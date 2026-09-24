@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Start Runway:  python3 run.py  [--port 8765]  then open http://localhost:8765"""
+"""Start Runway:  python3 run.py  [--port 8765]  then open http://localhost:8765
+
+Backups:  python3 run.py backup [file.json.gz]      save everything to a file
+          python3 run.py restore file.json.gz       replace everything with a backup (asks first; --yes to skip)
+"""
 import argparse
 import os
 import sys
@@ -15,5 +19,33 @@ if __name__ == "__main__":
                    help="address to listen on; 0.0.0.0 for other devices (needs RUNWAY_PASSWORD)")
     p.add_argument("--no-sync", action="store_true", default=os.environ.get("RUNWAY_NO_SYNC") == "1",
                    help="don't sync with SimpleFIN in the background")
+    p.add_argument("command", nargs="?", choices=["serve", "backup", "restore"], default="serve")
+    p.add_argument("file", nargs="?", help="backup file (for backup / restore)")
+    p.add_argument("--yes", action="store_true", help="restore without asking")
     a = p.parse_args()
-    serve(host=a.host, port=a.port, auto_sync=not a.no_sync)
+    if a.command == "serve":
+        serve(host=a.host, port=a.port, auto_sync=not a.no_sync)
+    else:
+        from datetime import date
+        from runway import backup, db
+        db.init()
+        if a.command == "backup":
+            out = a.file or f"runway-backup-{date.today().isoformat()}.json.gz"
+            with db.session() as conn:
+                data = backup.dump(conn)
+            with open(out, "wb") as f:
+                f.write(data)
+            os.chmod(out, 0o600)
+            print(f"Saved {out} ({len(data) / 1024:.0f} KB) from {db.describe()}. It includes your API keys and bank access: keep it private.")
+        else:
+            if not a.file:
+                sys.exit("Which backup file? python3 run.py restore runway-backup.json.gz")
+            with open(a.file, "rb") as f:
+                data = backup.load(f.read())
+            print(f"Backup from {data.get('created')} ({data.get('source')}): "
+                  f"{len(data['tables'].get('transactions', {}).get('rows', []))} transactions.")
+            if not a.yes and input(f"Replace everything in {db.describe()} with it? Type yes: ").strip().lower() != "yes":
+                sys.exit("Nothing changed.")
+            with db.session() as conn:
+                counts = backup.restore(conn, data)
+            print(f"Restored {sum(counts.values())} rows into {db.describe()}.")

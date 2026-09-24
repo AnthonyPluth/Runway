@@ -333,7 +333,29 @@ def db_path() -> str:
     return os.path.join(data_dir(), "runway.db")
 
 
-def connect(path: str | None = None) -> sqlite3.Connection:
+def database_url() -> str | None:
+    """Postgres connection string, if Runway should use Postgres instead of its SQLite file."""
+    return os.environ.get("DATABASE_URL") or None
+
+
+def using_postgres() -> bool:
+    return bool(database_url())
+
+
+def describe() -> str:
+    if using_postgres():
+        from urllib.parse import urlsplit
+        u = urlsplit(database_url())
+        return f"Postgres {u.hostname or 'local'}{':' + str(u.port) if u.port else ''}/{u.path.lstrip('/')}"
+    return db_path()
+
+
+def connect(path: str | None = None):
+    if using_postgres():
+        from . import pg
+        # A path only comes in from tests; each gets its own schema so they don't share data.
+        schema = None if path is None else "t_" + __import__("hashlib").sha1(path.encode()).hexdigest()[:12]
+        return pg.Connection(database_url(), schema)
     conn = sqlite3.connect(path or db_path(), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -355,6 +377,13 @@ def session(path: str | None = None):
 
 
 def _ensure_column(conn, table: str, column: str, decl: str) -> None:
+    if using_postgres():
+        from . import pg
+        pg._table_columns.pop(table, None)
+        if column not in pg.columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {pg.translate_ddl(decl)}")
+            pg._table_columns.pop(table, None)
+        return
     cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -362,7 +391,13 @@ def _ensure_column(conn, table: str, column: str, decl: str) -> None:
 
 def init(path: str | None = None) -> None:
     with session(path) as conn:
-        conn.executescript(SCHEMA)
+        if using_postgres():
+            from . import pg
+            pg.learn_schema(SCHEMA)
+            conn.executescript(pg.translate_ddl(SCHEMA))
+            pg.install_helpers(conn)
+        else:
+            conn.executescript(SCHEMA)
         # Columns added after the first release (existing databases get them on start-up).
         _ensure_column(conn, "transactions", "recurring_id", "INTEGER")   # NULL = not matched, 0 = never match
         _ensure_column(conn, "recurring", "amount_mode", "TEXT DEFAULT 'fixed'")  # fixed | last | avg3
@@ -372,7 +407,7 @@ def init(path: str | None = None) -> None:
         _ensure_column(conn, "price_meta", "instrument_type", "TEXT")          # EQUITY | ETF | MUTUALFUND | ...
         _ensure_column(conn, "price_meta", "long_name", "TEXT")
         _ensure_column(conn, "recurring", "dates", "TEXT")
-        _ensure_column(conn, "manual_state", "offset", "REAL")   # gap between entered funds and the balance, at entry   # "04-15,10-15" (dates each year) or "1,15" (days each month)
+        _ensure_column(conn, "manual_state", "baseline", "REAL")   # gap between entered funds and the balance, at entry
         _ensure_column(conn, "cost_overrides", "per_share", "REAL")   # set: cost basis = per_share x shares held
         conn.execute("CREATE INDEX IF NOT EXISTS tx_recurring ON transactions(recurring_id)")
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.

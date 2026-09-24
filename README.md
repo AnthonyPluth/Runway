@@ -16,6 +16,11 @@ Needs Python 3.9 or newer. Connect SimpleFIN and the rest under Setup.
 
 See [DOCKER.md](DOCKER.md). Sign-in uses your OpenID Connect provider.
 
+## Backups and Postgres
+
+`python3 run.py backup` saves everything to a file; `python3 run.py restore <file>` loads it (also in Setup).
+Set `DATABASE_URL=postgresql://...` to use Postgres instead of the built-in SQLite file (needs `pip install "psycopg[binary]"`).
+
 ## Tests
 
 ```
@@ -33,5 +38,6 @@ python3 -m unittest discover tests
 | `runway/portfolio.py`, `prices.py` | investment performance and prices |
 | `runway/networth.py`, `rentcast.py` | net worth and home values |
 | `runway/oidc.py` | sign-in |
+| `runway/db.py`, `pg.py`, `backup.py` | database (SQLite or Postgres) and backups |
 | `runway/static/` | the web app (plain HTML, CSS, JavaScript) |
 | `data/` | your database (not in Git) |

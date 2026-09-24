@@ -152,6 +152,7 @@ def api_state(conn, _q, _b):
         "primary_account": db.get_setting(conn, "primary_account"),
         "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
         "rentcast_configured": rentcast.configured(conn),
+        "database": "postgres" if db.using_postgres() else "sqlite",
         "user": getattr(_current, "user", None),
     }
 
@@ -1038,6 +1039,33 @@ class Handler(BaseHTTPRequestHandler):
         # State-changing calls must carry a custom header, which a foreign web page can't add without CORS approval.
         if method != "GET" and self.headers.get("X-Runway") != "1":
             return self._json(403, {"error": "forbidden"})
+        if method == "GET" and url.path == "/api/backup":
+            from . import backup
+            with db.session() as conn:
+                data = backup.dump(conn)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/gzip")
+            self.send_header("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if method == "POST" and url.path == "/api/restore":
+            from . import backup
+            n = int(self.headers.get("Content-Length") or 0)
+            if not n or n > 200 * 1024 * 1024:
+                return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
+            try:
+                data = backup.load(self.rfile.read(n))
+                with db.session() as conn:
+                    counts = backup.restore(conn, data)
+                with db.session() as conn:
+                    sfinvest.repair_stored(conn)
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
+                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
         if method in ("POST", "DELETE"):
             n = int(self.headers.get("Content-Length") or 0)
@@ -1151,7 +1179,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         threading.Thread(target=background_sync, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     where = f"http://localhost:{port}" if host in ("127.0.0.1", "localhost") else f"port {port} on all network addresses"
-    print(f"Runway is running at {where}  (data: {db.data_dir()})"
+    print(f"Runway is running at {where}  (data: {db.describe()})"
           f"{'  · sign-in via ' + oidc.config()['issuer'] if oidc.enabled() else ''}", flush=True)
     try:
         httpd.serve_forever()

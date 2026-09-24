@@ -259,7 +259,7 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         for r in conn.execute(
             "SELECT lower(payee) AS k, amount > 0 AS sign, category FROM transactions "
             "WHERE needs_review=0 AND category IS NOT NULL AND category_source IN ('manual','rule','ai','history') "
-            "AND payee<>'' ORDER BY posted, rowid"
+            "AND payee<>'' ORDER BY posted, id"
         )
     }
     leftover: list[dict] = []
@@ -333,10 +333,15 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
         return [empty] * len(groups)
     model = db.get_setting(conn, "llm_model", DEFAULT_MODEL) or DEFAULT_MODEL
     categories = _category_names(conn)
-    examples = db.rows(conn.execute(
-        "SELECT payee, category FROM transactions WHERE category_source IN ('manual','rule') AND payee<>'' "
-        "GROUP BY lower(payee) ORDER BY MAX(posted) DESC LIMIT 60"
-    ))
+    # The latest choice for each merchant (newest first), as examples for the model.
+    examples, seen = [], set()
+    for r in conn.execute("SELECT payee, category FROM transactions WHERE category_source IN ('manual','rule') AND payee<>'' "
+                          "ORDER BY posted DESC LIMIT 5000"):
+        if r["payee"].lower() not in seen:
+            seen.add(r["payee"].lower())
+            examples.append({"payee": r["payee"], "category": r["category"]})
+        if len(examples) >= 60:
+            break
     out: list[tuple[str | None, float]] = []
     for start in range(0, len(groups), 40):
         batch = groups[start : start + 40]
