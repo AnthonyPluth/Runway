@@ -51,6 +51,35 @@ def next_after(d: date, day: int) -> date:
     return this_month if this_month > d else add_months(this_month, 1, day)
 
 
+MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+def parse_dates(text: str, freq: str) -> list[tuple[int, int]]:
+    """'04-15, 10-15' or 'Apr 15, Oct 15' -> [(4, 15), (10, 15)] for freq='dates'; '1, 15' -> [(0, 1), (0, 15)]
+    for freq='semimonthly' (days of every month). Raises ValueError on anything it can't read."""
+    out = []
+    for part in [p.strip() for p in (text or "").replace(";", ",").split(",") if p.strip()]:
+        if freq == "semimonthly":
+            day = int(part.lower().rstrip("stndrh"))
+            if not 1 <= day <= 31:
+                raise ValueError(part)
+            out.append((0, day))
+            continue
+        bits = part.replace("/", "-").replace(" ", "-").split("-")
+        bits = [b for b in bits if b]
+        if len(bits) != 2:
+            raise ValueError(part)
+        a, b = bits
+        mo = MONTHS.get(a[:3].lower()) if not a.isdigit() else int(a)
+        day = int(b.lower().rstrip("stndrh"))
+        if not mo or not 1 <= mo <= 12 or not 1 <= day <= 31:
+            raise ValueError(part)
+        out.append((mo, day))
+    if not out:
+        raise ValueError("no dates")
+    return sorted(set(out))
+
+
 def occurrences(item: dict, start: date, end: date) -> list[date]:
     """Dates in (start, end] on which a recurring item happens."""
     anchor = _d(item["anchor_date"])
@@ -65,8 +94,25 @@ def occurrences(item: dict, start: date, end: date) -> list[date]:
             if d > start:
                 out.append(d)
             d += timedelta(days=step)
-    elif freq in ("monthly", "yearly"):
-        months = 1 if freq == "monthly" else 12
+    elif freq in ("semimonthly", "dates"):
+        # A list of days each month ("1,15") or of dates each year ("04-15,10-15").
+        spec = parse_dates(item.get("dates") or "", freq)
+        y, m = start.year, start.month
+        while True:
+            first = date(y, m, 1)
+            if first > stop:
+                break
+            for mo, dy in spec:
+                if freq == "dates" and mo != m:
+                    continue
+                last = calendar.monthrange(y, m)[1]
+                d = date(y, m, min(dy, last))
+                if start < d <= stop and d >= anchor:
+                    out.append(d)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        out.sort()
+    elif freq in ("monthly", "quarterly", "semiannual", "yearly"):
+        months = {"monthly": 1, "quarterly": 3, "semiannual": 6, "yearly": 12}[freq]
         k = ((start.year - anchor.year) * 12 + start.month - anchor.month) // months - 1
         d = add_months(anchor, k * months, anchor.day)
         while d <= stop:

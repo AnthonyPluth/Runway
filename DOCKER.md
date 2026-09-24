@@ -16,13 +16,25 @@ Create an OIDC / OAuth2 application ("confidential" client, authorization code f
 
 Note the issuer URL, client ID and client secret.
 
+## Where the image comes from
+
+Every push to `main` runs the tests and publishes `ghcr.io/anthonypluth/runway:latest` (Intel/AMD and ARM) through
+GitHub Actions (`.github/workflows/docker.yml`). Only the latest image is kept.
+
+The repository is private, so the image is too. On the server, log in once with a GitHub token that has the
+`read:packages` scope (github.com/settings/tokens):
+
+```
+echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
+```
+
 ## 2. First start
 
 1. Stop the Runway you run with `python3 run.py` (Ctrl-C) so the database is fully written.
 2. In this folder:
    ```
    cp .env.example .env        # fill in RUNWAY_PUBLIC_URL, OIDC_* and OIDC_ALLOWED_EMAILS
-   docker compose up -d --build
+   docker compose up -d
    docker compose logs -f runway
    ```
    Your existing data in `./data` is used as-is.
@@ -33,7 +45,8 @@ If a setting is missing, the container stops with a message saying which one (se
 
 ## Everyday
 
-- Update: extract the new version over this folder, then `docker compose up -d --build`
+- Update to the newest image: `docker compose pull && docker compose up -d`
+  (or let Watchtower do it automatically)
 - Stop: `docker compose down` (data stays in `./data`)
 - Back up: the `data` folder (stop the container first, or copy all three `runway.db*` files together)
 

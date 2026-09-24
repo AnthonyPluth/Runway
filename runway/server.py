@@ -31,7 +31,7 @@ ACCOUNT_FIELDS = {
     "in_forecast": int, "daily_spend": int, "hidden": int, "owed_positive": int,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
-FREQS = {"weekly", "biweekly", "monthly", "yearly"}
+FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates"}
 
 
 class ApiError(Exception):
@@ -98,7 +98,8 @@ def run_investment_sync() -> dict:
 def refresh_prices(conn) -> dict:
     tickers = [r["ticker"] for r in conn.execute(
         "SELECT DISTINCT s.ticker FROM securities s WHERE s.is_cash=0 AND s.ticker IS NOT NULL AND "
-        "(s.id IN (SELECT security_id FROM holdings) OR s.id IN (SELECT security_id FROM inv_transactions))")]
+        "(s.id IN (SELECT security_id FROM holdings) OR s.id IN (SELECT security_id FROM inv_transactions) "
+        "OR s.id IN (SELECT security_id FROM manual_positions))")]
     tickers.append(prices.BENCHMARK)
     out = prices.refresh(conn, tickers, date.today() - timedelta(days=portfolio.HISTORY_DAYS + 10))
     sfinvest.recapture_all(conn)   # re-check reported position values against the fresh prices
@@ -159,6 +160,7 @@ def api_overview(conn, q, _b):
     horizon = int(q.get("days", [db.get_setting(conn, "horizon_days", "90") or 90])[0])
     horizon = max(14, min(horizon, 365))
     fc = forecast.build(conn, date.today(), horizon)
+    fc["missed"] = recurring.missed(conn)
     fc["all_accounts"] = db.rows(conn.execute(
         "SELECT id, COALESCE(display_name, name) AS name, kind, balance, balance_date, owed_positive, hidden "
         "FROM accounts ORDER BY kind, name"
@@ -344,6 +346,18 @@ def api_rule_delete(conn, _q, _b, rule_id):
     return {"ok": True}
 
 
+def api_recurring_missed(conn, _q, _b):
+    return recurring.missed(conn)
+
+
+def api_recurring_dismiss(conn, _q, body):
+    key = body.get("key") or ""
+    if not key.startswith("rec:"):
+        raise ApiError("Unknown alert")
+    recurring.dismiss(conn, key)
+    return {"ok": True}
+
+
 def api_recurring(conn, _q, _b):
     items = db.rows(conn.execute(
         "SELECT r.*, COALESCE(a.display_name, a.name) AS account_name FROM recurring r "
@@ -358,6 +372,9 @@ def api_recurring(conn, _q, _b):
         nxt = [d for d in forecast.occurrences(it, today, today + timedelta(days=400))
                if not recurring.already_happened(it, d, hist, today)]
         it["next_date"] = nxt[0].isoformat() if nxt else None
+    missed = recurring.missed(conn, today)
+    for it in items:
+        it["missed"] = [m for m in missed if m["recurring_id"] == it["id"]]
     return items
 
 
@@ -379,14 +396,22 @@ def _recurring_values(conn, body):
     mode = body.get("amount_mode") or "fixed"
     if mode not in recurring.AMOUNT_MODES:
         raise ApiError("Unknown amount mode")
-    return (name, acct, amount, freq, anchor, match, end, int(body.get("active", 1)), mode)
+    dates = None
+    if freq in ("dates", "semimonthly"):
+        try:
+            spec = forecast.parse_dates(body.get("dates") or "", freq)
+        except ValueError:
+            raise ApiError("List the dates like 04-15, 10-15 (or Apr 15, Oct 15)" if freq == "dates"
+                           else "List the days of the month like 1, 15")
+        dates = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
+    return (name, acct, amount, freq, anchor, match, end, int(body.get("active", 1)), mode, dates)
 
 
 def api_recurring_add(conn, _q, body):
     vals = _recurring_values(conn, body)
     cur = conn.execute(
-        "INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match, end_date, active, amount_mode) "
-        "VALUES (?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match, end_date, active, amount_mode, dates) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
         vals,
     )
     linked = recurring.auto_match(conn, [cur.lastrowid])
@@ -401,7 +426,7 @@ def api_recurring_update(conn, _q, body, rid):
     vals = _recurring_values(conn, body)
     conn.execute(
         "UPDATE recurring SET name=?, account_id=?, amount=?, frequency=?, anchor_date=?, match=?, end_date=?, active=?, "
-        "amount_mode=? WHERE id=?",
+        "amount_mode=?, dates=? WHERE id=?",
         (*vals, rid),
     )
     new = dict(conn.execute("SELECT * FROM recurring WHERE id=?", (rid,)).fetchone())
@@ -664,7 +689,7 @@ def api_plaid_status(conn, _q, _b):
     for it in items:
         it["accounts"] = db.rows(conn.execute(
             "SELECT id, name, official_name, subtype, mask, balance, hidden FROM inv_accounts WHERE item_id=? ORDER BY name", (it["item_id"],)))
-    return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "sandbox"),
+    return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "production"),
             "client_id": db.get_setting(conn, "plaid_client_id") or "", "items": items,
             "last_inv_sync": db.get_setting(conn, "last_inv_sync"), "syncing": _inv_lock.locked(),
             "inv_accounts": conn.execute("SELECT COUNT(*) FROM inv_accounts").fetchone()[0],
@@ -698,6 +723,7 @@ def api_plaid_exchange(conn, _q, body):
     try:
         item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {})
         res = plaid.sync_item(conn, item_id)
+        res["hidden_simplefin"] = plaid.hide_simplefin_duplicates(conn, item_id)
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
     except plaid.PlaidError as e:
@@ -805,6 +831,27 @@ def api_rentcast_settings(conn, _q, body):
     return {"ok": True, "configured": rentcast.configured(conn)}
 
 
+def api_tracked_get(conn, _q, _b, acct_id):
+    from . import tracked
+    st = conn.execute("SELECT * FROM manual_state WHERE account_id=?", (acct_id,)).fetchone()
+    return {"positions": tracked.positions_for(conn, acct_id), "state": dict(st) if st else None,
+            "contributions": db.rows(conn.execute("SELECT date, amount FROM manual_contributions WHERE account_id=? ORDER BY date DESC LIMIT 12", (acct_id,)))}
+
+
+def api_tracked_save(conn, _q, body, acct_id):
+    from . import tracked
+    try:
+        tracked.save(conn, acct_id, body.get("rows") or [])
+    except ValueError as e:
+        raise ApiError(str(e))
+    conn.commit()
+    try:
+        refresh_prices(conn)   # prices for the funds just entered, then re-value the account
+    except Exception:
+        sfinvest.recapture_all(conn)
+    return {"ok": True}
+
+
 def api_investments(conn, q, _b):
     period = q.get("period", ["1Y"])[0]
     return portfolio.overview(conn, period if period in ("1M", "3M", "YTD", "1Y", "2Y", "MAX") else "1Y")
@@ -840,6 +887,8 @@ ROUTES = [
     ("GET", "/api/recurring", api_recurring),
     ("POST", "/api/recurring", api_recurring_add),
     ("GET", "/api/recurring/suggestions", api_recurring_suggestions),
+    ("GET", "/api/recurring/missed", api_recurring_missed),
+    ("POST", "/api/recurring/dismiss", api_recurring_dismiss),
     ("POST", "/api/recurring/{id}", api_recurring_update),
     ("DELETE", "/api/recurring/{id}", api_recurring_delete),
     ("POST", "/api/connect", api_connect),
@@ -858,6 +907,8 @@ ROUTES = [
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
     ("POST", "/api/rentcast/settings", api_rentcast_settings),
     ("GET", "/api/investments/live", api_live_quotes),
+    ("GET", "/api/tracked/{id}", api_tracked_get),
+    ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),
     ("POST", "/api/settings", api_settings),
     ("POST", "/api/recategorize", api_recategorize),

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import ssl
 import urllib.error
@@ -41,7 +42,7 @@ def base_url(conn) -> str:
     override = os.environ.get("RUNWAY_PLAID_URL")
     if override:
         return override.rstrip("/")
-    return HOSTS.get(db.get_setting(conn, "plaid_env", "sandbox") or "sandbox", HOSTS["sandbox"])
+    return HOSTS.get(db.get_setting(conn, "plaid_env", "production") or "production", HOSTS["production"])
 
 
 def call(conn, path: str, body: dict) -> dict:
@@ -97,7 +98,7 @@ def exchange(conn, public_token: str, institution: dict | None = None) -> str:
     conn.execute(
         "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env) VALUES (?,?,?,?,?) "
         "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, error=NULL",
-        (item_id, token, institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "sandbox")),
+        (item_id, token, institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production")),
     )
     conn.commit()
     return item_id
@@ -218,3 +219,19 @@ def sync_all(conn) -> dict:
         except PlaidError as e:
             out["errors"].append(f"{row['institution_name'] or 'Connection'}: {e}")
     return out
+
+
+def hide_simplefin_duplicates(conn, item_id: str) -> list[str]:
+    """When an institution is linked through Plaid, hide the same institution's SimpleFIN account on the Investments
+    page (Plaid has the fuller data). Net worth keeps using the SimpleFIN balance, so nothing is counted twice."""
+    item = conn.execute("SELECT institution_name FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    compact = lambda v: re.sub(r"[^a-z0-9]", "", (v or "").lower())   # "E*TRADE" -> "etrade"
+    key = compact(re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", ((item["institution_name"] if item else "") or "").lower()))
+    if len(key) < 4:
+        return []
+    hidden = []
+    for a in conn.execute("SELECT id, name, institution FROM inv_accounts WHERE source='simplefin' AND hidden=0").fetchall():
+        if key in compact(a["institution"]):
+            conn.execute("UPDATE inv_accounts SET hidden=1 WHERE id=?", (a["id"],))
+            hidden.append(a["name"])
+    return hidden

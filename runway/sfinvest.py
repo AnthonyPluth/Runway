@@ -10,7 +10,7 @@ import json
 import re
 from datetime import date, timedelta
 
-from . import db
+from . import db, tracked
 
 CASH_WORDS = re.compile(r"money market|cash|sweep|core position|deposit|fdic|treasury fund", re.I)
 MONEY_MARKET = re.compile(r"^[A-Z]{3}XX$")          # SPAXX, FDRXX, VMFXX, SWVXX...
@@ -139,10 +139,22 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
         else:
             p["cost"] += cost
 
+    tracked_leftover = False
+    if not positions:   # balance-only account: use the holdings you entered, if any
+        row = conn.execute("SELECT balance_date FROM accounts WHERE id=?", (acct_id,)).fetchone()
+        t = tracked.value(conn, iid, balance, (row["balance_date"] if row else None) or today.isoformat(), today)
+        if t:
+            positions = t["positions"]
+            tracked_leftover = True
+
     # Whatever the balance doesn't explain is uninvested cash (or the whole balance, when no positions come through).
     leftover = balance - sum(p["value"] for p in positions.values())
     if abs(leftover) >= 1.0:
-        if positions:
+        if tracked_leftover:
+            cid = "sf:unexplained"
+            conn.execute("INSERT OR IGNORE INTO securities(id, ticker, name, type, is_cash, currency) "
+                         "VALUES (?,NULL,'Difference from synced balance','other',1,'USD')", (cid,))
+        elif positions:
             cid = "sf:cash"
             conn.execute("INSERT OR IGNORE INTO securities(id, ticker, name, type, is_cash, currency) VALUES (?,NULL,'Cash','cash',1,'USD')", (cid,))
         else:  # e.g. a 401(k) where SimpleFIN only knows the total: invested in something, we just can't see what
