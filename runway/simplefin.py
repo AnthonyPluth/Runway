@@ -113,7 +113,7 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
     except urllib.error.HTTPError as e:
         detail = _describe_http_error(e)
         if e.code == 403 and "cloudflare" not in detail.lower():
-            raise SimpleFinError(f"SimpleFIN rejected the access credentials ({detail}). Reconnect in Setup.") from e
+            raise SimpleFinError(f"SimpleFIN rejected the access credentials ({detail}). Reconnect in Settings.") from e
         raise SimpleFinError(f"SimpleFIN request failed ({detail}).") from e
     except urllib.error.URLError as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: {e.reason}") from e

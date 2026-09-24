@@ -49,7 +49,7 @@ def run_sync() -> dict:
         with db.session() as conn:
             access_url = db.get_setting(conn, "simplefin_access_url")
             if not access_url:
-                raise ApiError("Connect SimpleFIN in Setup first.")
+                raise ApiError("Connect SimpleFIN in Settings first.")
             try:
                 result = simplefin.sync(conn, access_url)
                 counts = categorize.categorize(conn, result["new"])
@@ -596,7 +596,7 @@ def api_budget_set(conn, _q, body):
 
 def api_ai_suggest(conn, _q, _b):
     if not db.get_setting(conn, "openrouter_api_key"):
-        raise ApiError("Add an OpenRouter API key in Setup first.")
+        raise ApiError("Add an OpenRouter API key in Settings first.")
     try:
         return categorize.suggest_for_review(conn)
     except RuntimeError as e:

@@ -48,7 +48,7 @@ def base_url(conn) -> str:
 def call(conn, path: str, body: dict) -> dict:
     client_id, secret = db.get_setting(conn, "plaid_client_id"), db.get_setting(conn, "plaid_secret")
     if not client_id or not secret:
-        raise PlaidError("Add your Plaid client ID and secret in Setup first.")
+        raise PlaidError("Add your Plaid client ID and secret in Settings first.")
     payload = json.dumps({"client_id": client_id, "secret": secret, **body}).encode()
     req = urllib.request.Request(
         base_url(conn) + path, data=payload, method="POST",

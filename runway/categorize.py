@@ -356,7 +356,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
             if extract_json_array(reply) is None:
                 snippet = " ".join((reply or "(empty reply)").split())[:160]
                 raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                 f"Free or small models often do this; try {DEFAULT_MODEL} in Setup.")
+                                 f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
             results = parse_ai_reply(reply, categories, allow_new)
             db.set_setting(conn, "last_llm_error", None)
             answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
