@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runway</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="apple-touch-icon" href="/logo-180.png">
+<meta name="theme-color" content="#2a78d6">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="#overview"><img src="/logo.svg" alt="" width="26" height="26">Runway</a>
+  <nav>
+    <a href="#overview" data-page="overview">Overview</a>
+    <a href="#budget" data-page="budget">Budget</a>
+    <a href="#reports" data-page="reports">Reports</a>
+    <a href="#investments" data-page="investments">Investments</a>
+    <a href="#networth" data-page="networth">Net worth</a>
+    <a href="#review" data-page="review">Review <span id="review-badge" class="badge" hidden></span></a>
+    <a href="#transactions" data-page="transactions">Transactions</a>
+    <a href="#recurring" data-page="recurring">Recurring</a>
+    <a href="#setup" data-page="setup">Setup</a>
+  </nav>
+  <div class="sync">
+    <span id="sync-status" class="muted"></span>
+    <button id="sync-btn" class="btn">Sync now</button>
+    <span id="user-box" class="user-box" hidden></span>
+  </div>
+</header>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<main id="app"></main>
+<script src="/app.js"></script>
+</body>
+</html>

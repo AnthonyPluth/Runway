@@ -1,0 +1,267 @@
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+from datetime import date, datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runway import db, plaid, portfolio, prices  # noqa: E402
+
+TODAY = date(2026, 9, 23)
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "t.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it1','tok','Fidelity')")
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, type, subtype, balance) VALUES ('A','it1','Brokerage','investment','brokerage',0)")
+        self.c.executemany("INSERT INTO securities(id, ticker, name, type, is_cash) VALUES (?,?,?,?,?)", [
+            ("VTI", "VTI", "Vanguard Total Stock Market ETF", "etf", 0),
+            ("SPAXX", "SPAXX", "Fidelity Government Money Market", "mutual fund", 1),
+            ("XYZ", "XYZ", "XYZ Corp", "equity", 0),
+        ])
+
+    def tearDown(self):
+        self.c.close()
+        self.tmp.cleanup()
+
+    def tx(self, id, d, type_, sub, amount, sec=None, qty=0, price=None, fees=0):
+        self.c.execute("INSERT INTO inv_transactions(id, account_id, security_id, date, name, type, subtype, quantity, amount, price, fees) "
+                       "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (id, "A", sec, d, id, type_, sub, qty, amount, price, fees))
+
+    def price(self, ticker, d, close, adj=None):
+        self.c.execute("INSERT OR REPLACE INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?)", (ticker, d, close, adj or close))
+
+
+class HistoryTests(Base):
+    def setUp(self):
+        super().setUp()
+        # Deposit $3,000, buy 10 VTI at $250, get a $20 dividend. Today: 10 VTI worth $3,000 + $520 cash.
+        self.tx("t1", "2026-06-01", "cash", "deposit", -3000)
+        self.tx("t2", "2026-06-02", "buy", "buy", 2500, "VTI", 10, 250)
+        self.tx("t3", "2026-08-15", "cash", "dividend", -20, "VTI")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','VTI',10,300,3000,2500)")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','SPAXX',520,1,520,520)")
+        self.price("VTI", "2026-06-01", 250)
+        self.price("VTI", "2026-07-01", 275)
+        self.price("VTI", "2026-08-01", 300)
+        self.price("SPY", "2026-05-29", 500)
+        self.price("SPY", "2026-09-22", 550)
+
+    def at(self, h, d):
+        return h["value"][h["dates"].index(d)]
+
+    def test_values_rebuilt_from_activity(self):
+        h = portfolio.history(self.c, TODAY)
+        self.assertEqual(h["dates"][0], "2026-05-31")
+        self.assertEqual(self.at(h, "2026-05-31"), 0.0)
+        self.assertEqual(self.at(h, "2026-06-01"), 3000.0)            # cash only
+        self.assertEqual(self.at(h, "2026-06-02"), 3000.0)            # 10 x 250 + 500 cash
+        self.assertEqual(self.at(h, "2026-07-15"), 3250.0)            # 10 x 275 + 500
+        self.assertEqual(self.at(h, "2026-08-14"), 3500.0)
+        self.assertEqual(self.at(h, "2026-08-15"), 3520.0)            # dividend lands in cash
+        self.assertEqual(h["value"][-1], 3520.0)
+        self.assertEqual(h["flows"][h["dates"].index("2026-06-01")], 3000.0)
+        self.assertEqual(h["invested"][-1], 3000.0)
+        # Time-weighted: the deposit isn't a gain. 3000 -> 3520 with no other flows.
+        self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)
+
+    def test_performance_and_benchmark(self):
+        ov = portfolio.overview(self.c, "2Y", TODAY)
+        p = ov["performance"]
+        self.assertEqual((p["net_deposits"], p["gain"]), (3000.0, 520.0))
+        self.assertAlmostEqual(p["return"], 3520 / 3000 - 1, places=5)
+        self.assertAlmostEqual(p["benchmark_return"], 550 / 500 - 1, places=5)
+        self.assertEqual(ov["total"], 3520.0)
+        self.assertEqual(ov["unrealized_gain"], 500.0)
+        vti = next(x for x in ov["holdings"] if x["ticker"] == "VTI")
+        self.assertAlmostEqual(vti["allocation"], 3000 / 3520, places=5)
+        self.assertEqual(ov["income"]["income_12m"], 20.0)
+        classes = {a["name"]: a["value"] for a in ov["allocation"]["asset_class"]}
+        self.assertEqual(classes, {"ETFs": 3000.0, "Cash": 520.0})
+
+    def test_withdrawal_not_a_loss(self):
+        self.tx("t4", "2026-09-01", "cash", "withdrawal", 400)
+        self.c.execute("UPDATE holdings SET value=120, quantity=120 WHERE security_id='SPAXX'")
+        h = portfolio.history(self.c, TODAY)
+        self.assertEqual(self.at(h, "2026-08-31"), 3520.0)
+        self.assertEqual(self.at(h, "2026-09-01"), 3120.0)
+        self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)  # unchanged by taking money out
+
+    def test_hidden_accounts_excluded(self):
+        self.c.execute("UPDATE inv_accounts SET hidden=1")
+        self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 0)
+
+
+class SplitTests(Base):
+    def test_split_does_not_jump(self):
+        # 10 XYZ at $200, 2-for-1 split on Jul 1, now 20 at $100. Yahoo's closes are split-adjusted (100 throughout).
+        self.tx("s0", "2026-06-10", "buy", "buy", 2000, "XYZ", 10, 200)
+        self.tx("s1", "2026-07-01", "transfer", "split", 0, "XYZ", 10)
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','XYZ',20,100,2000,2000)")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',0,1,0)")
+        self.tx("s_dep", "2026-06-09", "cash", "deposit", -2000)
+        for d in ("2026-06-09", "2026-06-30", "2026-07-01", "2026-09-22"):
+            self.price("XYZ", d, 100)
+        self.c.execute("INSERT INTO price_meta(ticker, fetched_at, ok, splits) VALUES ('XYZ', ?, 1, ?)",
+                       (datetime.now().isoformat(), json.dumps([["2026-07-01", 2.0]])))
+        h = portfolio.history(self.c, TODAY)
+        vals = {d: v for d, v in zip(h["dates"], h["value"])}
+        self.assertEqual(vals["2026-06-30"], 2000.0)
+        self.assertEqual(vals["2026-07-01"], 2000.0)
+        self.assertEqual(h["flows"][h["dates"].index("2026-07-01")], 0.0)
+        self.assertAlmostEqual(h["twr"][-1], 0.0, places=6)
+
+
+class XrayTests(Base):
+    def test_rules(self):
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','XYZ',10,100,6000,4000)")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',4000,1,4000)")
+        self.tx("f1", "2026-09-01", "fee", "management fee", 80)
+        ov = portfolio.overview(self.c, "1Y", TODAY)
+        rules = {r["name"]: r for r in ov["xray"]}
+        self.assertFalse(rules["Largest single holding"]["ok"])   # 60% in one stock
+        self.assertFalse(rules["Uninvested cash"]["ok"])          # 40% cash
+        self.assertFalse(rules["Fees paid"]["ok"])                # 0.8%
+        self.assertEqual(ov["income"]["fees_12m"], 80.0)
+
+
+# ---------------------------------------------------------------------------------------------- mock servers
+
+class MockPlaid(BaseHTTPRequestHandler):
+    calls: list = []
+    login_required = False
+
+    def log_message(self, *a):
+        pass
+
+    def reply(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+    def do_POST(self):
+        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        MockPlaid.calls.append((self.path, req))
+        if req.get("client_id") != "cid" or req.get("secret") != "sec":
+            return self.reply(400, {"error_code": "INVALID_API_KEYS", "error_message": "invalid client_id or secret"})
+        if self.path == "/link/token/create":
+            return self.reply(200, {"link_token": "link-sandbox-123"})
+        if self.path == "/item/public_token/exchange":
+            return self.reply(200, {"access_token": "access-1", "item_id": "item-1"})
+        if self.path == "/item/remove":
+            return self.reply(200, {})
+        if MockPlaid.login_required:
+            return self.reply(400, {"error_code": "ITEM_LOGIN_REQUIRED", "error_message": "login required",
+                                    "display_message": "Your credentials have changed."})
+        secs = [{"security_id": "s-vti", "ticker_symbol": "VTI", "name": "Vanguard Total Stock", "type": "etf", "close_price": 300},
+                {"security_id": "s-cash", "ticker_symbol": "CUR:USD", "name": "U S Dollar", "type": "cash", "is_cash_equivalent": True}]
+        if self.path == "/investments/holdings/get":
+            return self.reply(200, {
+                "accounts": [{"account_id": "acc-1", "name": "Brokerage", "type": "investment", "subtype": "brokerage",
+                              "balances": {"current": 3100, "iso_currency_code": "USD"}}],
+                "holdings": [{"account_id": "acc-1", "security_id": "s-vti", "quantity": 10, "institution_price": 300,
+                              "institution_value": 3000, "cost_basis": 2500},
+                             {"account_id": "acc-1", "security_id": "s-cash", "quantity": 100, "institution_price": 1, "institution_value": 100}],
+                "securities": secs, "item": {"item_id": "item-1", "institution_name": "Fidelity"}})
+        if self.path == "/investments/transactions/get":
+            all_tx = [{"investment_transaction_id": f"t{i}", "account_id": "acc-1", "security_id": "s-vti", "date": f"2026-0{1 + i % 8}-15",
+                       "name": "BUY VTI", "type": "buy", "subtype": "buy", "quantity": 1, "amount": 250, "price": 250, "fees": 0}
+                      for i in range(7)]
+            off, cnt = req["options"]["offset"], req["options"]["count"]
+            page = all_tx[off:off + min(cnt, 3)]  # serve small pages to exercise pagination
+            return self.reply(200, {"investment_transactions": page, "total_investment_transactions": len(all_tx), "securities": secs})
+        self.reply(404, {"error_code": "NOT_FOUND"})
+
+
+class MockYahoo(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        day = lambda d: int(datetime(d.year, d.month, d.day, 14, tzinfo=timezone.utc).timestamp())
+        ts = [day(date(2026, 9, 21)), day(date(2026, 9, 22))]
+        body = json.dumps({"chart": {"result": [{
+            "meta": {"gmtoffset": -14400}, "timestamp": ts,
+            "indicators": {"quote": [{"close": [100.0, 101.0]}], "adjclose": [{"adjclose": [99.0, 100.0]}]},
+            "events": {"splits": {"1": {"date": day(date(2026, 3, 2)), "numerator": 4, "denominator": 1}}}}]}}).encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+
+class SyncTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.plaid = HTTPServer(("127.0.0.1", 0), MockPlaid)
+        cls.yahoo = HTTPServer(("127.0.0.1", 0), MockYahoo)
+        for s in (cls.plaid, cls.yahoo):
+            threading.Thread(target=s.serve_forever, daemon=True).start()
+        os.environ["RUNWAY_PLAID_URL"] = f"http://127.0.0.1:{cls.plaid.server_port}"
+        os.environ["RUNWAY_PRICES_URL"] = f"http://127.0.0.1:{cls.yahoo.server_port}/chart"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.plaid.shutdown(); cls.yahoo.shutdown()
+        os.environ.pop("RUNWAY_PLAID_URL", None); os.environ.pop("RUNWAY_PRICES_URL", None)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "t.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        MockPlaid.calls.clear(); MockPlaid.login_required = False
+
+    def tearDown(self):
+        self.c.close(); self.tmp.cleanup()
+
+    def test_link_exchange_sync_remove(self):
+        with self.assertRaises(plaid.PlaidError):
+            plaid.link_token(self.c)  # no keys yet
+        db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
+        self.assertEqual(plaid.link_token(self.c), "link-sandbox-123")
+        self.assertEqual(MockPlaid.calls[-1][1]["products"], ["investments"])
+        item = plaid.exchange(self.c, "public-1", {"name": "Fidelity", "institution_id": "ins_12"})
+        res = plaid.sync_item(self.c, item, TODAY)
+        self.assertEqual(res, {"accounts": 1, "holdings": 2, "transactions": 7})
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM inv_transactions").fetchone()[0], 7)
+        tx_calls = [c for p, c in MockPlaid.calls if p == "/investments/transactions/get"]
+        self.assertEqual([c["options"]["offset"] for c in tx_calls], [0, 3, 6])
+        self.assertEqual(tx_calls[0]["start_date"], (TODAY - timedelta(days=plaid.HISTORY_DAYS)).isoformat())
+        cash = self.c.execute("SELECT is_cash FROM securities WHERE id='s-cash'").fetchone()[0]
+        self.assertEqual(cash, 1)
+        # second sync only re-reads a recent window
+        plaid.sync_item(self.c, item, TODAY)
+        self.assertEqual([c for p, c in MockPlaid.calls if p == "/investments/transactions/get"][-1]["start_date"],
+                         (TODAY - timedelta(days=plaid.REFRESH_DAYS)).isoformat())
+        # update mode link token for reconnecting
+        plaid.link_token(self.c, item)
+        self.assertEqual(MockPlaid.calls[-1][1]["access_token"], "access-1")
+        self.assertNotIn("products", MockPlaid.calls[-1][1])
+        # expired login is recorded, not fatal for other items
+        MockPlaid.login_required = True
+        out = plaid.sync_all(self.c)
+        self.assertEqual(out["items"], 0)
+        self.assertIn("credentials have changed", out["errors"][0])
+        self.assertEqual(self.c.execute("SELECT error FROM plaid_items").fetchone()[0], "ITEM_LOGIN_REQUIRED")
+        plaid.remove_item(self.c, item)
+        for table in ("plaid_items", "inv_accounts", "holdings", "inv_transactions"):
+            self.assertEqual(self.c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
+
+    def test_price_fetch_with_splits(self):
+        res = prices.refresh(self.c, ["VTI", "CUR:USD"], date(2026, 1, 1))
+        self.assertEqual(res, {"fetched": ["VTI"], "failed": []})
+        real, adj, splits = prices.history(self.c, "VTI", date(2026, 1, 1))
+        self.assertEqual(splits, [("2026-03-02", 4.0)])
+        self.assertEqual(real["2026-09-22"], 101.0)       # after the split: unchanged
+        self.assertEqual(adj["2026-09-22"], 100.0)
+        # a second refresh within the day is skipped
+        self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1)), {"fetched": [], "failed": []})
+
+
+if __name__ == "__main__":
+    unittest.main()
