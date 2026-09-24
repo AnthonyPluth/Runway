@@ -320,3 +320,6 @@ label.inline.just-saved::after { position: static; margin-left: 6px; }
 .user-box { font-size: 13px; display: inline-flex; gap: 8px; align-items: center; margin-left: 4px; }
 .user-box a { color: var(--accent); text-decoration: none; }
 a.btn { text-decoration: none; display: inline-block; }
+.live-dot.row-live { width: 7px; height: 7px; margin-left: 6px; vertical-align: 2px; }
+.tracked-editor .tr-table td { padding: 4px 6px 4px 0; border: 0; }
+.tracked-editor .tr-table th { font-size: 12px; }

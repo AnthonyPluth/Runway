@@ -706,3 +706,52 @@ class ServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
+
+
+class ScheduleAndMissedTests(Base):
+    def test_dates_each_year_and_twice_a_month(self):
+        from runway import forecast
+        tax = {"frequency": "dates", "dates": "04-15,10-15", "anchor_date": "2026-01-01", "end_date": None}
+        self.assertEqual([d.isoformat() for d in forecast.occurrences(tax, date(2026, 1, 1), date(2027, 12, 31))],
+                         ["2026-04-15", "2026-10-15", "2027-04-15", "2027-10-15"])
+        pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None}
+        self.assertEqual([d.isoformat() for d in forecast.occurrences(pay, date(2026, 1, 31), date(2026, 3, 1))],
+                         ["2026-02-15", "2026-02-28"])        # 31st becomes the last day of a short month
+        q = {"frequency": "quarterly", "anchor_date": "2026-01-10", "end_date": None}
+        self.assertEqual([d.isoformat() for d in forecast.occurrences(q, date(2026, 1, 1), date(2026, 12, 31))],
+                         ["2026-01-10", "2026-04-10", "2026-07-10", "2026-10-10"])
+        self.assertEqual(forecast.parse_dates("Apr 15, oct 15th", "dates"), [(4, 15), (10, 15)])
+        with self.assertRaises(ValueError):
+            forecast.parse_dates("13-40", "dates")
+
+    def test_api_accepts_and_normalises_dates(self):
+        from runway import server
+        self.acct("chk", "checking", 1000.0)
+        r = server.api_recurring_add(self.conn, None, {"name": "Property tax", "account_id": "chk", "amount": -2400,
+                                                       "frequency": "dates", "dates": "Apr 15, Oct 15", "anchor_date": "2026-01-01"})
+        self.assertEqual(self.conn.execute("SELECT dates FROM recurring WHERE id=?", (r["id"],)).fetchone()[0], "04-15,10-15")
+        with self.assertRaises(server.ApiError):
+            server.api_recurring_add(self.conn, None, {"name": "X", "account_id": "chk", "amount": -1, "frequency": "dates",
+                                                       "dates": "whenever", "anchor_date": "2026-01-01"})
+
+    def test_missed_payments(self):
+        from runway import recurring
+        self.acct("chk", "checking", 1000.0)
+        self.tx("chk", "2026-06-01", -5.0, "OPENING", "Other")                      # history starts here
+        self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date, match, active) "
+                          "VALUES (1, 'Gym', 'chk', -40, 'monthly', '2026-07-05', 'gym', 1)")
+        for d in ("2026-07-05", "2026-08-07"):                                      # paid July, August (2 days late)
+            self.tx("chk", d, -40.0, "GYM MEMBERSHIP", "Other")
+        recurring.auto_match(self.conn)
+        today = date(2026, 9, 23)
+        m = recurring.missed(self.conn, today)
+        self.assertEqual([x["date"] for x in m], ["2026-09-05"])                   # September never came
+        self.assertEqual(recurring.missed(self.conn, date(2026, 9, 9)), [])        # still inside the grace window
+        recurring.dismiss(self.conn, m[0]["key"])
+        self.assertEqual(recurring.missed(self.conn, today), [])
+        # linking the payment that did happen also clears it
+        self.conn.execute("DELETE FROM recurring_dismissed")
+        self.tx("chk", "2026-09-06", -40.0, "CLUB FEE", "Other")
+        tid = self.conn.execute("SELECT id FROM transactions WHERE description='CLUB FEE'").fetchone()[0]
+        recurring.link(self.conn, tid, 1)
+        self.assertEqual(recurring.missed(self.conn, today), [])

@@ -211,3 +211,111 @@ class SnapshotHistoryTests(Base):
         self.assertAlmostEqual(at("flows", "2026-09-10"), 1210.0)     # the 10 new shares count as money added
         self.assertAlmostEqual(h["twr"][-1], 0.21, places=6)          # 100 -> 121 is +21%, deposits excluded
         self.assertAlmostEqual(h["invested"][-1] - h["invested"][0], 1210.0)
+
+
+class PlaidDuplicateTests(Base):
+    def test_linking_through_plaid_hides_the_simplefin_copy(self):
+        from runway import plaid
+        simplefin.store_payload(self.c, {"accounts": [account("vw", "Retirement Savings 401k", "333069.97"),
+                                                      account("wf", "Roth IRA", "4935.94", [VTI]),
+                                                      account("et", "Individual Brokerage", "154756.49", [VTI])]}, TODAY)
+        for iid, inst in (("sf:vw", "Vestwell"), ("sf:wf", "Wealthfront Anthony"), ("sf:et", "E*Trade")):
+            self.c.execute("UPDATE inv_accounts SET institution=? WHERE id=?", (inst, iid))
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it', 'tok', 'Vestwell'), ('it2', 'tok2', 'E*TRADE Financial')")
+        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it"), ["Retirement Savings 401k"])
+        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it2"), ["Individual Brokerage"])
+        hidden = dict(self.c.execute("SELECT id, hidden FROM inv_accounts").fetchall())
+        self.assertEqual((hidden["sf:vw"], hidden["sf:wf"], hidden["sf:et"]), (1, 0, 1))
+        self.assertEqual(self.c.execute("SELECT hidden FROM accounts WHERE id='vw'").fetchone()[0], 0)   # net worth unaffected
+
+
+
+class TrackedHoldingsTests(Base):
+    """A Vestwell-style 401(k): SimpleFIN only sends the balance; you enter funds and a contribution election."""
+
+    def setUp(self):
+        super().setUp()
+        from runway import tracked
+        self.tracked = tracked
+        simplefin.store_payload(self.c, {"accounts": [account("vw", "Vestwell 401k", "20000")]}, TODAY)
+        self.c.execute("UPDATE accounts SET balance_date='2026-09-22' WHERE id='vw'")
+        self.price("FXAIX", "2026-09-22", 200.0)
+        self.price("VTSAX", "2026-09-22", 100.0)
+
+    def sync(self, balance, day):
+        self.c.execute("UPDATE accounts SET balance=?, balance_date=? WHERE id='vw'", (balance, day))
+        sfinvest.capture(self.c, account("vw", "Vestwell 401k", str(balance)), "vw", "Vestwell", balance, date.fromisoformat(day))
+        return {r["security_id"]: r for r in self.c.execute("SELECT * FROM holdings WHERE account_id='sf:vw'")}
+
+    def test_contributions_buy_shares_per_election(self):
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "fxaix", "shares": 60, "pct": 70}, {"ticker": "VTSAX", "shares": 80, "pct": 30}])
+        h = self.sync(20000, "2026-09-22")                        # 60*200 + 80*100 = 20,000 exactly
+        self.assertEqual((round(h["man:FXAIX"]["value"], 2), round(h["man:VTSAX"]["value"], 2)), (12000.0, 8000.0))
+        self.assertNotIn("sf:balance", h)
+        # a $1,000 paycheck contribution lands; prices unchanged
+        h = self.sync(21000, "2026-09-22")
+        self.assertAlmostEqual(h["man:FXAIX"]["quantity"], 60 + 700 / 200)
+        self.assertAlmostEqual(h["man:VTSAX"]["quantity"], 80 + 300 / 100)
+        self.assertEqual(self.c.execute("SELECT amount FROM manual_contributions").fetchone()[0], 1000.0)
+        # syncing again doesn't count it twice
+        self.sync(21000, "2026-09-22")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 1)
+        # market moves are market moves, not contributions
+        self.price("FXAIX", "2026-09-23", 210.0)
+        h = self.sync(round(63.5 * 210 + 83 * 100, 2), "2026-09-23")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 1)
+        self.assertNotIn("sf:unexplained", h)
+        # the contribution shows up as money added in history, not as a gain
+        hist = portfolio.history(self.c, TODAY, days=3)
+        self.assertEqual(round(portfolio.overview(self.c, "1M", TODAY)["total"], 2), round(63.5 * 210 + 83 * 100, 2))
+
+    def test_drift_and_funds_without_ticker(self):
+        # A collective trust with no ticker: enter its value; it absorbs what the priced fund doesn't explain.
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 50, "pct": 50}, {"name": "Stable Value CIT", "value": 10000, "pct": 50}])
+        h = self.sync(20000, "2026-09-22")
+        self.assertEqual(round(h["man:stablevaluecit"]["value"], 2), 10000.0)
+        # a drop the funds don't explain (a fee, a loan) is not bought or sold; it's absorbed by the untickered fund
+        h = self.sync(19800, "2026-09-22")
+        self.assertEqual(round(h["man:stablevaluecit"]["value"], 2), 9800.0)
+        # with only priced funds, an unexplained drop is shown as a difference and reported as drift
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 100, "pct": 100}])
+        h = self.sync(19000, "2026-09-22")
+        self.assertEqual(round(h["sf:unexplained"]["value"], 2), -1000.0)
+        self.assertAlmostEqual(self.c.execute("SELECT drift FROM manual_state WHERE account_id='sf:vw'").fetchone()[0], 1000 / 19000, places=4)
+
+    def test_starting_gap_is_a_baseline_not_a_contribution(self):
+        # Shares from a statement that predates the last paycheck: $1,200 short of the balance.
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 94, "pct": 100}])   # 18,800
+        h = self.sync(20000, "2026-09-22")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 0)
+        self.assertEqual(round(h["sf:unexplained"]["value"], 2), 1200.0)
+        h = self.sync(21000, "2026-09-22")                        # next paycheck: only the new $1,000 is invested
+        self.assertEqual(self.c.execute("SELECT amount FROM manual_contributions").fetchone()[0], 1000.0)
+        self.assertAlmostEqual(h["man:FXAIX"]["quantity"], 99.0)
+
+    def test_baseline_waits_for_prices(self):
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "NEWFUND", "shares": 90, "pct": 100}])
+        self.sync(20000, "2026-09-22")                            # no price yet for NEWFUND
+        self.price("NEWFUND", "2026-09-22", 200.0)                 # 18,000: a $2,000 gap at entry
+        self.sync(20000, "2026-09-22")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 0)
+
+    def test_validation(self):
+        for rows in ([{"ticker": "FXAIX", "shares": 10, "pct": 60}, {"ticker": "VTSAX", "shares": 5, "pct": 30}],
+                     [{"name": "Trust", "shares": 5, "pct": 100}], [{"ticker": "FXAIX", "shares": -1, "pct": 100}]):
+            with self.assertRaises(ValueError):
+                self.tracked.save(self.c, "sf:vw", rows)
+
+
+class MergeByTickerTests(Base):
+    def test_same_fund_in_two_accounts_is_one_row(self):
+        from runway import tracked
+        simplefin.store_payload(self.c, {"accounts": [account("wf", "Roth IRA", "3000", [VTI]), account("vw", "Vestwell 401k", "5000")]}, TODAY)
+        self.price("VTI", "2026-09-22", 300.0)
+        self.c.execute("UPDATE accounts SET balance_date='2026-09-22' WHERE id='vw'")
+        tracked.save(self.c, "sf:vw", [{"ticker": "VTI", "shares": 10, "pct": 100}])
+        sfinvest.capture(self.c, account("vw", "Vestwell 401k", "5000"), "vw", "Vestwell", 5000.0, TODAY)
+        vti = [h for h in portfolio.holdings(self.c) if h["ticker"] == "VTI"]
+        self.assertEqual(len(vti), 1)
+        self.assertEqual((vti[0]["quantity"], len(vti[0]["lots"])), (20.0, 2))
+        self.assertEqual(sorted(l["security_id"] for l in vti[0]["lots"]), ["man:VTI", "sf:VTI"])

@@ -1,6 +1,9 @@
 # Runway: personal finance, forecasting and investments. Standard-library Python only, so the image stays small.
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.source="https://github.com/AnthonyPluth/Runway" \
+      org.opencontainers.image.description="Runway: personal finance, forecasting and investments"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     RUNWAY_DATA=/data \

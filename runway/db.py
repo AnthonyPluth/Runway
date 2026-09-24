@@ -59,11 +59,15 @@ CREATE TABLE IF NOT EXISTS recurring (
     name        TEXT NOT NULL,
     account_id  TEXT NOT NULL,
     amount      REAL NOT NULL,               -- negative = money out
-    frequency   TEXT NOT NULL,               -- weekly | biweekly | monthly | yearly
+    frequency   TEXT NOT NULL,               -- weekly | biweekly | semimonthly | monthly | quarterly | semiannual | yearly | dates
     anchor_date TEXT NOT NULL,               -- a known occurrence (YYYY-MM-DD)
     match       TEXT,                        -- payee text, so history of this item is not double counted
     end_date    TEXT,
     active      INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS recurring_dismissed (   -- missed-payment alerts you've dismissed ("rec:<id>:<date>")
+    key TEXT PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS budgets (
@@ -219,6 +223,29 @@ CREATE TABLE IF NOT EXISTS networth_snapshots (
     detail      TEXT                              -- JSON: total per group
 );
 
+CREATE TABLE IF NOT EXISTS manual_positions (   -- what a balance-only account holds, entered by you
+    account_id  TEXT NOT NULL,
+    security_id TEXT NOT NULL,
+    shares      REAL,
+    pct         REAL,                             -- share of each new contribution, %
+    last_value  REAL,                             -- for funds without a ticker
+    updated     TEXT,
+    PRIMARY KEY (account_id, security_id)
+);
+
+CREATE TABLE IF NOT EXISTS manual_contributions (  -- new money Runway spotted and invested per your election
+    account_id TEXT,
+    date       TEXT,
+    amount     REAL
+);
+
+CREATE TABLE IF NOT EXISTS manual_state (
+    account_id   TEXT PRIMARY KEY,
+    drift        REAL,                            -- how far the tracked funds are from the synced balance (share of it)
+    checked      TEXT,
+    last_balance REAL
+);
+
 CREATE TABLE IF NOT EXISTS cost_overrides (      -- cost basis you entered yourself; wins over what the institution reports
     account_id  TEXT NOT NULL,
     security_id TEXT NOT NULL,
@@ -344,6 +371,8 @@ def init(path: str | None = None) -> None:
         _ensure_column(conn, "inv_accounts", "institution", "TEXT")
         _ensure_column(conn, "price_meta", "instrument_type", "TEXT")          # EQUITY | ETF | MUTUALFUND | ...
         _ensure_column(conn, "price_meta", "long_name", "TEXT")
+        _ensure_column(conn, "recurring", "dates", "TEXT")
+        _ensure_column(conn, "manual_state", "offset", "REAL")   # gap between entered funds and the balance, at entry   # "04-15,10-15" (dates each year) or "1,15" (days each month)
         _ensure_column(conn, "cost_overrides", "per_share", "REAL")   # set: cost basis = per_share x shares held
         conn.execute("CREATE INDEX IF NOT EXISTS tx_recurring ON transactions(recurring_id)")
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.

@@ -1,9 +1,9 @@
-# Start:   docker compose up -d --build
+# Start:   docker compose up -d          (update later: docker compose pull && docker compose up -d)
 # Open:    the RUNWAY_PUBLIC_URL you set in .env, and sign in with your identity provider.
 services:
   runway:
-    build: .
-    image: runway:latest
+    image: ghcr.io/anthonypluth/runway:latest   # built by GitHub Actions on every push to main
+    # build: .                                  # or build it yourself from this folder instead
     container_name: runway
     restart: unless-stopped
     ports:

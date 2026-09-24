@@ -39,7 +39,9 @@ def asset_class(sec: dict) -> str:
 
 def _accounts(conn) -> list[dict]:
     return db.rows(conn.execute(
-        "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name FROM inv_accounts a "
+        "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name, "
+        "(SELECT COUNT(*) FROM manual_positions m WHERE m.account_id=a.id) AS tracked, "
+        "(SELECT drift FROM manual_state ms WHERE ms.account_id=a.id) AS drift FROM inv_accounts a "
         "LEFT JOIN plaid_items i ON i.item_id=a.item_id ORDER BY institution_name, a.name"))
 
 
@@ -68,13 +70,17 @@ def holdings(conn) -> list[dict]:
             cost = per_share * (r["quantity"] or 0) if per_share is not None else manual[key][0]
         else:
             cost = r["cost_basis"]
-        h = by_sec.setdefault(r["security_id"], {
-            "security_id": r["security_id"], "ticker": r["ticker"], "name": r["sec_name"], "type": r["type"],
+        # The same fund in several accounts (or from different sources) is one row: group by ticker.
+        group = f"t:{r['ticker'].upper()}" if prices.usable_ticker(r["ticker"]) and not r["is_cash"] else r["security_id"]
+        h = by_sec.setdefault(group, {
+            "security_id": r["security_id"], "group": group, "ticker": r["ticker"], "name": r["sec_name"], "type": r["type"],
             "asset_class": asset_class(r), "sector": r["sector"], "is_cash": bool(r["is_cash"]),
             "quantity": 0.0, "value": 0.0, "cost_basis": 0.0, "cost_known": True, "accounts": [], "price": r["price"],
             "lots": [], "cost_manual": False,
         })
-        h["lots"].append({"account_id": r["account_id"], "account_name": r["account_name"], "quantity": r["quantity"] or 0,
+        if not h["name"] and r["sec_name"]:
+            h["name"] = r["sec_name"]
+        h["lots"].append({"account_id": r["account_id"], "security_id": r["security_id"], "account_name": r["account_name"], "quantity": r["quantity"] or 0,
                           "value": round(value, 2), "cost_basis": cost, "reported_cost_basis": r["cost_basis"],
                           "per_share": per_share if per_share is not None else (cost / r["quantity"] if cost is not None and r["quantity"] else None),
                           "manual": key in manual})

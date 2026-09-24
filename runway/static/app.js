@@ -169,6 +169,7 @@ async function renderOverview(el) {
 
   let html = "";
   for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup">Setup</a></span></div>`;
+  for (const m of fc.missed || []) html += missedLine(m);
   if (!fc.accounts.length) {
     html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup">Setup</a>.</span></div>`;
   }
@@ -205,6 +206,7 @@ async function renderOverview(el) {
   </table></div></div>`;
 
   el.innerHTML = html;
+  wireMissed(el);
   $$("#horizon button").forEach((b) => b.addEventListener("click", () => { horizon = Number(b.dataset.d); renderOverview(el); }));
   drawChart($("#chart"), fc);
   wireEvents(el);
@@ -601,6 +603,26 @@ async function runAiSuggestions(btn, f, reload) {
   });
 }
 
+// Missed recurring payments: one line each, with "Find it" (Transactions around that date) and "Dismiss".
+function missedLine(m) {
+  return `<div class="warn missed" data-key="${esc(m.key)}"><span class="icon">!</span><span>
+    <b>${esc(m.name)}</b>: ${fmt(Math.abs(m.amount))} ${m.amount > 0 ? "expected in" : "expected"} ${fmtDate(m.date, { month: "short", day: "numeric" })} hasn't shown up in ${esc(m.account_name || "the account")}.
+    <a href="#transactions" class="m-find" data-acct="${esc(m.account_id)}" data-month="${esc(m.date.slice(0, 7))}">Find it</a> ·
+    <button class="btn link m-dismiss">Dismiss</button></span></div>`;
+}
+function wireMissed(root) {
+  $$(".warn.missed", root).forEach((w) => {
+    $(".m-find", w).addEventListener("click", (e) => {
+      Object.assign(LIST_STATE.transactions, { q: "", category: "", account: e.currentTarget.dataset.acct, month: e.currentTarget.dataset.month, scope: "" });
+      toast("Use ↻ on the payment to link it to this recurring item");
+    });
+    $(".m-dismiss", w).addEventListener("click", async () => {
+      try { await api("/api/recurring/dismiss", { method: "POST", body: { key: w.dataset.key } }); w.remove(); toast("Dismissed"); }
+      catch (err) { toast(err.message, true); }
+    });
+  });
+}
+
 // ------------------------------------------------------------------------------------------ recurring
 async function renderRecurring(el) {
   const [accounts, items] = await Promise.all([api("/api/accounts"), api("/api/recurring")]);
@@ -608,7 +630,8 @@ async function renderRecurring(el) {
   const name = (a) => a.display_name || a.name;
   const acctName = (id) => { const a = accounts.find((x) => x.id === id); return a ? name(a) : "?"; };
   const acctOptions = (sel) => accounts.filter((a) => !a.hidden).map((a) => `<option value="${esc(a.id)}" ${a.id === sel ? "selected" : ""}>${esc(name(a))}</option>`).join("");
-  const freqOptions = (sel) => [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"], ["yearly", "Yearly"]]
+  const freqOptions = (sel) => [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"], ["semimonthly", "Twice a month (set days)"],
+    ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"], ["dates", "Specific dates each year"]]
     .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
   const modeOptions = (sel) => [["fixed", "Fixed amount"], ["last", "Same as last payment"], ["avg3", "Average of last 3"]]
     .map(([v, l]) => `<option value="${v}" ${v === (sel || "fixed") ? "selected" : ""}>${l}</option>`).join("");
@@ -618,13 +641,25 @@ async function renderRecurring(el) {
       <label>Amount<input class="r-amount" type="number" step="0.01" value="${r.amount ?? ""}" placeholder="-120.00" style="width:110px"></label>
       <label>Forecast amount<select class="r-mode">${modeOptions(r.amount_mode)}</select></label>
       <label>How often<select class="r-freq">${freqOptions(r.frequency || "monthly")}</select></label>
-      <label>A date it happens<input class="r-date" type="date" value="${esc(r.anchor_date || "")}"></label>
+      <label class="r-dates-wrap" ${["dates", "semimonthly"].includes(r.frequency) ? "" : "hidden"}>${r.frequency === "semimonthly" ? "Days of the month" : "Dates each year"}
+        <input class="r-dates" value="${esc(r.dates || "")}" placeholder="${r.frequency === "semimonthly" ? "1, 15" : "Apr 15, Oct 15"}" style="width:150px"></label>
+      <label>${["dates", "semimonthly"].includes(r.frequency) ? "Starting" : "A date it happens"}<input class="r-date" type="date" value="${esc(r.anchor_date || "")}"></label>
       <label>Merchant text<input class="r-match" value="${esc(r.match || "")}" placeholder="e.g. comed" style="width:150px"></label>`;
   const values = (box) => ({
     name: $(".r-name", box).value, account_id: $(".r-acct", box).value, amount: $(".r-amount", box).value,
     amount_mode: $(".r-mode", box).value, frequency: $(".r-freq", box).value, anchor_date: $(".r-date", box).value,
     match: $(".r-match", box).value, active: $(".r-active", box) ? ($(".r-active", box).checked ? 1 : 0) : 1,
+    dates: $(".r-dates", box).value,
   });
+  // Show the dates box only for schedules that need it, with the right hint.
+  const syncFreq = (box) => {
+    const f = $(".r-freq", box).value, wrap = $(".r-dates-wrap", box);
+    const needs = f === "dates" || f === "semimonthly";
+    wrap.hidden = !needs;
+    wrap.firstChild.textContent = f === "semimonthly" ? "Days of the month " : "Dates each year ";
+    $(".r-dates", box).placeholder = f === "semimonthly" ? "1, 15" : "Apr 15, Oct 15";
+    $(".r-date", box).parentElement.firstChild.textContent = needs ? "Starting" : "A date it happens";
+  };
 
   el.innerHTML = `<h1>Recurring</h1>
     <p class="help">Paychecks, mortgage, loans and bills. Transactions from the same merchant are matched automatically, whatever the amount;
@@ -634,6 +669,7 @@ async function renderRecurring(el) {
       <div class="card-head"><h2>↻ ${esc(r.name)} ${r.active ? "" : `<span class="tag">paused</span>`}</h2>
         <span class="small muted">${r.next_date ? `Next ${fmtDate(r.next_date)} · ${fmt(r.expected_amount)}` : "No upcoming date"}
           · ${r.matched_count} matched${r.last_matched ? ` · last ${fmtDate(r.last_matched.posted)} ${fmt(r.last_matched.amount)}` : ""}</span></div>
+      ${(r.missed || []).map((m) => missedLine(m)).join("")}
       <div class="form-row">${fields(r)}
         <label class="inline"><input type="checkbox" class="r-active" ${r.active ? "checked" : ""}> Active</label></div>
       <div class="form-row">
@@ -651,10 +687,17 @@ async function renderRecurring(el) {
 
   $$(".rec-item").forEach((box) => {
     const id = box.dataset.id;
-    onEdit($$("input, select", box), async () => {
-      const r = await api(`/api/recurring/${id}`, { method: "POST", body: values(box) });
+    $(".r-freq", box).addEventListener("change", () => syncFreq(box));
+    onEdit($$("input, select", box).filter((f) => {
+      // Don't save a dates schedule until its dates are filled in.
+      return true;
+    }), async (f) => {
+      const v = values(box);
+      if ((v.frequency === "dates" || v.frequency === "semimonthly") && !v.dates.trim()) { if (f.classList.contains("r-freq")) $(".r-dates", box).focus(); return; }
+      const r = await api(`/api/recurring/${id}`, { method: "POST", body: v });
       if (r.linked) toast(`Saved · matched ${r.linked} more`);
     });
+    wireMissed(box);
     $(".r-del", box).addEventListener("click", async () => {
       if (!confirmInline($(".r-del", box), "Remove?")) return;
       await api(`/api/recurring/${id}`, { method: "DELETE" }); toast("Removed"); route();
@@ -668,6 +711,7 @@ async function renderRecurring(el) {
       btn.textContent = "Hide matched transactions";
     });
   });
+  $(".r-freq", $("#rec-new")).addEventListener("change", () => syncFreq($("#rec-new")));
   $("#r-add").addEventListener("click", async () => {
     try { const r = await api("/api/recurring", { method: "POST", body: values($("#rec-new")) }); toast(r.linked ? `Added · matched ${r.linked} past transactions` : "Added"); route(); }
     catch (err) { toast(err.message, true); }
@@ -922,10 +966,15 @@ function invTiles(d, perf, beat) {
 }
 
 // Re-price holdings with live quotes and recompute the page totals.
-function applyLiveQuotes(d, quotes) {
+function applyLiveQuotes(d, quotes, market) {
+  const now = Date.now() / 1000;
   for (const h of d.holdings) {
     const q = h.ticker && quotes[h.ticker];
+    h.live = false;
     if (!q || h.is_cash || !h.quantity) continue;
+    // "Live" = trading now and quoted in the last 20 minutes. Mutual funds only get one price a day, after the close.
+    h.live = market === "open" && (q.type || "").toUpperCase() !== "MUTUALFUND" && !!q.time && now - q.time < 1200;
+    h.live_time = q.time;
     h.price = q.price;
     h.value = h.quantity * q.price;
     if (q.prev_close) {
@@ -948,6 +997,60 @@ function applyLiveQuotes(d, quotes) {
     d.unrealized_gain = known.reduce((a, h) => a + h.gain, 0);
     d.cost_basis = known.reduce((a, h) => a + h.cost_basis, 0);
   }
+}
+
+// Holdings you enter for an account that only reports a balance (a 401(k) through SimpleFIN, say).
+async function openTrackedEditor(acctId, el) {
+  const row = $(`.tr-row[data-id="${CSS.escape(acctId)}"]`);
+  if (!row) return;
+  if (!row.hidden) { row.hidden = true; return; }
+  const t = await api(`/api/tracked/${encodeURIComponent(acctId)}`);
+  const fund = (p = {}) => `<tr class="tr-fund">
+      <td><input class="tr-ticker" value="${esc(p.ticker || "")}" placeholder="FXAIX" style="width:90px" aria-label="Ticker"></td>
+      <td><input class="tr-name" value="${esc(p.ticker ? "" : (p.name || ""))}" placeholder="${p.ticker ? esc(p.name || "") : "Fund name (if no ticker)"}" style="width:220px" aria-label="Fund name"></td>
+      <td><input class="tr-shares" type="number" min="0" step="0.0001" value="${p.ticker ? +(+p.shares).toFixed(4) : ""}" placeholder="shares" style="width:110px" aria-label="Shares"></td>
+      <td><input class="tr-value" type="number" min="0" step="1" value="${!p.ticker && p.last_value ? Math.round(p.last_value) : ""}" placeholder="or value $" style="width:110px" aria-label="Value, for a fund without a ticker"></td>
+      <td><input class="tr-pct" type="number" min="0" max="100" step="0.5" value="${p.pct ?? ""}" placeholder="%" style="width:70px" aria-label="Share of each contribution, %"></td>
+      <td><button class="btn link tr-del" aria-label="Remove fund">✕</button></td></tr>`;
+  row.hidden = false;
+  row.firstElementChild.innerHTML = `<div class="card-inset tracked-editor">
+    <h3>What this account holds</h3>
+    <p class="help">From your plan's website or latest statement: each fund's ticker and shares, and your contribution election (the % of each
+      paycheck that goes into it). For a fund with no ticker, enter its current value instead of shares. Runway prices the funds daily and, when the
+      synced balance jumps, invests the new money per your election. Update the shares from a statement every so often.</p>
+    <table class="tr-table"><tr><th>Ticker</th><th>Name</th><th>Shares</th><th>Value (no ticker)</th><th>Contribution %</th><th></th></tr>
+      ${(t.positions.length ? t.positions : [{}]).map(fund).join("")}</table>
+    <div class="form-row"><button class="btn link" id="tr-add">+ Add a fund</button><span class="small" id="tr-status"></span>
+      <button class="btn link" id="tr-done" style="margin-left:auto">Done</button></div>
+    ${t.contributions.length ? `<p class="small muted">Contributions spotted: ${t.contributions.slice(0, 6).map((c) => `${fmtDate(c.date)} ${fmt(c.amount)}`).join(" · ")}</p>` : ""}
+  </div>`;
+  const box = row.firstElementChild;
+  let changed = false, timer;
+  const status = (msg, bad) => { const s = $("#tr-status", box); s.textContent = msg; s.style.color = bad ? "var(--critical)" : ""; };
+  const collect = () => $$(".tr-fund", box).map((r) => ({ ticker: $(".tr-ticker", r).value.trim(), name: $(".tr-name", r).value.trim(),
+    shares: $(".tr-shares", r).value, value: $(".tr-value", r).value, pct: $(".tr-pct", r).value }))
+    .filter((r) => r.ticker || r.name);
+  const save = async () => {
+    const rows = collect();
+    if (!rows.length) return status("");
+    const total = rows.reduce((a, r) => a + (Number(r.pct) || 0), 0);
+    if (total > 0 && Math.abs(total - 100) > 0.5) return status(`Contribution percentages add up to ${total}%, not 100%`, true);
+    if (rows.some((r) => !r.ticker && !Number(r.value))) return status("A fund without a ticker needs its current value", true);
+    if (rows.some((r) => r.ticker && !Number(r.shares))) return status("Enter shares for each fund with a ticker", true);
+    status("Saving…");
+    try { await api(`/api/tracked/${encodeURIComponent(acctId)}`, { method: "POST", body: { rows } }); changed = true; status("Saved ✓ · prices updated"); }
+    catch (err) { status(err.message, true); }
+  };
+  const wire = (r) => {
+    $$("input", r).forEach((i) => i.addEventListener("change", () => { clearTimeout(timer); timer = setTimeout(save, 150); }));
+    $(".tr-del", r).addEventListener("click", () => { r.remove(); save(); });
+  };
+  $$(".tr-fund", box).forEach(wire);
+  $("#tr-add", box).addEventListener("click", () => {
+    $(".tr-table", box).insertAdjacentHTML("beforeend", fund()); const r = $$(".tr-fund", box).pop(); wire(r); $(".tr-ticker", r).focus();
+  });
+  $("#tr-done", box).addEventListener("click", () => { row.hidden = true; if (changed) renderInvestments(el); });
+  $(".tr-ticker", box).focus();
 }
 
 async function renderInvestments(el) {
@@ -1022,8 +1125,13 @@ async function renderInvestments(el) {
     <div class="card"><h2>Accounts</h2><p class="help">Untick an account to leave it out of everything on this page.</p>
       <table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
         ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}</label></td>
-        <td class="muted small">${a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
-        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table>
+        <td class="muted small">${a.source !== "simplefin" ? `via Plaid${a.subtype ? ` · ${esc(a.subtype)}` : ""}` : a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
+        <td class="num">${fmt(a.balance)}</td>
+        <td class="num" style="white-space:nowrap">${a.source === "simplefin" && (a.tracked || (seenBy[a.id.slice(3)] && !seenBy[a.id.slice(3)].positions))
+          ? `<button class="btn link tr-edit" data-id="${esc(a.id)}">${a.tracked ? "Edit holdings" : "Enter holdings"}</button>` : ""}</td></tr>
+        ${a.tracked && a.drift > 0.02 ? `<tr><td colspan="4"><div class="warn"><span class="icon">!</span><span>${esc(a.name)}: the funds you entered are ${(a.drift * 100).toFixed(1)}% off the synced balance.
+          Update the share counts from your latest statement.</span></div></td></tr>` : ""}
+        <tr class="tr-row" data-id="${esc(a.id)}" hidden><td colspan="4"></td></tr>`).join("")}</table>
       ${status.simplefin_seen.length ? `<details><summary class="small">What SimpleFIN sends for each account</summary><table class="small">
         ${status.simplefin_seen.map((x) => `<tr><td>${esc(x.org || "")} · ${esc(x.name)}</td><td>${x.positions ? `${x.positions} positions` : "balance only, no positions"}</td>
           <td class="muted">${x.fields.length ? esc(x.fields.join(", ")) : ""}</td></tr>`).join("")}</table>
@@ -1041,6 +1149,7 @@ async function renderInvestments(el) {
     catch (err) { toast(err.message, true); }
     renderInvestments(el);
   });
+  $$(".tr-edit").forEach((b) => b.addEventListener("click", () => openTrackedEditor(b.dataset.id, el)));
   $$(".inv-acct").forEach((c) => c.addEventListener("change", async () => {
     await api(`/api/plaid/accounts/${encodeURIComponent(c.dataset.id)}`, { method: "POST", body: { hidden: !c.checked } }); renderInvestments(el);
   }));
@@ -1071,7 +1180,7 @@ async function renderInvestments(el) {
       ${th("value", "Value")}${th("day_change", "Today")}${th("gain", "Total gain")}${th("allocation", "Weight")}${th("cost_basis", "Cost basis", "num hide-sm")}</tr>
       ${rows.map((x) => `<tr><td><div><b>${esc(x.ticker && !x.ticker.includes(":") ? x.ticker : "")}</b> ${esc(x.name || "")}</div><div class="desc">${esc(x.accounts.join(", "))}</div></td>
         <td class="num">${x.is_cash ? "—" : x.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
-        <td class="num">${x.is_cash ? "—" : fmt(x.price)}</td>
+        <td class="num" style="white-space:nowrap">${x.is_cash ? "—" : fmt(x.price)}${x.live ? `<i class="live-dot row-live" role="img" aria-label="Live price" title="Live price · ${esc(new Date(x.live_time * 1000).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }))}"></i>` : ""}</td>
         <td class="num"><b>${fmt(x.value)}</b></td>
         <td class="num">${x.day_change == null ? `<span class="muted">—</span>`
           : `<span class="${gainCls(x.day_change)}">${signed(x.day_change)}</span><div class="desc">${pct(x.day_change_pct, 2)}</div>`}</td>
@@ -1079,7 +1188,7 @@ async function renderInvestments(el) {
           : `<span class="${gainCls(x.gain)}">${signed(x.gain)}</span><div class="desc">${pct(x.gain_pct)}</div>`}</td>
         <td class="num"><div class="weight"><span style="width:${Math.min(100, x.allocation * 100).toFixed(1)}%"></span></div>${(x.allocation * 100).toFixed(1)}%</td>
         <td class="num hide-sm">${x.is_cash || x.asset_class === "Not reported" ? `<span class="muted">—</span>`
-          : `<button class="cost-edit ${x.gain == null ? "missing" : ""}" data-sec="${esc(x.security_id)}" title="Edit cost basis">${x.gain == null ? "Add" : fmt(x.cost_basis)}${x.cost_manual ? ` <span class="tag">edited</span>` : ""} <span class="pencil" aria-hidden="true">✎</span></button>`}</td>
+          : `<button class="cost-edit ${x.gain == null ? "missing" : ""}" data-sec="${esc(x.group || x.security_id)}" title="Edit cost basis">${x.gain == null ? "Add" : fmt(x.cost_basis)}${x.cost_manual ? ` <span class="tag">edited</span>` : ""} <span class="pencil" aria-hidden="true">✎</span></button>`}</td>
 </tr>`).join("")}</table>`;
     $$("#inv-holdings .cost-edit").forEach((btn) => btn.addEventListener("click", () => openCostEditor(btn)));
     $$("#inv-holdings th.sortable").forEach((t) => t.addEventListener("click", () => {
@@ -1088,7 +1197,7 @@ async function renderInvestments(el) {
   };
   // Cost basis editor: one input per account holding the security (the institution's number is the default).
   const openCostEditor = (btn) => {
-    const x = d.holdings.find((h) => h.security_id === btn.dataset.sec);
+    const x = d.holdings.find((h) => (h.group || h.security_id) === btn.dataset.sec);
     const tr = btn.closest("tr");
     $$("#inv-holdings tr.cost-row").forEach((r) => r.remove());
     const row = document.createElement("tr");
@@ -1115,7 +1224,7 @@ async function renderInvestments(el) {
     $(".cb-cancel", row).addEventListener("click", finish);
     onEdit($$(".cb-in", row), async (inp) => {
       const l = x.lots[inp.dataset.i];
-      await api("/api/investments/cost", { method: "POST", body: { account_id: l.account_id, security_id: x.security_id, per_share: inp.value } });
+      await api("/api/investments/cost", { method: "POST", body: { account_id: l.account_id, security_id: l.security_id || x.security_id, per_share: inp.value } });
       changed = true;
       if (x.lots.length === 1) finish();   // one account: done as soon as it's saved
     });
@@ -1137,7 +1246,7 @@ async function renderInvestments(el) {
       try {
         const live = await api("/api/investments/live");
         if (!$("#inv-tiles")) return;
-        applyLiveQuotes(d, live.quotes);
+        applyLiveQuotes(d, live.quotes, live.market);
         $("#inv-tiles").innerHTML = invTiles(d, perf, beat); wireTiles();
         if (!document.querySelector(".cost-row")) drawHoldings();   // don't close an open cost editor
         const t = new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
@@ -1486,6 +1595,84 @@ function openAssetForm(a, d, el) {
   host.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
+// Plaid Link: loaded from Plaid's servers only when you connect an account.
+function loadPlaid() {
+  if (window.Plaid) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    sc.onload = resolve; sc.onerror = () => reject(new Error("Couldn't load Plaid Link. Check your internet connection."));
+    document.head.appendChild(sc);
+  });
+}
+
+async function openPlaidLink(itemId) {
+  await loadPlaid();
+  const token = (await api("/api/plaid/link_token", { method: "POST", body: { item_id: itemId || null } })).link_token;
+  return new Promise((resolve) => {
+    window.Plaid.create({
+      token,
+      onSuccess: async (publicToken, metadata) => {
+        try {
+          toast("Connected. Pulling holdings and activity…");
+          const r = itemId
+            ? await api(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
+            : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution } });
+          toast(`Synced ${r.accounts} account${r.accounts === 1 ? "" : "s"}, ${r.holdings} holdings, ${r.transactions} activities` +
+            (r.hidden_simplefin && r.hidden_simplefin.length ? ` · hid the SimpleFIN copy of ${r.hidden_simplefin.join(", ")}` : ""));
+        } catch (err) { toast(err.message, true); }
+        resolve(true);
+      },
+      onExit: (err) => { if (err) toast(err.display_message || err.error_message || "Plaid closed", true); resolve(false); },
+    }).open();
+  });
+}
+
+async function wirePlaidSetup() {
+  const st = await api("/api/plaid/status");
+  if (!$("#plaid-card")) return;
+  $("#pl-env").value = st.env === "sandbox" ? "sandbox" : "production";
+  $("#pl-id").value = st.client_id;
+  $("#pl-secret").placeholder = st.configured ? "•••••••• saved" : "secret";
+  onEdit([$("#pl-env"), $("#pl-id")], async () => {
+    await api("/api/plaid/settings", { method: "POST", body: { env: $("#pl-env").value, client_id: $("#pl-id").value } });
+  });
+  onEdit([$("#pl-secret")], async () => {
+    if (!$("#pl-secret").value.trim()) return;
+    await api("/api/plaid/settings", { method: "POST", body: { secret: $("#pl-secret").value } });
+    toast("Plaid secret saved"); route();
+  });
+  const box = $("#pl-items");
+  box.innerHTML = `${st.items.length ? `<table>${st.items.map((it) => `<tr data-item="${esc(it.item_id)}">
+      <td><b>${esc(it.institution_name || "Connection")}</b> ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}
+        <div class="desc">${it.accounts.map((a) => `${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`).join(", ") || "no accounts yet"}</div>
+        ${it.error ? `<div class="small" style="color:var(--critical)">▲ ${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired or changed; reconnect to fix" : it.error)}</div>` : ""}</td>
+      <td class="small muted">${it.last_sync ? `synced ${esc(it.last_sync)} UTC` : "not synced"}</td>
+      <td class="num" style="white-space:nowrap">${it.error ? `<button class="btn primary pl-reconnect">Reconnect</button>` : `<button class="btn pl-sync">Sync</button>`}
+        <button class="btn link pl-remove">Remove</button></td></tr>`).join("")}</table>` : ""}
+    <div class="form-row"><button class="btn primary" id="pl-connect" ${st.configured ? "" : "disabled title=\"Add your Plaid client ID and secret first\""}>Connect an investment account</button></div>`;
+  $("#pl-connect").addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { if (await openPlaidLink(null)) route(); } catch (err) { toast(err.message, true); }
+    b.disabled = false;
+  });
+  $$("#pl-items tr[data-item]").forEach((tr) => {
+    const id = tr.dataset.item;
+    $(".pl-sync", tr)?.addEventListener("click", async (e) => {
+      const b = e.currentTarget; b.disabled = true; b.textContent = "Syncing…";
+      try { const r = await api(`/api/plaid/items/${encodeURIComponent(id)}/sync`, { method: "POST" }); toast(`Synced ${r.holdings} holdings, ${r.transactions} activities`); }
+      catch (err) { toast(err.message, true); }
+      route();
+    });
+    $(".pl-reconnect", tr)?.addEventListener("click", async () => { try { if (await openPlaidLink(id)) route(); } catch (err) { toast(err.message, true); } });
+    $(".pl-remove", tr).addEventListener("click", async (e) => {
+      if (!confirmInline(e.currentTarget, "Remove this connection?")) return;
+      try { await api(`/api/plaid/items/${encodeURIComponent(id)}/remove`, { method: "POST" }); toast("Connection removed"); route(); }
+      catch (err) { toast(err.message, true); }
+    });
+  });
+}
+
 // ------------------------------------------------------------------------------------------ setup
 let rulesOpen = false, rulesFilter = "";
 async function renderSetup(el) {
@@ -1527,7 +1714,12 @@ async function renderSetup(el) {
           : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>
              <div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}
           <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label></td>
-        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
+        <td class="num">${fmt(a.balance)}</td>
+        <td class="num" style="white-space:nowrap">${a.source === "simplefin" && (a.tracked || (seenBy[a.id.slice(3)] && !seenBy[a.id.slice(3)].positions))
+          ? `<button class="btn link tr-edit" data-id="${esc(a.id)}">${a.tracked ? "Edit holdings" : "Enter holdings"}</button>` : ""}</td></tr>
+        ${a.tracked && a.drift > 0.02 ? `<tr><td colspan="4"><div class="warn"><span class="icon">!</span><span>${esc(a.name)}: the funds you entered are ${(a.drift * 100).toFixed(1)}% off the synced balance.
+          Update the share counts from your latest statement.</span></div></td></tr>` : ""}
+        <tr class="tr-row" data-id="${esc(a.id)}" hidden><td colspan="4"></td></tr>`).join("")}</table></div>`
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
   </div>
 
@@ -1548,9 +1740,19 @@ async function renderSetup(el) {
     ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
   </div>
 
-  <div class="card"><h2>Investments</h2>
+  <div class="card" id="plaid-card"><h2>Investments</h2>
     <p class="help">Investment positions come from SimpleFIN with each sync: any account whose type is <b>investment</b> in the Accounts list above shows up on the
       <a href="#investments">Investments</a> page. If a brokerage or retirement account is missing there, set its type to investment and sync.</p>
+    <h3>Plaid <span class="muted small">for accounts SimpleFIN only knows the balance of</span></h3>
+    <p class="help">Plaid adds holdings and trade history. Linking an institution here hides its SimpleFIN copy on the Investments page;
+      net worth keeps using the SimpleFIN balance so nothing is counted twice. Keys are under Developers → Keys at
+      <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
+    <div class="form-row">
+      <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
+      <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
+      <label>Secret<input id="pl-secret" type="password" style="width:220px" autocomplete="off"></label>
+    </div>
+    <div id="pl-items"></div>
   </div>
 
   <div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
@@ -1602,6 +1804,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   </div>`;
 
   wireConnect();
+  wirePlaidSetup();
   $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
   const filterRules = () => {
     const q = ($("#rule-filter")?.value || "").trim().toLowerCase();
