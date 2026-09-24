@@ -20,3 +20,18 @@ services:
       OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
       OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
       RUNWAY_ALLOWED_HOSTS: ${RUNWAY_ALLOWED_HOSTS:-}
+      # Optional: use Postgres instead of the built-in database (see DOCKER.md for moving your data over).
+      DATABASE_URL: ${DATABASE_URL:-}
+    # depends_on: [db]            # if you use the Postgres service below
+
+  # Optional Postgres, if you don't already run one. Then set in .env:
+  #   DATABASE_URL=postgresql://runway:<password>@db:5432/runway
+  # db:
+  #   image: postgres:16
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: runway
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+  #     POSTGRES_DB: runway
+  #   volumes:
+  #     - ./postgres:/var/lib/postgresql/data

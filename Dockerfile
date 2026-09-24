@@ -11,6 +11,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RUNWAY_PORT=8765 \
     TZ=America/Chicago
 
+# The Postgres driver, used only when DATABASE_URL is set (otherwise Runway uses its built-in SQLite database).
+RUN pip install --no-cache-dir "psycopg[binary]>=3.1,<4"
+
 # Run as an ordinary user; your database lives in /data (mount a folder or volume there).
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin runway \
  && mkdir -p /data && chown runway:runway /data

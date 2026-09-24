@@ -110,7 +110,7 @@ async function route() {
   let page = (location.hash || "#overview").slice(1).split("?")[0];
   if (!PAGES[page]) page = "overview";
   $$("nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
-  try { await PAGES[page]($("#app")); } catch (err) { $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
+  try { await PAGES[page]($("#app")); } catch (err) { console.error(err); $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
 }
 window.addEventListener("hashchange", route);
 // Charts are drawn to fit their box, so redraw the page when the window width changes enough to matter
@@ -1714,12 +1714,7 @@ async function renderSetup(el) {
           : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>
              <div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}
           <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label></td>
-        <td class="num">${fmt(a.balance)}</td>
-        <td class="num" style="white-space:nowrap">${a.source === "simplefin" && (a.tracked || (seenBy[a.id.slice(3)] && !seenBy[a.id.slice(3)].positions))
-          ? `<button class="btn link tr-edit" data-id="${esc(a.id)}">${a.tracked ? "Edit holdings" : "Enter holdings"}</button>` : ""}</td></tr>
-        ${a.tracked && a.drift > 0.02 ? `<tr><td colspan="4"><div class="warn"><span class="icon">!</span><span>${esc(a.name)}: the funds you entered are ${(a.drift * 100).toFixed(1)}% off the synced balance.
-          Update the share counts from your latest statement.</span></div></td></tr>` : ""}
-        <tr class="tr-row" data-id="${esc(a.id)}" hidden><td colspan="4"></td></tr>`).join("")}</table></div>`
+        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
   </div>
 
@@ -1760,6 +1755,17 @@ async function renderSetup(el) {
       For homes, a free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast API key</a> gives an automated estimate (50 lookups a month on the free plan; Runway stops there so you're never charged).</p>
     <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
 ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
+  </div>
+
+  <div class="card"><h2>Backup &amp; restore</h2>
+    <p class="help">A backup is one file with all your data and settings. It works with either database, so it's also how you move
+      Runway to another machine, or from its built-in database to Postgres. Currently using: <b>${STATE.database === "postgres" ? "Postgres" : "the built-in database (SQLite)"}</b>.
+      The file includes your bank access and API keys, so keep it somewhere private.</p>
+    <div class="form-row"><a class="btn primary" href="/api/backup" download>Download a backup</a></div>
+    <div class="form-row">
+      <label>Restore from a backup<input type="file" id="restore-file" accept=".gz,.json,application/gzip,application/json"></label>
+      <button class="btn" id="restore-go" disabled>Restore…</button>
+    </div>
   </div>
 
   <div class="card"><h2>5 · Rules</h2>
@@ -1804,6 +1810,20 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   </div>`;
 
   wireConnect();
+  $("#restore-file")?.addEventListener("change", (e) => { $("#restore-go").disabled = !e.target.files.length; });
+  $("#restore-go")?.addEventListener("click", async (e) => {
+    const file = $("#restore-file").files[0];
+    if (!file) return;
+    if (!confirmInline(e.currentTarget, "Replace everything here with this backup?")) return;
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Restoring…";
+    try {
+      const res = await fetch("/api/restore", { method: "POST", headers: { "X-Runway": "1", "Content-Type": "application/octet-stream" }, body: file });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(r.error || `Restore failed (${res.status})`);
+      toast(`Restored backup from ${new Date(r.created).toLocaleString()} · ${r.transactions} transactions, ${r.accounts} accounts`);
+      await refreshState(); route();
+    } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Restore…"; }
+  });
   wirePlaidSetup();
   $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
   const filterRules = () => {

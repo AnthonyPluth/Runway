@@ -56,7 +56,7 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     gap = balance - total_priced() - unpriced_last
     # The first time after you enter holdings, whatever gap there is (a statement a few weeks old, say) becomes the
     # baseline; only growth beyond it counts as new money.
-    offset = gap if state is None or state["offset"] is None else state["offset"]
+    offset = gap if state is None or state["baseline"] is None else state["baseline"]
     diff = gap - offset
     contributed = 0.0
     # Only with at least one priced fund can new money be told apart from market moves.
@@ -92,9 +92,9 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     explained = sum(p["value"] for p in positions.values())
     leftover = balance - explained
     drift = abs(leftover) / balance if balance else 0.0
-    conn.execute("INSERT INTO manual_state(account_id, drift, checked, last_balance, offset) VALUES (?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET "
+    conn.execute("INSERT INTO manual_state(account_id, drift, checked, last_balance, baseline) VALUES (?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET "
                  "drift=excluded.drift, checked=excluded.checked, last_balance=excluded.last_balance, "
-                 "offset=COALESCE(manual_state.offset, excluded.offset)",
+                 "baseline=COALESCE(manual_state.baseline, excluded.baseline)",
                  (account_id, round(drift, 5), today.isoformat(), balance, offset if priced else None))
     return {"positions": positions, "leftover": leftover, "drift": drift, "contributed": contributed}
 

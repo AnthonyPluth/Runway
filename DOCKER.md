@@ -43,12 +43,27 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
 
 If a setting is missing, the container stops with a message saying which one (see the logs).
 
+## Moving your data from your Mac
+
+1. On the Mac: Setup → Backup & restore → **Download a backup** (or `python3 run.py backup`).
+2. Start the container on the server, sign in, and go to Setup → Backup & restore → **Restore**, choosing that file.
+   (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
+
+The backup holds your bank access and API keys; delete stray copies once you've restored it.
+
+## Using Postgres (optional)
+
+Set `DATABASE_URL` in `.env` (e.g. `postgresql://runway:password@db-host:5432/runway`) and restart. Runway creates its
+tables on first start. To bring your data along, restore a backup into it as above. There's a commented-out
+`db` service in `docker-compose.yml` if you want Postgres alongside Runway. Without `DATABASE_URL`, Runway keeps
+using its built-in database in `./data`.
+
 ## Everyday
 
 - Update to the newest image: `docker compose pull && docker compose up -d`
   (or let Watchtower do it automatically)
 - Stop: `docker compose down` (data stays in `./data`)
-- Back up: the `data` folder (stop the container first, or copy all three `runway.db*` files together)
+- Back up: Setup → Backup & restore → Download a backup (works for either database)
 
 ## Notes
 

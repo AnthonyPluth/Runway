@@ -1,5 +1,7 @@
 # Your financial data and secrets: never commit these
 data/
+postgres/
+*.json.gz
 *.db
 *.db-wal
 *.db-shm
