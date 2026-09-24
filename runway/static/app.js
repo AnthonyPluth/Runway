@@ -73,9 +73,7 @@ function categoryOptions(selected, { blank = true, canHoldChildren = false, excl
 let STATE = {};
 async function refreshState() {
   STATE = await api("/api/state");
-  const badge = $("#review-badge");
-  badge.hidden = !STATE.review_count;
-  badge.textContent = STATE.review_count || "";
+  $$("#review-badge, .review-count").forEach((b) => { b.hidden = !STATE.review_count; b.textContent = STATE.review_count || ""; });
   const s = $("#sync-status");
   if (STATE.syncing) s.textContent = "Syncing…";
   else if (STATE.last_log && !STATE.last_log.ok) s.innerHTML = `<span style="color:var(--critical)">▲ Last sync failed</span>`;
@@ -107,10 +105,12 @@ $("#sync-btn").addEventListener("click", async (e) => {
 const PAGES = { overview: renderOverview, budget: renderBudget, reports: renderReports, investments: renderInvestments, networth: renderNetWorth, review: renderReview, transactions: renderTransactions,
   recurring: renderRecurring, setup: renderSetup };
 async function route() {
-  let page = (location.hash || "#overview").slice(1).split("?")[0];
+  let [page, sub] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
+  if (page === "settings") page = "setup";
   if (!PAGES[page]) page = "overview";
-  $$("nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
-  try { await PAGES[page]($("#app")); } catch (err) { console.error(err); $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
+  const navPage = page === "review" ? "transactions" : page;   // Review is a tab of Transactions
+  $$("[data-page]").forEach((a) => a.classList.toggle("active", a.dataset.page === navPage));
+  try { await PAGES[page]($("#app"), sub); } catch (err) { console.error(err); $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
 }
 window.addEventListener("hashchange", route);
 // Charts are drawn to fit their box, so redraw the page when the window width changes enough to matter
@@ -156,7 +156,7 @@ async function renderOverview(el) {
   if (!STATE.connected) {
     el.innerHTML = `<div class="card empty"><h2>Connect your bank to get started</h2>
       <p>Runway pulls balances and transactions from SimpleFIN, then projects where your cash is headed.</p>
-      <a class="btn primary" href="#setup">Go to Setup</a></div>`;
+      <a class="btn primary" href="#setup/connections">Go to Settings</a></div>`;
     return;
   }
   horizon = horizon || STATE.horizon_days || 90;
@@ -168,10 +168,10 @@ async function renderOverview(el) {
   const lowBad = low && low.balance < 0;
 
   let html = "";
-  for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup">Setup</a></span></div>`;
+  for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup/accounts">Settings</a></span></div>`;
   for (const m of fc.missed || []) html += missedLine(m);
   if (!fc.accounts.length) {
-    html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup">Setup</a>.</span></div>`;
+    html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup/accounts">Settings</a>.</span></div>`;
   }
 
   html += `<div class="tiles">
@@ -190,7 +190,7 @@ async function renderOverview(el) {
     <div class="chart-wrap" id="chart"></div>
     <p class="help">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
       ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
-      ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup">Setup</a>.` : ""}</p>
+      ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup/accounts">Settings</a>.` : ""}</p>
     <details><summary class="small muted">Show as table</summary>${weeklyTable(fc)}</details>
   </div>`;
 
@@ -255,7 +255,7 @@ function eventsTable(events) {
 }
 
 function cardsTable(cards) {
-  if (!cards.length) return `<div class="empty">Add statement dates for your cards in Setup.</div>`;
+  if (!cards.length) return `<div class="empty">Add statement dates for your cards in <a href="#setup/accounts">Settings → Accounts</a>.</div>`;
   return `<table><tr><th>Card</th><th class="num">Owed now</th><th class="num">Last statement</th><th class="num">Left to pay</th><th class="num">Due</th></tr>
     ${cards.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.owed_now)}</td>
       <td class="num" title="Closed ${fmtDate(c.last_close)}">${fmt(c.statement_balance)}</td>
@@ -373,10 +373,12 @@ async function renderTxPage(el, mode) {
   const review = mode === "review";
   await loadCategories();
   const [accounts, recurringItems] = await Promise.all([api("/api/accounts"), api("/api/recurring")]);
-  el.innerHTML = `<div class="card-head"><h1>${review ? "Review" : "Transactions"} <span class="muted small" id="tx-count"></span></h1>
-      ${review ? `<button class="btn primary" id="ai-suggest" ${STATE.has_api_key ? "" : "disabled title=\"Add an OpenRouter key in Setup first\""}>Suggest categories with AI</button>` : ""}</div>
+  el.innerHTML = `<div class="card-head"><h1>Transactions <span class="muted small" id="tx-count"></span></h1>
+      ${review ? `<button class="btn primary" id="ai-suggest" ${STATE.has_api_key ? "" : "disabled title=\"Add an OpenRouter key in Settings → Connections first\""}>Suggest categories with AI</button>` : ""}</div>
+    <div class="subtabs" role="tablist"><a href="#transactions" role="tab" class="${review ? "" : "active"}">All</a>
+      <a href="#review" role="tab" class="${review ? "active" : ""}">To review <span class="badge review-count" ${STATE.review_count ? "" : "hidden"}>${STATE.review_count || ""}</span></a></div>
     ${review ? `<p class="help">Pick a category and it saves right away.
-      ${STATE.has_api_key ? "Or ask the AI: it suggests one category per merchant, and nothing changes until you apply each one." : "Add an OpenRouter key in Setup to get AI suggestions."}</p>
+      ${STATE.has_api_key ? "Or ask the AI: it suggests one category per merchant, and nothing changes until you apply each one." : `Add an OpenRouter key in <a href="#setup/connections">Settings → Connections</a> to get AI suggestions.`}</p>
       <div id="ai-panel"></div>
       ${STATE.has_api_key ? `<details class="card ai-log" id="ai-log" ${aiLogOpen ? "open" : ""}><summary><b>AI activity</b> <span class="muted small" id="ai-log-sum"></span></summary>
         <div id="ai-log-body" class="small muted">Loading…</div></details>` : ""}` : ""}
@@ -573,7 +575,7 @@ async function runAiSuggestions(btn, f, reload) {
       <span class="small muted">Nothing changes until you click Apply. “Remember for this merchant” below also saves a rule.</span></div>
     <p class="help">${answered === groups.length ? `The AI suggested a category for every merchant.`
       : answered ? `The AI suggested a category for ${answered} of ${groups.length}; pick the rest yourself.`
-      : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Setup (for example anthropic/claude-haiku-4.5).`}</p>
+      : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5).`}</p>
     <table>${groups.map((g, i) => `<tr data-i="${i}">
       <td><div class="merchant">${esc(g.merchant)}${g.direction === "in" ? `<span class="tag">money in</span>` : ""}</div>
         <div class="desc">${g.count} transaction${g.count === 1 ? "" : "s"} · ${fmt(g.total)}</div>
@@ -1059,8 +1061,8 @@ async function renderInvestments(el) {
     el.innerHTML = `<h1>Investments</h1><div class="card empty">
       <h2>No investment accounts yet</h2>
       <p>Positions come from SimpleFIN. Add your brokerage and retirement accounts at SimpleFIN Bridge, make sure their type is
-        <b>investment</b> in <a href="#setup">Setup → Accounts</a>, then sync.</p>
-      ${status.simplefin_connected ? `<button class="btn primary" id="inv-first-sync">Sync now</button>` : `<p class="small"><a href="#setup">Connect SimpleFIN first</a></p>`}</div>`;
+        <b>investment</b> in <a href="#setup/accounts">Settings → Accounts</a>, then sync.</p>
+      ${status.simplefin_connected ? `<button class="btn primary" id="inv-first-sync">Sync now</button>` : `<p class="small"><a href="#setup/connections">Connect SimpleFIN first</a></p>`}</div>`;
     $("#inv-first-sync")?.addEventListener("click", async (e) => {
       e.currentTarget.disabled = true; e.currentTarget.textContent = "Syncing…";
       try { await api("/api/investments/sync", { method: "POST" }); } catch (err) { toast(err.message, true); }
@@ -1082,7 +1084,7 @@ async function renderInvestments(el) {
         <span class="live-ind small muted" id="live-ind" title="Stock and ETF prices refresh every 30 seconds while the market is open">Holdings updated ${esc(synced)}</span>
         <button class="btn" id="inv-sync">Sync investments</button>
         <div class="seg" id="inv-period">${["1M", "3M", "YTD", "1Y", "2Y"].map((p) => `<button data-p="${p}" class="${p === invPeriod ? "on" : ""}">${p}</button>`).join("")}</div></div></div>
-    ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup">Reconnect in Setup</a></span></div>`).join("")}
+    ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup/connections">Reconnect in Settings</a></span></div>`).join("")}
     <div class="tiles tiles-4" id="inv-tiles">${invTiles(d, perf, beat)}</div>
 
     <div class="card"><div class="card-head"><h2>Value</h2><span class="small muted">Portfolio value and what you've put in (net of withdrawals)</span></div>
@@ -1484,7 +1486,7 @@ async function renderNetWorth(el) {
         <button class="btn primary" id="asset-new">Add an asset</button></div>
       <p class="help">Things no bank reports. ${d.rentcast.configured
         ? `Homes can update from RentCast (${d.rentcast.used} of ${d.rentcast.limit} free lookups used this month).`
-        : `Enter values yourself, or add a free RentCast key in <a href="#setup">Setup</a> so homes can update automatically.`}
+        : `Enter values yourself, or add a free RentCast key in <a href="#setup/connections">Settings</a> so homes can update automatically.`}
         For a car, a yearly change like −15% keeps its value moving between your updates.</p>
       <div id="asset-form-host"></div>
       <div class="asset-list">${d.assets_list.length ? d.assets_list.map((a) => assetCard(a, d)).join("") : `<div class="empty">No assets yet.</div>`}</div>
@@ -1674,8 +1676,10 @@ async function wirePlaidSetup() {
 }
 
 // ------------------------------------------------------------------------------------------ setup
-let rulesOpen = false, rulesFilter = "";
-async function renderSetup(el) {
+let rulesOpen = true, rulesFilter = "";
+let SETUP_SECTION = "";
+async function renderSetup(el, sub) {
+  SETUP_SECTION = sub || SETUP_SECTION;
   await loadCategories();
   const [accounts, recurring, rules] = await Promise.all([api("/api/accounts"), api("/api/recurring"), api("/api/rules")]);
   const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings");
@@ -1683,22 +1687,17 @@ async function renderSetup(el) {
   const acctName = (id) => { const a = accounts.find((x) => x.id === id); return a ? name(a) : "?"; };
   const acctOptions = (list, sel) => list.map((a) => `<option value="${esc(a.id)}" ${a.id === sel ? "selected" : ""}>${esc(name(a))}</option>`).join("");
 
-  el.innerHTML = `<h1>Setup</h1>
-
-  <div class="card"><h2>1 · Bank connection</h2>
-    ${STATE.connected
-      ? `<p>Connected to SimpleFIN. Runway syncs about once a day while it's running.</p>
-         ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
-         <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
-      : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
-         (a token can only be used once, so the one Actual used won't work). Paste it here. It's exchanged for a private access link that stays in this app's database on your Mac.</p>${connectForm()}`}
-  </div>
-
-  <div class="card"><h2>2 · Accounts</h2>
+  const sections = {
+    accounts: { label: "Accounts", html: () => `
+  <div class="card"><h2>Forecast</h2>
     <div class="form-row"><label>Primary account (the one the forecast shows)
-      <select id="primary-acct">${cash.length > 1 || !STATE.primary_account ? `<option value="">Choose…</option>` : ""}${acctOptions(cash, STATE.primary_account || (cash.filter((a) => a.kind === "checking").length === 1 ? cash.find((a) => a.kind === "checking").id : ""))}</select></label></div>
+      <select id="primary-acct">${cash.length > 1 || !STATE.primary_account ? `<option value="">Choose…</option>` : ""}${acctOptions(cash, STATE.primary_account || (cash.filter((a) => a.kind === "checking").length === 1 ? cash.find((a) => a.kind === "checking").id : ""))}</select></label>
+      <label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label></div>
+  </div>
+  <div class="card"><h2>Accounts</h2>
     <p class="help">For each credit card, set the statement closing day, the payment due day, and the account that pays it.
-      Only cards paid from the primary account show up in the forecast.</p>
+      Only cards paid from the primary account show up in the forecast. Set brokerage and retirement accounts to <b>investment</b> so they appear on the
+      <a href="#investments">Investments</a> page.</p>
     ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Details</th><th class="num">Balance</th></tr>
       ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
         <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${esc(a.org || "")} ${esc(a.name)}</div></td>
@@ -1716,77 +1715,8 @@ async function renderSetup(el) {
           <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label></td>
         <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
-  </div>
-
-  <div class="card"><h2>3 · Recurring money in and out</h2>
-    <p class="help">Paychecks, mortgage, loans and bills now live on the <a href="#recurring">Recurring</a> tab (${recurring.length} set up).</p>
-  </div>
-
-  <div class="card"><h2>4 · AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
-    <p class="help">With an OpenRouter API key, the Review tab can suggest a category for each merchant; you confirm each one.
-      Only the date, amount, merchant text and account type of those transactions are sent.</p>
-    <div class="form-row">
-      <label>OpenRouter API key<input id="api-key" type="password" placeholder="${STATE.has_api_key ? "•••••••• saved" : "sk-or-…"}" style="width:260px" autocomplete="off"></label>
-      <label>Model<input id="llm-model" value="${esc(STATE.llm_model)}" style="width:240px" spellcheck="false"></label>
-      ${STATE.has_api_key ? `<button class="btn" id="clear-key">Remove key</button>` : ""}
-    </div>
-    <label class="inline"><input type="checkbox" id="auto-ai" ${STATE.auto_ai_on_sync ? "checked" : ""}>
-      During each sync, also ask the AI about new merchants and apply answers it's confident about (the rest wait in Review)</label>
-    ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
-  </div>
-
-  <div class="card" id="plaid-card"><h2>Investments</h2>
-    <p class="help">Investment positions come from SimpleFIN with each sync: any account whose type is <b>investment</b> in the Accounts list above shows up on the
-      <a href="#investments">Investments</a> page. If a brokerage or retirement account is missing there, set its type to investment and sync.</p>
-    <h3>Plaid <span class="muted small">for accounts SimpleFIN only knows the balance of</span></h3>
-    <p class="help">Plaid adds holdings and trade history. Linking an institution here hides its SimpleFIN copy on the Investments page;
-      net worth keeps using the SimpleFIN balance so nothing is counted twice. Keys are under Developers → Keys at
-      <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
-    <div class="form-row">
-      <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
-      <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
-      <label>Secret<input id="pl-secret" type="password" style="width:220px" autocomplete="off"></label>
-    </div>
-    <div id="pl-items"></div>
-  </div>
-
-  <div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
-    <p class="help">Zillow and KBB don't offer their values to individuals, so homes and vehicles on the <a href="#networth">Net worth</a> page are entered by hand.
-      For homes, a free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast API key</a> gives an automated estimate (50 lookups a month on the free plan; Runway stops there so you're never charged).</p>
-    <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
-${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
-  </div>
-
-  <div class="card"><h2>Backup &amp; restore</h2>
-    <p class="help">A backup is one file with all your data and settings. It works with either database, so it's also how you move
-      Runway to another machine, or from its built-in database to Postgres. Currently using: <b>${STATE.database === "postgres" ? "Postgres" : "the built-in database (SQLite)"}</b>.
-      The file includes your bank access and API keys, so keep it somewhere private.</p>
-    <div class="form-row"><a class="btn primary" href="/api/backup" download>Download a backup</a></div>
-    <div class="form-row">
-      <label>Restore from a backup<input type="file" id="restore-file" accept=".gz,.json,application/gzip,application/json"></label>
-      <button class="btn" id="restore-go" disabled>Restore…</button>
-    </div>
-  </div>
-
-  <div class="card"><h2>5 · Rules</h2>
-    <p class="help">If a merchant or description contains the text, it gets the category. Longer matches win. Edits save when you change a field.</p>
-    <div class="form-row">
-      <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
-      <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
-      <label class="inline"><input type="checkbox" id="rule-apply" checked> Apply to past transactions</label>
-      <button class="btn primary" id="rule-add">Add rule</button>
-    </div>
-    ${rules.length ? `<details class="rules-box" id="rules-box" ${rulesOpen ? "open" : ""}>
-      <summary><span class="rules-sum">${rules.length} rule${rules.length === 1 ? "" : "s"}</span> <span class="muted small">· show, search and edit</span></summary>
-      <div class="form-row"><label>Search rules<input id="rule-filter" placeholder="text or category" value="${esc(rulesFilter)}" style="width:240px"></label></div>
-      <div class="scroll-x"><table id="rules-table"><tr><th>Text contains</th><th>Category</th><th></th></tr>${rules.map((r) => `<tr data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
-      <td><input class="rule-m" value="${esc(r.match)}" style="width:260px" aria-label="Rule text"></td>
-      <td><select class="rule-c" aria-label="Rule category">${categoryOptions(r.category, { blank: false })}</select></td>
-      <td class="num" style="white-space:nowrap"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply to matching</button>
-        <button class="btn link del-rule">Remove</button></td></tr>`).join("")}</table></div></details>` : ""}
-  </div>
-
-  <div class="card"><h2>6 · Categories</h2>
+  </div>` },
+    categories: { label: "Categories", html: () => `<div class="card"><h2>Categories</h2>
     <p class="help">Rename a category by editing its name. Subcategories roll up into their parent in budgets and reports.
       Use Move to put a category under a different parent, or back at the top level.
       Categories marked “built-in” are used by Runway itself.</p>
@@ -1805,9 +1735,78 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
       <label class="inline"><input type="checkbox" id="cat-transfer"> Not spending (a transfer)</label>
       <label class="inline"><input type="checkbox" id="cat-income"> Money in</label>
       <button class="btn primary" id="cat-add">Add</button></div>
-    <div class="form-row"><label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label>
-</div>
-  </div>`;
+  </div>` },
+    rules: { label: "Rules", count: rules.length, html: () => `<div class="card"><h2>Rules</h2>
+    <p class="help">If a merchant or description contains the text, it gets the category. Longer matches win. Edits save when you change a field.</p>
+    <div class="form-row">
+      <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
+      <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
+      <label class="inline"><input type="checkbox" id="rule-apply" checked> Apply to past transactions</label>
+      <button class="btn primary" id="rule-add">Add rule</button>
+    </div>
+    ${rules.length ? `<details class="rules-box" id="rules-box" ${rulesOpen ? "open" : ""}>
+      <summary><span class="rules-sum">${rules.length} rule${rules.length === 1 ? "" : "s"}</span> <span class="muted small">· show, search and edit</span></summary>
+      <div class="form-row"><label>Search rules<input id="rule-filter" placeholder="text or category" value="${esc(rulesFilter)}" style="width:240px"></label></div>
+      <div class="scroll-x"><table id="rules-table"><tr><th>Text contains</th><th>Category</th><th></th></tr>${rules.map((r) => `<tr data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
+      <td><input class="rule-m" value="${esc(r.match)}" style="width:260px" aria-label="Rule text"></td>
+      <td><select class="rule-c" aria-label="Rule category">${categoryOptions(r.category, { blank: false })}</select></td>
+      <td class="num" style="white-space:nowrap"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply to matching</button>
+        <button class="btn link del-rule">Remove</button></td></tr>`).join("")}</table></div></details>` : ""}
+  </div>` },
+    connections: { label: "Connections", html: () => `
+  <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
+    ${STATE.connected
+      ? `<p>Connected to SimpleFIN. Runway syncs about once a day while it's running.</p>
+         ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
+         <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
+      : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
+         (a token can only be used once). Paste it here. It's exchanged for a private access link that stays in Runway's database.</p>${connectForm()}`}
+  </div>
+<div class="card" id="plaid-card"><h2>Investment holdings <span class="muted small">optional, via Plaid</span></h2>
+    <p class="help">SimpleFIN already brings in holdings for most brokerages. For accounts it only knows the balance of, Plaid adds holdings and trade history. Linking an institution here hides its SimpleFIN copy on the Investments page;
+      net worth keeps using the SimpleFIN balance so nothing is counted twice. Keys are under Developers → Keys at
+      <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
+    <div class="form-row">
+      <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
+      <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
+      <label>Secret<input id="pl-secret" type="password" style="width:220px" autocomplete="off"></label>
+    </div>
+    <div id="pl-items"></div>
+  </div>
+<div class="card"><h2>AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
+    <p class="help">With an OpenRouter API key, the To review list under Transactions can suggest a category for each merchant; you confirm each one.
+      Only the date, amount, merchant text and account type of those transactions are sent.</p>
+    <div class="form-row">
+      <label>OpenRouter API key<input id="api-key" type="password" placeholder="${STATE.has_api_key ? "•••••••• saved" : "sk-or-…"}" style="width:260px" autocomplete="off"></label>
+      <label>Model<input id="llm-model" value="${esc(STATE.llm_model)}" style="width:240px" spellcheck="false"></label>
+      ${STATE.has_api_key ? `<button class="btn" id="clear-key">Remove key</button>` : ""}
+    </div>
+    <label class="inline"><input type="checkbox" id="auto-ai" ${STATE.auto_ai_on_sync ? "checked" : ""}>
+      During each sync, also ask the AI about new merchants and apply answers it's confident about (the rest wait under Transactions → To review)</label>
+    ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
+  </div>
+<div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
+    <p class="help">Zillow and KBB don't offer their values to individuals, so homes and vehicles on the <a href="#networth">Net worth</a> page are entered by hand.
+      For homes, a free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast API key</a> gives an automated estimate (50 lookups a month on the free plan; Runway stops there so you're never charged).</p>
+    <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
+${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
+  </div>` },
+    backup: { label: "Backup", html: () => `<div class="card"><h2>Backup &amp; restore</h2>
+    <p class="help">A backup is one file with all your data and settings. It works with either database, so it's also how you move
+      Runway to another machine, or from its built-in database to Postgres. Currently using: <b>${STATE.database === "postgres" ? "Postgres" : "the built-in database (SQLite)"}</b>.
+      The file includes your bank access and API keys, so keep it somewhere private.</p>
+    <div class="form-row"><a class="btn primary" href="/api/backup" download>Download a backup</a></div>
+    <div class="form-row">
+      <label>Restore from a backup<input type="file" id="restore-file" accept=".gz,.json,application/gzip,application/json"></label>
+      <button class="btn" id="restore-go" disabled>Restore…</button>
+    </div>
+  </div>` },
+  };
+  const section = sections[SETUP_SECTION] ? SETUP_SECTION : (STATE.connected ? "accounts" : "connections");
+  el.innerHTML = `<h1>Settings</h1>
+  <div class="subtabs" role="tablist">${Object.entries(sections).map(([k, v]) =>
+    `<a href="#setup/${k}" role="tab" class="${k === section ? "active" : ""}" aria-selected="${k === section}">${v.label}${v.count ? ` <span class="muted small">${v.count}</span>` : ""}</a>`).join("")}</div>
+  ${sections[section].html()}`;
 
   wireConnect();
   $("#restore-file")?.addEventListener("change", (e) => { $("#restore-go").disabled = !e.target.files.length; });
@@ -1824,7 +1823,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
       await refreshState(); route();
     } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Restore…"; }
   });
-  wirePlaidSetup();
+  if ($("#plaid-card")) wirePlaidSetup();
   $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
   const filterRules = () => {
     const q = ($("#rule-filter")?.value || "").trim().toLowerCase();
@@ -1854,10 +1853,10 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     toast("API key saved"); await refreshState(); route();
   });
   $("#clear-key")?.addEventListener("click", async () => { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); route(); });
-  $("#auto-ai").addEventListener("change", async (e) => {
+  $("#auto-ai")?.addEventListener("change", async (e) => {
     await api("/api/settings", { method: "POST", body: { auto_ai_on_sync: e.target.checked } }); toast("Saved"); refreshState();
   });
-  $("#rule-add").addEventListener("click", async () => {
+  $("#rule-add")?.addEventListener("click", async () => {
     try { await api("/api/rules", { method: "POST", body: { match: $("#rule-match").value, category: $("#rule-cat").value, apply: $("#rule-apply").checked } });
       toast("Rule added"); await refreshState(); route(); } catch (err) { toast(err.message, true); }
   });
@@ -1883,10 +1882,10 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
       toast(parent ? `Added ${name} under ${parent}` : `Added ${name}`); route(); }
     catch (err) { toast(err.message, true); }
   };
-  $("#cat-new-parent").addEventListener("change", (e) => {  // a subcategory takes its parent's kind
+  $("#cat-new-parent")?.addEventListener("change", (e) => {  // a subcategory takes its parent's kind
     $("#cat-transfer").disabled = $("#cat-income").disabled = !!e.target.value;
   });
-  $("#cat-add").addEventListener("click", () => addCategory($("#cat-new-name").value, $("#cat-new-parent").value || null,
+  $("#cat-add")?.addEventListener("click", () => addCategory($("#cat-new-name").value, $("#cat-new-parent").value || null,
     $("#cat-transfer").checked, $("#cat-income").checked));
   $$("#cat-table tr[data-name]").forEach((tr) => {
     const name = tr.dataset.name;

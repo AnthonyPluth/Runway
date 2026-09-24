@@ -323,3 +323,16 @@ a.btn { text-decoration: none; display: inline-block; }
 .live-dot.row-live { width: 7px; height: 7px; margin-left: 6px; vertical-align: 2px; }
 .tracked-editor .tr-table td { padding: 4px 6px 4px 0; border: 0; }
 .tracked-editor .tr-table th { font-size: 12px; }
+
+
+/* Settings link in the header */
+.settings-link { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; color: var(--text-2); text-decoration: none; }
+.settings-link:hover { color: var(--text); background: var(--surface-2); }
+.settings-link.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+@media (max-width: 1100px) { .settings-label { display: none; } }
+
+/* Tabs inside a page (Settings sections, Transactions / To review) */
+.subtabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: -4px 0 18px; overflow-x: auto; }
+.subtabs a { padding: 8px 14px; color: var(--text-2); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; font-size: 14px; }
+.subtabs a:hover { color: var(--text); }
+.subtabs a.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }

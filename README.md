@@ -10,7 +10,7 @@ Python standard library only; data lives in a local SQLite database.
 python3 run.py            # then open http://localhost:8765
 ```
 
-Needs Python 3.9 or newer. Connect SimpleFIN and the rest under Setup.
+Needs Python 3.9 or newer. Connect SimpleFIN and the rest under Settings (the gear, top right).
 
 ## Run in Docker (home server)
 
@@ -18,7 +18,7 @@ See [DOCKER.md](DOCKER.md). Sign-in uses your OpenID Connect provider.
 
 ## Backups and Postgres
 
-`python3 run.py backup` saves everything to a file; `python3 run.py restore <file>` loads it (also in Setup).
+`python3 run.py backup` saves everything to a file; `python3 run.py restore <file>` loads it (also in Settings → Backup).
 Set `DATABASE_URL=postgresql://...` to use Postgres instead of the built-in SQLite file (needs `pip install "psycopg[binary]"`).
 
 ## Tests

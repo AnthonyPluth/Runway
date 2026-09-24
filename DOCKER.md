@@ -45,8 +45,8 @@ If a setting is missing, the container stops with a message saying which one (se
 
 ## Moving your data from your Mac
 
-1. On the Mac: Setup → Backup & restore → **Download a backup** (or `python3 run.py backup`).
-2. Start the container on the server, sign in, and go to Setup → Backup & restore → **Restore**, choosing that file.
+1. On the Mac: Settings → Backup → **Download a backup** (or `python3 run.py backup`).
+2. Start the container on the server, sign in, and go to Settings → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
 The backup holds your bank access and API keys; delete stray copies once you've restored it.
@@ -63,7 +63,7 @@ using its built-in database in `./data`.
 - Update to the newest image: `docker compose pull && docker compose up -d`
   (or let Watchtower do it automatically)
 - Stop: `docker compose down` (data stays in `./data`)
-- Back up: Setup → Backup & restore → Download a backup (works for either database)
+- Back up: Settings → Backup → Download a backup (works for either database)
 
 ## Notes
 

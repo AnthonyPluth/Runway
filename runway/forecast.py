@@ -231,14 +231,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     for card in cards:
         label = card["display_name"] or card["name"]
         if not card["closing_day"] or not card["due_day"]:
-            warnings.append(f"{label}: add its statement closing day and due day in Setup so its payments can be forecast.")
+            warnings.append(f"{label}: add its statement closing day and due day in Settings so its payments can be forecast.")
             continue
         info = card_cycle(conn, card, today)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
         card_status.append(info)
         payer = by_id.get(card["pay_from"] or "")
         if not payer:
-            warnings.append(f"{label}: choose which account pays it in Setup.")
+            warnings.append(f"{label}: choose which account pays it in Settings.")
             continue
         if payer not in cash:
             continue  # paid from an account that isn't being forecast

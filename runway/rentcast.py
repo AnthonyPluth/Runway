@@ -47,7 +47,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
     today = today or date.today()
     key = db.get_setting(conn, "rentcast_api_key")
     if not key:
-        raise RentCastError("Add a RentCast API key in Setup first.")
+        raise RentCastError("Add a RentCast API key in Settings first.")
     if not (address or "").strip():
         raise RentCastError("Add the property's full address (street, city, state, zip) first.")
     if used_this_month(conn, today) >= MONTHLY_LIMIT:
@@ -66,7 +66,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
         except Exception:
             detail = None
         if e.code in (401, 403):
-            raise RentCastError("RentCast didn't accept the API key. Check it in Setup.") from e
+            raise RentCastError("RentCast didn't accept the API key. Check it in Settings.") from e
         if e.code == 404:
             raise RentCastError("RentCast couldn't find that address. Check the spelling and include city, state and zip.") from e
         raise RentCastError(f"RentCast error ({detail or f'HTTP {e.code}'})") from e
