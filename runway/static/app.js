@@ -1,0 +1,1762 @@
+"use strict";
+
+// ------------------------------------------------------------------------------------------ helpers
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+const money0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const fmt = (n) => money.format(n ?? 0);
+const fmt0 = (n) => money0.format(n ?? 0);
+const parseDate = (s) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); };
+const fmtDate = (s, opts = { month: "short", day: "numeric" }) => parseDate(s).toLocaleDateString("en-US", opts);
+const fmtDow = (s) => fmtDate(s, { weekday: "short", month: "short", day: "numeric" });
+
+async function api(path, opts = {}) {
+  const init = { method: opts.method || "GET", headers: {} };
+  if (init.method !== "GET") init.headers["X-Runway"] = "1";
+  if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  const res = await fetch(path, init);
+  if (res.status === 401) {   // signed out (session expired): go sign in, then come back here
+    location.href = "/auth/login?next=" + encodeURIComponent("/" + location.hash);
+    throw new Error("Signing you in again…");
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
+let toastTimer;
+function toast(msg, isError = false) {
+  const t = $("#toast");
+  t.textContent = msg;
+  t.className = isError ? "error" : "";
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), isError ? 6000 : 3000);
+}
+
+let CATEGORIES = [];
+// Fill in path/depth/top from the parent links if the server didn't send them (e.g. an older server still running).
+function withPaths(list) {
+  const parentOf = Object.fromEntries(list.map((c) => [c.name, c.parent || null]));
+  for (const c of list) {
+    if (Array.isArray(c.path) && c.path.length) continue;
+    const path = [c.name];
+    let p = parentOf[c.name];
+    while (p && !path.includes(p) && path.length < 10) { path.unshift(p); p = parentOf[p]; }
+    c.path = path; c.depth = path.length - 1; c.top = path[0];
+  }
+  return list;
+}
+async function loadCategories() { CATEGORIES = withPaths(await api("/api/categories")); }
+const CAT_MAX_DEPTH = 2;  // levels including the top one (matches the server): Parent > Sub
+const monthLabel = (m) => { const [y, mo] = m.split("-").map(Number); return new Date(y, mo - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }); };
+const catParentOf = (name) => (CATEGORIES.find((c) => c.name === name) || {}).parent || null;
+const catLabel = (c) => (c.path && c.path.length > 1 ? c.path.join(" > ") : c.name);
+function categoryOptions(selected, { blank = true, canHoldChildren = false, exclude = null } = {}) {
+  // CATEGORIES comes back in tree order: each category followed by its subcategories, at any depth.
+  const groups = [["Spending", (c) => !c.is_transfer && !c.is_income], ["Money in", (c) => c.is_income], ["Not spending", (c) => c.is_transfer]];
+  let html = blank ? `<option value="">Choose…</option>` : "";
+  for (const [label, test] of groups) {
+    const items = CATEGORIES.filter(test)
+      .filter((c) => !canHoldChildren || (c.depth || 0) < CAT_MAX_DEPTH - 1)
+      .filter((c) => !exclude || !exclude(c));
+    if (!items.length) continue;
+    html += `<optgroup label="${label}">` + items.map((c) =>
+      `<option value="${esc(c.name)}" ${c.name === selected ? "selected" : ""}>${esc(catLabel(c))}</option>`).join("") + `</optgroup>`;
+  }
+  return html;
+}
+
+// ------------------------------------------------------------------------------------------ state / header
+let STATE = {};
+async function refreshState() {
+  STATE = await api("/api/state");
+  const badge = $("#review-badge");
+  badge.hidden = !STATE.review_count;
+  badge.textContent = STATE.review_count || "";
+  const s = $("#sync-status");
+  if (STATE.syncing) s.textContent = "Syncing…";
+  else if (STATE.last_log && !STATE.last_log.ok) s.innerHTML = `<span style="color:var(--critical)">▲ Last sync failed</span>`;
+  else if (STATE.last_sync_ok) s.textContent = "Synced " + new Date(STATE.last_sync_ok).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  else s.textContent = STATE.connected ? "Not synced yet" : "Bank not connected";
+  $("#sync-btn").hidden = !STATE.connected;
+  const u = STATE.user, box = $("#user-box");
+  if (box && u && !u.local) {
+    box.hidden = false;
+    box.innerHTML = `<span class="muted" title="${esc(u.email || "")}">${esc(u.name || u.email || "Signed in")}</span> <a href="/auth/logout">Sign out</a>`;
+  }
+}
+
+$("#sync-btn").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  $("#sync-status").textContent = "Syncing…";
+  try {
+    const r = await api("/api/sync", { method: "POST" });
+    toast(`${r.new} new transaction${r.new === 1 ? "" : "s"}` + (r.categorized.review ? ` · ${r.categorized.review} to review` : ""));
+    if (r.bank_messages && r.bank_messages.length) toast("Bank messages: " + r.bank_messages.join("; "), true);
+  } catch (err) { toast(err.message, true); }
+  b.disabled = false;
+  await refreshState();
+  route();
+});
+
+// ------------------------------------------------------------------------------------------ router
+const PAGES = { overview: renderOverview, budget: renderBudget, reports: renderReports, investments: renderInvestments, networth: renderNetWorth, review: renderReview, transactions: renderTransactions,
+  recurring: renderRecurring, setup: renderSetup };
+async function route() {
+  let page = (location.hash || "#overview").slice(1).split("?")[0];
+  if (!PAGES[page]) page = "overview";
+  $$("nav a").forEach((a) => a.classList.toggle("active", a.dataset.page === page));
+  try { await PAGES[page]($("#app")); } catch (err) { $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
+}
+window.addEventListener("hashchange", route);
+// Charts are drawn to fit their box, so redraw the page when the window width changes enough to matter
+// (but never while you're typing in a field).
+let lastWidth = window.innerWidth, resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (Math.abs(window.innerWidth - lastWidth) < 60) return;
+    const f = document.activeElement;
+    if (f && (f.tagName === "INPUT" || f.tagName === "TEXTAREA" || f.tagName === "SELECT")) return;
+    if (document.querySelector(".cost-row")) return;   // an editor is open
+    lastWidth = window.innerWidth;
+    route();
+  }, 300);
+});
+
+// Autosave: run `save` whenever a field's value changes (text fields when you leave them or press Enter),
+// then flash a small "Saved" mark on the field.
+function onEdit(fields, save) {
+  for (const f of fields) {
+    if (!f) continue;
+    let last = f.type === "checkbox" ? f.checked : f.value;
+    const run = async () => {
+      const now = f.type === "checkbox" ? f.checked : f.value;
+      if (now === last) return;
+      try { await save(f); last = now; markSaved(f); }
+      catch (err) { toast(err.message, true); }
+    };
+    f.addEventListener("change", run);
+    if (f.tagName === "INPUT" && f.type !== "checkbox") f.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); f.blur(); } });
+  }
+}
+function markSaved(f) {
+  const host = f.closest("label") || f;
+  host.classList.remove("just-saved"); void host.offsetWidth; host.classList.add("just-saved");
+  setTimeout(() => host.classList.remove("just-saved"), 1600);
+}
+
+// ------------------------------------------------------------------------------------------ overview
+let horizon = null;
+async function renderOverview(el) {
+  if (!STATE.connected) {
+    el.innerHTML = `<div class="card empty"><h2>Connect your bank to get started</h2>
+      <p>Runway pulls balances and transactions from SimpleFIN, then projects where your cash is headed.</p>
+      <a class="btn primary" href="#setup">Go to Setup</a></div>`;
+    return;
+  }
+  horizon = horizon || STATE.horizon_days || 90;
+  const fc = await api(`/api/overview?days=${horizon}`);
+  const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0);
+  const in30 = fc.events.filter((e) => e.kind === "card" && (parseDate(e.date) - parseDate(fc.today)) / 864e5 <= 30);
+  const cardDue30 = -in30.reduce((s, e) => s + e.amount, 0);
+  const low = fc.low;
+  const lowBad = low && low.balance < 0;
+
+  let html = "";
+  for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup">Setup</a></span></div>`;
+  if (!fc.accounts.length) {
+    html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup">Setup</a>.</span></div>`;
+  }
+
+  html += `<div class="tiles">
+    <div class="tile"><div class="label">Balance today</div><div class="value">${fmt0(cashNow)}</div>
+      <div class="sub">${fc.accounts.map((a) => esc(a.name)).join(" + ") || "—"}</div></div>
+    <div class="tile ${lowBad ? "alert" : ""}"><div class="label">${lowBad ? "▲ Goes negative" : "Lowest point"} · next ${horizon} days</div>
+      <div class="value">${low ? fmt0(low.balance) : "—"}</div>
+      <div class="sub">${low ? "on " + fmtDow(low.date) : ""}</div></div>
+    <div class="tile"><div class="label">Card payments · next 30 days</div><div class="value">${fmt0(cardDue30)}</div>
+      <div class="sub">${in30.length} payment${in30.length === 1 ? "" : "s"}${in30.some((e) => e.estimated) ? ", some estimated" : ""}</div></div>
+  </div>`;
+
+  html += `<div class="card">
+    <div class="card-head"><h2>Projected balance${fc.accounts.length === 1 ? ` · ${esc(fc.accounts[0].name)}` : ""}</h2>
+      <div class="seg" id="horizon">${[30, 60, 90, 180].map((d) => `<button data-d="${d}" class="${d === horizon ? "on" : ""}">${d} days</button>`).join("")}</div></div>
+    <div class="chart-wrap" id="chart"></div>
+    <p class="help">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
+      ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
+      ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup">Setup</a>.` : ""}</p>
+    <details><summary class="small muted">Show as table</summary>${weeklyTable(fc)}</details>
+  </div>`;
+
+  html += `<div class="grid-2">
+    <div class="card"><h2>Coming up</h2>${eventsTable(fc.events)}</div>
+    <div class="card"><h2>Credit cards</h2><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
+  </div>`;
+
+  html += `<div class="card" style="margin-top:20px"><h2>All accounts</h2><div class="scroll-x"><table>
+    <tr><th>Account</th><th>Type</th><th class="num">Balance</th><th class="num hide-sm">As of</th></tr>
+    ${fc.all_accounts.filter((a) => !a.hidden).map((a) => `<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.kind)}</td>
+      <td class="num">${fmt(a.balance)}</td><td class="num muted hide-sm">${a.balance_date ? fmtDate(a.balance_date) : ""}</td></tr>`).join("")}
+  </table></div></div>`;
+
+  el.innerHTML = html;
+  $$("#horizon button").forEach((b) => b.addEventListener("click", () => { horizon = Number(b.dataset.d); renderOverview(el); }));
+  drawChart($("#chart"), fc);
+  wireEvents(el);
+  $("#show-all-events")?.addEventListener("click", () => { showAllEvents = true; renderOverview(el); });
+}
+
+// Click an upcoming amount to change just that one occurrence.
+function wireEvents(root) {
+  $$(".ev-amt", root).forEach((b) => b.addEventListener("click", () => {
+    const td = b.closest("td");
+    const cur = Number(b.dataset.amount);
+    td.innerHTML = `<input type="number" step="0.01" class="ev-input" value="${Math.abs(cur).toFixed(2)}" style="width:110px" aria-label="Amount">`;
+    const input = $("input", td);
+    input.focus(); input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      if (save && input.value !== "" && Number(input.value) !== Math.abs(cur)) {
+        const amount = (cur < 0 ? -1 : 1) * Math.abs(Number(input.value));
+        try { await api("/api/overrides", { method: "POST", body: { key: b.dataset.key, amount } }); toast("Updated for this date only"); }
+        catch (err) { toast(err.message, true); }
+      }
+      route();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+    input.addEventListener("blur", () => finish(true));
+  }));
+  $$(".ev-reset", root).forEach((b) => b.addEventListener("click", async () => {
+    try { await api("/api/overrides", { method: "DELETE", body: { key: b.dataset.key } }); toast("Back to the usual amount"); route(); }
+    catch (err) { toast(err.message, true); }
+  }));
+}
+
+let showAllEvents = false;
+function eventsTable(events) {
+  if (!events.length) return `<div class="empty">Nothing scheduled. Add paychecks and bills on the <a href="#recurring">Recurring</a> tab.</div>`;
+  const shown = showAllEvents ? events : events.slice(0, 12);
+  return `<p class="help" style="margin-top:-6px">Click an amount to change it for that date only.</p><table>
+    <tr><th>Date</th><th>Item</th><th class="num">Amount</th><th class="num">Balance after</th></tr>${shown.map((e) => `<tr>
+    <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
+    <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on recent spending" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
+    <td class="num">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>` : fmt(e.amount)}
+      ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}" title="Go back to the usual amount">reset</button>` : ""}</td>
+    <td class="num ${e.balance_after < 0 ? "neg-bal" : "muted"}">${e.balance_after < 0 ? "▲ " : ""}${fmt(e.balance_after)}</td></tr>`).join("")}</table>
+    ${events.length > shown.length ? `<button class="btn link" id="show-all-events">Show all ${events.length}</button>` : ""}`;
+}
+
+function cardsTable(cards) {
+  if (!cards.length) return `<div class="empty">Add statement dates for your cards in Setup.</div>`;
+  return `<table><tr><th>Card</th><th class="num">Owed now</th><th class="num">Last statement</th><th class="num">Left to pay</th><th class="num">Due</th></tr>
+    ${cards.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.owed_now)}</td>
+      <td class="num" title="Closed ${fmtDate(c.last_close)}">${fmt(c.statement_balance)}</td>
+      <td class="num">${c.remaining > 0 ? fmt(c.remaining) : `<span class="pos">Paid ✓</span>`}</td>
+      <td class="num muted">${fmtDate(c.due_date)}</td></tr>`).join("")}</table>
+    <p class="help">Statement balances are worked out from each card's transactions since its closing day.</p>`;
+}
+
+function weeklyTable(fc) {
+  const rows = [];
+  for (let i = 0; i < fc.dates.length; i += 7) rows.push(`<tr><td>${fmtDow(fc.dates[i])}</td><td class="num">${fmt(fc.total[i])}</td></tr>`);
+  return `<table style="max-width:360px"><tr><th>Date</th><th class="num">Projected balance</th></tr>${rows.join("")}</table>`;
+}
+
+// ------------------------------------------------------------------------------------------ chart
+function niceTicks(min, max, count = 5) {
+  const span = max - min || Math.abs(max) || 1;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw);
+  const start = Math.floor(min / step) * step, end = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = start; v <= end + step / 2; v += step) ticks.push(Math.round(v * 100) / 100);
+  return ticks;
+}
+function shortMoney(v) {
+  const a = Math.abs(v);
+  const s = a >= 1e6 ? (a / 1e6).toFixed(1).replace(/\.0$/, "") + "M" : a >= 1e3 ? (a / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace(/\.0$/, "") + "k" : a.toFixed(0);
+  return (v < 0 ? "−$" : "$") + s;
+}
+
+function drawChart(host, fc) {
+  const series = fc.total;
+  if (!series.length) { host.innerHTML = `<div class="empty">No cash accounts in the forecast yet.</div>`; return; }
+  const W = Math.max(320, host.clientWidth), H = 300;
+  const m = { top: 24, right: 16, bottom: 28, left: 56 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+  let lo = Math.min(...series), hi = Math.max(...series);
+  if (lo > 0 && lo < hi * 0.25) lo = 0;  // near zero: show the floor
+  const ticks = niceTicks(lo, hi);
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const x = (i) => m.left + (i / (series.length - 1)) * iw;
+  const y = (v) => m.top + (1 - (v - y0) / (y1 - y0 || 1)) * ih;
+
+  const eventsByDate = {};
+  for (const e of fc.events) (eventsByDate[e.date] ||= []).push(e);
+
+  const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`);
+  const baseY = y(Math.max(y0, Math.min(0, y1)) === 0 ? 0 : y0);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Projected balance over the next ${series.length - 1} days">`;
+  svg += `<g class="grid">${ticks.map((t) => `<line x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>`).join("")}</g>`;
+  svg += `<g class="axis">${ticks.map((t) => `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${shortMoney(t)}</text>`).join("")}</g>`;
+  // month labels on the x axis
+  let xl = "";
+  fc.dates.forEach((d, i) => {
+    const dt = parseDate(d);
+    if (i === 0 || dt.getDate() === 1) {
+      const label = i === 0 ? "Today" : dt.toLocaleDateString("en-US", { month: "short" });
+      if (i === 0 || x(i) - m.left > 40) xl += `<text x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : "middle"}">${label}</text>`;
+    }
+  });
+  svg += `<g class="axis">${xl}</g>`;
+  if (y0 < 0 && y1 > 0) svg += `<line class="zero" x1="${m.left}" x2="${W - m.right}" y1="${y(0)}" y2="${y(0)}"/>`;
+  // event ticks along the baseline
+  fc.dates.forEach((d, i) => { if (eventsByDate[d]) svg += `<line class="event-tick" x1="${x(i)}" x2="${x(i)}" y1="${m.top + ih}" y2="${m.top + ih + 5}"/>`; });
+  svg += `<path class="area" d="M${pts[0]} L${pts.join(" L")} L${x(series.length - 1)},${y(y0)} L${x(0)},${y(y0)} Z"/>`;
+  svg += `<path class="line" d="M${pts.join(" L")}"/>`;
+  // low point
+  const li = fc.dates.indexOf(fc.low.date);
+  if (li >= 0) {
+    const lx = x(li), ly = y(series[li]);
+    const anchor = lx > W - 140 ? "end" : lx < m.left + 80 ? "start" : "middle";
+    svg += `<circle class="low-dot" cx="${lx}" cy="${ly}" r="5"/>`;
+    svg += `<text class="low-label" x="${lx}" y="${ly + (ly > m.top + ih - 20 ? -12 : 20)}" text-anchor="${anchor}">Low ${fmt0(series[li])} · ${fmtDate(fc.low.date)}</text>`;
+  }
+  svg += `<g id="hover" style="display:none"><line class="cross" y1="${m.top}" y2="${m.top + ih}"/><circle class="hover-dot" r="5"/></g>`;
+  svg += `<rect id="hit" x="${m.left}" y="${m.top}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+
+  const hover = $("#hover", host), tip = $(".tooltip", host), hit = $("#hit", host), svgEl = $("svg", host);
+  const move = (clientX) => {
+    const r = svgEl.getBoundingClientRect();
+    const px = ((clientX - r.left) / r.width) * W;
+    const i = Math.max(0, Math.min(series.length - 1, Math.round(((px - m.left) / iw) * (series.length - 1))));
+    const cx = x(i), cy = y(series[i]);
+    hover.style.display = "";
+    $("line", hover).setAttribute("x1", cx); $("line", hover).setAttribute("x2", cx);
+    $("circle", hover).setAttribute("cx", cx); $("circle", hover).setAttribute("cy", cy);
+    const evs = eventsByDate[fc.dates[i]] || [];
+    tip.innerHTML = `<div class="tt-date">${fmtDow(fc.dates[i])}</div><div class="tt-val">${fmt(series[i])}</div>` +
+      evs.map((e) => `<div class="tt-ev"><span>${esc(e.name)}${e.estimated ? " (est.)" : ""}</span><span>${fmt(e.amount)}</span></div>`).join("");
+    tip.hidden = false;
+    const sx = (cx / W) * r.width, tw = tip.offsetWidth;
+    tip.style.left = Math.min(Math.max(0, sx + 12), r.width - tw) + "px";
+    tip.style.top = Math.max(0, (cy / H) * r.height - 60) + "px";
+  };
+  hit.addEventListener("mousemove", (e) => move(e.clientX));
+  hit.addEventListener("touchmove", (e) => { move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
+  hit.addEventListener("mouseleave", () => { hover.style.display = "none"; tip.hidden = true; });
+}
+
+// ------------------------------------------------------------------------------------------ review + transactions
+// Both pages share one list: same filters, same columns. Changing a category saves immediately.
+let upcomingAll = false;
+const LIST_STATE = {
+  review: { q: "", account: "", category: "", month: "", scope: "", remember: true },
+  transactions: { q: "", account: "", category: "", month: "", scope: "", remember: false },
+};
+function renderReview(el) { return renderTxPage(el, "review"); }
+function renderTransactions(el) { return renderTxPage(el, "transactions"); }
+
+async function renderTxPage(el, mode) {
+  const f = LIST_STATE[mode];
+  const review = mode === "review";
+  await loadCategories();
+  const [accounts, recurringItems] = await Promise.all([api("/api/accounts"), api("/api/recurring")]);
+  el.innerHTML = `<div class="card-head"><h1>${review ? "Review" : "Transactions"} <span class="muted small" id="tx-count"></span></h1>
+      ${review ? `<button class="btn primary" id="ai-suggest" ${STATE.has_api_key ? "" : "disabled title=\"Add an OpenRouter key in Setup first\""}>Suggest categories with AI</button>` : ""}</div>
+    ${review ? `<p class="help">Pick a category and it saves right away.
+      ${STATE.has_api_key ? "Or ask the AI: it suggests one category per merchant, and nothing changes until you apply each one." : "Add an OpenRouter key in Setup to get AI suggestions."}</p>
+      <div id="ai-panel"></div>
+      ${STATE.has_api_key ? `<details class="card ai-log" id="ai-log" ${aiLogOpen ? "open" : ""}><summary><b>AI activity</b> <span class="muted small" id="ai-log-sum"></span></summary>
+        <div id="ai-log-body" class="small muted">Loading…</div></details>` : ""}` : ""}
+    <div class="toolbar">
+      <input type="search" id="tx-q" placeholder="Search merchant or description" value="${esc(f.q)}">
+      <select id="tx-account"><option value="">All accounts</option>${accounts.map((a) =>
+        `<option value="${esc(a.id)}" ${a.id === f.account ? "selected" : ""}>${esc(a.display_name || a.name)}</option>`).join("")}</select>
+      <select id="tx-category"><option value="">All categories</option><option value="__none__" ${f.category === "__none__" ? "selected" : ""}>Uncategorized</option>
+        ${CATEGORIES.map((c) => `<option value="${esc(c.name)}" ${c.name === f.category ? "selected" : ""}>${esc(catLabel(c))}</option>`).join("")}</select>
+      ${f.month ? `<span class="filter-chip">${esc(monthLabel(f.month))}${f.scope === "budget" ? " · accounts counted in Budget" : ""}
+        <button class="chip-x" id="tx-month-clear" aria-label="Show all dates">✕</button></span>` : ""}
+      <label class="inline" title="When you pick a category, also save a rule so future transactions from this merchant get it automatically">
+        <input type="checkbox" id="tx-remember" ${f.remember ? "checked" : ""}> Remember for this merchant</label>
+    </div>
+    ${review ? "" : `<div id="tx-upcoming"></div>`}
+    <div class="card scroll-x" id="tx-list"><div class="empty">Loading…</div></div>`;
+
+  // Upcoming (projected) items for the forecast account, filtered the same way as the list below.
+  const upcoming = review ? null : api(`/api/overview?days=${STATE.horizon_days || 90}`).then((fc) => fc.events).catch(() => []);
+  const showUpcoming = async () => {
+    const box = $("#tx-upcoming");
+    if (!box) return;
+    const q = f.q.trim().toLowerCase();
+    const events = (await upcoming).filter((e) =>
+      (!q || e.name.toLowerCase().includes(q)) && (!f.account || e.account_id === f.account) &&
+      (!f.category || (f.category === "__none__" ? !e.category : e.category === f.category || catParentOf(e.category) === f.category)) &&
+      (!f.month || e.date.startsWith(f.month)));
+    if (!events.length) { box.innerHTML = ""; return; }
+    const shown = upcomingAll ? events : events.slice(0, 6);
+    box.innerHTML = `<div class="card scroll-x projected"><div class="card-head"><h2>Upcoming <span class="tag">projected</span></h2>
+        <span class="small muted">From recurring items and card statements · click an amount to change it for that date</span></div>
+      <table><tr><th>Date</th><th>Item</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th><th class="num">Balance after</th></tr>
+      ${shown.map((e) => `<tr>
+        <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
+        <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
+        <td class="muted hide-sm">${esc(e.account)}</td>
+        <td class="num"><button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>
+          ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}">reset</button>` : ""}</td>
+        <td class="muted">${esc(e.category || "—")}</td>
+        <td class="num ${e.balance_after < 0 ? "neg-bal" : "muted"}">${e.balance_after < 0 ? "▲ " : ""}${fmt(e.balance_after)}</td></tr>`).join("")}</table>
+      ${events.length > shown.length ? `<button class="btn link" id="up-all">Show all ${events.length} upcoming</button>` : ""}</div>`;
+    wireEvents(box);
+    $("#up-all", box)?.addEventListener("click", () => { upcomingAll = true; showUpcoming(); });
+  };
+
+  const load = async () => {
+    showUpcoming();
+    const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope, limit: "300" });
+    if (review) qs.set("review", "1");
+    const data = await api(`/api/transactions?${qs}`);
+    const box = $("#tx-list");
+    if (!box || !$("#tx-count")) return;  // you've moved to another page meanwhile
+    const filtered = f.q || f.account || f.category || f.month;
+    $("#tx-count").textContent = review ? (data.total ? `${data.total} to go` : "") : `${data.total}`;
+    if (!data.items.length) {
+      box.innerHTML = `<div class="empty">${review && !filtered ? "All caught up. New transactions that need a decision will show up here." : "No transactions match."}</div>`;
+      return;
+    }
+    box.innerHTML = `<table><tr><th>Date</th><th>Merchant</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th></tr>
+      ${data.items.map((t) => txRow(t, review)).join("")}
+    </table>${data.total > data.items.length ? `<p class="help">Showing ${data.items.length} of ${data.total}. Narrow the search to see more.</p>` : ""}`;
+    $$("tr[data-id]", box).forEach((tr) => {
+      $("select.cat", tr).addEventListener("change", (e) => { if (e.target.value) save(tr, e.target.value); });
+      $(".keep", tr)?.addEventListener("click", () => save(tr, $("select.cat", tr).value));
+      $(".rec-btn", tr).addEventListener("click", () => openRecurringPicker(tr, recurringItems, load));
+    });
+  };
+
+  const save = async (tr, category) => {
+    const sel = $("select.cat", tr);
+    sel.disabled = true;
+    try {
+      const r = await api(`/api/transactions/${encodeURIComponent(tr.dataset.id)}/category`, {
+        method: "POST", body: { category, remember: f.remember },
+      });
+      toast(r.also_updated ? `Saved · ${r.also_updated} more from this merchant updated too` : "Saved");
+      refreshState();
+      if (r.also_updated) return load();
+      if (review) {
+        tr.remove();
+        if (!$$("#tx-list tr[data-id]").length) return load();
+        const cnt = $("#tx-count"), n = cnt ? parseInt(cnt.textContent, 10) : 0;
+        if (n > 0) cnt.textContent = `${n - 1} to go`;
+      } else {
+        $(".tag.review", tr)?.remove();
+        $(".tag.ai", tr)?.remove();
+        $(".keep", tr)?.remove();
+        sel.disabled = false;
+      }
+    } catch (err) {
+      toast(err.message, true);
+      sel.disabled = false;
+    }
+  };
+
+  let timer;
+  $("#tx-q").addEventListener("input", (e) => { f.q = e.target.value; clearTimeout(timer); timer = setTimeout(load, 250); });
+  $("#tx-account").addEventListener("change", (e) => { f.account = e.target.value; load(); });
+  $("#tx-category").addEventListener("change", (e) => { f.category = e.target.value; load(); });
+  $("#tx-month-clear")?.addEventListener("click", () => { f.month = ""; f.scope = ""; route(); });
+  $("#tx-remember").addEventListener("change", (e) => { f.remember = e.target.checked; });
+  $("#ai-suggest")?.addEventListener("click", (e) => runAiSuggestions(e.currentTarget, f, load));
+  $("#ai-log")?.addEventListener("toggle", (e) => { aiLogOpen = e.currentTarget.open; });
+  loadAiLog();
+  load();
+}
+
+function txRow(t, review) {
+  const suggestion = t.needs_review && t.category && t.category_source === "ai";
+  const linked = t.recurring_id > 0;
+  return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}">
+    <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
+    <td><div class="merchant">${esc(t.payee || t.description)}
+        <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button></div>
+      <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div></td>
+    <td class="muted hide-sm">${esc(t.account_name)}</td>
+    <td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td>
+    <td style="white-space:nowrap"><select class="cat" aria-label="Category">${categoryOptions(t.category)}</select>
+      ${suggestion ? `<span class="tag ai" title="AI suggestion confidence">${Math.round((t.confidence || 0) * 100)}%</span>
+        <button class="btn link keep" title="Keep the suggested category">✓ Keep</button>` : ""}
+      ${!review && t.needs_review ? `<span class="tag review">review</span>` : ""}</td></tr>`;
+}
+
+// Link a transaction to a recurring item, start a new one from it, or mark it as not recurring.
+function openRecurringPicker(tr, items, reload) {
+  const btn = $(".rec-btn", tr);
+  const acct = tr.dataset.account;
+  const same = items.filter((r) => r.account_id === acct), other = items.filter((r) => r.account_id !== acct);
+  const opt = (r) => `<option value="${r.id}">${esc(r.name)} · ${esc(r.frequency)}</option>`;
+  const sel = document.createElement("select");
+  sel.className = "rec-picker";
+  sel.innerHTML = `<option value="">Recurring…</option>
+    ${same.length ? `<optgroup label="Link to">${same.map(opt).join("")}</optgroup>` : ""}
+    ${other.length ? `<optgroup label="Other accounts">${other.map(opt).join("")}</optgroup>` : ""}
+    <optgroup label="New recurring item from this"><option value="new:monthly">Monthly</option><option value="new:biweekly">Every 2 weeks</option>
+      <option value="new:weekly">Weekly</option><option value="new:yearly">Yearly</option></optgroup>
+    ${btn.classList.contains("linked") ? `<option value="none">Not recurring</option>` : ""}`;
+  btn.replaceWith(sel);
+  sel.focus();
+  sel.addEventListener("blur", () => { if (!sel.dataset.busy) reload(); });
+  sel.addEventListener("change", async () => {
+    if (!sel.value) return;
+    sel.dataset.busy = "1";
+    const body = sel.value.startsWith("new:") ? { new: sel.value.slice(4) } : sel.value === "none" ? { recurring_id: null } : { recurring_id: Number(sel.value) };
+    try {
+      await api(`/api/transactions/${encodeURIComponent(tr.dataset.id)}/recurring`, { method: "POST", body });
+      toast(body.new ? "Recurring item created; edit it on the Recurring tab" : body.recurring_id ? "Linked" : "Marked as not recurring");
+    } catch (err) { toast(err.message, true); }
+    reload();
+  });
+}
+
+let aiLogOpen = false;
+async function loadAiLog() {
+  const body = $("#ai-log-body");
+  if (!body) return;
+  let rows;
+  try { rows = await api("/api/ai/log"); } catch (err) { body.textContent = err.message; return; }
+  if (!$("#ai-log-body")) return;
+  const last = rows[0];
+  $("#ai-log-sum").textContent = last
+    ? `· last ${last.purpose === "review" ? "run" : "automatic run"} ${new Date(last.at.replace(" ", "T")).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}: ${last.ok ? `${last.answered} of ${last.merchants} suggested` : "failed"}`
+    : "· nothing yet";
+  body.innerHTML = rows.length ? `<table class="ai-log-table"><tr><th>When</th><th>What</th><th>Model</th><th class="num">Result</th><th class="num">Time</th></tr>
+    ${rows.map((r) => `<tr class="${r.ok ? "" : "ai-fail"}">
+      <td style="white-space:nowrap">${esc(new Date(r.at.replace(" ", "T")).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }))}</td>
+      <td>${r.purpose === "review" ? "Suggest button" : "Automatic, during sync"}<div class="desc ai-msg">${r.ok ? "" : "▲ "}${esc(r.message || "")}</div>
+        ${r.reply ? `<details class="ai-reply"><summary>What the model said</summary><pre>${esc(r.reply)}</pre></details>` : ""}</td>
+      <td><code>${esc(r.model || "")}</code></td>
+      <td class="num">${r.ok ? `${r.answered}/${r.merchants}` : "error"}</td>
+      <td class="num">${r.seconds != null ? `${r.seconds}s` : ""}</td></tr>`).join("")}</table>`
+    : `<p>No AI requests yet. Click “Suggest categories with AI” and each request will show up here.</p>`;
+}
+
+async function runAiSuggestions(btn, f, reload) {
+  const panel = $("#ai-panel");
+  btn.disabled = true; btn.textContent = "Asking the AI…";
+  panel.innerHTML = `<div class="card empty">Asking the AI about each merchant in Review… <span id="ai-wait"></span></div>`;
+  const began = Date.now();
+  const tick = setInterval(() => { const w = $("#ai-wait"); if (!w) return clearInterval(tick); w.textContent = `${Math.round((Date.now() - began) / 1000)}s`; }, 1000);
+  let groups;
+  try { groups = await api("/api/ai/suggest", { method: "POST" }); }
+  catch (err) {
+    panel.innerHTML = `<div class="warn critical"><span class="icon">!</span><span>${esc(err.message)}</span></div>`;
+    btn.disabled = false; btn.textContent = "Suggest categories with AI";
+    const log = $("#ai-log"); if (log) { log.open = true; aiLogOpen = true; } loadAiLog(); return;
+  }
+  loadAiLog();
+  clearInterval(tick);
+  btn.disabled = false; btn.textContent = "Ask again";
+  if (!groups.length) { panel.innerHTML = `<div class="card empty">Nothing waiting for a category.</div>`; return; }
+  const answered = groups.filter((g) => g.category || g.new_category).length;
+  panel.innerHTML = `<div class="card ai-card"><div class="card-head"><h2>AI suggestions · ${groups.length} merchant${groups.length === 1 ? "" : "s"}</h2>
+      <span class="small muted">Nothing changes until you click Apply. “Remember for this merchant” below also saves a rule.</span></div>
+    <p class="help">${answered === groups.length ? `The AI suggested a category for every merchant.`
+      : answered ? `The AI suggested a category for ${answered} of ${groups.length}; pick the rest yourself.`
+      : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Setup (for example anthropic/claude-haiku-4.5).`}</p>
+    <table>${groups.map((g, i) => `<tr data-i="${i}">
+      <td><div class="merchant">${esc(g.merchant)}${g.direction === "in" ? `<span class="tag">money in</span>` : ""}</div>
+        <div class="desc">${g.count} transaction${g.count === 1 ? "" : "s"} · ${fmt(g.total)}</div>
+        ${g.examples.map((x) => `<div class="desc" title="${esc(x)}">${esc(x)}</div>`).join("")}</td>
+      <td style="white-space:nowrap"><select class="ai-cat" aria-label="Category">${g.new_category
+          ? `<option value="__new__" selected>✦ New: ${esc(g.new_category.name)}${g.new_category.parent ? ` (in ${esc(g.new_category.parent)})` : ""}</option>` : ""}${categoryOptions(g.new_category ? "" : g.category)}</select>
+        ${g.new_category ? `<span class="tag ai" title="Nothing existing fit, so the AI suggests adding this category. Applying creates it.">new category · ${Math.round(g.confidence * 100)}%</span>`
+          : g.category ? `<span class="tag ai" title="AI confidence">${Math.round(g.confidence * 100)}%</span>` : `<span class="tag">no suggestion</span>`}</td>
+      <td style="white-space:nowrap" class="num"><button class="btn primary ai-apply">Apply to ${g.count}</button> <button class="btn ai-skip">Skip</button></td></tr>`).join("")}</table></div>`;
+  const done = (tr) => { tr.remove(); if (!$$("#ai-panel tr[data-i]").length && document.body.contains(panel)) panel.innerHTML = ""; };
+  $$("#ai-panel tr[data-i]").forEach((tr) => {
+    const g = groups[Number(tr.dataset.i)];
+    $(".ai-skip", tr).addEventListener("click", () => done(tr));
+    $(".ai-apply", tr).addEventListener("click", async (e) => {
+      const btn = e.currentTarget, choice = $(".ai-cat", tr).value;
+      if (!choice) { toast("Choose a category first", true); return; }
+      btn.disabled = true;
+      try {
+        const body = { tx_ids: g.tx_ids, remember: f.remember, direction: g.direction };
+        if (choice === "__new__") body.new_category = g.new_category; else body.category = choice;
+        const r = await api("/api/ai/apply", { method: "POST", body });
+        if (r.created) await loadCategories();
+        toast(`${g.merchant}: ${r.category}${r.created ? " (new category)" : ""} applied to ${r.updated}`);
+        done(tr); refreshState(); reload();
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    });
+  });
+}
+
+// ------------------------------------------------------------------------------------------ recurring
+async function renderRecurring(el) {
+  const [accounts, items] = await Promise.all([api("/api/accounts"), api("/api/recurring")]);
+  const suggestions = STATE.connected ? await api("/api/recurring/suggestions") : [];
+  const name = (a) => a.display_name || a.name;
+  const acctName = (id) => { const a = accounts.find((x) => x.id === id); return a ? name(a) : "?"; };
+  const acctOptions = (sel) => accounts.filter((a) => !a.hidden).map((a) => `<option value="${esc(a.id)}" ${a.id === sel ? "selected" : ""}>${esc(name(a))}</option>`).join("");
+  const freqOptions = (sel) => [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"], ["yearly", "Yearly"]]
+    .map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+  const modeOptions = (sel) => [["fixed", "Fixed amount"], ["last", "Same as last payment"], ["avg3", "Average of last 3"]]
+    .map(([v, l]) => `<option value="${v}" ${v === (sel || "fixed") ? "selected" : ""}>${l}</option>`).join("");
+  const fields = (r = {}) => `
+      <label>Name<input class="r-name" value="${esc(r.name || "")}" placeholder="Paycheck" style="width:170px"></label>
+      <label>Account<select class="r-acct">${acctOptions(r.account_id || STATE.primary_account)}</select></label>
+      <label>Amount<input class="r-amount" type="number" step="0.01" value="${r.amount ?? ""}" placeholder="-120.00" style="width:110px"></label>
+      <label>Forecast amount<select class="r-mode">${modeOptions(r.amount_mode)}</select></label>
+      <label>How often<select class="r-freq">${freqOptions(r.frequency || "monthly")}</select></label>
+      <label>A date it happens<input class="r-date" type="date" value="${esc(r.anchor_date || "")}"></label>
+      <label>Merchant text<input class="r-match" value="${esc(r.match || "")}" placeholder="e.g. comed" style="width:150px"></label>`;
+  const values = (box) => ({
+    name: $(".r-name", box).value, account_id: $(".r-acct", box).value, amount: $(".r-amount", box).value,
+    amount_mode: $(".r-mode", box).value, frequency: $(".r-freq", box).value, anchor_date: $(".r-date", box).value,
+    match: $(".r-match", box).value, active: $(".r-active", box) ? ($(".r-active", box).checked ? 1 : 0) : 1,
+  });
+
+  el.innerHTML = `<h1>Recurring</h1>
+    <p class="help">Paychecks, mortgage, loans and bills. Transactions from the same merchant are matched automatically, whatever the amount;
+      matched ones show ↻ on the Transactions tab. For bills that vary, set “Forecast amount” to use the last payment or an average.
+      Use negative amounts for money going out.</p>
+    ${items.length ? items.map((r) => `<div class="card rec-item" data-id="${r.id}">
+      <div class="card-head"><h2>↻ ${esc(r.name)} ${r.active ? "" : `<span class="tag">paused</span>`}</h2>
+        <span class="small muted">${r.next_date ? `Next ${fmtDate(r.next_date)} · ${fmt(r.expected_amount)}` : "No upcoming date"}
+          · ${r.matched_count} matched${r.last_matched ? ` · last ${fmtDate(r.last_matched.posted)} ${fmt(r.last_matched.amount)}` : ""}</span></div>
+      <div class="form-row">${fields(r)}
+        <label class="inline"><input type="checkbox" class="r-active" ${r.active ? "checked" : ""}> Active</label></div>
+      <div class="form-row">
+        ${r.matched_count ? `<button class="btn r-show">Show matched transactions</button>` : ""}
+        <button class="btn link r-del">Remove</button></div>
+      <div class="r-matches"></div></div>`).join("")
+    : `<div class="card empty">No recurring items yet. Add one below, pick from what's spotted in your history,
+        or use ↻ on any transaction to start one from it.</div>`}
+    <div class="card" id="rec-new"><h2>Add a recurring item</h2><div class="form-row">${fields()}</div>
+      <button class="btn primary" id="r-add">Add</button></div>
+    ${suggestions.length ? `<div class="card"><h2>Spotted in your history</h2><table>${suggestions.map((s, i) => `<tr>
+      <td>${esc(s.name)}</td><td class="muted">${esc(acctName(s.account_id))}</td><td class="num">${fmt(s.amount)}</td>
+      <td>${esc(s.frequency)} · ${s.count}×</td><td class="muted">last ${fmtDate(s.anchor_date)}</td>
+      <td class="num"><button class="btn add-sug" data-i="${i}">Add</button></td></tr>`).join("")}</table></div>` : ""}`;
+
+  $$(".rec-item").forEach((box) => {
+    const id = box.dataset.id;
+    onEdit($$("input, select", box), async () => {
+      const r = await api(`/api/recurring/${id}`, { method: "POST", body: values(box) });
+      if (r.linked) toast(`Saved · matched ${r.linked} more`);
+    });
+    $(".r-del", box).addEventListener("click", async () => {
+      if (!confirmInline($(".r-del", box), "Remove?")) return;
+      await api(`/api/recurring/${id}`, { method: "DELETE" }); toast("Removed"); route();
+    });
+    $(".r-show", box)?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget, out = $(".r-matches", box);
+      if (out.innerHTML) { out.innerHTML = ""; btn.textContent = "Show matched transactions"; return; }
+      const data = await api(`/api/transactions?recurring=${id}&limit=50`);
+      out.innerHTML = data.items.length ? `<table>${data.items.map((t) => `<tr><td class="muted">${fmtDate(t.posted)}</td><td>${esc(t.description)}</td>
+        <td class="num">${fmt(t.amount)}</td></tr>`).join("")}</table>` : `<p class="help">No matched transactions.</p>`;
+      btn.textContent = "Hide matched transactions";
+    });
+  });
+  $("#r-add").addEventListener("click", async () => {
+    try { const r = await api("/api/recurring", { method: "POST", body: values($("#rec-new")) }); toast(r.linked ? `Added · matched ${r.linked} past transactions` : "Added"); route(); }
+    catch (err) { toast(err.message, true); }
+  });
+  $$(".add-sug").forEach((b) => b.addEventListener("click", async () => {
+    const s = suggestions[Number(b.dataset.i)];
+    try { const r = await api("/api/recurring", { method: "POST", body: s }); toast(`Added · matched ${r.linked}`); route(); } catch (err) { toast(err.message, true); }
+  }));
+}
+
+// Two-click confirm without a browser dialog: first click arms the button, second click within 4s confirms.
+function confirmInline(btn, label) {
+  if (btn.dataset.armed) return true;
+  const orig = btn.textContent;
+  btn.dataset.armed = "1"; btn.textContent = label;
+  setTimeout(() => { delete btn.dataset.armed; btn.textContent = orig; }, 4000);
+  return false;
+}
+
+// ------------------------------------------------------------------------------------------ budget
+let budgetMonth = null;
+async function renderBudget(el) {
+  const now = new Date();
+  budgetMonth = budgetMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  await loadCategories();
+  const b = await api(`/api/budget?month=${budgetMonth}`);
+  withPaths(b.categories);
+  const [y, m] = b.month.split("-").map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const shift = (n) => { const d = new Date(y, m - 1 + n, 1); budgetMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderBudget(el); };
+  // Group into families: a top-level category plus everything under it. A category's "spent" already includes its subcategories.
+  const families = [];
+  for (const c of b.categories) {
+    if (!c.depth) families.push({ top: c, kids: [] });
+    else { const fam = families.find((f) => f.top.name === c.top); if (fam) fam.kids.push(c); }
+  }
+  const budgeted = new Set(b.categories.filter((c) => c.budget != null).map((c) => c.name));
+  // Count a budget only when nothing above it has one, so nested budgets aren't counted twice.
+  const countsToward = (c) => c.budget != null && !c.path.slice(0, -1).some((a) => budgeted.has(a));
+  const isBudgeted = (f) => f.top.budget != null || f.kids.some((k) => k.budget != null);
+  const inBudget = families.filter(isBudgeted);
+  const notBudget = families.filter((f) => !isBudgeted(f) && (f.top.spent > 0.005));
+  // Totals without double counting: a parent's budget covers its subcategories.
+  let totBudget = 0, totSpent = 0;
+  for (const f of inBudget) for (const c of [f.top, ...f.kids]) if (countsToward(c)) { totBudget += c.budget; totSpent += c.spent; }
+  const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
+  const otherSpent = allSpent - totSpent;
+  const pace = b.day / b.days_in_month;  // share of the month gone
+  const bar = (c) => {
+    if (c.budget == null) return "";
+    const pct = c.budget > 0 ? Math.max(0, c.spent / c.budget) : 0;
+    const over = c.spent > c.budget;
+    return `<div class="meter ${over ? "over" : ""}" role="img" aria-label="${Math.round(pct * 100)}% of budget used">
+      <div class="meter-fill" style="width:${Math.min(100, pct * 100).toFixed(1)}%"></div>
+      ${pace > 0 && pace < 1 ? `<div class="meter-pace" style="left:${(pace * 100).toFixed(1)}%" title="Where you'd be at an even pace today"></div>` : ""}</div>`;
+  };
+  const status = (c) => c.budget == null ? "" : c.spent > c.budget
+    ? `<span class="over-label">▲ ${fmt(c.spent - c.budget)} over</span>`
+    : pace > 0 && pace < 1 && c.spent > c.budget * pace * 1.1
+      ? `<span class="muted">${fmt(c.left)} left · ahead of pace</span>` : `<span class="muted">${fmt(c.left)} left</span>`;
+  const row = (c, sub) => `<tr data-cat="${esc(c.name)}" class="${sub ? "sub-row" : ""}">
+    <td style="padding-left:${10 + (c.depth || 0) * 20}px">${sub ? `<span class="muted">${esc(c.parent)} &gt;</span> ` : ""}<a href="#transactions" class="cat-link">${esc(c.name)}</a>
+      ${c.has_children && c.own_spent !== c.spent ? `<div class="desc">incl. subcategories</div>` : ""}</td>
+    <td class="num"><input type="number" min="0" step="10" class="b-amt" value="${c.budget ?? ""}" placeholder="${c.budget == null ? "Set budget" : ""}" aria-label="Budget for ${esc(c.name)}"></td>
+    <td class="num"><a href="#transactions" class="spent-link" title="See the transactions behind this amount">${fmt(c.spent)}</a></td><td>${bar(c)}</td><td class="small" style="white-space:nowrap">${status(c)}</td></tr>`;
+  const familyRows = (f) => row(f.top, false) + f.kids.map((k) => row(k, true)).join("");
+  const unusedTops = families.filter((f) => !isBudgeted(f) && !(f.top.spent > 0.005));
+
+  el.innerHTML = `<div class="card-head"><h1>Budget</h1>
+      <div class="seg"><button id="m-prev" aria-label="Previous month">‹</button><button class="on" disabled>${label}</button><button id="m-next" aria-label="Next month">›</button></div></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Budgeted</div><div class="value">${fmt0(totBudget)}</div><div class="sub">monthly · repeats every month</div></div>
+      <div class="tile ${totSpent > totBudget && totBudget > 0 ? "alert" : ""}"><div class="label">Spent in budgeted categories</div><div class="value">${fmt0(totSpent)}</div>
+        <div class="sub">${totBudget > 0 ? (totSpent > totBudget ? `▲ ${fmt0(totSpent - totBudget)} over` : `${fmt0(totBudget - totSpent)} left`) : "Set a budget below"}</div></div>
+      <div class="tile"><div class="label">Other spending</div><div class="value">${fmt0(otherSpent + b.uncategorized)}</div>
+        <div class="sub">${b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget"}</div></div>
+    </div>
+    <div class="card"><h2>Budgets</h2>
+      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><tr><th>Category</th><th class="num">Monthly budget</th><th class="num">Spent</th><th style="width:34%">Progress</th><th></th></tr>
+        ${inBudget.map(familyRows).join("")}</table></div>
+        ${pace > 0 && pace < 1 ? `<p class="help">The thin line in each bar marks where you'd be if you spent evenly through the month (day ${b.day} of ${b.days_in_month}).
+          A category's budget covers everything under it; you can also budget a subcategory on its own.</p>` : ""}`
+      : `<div class="empty">No budgets yet. Set one for any category below. Budgets repeat every month.</div>`}
+    </div>
+    <div class="card"><h2>Not budgeted</h2>
+      <p class="help">Spending this month in categories without a budget. Type an amount to start budgeting one.</p>
+      <div class="scroll-x"><table class="budget-table">${notBudget.map(familyRows).join("")}
+        ${unusedTops.length ? `<tr><td><select id="b-new-cat"><option value="">Another category…</option>${unusedTops.map((f) => [f.top, ...f.kids].map((c) => `<option value="${esc(c.name)}">${esc(c.parent ? `${c.parent} > ${c.name}` : c.name)}</option>`).join("")).join("")}</select></td>
+          <td class="num"><input type="number" min="0" step="10" id="b-new-amt" class="b-amt" placeholder="Set budget"></td><td></td><td></td><td></td></tr>` : ""}</table></div>
+    </div>
+    ${b.income ? `<p class="help">Money in this month (Income and Refunds): ${fmt(b.income)}. See the <a href="#reports">Reports</a> tab for where it went.</p>` : ""}`;
+
+  $("#m-prev").addEventListener("click", () => shift(-1));
+  $("#m-next").addEventListener("click", () => shift(1));
+  const saveBudget = async (category, amount) => {
+    try { await api("/api/budget", { method: "POST", body: { category, amount } }); toast(amount ? "Budget saved" : "Budget removed"); renderBudget(el); }
+    catch (err) { toast(err.message, true); }
+  };
+  $$("tr[data-cat] .b-amt").forEach((input) => input.addEventListener("change", () => saveBudget(input.closest("tr").dataset.cat, input.value)));
+  $("#b-new-amt")?.addEventListener("change", () => { const c = $("#b-new-cat").value; if (c) saveBudget(c, $("#b-new-amt").value); else toast("Choose a category first", true); });
+  // The category name and the Spent amount both open Transactions showing exactly what adds up to that number.
+  $$(".cat-link, .spent-link").forEach((a) => a.addEventListener("click", () => {
+    Object.assign(LIST_STATE.transactions, { category: a.closest("tr").dataset.cat, q: "", account: "", month: b.month, scope: "budget" });
+  }));
+}
+
+// ------------------------------------------------------------------------------------------ reports
+let reportMonth = null;
+async function renderReports(el) {
+  const now = new Date();
+  reportMonth = reportMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const cf = await api(`/api/cashflow?month=${reportMonth}`);
+  const [y, m] = cf.month.split("-").map(Number);
+  const label = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const short = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long" });
+  const shift = (n) => { const d = new Date(y, m - 1 + n, 1); reportMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderReports(el); };
+  const empty = !cf.income.length && !cf.spending.length;
+  el.innerHTML = `<div class="card-head"><h1>Where money went</h1>
+      <div class="seg"><button id="r-prev" aria-label="Previous month">‹</button><button class="on" disabled>${label}</button><button id="r-next" aria-label="Next month">›</button></div></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Money in</div><div class="value">${fmt0(cf.total_in)}</div><div class="sub">income and refunds</div></div>
+      <div class="tile"><div class="label">Money out</div><div class="value">${fmt0(cf.total_out)}</div><div class="sub">spending, not card payments or transfers</div></div>
+      <div class="tile ${cf.net < 0 ? "alert" : ""}"><div class="label">${cf.net >= 0 ? "Left over" : "▲ Spent more than came in"}</div>
+        <div class="value">${fmt0(Math.abs(cf.net))}</div><div class="sub">${cf.total_in > 0 ? `${Math.round((cf.net / cf.total_in) * 100)}% of money in` : ""}</div></div>
+    </div>
+    <div class="card"><h2>${short} cash flow</h2>
+      ${empty ? `<div class="empty">No transactions in ${label}.</div>` : `<div class="scroll-x"><div class="sankey-wrap" id="sankey"></div></div>
+      <p class="help">Width of each band is proportional to the amount. Hover for exact figures. Categories under 2% of spending are grouped as “Everything else”.
+        Checking, savings and cards are included; card payments and transfers between your own accounts are not, so nothing is counted twice.</p>
+      <details><summary class="small muted">Show as table</summary>${cashflowTable(cf)}</details>`}
+    </div>`;
+  $("#r-prev").addEventListener("click", () => shift(-1));
+  $("#r-next").addEventListener("click", () => shift(1));
+  if (!empty) drawSankey($("#sankey"), cf, short);
+}
+
+function cashflowTable(cf) {
+  const pct = (v, t) => (t > 0 ? `${Math.round((v / t) * 100)}%` : "");
+  return `<table style="max-width:560px">
+    <tr><th>Money in</th><th class="num">Amount</th><th class="num">Share</th></tr>
+    ${cf.income.map((n) => `<tr><td>${esc(n.name)}</td><td class="num">${fmt(n.value)}</td><td class="num muted">${pct(n.value, cf.total_in)}</td></tr>`).join("")}
+    <tr><th>Money out</th><th class="num"></th><th class="num"></th></tr>
+    ${cf.spending.map((n) => `<tr><td>${esc(n.name)}</td><td class="num">${fmt(n.value)}</td><td class="num muted">${pct(n.value, cf.total_out)}</td></tr>` +
+      n.children.map((k) => `<tr class="sub-row"><td style="padding-left:28px"><span class="muted">${esc(n.name)} &gt;</span> ${esc(k.name)}</td><td class="num">${fmt(k.value)}</td><td class="num muted">${pct(k.value, cf.total_out)}</td></tr>`).join("")).join("")}
+    <tr><td><b>${cf.net >= 0 ? "Left over" : "Spent more than came in"}</b></td><td class="num"><b>${fmt(Math.abs(cf.net))}</b></td><td></td></tr></table>`;
+}
+
+function drawSankey(host, cf, monthName) {
+  const total = Math.max(cf.total_in, cf.total_out);
+  if (total <= 0) return;
+  // ---- nodes, by column
+  const inNodes = cf.income.map((n) => ({ ...n, role: "in" }));
+  if (cf.total_out > cf.total_in) inNodes.push({ name: "From your balance", value: +(cf.total_out - cf.total_in).toFixed(2), role: "neutral" });
+  const hub = { name: monthName, value: total, role: "hub" };
+  const small = cf.spending.filter((n) => n.value < cf.total_out * 0.02);
+  const outNodes = cf.spending.filter((n) => n.value >= cf.total_out * 0.02).map((n) => ({ ...n, role: "out" }));
+  if (small.length === 1) outNodes.push({ ...small[0], role: "out" });
+  else if (small.length) outNodes.push({ name: `Everything else (${small.length})`, value: +small.reduce((s, n) => s + n.value, 0).toFixed(2),
+    role: "out", children: [], members: small });
+  if (cf.total_in > cf.total_out) outNodes.push({ name: "Left over", value: +(cf.total_in - cf.total_out).toFixed(2), role: "neutral" });
+  const subNodes = [];
+  for (const n of outNodes) for (const k of n.children || []) subNodes.push({ ...k, role: "out", parentNode: n });
+  const cols = subNodes.length ? [inNodes, [hub], outNodes, subNodes] : [inNodes, [hub], outNodes];
+
+  // ---- geometry
+  const W = Math.max(720, host.clientWidth || 720);
+  const nodeW = 12, pad = 8, top = 28, bottom = 10, minSlot = 16;  // every node gets at least one text line of room
+  const left = 170, right = 190;
+  const k = 300 / total;  // 300px of band height for the whole month
+  const colX = cols.map((_, i) => left + (i * (W - left - right - nodeW)) / (cols.length - 1));
+  const colHeight = (col) => col.reduce((s, n) => s + Math.max(minSlot, n.value * k), 0) + pad * (col.length - 1);
+  const H = Math.max(360, Math.max(...cols.map(colHeight)) + top + bottom);
+  cols.forEach((col, ci) => {
+    let yy = top + (H - top - bottom - colHeight(col)) / 2;
+    for (const n of col) {
+      const slot = Math.max(minSlot, n.value * k);
+      n.x = colX[ci]; n.h = Math.max(1.5, n.value * k); n.y = yy + (slot - n.h) / 2; n.out = 0; n.in = 0;
+      yy += slot + pad;
+    }
+  });
+  // ---- links
+  const links = [];
+  for (const n of inNodes) links.push({ s: n, t: hub, v: n.value, role: n.role === "in" ? "in" : "neutral" });
+  for (const n of outNodes) links.push({ s: hub, t: n, v: n.value, role: n.role === "neutral" ? "neutral" : "out" });
+  for (const c of subNodes) links.push({ s: c.parentNode, t: c, v: c.value, role: "out" });
+  const band = (l) => {
+    const t = l.v * k;
+    const x0 = l.s.x + nodeW, x1 = l.t.x, xm = (x0 + x1) / 2;
+    const y0 = l.s.y + l.s.out, y1 = l.t.y + l.t.in;
+    l.s.out += t; l.t.in += t;
+    return `M${x0},${y0} C${xm},${y0} ${xm},${y1} ${x1},${y1} L${x1},${y1 + t} C${xm},${y1 + t} ${xm},${y0 + t} ${x0},${y0 + t} Z`;
+  };
+  const pctOf = (v, base) => (base > 0 ? ` · ${Math.round((v / base) * 100)}%` : "");
+  const tipFor = (name, v, role) => `<div class="tt-date">${esc(name)}</div><div class="tt-val">${fmt(v)}</div>` +
+    `<div class="tt-ev"><span>${role === "in" ? "of money in" : role === "out" ? "of spending" : ""}</span><span>${role === "in" ? pctOf(v, cf.total_in).slice(3) : role === "out" ? pctOf(v, cf.total_out).slice(3) : ""}</span></div>`;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Cash flow for ${esc(monthName)}: money in on the left, spending on the right">`;
+  links.forEach((l, i) => { svg += `<path class="flow flow-${l.role}" d="${band(l)}" data-i="${i}"/>`; });
+  const allNodes = cols.flat();
+  allNodes.forEach((n, i) => {
+    svg += `<rect class="node node-${n.role}" x="${n.x}" y="${n.y}" width="${nodeW}" height="${n.h}" rx="2" data-n="${i}"/>`;
+  });
+  // labels: money in on the left, the month above its bar, everything else to the right
+  const text = (n, x, anchor, dy = 0) =>
+    `<text class="s-label" x="${x}" y="${n.y + n.h / 2 + 4 + dy}" text-anchor="${anchor}">${esc(n.name)} <tspan class="s-amt">${fmt0(n.value)}</tspan></text>`;
+  for (const n of inNodes) svg += text(n, n.x - 8, "end");
+  svg += `<text class="s-label s-hub" x="${hub.x + nodeW / 2}" y="${hub.y - 10}" text-anchor="middle">${esc(monthName)} <tspan class="s-amt">${fmt0(cf.total_in)} in · ${fmt0(cf.total_out)} out</tspan></text>`;
+  for (const n of outNodes) svg += text(n, n.x + nodeW + 8, "start");
+  for (const n of subNodes) svg += text(n, n.x + nodeW + 8, "start");
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+
+  const tip = $(".tooltip", host);
+  const show = (html, ev) => {
+    tip.innerHTML = html; tip.hidden = false;
+    const r = host.getBoundingClientRect();
+    tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - tip.offsetWidth - 4) + "px";
+    tip.style.top = Math.max(0, ev.clientY - r.top - 20) + "px";
+  };
+  $$(".flow", host).forEach((p) => {
+    const l = links[Number(p.dataset.i)];
+    p.addEventListener("mousemove", (ev) => show(tipFor(`${l.s.role === "hub" ? "" : l.s.name + " → "}${l.t.role === "hub" ? monthName : l.t.name}`, l.v, l.role), ev));
+    p.addEventListener("mouseleave", () => (tip.hidden = true));
+  });
+  $$(".node", host).forEach((r) => {
+    const n = allNodes[Number(r.dataset.n)];
+    const extra = n.members ? `<div class="tt-ev" style="display:block">${n.members.map((mm) => `${esc(mm.name)} ${fmt0(mm.value)}`).join(" · ")}</div>` : "";
+    r.addEventListener("mousemove", (ev) => show(tipFor(n.name, n.value, n.role) + extra, ev));
+    r.addEventListener("mouseleave", () => (tip.hidden = true));
+  });
+}
+
+// ------------------------------------------------------------------------------------------ investments
+let invLiveTimer = null;
+let invPeriod = "1Y", invAllocTab = "asset_class", invSort = { key: "value", dir: -1 }, invActivityLimit = 40, invActivityType = "";
+const pct = (x, digits = 1) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(digits)}%`);
+const gainCls = (x) => (x == null ? "" : x > 0 ? "pos" : "");
+const signed = (x) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${fmt(Math.abs(x))}`);
+
+function invTiles(d, perf, beat) {
+  return `
+      <div class="tile"><div class="label">Total value</div><div class="value">${fmt0(d.total)}</div>
+        <div class="sub">${d.accounts.filter((a) => !a.hidden).length} accounts · ${d.holdings.length} holdings</div></div>
+      <div class="tile"><div class="label">Today</div><div class="value ${gainCls(d.day_change)}">${d.day_change == null ? "—" : signed(d.day_change)}</div>
+        <div class="sub">${d.day_change_pct == null ? "no prices for today yet" : `${pct(d.day_change_pct, 2)} since the last close`}</div></div>
+      <div class="tile"><div class="label">Total gain</div><div class="value ${gainCls(d.unrealized_gain)}">${d.unrealized_gain == null ? "—" : signed(d.unrealized_gain)}</div>
+        <div class="sub">${d.cost_basis ? `${pct(d.unrealized_gain / d.cost_basis)} on ${fmt0(d.cost_basis)} invested` : "no cost basis yet"}${
+          d.cost_missing ? ` · <a href="#" id="cost-missing-link">${d.cost_missing} holding${d.cost_missing === 1 ? "" : "s"} (${fmt0(d.cost_missing_value)}) need a cost basis</a>` : ""}</div></div>
+      <div class="tile"><div class="label">Return · ${esc(invPeriod)}</div><div class="value">${pct(perf.return)}</div>
+        <div class="sub">S&amp;P 500 ${pct(perf.benchmark_return)}${beat == null ? "" : beat >= 0 ? ` · ahead by ${pct(beat).slice(1)}` : ` · behind by ${pct(beat).slice(1)}`}</div></div>
+`;
+}
+
+// Re-price holdings with live quotes and recompute the page totals.
+function applyLiveQuotes(d, quotes) {
+  for (const h of d.holdings) {
+    const q = h.ticker && quotes[h.ticker];
+    if (!q || h.is_cash || !h.quantity) continue;
+    h.price = q.price;
+    h.value = h.quantity * q.price;
+    if (q.prev_close) {
+      h.day_change = h.quantity * (q.price - q.prev_close);
+      h.day_change_pct = q.price / q.prev_close - 1;
+    }
+    if (h.gain != null && h.cost_basis) {
+      h.gain = h.value - h.cost_basis;
+      h.gain_pct = h.gain / h.cost_basis;
+    }
+  }
+  d.total = d.holdings.reduce((a, h) => a + h.value, 0);
+  for (const h of d.holdings) h.allocation = d.total ? h.value / d.total : 0;
+  const moved = d.holdings.filter((h) => h.day_change != null);
+  d.day_change = moved.length ? moved.reduce((a, h) => a + h.day_change, 0) : null;
+  const prev = moved.reduce((a, h) => a + h.value - h.day_change, 0);
+  d.day_change_pct = d.day_change != null && prev > 0 ? d.day_change / prev : null;
+  const known = d.holdings.filter((h) => h.gain != null);
+  if (known.length) {
+    d.unrealized_gain = known.reduce((a, h) => a + h.gain, 0);
+    d.cost_basis = known.reduce((a, h) => a + h.cost_basis, 0);
+  }
+}
+
+async function renderInvestments(el) {
+  const status = await api("/api/plaid/status");
+  if (!status.inv_accounts) {
+    el.innerHTML = `<h1>Investments</h1><div class="card empty">
+      <h2>No investment accounts yet</h2>
+      <p>Positions come from SimpleFIN. Add your brokerage and retirement accounts at SimpleFIN Bridge, make sure their type is
+        <b>investment</b> in <a href="#setup">Setup → Accounts</a>, then sync.</p>
+      ${status.simplefin_connected ? `<button class="btn primary" id="inv-first-sync">Sync now</button>` : `<p class="small"><a href="#setup">Connect SimpleFIN first</a></p>`}</div>`;
+    $("#inv-first-sync")?.addEventListener("click", async (e) => {
+      e.currentTarget.disabled = true; e.currentTarget.textContent = "Syncing…";
+      try { await api("/api/investments/sync", { method: "POST" }); } catch (err) { toast(err.message, true); }
+      refreshState(); renderInvestments(el);
+    });
+    return;
+  }
+  const d = await api(`/api/investments?period=${invPeriod}`);
+  const perf = d.performance || {};
+  const h = d.history;
+  const lastSync = [status.last_inv_sync, status.simplefin_last_sync].filter(Boolean).sort().pop();
+  const synced = lastSync ? new Date(lastSync).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never";
+  const errors = status.items.filter((i) => i.error);
+  const seenBy = Object.fromEntries(status.simplefin_seen.map((x) => [x.id || "", x]));
+  const beat = perf.benchmark_return != null && perf.return != null ? perf.return - perf.benchmark_return : null;
+
+  el.innerHTML = `<div class="card-head"><h1>Investments</h1>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="live-ind small muted" id="live-ind" title="Stock and ETF prices refresh every 30 seconds while the market is open">Holdings updated ${esc(synced)}</span>
+        <button class="btn" id="inv-sync">Sync investments</button>
+        <div class="seg" id="inv-period">${["1M", "3M", "YTD", "1Y", "2Y"].map((p) => `<button data-p="${p}" class="${p === invPeriod ? "on" : ""}">${p}</button>`).join("")}</div></div></div>
+    ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup">Reconnect in Setup</a></span></div>`).join("")}
+    <div class="tiles tiles-4" id="inv-tiles">${invTiles(d, perf, beat)}</div>
+
+    <div class="card"><div class="card-head"><h2>Value</h2><span class="small muted">Portfolio value and what you've put in (net of withdrawals)</span></div>
+      <div class="chart-wrap" id="inv-value"></div>
+      <h3>Return vs S&amp;P 500</h3>
+      <div class="chart-wrap" id="inv-return"></div>
+      <p class="help">${h.estimated_before ? `SimpleFIN reports what you hold, not your trades, so Runway saves your positions every sync and works out returns from price moves.
+        Changes in positions between syncs count as money added or withdrawn, not as gains. <b>Before ${fmtDate(h.estimated_before, { month: "short", day: "numeric", year: "numeric" })}</b> (shaded) the chart
+        assumes you held what you held that day, so treat it as an estimate. It fills in with real data as Runway keeps syncing.`
+        : "Rebuilt from your activity and daily prices, the way Ghostfolio does it. Returns are time-weighted, so deposits and withdrawals don't count as gains."}${h.missing_prices && h.missing_prices.length ? ` No price history for ${h.missing_prices.map(esc).join(", ")}; the latest known price is used for those.` : ""}</p>
+      <div class="period-table scroll-x"><table><tr><th>Period</th>${Object.keys(d.periods).map((p) => `<th class="num">${p}</th>`).join("")}</tr>
+        <tr><td>Your return</td>${Object.values(d.periods).map((p) => `<td class="num">${pct(p.return)}</td>`).join("")}</tr>
+        <tr><td>S&amp;P 500</td>${Object.values(d.periods).map((p) => `<td class="num muted">${pct(p.benchmark_return)}</td>`).join("")}</tr>
+        <tr><td>Gain after deposits</td>${Object.values(d.periods).map((p) => `<td class="num muted">${signed(p.gain)}</td>`).join("")}</tr></table></div>
+    </div>
+
+    <div class="card"><div class="card-head"><h2>Holdings</h2><span class="small muted">Combined across accounts · click a column to sort</span></div>
+      <div class="scroll-x" id="inv-holdings"></div></div>
+
+    <div class="grid-2">
+      <div class="card"><div class="card-head"><h2>Allocation</h2>
+        <div class="seg" id="alloc-tabs">${[["asset_class", "Asset class"], ["account", "Account"], ["sector", "Sector"], ["holding", "Top holdings"]]
+          .map(([k, l]) => `<button data-k="${k}" class="${k === invAllocTab ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <div id="inv-alloc"></div></div>
+      <div class="card"><div class="card-head"><h2>X-ray</h2><span class="small muted">Quick checks on concentration, cash and fees</span></div>
+        <ul class="xray">${d.xray.map((r) => `<li class="${r.ok ? "ok" : r.info ? "info" : "warn-item"}"><span class="xr-icon">${r.ok ? "✓" : r.info ? "i" : "▲"}</span>
+          <div><b>${esc(r.name)}</b> <span class="xr-state">${r.ok ? "looks fine" : r.info ? "note" : "worth a look"}</span><div class="small muted">${esc(r.detail)}</div></div></li>`).join("")}</ul></div>
+    </div>
+
+    <div class="grid-2" style="margin-top:20px">
+      <div class="card"><div class="card-head"><h2>Dividends &amp; interest</h2><span class="small muted">${fmt(d.income.income_12m)} in the last 12 months · fees ${fmt(d.income.fees_12m)}</span></div>
+        <div class="chart-wrap" id="inv-income"></div></div>
+      <div class="card"><h2>Financial independence</h2>${fireForm(d.fire)}<div id="fire-out"></div></div>
+    </div>
+
+    <div class="card" style="margin-top:20px"><div class="card-head"><h2>Activity</h2>
+        <select id="act-type"><option value="">All activity</option>${["buy", "sell", "cash", "fee", "transfer"].map((t) => `<option ${t === invActivityType ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      <div class="scroll-x" id="inv-activity"></div></div>
+
+    <div class="card"><h2>Accounts</h2><p class="help">Untick an account to leave it out of everything on this page.</p>
+      <table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
+        ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}</label></td>
+        <td class="muted small">${a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
+        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table>
+      ${status.simplefin_seen.length ? `<details><summary class="small">What SimpleFIN sends for each account</summary><table class="small">
+        ${status.simplefin_seen.map((x) => `<tr><td>${esc(x.org || "")} · ${esc(x.name)}</td><td>${x.positions ? `${x.positions} positions` : "balance only, no positions"}</td>
+          <td class="muted">${x.fields.length ? esc(x.fields.join(", ")) : ""}</td></tr>`).join("")}</table>
+        <p class="help">Balance-only accounts count toward your total and allocation as a single line, but Runway can't see what they're invested in.</p></details>` : ""}</div>`;
+
+  $$("#inv-period button").forEach((b) => b.addEventListener("click", () => { invPeriod = b.dataset.p; renderInvestments(el); }));
+  $("#inv-sync").addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Syncing…";
+    try {
+      const r = await api("/api/investments/sync", { method: "POST" });
+      const errs = [...(r.errors || []), ...((r.bank && r.bank.bank_messages) || [])];
+      toast(errs.length ? errs.join("; ") : "Investments updated", !!(r.errors && r.errors.length));
+      refreshState();
+    }
+    catch (err) { toast(err.message, true); }
+    renderInvestments(el);
+  });
+  $$(".inv-acct").forEach((c) => c.addEventListener("change", async () => {
+    await api(`/api/plaid/accounts/${encodeURIComponent(c.dataset.id)}`, { method: "POST", body: { hidden: !c.checked } }); renderInvestments(el);
+  }));
+
+  // charts
+  const s = h.dates.findIndex((x) => x >= (perf.start || h.dates[0]));
+  const sl = (arr) => arr.slice(Math.max(0, s));
+  const dates = sl(h.dates);
+  lineChart($("#inv-value"), dates, [
+    { name: "Value", values: sl(h.value), cls: "s-main", area: true },
+    { name: "Net invested", values: sl(h.invested), cls: "s-muted", step: true },
+  ], { fmtY: shortMoney, fmtTip: fmt, height: 260, estimateUntil: h.estimated_before });
+  const t0 = 1 + (h.twr[Math.max(0, s)] || 0), b0 = h.benchmark[Math.max(0, s)];
+  lineChart($("#inv-return"), dates, [
+    { name: "Your portfolio", values: sl(h.twr).map((r) => (1 + r) / t0 - 1), cls: "s-main" },
+    { name: "S&P 500", values: sl(h.benchmark).map((b) => (b == null || b0 == null ? null : (1 + b) / (1 + b0) - 1)), cls: "s-alt" },
+  ], { fmtY: (v) => pct(v, 0), fmtTip: (v) => pct(v, 2), height: 200, zero: true, estimateUntil: h.estimated_before });
+  barChart($("#inv-income"), d.income.months.map((m) => { const [yy, mm] = m.split("-").map(Number); return new Date(yy, mm - 1, 1).toLocaleDateString("en-US", { month: "short" }) + (mm === 1 ? ` ${String(yy).slice(2)}` : ""); }),
+    d.income.income, { fmtTip: fmt });
+
+  const drawHoldings = () => {
+    const rows = [...d.holdings].sort((a, b) => {
+      const k = invSort.key, av = a[k] ?? -Infinity, bv = b[k] ?? -Infinity;
+      return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * invSort.dir;
+    });
+    const th = (k, label, cls = "num") => `<th class="${cls} sortable" data-k="${k}">${label}${invSort.key === k ? (invSort.dir < 0 ? " ↓" : " ↑") : ""}</th>`;
+    $("#inv-holdings").innerHTML = `<table class="holdings"><tr>${th("name", "Holding", "")}${th("quantity", "Shares")}${th("price", "Price")}
+      ${th("value", "Value")}${th("day_change", "Today")}${th("gain", "Total gain")}${th("allocation", "Weight")}${th("cost_basis", "Cost basis", "num hide-sm")}</tr>
+      ${rows.map((x) => `<tr><td><div><b>${esc(x.ticker && !x.ticker.includes(":") ? x.ticker : "")}</b> ${esc(x.name || "")}</div><div class="desc">${esc(x.accounts.join(", "))}</div></td>
+        <td class="num">${x.is_cash ? "—" : x.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
+        <td class="num">${x.is_cash ? "—" : fmt(x.price)}</td>
+        <td class="num"><b>${fmt(x.value)}</b></td>
+        <td class="num">${x.day_change == null ? `<span class="muted">—</span>`
+          : `<span class="${gainCls(x.day_change)}">${signed(x.day_change)}</span><div class="desc">${pct(x.day_change_pct, 2)}</div>`}</td>
+        <td class="num">${x.gain == null ? `<span class="muted">—</span>`
+          : `<span class="${gainCls(x.gain)}">${signed(x.gain)}</span><div class="desc">${pct(x.gain_pct)}</div>`}</td>
+        <td class="num"><div class="weight"><span style="width:${Math.min(100, x.allocation * 100).toFixed(1)}%"></span></div>${(x.allocation * 100).toFixed(1)}%</td>
+        <td class="num hide-sm">${x.is_cash || x.asset_class === "Not reported" ? `<span class="muted">—</span>`
+          : `<button class="cost-edit ${x.gain == null ? "missing" : ""}" data-sec="${esc(x.security_id)}" title="Edit cost basis">${x.gain == null ? "Add" : fmt(x.cost_basis)}${x.cost_manual ? ` <span class="tag">edited</span>` : ""} <span class="pencil" aria-hidden="true">✎</span></button>`}</td>
+</tr>`).join("")}</table>`;
+    $$("#inv-holdings .cost-edit").forEach((btn) => btn.addEventListener("click", () => openCostEditor(btn)));
+    $$("#inv-holdings th.sortable").forEach((t) => t.addEventListener("click", () => {
+      invSort = { key: t.dataset.k, dir: invSort.key === t.dataset.k ? -invSort.dir : (t.dataset.k === "name" ? 1 : -1) }; drawHoldings();
+    }));
+  };
+  // Cost basis editor: one input per account holding the security (the institution's number is the default).
+  const openCostEditor = (btn) => {
+    const x = d.holdings.find((h) => h.security_id === btn.dataset.sec);
+    const tr = btn.closest("tr");
+    $$("#inv-holdings tr.cost-row").forEach((r) => r.remove());
+    const row = document.createElement("tr");
+    row.className = "cost-row";
+    row.innerHTML = `<td colspan="8"><div class="cost-editor">
+      <div class="small"><b>Price paid per share for ${esc(x.ticker || x.name || "")}</b> · your average if you bought at different prices.
+        Runway multiplies it by the shares you hold. Leave a box empty to go back to what the institution reports.</div>
+      ${x.lots.map((l, i) => `<div class="form-row"><label>${esc(l.account_name)} · ${Number(l.quantity).toLocaleString("en-US", { maximumFractionDigits: 4 })} shares
+          <span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input type="number" min="0" step="0.0001" class="cb-in" data-i="${i}"
+            value="${l.manual && l.per_share != null ? +l.per_share.toFixed(4) : ""}" aria-label="Price per share in ${esc(l.account_name)}"
+            placeholder="${l.reported_cost_basis && l.quantity ? `reported ${(l.reported_cost_basis / l.quantity).toFixed(2)}` : "not reported"}"></span></label>
+        <span class="small muted cb-per" data-i="${i}"></span></div>`).join("")}
+      <div class="form-row"><button class="btn link cb-cancel">Done</button></div></div></td>`;
+    tr.after(row);
+    const perShare = () => $$(".cb-in", row).forEach((inp) => {
+      const l = x.lots[inp.dataset.i], v = Number(inp.value);
+      $(`.cb-per[data-i="${inp.dataset.i}"]`, row).textContent = inp.value && l.quantity ? `= ${fmt(v * l.quantity)} cost basis` : "";
+    });
+    $$(".cb-in", row).forEach((inp) => inp.addEventListener("input", perShare));
+    perShare();
+    $(".cb-in", row)?.focus();
+    let changed = false;
+    const finish = () => { row.remove(); if (changed) renderInvestments(el); };
+    $(".cb-cancel", row).addEventListener("click", finish);
+    onEdit($$(".cb-in", row), async (inp) => {
+      const l = x.lots[inp.dataset.i];
+      await api("/api/investments/cost", { method: "POST", body: { account_id: l.account_id, security_id: x.security_id, per_share: inp.value } });
+      changed = true;
+      if (x.lots.length === 1) finish();   // one account: done as soon as it's saved
+    });
+  };
+  drawHoldings();
+  const wireTiles = () => $("#cost-missing-link")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    invSort = { key: "gain", dir: 1 }; drawHoldings();
+    $("#inv-holdings").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  wireTiles();
+
+  // Live prices: poll while this page is open. Every ~30s when the market is open, every 5 minutes when it's closed.
+  clearTimeout(invLiveTimer);
+  const liveTick = async () => {
+    if (!$("#inv-tiles") || !location.hash.startsWith("#investments")) return;   // left the page
+    let next = 30_000;
+    if (!document.hidden) {
+      try {
+        const live = await api("/api/investments/live");
+        if (!$("#inv-tiles")) return;
+        applyLiveQuotes(d, live.quotes);
+        $("#inv-tiles").innerHTML = invTiles(d, perf, beat); wireTiles();
+        if (!document.querySelector(".cost-row")) drawHoldings();   // don't close an open cost editor
+        const t = new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+        $("#live-ind").innerHTML = live.market === "open"
+          ? `<i class="live-dot" aria-hidden="true"></i> Live prices · ${esc(t)}`
+          : `Market closed · latest prices as of ${esc(t)}`;
+        $("#live-ind").classList.toggle("is-live", live.market === "open");
+        if (live.market !== "open") next = 300_000;
+      } catch (err) { /* keep the last numbers; try again next time */ }
+    }
+    invLiveTimer = setTimeout(liveTick, next);
+  };
+  liveTick();
+
+  const drawAlloc = () => {
+    const items = d.allocation[invAllocTab] || [];
+    $("#inv-alloc").innerHTML = items.length ? `<table class="alloc">${items.map((a) => `<tr><td>${esc(a.name)}</td>
+      <td style="width:45%"><div class="weight wide"><span style="width:${Math.min(100, a.share * 100).toFixed(1)}%"></span></div></td>
+      <td class="num">${(a.share * 100).toFixed(1)}%</td><td class="num muted">${fmt0(a.value)}</td></tr>`).join("")}</table>` : `<div class="empty">Nothing to show.</div>`;
+  };
+  drawAlloc();
+  $$("#alloc-tabs button").forEach((b) => b.addEventListener("click", () => { invAllocTab = b.dataset.k; $$("#alloc-tabs button").forEach((x) => x.classList.toggle("on", x === b)); drawAlloc(); }));
+
+  const drawActivity = () => {
+    const rows = d.activity.filter((t) => !invActivityType || t.type === invActivityType);
+    const shown = rows.slice(0, invActivityLimit);
+    $("#inv-activity").innerHTML = shown.length ? `<table><tr><th>Date</th><th>Activity</th><th class="hide-sm">Account</th><th class="num">Shares</th><th class="num">Price</th><th class="num">Cash</th></tr>
+      ${shown.map((t) => `<tr><td class="muted" style="white-space:nowrap">${fmtDate(t.date, { month: "short", day: "numeric", year: "numeric" })}</td>
+        <td><div>${esc(t.name || "")}</div><div class="desc">${esc(t.type || "")}${t.subtype && t.subtype !== t.type ? ` · ${esc(t.subtype)}` : ""}${t.ticker && !t.ticker.includes(":") ? ` · ${esc(t.ticker)}` : ""}</div></td>
+        <td class="muted hide-sm">${esc(t.account_name)}</td>
+        <td class="num">${t.quantity ? t.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }) : ""}</td>
+        <td class="num muted">${t.price ? fmt(t.price) : ""}</td>
+        <td class="num ${t.amount < 0 ? "pos" : ""}">${t.amount ? signed(-t.amount) : ""}</td></tr>`).join("")}</table>
+      ${rows.length > shown.length ? `<button class="btn link" id="act-more">Show more (${rows.length - shown.length})</button>` : ""}` : `<div class="empty">No activity.</div>`;
+    $("#act-more")?.addEventListener("click", () => { invActivityLimit += 100; drawActivity(); });
+  };
+  drawActivity();
+  $("#act-type").addEventListener("change", (e) => { invActivityType = e.target.value; invActivityLimit = 40; drawActivity(); });
+  wireFire(d.fire);
+}
+
+function fireForm(f) {
+  return `<p class="help">Uses the 4% rule of thumb: you can retire when your investments are about 25× your yearly spending.
+    Spending is prefilled from your last 6 months in Runway; savings from what you added to these accounts over the last 12 months.</p>
+    <div class="form-row fire-form">
+      <label>Yearly spending<input type="number" id="fi-spend" value="${Math.round(f.annual_spending)}" step="1000"></label>
+      <label>Saved per year<input type="number" id="fi-save" value="${Math.round(f.yearly_savings)}" step="1000"></label>
+      <label>Return after inflation<input type="number" id="fi-ret" value="${(f.expected_return * 100).toFixed(1)}" step="0.5"></label>
+      <label>Withdrawal rate<input type="number" id="fi-wr" value="${(f.withdrawal_rate * 100).toFixed(1)}" step="0.25"></label>
+    </div>`;
+}
+
+function wireFire(f) {
+  const calc = () => {
+    const spend = Number($("#fi-spend").value) || 0, save = Number($("#fi-save").value) || 0;
+    const r = (Number($("#fi-ret").value) || 0) / 100, wr = (Number($("#fi-wr").value) || 4) / 100;
+    const target = wr > 0 ? spend / wr : 0;
+    let v = f.current, years = 0;
+    const path = [v];
+    while (v < target && years < 60) { v = v * (1 + r) + save; years += 1; path.push(v); }
+    const out = $("#fire-out");
+    if (!out) return;
+    const reached = v >= target;
+    out.innerHTML = `<div class="fire-result"><div><div class="label small muted">Target</div><div class="big">${fmt0(target)}</div></div>
+      <div><div class="label small muted">You have</div><div class="big">${fmt0(f.current)}</div><div class="small muted">${target ? ((f.current / target) * 100).toFixed(0) : 0}% of the way</div></div>
+      <div><div class="label small muted">${reached ? "Reached in about" : "Not reached within"}</div><div class="big">${reached ? `${years} yr${years === 1 ? "" : "s"}` : "60 yrs"}</div>
+        <div class="small muted">${reached && years ? `around ${new Date().getFullYear() + years}` : reached ? "already there" : "try saving more"}</div></div></div>
+      <div class="chart-wrap" id="fire-chart"></div>`;
+    const yearsLabels = path.map((_, i) => `${new Date().getFullYear() + i}`);
+    lineChart($("#fire-chart"), yearsLabels, [
+      { name: "Projected", values: path, cls: "s-main", area: true },
+      { name: "Target", values: path.map(() => target), cls: "s-muted" },
+    ], { fmtY: shortMoney, fmtTip: fmt, height: 170, labels: true });
+  };
+  $$(".fire-form input").forEach((i) => i.addEventListener("input", calc));
+  calc();
+}
+
+// A small reusable line chart: shared y axis, direct labels at the line ends, crosshair tooltip.
+function lineChart(host, xs, series, opts = {}) {
+  if (!host) return;
+  const n = xs.length;
+  if (n < 2) { host.innerHTML = `<div class="empty small">Not enough history yet.</div>`; return; }
+  const W = Math.max(320, host.clientWidth), H = opts.height || 240;
+  const m = { top: 14, right: 110, bottom: 26, left: 56 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+  const vals = series.flatMap((s) => s.values.filter((v) => v != null && isFinite(v)));
+  if (!vals.length) { host.innerHTML = `<div class="empty small">No data for this period yet.</div>`; return; }
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (opts.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (lo === hi) { lo -= Math.abs(lo) * 0.1 || 1; hi += Math.abs(hi) * 0.1 || 1; }
+  const ticks = niceTicks(lo, hi, 4);
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const x = (i) => m.left + (i / (n - 1)) * iw;
+  const y = (v) => m.top + (1 - (v - y0) / (y1 - y0 || 1)) * ih;
+  const fy = opts.fmtY || ((v) => v), ft = opts.fmtTip || fy;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map((s) => s.name).join(" and "))}">`;
+  svg += `<g class="grid">${ticks.map((t) => `<line x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>`).join("")}</g>`;
+  svg += `<g class="axis">${ticks.map((t) => `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${fy(t)}</text>`).join("")}</g>`;
+  if (opts.zero && y0 < 0 && y1 > 0) svg += `<line class="zero" x1="${m.left}" x2="${W - m.right}" y1="${y(0)}" y2="${y(0)}"/>`;
+  // x labels: ~6 evenly spaced
+  const step = Math.max(1, Math.round((n - 1) / Math.max(1, Math.min(5, Math.floor(iw / 80)))));
+  let xl = "";
+  for (let i = 0; i < n; i += step) {
+    const lab = opts.labels ? xs[i] : fmtDate(xs[i], n > 200 ? { month: "short", year: "2-digit" } : { month: "short", day: "numeric" });
+    xl += `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : "middle"}">${esc(lab)}</text>`;
+  }
+  svg += `<g class="axis">${xl}</g>`;
+  if (opts.estimateUntil && xs[0] < opts.estimateUntil) {
+    let ei = xs.findIndex((d) => d >= opts.estimateUntil);
+    if (ei < 0) ei = n - 1;
+    const ex = x(ei);
+    svg += `<rect class="est-zone" x="${m.left}" y="${m.top}" width="${Math.max(0, ex - m.left)}" height="${ih}"/>
+      <line class="est-line" x1="${ex}" x2="${ex}" y1="${m.top}" y2="${m.top + ih}"/>
+      ${ex - m.left > 70 ? `<text class="est-label" x="${ex - 6}" y="${m.top + 12}" text-anchor="end">estimated</text>` : ""}`;
+  }
+  const ends = [];
+  for (const s of series) {
+    let d = "", started = false, prev = null;
+    s.values.forEach((v, i) => {
+      if (v == null || !isFinite(v)) { started = false; return; }
+      if (s.step && started && prev != null) d += ` L${x(i).toFixed(1)},${y(prev).toFixed(1)}`;
+      d += `${started ? " L" : " M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
+      started = true; prev = v;
+    });
+    if (s.area) {
+      const first = s.values.findIndex((v) => v != null);
+      svg += `<path class="area ${s.cls}" d="${d} L${x(n - 1)},${y(y0)} L${x(first)},${y(y0)} Z"/>`;
+    }
+    svg += `<path class="line ${s.cls}" d="${d}"/>`;
+    const li = s.values.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0).pop();
+    if (li != null) ends.push({ s, yv: y(s.values[li]), v: s.values[li], xi: x(li) });
+  }
+  // end labels, nudged apart so they don't overlap
+  ends.sort((a, b) => a.yv - b.yv);
+  for (let i = 1; i < ends.length; i++) if (ends[i].yv - ends[i - 1].yv < 14) ends[i].yv = ends[i - 1].yv + 14;
+  for (const e of ends) svg += `<circle class="end-dot ${e.s.cls}" cx="${e.xi}" cy="${y(e.v)}" r="4"/>
+    <text class="end-label" x="${e.xi + 8}" y="${e.yv + 4}">${esc(e.s.name)}</text>`;
+  svg += `<g class="hover" style="display:none"><line class="cross" y1="${m.top}" y2="${m.top + ih}"/></g>`;
+  svg += `<rect class="hit" x="${m.left}" y="${m.top}" width="${iw}" height="${ih}" fill="transparent"/></svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+  const svgEl = $("svg", host), hover = $(".hover", host), tip = $(".tooltip", host);
+  const move = (cx) => {
+    const r = svgEl.getBoundingClientRect();
+    const px = ((cx - r.left) / r.width) * W;
+    const i = Math.max(0, Math.min(n - 1, Math.round(((px - m.left) / iw) * (n - 1))));
+    hover.style.display = ""; $("line", hover).setAttribute("x1", x(i)); $("line", hover).setAttribute("x2", x(i));
+    tip.innerHTML = `<div class="tt-date">${esc(opts.labels ? xs[i] : fmtDow(xs[i]))}${opts.estimateUntil && xs[i] < opts.estimateUntil ? " · estimate" : ""}</div>` + series.map((s) =>
+      `<div class="tt-ev"><span><i class="key ${s.cls}"></i>${esc(s.name)}</span><span>${s.values[i] == null ? "—" : ft(s.values[i])}</span></div>`).join("");
+    tip.hidden = false;
+    const sx = (x(i) / W) * r.width;
+    tip.style.left = Math.min(Math.max(0, sx + 12), r.width - tip.offsetWidth) + "px";
+    tip.style.top = "0px";
+  };
+  const hit = $(".hit", host);
+  hit.addEventListener("mousemove", (e) => move(e.clientX));
+  hit.addEventListener("touchmove", (e) => { move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
+  hit.addEventListener("mouseleave", () => { hover.style.display = "none"; tip.hidden = true; });
+}
+
+// Single-series column chart (monthly income).
+function barChart(host, labels, values, opts = {}) {
+  if (!host) return;
+  const W = Math.max(300, host.clientWidth), H = opts.height || 200;
+  const m = { top: 12, right: 8, bottom: 24, left: 48 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+  const hi = Math.max(...values, 0);
+  if (hi <= 0) { host.innerHTML = `<div class="empty small">No dividends or interest recorded yet.</div>`; return; }
+  const ticks = niceTicks(0, hi, 3), y1 = ticks[ticks.length - 1];
+  const bw = iw / values.length, w = Math.min(24, bw - 2);
+  const y = (v) => m.top + (1 - v / y1) * ih;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Monthly dividends and interest">`;
+  svg += `<g class="grid">${ticks.map((t) => `<line x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>`).join("")}</g>`;
+  svg += `<g class="axis">${ticks.map((t) => `<text x="${m.left - 6}" y="${y(t) + 4}" text-anchor="end">${shortMoney(t)}</text>`).join("")}</g>`;
+  values.forEach((v, i) => {
+    const cx = m.left + bw * i + bw / 2;
+    if (v > 0) {
+      const top = y(v), h = m.top + ih - top, r = Math.min(4, h);
+      svg += `<path class="bar" data-i="${i}" d="M${cx - w / 2},${m.top + ih} V${top + r} Q${cx - w / 2},${top} ${cx - w / 2 + r},${top} H${cx + w / 2 - r} Q${cx + w / 2},${top} ${cx + w / 2},${top + r} V${m.top + ih} Z"/>`;
+    }
+    if (i % Math.ceil(values.length / 8) === 0) svg += `<text class="axis-t" x="${cx}" y="${H - 6}" text-anchor="middle">${esc(labels[i])}</text>`;
+    svg += `<rect class="bar-hit" data-i="${i}" x="${m.left + bw * i}" y="${m.top}" width="${bw}" height="${ih}" fill="transparent"/>`;
+  });
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+  const tip = $(".tooltip", host);
+  $$(".bar-hit", host).forEach((r) => {
+    r.addEventListener("mousemove", (e) => {
+      const i = Number(r.dataset.i), box = host.getBoundingClientRect();
+      tip.innerHTML = `<div class="tt-date">${esc(labels[i])}</div><div class="tt-val">${(opts.fmtTip || fmt)(values[i])}</div>`;
+      tip.hidden = false; tip.style.left = Math.min(e.clientX - box.left + 10, box.width - tip.offsetWidth) + "px"; tip.style.top = "0px";
+    });
+    r.addEventListener("mouseleave", () => (tip.hidden = true));
+  });
+}
+
+// ------------------------------------------------------------------------------------------ net worth
+const ASSET_KIND_LABEL = { home: "Home / property", vehicle: "Vehicle", other: "Other" };
+const assetLookupLink = (a) => a.url ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
+  : a.kind === "home" && a.address ? { href: `https://www.zillow.com/homes/${encodeURIComponent(a.address)}_rb/`, label: "Zillow" }
+  : a.kind === "vehicle" ? { href: "https://www.kbb.com/whats-my-car-worth/", label: "KBB" } : null;
+
+async function renderNetWorth(el) {
+  const d = await api("/api/networth");
+  const ch = d.change["30d"];
+  const since = d.first_snapshot ? fmtDate(d.first_snapshot, { month: "short", day: "numeric", year: "numeric" }) : null;
+  const sideRows = (side) => d.groups.filter((g) => g.side === side).map((g) => `
+      <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
+      ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${esc(i.name)}
+          <div class="desc">${i.type === "account" ? esc(i.org || "") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
+            i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
+        <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
+  const assetGroups = d.groups.filter((g) => g.side === "asset" && g.total > 0);
+  el.innerHTML = `<h1>Net worth</h1>
+    <div class="tiles">
+      <div class="tile"><div class="label">Net worth</div><div class="value">${fmt0(d.net)}</div>
+        <div class="sub">${ch != null ? `${signed(ch)} in the last 30 days` : since ? `tracking since ${esc(since)}` : ""}</div></div>
+      <div class="tile"><div class="label">Assets</div><div class="value">${fmt0(d.assets)}</div>
+        <div class="sub">${assetGroups.map((g) => esc(g.label)).join(" · ")}</div></div>
+      <div class="tile"><div class="label">Liabilities</div><div class="value">${fmt0(d.liabilities)}</div>
+        <div class="sub">${d.groups.filter((g) => g.side === "liability").map((g) => `${esc(g.label)} ${fmt0(g.total)}`).join(" · ") || "nothing owed"}</div></div>
+    </div>
+    <div class="card"><div class="card-head"><h2>Over time</h2><span class="small muted">Saved once a day from your synced balances and asset values</span></div>
+      <div class="chart-wrap" id="nw-chart"></div>
+      ${d.history.length < 2 ? `<p class="help">Runway records your net worth every day from here on, so this chart fills in as the days go by.</p>` : ""}</div>
+    <div class="card"><h2>What makes it up</h2>
+      <div class="nw-bar" role="img" aria-label="Share of assets by type">${assetGroups.map((g, i) =>
+        `<span class="nw-seg s${i}" style="width:${(g.total / d.assets * 100).toFixed(2)}%" title="${esc(g.label)} ${fmt0(g.total)}"></span>`).join("")}</div>
+      <div class="nw-legend">${assetGroups.map((g, i) => `<span><i class="nw-key s${i}"></i>${esc(g.label)} ${(g.total / d.assets * 100).toFixed(0)}%</span>`).join("")}</div>
+      <div class="grid-2" style="margin-top:12px">
+        <div><h3>Assets</h3><table class="nw-table">${sideRows("asset")}</table></div>
+        <div><h3>Liabilities</h3><table class="nw-table">${sideRows("liability") || `<tr><td class="muted">Nothing owed</td></tr>`}</table></div>
+      </div></div>
+    <div class="card"><div class="card-head"><h2>Home, vehicles and other assets</h2>
+        <button class="btn primary" id="asset-new">Add an asset</button></div>
+      <p class="help">Things no bank reports. ${d.rentcast.configured
+        ? `Homes can update from RentCast (${d.rentcast.used} of ${d.rentcast.limit} free lookups used this month).`
+        : `Enter values yourself, or add a free RentCast key in <a href="#setup">Setup</a> so homes can update automatically.`}
+        For a car, a yearly change like −15% keeps its value moving between your updates.</p>
+      <div id="asset-form-host"></div>
+      <div class="asset-list">${d.assets_list.length ? d.assets_list.map((a) => assetCard(a, d)).join("") : `<div class="empty">No assets yet.</div>`}</div>
+    </div>`;
+
+  if (d.history.length >= 2) {
+    lineChart($("#nw-chart"), d.history.map((h) => h.date), [{ name: "Net worth", values: d.history.map((h) => h.net), cls: "s-main", area: true }],
+      { fmtY: shortMoney, fmtTip: fmt, height: 220 });
+  } else {
+    $("#nw-chart").innerHTML = `<div class="empty small">Today: ${fmt0(d.net)}</div>`;
+  }
+  $("#asset-new").addEventListener("click", () => openAssetForm(null, d, el));
+  $$(".asset-card").forEach((card) => {
+    const a = d.assets_list.find((x) => String(x.id) === card.dataset.id);
+    $(".a-edit", card).addEventListener("click", () => openAssetForm(a, d, el));
+    $(".a-update", card).addEventListener("click", () => {
+      const box = $(".a-quick", card);
+      box.innerHTML = `<div class="form-row"><label>New value<span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input type="number" min="0" step="100" class="a-val" value="${Math.round(a.current_value)}"></span></label>
+        <button class="btn link a-val-cancel">Cancel</button></div>`;
+      $(".a-val", box).focus(); $(".a-val", box).select();
+      $(".a-val-cancel", box).addEventListener("click", () => (box.innerHTML = ""));
+      onEdit([$(".a-val", box)], async () => {
+        await api(`/api/assets/${a.id}`, { method: "POST", body: { value: $(".a-val", box).value } }); toast("Value updated"); renderNetWorth(el);
+      });
+      $(".a-val", box).addEventListener("keydown", (e) => { if (e.key === "Escape") box.innerHTML = ""; });
+    });
+    $(".a-refresh", card)?.addEventListener("click", async (e) => {
+      const b = e.currentTarget; b.disabled = true; b.textContent = "Looking up…";
+      try { const r = await api(`/api/assets/${a.id}/refresh`, { method: "POST" }); toast(`RentCast estimate: ${fmt0(r.value)} (range ${fmt0(r.low)}–${fmt0(r.high)})`); renderNetWorth(el); }
+      catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Update from RentCast"; }
+    });
+    $(".a-remove", card).addEventListener("click", async (e) => {
+      if (!confirmInline(e.currentTarget, `Remove ${a.name}?`)) return;
+      await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); renderNetWorth(el);
+    });
+  });
+}
+
+function assetCard(a, d) {
+  const link = assetLookupLink(a);
+  const loan = d.loan_accounts.find((l) => l.id === a.loan_account_id);
+  const item = d.groups.flatMap((g) => g.items).find((i) => i.type === "asset" && i.id === a.id);
+  const stale = a.as_of && (Date.now() - parseDate(a.as_of)) / 864e5 > (a.kind === "home" ? 120 : 90);
+  return `<div class="asset-card" data-id="${a.id}">
+    <div class="asset-main">
+      <div><div class="asset-name">${esc(a.name)} <span class="tag">${esc(ASSET_KIND_LABEL[a.kind] || a.kind)}</span></div>
+        <div class="small muted">${a.source === "rentcast" ? `RentCast estimate${a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}` : "Your estimate"}
+          · set ${fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" })}${a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year since` : ""}
+          ${stale ? ` · <span class="stale">worth a fresh look</span>` : ""}</div>
+        ${a.address ? `<div class="small muted">${esc(a.address)}</div>` : ""}
+        ${loan ? `<div class="small">${fmt(item?.equity ?? 0)} equity after ${esc(loan.name)} (${fmt0(item?.loan?.owed ?? 0)} owed)</div>` : ""}</div>
+      <div class="asset-value">${fmt0(a.current_value)}</div>
+    </div>
+    <div class="asset-actions">
+      <button class="btn a-update">Update value</button>
+      ${a.kind === "home" && d.rentcast.configured && a.address ? `<button class="btn a-refresh">Update from RentCast</button>` : ""}
+      ${link ? `<a class="btn link" href="${esc(link.href)}" target="_blank" rel="noopener">Check on ${esc(link.label)} ↗</a>` : ""}
+      <button class="btn link a-edit">Edit details</button><button class="btn link a-remove">Remove</button>
+    </div>
+    <div class="a-quick"></div>
+  </div>`;
+}
+
+function openAssetForm(a, d, el) {
+  const host = $("#asset-form-host");
+  const v = a || { kind: "home" };
+  host.innerHTML = `<div class="asset-form card-inset">
+    <h3>${a ? `Edit ${esc(a.name)}` : "Add an asset"}</h3>
+    <div class="form-row">
+      <label>What is it<select id="af-kind">${Object.entries(ASSET_KIND_LABEL).map(([k, l]) => `<option value="${k}" ${v.kind === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Name<input id="af-name" value="${esc(v.name || "")}" placeholder="e.g. House, 2022 Model Y"></label>
+      ${a ? "" : `<label>Value today<span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input id="af-value" type="number" min="0" step="100"></span></label>`}
+    </div>
+    <div class="form-row af-home">
+      <label style="flex:1">Address (street, city, state, zip)<input id="af-address" value="${esc(v.address || "")}" style="width:100%"></label>
+      <label class="inline"><input type="checkbox" id="af-auto" ${v.auto_update ? "checked" : ""} ${d.rentcast.configured ? "" : "disabled"}> Update from RentCast monthly</label>
+    </div>
+    <div class="form-row">
+      <label>Yearly change %<input id="af-yc" type="number" step="0.5" value="${v.yearly_change ?? ""}" placeholder="e.g. -15 for a car" style="width:150px"></label>
+      <label>Loan against it<select id="af-loan"><option value="">None</option>${d.loan_accounts.map((l) => `<option value="${esc(l.id)}" ${v.loan_account_id === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
+      <label style="flex:1">Link to check the value (Zillow, KBB…)<input id="af-url" value="${esc(v.url || "")}" placeholder="https://" style="width:100%"></label>
+    </div>
+    <div class="form-row">${a ? `<button class="btn link" id="af-cancel">Done</button><span class="small muted">Changes save as you make them.</span>`
+      : `<button class="btn primary" id="af-save">Add</button><button class="btn link" id="af-cancel">Cancel</button>`}</div>
+  </div>`;
+  const syncKind = () => { $(".af-home", host).style.display = $("#af-kind").value === "home" ? "" : "none"; };
+  $("#af-kind").addEventListener("change", syncKind); syncKind();
+  $("#af-name").focus();
+  let changed = false;
+  $("#af-cancel").addEventListener("click", () => { host.innerHTML = ""; if (changed) renderNetWorth(el); });
+  if (a) {
+    const fieldKey = { "af-name": "name", "af-kind": "kind", "af-yc": "yearly_change", "af-loan": "loan_account_id", "af-url": "url", "af-address": "address", "af-auto": "auto_update" };
+    onEdit($$("input, select", host), async (f) => {
+      await api(`/api/assets/${a.id}`, { method: "POST", body: { [fieldKey[f.id]]: f.type === "checkbox" ? f.checked : f.value } });
+      changed = true;
+    });
+    return;
+  }
+  $("#af-save").addEventListener("click", async () => {
+    const body = { name: $("#af-name").value, kind: $("#af-kind").value, yearly_change: $("#af-yc").value,
+      loan_account_id: $("#af-loan").value, url: $("#af-url").value, address: $("#af-address").value, auto_update: $("#af-auto").checked };
+    if (!a) body.value = $("#af-value").value;
+    try {
+      await api(a ? `/api/assets/${a.id}` : "/api/assets", { method: "POST", body });
+      toast(a ? "Saved" : `Added ${body.name}`); renderNetWorth(el);
+    } catch (err) { toast(err.message, true); }
+  });
+  host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+// ------------------------------------------------------------------------------------------ setup
+let rulesOpen = false, rulesFilter = "";
+async function renderSetup(el) {
+  await loadCategories();
+  const [accounts, recurring, rules] = await Promise.all([api("/api/accounts"), api("/api/recurring"), api("/api/rules")]);
+  const cash = accounts.filter((a) => a.kind === "checking" || a.kind === "savings");
+  const name = (a) => a.display_name || a.name;
+  const acctName = (id) => { const a = accounts.find((x) => x.id === id); return a ? name(a) : "?"; };
+  const acctOptions = (list, sel) => list.map((a) => `<option value="${esc(a.id)}" ${a.id === sel ? "selected" : ""}>${esc(name(a))}</option>`).join("");
+
+  el.innerHTML = `<h1>Setup</h1>
+
+  <div class="card"><h2>1 · Bank connection</h2>
+    ${STATE.connected
+      ? `<p>Connected to SimpleFIN. Runway syncs about once a day while it's running.</p>
+         ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
+         <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
+      : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
+         (a token can only be used once, so the one Actual used won't work). Paste it here. It's exchanged for a private access link that stays in this app's database on your Mac.</p>${connectForm()}`}
+  </div>
+
+  <div class="card"><h2>2 · Accounts</h2>
+    <div class="form-row"><label>Primary account (the one the forecast shows)
+      <select id="primary-acct">${cash.length > 1 || !STATE.primary_account ? `<option value="">Choose…</option>` : ""}${acctOptions(cash, STATE.primary_account || (cash.filter((a) => a.kind === "checking").length === 1 ? cash.find((a) => a.kind === "checking").id : ""))}</select></label></div>
+    <p class="help">For each credit card, set the statement closing day, the payment due day, and the account that pays it.
+      Only cards paid from the primary account show up in the forecast.</p>
+    ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Details</th><th class="num">Balance</th></tr>
+      ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
+        <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${esc(a.org || "")} ${esc(a.name)}</div></td>
+        <td><select class="f-kind">${["checking", "savings", "credit", "loan", "investment"].map((k) => `<option ${k === a.kind ? "selected" : ""}>${k}</option>`).join("")}</select></td>
+        <td class="f-details">${a.kind === "credit"
+          ? `<div class="form-row" style="margin:0">
+              <label>Closes on day<input type="number" min="1" max="31" class="f-close" value="${a.closing_day ?? ""}"></label>
+              <label>Due on day<input type="number" min="1" max="31" class="f-due" value="${a.due_day ?? ""}"></label>
+              <label>Paid from<select class="f-payfrom"><option value="">—</option>${acctOptions(cash, a.pay_from)}</select></label></div>
+             <label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>`
+          : a.kind === "checking" || a.kind === "savings"
+          ? `<label class="inline" title="Spreads this account's recent non-recurring spending evenly over every day of the forecast"><input type="checkbox" class="f-spend" ${a.daily_spend ? "checked" : ""}> Also subtract average everyday spending</label>`
+          : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>
+             <div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}
+          <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label></td>
+        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
+    : `<div class="empty">Accounts appear here after the first sync.</div>`}
+  </div>
+
+  <div class="card"><h2>3 · Recurring money in and out</h2>
+    <p class="help">Paychecks, mortgage, loans and bills now live on the <a href="#recurring">Recurring</a> tab (${recurring.length} set up).</p>
+  </div>
+
+  <div class="card"><h2>4 · AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
+    <p class="help">With an OpenRouter API key, the Review tab can suggest a category for each merchant; you confirm each one.
+      Only the date, amount, merchant text and account type of those transactions are sent.</p>
+    <div class="form-row">
+      <label>OpenRouter API key<input id="api-key" type="password" placeholder="${STATE.has_api_key ? "•••••••• saved" : "sk-or-…"}" style="width:260px" autocomplete="off"></label>
+      <label>Model<input id="llm-model" value="${esc(STATE.llm_model)}" style="width:240px" spellcheck="false"></label>
+      ${STATE.has_api_key ? `<button class="btn" id="clear-key">Remove key</button>` : ""}
+    </div>
+    <label class="inline"><input type="checkbox" id="auto-ai" ${STATE.auto_ai_on_sync ? "checked" : ""}>
+      During each sync, also ask the AI about new merchants and apply answers it's confident about (the rest wait in Review)</label>
+    ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
+  </div>
+
+  <div class="card"><h2>Investments</h2>
+    <p class="help">Investment positions come from SimpleFIN with each sync: any account whose type is <b>investment</b> in the Accounts list above shows up on the
+      <a href="#investments">Investments</a> page. If a brokerage or retirement account is missing there, set its type to investment and sync.</p>
+  </div>
+
+  <div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
+    <p class="help">Zillow and KBB don't offer their values to individuals, so homes and vehicles on the <a href="#networth">Net worth</a> page are entered by hand.
+      For homes, a free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast API key</a> gives an automated estimate (50 lookups a month on the free plan; Runway stops there so you're never charged).</p>
+    <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
+${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
+  </div>
+
+  <div class="card"><h2>5 · Rules</h2>
+    <p class="help">If a merchant or description contains the text, it gets the category. Longer matches win. Edits save when you change a field.</p>
+    <div class="form-row">
+      <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
+      <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
+      <label class="inline"><input type="checkbox" id="rule-apply" checked> Apply to past transactions</label>
+      <button class="btn primary" id="rule-add">Add rule</button>
+    </div>
+    ${rules.length ? `<details class="rules-box" id="rules-box" ${rulesOpen ? "open" : ""}>
+      <summary><span class="rules-sum">${rules.length} rule${rules.length === 1 ? "" : "s"}</span> <span class="muted small">· show, search and edit</span></summary>
+      <div class="form-row"><label>Search rules<input id="rule-filter" placeholder="text or category" value="${esc(rulesFilter)}" style="width:240px"></label></div>
+      <div class="scroll-x"><table id="rules-table"><tr><th>Text contains</th><th>Category</th><th></th></tr>${rules.map((r) => `<tr data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
+      <td><input class="rule-m" value="${esc(r.match)}" style="width:260px" aria-label="Rule text"></td>
+      <td><select class="rule-c" aria-label="Rule category">${categoryOptions(r.category, { blank: false })}</select></td>
+      <td class="num" style="white-space:nowrap"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply to matching</button>
+        <button class="btn link del-rule">Remove</button></td></tr>`).join("")}</table></div></details>` : ""}
+  </div>
+
+  <div class="card"><h2>6 · Categories</h2>
+    <p class="help">Rename a category by editing its name. Subcategories roll up into their parent in budgets and reports.
+      Use Move to put a category under a different parent, or back at the top level.
+      Categories marked “built-in” are used by Runway itself.</p>
+    <div class="scroll-x"><table id="cat-table"><tr><th>Category</th><th>Kind</th><th class="num">Transactions</th><th></th></tr>
+      ${CATEGORIES.map((c) => `<tr data-name="${esc(c.name)}" class="${c.parent ? "sub-row" : ""}">
+        <td style="padding-left:${10 + (c.depth || 0) * 20}px">${c.parent ? `<span class="muted">${esc(c.parent)} &gt;</span> ` : ""}${c.protected ? `<b>${esc(c.name)}</b> <span class="tag">built-in</span>`
+          : `<input class="cat-name" value="${esc(c.name)}" aria-label="Category name" style="width:200px">`}</td>
+        <td class="muted small">${c.is_transfer ? "not spending" : c.is_income ? "money in" : "spending"}</td>
+        <td class="num muted">${c.transactions}</td>
+        <td class="num cat-actions" style="white-space:nowrap">${(c.depth || 0) < CAT_MAX_DEPTH - 1 ? `<button class="btn link cat-sub">+ Subcategory</button>` : ""}
+          ${c.protected ? "" : `<button class="btn link cat-move">Move</button> <button class="btn link cat-del">Remove</button>`}</td></tr>`).join("")}
+    </table></div>
+    <h3>Add a category</h3>
+    <div class="form-row"><label>Name<input id="cat-new-name"></label>
+      <label>Subcategory of<select id="cat-new-parent"><option value="">— none (top level) —</option>${categoryOptions("", { blank: false, canHoldChildren: true })}</select></label>
+      <label class="inline"><input type="checkbox" id="cat-transfer"> Not spending (a transfer)</label>
+      <label class="inline"><input type="checkbox" id="cat-income"> Money in</label>
+      <button class="btn primary" id="cat-add">Add</button></div>
+    <div class="form-row"><label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label>
+</div>
+  </div>`;
+
+  wireConnect();
+  $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
+  const filterRules = () => {
+    const q = ($("#rule-filter")?.value || "").trim().toLowerCase();
+    rulesFilter = q;
+    $$("#rules-table tr[data-id]").forEach((tr) => { tr.hidden = !!q && !tr.dataset.q.includes(q); });
+  };
+  $("#rule-filter")?.addEventListener("input", filterRules);
+  filterRules();
+  onEdit([$("#rc-key")], async () => {
+    if (!$("#rc-key").value.trim()) return;
+    await api("/api/rentcast/settings", { method: "POST", body: { api_key: $("#rc-key").value } }); toast("RentCast key saved"); await refreshState(); route();
+  });
+  $("#rc-clear")?.addEventListener("click", async () => { await api("/api/rentcast/settings", { method: "POST", body: { clear: true } }); await refreshState(); route(); });
+  $("#primary-acct")?.addEventListener("change", async (e) => {
+    try { await api("/api/settings", { method: "POST", body: { primary_account: e.target.value } }); toast("Primary account saved"); await refreshState(); }
+    catch (err) { toast(err.message, true); }
+  });
+  $$("#acct-table tr[data-id]").forEach((tr) => {
+    $(".f-kind", tr).addEventListener("change", () => saveAccount(tr, true));
+    onEdit($$(".f-name, .f-close, .f-due, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
+  });
+  onEdit([$("#llm-model")], async () => { await api("/api/settings", { method: "POST", body: { llm_model: $("#llm-model").value.trim() } }); await refreshState(); });
+  onEdit([$("#api-key")], async () => {
+    const v = $("#api-key").value.trim();
+    if (!v) return;
+    await api("/api/settings", { method: "POST", body: { openrouter_api_key: v } });
+    toast("API key saved"); await refreshState(); route();
+  });
+  $("#clear-key")?.addEventListener("click", async () => { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); route(); });
+  $("#auto-ai").addEventListener("change", async (e) => {
+    await api("/api/settings", { method: "POST", body: { auto_ai_on_sync: e.target.checked } }); toast("Saved"); refreshState();
+  });
+  $("#rule-add").addEventListener("click", async () => {
+    try { await api("/api/rules", { method: "POST", body: { match: $("#rule-match").value, category: $("#rule-cat").value, apply: $("#rule-apply").checked } });
+      toast("Rule added"); await refreshState(); route(); } catch (err) { toast(err.message, true); }
+  });
+  $$("#rules-table tr[data-id]").forEach((tr) => {
+    const id = tr.dataset.id;
+    const saveRule = async () => {
+      try { await api(`/api/rules/${id}`, { method: "POST", body: { match: $(".rule-m", tr).value, category: $(".rule-c", tr).value } }); toast("Rule saved"); }
+      catch (err) { toast(err.message, true); }
+    };
+    $(".rule-m", tr).addEventListener("change", saveRule);
+    $(".rule-c", tr).addEventListener("change", saveRule);
+    $(".rule-apply", tr).addEventListener("click", async () => {
+      try { const r = await api(`/api/rules/${id}/apply`, { method: "POST" }); toast(`${r.updated} transaction${r.updated === 1 ? "" : "s"} updated`); refreshState(); }
+      catch (err) { toast(err.message, true); }
+    });
+    $(".del-rule", tr).addEventListener("click", async (e) => {
+      if (!confirmInline(e.currentTarget, "Remove?")) return;
+      await api(`/api/rules/${id}`, { method: "DELETE" }); toast("Rule removed"); route();
+    });
+  });
+  const addCategory = async (name, parent, isTransfer, isIncome) => {
+    try { await api("/api/categories", { method: "POST", body: { name, parent, is_transfer: isTransfer, is_income: isIncome } });
+      toast(parent ? `Added ${name} under ${parent}` : `Added ${name}`); route(); }
+    catch (err) { toast(err.message, true); }
+  };
+  $("#cat-new-parent").addEventListener("change", (e) => {  // a subcategory takes its parent's kind
+    $("#cat-transfer").disabled = $("#cat-income").disabled = !!e.target.value;
+  });
+  $("#cat-add").addEventListener("click", () => addCategory($("#cat-new-name").value, $("#cat-new-parent").value || null,
+    $("#cat-transfer").checked, $("#cat-income").checked));
+  $$("#cat-table tr[data-name]").forEach((tr) => {
+    const name = tr.dataset.name;
+    $(".cat-name", tr)?.addEventListener("change", async (e) => {
+      try { await api("/api/categories/rename", { method: "POST", body: { name, new_name: e.target.value } }); toast("Renamed"); route(); }
+      catch (err) { toast(err.message, true); e.target.value = name; }
+    });
+    $(".cat-sub", tr)?.addEventListener("click", () => {
+      const cell = $(".cat-actions", tr);
+      cell.innerHTML = `<input class="sub-name" placeholder="New subcategory of ${esc(name)}" style="width:220px"> <button class="btn primary sub-ok">Add</button> <button class="btn link sub-cancel">Cancel</button>`;
+      $(".sub-name", cell).focus();
+      const go = () => addCategory($(".sub-name", cell).value, name, false, false);
+      $(".sub-ok", cell).addEventListener("click", go);
+      $(".sub-name", cell).addEventListener("keydown", (e) => { if (e.key === "Enter") go(); if (e.key === "Escape") route(); });
+      $(".sub-cancel", cell).addEventListener("click", () => route());
+    });
+    $(".cat-move", tr)?.addEventListener("click", () => {
+      const c = CATEGORIES.find((x) => x.name === name);
+      // How many levels this branch needs, so we only offer parents it fits under.
+      const height = 1 + Math.max(0, ...CATEGORIES.filter((x) => x.path.includes(name)).map((x) => x.path.length - c.path.length));
+      const options = categoryOptions(c.parent || "", {
+        blank: false,
+        exclude: (x) => x.path.includes(name) || x.path.length + height > CAT_MAX_DEPTH,
+      });
+      const cell = $(".cat-actions", tr);
+      cell.innerHTML = `<select class="move-parent" aria-label="Move ${esc(name)} under"><option value="" ${c.parent ? "" : "selected"}>Top level</option>${options}</select>
+        <button class="btn primary move-ok">Move</button> <button class="btn link move-cancel">Cancel</button>`;
+      $(".move-cancel", cell).addEventListener("click", () => route());
+      $(".move-ok", cell).addEventListener("click", async () => {
+        const parent = $(".move-parent", cell).value || null;
+        try {
+          await api("/api/categories/move", { method: "POST", body: { name, parent } });
+          toast(parent ? `Moved ${name} under ${parent}` : `${name} is now a top-level category`);
+          await refreshState(); route();
+        } catch (err) { toast(err.message, true); }
+      });
+    });
+    $(".cat-del", tr)?.addEventListener("click", () => {
+      const c = CATEGORIES.find((x) => x.name === name);
+      const cell = $(".cat-actions", tr);
+      const others = categoryOptions("", { blank: false }).replace(`<option value="${esc(name)}" `, `<option disabled value="${esc(name)}" `);
+      cell.innerHTML = `${c.transactions ? `<select class="move-to" aria-label="Move transactions to"><option value="">Send its ${c.transactions} transaction${c.transactions === 1 ? "" : "s"} to Review</option>
+          <optgroup label="Or move them to">${others.replace(/<optgroup[^>]*>|<\/optgroup>/g, "")}</optgroup></select> ` : ""}
+        <button class="btn primary del-ok">Remove ${esc(name)}</button> <button class="btn link del-cancel">Cancel</button>`;
+      $(".del-cancel", cell).addEventListener("click", () => route());
+      $(".del-ok", cell).addEventListener("click", async () => {
+        try {
+          const r = await api("/api/categories/remove", { method: "POST", body: { name, move_to: $(".move-to", cell)?.value || null } });
+          toast(r.moved ? `Removed · ${r.moved} transaction${r.moved === 1 ? "" : "s"} ${$(".move-to", cell)?.value ? "moved" : "sent to Review"}` : "Removed");
+          await refreshState(); route();
+        } catch (err) { toast(err.message, true); }
+      });
+    });
+  });
+  onEdit([$("#horizon-days")], async () => {
+    await api("/api/settings", { method: "POST", body: { horizon_days: Number($("#horizon-days").value) } });
+    horizon = null; await refreshState();
+  });
+}
+
+function connectForm() {
+  return `<div class="form-row" style="flex-direction:column;align-items:stretch">
+    <textarea id="sf-token" placeholder="Paste a SimpleFIN setup token (or an access URL, if you already claimed one)" autocomplete="off" spellcheck="false"></textarea>
+    <div><button class="btn primary" id="sf-connect">Connect and sync</button></div></div>`;
+}
+function wireConnect() {
+  $("#sf-connect")?.addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true; b.textContent = "Connecting…";
+    try {
+      await api("/api/connect", { method: "POST", body: { token: $("#sf-token").value } });
+      b.textContent = "Syncing (first sync pulls ~6 months)…";
+      const r = await api("/api/sync", { method: "POST" });
+      toast(`Connected · ${r.new} transactions imported`);
+      await refreshState(); route();
+    } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Connect and sync"; }
+  });
+}
+
+async function saveAccount(tr, rerender) {
+  const body = { display_name: $(".f-name", tr).value, kind: $(".f-kind", tr).value, hidden: $(".f-hidden", tr).checked ? 1 : 0 };
+  if ($(".f-close", tr)) { body.closing_day = $(".f-close", tr).value; body.due_day = $(".f-due", tr).value; body.pay_from = $(".f-payfrom", tr).value; }
+  if ($(".f-sign", tr)) body.owed_positive = $(".f-sign", tr).checked ? 1 : 0;
+  if ($(".f-spend", tr)) body.daily_spend = $(".f-spend", tr).checked ? 1 : 0;
+  try {
+    await api(`/api/accounts/${encodeURIComponent(tr.dataset.id)}`, { method: "POST", body });
+    if (rerender) { toast("Saved"); route(); }
+  } catch (err) { if (rerender) toast(err.message, true); else throw err; }
+}
+
+// ------------------------------------------------------------------------------------------ boot
+(async () => {
+  await refreshState();
+  route();
+  setInterval(refreshState, 60_000);
+})();
