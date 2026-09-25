@@ -4,7 +4,11 @@ FROM python:3.12-slim
 LABEL org.opencontainers.image.source="https://github.com/AnthonyPluth/Runway" \
       org.opencontainers.image.description="Runway: personal finance, forecasting and investments"
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# Set by the release workflow (v1.2.3); shown in Settings.
+ARG VERSION=dev
+
+ENV RUNWAY_VERSION=$VERSION \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     RUNWAY_DATA=/data \
     RUNWAY_HOST=0.0.0.0 \

@@ -21,6 +21,11 @@ Note the issuer URL, client ID and client secret.
 Every push to `main` runs the tests and publishes `ghcr.io/anthonypluth/runway:latest` (Intel/AMD and ARM) through
 GitHub Actions (`.github/workflows/docker.yml`). Only the latest image is kept.
 
+Each of those pushes is also a release: it gets the next version tag (`v1.0.0`, `v1.0.1`, …) and a GitHub Release with
+notes listing what changed. Every push bumps the last number; put `#minor` in a commit message (or start it with
+`feat:`) to bump the middle one, or `#major` for the first. The running version is shown at the bottom of Settings,
+and on the image as the `org.opencontainers.image.version` label.
+
 The repository is private, so the image is too. On the server, log in once with a GitHub token that has the
 `read:packages` scope (github.com/settings/tokens):
 
