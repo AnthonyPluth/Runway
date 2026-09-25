@@ -231,7 +231,20 @@ def hide_simplefin_duplicates(conn, item_id: str) -> list[str]:
         return []
     hidden = []
     for a in conn.execute("SELECT id, name, institution FROM inv_accounts WHERE source='simplefin' AND hidden=0").fetchall():
-        if key in compact(a["institution"]):
+        inst = compact(re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (a["institution"] or "").lower()))
+        # "E*TRADE from Morgan Stanley" (Plaid) and "E*Trade" (SimpleFIN) are the same place
+        if len(inst) >= 4 and (key in inst or inst in key):
             conn.execute("UPDATE inv_accounts SET hidden=1 WHERE id=?", (a["id"],))
             hidden.append(a["name"])
+    return hidden
+
+
+def hide_all_duplicates(conn) -> list[str]:
+    """Run the duplicate check for every Plaid connection, once (later changes are yours to make on the page)."""
+    if db.get_setting(conn, "dedupe_simplefin_v2"):
+        return []
+    hidden = []
+    for r in conn.execute("SELECT item_id FROM plaid_items").fetchall():
+        hidden += hide_simplefin_duplicates(conn, r["item_id"])
+    db.set_setting(conn, "dedupe_simplefin_v2", "1")
     return hidden

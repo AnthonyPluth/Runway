@@ -126,6 +126,29 @@ class ForecastTests(Base):
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
         self.assertEqual(est["2026-11-05"], 2300.0)
 
+    def test_sticking_to_the_budget(self):
+        # $500/month on Groceries, paid with the card. $200 already spent in September, so $300 over Sep 24-30.
+        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'cc')")
+        fc = forecast.build(self.conn, TODAY, 90)
+        b = fc["budget"]
+        self.assertEqual((b["monthly"], [u["account_id"] for u in b["used"]]), (500.0, ["cc"]))
+        paid = lambda due: fc["budget"]["total"][fc["dates"].index(due) - 1] - fc["budget"]["total"][fc["dates"].index(due)]
+        # Oct 5: the closed September statement ($600 left), same as the regular forecast
+        self.assertAlmostEqual(paid("2026-10-05"), 600.0, places=2)
+        # Nov 5: $300 charged so far this cycle + $300 (rest of Sept) + 10 days of October at 500/31
+        self.assertAlmostEqual(paid("2026-11-05"), 300 + 300 + 500 / 31 * 10, places=1)
+        # Dec 5: Oct 11-31 and Nov 1-10
+        self.assertAlmostEqual(paid("2026-12-05"), 500 / 31 * 21 + 500 / 30 * 10, places=1)
+        # no daily drain: nothing moves between those dates
+        self.assertEqual(b["total"][fc["dates"].index("2026-10-20")], b["total"][fc["dates"].index("2026-10-25")])
+
+    def test_budget_covered_by_a_recurring_item_is_left_out(self):
+        self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES (7, 'Grocery box','chk',-100,'monthly','2026-09-01')")
+        self.conn.execute("UPDATE transactions SET recurring_id=7 WHERE category='Groceries'")
+        self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Groceries', 500)")
+        b = forecast.build(self.conn, TODAY, 60)["budget"]
+        self.assertEqual((b["used"], b["skipped"][0]["category"]), ([], "Groceries"))
+
     def test_statement_you_entered_wins(self):
         card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
         key = forecast.card_cycle(self.conn, card, TODAY)["statement_key"]
@@ -799,3 +822,11 @@ class ScheduleAndMissedTests(Base):
         tid = self.conn.execute("SELECT id FROM transactions WHERE description='CLUB FEE'").fetchone()[0]
         recurring.link(self.conn, tid, 1)
         self.assertEqual(recurring.missed(self.conn, today), [])
+
+
+class OwnerTests(unittest.TestCase):
+    def test_first_names(self):
+        from runway import oidc
+        self.assertEqual(oidc.first_name("Anthony Pluth", "a@x.com"), "Anthony")
+        self.assertEqual(oidc.first_name(None, "sara.smith@x.com"), "Sara")
+        self.assertEqual(oidc.first_name("sara@x.com", "sara@x.com", "Sara Jane"), "Sara")

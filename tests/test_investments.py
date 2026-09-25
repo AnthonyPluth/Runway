@@ -73,6 +73,12 @@ class HistoryTests(Base):
         # Time-weighted: the deposit isn't a gain. 3000 -> 3520 with no other flows.
         self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)
 
+    def test_cash_rows_with_a_share_count_dont_change_shares(self):
+        # Some institutions tag a small cash deposit with a security and a share count; it mustn't move shares.
+        self.tx("t4", "2026-09-10", "cash", "deposit", -2, "VTI", -8.4)
+        h = portfolio.history(self.c, TODAY)
+        self.assertEqual(self.at(h, "2026-09-09"), 3520.0 - 2)       # the $2 deposit came in after; shares unchanged
+
     def test_performance_and_benchmark(self):
         ov = portfolio.overview(self.c, "2Y", TODAY)
         p = ov["performance"]

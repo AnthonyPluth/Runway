@@ -213,6 +213,22 @@ class SnapshotHistoryTests(Base):
         self.assertAlmostEqual(h["invested"][-1] - h["invested"][0], 1210.0)
 
 
+    def test_balance_only_snapshots_give_way_to_real_positions(self):
+        # Snapshots from before you entered a 401(k)'s funds hold only its balance; the later positions carry history.
+        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('wf1', 'Wealthfront', 'investment')")
+        sfinvest.capture(self.c, account(holdings=[VTI]), "wf1", "Wealthfront", 3000.0, TODAY)
+        self.c.execute("DELETE FROM holding_snapshots")
+        self.c.execute("INSERT INTO holding_snapshots VALUES ('2026-09-01', 'sf:wf1', 'sf:balance', 0, 2000)")
+        self.snap("2026-09-10", 20, 0)
+        self.price("VTI", "2026-08-25", 100)
+        self.price("VTI", "2026-09-10", 121)
+        h = portfolio.history(self.c, TODAY, days=40)
+        at = lambda key, d: h[key][h["dates"].index(d)]
+        self.assertEqual(h["estimated_before"], "2026-09-10")
+        self.assertEqual(at("value", "2026-09-01"), 2000.0)          # 20 VTI at $100, not a flat balance
+        self.assertAlmostEqual(h["twr"][-1], 0.21, places=6)
+
+
 class PlaidDuplicateTests(Base):
     def test_linking_through_plaid_hides_the_simplefin_copy(self):
         from runway import plaid
@@ -221,7 +237,7 @@ class PlaidDuplicateTests(Base):
                                                       account("et", "Individual Brokerage", "154756.49", [VTI])]}, TODAY)
         for iid, inst in (("sf:vw", "Vestwell"), ("sf:wf", "Wealthfront Anthony"), ("sf:et", "E*Trade")):
             self.c.execute("UPDATE inv_accounts SET institution=? WHERE id=?", (inst, iid))
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it', 'tok', 'Vestwell'), ('it2', 'tok2', 'E*TRADE Financial')")
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it', 'tok', 'Vestwell'), ('it2', 'tok2', 'E*TRADE from Morgan Stanley')")
         self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it"), ["Retirement Savings 401k"])
         self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it2"), ["Individual Brokerage"])
         hidden = dict(self.c.execute("SELECT id, hidden FROM inv_accounts").fetchall())

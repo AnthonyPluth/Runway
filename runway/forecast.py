@@ -14,6 +14,7 @@ cycles (for the cycle in progress, at least what's already been charged), and fl
 from __future__ import annotations
 
 import calendar
+from collections import defaultdict
 import statistics
 from datetime import date, timedelta
 
@@ -247,6 +248,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     warnings: list[str] = []
     card_status: list[dict] = []
 
+    rec_cats: set[str] = set()
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
@@ -255,6 +257,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         cat_row = conn.execute(
             "SELECT category FROM transactions WHERE recurring_id=? AND category IS NOT NULL "
             "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1", (item["id"],)).fetchone()
+        if cat_row:
+            rec_cats.add(cat_row["category"])
         for d in occurrences(item, today, end):
             if rec.already_happened(item, d, history, today):
                 continue  # this one already posted (possibly early), don't count it twice
@@ -338,6 +342,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i = min(range(len(series)), key=lambda k: series[k])
         return {"date": dates[i], "balance": series[i]}
 
+    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events, rec_cats)
+
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
     # Balance of the item's account right after it lands (same-day items apply in the order listed).
@@ -367,7 +373,109 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "events": events,
         "cards": card_status,
         "warnings": warnings,
+        "budget": scenario,
     }
+
+
+# ------------------------------------------------------------------------------------------------ sticking to the budget
+
+def budget_plan(conn, today: date) -> list[dict]:
+    """Each budget that counts (a parent's budget covers its subcategories), with what's been spent this month and the
+    account it's paid with: the one you chose, else the account used most for it over the last 90 days."""
+    from . import categories as catmod
+    cats = catmod.all_categories(conn)
+    by_name = {c["name"]: c for c in cats}
+    budgets = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
+    month_start = today.replace(day=1).isoformat()
+    since = (today - timedelta(days=90)).isoformat()
+    out = []
+    for name, b in budgets.items():
+        c = by_name.get(name)
+        if not c or c["is_transfer"] or c["is_income"] or any(p in budgets for p in c["path"][:-1]):
+            continue
+        names = [name] + [k["name"] for k in cats if name in k["path"][:-1]]
+        q = ",".join("?" * len(names))
+        base = (f"FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.category IN ({q}) AND a.hidden=0 "
+                "AND a.kind IN ('checking','savings','credit')")
+        spent = -(conn.execute(f"SELECT COALESCE(SUM(t.amount), 0) {base} AND t.posted>=? AND t.posted<=?",
+                               (*names, month_start, today.isoformat())).fetchone()[0] or 0.0)
+        usual = conn.execute(f"SELECT t.account_id, SUM(-t.amount) AS s {base} AND t.posted>? AND t.amount<0 "
+                             "GROUP BY t.account_id ORDER BY s DESC LIMIT 1", (*names, since)).fetchone()
+        out.append({"category": name, "amount": b["amount"], "names": names, "spent": round(max(0.0, spent), 2),
+                    "pay_with": b.get("pay_with"), "usual": usual["account_id"] if usual else None})
+    return out
+
+
+def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash: list[dict], by_id: dict,
+                    card_status: list[dict], events: list[dict], rec_cats: set[str]) -> dict | None:
+    """The forecast if you spend exactly your budgets: budgeted spending is charged day by day to each category's
+    account; spending on cards is paid on each card's due date. Recurring items and statements that have already closed
+    stay as they are; estimated future statements are replaced by the budgeted charges."""
+    plan = budget_plan(conn, today)
+    if not plan or not cash:
+        return None
+    cash_ids = {a["id"] for a in cash}
+    cards = {c["id"]: c for c in card_status}
+    spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))   # account -> date -> amount
+    used, skipped = [], []
+    for p in plan:
+        if set(p["names"]) & rec_cats:
+            skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
+            continue
+        acct = p["pay_with"] or p["usual"] or cash[0]["id"]
+        if acct not in cash_ids and acct not in cards:
+            skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
+            continue
+        for i in range(1, horizon_days + 1):
+            d = today + timedelta(days=i)
+            dim = calendar.monthrange(d.year, d.month)[1]
+            if (d.year, d.month) == (today.year, today.month):   # this month: whatever's left, over the days left
+                per_day = max(0.0, p["amount"] - p["spent"]) / (dim - today.day)
+            else:
+                per_day = p["amount"] / dim
+            spend[acct][d.isoformat()] += per_day
+        used.append({"category": p["category"], "amount": p["amount"], "account_id": acct,
+                     "account": by_id[acct]["display_name"] or by_id[acct]["name"], "chosen": bool(p["pay_with"])})
+
+    base = [e for e in events if not (e["kind"] == "card" and e.get("estimated"))]
+    extra: list[tuple[str, str, float]] = []   # (account, date, amount)
+    for acct, days in spend.items():
+        if acct in cash_ids:
+            extra += [(acct, d, -v) for d, v in days.items()]
+    # Each card's open statement (charges so far plus budgeted charges) and later ones, paid on their due dates.
+    for cid, info in cards.items():
+        card = by_id[cid]
+        payer = card["pay_from"]
+        if payer not in cash_ids:
+            continue
+        days = spend.get(cid, {})
+        prev = _d(info["last_close"])
+        close, first = next_after(prev, card["closing_day"]), True
+        while True:
+            due = next_after(close, card["due_day"])
+            if due.isoformat() > dates[-1]:
+                break
+            amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
+            if amt > 0.005:
+                extra.append((payer, due.isoformat(), -round(amt, 2)))
+            prev, close, first = close, next_after(close, card["closing_day"]), False
+
+    by_day: dict[tuple, float] = defaultdict(float)
+    for e in base:
+        by_day[(e["account_id"], e["date"])] += e["amount"]
+    for acct, d, v in extra:
+        by_day[(acct, d)] += v
+    total = [0.0] * len(dates)
+    for a in cash:
+        bal = a["balance"]
+        total[0] += bal
+        for i in range(1, len(dates)):
+            bal += by_day.get((a["id"], dates[i]), 0.0)
+            total[i] += bal
+    total = [round(v, 2) for v in total]
+    i = min(range(len(total)), key=lambda k: total[k])
+    return {"total": total, "low": {"date": dates[i], "balance": total[i]}, "used": used, "skipped": skipped,
+            "monthly": round(sum(u["amount"] for u in used), 2)}
 
 
 # ------------------------------------------------------------------------------------------------ suggestions
