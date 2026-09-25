@@ -210,12 +210,13 @@ async function renderOverview(el) {
   $$("#horizon button").forEach((b) => b.addEventListener("click", () => { horizon = Number(b.dataset.d); renderOverview(el); }));
   drawChart($("#chart"), fc);
   wireEvents(el);
+  wireCards(el);
   $("#show-all-events")?.addEventListener("click", () => { showAllEvents = true; renderOverview(el); });
 }
 
 // Click an upcoming amount to change just that one occurrence.
 function wireEvents(root) {
-  $$(".ev-amt", root).forEach((b) => b.addEventListener("click", () => {
+  $$(".ev-amt:not(.stmt-amt)", root).forEach((b) => b.addEventListener("click", () => {
     const td = b.closest("td");
     const cur = Number(b.dataset.amount);
     td.innerHTML = `<input type="number" step="0.01" class="ev-input" value="${Math.abs(cur).toFixed(2)}" style="width:110px" aria-label="Amount">`;
@@ -247,7 +248,7 @@ function eventsTable(events) {
   return `<p class="help" style="margin-top:-6px">Click an amount to change it for that date only.</p><table>
     <tr><th>Date</th><th>Item</th><th class="num">Amount</th><th class="num">Balance after</th></tr>${shown.map((e) => `<tr>
     <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
-    <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on recent spending" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
+    <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
     <td class="num">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>` : fmt(e.amount)}
       ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}" title="Go back to the usual amount">reset</button>` : ""}</td>
     <td class="num ${e.balance_after < 0 ? "neg-bal" : "muted"}">${e.balance_after < 0 ? "▲ " : ""}${fmt(e.balance_after)}</td></tr>`).join("")}</table>
@@ -256,12 +257,43 @@ function eventsTable(events) {
 
 function cardsTable(cards) {
   if (!cards.length) return `<div class="empty">Add statement dates for your cards in <a href="#setup/accounts">Settings → Accounts</a>.</div>`;
-  return `<table><tr><th>Card</th><th class="num">Owed now</th><th class="num">Last statement</th><th class="num">Left to pay</th><th class="num">Due</th></tr>
+  return `<table id="cards-table"><tr><th>Card</th><th class="num">Owed now</th><th class="num">Last statement</th><th class="num">Left to pay</th><th class="num">Due</th>
+      <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / statement</th></tr>
     ${cards.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.owed_now)}</td>
-      <td class="num" title="Closed ${fmtDate(c.last_close)}">${fmt(c.statement_balance)}</td>
+      <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
+          title="Closed ${fmtDate(c.last_close)} · click to enter the amount on your statement">${fmt(c.statement_balance)}</button>
+        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>
+          <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the calculated amount (${fmt(c.statement_calculated)})">reset</button>` : ""}</td>
       <td class="num">${c.remaining > 0 ? fmt(c.remaining) : `<span class="pos">Paid ✓</span>`}</td>
-      <td class="num muted">${fmtDate(c.due_date)}</td></tr>`).join("")}</table>
-    <p class="help">Statement balances are worked out from each card's transactions since its closing day.</p>`;
+      <td class="num muted">${fmtDate(c.due_date)}</td>
+      <td class="num muted" title="${c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}">${c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}</td></tr>`).join("")}</table>
+    <p class="help">Statement balances are worked out from each card's transactions since its closing day. If you know the real amount, click it to enter it;
+      it's used until the next statement closes. Future payments are forecast from each card's average over its last 3 statements.</p>`;
+}
+
+function wireCards(root) {
+  $$(".stmt-amt", root).forEach((b) => b.addEventListener("click", () => {
+    const td = b.closest("td");
+    const cur = Number(b.dataset.amount);
+    td.innerHTML = `<input type="number" step="0.01" min="0" class="ev-input" value="${cur.toFixed(2)}" style="width:110px" aria-label="Statement balance">`;
+    const input = $("input", td);
+    input.focus(); input.select();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      if (save && input.value !== "" && Number(input.value) !== cur) {
+        try { await api("/api/overrides", { method: "POST", body: { key: b.dataset.key, amount: Math.abs(Number(input.value)) } }); toast("Statement balance saved"); }
+        catch (err) { toast(err.message, true); }
+      }
+      route();
+    };
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+    input.addEventListener("blur", () => finish(true));
+  }));
+  $$(".stmt-reset", root).forEach((b) => b.addEventListener("click", async () => {
+    try { await api("/api/overrides", { method: "DELETE", body: { key: b.dataset.key } }); toast("Back to the calculated amount"); route(); }
+    catch (err) { toast(err.message, true); }
+  }));
 }
 
 function weeklyTable(fc) {
@@ -1091,10 +1123,6 @@ async function renderInvestments(el) {
       <div class="chart-wrap" id="inv-value"></div>
       <h3>Return vs S&amp;P 500</h3>
       <div class="chart-wrap" id="inv-return"></div>
-      <p class="help">${h.estimated_before ? `SimpleFIN reports what you hold, not your trades, so Runway saves your positions every sync and works out returns from price moves.
-        Changes in positions between syncs count as money added or withdrawn, not as gains. <b>Before ${fmtDate(h.estimated_before, { month: "short", day: "numeric", year: "numeric" })}</b> (shaded) the chart
-        assumes you held what you held that day, so treat it as an estimate. It fills in with real data as Runway keeps syncing.`
-        : "Rebuilt from your activity and daily prices, the way Ghostfolio does it. Returns are time-weighted, so deposits and withdrawals don't count as gains."}${h.missing_prices && h.missing_prices.length ? ` No price history for ${h.missing_prices.map(esc).join(", ")}; the latest known price is used for those.` : ""}</p>
       <div class="period-table scroll-x"><table><tr><th>Period</th>${Object.keys(d.periods).map((p) => `<th class="num">${p}</th>`).join("")}</tr>
         <tr><td>Your return</td>${Object.values(d.periods).map((p) => `<td class="num">${pct(p.return)}</td>`).join("")}</tr>
         <tr><td>S&amp;P 500</td>${Object.values(d.periods).map((p) => `<td class="num muted">${pct(p.benchmark_return)}</td>`).join("")}</tr>
@@ -1977,8 +2005,31 @@ async function saveAccount(tr, rerender) {
 }
 
 // ------------------------------------------------------------------------------------------ boot
+// Opening Runway (or coming back to its tab) syncs in the background when the data is more than an hour old;
+// the server decides, so this is cheap to call. When the sync finishes, the page redraws with the new data.
+let autoSyncWatch = null;
+async function syncOnVisit() {
+  try {
+    const r = await api("/api/sync/auto", { method: "POST" });
+    if (!r.started || autoSyncWatch) return;
+    $("#sync-status").textContent = "Syncing…";
+    const before = STATE.last_sync_ok;
+    autoSyncWatch = setInterval(async () => {
+      await refreshState();
+      if (STATE.syncing) return;
+      clearInterval(autoSyncWatch); autoSyncWatch = null;
+      if (STATE.last_sync_ok !== before && STATE.last_log?.ok) toast(`Synced · ${STATE.last_log.message}`);
+      const f = document.activeElement;
+      const busy = f && ["INPUT", "TEXTAREA", "SELECT"].includes(f.tagName) || document.querySelector(".cost-row, .tracked-editor");
+      if (!busy) route();
+    }, 3000);
+  } catch (err) { console.error(err); }
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncOnVisit(); });
+
 (async () => {
   await refreshState();
   route();
+  syncOnVisit();
   setInterval(refreshState, 60_000);
 })();
