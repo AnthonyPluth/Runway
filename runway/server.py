@@ -9,6 +9,7 @@ import json
 import mimetypes
 mimetypes.add_type("image/svg+xml", ".svg")
 mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 import sqlite3
 import os
 import threading
@@ -19,10 +20,14 @@ from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import oidc, sfinvest
-from . import networth, rentcast
+from . import networth, notify, rentcast, webpush
 from . import categories, categorize, db, forecast, plaid, portfolio, prices, recurring, simplefin
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
+# without cookies). None of them hold any data.
+PUBLIC_FILES = {"/app.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
+                "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 DAILY_SYNC_HOUR = 6          # the daily sync runs on the first check after this hour (local time)
 VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
 _sync_lock = threading.Lock()
@@ -128,11 +133,21 @@ def _sync_everything(bank: bool, invest: bool) -> None:
             run_sync()
         except ApiError:
             pass
+        notify_now()
     if invest:
         try:
             run_investment_sync()
         except ApiError:
             pass
+
+
+def notify_now() -> None:
+    """Send any new alerts to subscribed devices. Never lets a notification problem break a sync."""
+    try:
+        with db.session() as conn:
+            notify.run(conn)
+    except Exception:
+        traceback.print_exc()
 
 
 def sync_on_visit() -> dict:
@@ -203,6 +218,42 @@ def owner_choices(conn) -> list[str]:
         if n and n not in out and n != "Joint":
             out.append(n)
     return out
+
+
+def api_push(conn, _q, _b):
+    _priv, pub = webpush.vapid_keys(conn)
+    return {"public_key": pub, "prefs": notify.prefs(conn),
+            "devices": [{"endpoint": s["endpoint"], "device": s["device"], "created": s["created"], "last_ok": s["last_ok"],
+                         "last_error": s["last_error"]} for s in notify.subscriptions(conn)],
+            "recent": db.rows(conn.execute("SELECT title, sent FROM notify_log ORDER BY sent DESC LIMIT 8"))}
+
+
+def api_push_subscribe(conn, _q, body):
+    try:
+        notify.subscribe(conn, body.get("subscription") or {}, str(body.get("device") or ""), (getattr(_current, "user", None) or {}).get("sub"))
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
+def api_push_unsubscribe(conn, _q, body):
+    notify.unsubscribe(conn, str(body.get("endpoint") or ""))
+    return {"ok": True}
+
+
+def api_push_prefs(conn, _q, body):
+    try:
+        return notify.save_prefs(conn, body)
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
+def api_push_test(conn, _q, body):
+    r = notify.send_all(conn, {"title": "Runway notifications are on", "body": "You'll hear about card payments, low balances and missed bills here.",
+                               "url": "/#overview", "tag": "test"}, only=body.get("endpoint") or None)
+    if not r["sent"]:
+        raise ApiError("Nothing was delivered. " + ("; ".join(r["failed"]) if r["failed"] else "No device is subscribed."))
+    return r
 
 
 def api_overview(conn, q, _b):
@@ -931,6 +982,11 @@ ROUTES = [
     ("POST", "/api/transactions/{id}/recurring", api_tx_recurring),
     ("POST", "/api/overrides", api_override_set),
     ("DELETE", "/api/overrides", api_override_delete),
+    ("GET", "/api/push", api_push),
+    ("POST", "/api/push/subscribe", api_push_subscribe),
+    ("POST", "/api/push/unsubscribe", api_push_unsubscribe),
+    ("POST", "/api/push/prefs", api_push_prefs),
+    ("POST", "/api/push/test", api_push_test),
     ("GET", "/api/budget", api_budget),
     ("POST", "/api/budget", api_budget_set),
     ("POST", "/api/ai/suggest", api_ai_suggest),
@@ -1088,7 +1144,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
         # The look of the sign-in pages is public; everything else needs you signed in.
-        if url.path not in ("/app.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2"):
+        if url.path not in PUBLIC_FILES:
             self.user = self._user()
             if not self.user:
                 if url.path.startswith("/api/"):
