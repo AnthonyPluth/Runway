@@ -230,8 +230,8 @@ async function renderOverview(el) {
     ${fc.budget ? `<div class="chart-legend"><span><i class="lg-line"></i>Forecast</span><span><i class="lg-line lg-budget"></i>If you stick to your budget
       · low ${fmt0(fc.budget.low.balance)} on ${fmtDate(fc.budget.low.date)}</span></div>` : ""}
     <div class="chart-wrap" id="chart"></div>
-    ${fc.budget ? `<p class="help" style="margin-top:12px">The dashed line spends exactly your budgets (${fmt0(fc.budget.monthly)} a month) on the card or account set under
-      <a href="#budget">Budget → Paid with</a>, paying cards on their due dates, instead of the usual estimate of future card statements.
+    ${fc.budget ? `<p class="help" style="margin-top:12px">The dashed line spends exactly your budgets (${fmt0(fc.budget.monthly)} a month) on the card you usually use for each
+      (<a href="#budget">change it on the Budget page</a>), paying cards on their due dates, instead of the usual estimate of future card statements.
       Spending in categories without a budget isn't included.${fc.budget.skipped.length ? ` Left out: ${fc.budget.skipped.map((k) => `${esc(k.category)} (${esc(k.reason)})`).join(", ")}.` : ""}</p>` : ""}
     <p class="help" style="margin-top:12px">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
       ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
@@ -876,13 +876,18 @@ async function renderBudget(el) {
     : pace > 0 && pace < 1 && c.spent > c.budget * pace * 1.1
       ? `<span class="muted">${fmt(c.left)} left · ahead of pace</span>` : `<span class="muted">${fmt(c.left)} left</span>`;
   const acctName = (id) => (b.pay_accounts.find((x) => x.id === id) || {}).name;
+  // Which card a budget is paid with: out of the way until you want to change it.
   const payWith = (c) => {
     if (c.budget == null || !countsToward(c)) return "";
+    const chosen = c.pay_with && acctName(c.pay_with);
+    return `<button type="button" class="pay-btn ${chosen ? "" : "unset"}" title="Which card or account this spending goes on (used by the budget forecast)">${chosen ? esc(chosen) : "Set card"}</button>`;
+  };
+  const paySelect = (c) => {
     const usual = c.usual_account && acctName(c.usual_account);
     const opts = (kind) => b.pay_accounts.filter((x) => (kind === "credit") === (x.kind === "credit"))
       .map((x) => `<option value="${esc(x.id)}" ${x.id === c.pay_with ? "selected" : ""}>${esc(x.name)}</option>`).join("");
     return `<select class="b-pay" aria-label="Account ${esc(c.name)} is paid with">
-      <option value="">${usual ? `Usually ${esc(usual)}` : "Choose…"}</option>
+      <option value="">${usual ? `Automatic (usually ${esc(usual)})` : "Automatic"}</option>
       <optgroup label="Cards">${opts("credit")}</optgroup><optgroup label="Bank accounts">${opts("cash")}</optgroup></select>`;
   };
   const row = (c, sub, budgets, last) => `<tr data-cat="${esc(c.name)}" class="${sub ? `sub-row${last ? " last-sub" : ""}` : "parent-row"}">
@@ -904,11 +909,11 @@ async function renderBudget(el) {
         <div class="sub">${b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget"}</div></div>
     </div>
     <div class="card"><h2>Budgets</h2>
-      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><thead><tr><th>Category</th><th class="num">Monthly budget</th><th title="Which card or account this spending usually goes on; the budget forecast on Overview uses it">Paid with</th><th class="num">Spent</th><th style="width:28%">Progress</th><th></th></tr></thead>
+      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><thead><tr><th>Category</th><th class="num">Monthly budget</th><th class="pay-col"><span class="sr-only">Paid with</span></th><th class="num">Spent</th><th style="width:28%">Progress</th><th></th></tr></thead>
         ${inBudget.map((f) => familyRows(f, true)).join("")}</table></div>
         ${pace > 0 && pace < 1 ? `<p class="help">The thin line in each bar marks where you'd be if you spent evenly through the month (day ${b.day} of ${b.days_in_month}).
           A category's budget covers everything under it; you can also budget a subcategory on its own.</p>` : ""}
-        <p class="help">“Paid with” is the card or account each budget's spending usually goes on. The Overview uses it to project your balance if you stick to your budget.</p>`
+        <p class="help">The budget forecast on the Overview charts each budget to the card you usually use for it; use “Set card” on a row to pick a different one.</p>`
       : `<div class="empty">No budgets yet. Set one for any category below. Budgets repeat every month.</div>`}
     </div>
     <div class="card"><h2>Not budgeted</h2>
@@ -926,9 +931,24 @@ async function renderBudget(el) {
     catch (err) { toast(err.message, true); }
   };
   $$("tr[data-cat] .b-amt").forEach((input) => input.addEventListener("change", () => saveBudget(input.closest("tr").dataset.cat, input.value)));
-  $$("tr[data-cat] .b-pay").forEach((sel) => sel.addEventListener("change", async () => {
-    try { await api("/api/budget", { method: "POST", body: { category: sel.closest("tr").dataset.cat, pay_with: sel.value } }); markSaved(sel); }
-    catch (err) { toast(err.message, true); }
+  $$("tr[data-cat] .pay-btn").forEach((btn) => btn.addEventListener("click", () => {
+    const cat = btn.closest("tr").dataset.cat, c = b.categories.find((x) => x.name === cat);
+    const cell = btn.parentElement;
+    cell.innerHTML = paySelect(c);
+    const sel = $("select", cell);
+    sel.focus();
+    let done = false;
+    const finish = async (save) => {
+      if (done) return; done = true;
+      if (save && sel.value !== (c.pay_with || "")) {
+        try { await api("/api/budget", { method: "POST", body: { category: cat, pay_with: sel.value } }); toast("Saved"); }
+        catch (err) { toast(err.message, true); }
+      }
+      renderBudget(el);
+    };
+    sel.addEventListener("change", () => finish(true));
+    sel.addEventListener("blur", () => finish(true));
+    sel.addEventListener("keydown", (e) => { if (e.key === "Escape") finish(false); });
   }));
   $("#b-new-amt")?.addEventListener("change", () => { const c = $("#b-new-cat").value; if (c) saveBudget(c, $("#b-new-amt").value); else toast("Choose a category first", true); });
   // The category name and the Spent amount both open Transactions showing exactly what adds up to that number.
