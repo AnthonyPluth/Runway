@@ -440,3 +440,10 @@ td.due-soon { color: var(--low); font-weight: 500; }
 .lg-line { display: inline-block; width: 16px; height: 0; border-top: 2px solid var(--accent); }
 .lg-line.lg-budget { border-top: 2px dashed var(--good); }
 .tooltip .tt-budget { color: var(--good-ink); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.budget-table .pay-col { width: 1%; }
+.pay-btn { border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--text-3); padding: 3px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.pay-btn:hover, .pay-btn:focus-visible { color: var(--text); background: var(--surface-2); }
+.pay-btn.unset { opacity: 0; }
+tbody.family:hover .pay-btn.unset, .pay-btn.unset:focus-visible { opacity: 1; }
+@media (hover: none) { .pay-btn.unset { opacity: 1; } }
