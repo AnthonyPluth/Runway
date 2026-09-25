@@ -19,7 +19,9 @@ Note the issuer URL, client ID and client secret.
 ## Where the image comes from
 
 Every push to `main` runs the tests and publishes `ghcr.io/anthonypluth/runway:latest` (Intel/AMD and ARM) through
-GitHub Actions (`.github/workflows/docker.yml`). Only the latest image is kept.
+GitHub Actions (`.github/workflows/docker.yml`), tagged `latest` and with its version (`1.2.3`, `v1.2.3`, `1.2`, `1`).
+To stay on a version instead of always taking the newest, set `image: ghcr.io/anthonypluth/runway:1.2` (or `:1.2.3`)
+in `docker-compose.yml`; every released version stays in the registry.
 
 Each of those pushes is also a release: it gets the next version tag (`v1.0.0`, `v1.0.1`, …) and a GitHub Release with
 notes listing what changed. Every push bumps the last number; put `#minor` in a commit message (or start it with
@@ -66,11 +68,14 @@ using its built-in database in `./data`.
 ## Everyday
 
 - Update to the newest image: `docker compose pull && docker compose up -d`
-  (or let Watchtower do it automatically)
+  (or let Watchtower do it automatically). If you pinned a version, change the tag first.
 - Stop: `docker compose down` (data stays in `./data`)
 - Back up: Settings → Backup → Download a backup (works for either database)
 
 ## Notes
+
+- Installing Runway on an iPhone and push notifications both need `RUNWAY_PUBLIC_URL` to be `https://`. Notifications
+  go out through Apple's, Google's or Mozilla's push service, so the server needs outbound HTTPS to them.
 
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
 - Sessions last 14 days (`RUNWAY_SESSION_DAYS`). Signing out ends the Runway session and your provider session.

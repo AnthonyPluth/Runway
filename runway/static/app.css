@@ -370,9 +370,9 @@ a.btn { text-decoration: none; display: inline-block; }
 
 /* ---------------------------------------------------------------- overview */
 .hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; margin: 4px 0 28px; }
-.hero-text { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
+.hero-text { display: flex; flex-direction: column; gap: 12px; max-width: min(900px, 100%); }
 .eyebrow { font-size: 12.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
-.headline { margin: 0; font-size: 36px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; color: var(--text-strong); }
+.headline { margin: 0; font-size: 36px; line-height: 1.15; font-weight: 600; letter-spacing: -0.025em; color: var(--text-strong); text-wrap: balance; }
 .headline .hl { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
 .headline .hl-bad { color: var(--critical); font-weight: 700; font-variant-numeric: tabular-nums; }
 .lede { margin: 0; font-size: 15px; line-height: 1.55; color: var(--text-2); }
@@ -447,3 +447,19 @@ td.due-soon { color: var(--low); font-weight: 500; }
 .pay-btn.unset { opacity: 0; }
 tbody.family:hover .pay-btn.unset, .pay-btn.unset:focus-visible { opacity: 1; }
 @media (hover: none) { .pay-btn.unset { opacity: 1; } }
+
+/* Installed on a phone: keep clear of the notch and the home indicator */
+@supports (padding: env(safe-area-inset-top)) {
+  @media (max-width: 860px) {
+    .sidebar { padding-top: calc(10px + env(safe-area-inset-top)); padding-left: calc(14px + env(safe-area-inset-left)); padding-right: calc(14px + env(safe-area-inset-right)); }
+    main { padding-bottom: calc(40px + env(safe-area-inset-bottom)); padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+  }
+  .sidebar { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+  #toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
+}
+@media (display-mode: standalone) { body { overscroll-behavior-y: none; } }
+.steps { margin: 8px 0 4px; padding-left: 22px; line-height: 1.7; }
+.notif-rule { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid var(--line); }
+.notif-rule:first-of-type { border-top: 0; }
+.n-num input { width: 84px; padding: 4px 8px; }
+.n-num { color: var(--text-3); }

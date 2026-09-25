@@ -185,12 +185,13 @@ async function renderOverview(el) {
     const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((x, y) => x.amount - y.amount);
     const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date);
     const when = low.date === fc.today ? "today" : relDay(low.date, fc.today);
+    const nb = (t) => t.replace(/ /g, "\u00a0");   // keep "Dec 21" and "90 days" on one line
     headline = lowBad
-      ? `Heads up. ${what} dips to <span class="hl-bad">${fmt0(low.balance)}</span> ${when === "today" ? "today" : "on " + when}.`
-      : `You’re on track. ${what} stays above <span class="hl">${fmt0(low.balance)}</span> for the next ${span}.`;
+      ? `Heads up. ${what} dips to <span class="hl-bad">${fmt0(low.balance)}</span> ${nb(when === "today" ? "today" : "on " + when)}.`
+      : `You’re on track. ${what} stays above <span class="hl">${fmt0(low.balance)}</span> for the next ${nb(span)}.`;
     lede = [
       low.date === fc.today ? "Today is the tightest point in the forecast."
-        : `The tightest moment is ${when}${lowEvents.length ? `, when ${esc(lowEvents[0].name.replace(/ statement$/, ""))}${lowEvents[0].kind === "card" ? "’s payment" : ""} goes out` : ""}.`,
+        : `The tightest moment is ${when}${lowEvents.length ? `, when ${lowEvents[0].kind === "card" ? `the ${esc(lowEvents[0].name.replace(/ statement$/, ""))} payment` : esc(lowEvents[0].name)} goes out` : ""}.`,
       nextIn ? `Next money in: ${esc(nextIn.name)}, ${fmt0(nextIn.amount)} on ${relDay(nextIn.date, fc.today)}.` : "",
     ].filter(Boolean).join(" ");
   }
@@ -1808,6 +1809,107 @@ function ownerOptions(sel) {
   return `<option value="">—</option>${names.map((n) => `<option ${n === sel ? "selected" : ""}>${esc(n)}</option>`).join("")}
     <option ${sel === "Joint" ? "selected" : ""}>Joint</option>`;
 }
+// ------------------------------------------------------------------------------------------ notifications
+const b64uToBytes = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (t.length % 4)) % 4)), (c) => c.charCodeAt(0));
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isInstalled = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function deviceName() {
+  const ua = navigator.userAgent;
+  const dev = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) || isIOS() ? "iPad" : /Android/.test(ua) ? "Android" : /Mac/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : "Computer";
+  const br = isInstalled() ? "app" : /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "browser";
+  return `${dev} · ${br}`;
+}
+
+async function renderNotifications(box) {
+  const d = await api("/api/push");
+  const p = d.prefs;
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  let reg = null, sub = null;
+  if (supported && window.isSecureContext) {
+    try { reg = await navigator.serviceWorker.register("/sw.js"); sub = await reg.pushManager.getSubscription(); } catch (e) { console.warn(e); }
+  }
+  const mine = sub && d.devices.find((x) => x.endpoint === sub.endpoint);
+  let status;
+  if (!window.isSecureContext) {
+    status = `<p>Notifications need Runway to be opened over <b>https://</b> (your <code>RUNWAY_PUBLIC_URL</code>). They can't be turned on from this address.</p>`;
+  } else if (isIOS() && !isInstalled()) {
+    status = `<p>On iPhone and iPad, notifications work once Runway is on your Home Screen (iOS 16.4 or later):</p>
+      <ol class="steps"><li>Tap the <b>Share</b> button <span class="muted">(the square with an arrow)</span> in Safari.</li>
+        <li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+        <li>Open Runway from the new icon, come back to <b>Settings → Notifications</b> and turn them on.</li></ol>`;
+  } else if (!supported) {
+    status = `<p>This browser can't receive notifications. On iPhone, add Runway to the Home Screen from Safari; on a computer, use a current Chrome, Edge, Firefox or Safari.</p>`;
+  } else if (Notification.permission === "denied") {
+    status = `<p>Notifications are blocked for Runway on this device. ${isIOS() ? "Turn them on in the iPhone's <b>Settings → Notifications → Runway</b>" : "Allow them in your browser's site settings for this address"}, then come back here.</p>`;
+  } else if (mine) {
+    status = `<p><span class="sync-dot" style="display:inline-block;margin-right:6px"></span><b>On for this device</b> (${esc(mine.device)}).</p>
+      <div class="form-row"><button class="btn primary" id="n-test">Send a test notification</button><button class="btn" id="n-off">Turn off on this device</button></div>`;
+  } else {
+    status = `<p>Get a notification on this ${isIOS() ? (/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone") : "device"} when something needs your attention.</p>
+      <div class="form-row"><button class="btn primary" id="n-on">Turn on notifications</button></div>`;
+  }
+  const toggle = (k, label, extra = "") => `<div class="notif-rule"><label class="inline"><input type="checkbox" class="n-pref" data-k="${k}" ${p[k] ? "checked" : ""}> ${label}</label>${extra}</div>`;
+  const num = (k, pre, post, step) => `<label class="inline n-num">${pre}<input type="number" min="0" step="${step}" class="n-pref" data-k="${k}" value="${p[k]}">${post}</label>`;
+  box.innerHTML = `<div class="card"><h2>This device</h2>${status}</div>
+    <div class="card"><h2>What to tell you about</h2>
+      <p class="help">Checked after each sync (once a day, and whenever you open Runway). Each alert is sent once.</p>
+      ${toggle("card_due", "A card payment is coming up", num("card_due_days", "", " days ahead", 1))}
+      ${toggle("low_balance", "The forecast gets low in the next 30 days", num("low_balance_below", "below $", "", 50))}
+      ${toggle("missed", "A recurring payment didn't show up")}
+      ${toggle("big_charge", "A large charge posts", num("big_charge_over", "over $", "", 50))}
+      ${toggle("review", "Transactions are waiting for a category (at most once a day)")}
+      ${toggle("sync_failed", "Syncing with your bank has been failing for a day")}
+    </div>
+    <div class="card"><h2>Devices</h2>
+      ${d.devices.length ? `<table><tr><th>Device</th><th>Added</th><th>Last delivered</th><th></th></tr>${d.devices.map((x) => `<tr data-ep="${esc(x.endpoint)}">
+        <td>${esc(x.device || "Device")}${sub && x.endpoint === sub.endpoint ? ` <span class="tag">this one</span>` : ""}
+          ${x.last_error ? `<div class="desc" style="color:var(--critical)">${esc(x.last_error)}</div>` : ""}</td>
+        <td class="muted">${x.created ? new Date(x.created * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}</td>
+        <td class="muted">${x.last_ok ? new Date(x.last_ok * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}</td>
+        <td class="num"><button class="btn link n-remove">Remove</button></td></tr>`).join("")}</table>`
+        : `<div class="empty">No devices yet. Turn notifications on from each phone or computer you want them on.</div>`}
+    </div>
+    ${d.recent.length ? `<div class="card"><h2>Recently sent</h2><table>${d.recent.map((r) => `<tr><td>${esc(r.title)}</td>
+      <td class="num muted">${new Date(r.sent * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td></tr>`).join("")}</table></div>` : ""}`;
+
+  $("#n-on")?.addEventListener("click", async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      // iOS only allows the permission prompt straight from a tap, so ask before anything else.
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") throw new Error(perm === "denied" ? "Notifications were blocked." : "Notifications weren't allowed.");
+      reg = reg || (await navigator.serviceWorker.register("/sw.js"));
+      await navigator.serviceWorker.ready;
+      const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(d.public_key) });
+      await api("/api/push/subscribe", { method: "POST", body: { subscription: s.toJSON(), device: deviceName() } });
+      toast("Notifications are on");
+      await api("/api/push/test", { method: "POST", body: { endpoint: s.endpoint } }).catch(() => {});
+    } catch (err) { toast(err.message, true); }
+    renderNotifications(box);
+  });
+  $("#n-test")?.addEventListener("click", async () => {
+    try { await api("/api/push/test", { method: "POST", body: { endpoint: sub.endpoint } }); toast("Sent. It should arrive in a few seconds."); }
+    catch (err) { toast(err.message, true); }
+    renderNotifications(box);
+  });
+  $("#n-off")?.addEventListener("click", async () => {
+    try { await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); toast("Notifications are off on this device"); }
+    catch (err) { toast(err.message, true); }
+    renderNotifications(box);
+  });
+  $$(".n-remove", box).forEach((b) => b.addEventListener("click", async (e) => {
+    if (!confirmInline(e.currentTarget, "Remove?")) return;
+    const ep = b.closest("tr").dataset.ep;
+    await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: ep } });
+    if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => {});
+    renderNotifications(box);
+  }));
+  onEdit($$(".n-pref", box), async (f) => {
+    await api("/api/push/prefs", { method: "POST", body: { [f.dataset.k]: f.type === "checkbox" ? f.checked : f.value } });
+  });
+}
+
 let SETUP_SECTION = "";
 async function renderSetup(el, sub) {
   SETUP_SECTION = sub || SETUP_SECTION;
@@ -1923,6 +2025,7 @@ async function renderSetup(el, sub) {
     <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
 ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
   </div>` },
+    notifications: { label: "Notifications", html: () => `<div id="notif-box"><div class="card empty">Loading…</div></div>` },
     backup: { label: "Backup", html: () => `<div class="card"><h2>Backup &amp; restore</h2>
     <p class="help">A backup is one file with all your data and settings. It works with either database, so it's also how you move
       Runway to another machine, or from its built-in database to Postgres. Currently using: <b>${STATE.database === "postgres" ? "Postgres" : "the built-in database (SQLite)"}</b>.
@@ -1943,6 +2046,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     ? ` · <a href="https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(STATE.version)}" target="_blank" rel="noopener">what's new</a>` : ""}</p>`;
 
   wireConnect();
+  if (section === "notifications") renderNotifications($("#notif-box"));
   $("#restore-file")?.addEventListener("change", (e) => { $("#restore-go").disabled = !e.target.files.length; });
   $("#restore-go")?.addEventListener("click", async (e) => {
     const file = $("#restore-file").files[0];
@@ -2133,6 +2237,11 @@ async function syncOnVisit() {
   } catch (err) { console.error(err); }
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncOnVisit(); });
+
+// Installable app: the service worker shows notifications and keeps the app's shell for offline starts.
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("Service worker:", err));
+}
 
 (async () => {
   await refreshState();

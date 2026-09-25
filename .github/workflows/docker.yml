@@ -1,8 +1,8 @@
 name: Docker image
 
 # Every push to main: run the tests, tag the next version (v1.2.3) and publish a GitHub Release for it, build the image
-# for Intel/AMD and ARM with that version baked in, publish it to GitHub Container Registry as
-# ghcr.io/<owner>/runway:latest, then delete older images so only the latest is kept.
+# for Intel/AMD and ARM with that version baked in, and publish it to GitHub Container Registry as
+# ghcr.io/<owner>/runway:latest plus :1.2.3, :v1.2.3, :1.2 and :1 (so you can pin a version), then delete untagged leftovers.
 #
 # Versions: each push bumps the patch number (v1.0.0 -> v1.0.1). Put "#minor" in a commit message (or start it with
 # "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
@@ -102,13 +102,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Image tags (latest, 1.2.3, v1.2.3, 1.2 and 1)
+        id: tags
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          v="${VERSION#v}"
+          IFS=. read -r major minor patch <<< "$v"
+          {
+            echo "list<<EOF"
+            echo "$IMAGE:latest"
+            echo "$IMAGE:$v"
+            echo "$IMAGE:v$v"
+            echo "$IMAGE:$major.$minor"
+            echo "$IMAGE:$major"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.IMAGE }}:latest
+          tags: ${{ steps.tags.outputs.list }}
           build-args: |
             VERSION=${{ needs.version.outputs.version }}
           labels: |
@@ -118,9 +135,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Delete older image versions (keep only latest)
+      - name: Delete untagged leftovers (every released version stays pullable)
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
           package: runway
-          delete-untagged: true      # understands multi-architecture images, so latest stays intact
+          delete-untagged: true      # understands multi-architecture images, so tagged versions stay intact
           token: ${{ secrets.GITHUB_TOKEN }}

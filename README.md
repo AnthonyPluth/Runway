@@ -27,6 +27,7 @@
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Quick start](#quick-start)
+- [On your phone](#on-your-phone)
 - [Running on a server](#running-on-a-server)
 - [Configuration](#configuration)
 - [Backups, migration and Postgres](#backups-migration-and-postgres)
@@ -88,7 +89,9 @@ plain Python with no third-party packages.
 ### Everyday
 - **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old.
 - **Autosave everywhere:** there are no Save buttons.
-- Dark interface that works on a phone as well as a desktop.
+- Dark interface that works on a phone as well as a desktop, and **installs as an app** on your iPhone's Home Screen.
+- **Push notifications** on your phone or computer: a card payment coming up, the forecast getting low, a recurring
+  payment that didn't show up, a large charge, or syncing that keeps failing. Each alert is sent once.
 - **Backups** as a single file, restorable into either database.
 
 ## Screenshots
@@ -122,6 +125,17 @@ Open <http://localhost:8765>, then:
    (home values) under **Settings → Connections**.
 
 Your data is stored in `data/runway.db` next to the code.
+
+## On your phone
+
+Open Runway in Safari on your iPhone, tap **Share → Add to Home Screen**, and open it from the new icon: it runs full
+screen like an app. To get notifications (iOS 16.4 or later), go to **Settings → Notifications** inside the installed
+app and tap **Turn on notifications**. On a computer, the same button works in Chrome, Edge, Firefox or Safari.
+Notifications need Runway to be served over `https://`.
+
+Notifications are sent with Web Push. Runway signs and encrypts them itself (VAPID and RFC 8291, implemented in
+[`runway/webpush.py`](runway/webpush.py) and checked against the RFC's published test vectors), so no third-party
+notification service or account is involved.
 
 ## Running on a server
 
@@ -226,8 +240,9 @@ DATABASE_URL=postgresql://... python3 -m unittest discover tests   # the same te
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
 | `runway/networth.py`, `rentcast.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
+| `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/db.py`, `pg.py`, `backup.py` | Schema, SQLite/Postgres layer, backups |
-| `runway/static/` | The web app: `index.html`, `app.js`, `app.css`, fonts and logo |
+| `runway/static/` | The web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `data/` | Your database (not in Git) |
 
@@ -237,8 +252,9 @@ Every push to `main` runs the tests, then GitHub Actions:
 
 1. tags the next version and publishes a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases) with notes;
 2. builds the image for `linux/amd64` and `linux/arm64` with that version baked in, and pushes it as
-   `ghcr.io/anthonypluth/runway:latest`;
-3. removes older images, so only the latest is kept.
+   `ghcr.io/anthonypluth/runway` tagged `latest`, `1.2.3` (and `v1.2.3`), `1.2` and `1`;
+3. deletes untagged leftovers. Every released version stays available, so you can pin one
+   (`image: ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose.
 
 Versions follow `vMAJOR.MINOR.PATCH`. Each push bumps the patch number; put `#minor` in a commit message (or start it
 with `feat:`) to bump the minor version, or `#major` (or `BREAKING CHANGE`) for a major one. The running version is

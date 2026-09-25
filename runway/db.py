@@ -174,6 +174,23 @@ CREATE TABLE IF NOT EXISTS auth_sessions (       -- signed-in browsers (only a h
     id_token   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS push_subscriptions (  -- devices that get notifications
+    endpoint   TEXT PRIMARY KEY,
+    p256dh     TEXT NOT NULL,
+    auth       TEXT NOT NULL,
+    device     TEXT,
+    user_sub   TEXT,
+    created    REAL,
+    last_ok    REAL,
+    last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS notify_log (         -- alerts already sent, so each is sent once
+    key   TEXT PRIMARY KEY,
+    sent  REAL,
+    title TEXT
+);
+
 CREATE TABLE IF NOT EXISTS users (              -- people who have signed in (for account owners)
     sub        TEXT PRIMARY KEY,
     email      TEXT,

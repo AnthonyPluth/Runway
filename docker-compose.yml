@@ -2,7 +2,7 @@
 # Open:    the RUNWAY_PUBLIC_URL you set in .env, and sign in with your identity provider.
 services:
   runway:
-    image: ghcr.io/anthonypluth/runway:latest   # built by GitHub Actions on every push to main
+    image: ghcr.io/anthonypluth/runway:latest   # or pin a version: :1.2.3, :1.2 or :1 (see Releases on GitHub)
     # build: .                                  # or build it yourself from this folder instead
     container_name: runway
     restart: unless-stopped
