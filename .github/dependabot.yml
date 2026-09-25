@@ -1,0 +1,24 @@
+# Dependabot keeps the build's moving parts up to date with weekly pull requests.
+# Runway itself uses only the Python standard library, so there's no requirements file to watch.
+version: 2
+updates:
+  # Actions used by .github/workflows/docker.yml (checkout, setup-python, Docker build, ghcr cleanup)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  # The python:3.12-slim base image in the Dockerfile
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: docker
