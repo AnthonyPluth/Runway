@@ -11,6 +11,14 @@ const fmt0 = (n) => money0.format(n ?? 0);
 const parseDate = (s) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); };
 const fmtDate = (s, opts = { month: "short", day: "numeric" }) => parseDate(s).toLocaleDateString("en-US", opts);
 const fmtDow = (s) => fmtDate(s, { weekday: "short", month: "short", day: "numeric" });
+// "tomorrow", "Monday" (within a week) or "Oct 12"
+const relDay = (s, today) => {
+  const days = Math.round((parseDate(s) - parseDate(today)) / 864e5);
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days > 1 && days < 7) return parseDate(s).toLocaleDateString("en-US", { weekday: "long" });
+  return fmtDate(s);
+};
 
 async function api(path, opts = {}) {
   const init = { method: opts.method || "GET", headers: {} };
@@ -74,32 +82,29 @@ let STATE = {};
 async function refreshState() {
   STATE = await api("/api/state");
   $$("#review-badge, .review-count").forEach((b) => { b.hidden = !STATE.review_count; b.textContent = STATE.review_count || ""; });
-  const s = $("#sync-status");
-  if (STATE.syncing) s.textContent = "Syncing…";
-  else if (STATE.last_log && !STATE.last_log.ok) s.innerHTML = `<span style="color:var(--critical)">▲ Last sync failed</span>`;
-  else if (STATE.last_sync_ok) s.textContent = "Synced " + new Date(STATE.last_sync_ok).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  else s.textContent = STATE.connected ? "Not synced yet" : "Bank not connected";
-  $("#sync-btn").hidden = !STATE.connected;
-  const u = STATE.user, box = $("#user-box");
-  if (box && u && !u.local) {
-    box.hidden = false;
-    box.innerHTML = `<span class="muted" title="${esc(u.email || "")}">${esc(u.name || u.email || "Signed in")}</span> <a href="/auth/logout">Sign out</a>`;
+  showSyncStatus();
+  const u = STATE.user;
+  if (u && !u.local) {
+    const name = u.name || u.email || "Signed in";
+    $("#account-name").textContent = name; $("#account-name").title = u.email || ""; $("#account-name").hidden = false;
+    $("#avatar").textContent = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+    $("#avatar").hidden = false; $("#sign-out").hidden = false;
   }
 }
 
-$("#sync-btn").addEventListener("click", async (e) => {
-  const b = e.currentTarget;
-  b.disabled = true;
-  $("#sync-status").textContent = "Syncing…";
-  try {
-    const r = await api("/api/sync", { method: "POST" });
-    toast(`${r.new} new transaction${r.new === 1 ? "" : "s"}` + (r.categorized.review ? ` · ${r.categorized.review} to review` : ""));
-    if (r.bank_messages && r.bank_messages.length) toast("Bank messages: " + r.bank_messages.join("; "), true);
-  } catch (err) { toast(err.message, true); }
-  b.disabled = false;
-  await refreshState();
-  route();
-});
+// Sync runs on its own (daily, and when you open Runway), so the sidebar just says how fresh the data is.
+function showSyncStatus() {
+  const s = $("#sync-status"), dot = $("#sync-dot");
+  dot.className = "sync-dot";
+  if (STATE.syncing) { s.textContent = "Syncing…"; dot.classList.add("busy"); }
+  else if (STATE.last_log && !STATE.last_log.ok) { s.textContent = "Last sync failed"; s.title = STATE.last_log.message || ""; dot.classList.add("bad"); }
+  else if (STATE.last_sync_ok) {
+    const t = new Date(STATE.last_sync_ok), today = new Date().toDateString() === t.toDateString();
+    s.textContent = "Up to date · " + (today ? t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      : t.toLocaleDateString("en-US", { month: "short", day: "numeric" }));
+    s.title = "Last synced " + t.toLocaleString();
+  } else { s.textContent = STATE.connected ? "Not synced yet" : "Bank not connected"; dot.classList.add(STATE.connected ? "busy" : "bad"); }
+}
 
 // ------------------------------------------------------------------------------------------ router
 const PAGES = { overview: renderOverview, budget: renderBudget, reports: renderReports, investments: renderInvestments, networth: renderNetWorth, review: renderReview, transactions: renderTransactions,
@@ -110,6 +115,8 @@ async function route() {
   if (!PAGES[page]) page = "overview";
   const navPage = page === "review" ? "transactions" : page;   // Review is a tab of Transactions
   $$("[data-page]").forEach((a) => a.classList.toggle("active", a.dataset.page === navPage));
+  const on = $(`.nav a[data-page="${navPage}"]`);
+  if (on && window.innerWidth <= 860) on.scrollIntoView({ block: "nearest", inline: "center" });
   try { await PAGES[page]($("#app"), sub); } catch (err) { console.error(err); $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
 }
 window.addEventListener("hashchange", route);
@@ -162,10 +169,31 @@ async function renderOverview(el) {
   horizon = horizon || STATE.horizon_days || 90;
   const fc = await api(`/api/overview?days=${horizon}`);
   const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0);
-  const in30 = fc.events.filter((e) => e.kind === "card" && (parseDate(e.date) - parseDate(fc.today)) / 864e5 <= 30);
-  const cardDue30 = -in30.reduce((s, e) => s + e.amount, 0);
   const low = fc.low;
   const lowBad = low && low.balance < 0;
+  const end = fc.total.length ? fc.total[fc.total.length - 1] : cashNow;
+  const lastDate = fc.dates[fc.dates.length - 1];
+  const owed = fc.cards.reduce((s, c) => s + (c.owed_now || 0), 0);
+  const nextDue = fc.cards.filter((c) => c.remaining > 0 && c.due_date >= fc.today).sort((x, y) => x.due_date.localeCompare(y.due_date))[0];
+  const allChecking = fc.accounts.length && fc.accounts.every((a) => a.kind === "checking");
+  const what = fc.accounts.length === 1 ? (allChecking ? "Checking" : esc(fc.accounts[0].name)) : "Your cash";
+  const span = horizon === 180 ? "6 months" : `${horizon} days`;
+
+  // The headline: where the balance bottoms out, and why.
+  let headline = "", lede = "";
+  if (low && fc.accounts.length) {
+    const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((x, y) => x.amount - y.amount);
+    const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date);
+    const when = low.date === fc.today ? "today" : relDay(low.date, fc.today);
+    headline = lowBad
+      ? `Heads up. ${what} dips to <span class="hl-bad">${fmt0(low.balance)}</span> ${when === "today" ? "today" : "on " + when}.`
+      : `You’re on track. ${what} stays above <span class="hl">${fmt0(low.balance)}</span> for the next ${span}.`;
+    lede = [
+      low.date === fc.today ? "Today is the tightest point in the forecast."
+        : `The tightest moment is ${when}${lowEvents.length ? `, when ${esc(lowEvents[0].name.replace(/ statement$/, ""))}${lowEvents[0].kind === "card" ? "’s payment" : ""} goes out` : ""}.`,
+      nextIn ? `Next money in: ${esc(nextIn.name)}, ${fmt0(nextIn.amount)} on ${relDay(nextIn.date, fc.today)}.` : "",
+    ].filter(Boolean).join(" ");
+  }
 
   let html = "";
   for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup/accounts">Settings</a></span></div>`;
@@ -174,32 +202,44 @@ async function renderOverview(el) {
     html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup/accounts">Settings</a>.</span></div>`;
   }
 
+  html += `<section class="hero">
+    <div class="hero-text">
+      <span class="eyebrow">${parseDate(fc.today).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</span>
+      ${headline ? `<h1 class="headline">${headline}</h1>` : `<h1 class="headline">Overview</h1>`}
+      ${lede ? `<p class="lede">${lede}</p>` : ""}
+    </div>
+    <div class="hero-balance">
+      <span class="muted small">${allChecking ? "In checking today" : "Cash today"}</span>
+      <span class="big-num">${fmt(cashNow)}</span>
+      <span class="muted small">${fc.accounts.map((a) => esc(a.name)).join(" + ") || "—"}</span>
+    </div>
+  </section>`;
+
   html += `<div class="tiles">
-    <div class="tile"><div class="label">Balance today</div><div class="value">${fmt0(cashNow)}</div>
-      <div class="sub">${fc.accounts.map((a) => esc(a.name)).join(" + ") || "—"}</div></div>
-    <div class="tile ${lowBad ? "alert" : ""}"><div class="label">${lowBad ? "▲ Goes negative" : "Lowest point"} · next ${horizon} days</div>
-      <div class="value">${low ? fmt0(low.balance) : "—"}</div>
-      <div class="sub">${low ? "on " + fmtDow(low.date) : ""}</div></div>
-    <div class="tile"><div class="label">Card payments · next 30 days</div><div class="value">${fmt0(cardDue30)}</div>
-      <div class="sub">${in30.length} payment${in30.length === 1 ? "" : "s"}${in30.some((e) => e.estimated) ? ", some estimated" : ""}</div></div>
+    <div class="tile tile-row ${lowBad ? "alert" : ""}"><div><div class="label">${lowBad ? "Goes negative" : "Lowest point"}</div><div class="sub">${low ? fmtDow(low.date) : ""}</div></div>
+      <div class="value low-val">${low ? fmt(low.balance) : "—"}</div></div>
+    <div class="tile tile-row"><div><div class="label">In ${span}</div><div class="sub ${end - cashNow >= 0 ? "pos" : "neg"}">${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}</div></div>
+      <div class="value">${fmt(end)}</div></div>
+    <div class="tile tile-row"><div><div class="label">Owed on cards</div><div class="sub">${fc.cards.length} card${fc.cards.length === 1 ? "" : "s"}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}</div></div>
+      <div class="value">${fmt(owed)}</div></div>
   </div>`;
 
   html += `<div class="card">
-    <div class="card-head"><h2>Projected balance${fc.accounts.length === 1 ? ` · ${esc(fc.accounts[0].name)}` : ""}</h2>
-      <div class="seg" id="horizon">${[30, 60, 90, 180].map((d) => `<button data-d="${d}" class="${d === horizon ? "on" : ""}">${d} days</button>`).join("")}</div></div>
+    <div class="card-head"><h2>The next ${span}${fc.accounts.length === 1 && !allChecking ? ` · ${esc(fc.accounts[0].name)}` : ""}</h2>
+      <div class="seg" id="horizon" role="group" aria-label="Forecast length">${[...new Set([30, 60, 90, 180, horizon])].sort((x, y) => x - y).map((d) => `<button data-d="${d}" class="${d === horizon ? "on" : ""}" aria-pressed="${d === horizon}">${d === 180 ? "6 months" : d + " days"}</button>`).join("")}</div></div>
     <div class="chart-wrap" id="chart"></div>
-    <p class="help">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
+    <p class="help" style="margin-top:12px">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
       ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
       ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup/accounts">Settings</a>.` : ""}</p>
     <details><summary class="small muted">Show as table</summary>${weeklyTable(fc)}</details>
   </div>`;
 
   html += `<div class="grid-2">
-    <div class="card"><h2>Coming up</h2>${eventsTable(fc.events)}</div>
-    <div class="card"><h2>Credit cards</h2><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
+    <div class="card"><div class="card-head"><h2>Coming up</h2><span class="small muted">Click an amount to change it for that date</span></div>${eventsTable(fc.events)}</div>
+    <div class="card"><div class="card-head"><h2>Credit cards</h2><span class="small muted">Click a statement to correct it</span></div><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
   </div>`;
 
-  html += `<div class="card" style="margin-top:20px"><h2>All accounts</h2><div class="scroll-x"><table>
+  html += `<div class="card" style="margin-top:16px"><h2>All accounts</h2><div class="scroll-x"><table>
     <tr><th>Account</th><th>Type</th><th class="num">Balance</th><th class="num hide-sm">As of</th></tr>
     ${fc.all_accounts.filter((a) => !a.hidden).map((a) => `<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.kind)}</td>
       <td class="num">${fmt(a.balance)}</td><td class="num muted hide-sm">${a.balance_date ? fmtDate(a.balance_date) : ""}</td></tr>`).join("")}
@@ -217,7 +257,7 @@ async function renderOverview(el) {
 // Click an upcoming amount to change just that one occurrence.
 function wireEvents(root) {
   $$(".ev-amt:not(.stmt-amt)", root).forEach((b) => b.addEventListener("click", () => {
-    const td = b.closest("td");
+    const td = b.closest("td, .ev-amount");
     const cur = Number(b.dataset.amount);
     td.innerHTML = `<input type="number" step="0.01" class="ev-input" value="${Math.abs(cur).toFixed(2)}" style="width:110px" aria-label="Amount">`;
     const input = $("input", td);
@@ -244,31 +284,37 @@ function wireEvents(root) {
 let showAllEvents = false;
 function eventsTable(events) {
   if (!events.length) return `<div class="empty">Nothing scheduled. Add paychecks and bills on the <a href="#recurring">Recurring</a> tab.</div>`;
-  const shown = showAllEvents ? events : events.slice(0, 12);
-  return `<p class="help" style="margin-top:-6px">Click an amount to change it for that date only.</p><table>
-    <tr><th>Date</th><th>Item</th><th class="num">Amount</th><th class="num">Balance after</th></tr>${shown.map((e) => `<tr>
-    <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
-    <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
-    <td class="num">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>` : fmt(e.amount)}
-      ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}" title="Go back to the usual amount">reset</button>` : ""}</td>
-    <td class="num ${e.balance_after < 0 ? "neg-bal" : "muted"}">${e.balance_after < 0 ? "▲ " : ""}${fmt(e.balance_after)}</td></tr>`).join("")}</table>
-    ${events.length > shown.length ? `<button class="btn link" id="show-all-events">Show all ${events.length}</button>` : ""}`;
+  const shown = showAllEvents ? events : events.slice(0, 8);
+  return `<div class="ev-list">${shown.map((e) => {
+    const d = parseDate(e.date);
+    const sub = [e.kind === "card" ? "Card payment" : e.category || (e.kind === "recurring" ? "Recurring" : ""),
+      e.balance_after < 0 ? `<span class="neg-bal">balance ${fmt(e.balance_after)}</span>` : `balance ${fmt(e.balance_after)}`].filter(Boolean).join(" · ");
+    return `<div class="ev-row">
+      <div class="ev-date"><span>${d.toLocaleDateString("en-US", { weekday: "short" })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString("en-US", { month: "short" })}</span></div>
+      <div class="ev-main"><span class="ev-name">${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</span>
+        <span class="ev-sub">${sub}</span></div>
+      <div class="ev-amount">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : "−"}${fmt(Math.abs(e.amount))}</button>` : fmt(e.amount)}
+        ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}" title="Go back to the usual amount">reset</button>` : ""}</div>
+    </div>`; }).join("")}</div>
+    ${events.length > shown.length ? `<button class="btn link" id="show-all-events" style="margin-top:6px">Show all ${events.length}</button>` : ""}`;
 }
 
 function cardsTable(cards) {
   if (!cards.length) return `<div class="empty">Add statement dates for your cards in <a href="#setup/accounts">Settings → Accounts</a>.</div>`;
-  return `<table id="cards-table"><tr><th>Card</th><th class="num">Owed now</th><th class="num">Last statement</th><th class="num">Left to pay</th><th class="num">Due</th>
-      <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / statement</th></tr>
-    ${cards.map((c) => `<tr><td>${esc(c.name)}</td><td class="num">${fmt(c.owed_now)}</td>
+  return `<table id="cards-table"><tr><th>Card</th><th class="num">Statement</th><th class="num">Due</th>
+      <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / stmt</th></tr>
+    ${cards.map((c) => {
+      const soon = c.remaining > 0 && (parseDate(c.due_date) - parseDate(new Date().toISOString().slice(0, 10))) / 864e5 <= 7;
+      return `<tr><td><div class="card-name">${esc(c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
       <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
           title="Closed ${fmtDate(c.last_close)} · click to enter the amount on your statement">${fmt(c.statement_balance)}</button>
-        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>
-          <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the calculated amount (${fmt(c.statement_calculated)})">reset</button>` : ""}</td>
-      <td class="num">${c.remaining > 0 ? fmt(c.remaining) : `<span class="pos">Paid ✓</span>`}</td>
-      <td class="num muted">${fmtDate(c.due_date)}</td>
-      <td class="num muted" title="${c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}">${c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}</td></tr>`).join("")}</table>
-    <p class="help">Statement balances are worked out from each card's transactions since its closing day. If you know the real amount, click it to enter it;
-      it's used until the next statement closes. Future payments are forecast from each card's average over its last 3 statements.</p>`;
+        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>` : ""}
+        <div class="cell-sub">${c.remaining > 0 ? (c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid") : `<span class="pos">Paid ✓</span>`}${c.statement_set
+          ? ` · <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the calculated amount (${fmt(c.statement_calculated)})">reset</button>` : ""}</div></td>
+      <td class="num ${soon ? "due-soon" : "muted"}">${fmtDate(c.due_date)}</td>
+      <td class="num muted" title="${c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}">${c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}</td></tr>`; }).join("")}</table>
+    <p class="help" style="margin-top:12px">Statements are worked out from each card's transactions. An amount you enter is used until the next statement closes.
+      Future payments use each card's average over its last 3 statements.</p>`;
 }
 
 function wireCards(root) {
@@ -322,8 +368,8 @@ function shortMoney(v) {
 function drawChart(host, fc) {
   const series = fc.total;
   if (!series.length) { host.innerHTML = `<div class="empty">No cash accounts in the forecast yet.</div>`; return; }
-  const W = Math.max(320, host.clientWidth), H = 300;
-  const m = { top: 24, right: 16, bottom: 28, left: 56 };
+  const W = Math.max(320, host.clientWidth), H = 280;
+  const m = { top: 24, right: 8, bottom: 28, left: 52 };
   const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
   let lo = Math.min(...series), hi = Math.max(...series);
   if (lo > 0 && lo < hi * 0.25) lo = 0;  // near zero: show the floor
@@ -360,13 +406,22 @@ function drawChart(host, fc) {
   if (li >= 0) {
     const lx = x(li), ly = y(series[li]);
     const anchor = lx > W - 140 ? "end" : lx < m.left + 80 ? "start" : "middle";
-    svg += `<circle class="low-dot" cx="${lx}" cy="${ly}" r="5"/>`;
-    svg += `<text class="low-label" x="${lx}" y="${ly + (ly > m.top + ih - 20 ? -12 : 20)}" text-anchor="${anchor}">Low ${fmt0(series[li])} · ${fmtDate(fc.low.date)}</text>`;
+    svg += `<circle class="low-dot" cx="${lx}" cy="${ly}" r="5.5"/>`;
+    svg += `<text class="low-label" x="${lx + (anchor === "start" ? 10 : anchor === "end" ? -10 : 0)}" y="${ly + (ly > m.top + ih - 30 ? -14 : 24)}" text-anchor="${anchor}">Low ${fmt0(series[li])} · ${fmtDate(fc.low.date)}</text>`;
   }
+  // where it ends up
+  const ex = x(series.length - 1), ey = y(series[series.length - 1]);
+  svg += `<text class="end-note" x="${ex}" y="${ey < m.top + 20 ? ey + 18 : ey - 10}" text-anchor="end">${fmt0(series[series.length - 1])} by ${fmtDate(fc.dates[fc.dates.length - 1])}</text>`;
   svg += `<g id="hover" style="display:none"><line class="cross" y1="${m.top}" y2="${m.top + ih}"/><circle class="hover-dot" r="5"/></g>`;
   svg += `<rect id="hit" x="${m.left}" y="${m.top}" width="${iw}" height="${ih}" fill="transparent"/>`;
   svg += `</svg><div class="tooltip" hidden></div>`;
   host.innerHTML = svg;
+  // a small plate behind the low-point label so the line doesn't run through it
+  const ll = $(".low-label", host);
+  if (ll) {
+    const bb = ll.getBBox();
+    ll.insertAdjacentHTML("beforebegin", `<rect class="low-label-bg" x="${bb.x - 7}" y="${bb.y - 4}" width="${bb.width + 14}" height="${bb.height + 8}" rx="6"/>`);
+  }
 
   const hover = $("#hover", host), tip = $(".tooltip", host), hit = $("#hit", host), svgEl = $("svg", host);
   const move = (clientX) => {
@@ -714,10 +769,10 @@ async function renderRecurring(el) {
         or use ↻ on any transaction to start one from it.</div>`}
     <div class="card" id="rec-new"><h2>Add a recurring item</h2><div class="form-row">${fields()}</div>
       <button class="btn primary" id="r-add">Add</button></div>
-    ${suggestions.length ? `<div class="card"><h2>Spotted in your history</h2><table>${suggestions.map((s, i) => `<tr>
+    ${suggestions.length ? `<div class="card"><h2>Spotted in your history</h2><div class="scroll-x"><table>${suggestions.map((s, i) => `<tr>
       <td>${esc(s.name)}</td><td class="muted">${esc(acctName(s.account_id))}</td><td class="num">${fmt(s.amount)}</td>
       <td>${esc(s.frequency)} · ${s.count}×</td><td class="muted">last ${fmtDate(s.anchor_date)}</td>
-      <td class="num"><button class="btn add-sug" data-i="${i}">Add</button></td></tr>`).join("")}</table></div>` : ""}`;
+      <td class="num"><button class="btn add-sug" data-i="${i}">Add</button></td></tr>`).join("")}</table></div></div>` : ""}`;
 
   $$(".rec-item").forEach((box) => {
     const id = box.dataset.id;
@@ -1093,13 +1148,8 @@ async function renderInvestments(el) {
     el.innerHTML = `<h1>Investments</h1><div class="card empty">
       <h2>No investment accounts yet</h2>
       <p>Positions come from SimpleFIN. Add your brokerage and retirement accounts at SimpleFIN Bridge, make sure their type is
-        <b>investment</b> in <a href="#setup/accounts">Settings → Accounts</a>, then sync.</p>
-      ${status.simplefin_connected ? `<button class="btn primary" id="inv-first-sync">Sync now</button>` : `<p class="small"><a href="#setup/connections">Connect SimpleFIN first</a></p>`}</div>`;
-    $("#inv-first-sync")?.addEventListener("click", async (e) => {
-      e.currentTarget.disabled = true; e.currentTarget.textContent = "Syncing…";
-      try { await api("/api/investments/sync", { method: "POST" }); } catch (err) { toast(err.message, true); }
-      refreshState(); renderInvestments(el);
-    });
+        <b>investment</b> in <a href="#setup/accounts">Settings → Accounts</a>. They show up here after the next sync.</p>
+      ${status.simplefin_connected ? "" : `<p class="small"><a href="#setup/connections">Connect SimpleFIN first</a></p>`}</div>`;
     return;
   }
   const d = await api(`/api/investments?period=${invPeriod}`);
@@ -1114,7 +1164,6 @@ async function renderInvestments(el) {
   el.innerHTML = `<div class="card-head"><h1>Investments</h1>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <span class="live-ind small muted" id="live-ind" title="Stock and ETF prices refresh every 30 seconds while the market is open">Holdings updated ${esc(synced)}</span>
-        <button class="btn" id="inv-sync">Sync investments</button>
         <div class="seg" id="inv-period">${["1M", "3M", "YTD", "1Y", "2Y"].map((p) => `<button data-p="${p}" class="${p === invPeriod ? "on" : ""}">${p}</button>`).join("")}</div></div></div>
     ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup/connections">Reconnect in Settings</a></span></div>`).join("")}
     <div class="tiles tiles-4" id="inv-tiles">${invTiles(d, perf, beat)}</div>
@@ -1153,7 +1202,7 @@ async function renderInvestments(el) {
       <div class="scroll-x" id="inv-activity"></div></div>
 
     <div class="card"><h2>Accounts</h2><p class="help">Untick an account to leave it out of everything on this page.</p>
-      <table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
+      <div class="scroll-x"><table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
         ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}</label></td>
         <td class="muted small">${a.source !== "simplefin" ? `via Plaid${a.subtype ? ` · ${esc(a.subtype)}` : ""}` : a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
         <td class="num">${fmt(a.balance)}</td>
@@ -1161,24 +1210,13 @@ async function renderInvestments(el) {
           ? `<button class="btn link tr-edit" data-id="${esc(a.id)}">${a.tracked ? "Edit holdings" : "Enter holdings"}</button>` : ""}</td></tr>
         ${a.tracked && a.drift > 0.02 ? `<tr><td colspan="4"><div class="warn"><span class="icon">!</span><span>${esc(a.name)}: the funds you entered are ${(a.drift * 100).toFixed(1)}% off the synced balance.
           Update the share counts from your latest statement.</span></div></td></tr>` : ""}
-        <tr class="tr-row" data-id="${esc(a.id)}" hidden><td colspan="4"></td></tr>`).join("")}</table>
+        <tr class="tr-row" data-id="${esc(a.id)}" hidden><td colspan="4"></td></tr>`).join("")}</table></div>
       ${status.simplefin_seen.length ? `<details><summary class="small">What SimpleFIN sends for each account</summary><table class="small">
         ${status.simplefin_seen.map((x) => `<tr><td>${esc(x.org || "")} · ${esc(x.name)}</td><td>${x.positions ? `${x.positions} positions` : "balance only, no positions"}</td>
           <td class="muted">${x.fields.length ? esc(x.fields.join(", ")) : ""}</td></tr>`).join("")}</table>
         <p class="help">Balance-only accounts count toward your total and allocation as a single line, but Runway can't see what they're invested in.</p></details>` : ""}</div>`;
 
   $$("#inv-period button").forEach((b) => b.addEventListener("click", () => { invPeriod = b.dataset.p; renderInvestments(el); }));
-  $("#inv-sync").addEventListener("click", async (e) => {
-    const b = e.currentTarget; b.disabled = true; b.textContent = "Syncing…";
-    try {
-      const r = await api("/api/investments/sync", { method: "POST" });
-      const errs = [...(r.errors || []), ...((r.bank && r.bank.bank_messages) || [])];
-      toast(errs.length ? errs.join("; ") : "Investments updated", !!(r.errors && r.errors.length));
-      refreshState();
-    }
-    catch (err) { toast(err.message, true); }
-    renderInvestments(el);
-  });
   $$(".tr-edit").forEach((b) => b.addEventListener("click", () => openTrackedEditor(b.dataset.id, el)));
   $$(".inv-acct").forEach((c) => c.addEventListener("change", async () => {
     await api(`/api/plaid/accounts/${encodeURIComponent(c.dataset.id)}`, { method: "POST", body: { hidden: !c.checked } }); renderInvestments(el);
@@ -1784,7 +1822,7 @@ async function renderSetup(el, sub) {
     connections: { label: "Connections", html: () => `
   <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
     ${STATE.connected
-      ? `<p>Connected to SimpleFIN. Runway syncs about once a day while it's running.</p>
+      ? `<p>Connected to SimpleFIN. Runway syncs once a day, and whenever you open it if the data is more than an hour old.</p>
          ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
          <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
       : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
@@ -1834,7 +1872,9 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   el.innerHTML = `<h1>Settings</h1>
   <div class="subtabs" role="tablist">${Object.entries(sections).map(([k, v]) =>
     `<a href="#setup/${k}" role="tab" class="${k === section ? "active" : ""}" aria-selected="${k === section}">${v.label}${v.count ? ` <span class="muted small">${v.count}</span>` : ""}</a>`).join("")}</div>
-  ${sections[section].html()}`;
+  ${sections[section].html()}
+  <p class="small muted version-line">Runway ${esc(STATE.version && STATE.version !== "dev" ? STATE.version : "development build")}${STATE.version && STATE.version !== "dev"
+    ? ` · <a href="https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(STATE.version)}" target="_blank" rel="noopener">what's new</a>` : ""}</p>`;
 
   wireConnect();
   $("#restore-file")?.addEventListener("change", (e) => { $("#restore-go").disabled = !e.target.files.length; });
@@ -2012,7 +2052,7 @@ async function syncOnVisit() {
   try {
     const r = await api("/api/sync/auto", { method: "POST" });
     if (!r.started || autoSyncWatch) return;
-    $("#sync-status").textContent = "Syncing…";
+    $("#sync-status").textContent = "Syncing…"; $("#sync-dot").className = "sync-dot busy";
     const before = STATE.last_sync_ok;
     autoSyncWatch = setInterval(async () => {
       await refreshState();

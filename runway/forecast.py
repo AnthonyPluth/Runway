@@ -357,7 +357,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "primary_id": cash[0]["id"] if len(cash) == 1 else None,
         "dates": dates,
         "accounts": [
-            {"id": a["id"], "name": a["display_name"] or a["name"], "balance": round(a["balance"], 2),
+            {"id": a["id"], "name": a["display_name"] or a["name"], "kind": a["kind"], "balance": round(a["balance"], 2),
              "daily_spend": rates.get(a["id"], 0.0), "series": series_by_acct[a["id"]],
              "low": low(series_by_acct[a["id"]])}
             for a in cash
