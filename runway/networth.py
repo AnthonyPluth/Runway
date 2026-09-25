@@ -37,7 +37,7 @@ def assets(conn, today: date | None = None) -> list[dict]:
 def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
-        "SELECT id, COALESCE(display_name, name) AS name, org, kind, balance, balance_date, owed_positive FROM accounts WHERE hidden=0"))
+        "SELECT id, COALESCE(display_name, name) AS name, org, kind, balance, balance_date, owed_positive, owner FROM accounts WHERE hidden=0"))
     groups = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
@@ -49,7 +49,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     }
     owed_by_account = {}
     for a in accts:
-        item = {"type": "account", "id": a["id"], "name": a["name"], "org": a["org"], "as_of": a["balance_date"]}
+        item = {"type": "account", "id": a["id"], "name": a["name"], "org": a["org"], "as_of": a["balance_date"], "owner": a["owner"]}
         if a["kind"] in ("credit", "loan"):
             owed = round(forecast.owed(a), 2)
             owed_by_account[a["id"]] = owed

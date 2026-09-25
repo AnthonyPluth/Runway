@@ -227,7 +227,12 @@ async function renderOverview(el) {
   html += `<div class="card">
     <div class="card-head"><h2>The next ${span}${fc.accounts.length === 1 && !allChecking ? ` · ${esc(fc.accounts[0].name)}` : ""}</h2>
       <div class="seg" id="horizon" role="group" aria-label="Forecast length">${[...new Set([30, 60, 90, 180, horizon])].sort((x, y) => x - y).map((d) => `<button data-d="${d}" class="${d === horizon ? "on" : ""}" aria-pressed="${d === horizon}">${d === 180 ? "6 months" : d + " days"}</button>`).join("")}</div></div>
+    ${fc.budget ? `<div class="chart-legend"><span><i class="lg-line"></i>Forecast</span><span><i class="lg-line lg-budget"></i>If you stick to your budget
+      · low ${fmt0(fc.budget.low.balance)} on ${fmtDate(fc.budget.low.date)}</span></div>` : ""}
     <div class="chart-wrap" id="chart"></div>
+    ${fc.budget ? `<p class="help" style="margin-top:12px">The dashed line spends exactly your budgets (${fmt0(fc.budget.monthly)} a month) on the card or account set under
+      <a href="#budget">Budget → Paid with</a>, paying cards on their due dates, instead of the usual estimate of future card statements.
+      Spending in categories without a budget isn't included.${fc.budget.skipped.length ? ` Left out: ${fc.budget.skipped.map((k) => `${esc(k.category)} (${esc(k.reason)})`).join(", ")}.` : ""}</p>` : ""}
     <p class="help" style="margin-top:12px">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
       ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
       ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup/accounts">Settings</a>.` : ""}</p>
@@ -238,12 +243,6 @@ async function renderOverview(el) {
     <div class="card"><div class="card-head"><h2>Coming up</h2><span class="small muted">Click an amount to change it for that date</span></div>${eventsTable(fc.events)}</div>
     <div class="card"><div class="card-head"><h2>Credit cards</h2><span class="small muted">Click a statement to correct it</span></div><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
   </div>`;
-
-  html += `<div class="card" style="margin-top:16px"><h2>All accounts</h2><div class="scroll-x"><table>
-    <tr><th>Account</th><th>Type</th><th class="num">Balance</th><th class="num hide-sm">As of</th></tr>
-    ${fc.all_accounts.filter((a) => !a.hidden).map((a) => `<tr><td>${esc(a.name)}</td><td class="muted">${esc(a.kind)}</td>
-      <td class="num">${fmt(a.balance)}</td><td class="num muted hide-sm">${a.balance_date ? fmtDate(a.balance_date) : ""}</td></tr>`).join("")}
-  </table></div></div>`;
 
   el.innerHTML = html;
   wireMissed(el);
@@ -371,7 +370,9 @@ function drawChart(host, fc) {
   const W = Math.max(320, host.clientWidth), H = 280;
   const m = { top: 24, right: 8, bottom: 28, left: 52 };
   const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
-  let lo = Math.min(...series), hi = Math.max(...series);
+  const alt = fc.budget && fc.budget.total && fc.budget.total.length === series.length ? fc.budget.total : null;
+  const both = alt ? series.concat(alt) : series;
+  let lo = Math.min(...both), hi = Math.max(...both);
   if (lo > 0 && lo < hi * 0.25) lo = 0;  // near zero: show the floor
   const ticks = niceTicks(lo, hi);
   const y0 = ticks[0], y1 = ticks[ticks.length - 1];
@@ -392,7 +393,7 @@ function drawChart(host, fc) {
     const dt = parseDate(d);
     if (i === 0 || dt.getDate() === 1) {
       const label = i === 0 ? "Today" : dt.toLocaleDateString("en-US", { month: "short" });
-      if (i === 0 || x(i) - m.left > 40) xl += `<text x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : "middle"}">${label}</text>`;
+      if (i === 0 || x(i) - m.left > 56) xl += `<text x="${x(i)}" y="${H - 8}" text-anchor="${i === 0 ? "start" : "middle"}">${label}</text>`;
     }
   });
   svg += `<g class="axis">${xl}</g>`;
@@ -400,6 +401,7 @@ function drawChart(host, fc) {
   // event ticks along the baseline
   fc.dates.forEach((d, i) => { if (eventsByDate[d]) svg += `<line class="event-tick" x1="${x(i)}" x2="${x(i)}" y1="${m.top + ih}" y2="${m.top + ih + 5}"/>`; });
   svg += `<path class="area" d="M${pts[0]} L${pts.join(" L")} L${x(series.length - 1)},${y(y0)} L${x(0)},${y(y0)} Z"/>`;
+  if (alt) svg += `<path class="line budget-line" d="M${alt.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" L")}"/>`;
   svg += `<path class="line" d="M${pts.join(" L")}"/>`;
   // low point
   const li = fc.dates.indexOf(fc.low.date);
@@ -417,10 +419,21 @@ function drawChart(host, fc) {
   svg += `</svg><div class="tooltip" hidden></div>`;
   host.innerHTML = svg;
   // a small plate behind the low-point label so the line doesn't run through it
-  const ll = $(".low-label", host);
+  const ll = $(".low-label", host), en = $(".end-note", host);
   if (ll) {
     const bb = ll.getBBox();
     ll.insertAdjacentHTML("beforebegin", `<rect class="low-label-bg" x="${bb.x - 7}" y="${bb.y - 4}" width="${bb.width + 14}" height="${bb.height + 8}" rx="6"/>`);
+    // Keep the "ends at" note clear of the low-point label: move it above (or below) the label, or drop it when
+    // the low point is the end anyway.
+    if (en && fc.dates.indexOf(fc.low.date) >= series.length - 4) en.remove();   // the low point is the end
+    else if (en) {
+      const lo = { x: bb.x - 7, y: bb.y - 4, w: bb.width + 14, h: bb.height + 8 };
+      const overlaps = (b) => b.x < lo.x + lo.w + 4 && b.x + b.width > lo.x - 4 && b.y < lo.y + lo.h + 4 && b.y + b.height > lo.y - 4;
+      if (overlaps(en.getBBox())) {
+        en.setAttribute("y", lo.y - 8 > m.top + 10 ? lo.y - 8 : lo.y + lo.h + 16);
+        if (overlaps(en.getBBox())) en.remove();
+      }
+    }
   }
 
   const hover = $("#hover", host), tip = $(".tooltip", host), hit = $("#hit", host), svgEl = $("svg", host);
@@ -434,6 +447,7 @@ function drawChart(host, fc) {
     $("circle", hover).setAttribute("cx", cx); $("circle", hover).setAttribute("cy", cy);
     const evs = eventsByDate[fc.dates[i]] || [];
     tip.innerHTML = `<div class="tt-date">${fmtDow(fc.dates[i])}</div><div class="tt-val">${fmt(series[i])}</div>` +
+      (alt ? `<div class="tt-ev tt-budget"><span>If you stick to your budget</span><span>${fmt(alt[i])}</span></div>` : "") +
       evs.map((e) => `<div class="tt-ev"><span>${esc(e.name)}${e.estimated ? " (est.)" : ""}</span><span>${fmt(e.amount)}</span></div>`).join("");
     tip.hidden = false;
     const sx = (cx / W) * r.width, tw = tip.offsetWidth;
@@ -861,12 +875,23 @@ async function renderBudget(el) {
     ? `<span class="over-label">▲ ${fmt(c.spent - c.budget)} over</span>`
     : pace > 0 && pace < 1 && c.spent > c.budget * pace * 1.1
       ? `<span class="muted">${fmt(c.left)} left · ahead of pace</span>` : `<span class="muted">${fmt(c.left)} left</span>`;
-  const row = (c, sub) => `<tr data-cat="${esc(c.name)}" class="${sub ? "sub-row" : ""}">
-    <td style="padding-left:${10 + (c.depth || 0) * 20}px">${sub ? `<span class="muted">${esc(c.parent)} &gt;</span> ` : ""}<a href="#transactions" class="cat-link">${esc(c.name)}</a>
-      ${c.has_children && c.own_spent !== c.spent ? `<div class="desc">incl. subcategories</div>` : ""}</td>
-    <td class="num"><input type="number" min="0" step="10" class="b-amt" value="${c.budget ?? ""}" placeholder="${c.budget == null ? "Set budget" : ""}" aria-label="Budget for ${esc(c.name)}"></td>
+  const acctName = (id) => (b.pay_accounts.find((x) => x.id === id) || {}).name;
+  const payWith = (c) => {
+    if (c.budget == null || !countsToward(c)) return "";
+    const usual = c.usual_account && acctName(c.usual_account);
+    const opts = (kind) => b.pay_accounts.filter((x) => (kind === "credit") === (x.kind === "credit"))
+      .map((x) => `<option value="${esc(x.id)}" ${x.id === c.pay_with ? "selected" : ""}>${esc(x.name)}</option>`).join("");
+    return `<select class="b-pay" aria-label="Account ${esc(c.name)} is paid with">
+      <option value="">${usual ? `Usually ${esc(usual)}` : "Choose…"}</option>
+      <optgroup label="Cards">${opts("credit")}</optgroup><optgroup label="Bank accounts">${opts("cash")}</optgroup></select>`;
+  };
+  const row = (c, sub, budgets, last) => `<tr data-cat="${esc(c.name)}" class="${sub ? `sub-row${last ? " last-sub" : ""}` : "parent-row"}">
+    <td class="cat-cell"><a href="#transactions" class="cat-link">${esc(c.name)}</a>
+      ${!sub && c.has_children && c.own_spent !== c.spent ? `<span class="incl">incl. subcategories</span>` : ""}</td>
+    <td class="num"><input type="number" min="0" step="10" class="b-amt" value="${c.budget ?? ""}" placeholder="${c.budget == null ? (sub ? "—" : "Set budget") : ""}" aria-label="Budget for ${esc(c.name)}"></td>
+    ${budgets ? `<td>${payWith(c)}</td>` : ""}
     <td class="num"><a href="#transactions" class="spent-link" title="See the transactions behind this amount">${fmt(c.spent)}</a></td><td>${bar(c)}</td><td class="small" style="white-space:nowrap">${status(c)}</td></tr>`;
-  const familyRows = (f) => row(f.top, false) + f.kids.map((k) => row(k, true)).join("");
+  const familyRows = (f, budgets) => `<tbody class="family">${row(f.top, false, budgets)}${f.kids.map((k, i) => row(k, true, budgets, i === f.kids.length - 1)).join("")}</tbody>`;
   const unusedTops = families.filter((f) => !isBudgeted(f) && !(f.top.spent > 0.005));
 
   el.innerHTML = `<div class="card-head"><h1>Budget</h1>
@@ -879,15 +904,16 @@ async function renderBudget(el) {
         <div class="sub">${b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget"}</div></div>
     </div>
     <div class="card"><h2>Budgets</h2>
-      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><tr><th>Category</th><th class="num">Monthly budget</th><th class="num">Spent</th><th style="width:34%">Progress</th><th></th></tr>
-        ${inBudget.map(familyRows).join("")}</table></div>
+      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><thead><tr><th>Category</th><th class="num">Monthly budget</th><th title="Which card or account this spending usually goes on; the budget forecast on Overview uses it">Paid with</th><th class="num">Spent</th><th style="width:28%">Progress</th><th></th></tr></thead>
+        ${inBudget.map((f) => familyRows(f, true)).join("")}</table></div>
         ${pace > 0 && pace < 1 ? `<p class="help">The thin line in each bar marks where you'd be if you spent evenly through the month (day ${b.day} of ${b.days_in_month}).
-          A category's budget covers everything under it; you can also budget a subcategory on its own.</p>` : ""}`
+          A category's budget covers everything under it; you can also budget a subcategory on its own.</p>` : ""}
+        <p class="help">“Paid with” is the card or account each budget's spending usually goes on. The Overview uses it to project your balance if you stick to your budget.</p>`
       : `<div class="empty">No budgets yet. Set one for any category below. Budgets repeat every month.</div>`}
     </div>
     <div class="card"><h2>Not budgeted</h2>
       <p class="help">Spending this month in categories without a budget. Type an amount to start budgeting one.</p>
-      <div class="scroll-x"><table class="budget-table">${notBudget.map(familyRows).join("")}
+      <div class="scroll-x"><table class="budget-table">${notBudget.map((f) => familyRows(f, false)).join("")}
         ${unusedTops.length ? `<tr><td><select id="b-new-cat"><option value="">Another category…</option>${unusedTops.map((f) => [f.top, ...f.kids].map((c) => `<option value="${esc(c.name)}">${esc(c.parent ? `${c.parent} > ${c.name}` : c.name)}</option>`).join("")).join("")}</select></td>
           <td class="num"><input type="number" min="0" step="10" id="b-new-amt" class="b-amt" placeholder="Set budget"></td><td></td><td></td><td></td></tr>` : ""}</table></div>
     </div>
@@ -900,6 +926,10 @@ async function renderBudget(el) {
     catch (err) { toast(err.message, true); }
   };
   $$("tr[data-cat] .b-amt").forEach((input) => input.addEventListener("change", () => saveBudget(input.closest("tr").dataset.cat, input.value)));
+  $$("tr[data-cat] .b-pay").forEach((sel) => sel.addEventListener("change", async () => {
+    try { await api("/api/budget", { method: "POST", body: { category: sel.closest("tr").dataset.cat, pay_with: sel.value } }); markSaved(sel); }
+    catch (err) { toast(err.message, true); }
+  }));
   $("#b-new-amt")?.addEventListener("change", () => { const c = $("#b-new-cat").value; if (c) saveBudget(c, $("#b-new-amt").value); else toast("Choose a category first", true); });
   // The category name and the Spent amount both open Transactions showing exactly what adds up to that number.
   $$(".cat-link, .spent-link").forEach((a) => a.addEventListener("click", () => {
@@ -1036,7 +1066,11 @@ function drawSankey(host, cf, monthName) {
 // ------------------------------------------------------------------------------------------ investments
 let invLiveTimer = null;
 let invPeriod = "1Y", invAllocTab = "asset_class", invSort = { key: "value", dir: -1 }, invActivityLimit = 40, invActivityType = "";
-const pct = (x, digits = 1) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(digits)}%`);
+const pct = (x, digits = 1) => {
+  if (x == null) return "—";
+  const shown = Math.abs(x * 100).toFixed(digits);
+  return Number(shown) === 0 ? `${shown}%` : `${x > 0 ? "+" : "−"}${shown}%`;   // no "−0.0%"
+};
 const gainCls = (x) => (x == null ? "" : x > 0 ? "pos" : "");
 const signed = (x) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${fmt(Math.abs(x))}`);
 
@@ -1450,7 +1484,11 @@ function lineChart(host, xs, series, opts = {}) {
   }
   // end labels, nudged apart so they don't overlap
   ends.sort((a, b) => a.yv - b.yv);
-  for (let i = 1; i < ends.length; i++) if (ends[i].yv - ends[i - 1].yv < 14) ends[i].yv = ends[i - 1].yv + 14;
+  for (let i = 1; i < ends.length; i++) if (ends[i].yv - ends[i - 1].yv < 15) ends[i].yv = ends[i - 1].yv + 15;
+  // pushed below the chart? slide the whole stack back up
+  const over = ends.length ? ends[ends.length - 1].yv - (m.top + ih) : 0;
+  if (over > 0) ends.forEach((e) => { e.yv -= over; });
+  for (let i = ends.length - 2; i >= 0; i--) if (ends[i + 1].yv - ends[i].yv < 15) ends[i].yv = ends[i + 1].yv - 15;
   for (const e of ends) svg += `<circle class="end-dot ${e.s.cls}" cx="${e.xi}" cy="${y(e.v)}" r="4"/>
     <text class="end-label" x="${e.xi + 8}" y="${e.yv + 4}">${esc(e.s.name)}</text>`;
   svg += `<g class="hover" style="display:none"><line class="cross" y1="${m.top}" y2="${m.top + ih}"/></g>`;
@@ -1524,7 +1562,7 @@ async function renderNetWorth(el) {
   const sideRows = (side) => d.groups.filter((g) => g.side === side).map((g) => `
       <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
       ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${esc(i.name)}
-          <div class="desc">${i.type === "account" ? esc(i.org || "") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
+          <div class="desc">${i.type === "account" ? [i.org, i.owner].filter(Boolean).map(esc).join(" · ") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
             i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
         <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
   const assetGroups = d.groups.filter((g) => g.side === "asset" && g.total > 0);
@@ -1743,6 +1781,13 @@ async function wirePlaidSetup() {
 
 // ------------------------------------------------------------------------------------------ setup
 let rulesOpen = true, rulesFilter = "";
+// Owners: first names of the people who have signed in, plus "Joint".
+function ownerOptions(sel) {
+  const names = [...(STATE.owners || [])];
+  if (sel && sel !== "Joint" && !names.includes(sel)) names.push(sel);
+  return `<option value="">—</option>${names.map((n) => `<option ${n === sel ? "selected" : ""}>${esc(n)}</option>`).join("")}
+    <option ${sel === "Joint" ? "selected" : ""}>Joint</option>`;
+}
 let SETUP_SECTION = "";
 async function renderSetup(el, sub) {
   SETUP_SECTION = sub || SETUP_SECTION;
@@ -1762,12 +1807,13 @@ async function renderSetup(el, sub) {
   </div>
   <div class="card"><h2>Accounts</h2>
     <p class="help">For each credit card, set the statement closing day, the payment due day, and the account that pays it.
-      Only cards paid from the primary account show up in the forecast. Set brokerage and retirement accounts to <b>investment</b> so they appear on the
+      Only cards paid from the primary account show up in the forecast. ${(STATE.owners || []).length ? "" : "Owners are the people who have signed in to Runway; each shows up here after their first sign-in. "}Set brokerage and retirement accounts to <b>investment</b> so they appear on the
       <a href="#investments">Investments</a> page.</p>
-    ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Details</th><th class="num">Balance</th></tr>
+    ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Owner</th><th>Details</th><th class="num">Balance</th></tr>
       ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
         <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${esc(a.org || "")} ${esc(a.name)}</div></td>
         <td><select class="f-kind">${["checking", "savings", "credit", "loan", "investment"].map((k) => `<option ${k === a.kind ? "selected" : ""}>${k}</option>`).join("")}</select></td>
+        <td><select class="f-owner" aria-label="Owner of ${esc(name(a))}">${ownerOptions(a.owner)}</select></td>
         <td class="f-details">${a.kind === "credit"
           ? `<div class="form-row" style="margin:0">
               <label>Closes on day<input type="number" min="1" max="31" class="f-close" value="${a.closing_day ?? ""}"></label>
@@ -1911,7 +1957,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   });
   $$("#acct-table tr[data-id]").forEach((tr) => {
     $(".f-kind", tr).addEventListener("change", () => saveAccount(tr, true));
-    onEdit($$(".f-name, .f-close, .f-due, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
+    onEdit($$(".f-name, .f-owner, .f-close, .f-due, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
   });
   onEdit([$("#llm-model")], async () => { await api("/api/settings", { method: "POST", body: { llm_model: $("#llm-model").value.trim() } }); await refreshState(); });
   onEdit([$("#api-key")], async () => {
@@ -2034,7 +2080,8 @@ function wireConnect() {
 }
 
 async function saveAccount(tr, rerender) {
-  const body = { display_name: $(".f-name", tr).value, kind: $(".f-kind", tr).value, hidden: $(".f-hidden", tr).checked ? 1 : 0 };
+  const body = { display_name: $(".f-name", tr).value, kind: $(".f-kind", tr).value, hidden: $(".f-hidden", tr).checked ? 1 : 0,
+    owner: $(".f-owner", tr)?.value ?? undefined };
   if ($(".f-close", tr)) { body.closing_day = $(".f-close", tr).value; body.due_day = $(".f-due", tr).value; body.pay_from = $(".f-payfrom", tr).value; }
   if ($(".f-sign", tr)) body.owed_positive = $(".f-sign", tr).checked ? 1 : 0;
   if ($(".f-spend", tr)) body.daily_spend = $(".f-spend", tr).checked ? 1 : 0;

@@ -309,11 +309,13 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
                 continue
             sec = secs.get(t["security_id"] or "", {})
             is_cash_sec = bool(sec.get("is_cash"))
-            if t["security_id"] and not is_cash_sec and t["quantity"]:
+            ttype, sub = (t["type"] or "").lower(), (t["subtype"] or "").lower()
+            # Only trades and transfers change how many shares you hold. (Some institutions attach a share count to
+            # plain cash deposits or dividends; applying it would invent or remove shares.)
+            if t["security_id"] and not is_cash_sec and t["quantity"] and ttype in ("buy", "sell", "transfer"):
                 qty_delta[t["security_id"]][i] += t["quantity"]
                 if t["price"]:
                     last_trade_price[t["security_id"]].append((t["date"], t["price"]))
-            ttype, sub = (t["type"] or "").lower(), (t["subtype"] or "").lower()
             # Buying or selling a money-market "cash" fund is just moving cash around; everything else changes cash.
             if not (is_cash_sec and ttype in ("buy", "sell")):
                 cash_delta[i] += -(t["amount"] or 0)  # amount > 0 means cash left the account
@@ -372,7 +374,8 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
     twr = [0.0] * n
     growth = 1.0
     for i in range(1, n):
-        if value[i - 1] > 1.0:
+        # Skip days the portfolio was (nearly) empty: a first deposit into a $0 account isn't a return.
+        if value[i - 1] > 1.0 and value[i] - flows[i] > 0:
             growth *= (value[i] - flows[i]) / value[i - 1]
         twr[i] = growth - 1.0
     invested = [0.0] * n
@@ -395,6 +398,12 @@ def _snapshot_series(conn, aid: str, dates: list[str], secs: dict, book: "_Price
     snaps: dict[str, dict[str, tuple[float, float]]] = defaultdict(dict)
     for r in rows:
         snaps[r["date"]][r["security_id"]] = (r["quantity"] or 0.0, r["value"] or 0.0)
+    # Snapshots taken before you entered a balance-only account's holdings are just its balance. Once there are real
+    # positions, those carry the history (priced day by day) instead of a flat balance.
+    balance_only = {"sf:balance", "sf:unexplained"}
+    if any(set(pos) - balance_only for pos in snaps.values()):
+        for d in [d for d, pos in snaps.items() if not set(pos) - balance_only]:
+            del snaps[d]
     snap_dates = sorted(snaps)
     n = len(dates)
     values, flows = [0.0] * n, [0.0] * n

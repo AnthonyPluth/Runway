@@ -153,6 +153,7 @@ class OIDCTests(unittest.TestCase):
         status, _, _, body = self.req("/api/state", session)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["user"]["email"], "me@example.com")
+        self.assertIn("Anthony", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
         with db.session() as conn:   # only a hash of the token is stored
             self.assertIsNone(conn.execute("SELECT 1 FROM auth_sessions WHERE token_hash=?", (ck["runway_session"],)).fetchone())
         status, loc, ck2, _ = self.req("/auth/logout", session)

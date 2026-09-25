@@ -196,7 +196,33 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
     conn.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires, id_token) VALUES (?,?,?,?,?,?,?)",
                  (_hash(token), who["sub"], who["email"], who["name"], now, now + c["session_days"] * 86400,
                   tokens.get("id_token")))
+    remember_user(conn, who["sub"], who["email"], who["name"], info.get("given_name"), now)
     return token, row["next"] or "/"
+
+
+def first_name(name: str | None, email: str | None, given: str | None = None) -> str:
+    if given and given.strip():
+        return given.strip().split()[0]
+    if name and name.strip() and "@" not in name:
+        return name.strip().split()[0]
+    local = (email or "").split("@")[0]
+    return (local.split(".")[0].split("_")[0] or "Someone").capitalize()
+
+
+def remember_user(conn, sub, email, name, given=None, when=None) -> None:
+    """Keep a list of people who've signed in, so accounts can be assigned to them."""
+    if not sub:
+        return
+    conn.execute("INSERT INTO users(sub, email, name, first_name, last_seen) VALUES (?,?,?,?,?) ON CONFLICT(sub) DO UPDATE SET "
+                 "email=excluded.email, name=excluded.name, first_name=excluded.first_name, last_seen=excluded.last_seen",
+                 (sub, email, name, first_name(name, email, given), when or time.time()))
+
+
+def backfill_users(conn) -> None:
+    """People signed in before the users list existed."""
+    for r in conn.execute("SELECT sub, email, name, MAX(created) AS t FROM auth_sessions WHERE sub IS NOT NULL GROUP BY sub, email, name").fetchall():
+        if not conn.execute("SELECT 1 FROM users WHERE sub=?", (r["sub"],)).fetchone():
+            remember_user(conn, r["sub"], r["email"], r["name"], None, r["t"])
 
 
 def authorize(info: dict) -> dict:

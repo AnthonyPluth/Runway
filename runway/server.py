@@ -30,7 +30,7 @@ _inv_lock = threading.Lock()
 
 ACCOUNT_FIELDS = {
     "display_name": str, "kind": str, "closing_day": int, "due_day": int, "pay_from": str,
-    "in_forecast": int, "daily_spend": int, "hidden": int, "owed_positive": int,
+    "in_forecast": int, "daily_spend": int, "hidden": int, "owed_positive": int, "owner": str,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
 FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates"}
@@ -189,8 +189,20 @@ def api_state(conn, _q, _b):
         "rentcast_configured": rentcast.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
+        "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
     }
+
+
+def owner_choices(conn) -> list[str]:
+    """First names of everyone who has signed in (plus any owner already set), for the account Owner menus."""
+    names = [r["first_name"] for r in conn.execute("SELECT first_name FROM users WHERE first_name IS NOT NULL ORDER BY last_seen")]
+    names += [r["owner"] for r in conn.execute("SELECT DISTINCT owner FROM accounts WHERE owner IS NOT NULL AND owner<>''")]
+    out = []
+    for n in names:
+        if n and n not in out and n != "Joint":
+            out.append(n)
+    return out
 
 
 def api_overview(conn, q, _b):
@@ -547,7 +559,9 @@ def api_budget(conn, q, _b):
     cats = [c for c in categories.all_categories(conn) if not c["is_transfer"] and not c["is_income"]]
     income_cats = [r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")]
     totals = _month_totals(conn, start, end)
-    budgets = {r["category"]: r["amount"] for r in conn.execute("SELECT * FROM budgets")}
+    budget_rows = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
+    budgets = {k: r["amount"] for k, r in budget_rows.items()}
+    usual = {p["category"]: p["usual"] for p in forecast.budget_plan(conn, today)}
     own = {c["name"]: round(-totals.get(c["name"], 0.0), 2) for c in cats}
     out = []
     for c in cats:
@@ -556,6 +570,8 @@ def api_budget(conn, q, _b):
         b = budgets.get(c["name"])
         out.append({"name": c["name"], "parent": c["parent"], "path": c["path"], "depth": c["depth"], "top": c["top"],
                     "has_children": bool(below), "budget": b,
+                    "pay_with": budget_rows[c["name"]]["pay_with"] if c["name"] in budget_rows else None,
+                    "usual_account": usual.get(c["name"]),
                     "spent": spent, "own_spent": own[c["name"]], "left": round(b - spent, 2) if b is not None else None})
     current = start <= today < end
     return {
@@ -565,6 +581,10 @@ def api_budget(conn, q, _b):
         "categories": out,  # tree order: each category followed by its subcategories
         "income": round(sum(totals.get(c, 0.0) for c in income_cats), 2),
         "uncategorized": round(-totals.get(None, 0.0), 2),
+        # accounts a category can be paid with: cards and cash accounts
+        "pay_accounts": [{"id": r["id"], "name": r["name"], "kind": r["kind"]} for r in conn.execute(
+            "SELECT id, COALESCE(display_name, name) AS name, kind FROM accounts WHERE hidden=0 "
+            "AND kind IN ('credit','checking','savings') ORDER BY kind='credit' DESC, COALESCE(display_name, name)")],
     }
 
 
@@ -618,6 +638,12 @@ def api_budget_set(conn, _q, body):
     cat = body.get("category") or ""
     if not conn.execute("SELECT 1 FROM categories WHERE name=? AND is_transfer=0 AND is_income=0", (cat,)).fetchone():
         raise ApiError("Pick a spending category")
+    if "pay_with" in body and "amount" not in body:   # just choosing the card
+        acct = body.get("pay_with") or None
+        if acct and not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct,)).fetchone():
+            raise ApiError("Account not found")
+        conn.execute("UPDATE budgets SET pay_with=? WHERE category=?", (acct, cat))
+        return {"ok": True}
     amt = body.get("amount")
     if amt in (None, "", 0, "0"):
         conn.execute("DELETE FROM budgets WHERE category=?", (cat,))
@@ -1213,6 +1239,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         recurring.auto_match(conn)  # pick up matches for items created before this version
         sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
         categories.flatten(conn)      # subcategories are one level deep
+        plaid.hide_all_duplicates(conn)  # an institution linked through both Plaid and SimpleFIN is counted once
+        oidc.backfill_users(conn)        # people who signed in before owners existed
     if auto_sync:
         threading.Thread(target=background_sync, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), Handler)

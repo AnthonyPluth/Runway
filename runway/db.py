@@ -174,6 +174,14 @@ CREATE TABLE IF NOT EXISTS auth_sessions (       -- signed-in browsers (only a h
     id_token   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS users (              -- people who have signed in (for account owners)
+    sub        TEXT PRIMARY KEY,
+    email      TEXT,
+    name       TEXT,
+    first_name TEXT,
+    last_seen  REAL
+);
+
 CREATE TABLE IF NOT EXISTS ai_log (              -- one row per request to the AI, shown on the Review tab
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     at          TEXT DEFAULT (datetime('now', 'localtime')),
@@ -402,6 +410,8 @@ def init(path: str | None = None) -> None:
         _ensure_column(conn, "transactions", "recurring_id", "INTEGER")   # NULL = not matched, 0 = never match
         _ensure_column(conn, "recurring", "amount_mode", "TEXT DEFAULT 'fixed'")  # fixed | last | avg3
         _ensure_column(conn, "categories", "parent", "TEXT")  # subcategories: name of the top-level category
+        _ensure_column(conn, "accounts", "owner", "TEXT")      # a signed-in person's first name, "Joint", or NULL
+        _ensure_column(conn, "budgets", "pay_with", "TEXT")    # account id this category is usually paid with
         _ensure_column(conn, "inv_accounts", "source", "TEXT DEFAULT 'plaid'")   # plaid | simplefin
         _ensure_column(conn, "inv_accounts", "institution", "TEXT")
         _ensure_column(conn, "price_meta", "instrument_type", "TEXT")          # EQUITY | ETF | MUTUALFUND | ...
