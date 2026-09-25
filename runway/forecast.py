@@ -7,8 +7,9 @@ Model, per cash account (checking/savings marked "in forecast"):
   - average everyday spending, spread evenly per day
 
 A card's statement balance is worked out from its transactions: the balance on the closing day equals
-today's balance minus everything that posted after the close. Statements that haven't closed yet are
-estimated from charges so far plus the card's recent daily spending rate, and flagged as estimates.
+today's balance minus everything that posted after the close (or it's the amount you entered, if you know it).
+Statements that haven't closed yet are estimated from the card's average spending over its last 3 statement
+cycles (for the cycle in progress, at least what's already been charged), and flagged as estimates.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from . import db
 from . import recurring as rec
 
 SPEND_WINDOW_DAYS = 90
+AVG_CYCLES = 3           # statement cycles averaged to estimate a card's future statements
 ONE_OFF_LIMIT = 1000.0   # single outflows larger than this are treated as one-offs, not everyday spending
 
 
@@ -162,6 +164,31 @@ def daily_spend_rate(conn, account_id: str, today: date, exclude_matches: list[s
     return max(0.0, total / days)
 
 
+def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
+    """Average spending per statement cycle over the last AVG_CYCLES closed cycles (only cycles fully covered by
+    the transaction history). Charges minus refunds; payments and transfers don't count."""
+    transfers = _transfer_categories(conn)
+    first = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (card["id"],)).fetchone()[0]
+    cycles = []
+    end = last_close
+    for _ in range(AVG_CYCLES):
+        start = add_months(end, -1, card["closing_day"])
+        if not first or _d(first) > start + timedelta(days=3):   # history doesn't reach back this far
+            break
+        txs = conn.execute("SELECT amount, category FROM transactions WHERE account_id=? AND posted>? AND posted<=? AND pending=0",
+                           (card["id"], start.isoformat(), end.isoformat())).fetchall()
+        spent = -sum(t["amount"] for t in txs if t["category"] not in transfers)
+        cycles.append({"start": start.isoformat(), "end": end.isoformat(), "spent": round(max(0.0, spent), 2)})
+        end = start
+    avg = sum(c["spent"] for c in cycles) / len(cycles) if cycles else None
+    return {"average": round(avg, 2) if avg is not None else None, "cycles": cycles}
+
+
+def statement_override(conn, card_id: str, close: date) -> float | None:
+    r = conn.execute("SELECT amount FROM overrides WHERE key=?", (f"stmt:{card_id}:{close.isoformat()}",)).fetchone()
+    return abs(r["amount"]) if r else None
+
+
 def card_cycle(conn, card: dict, today: date) -> dict:
     """Where a card stands in its billing cycle today."""
     transfers = _transfer_categories(conn)
@@ -175,13 +202,21 @@ def card_cycle(conn, card: dict, today: date) -> dict:
     # Transactions are signed the same way whatever the balance convention (charges negative), so undo them
     # in "money in" terms first, then read the result as an amount owed.
     balance_at_close = card["balance"] + posted_after_close if card.get("owed_positive") else card["balance"] - posted_after_close
-    statement = max(0.0, owed(card, balance_at_close))
+    calculated = max(0.0, owed(card, balance_at_close))
+    known = statement_override(conn, card["id"], last_close)
+    statement = known if known is not None else calculated
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers))
     due = next_after(last_close, card["due_day"])
+    spend = card_monthly_spend(conn, card, last_close)
     return {
         "last_close": last_close.isoformat(),
         "statement_balance": round(statement, 2),
+        "statement_calculated": round(calculated, 2),
+        "statement_set": known is not None,
+        "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
+        "avg_monthly_spend": spend["average"],
+        "avg_cycles": len(spend["cycles"]),
         "paid_since_close": round(paid, 2),
         "remaining": round(max(0.0, statement - paid), 2),
         "due_date": due.isoformat(),
@@ -249,16 +284,21 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment"})
         elif due < today and info["remaining"] > 0.005:
             warnings.append(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.")
-        # Future statements: charges so far plus the recent daily rate until each close.
+        # Future statements: the card's average spending per cycle over its last few statements (for the cycle
+        # in progress, at least what's been charged already). Without enough history, the recent daily rate.
         close = next_after(_d(info["last_close"]), card["closing_day"])
         prev_close = _d(info["last_close"])
         first = True
+        avg = info["avg_monthly_spend"]
         while True:
             due_k = next_after(close, card["due_day"])
             if due_k > end:
                 break
-            days_in_cycle = (close - (today if first else prev_close)).days
-            est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle
+            if avg is not None:
+                est = max(info["new_charges"], avg) if first else avg
+            else:
+                days_in_cycle = (close - (today if first else prev_close)).days
+                est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle
             if est > 0.005:
                 events.append({"date": due_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,

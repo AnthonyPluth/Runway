@@ -108,6 +108,38 @@ class ForecastTests(Base):
         self.assertEqual(info["due_date"], "2026-10-05")
         self.assertEqual(info["new_charges"], 300.0)
 
+    def test_future_statements_use_three_cycle_average(self):
+        self.tx("cc", "2026-06-05", -50.0, "OLD", "Shopping")         # history reaches back before the oldest cycle
+        self.tx("cc", "2026-06-20", -1200.0, "TRIP", "Travel")        # Jun 10 - Jul 10: 1200
+        self.tx("cc", "2026-07-20", -900.0, "STORE", "Shopping")      # Jul 10 - Aug 10: 900 - 100 refund = 800
+        self.tx("cc", "2026-07-25", 100.0, "STORE REFUND", "Refunds")
+        self.tx("cc", "2026-08-20", -400.0, "GROCER", "Groceries")     # Aug 10 - Sep 10: 400 + 800 = 1200
+        self.tx("cc", "2026-08-25", 500.0, "PAYMENT", "Credit Card Payment")   # payments don't count as spending
+        fc = forecast.build(self.conn, TODAY, 90)
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        self.assertEqual((card["avg_monthly_spend"], card["avg_cycles"]), (1066.67, 3))
+        est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], 1066.67)   # cycle in progress: 300 charged so far, so the average wins
+        self.assertEqual(est["2026-12-05"], 1066.67)
+        # if the cycle in progress is already past the average, it's at least what's been charged
+        self.tx("cc", "2026-09-21", -2000.0, "LAPTOP", "Shopping")
+        est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], 2300.0)
+
+    def test_statement_you_entered_wins(self):
+        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
+        key = forecast.card_cycle(self.conn, card, TODAY)["statement_key"]
+        self.assertEqual(key, "stmt:cc:2026-09-10")
+        self.conn.execute("INSERT INTO overrides(key, amount) VALUES (?, 950)", (key,))
+        info = forecast.card_cycle(self.conn, card, TODAY)
+        self.assertEqual((info["statement_balance"], info["statement_calculated"], info["statement_set"], info["remaining"]),
+                         (950.0, 800.0, True, 750.0))
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertIn(("2026-10-05", -750.0), [(e["date"], e["amount"]) for e in fc["events"] if e["kind"] == "card"])
+        # once the next statement closes, the entered amount no longer applies
+        info = forecast.card_cycle(self.conn, card, date(2026, 10, 12))
+        self.assertFalse(info["statement_set"])
+
     def test_owed_positive_convention(self):
         self.conn.execute("UPDATE accounts SET balance=900, owed_positive=1 WHERE id='cc'")
         card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
@@ -604,6 +636,18 @@ class ServerTests(unittest.TestCase):
         cls.httpd.shutdown()
         cls.tmp.cleanup()
         os.environ.pop("RUNWAY_DATA", None)
+
+    def test_sync_schedule(self):
+        from runway import server
+        at = lambda s: datetime.fromisoformat(s)
+        self.assertTrue(server.daily_due(None))
+        self.assertFalse(server.daily_due("2026-09-25T06:30:00", at("2026-09-25T23:00")))   # already synced today
+        self.assertFalse(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T05:00")))   # a new day, but before 6am
+        self.assertTrue(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:15")))
+        self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))    # over 24 hours
+
+    def test_sync_on_visit_needs_a_connection(self):
+        self.assertEqual(self.req("POST", "/api/sync/auto"), (200, {"started": False}))
 
     def req(self, method, path, body=None, headers=None):
         h = {"X-Runway": "1", "Content-Type": "application/json", **(headers or {})}

@@ -22,7 +22,8 @@ from . import networth, rentcast
 from . import categories, categorize, db, forecast, plaid, portfolio, prices, recurring, simplefin
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-SYNC_EVERY_HOURS = 20
+DAILY_SYNC_HOUR = 6          # the daily sync runs on the first check after this hour (local time)
+VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 
@@ -107,6 +108,48 @@ def refresh_prices(conn) -> dict:
     return out
 
 
+def _older_than(stamp: str | None, **delta) -> bool:
+    return not stamp or datetime.now() - datetime.fromisoformat(stamp) > timedelta(**delta)
+
+
+def daily_due(last: str | None, now: datetime | None = None) -> bool:
+    """Once a day: after DAILY_SYNC_HOUR if the last sync was on an earlier day, or any time it's been 24 hours."""
+    now = now or datetime.now()
+    if not last:
+        return True
+    prev = datetime.fromisoformat(last)
+    return (prev.date() < now.date() and now.hour >= DAILY_SYNC_HOUR) or now - prev > timedelta(hours=24)
+
+
+def _sync_everything(bank: bool, invest: bool) -> None:
+    if bank:
+        try:
+            run_sync()
+        except ApiError:
+            pass
+    if invest:
+        try:
+            run_investment_sync()
+        except ApiError:
+            pass
+
+
+def sync_on_visit() -> dict:
+    """Someone opened Runway: sync in the background if the data is more than VISIT_SYNC_MINUTES old."""
+    with db.session() as conn:
+        configured = bool(db.get_setting(conn, "simplefin_access_url"))
+        bank = configured and _older_than(db.get_setting(conn, "last_sync_ok"), minutes=VISIT_SYNC_MINUTES) \
+            and _older_than(db.get_setting(conn, "last_auto_sync_attempt"), minutes=VISIT_SYNC_MINUTES)
+        has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
+        invest = has_inv and _older_than(db.get_setting(conn, "last_inv_sync"), minutes=VISIT_SYNC_MINUTES)
+        if bank:
+            db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
+    if (bank or invest) and not _sync_lock.locked() and not _inv_lock.locked():
+        threading.Thread(target=_sync_everything, args=(bank, invest), daemon=True).start()
+        return {"started": True}
+    return {"started": False}
+
+
 def background_sync() -> None:
     while True:
         try:
@@ -114,22 +157,13 @@ def background_sync() -> None:
                 configured = bool(db.get_setting(conn, "simplefin_access_url"))
                 last = db.get_setting(conn, "last_sync_ok")
                 last_try = db.get_setting(conn, "last_auto_sync_attempt")
-            due = configured and (not last or datetime.now() - datetime.fromisoformat(last) > timedelta(hours=SYNC_EVERY_HOURS))
+                last_inv = db.get_setting(conn, "last_inv_sync")
             # Don't hammer SimpleFIN after failures: at most one automatic attempt every 3 hours.
-            if due and (not last_try or datetime.now() - datetime.fromisoformat(last_try) > timedelta(hours=3)):
+            bank = configured and daily_due(last) and _older_than(last_try, hours=3)
+            if bank:
                 with db.session() as conn:
                     db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
-                try:
-                    run_sync()
-                except ApiError:
-                    pass
-            with db.session() as conn:
-                last_inv = db.get_setting(conn, "last_inv_sync")
-            if not last_inv or datetime.now() - datetime.fromisoformat(last_inv) > timedelta(hours=SYNC_EVERY_HOURS):
-                try:
-                    run_investment_sync()
-                except ApiError:
-                    pass
+            _sync_everything(bank, daily_due(last_inv))
         except Exception:
             traceback.print_exc()
         time.sleep(15 * 60)
@@ -148,7 +182,7 @@ def api_state(conn, _q, _b):
         "last_llm_error": db.get_setting(conn, "last_llm_error"),
         "review_count": conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0],
         "horizon_days": int(db.get_setting(conn, "horizon_days", "90") or 90),
-        "syncing": _sync_lock.locked(),
+        "syncing": _sync_lock.locked() or _inv_lock.locked(),
         "primary_account": db.get_setting(conn, "primary_account"),
         "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
         "rentcast_configured": rentcast.configured(conn),
@@ -467,7 +501,7 @@ def api_tx_recurring(conn, _q, body, tx_id):
 
 def api_override_set(conn, _q, body):
     key = str(body.get("key") or "")
-    if not (key.startswith("rec:") or key.startswith("card:")):
+    if not key.startswith(("rec:", "card:", "stmt:")):
         raise ApiError("Unknown item")
     try:
         amount = float(body.get("amount"))
@@ -1088,6 +1122,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, out)
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
+        if method == "POST" and url.path == "/api/sync/auto":
+            return self._json(200, sync_on_visit())
         if method == "POST" and url.path == "/api/sync":
             try:
                 return self._json(200, run_sync())
