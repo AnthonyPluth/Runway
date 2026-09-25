@@ -6,13 +6,16 @@ name: Docker image
 #
 # Versions: each push bumps the patch number (v1.0.0 -> v1.0.1). Put "#minor" in a commit message (or start it with
 # "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
+# Pull requests (including Dependabot's) only run the tests.
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: docker-image
+  group: docker-image-${{ github.ref }}
   cancel-in-progress: true   # a newer push replaces a build that's still running
 
 permissions:
@@ -31,6 +34,7 @@ jobs:
 
   version:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # push the tag and create the release

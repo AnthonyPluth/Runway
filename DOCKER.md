@@ -1,7 +1,7 @@
 # Running Runway in Docker
 
 Runway signs you in through your OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID, Google,
-Microsoft Entra, ...). Nothing else is needed: the image is plain Python with no extra packages.
+Microsoft Entra, ...). The image is plain Python plus the Postgres driver, which is only used if you set `DATABASE_URL`.
 
 ## 1. Register Runway with your provider
 
@@ -44,7 +44,7 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
    ```
    Your existing data in `./data` is used as-is.
 3. Open `RUNWAY_PUBLIC_URL`. You're sent to your provider to sign in, then back to Runway.
-   "Sign out" is at the top right.
+   Sign out with the arrow next to your name at the bottom of the sidebar.
 
 If a setting is missing, the container stops with a message saying which one (see the logs).
 

@@ -16,7 +16,7 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Runway cash-flow forecaster")
     p.add_argument("--port", type=int, default=int(os.environ.get("RUNWAY_PORT", "8765")))
     p.add_argument("--host", default=os.environ.get("RUNWAY_HOST", "127.0.0.1"),
-                   help="address to listen on; 0.0.0.0 for other devices (needs RUNWAY_PASSWORD)")
+                   help="address to listen on; 0.0.0.0 for other devices (needs OIDC sign-in, see DOCKER.md)")
     p.add_argument("--no-sync", action="store_true", default=os.environ.get("RUNWAY_NO_SYNC") == "1",
                    help="don't sync with SimpleFIN in the background")
     p.add_argument("command", nargs="?", choices=["serve", "backup", "restore"], default="serve")
