@@ -10,7 +10,7 @@ Python standard library only; data lives in a local SQLite database.
 python3 run.py            # then open http://localhost:8765
 ```
 
-Needs Python 3.9 or newer. Connect SimpleFIN and the rest under Settings (the gear, top right).
+Needs Python 3.9 or newer. Connect SimpleFIN and the rest under Settings (the cog at the bottom of the sidebar).
 
 ## Run in Docker (home server)
 

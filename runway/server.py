@@ -8,6 +8,7 @@ from http.cookies import SimpleCookie
 import json
 import mimetypes
 mimetypes.add_type("image/svg+xml", ".svg")
+mimetypes.add_type("font/woff2", ".woff2")
 import sqlite3
 import os
 import threading
@@ -187,6 +188,7 @@ def api_state(conn, _q, _b):
         "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
         "rentcast_configured": rentcast.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
+        "version": os.environ.get("RUNWAY_VERSION") or "dev",
         "user": getattr(_current, "user", None),
     }
 
@@ -1060,7 +1062,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
         # The look of the sign-in pages is public; everything else needs you signed in.
-        if url.path not in ("/app.css", "/logo.svg", "/logo-180.png"):
+        if url.path not in ("/app.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2"):
             self.user = self._user()
             if not self.user:
                 if url.path.startswith("/api/"):
