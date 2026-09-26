@@ -36,7 +36,7 @@ _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 
 ACCOUNT_FIELDS = {
-    "display_name": str, "kind": str, "closing_day": int, "due_day": int, "pay_from": str,
+    "display_name": str, "kind": str, "pay_from": str,
     "in_forecast": int, "daily_spend": int, "hidden": int, "owed_positive": int, "owner": str,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
@@ -288,11 +288,14 @@ def api_overview(conn, q, _b):
 def api_accounts(conn, _q, _b):
     accts = db.rows(conn.execute("SELECT * FROM accounts ORDER BY hidden, kind, COALESCE(display_name, name)"))
     items = {r["plaid_account_id"]: r for r in db.rows(conn.execute(
-        "SELECT p.plaid_account_id, p.mask, i.products, i.institution_name FROM plaid_accounts p JOIN plaid_items i ON i.item_id=p.item_id"))}
-    for a in accts:   # which providers this account can use
+        "SELECT p.plaid_account_id, p.mask, i.products, i.institution_name, s.last_statement_date, s.next_due_date "
+        "FROM plaid_accounts p JOIN plaid_items i ON i.item_id=p.item_id "
+        "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id"))}
+    for a in accts:   # which providers this account can use, and (cards) its latest statement dates
         it = items.get(a.get("plaid_account_id") or "")
         a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
-                            "transactions": "transactions" in (it["products"] or "")} if it else None)
+                            "transactions": "transactions" in (it["products"] or ""),
+                            "closed": it["last_statement_date"], "due": it["next_due_date"]} if it else None)
     return accts
 
 
@@ -311,8 +314,6 @@ def api_account_update(conn, _q, body, acct_id):
             v = str(v).strip()
         if k == "kind" and v not in KINDS:
             raise ApiError("Unknown account type")
-        if k in ("closing_day", "due_day") and v is not None and not 1 <= v <= 31:
-            raise ApiError("Days must be between 1 and 31")
         sets.append(f"{k}=?")
         vals.append(v)
     if sets:

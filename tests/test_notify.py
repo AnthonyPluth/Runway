@@ -32,8 +32,10 @@ class NotifyTests(unittest.TestCase):
         self.c = db.connect(path)
         self.c.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES ('chk','Checking','checking',700,'2026-09-23')")
         # Card closes on the 1st, due on the 25th (two days away), $400 statement unpaid.
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance, balance_date, closing_day, due_day, pay_from) "
-                       "VALUES ('cc','Visa','credit',-400,'2026-09-23',1,25,'chk')")
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance, balance_date, pay_from, plaid_account_id) "
+                       "VALUES ('cc','Visa','credit',-400,'2026-09-23','chk','p-cc')")
+        self.c.execute("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_balance, last_statement_date, next_due_date) "
+                       "VALUES ('p-cc','item',400,'2026-09-01','2026-09-25')")
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) "
                        "VALUES ('cc|1','cc','2026-08-20',-400,'STORE','Store','Shopping')")
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) "

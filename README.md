@@ -52,8 +52,8 @@ plain Python with no third-party packages.
 - **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain
   language ("Checking stays above $2,084 for the next 120 days").
 - **Credit cards paid the way you pay them:** each card's statement balance comes out of checking on its due date.
-  Statement balances come from the card issuer when the card is linked through Plaid (with the closing date, due date
-  and minimum payment); otherwise they're worked out from the card's transactions. You can always type in the real figure.
+  Statement balances, closing dates, due dates and minimum payments come straight from the card issuer through Plaid
+  (Liabilities), so there's nothing to set up by hand. You can still correct a statement figure if you need to.
 - **Future statements** are estimated from each card's average spending over its last three statements.
 - **One-off edits:** click any upcoming amount to change it for that date only.
 
@@ -131,8 +131,8 @@ Open <http://localhost:8765>, then:
    into **Settings → Connections**. The first sync pulls about six months of history. Or, with Plaid keys, use
    **Connect a bank or card** there (up to two years of history), and set those accounts to Plaid under
    **Settings → Accounts**. You can mix the two, account by account.
-2. **Pick your primary account** and add each credit card's closing day, due day and paying account under
-   **Settings → Accounts**.
+2. **Link your credit cards through Plaid** (**Connect a bank or card**) so Runway gets their statements and due dates,
+   then pick your primary account and each card's paying account under **Settings → Accounts**.
 3. **Add your paychecks and bills** on the **Recurring** page, or accept the ones Runway suggests.
 4. Optionally add an OpenRouter key (AI categorization), Plaid keys (banks and cards account by account, card
    statements, more investment detail) and a RentCast key
@@ -214,14 +214,12 @@ were added are upgraded in place.
 |---|---|---|
 | [SimpleFIN Bridge](https://beta-bridge.simplefin.org) | Balances, transactions and investment positions from your bank and brokerages | SimpleFIN or Plaid |
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to Claude Haiku) | Optional |
-| [Plaid](https://plaid.com) | Balances and transactions for accounts you set to Plaid (Transactions), card statements and due dates (Liabilities), investment holdings and trades (Investments) | SimpleFIN or Plaid |
+| [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | For credit cards |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
 | [RentCast](https://www.rentcast.io) | Automated home value estimates | Optional |
 
 - **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its
-  due date (the issuer's statement through Plaid, or the balance at the closing day worked out from transactions after
-  it), and optionally
-  spread average everyday spending across the days.
+  due date (both from the issuer through Plaid), and optionally spread average everyday spending across the days.
 - **Investment history:** rebuilt from activity where Plaid provides it, the way Ghostfolio does; otherwise from the
   position snapshots Runway saves on every sync. Changes in positions between snapshots count as money added or
   withdrawn, not as gains, and returns are time-weighted.

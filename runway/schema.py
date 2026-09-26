@@ -36,8 +36,6 @@ accounts = Table(
     Column('available', Float),
     Column('balance_date', Text),
     Column('kind', Text, server_default=text("'checking'"), doc='checking | savings | credit | loan | investment'),
-    Column('closing_day', Integer, doc='credit cards: statement closing day of month'),
-    Column('due_day', Integer, doc='credit cards: payment due day of month'),
     Column('pay_from', Text, doc='credit cards: account id that pays the statement'),
     Column('owed_positive', Integer, server_default=text('0'), doc='credit/loan: 1 if the bank reports the amount owed as a positive number'),
     Column('in_forecast', Integer, server_default=text('1'), doc='cash accounts: include in the projection'),

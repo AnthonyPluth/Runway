@@ -165,7 +165,7 @@ let horizon = null;
 async function renderOverview(el) {
   if (!STATE.connected) {
     el.innerHTML = `<div class="card empty"><h2>Connect your bank to get started</h2>
-      <p>Runway pulls balances and transactions from SimpleFIN, then projects where your cash is headed.</p>
+      <p>Link SimpleFIN or Plaid and Runway projects where your cash is headed.</p>
       <a class="btn primary" href="#setup/connections">Go to Settings</a></div>`;
     return;
   }
@@ -176,7 +176,8 @@ async function renderOverview(el) {
   const lowBad = low && low.balance < 0;
   const end = fc.total.length ? fc.total[fc.total.length - 1] : cashNow;
   const lastDate = fc.dates[fc.dates.length - 1];
-  const owed = fc.cards.reduce((s, c) => s + (c.owed_now || 0), 0);
+  const allCards = fc.cards.concat(fc.unlinked_cards || []);   // cards not linked yet still count toward what's owed
+  const owed = allCards.reduce((s, c) => s + (c.owed_now || 0), 0);
   const nextDue = fc.cards.filter((c) => c.remaining > 0 && c.due_date >= fc.today).sort((x, y) => x.due_date.localeCompare(y.due_date))[0];
   const allChecking = fc.accounts.length && fc.accounts.every((a) => a.kind === "checking");
   const what = fc.accounts.length === 1 ? (allChecking ? "Checking" : esc(fc.accounts[0].name)) : "Your cash";
@@ -200,7 +201,7 @@ async function renderOverview(el) {
   }
 
   let html = "";
-  for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup/accounts">Settings</a></span></div>`;
+  for (const w of fc.warnings) html += `<div class="warn"><span class="icon">!</span><span>${esc(w)} <a href="#setup/${/Plaid/.test(w) ? "connections" : "accounts"}">Settings</a></span></div>`;
   for (const m of fc.missed || []) html += missedLine(m);
   if (!fc.accounts.length) {
     html += `<div class="warn"><span class="icon">!</span><span>No account to forecast yet. Choose your primary checking account in <a href="#setup/accounts">Settings</a>.</span></div>`;
@@ -224,28 +225,23 @@ async function renderOverview(el) {
       <div class="value low-val">${low ? fmt(low.balance) : "—"}</div></div>
     <div class="tile tile-row"><div><div class="label">In ${span}</div><div class="sub ${end - cashNow >= 0 ? "pos" : "neg"}">${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}</div></div>
       <div class="value">${fmt(end)}</div></div>
-    <div class="tile tile-row"><div><div class="label">Owed on cards</div><div class="sub">${fc.cards.length} card${fc.cards.length === 1 ? "" : "s"}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}</div></div>
+    <div class="tile tile-row"><div><div class="label">Owed on cards</div><div class="sub">${allCards.length} card${allCards.length === 1 ? "" : "s"}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}</div></div>
       <div class="value">${fmt(owed)}</div></div>
   </div>`;
 
   html += `<div class="card">
     <div class="card-head"><h2>The next ${span}${fc.accounts.length === 1 && !allChecking ? ` · ${esc(fc.accounts[0].name)}` : ""}</h2>
       <div class="seg" id="horizon" role="group" aria-label="Forecast length">${[...new Set([30, 60, 90, 180, horizon])].sort((x, y) => x - y).map((d) => `<button data-d="${d}" class="${d === horizon ? "on" : ""}" aria-pressed="${d === horizon}">${d === 180 ? "6 months" : d + " days"}</button>`).join("")}</div></div>
-    ${fc.budget ? `<div class="chart-legend"><span><i class="lg-line"></i>Forecast</span><span><i class="lg-line lg-budget"></i>If you stick to your budget
+    ${fc.budget ? `<div class="chart-legend"><span><i class="lg-line"></i>Forecast</span><span title="Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's card, in place of estimated card statements.${budgetSkipped(fc.budget.skipped)}"><i class="lg-line lg-budget"></i>If you stick to your budget
       · low ${fmt0(fc.budget.low.balance)} on ${fmtDate(fc.budget.low.date)}</span></div>` : ""}
     <div class="chart-wrap" id="chart"></div>
-    ${fc.budget ? `<p class="help" style="margin-top:12px">The dashed line spends exactly your budgets (${fmt0(fc.budget.monthly)} a month) on the card you usually use for each
-      (<a href="#budget">change it on the Budget page</a>), paying cards on their due dates, instead of the usual estimate of future card statements.
-      Spending in categories without a budget isn't included.${budgetSkipped(fc.budget.skipped)}</p>` : ""}
-    <p class="help" style="margin-top:12px">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
-      ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
-      ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup/accounts">Settings</a>.` : ""}</p>
+    ${fc.accounts.length > 1 ? `<p class="help" style="margin-top:12px">${fc.accounts.length} accounts combined · <a href="#setup/accounts">pick a primary account</a></p>` : ""}
     <details><summary class="small muted">Show as table</summary>${weeklyTable(fc)}</details>
   </div>`;
 
   html += `<div class="grid-2">
-    <div class="card"><div class="card-head"><h2>Coming up</h2><span class="small muted">Click an amount to change it for that date</span></div>${eventsTable(fc.events)}</div>
-    <div class="card"><div class="card-head"><h2>Credit cards</h2><span class="small muted">Click a statement to correct it</span></div><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
+    <div class="card"><div class="card-head"><h2>Coming up</h2></div>${eventsTable(fc.events)}</div>
+    <div class="card"><div class="card-head"><h2>Credit cards</h2></div><div class="scroll-x">${cardsTable(fc.cards)}</div></div>
   </div>`;
 
   el.innerHTML = html;
@@ -303,23 +299,21 @@ function eventsTable(events) {
 }
 
 function cardsTable(cards) {
-  if (!cards.length) return `<div class="empty">Add statement dates for your cards in <a href="#setup/accounts">Settings → Accounts</a>.</div>`;
+  if (!cards.length) return `<div class="empty">Link your cards through Plaid in <a href="#setup/connections">Settings → Connections</a> to see their statements and due dates.</div>`;
   return `<table id="cards-table"><tr><th>Card</th><th class="num">Statement</th><th class="num">Due</th>
       <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / stmt</th></tr>
     ${cards.map((c) => {
       const soon = c.remaining > 0 && (parseDate(c.due_date) - parseDate(new Date().toISOString().slice(0, 10))) / 864e5 <= 7;
       return `<tr><td><div class="card-name">${esc(c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
       <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
-          title="Closed ${fmtDate(c.last_close)} · click to enter the amount on your statement">${fmt(c.statement_balance)}</button>
-        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>`
-          : c.statement_source === "bank" ? `<span class="tag" title="From your bank, through Plaid${c.minimum_payment != null ? ` · minimum payment ${fmt(c.minimum_payment)}` : ""}">bank</span>` : ""}
-        <div class="cell-sub">${c.remaining > 0 ? (c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid") : `<span class="pos">Paid ✓</span>`}${c.statement_set
-          ? ` · <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the calculated amount (${fmt(c.statement_calculated)})">reset</button>` : ""}</div></td>
+          title="Closed ${fmtDate(c.last_close)} · click to correct it">${fmt(c.statement_balance)}</button>
+        ${c.statement_set ? `<span class="tag edited" title="Entered by you · the bank reported ${fmt(c.statement_reported)}">set</span>` : ""}
+        <div class="cell-sub">${c.remaining > 0 ? (c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid") : `<span class="pos">Paid ✓</span>`}${
+          c.remaining > 0 && c.minimum_payment ? ` · ${nw(`min ${fmt(c.minimum_payment)}`)}` : ""}${c.statement_set
+          ? ` · <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the bank's figure (${fmt(c.statement_reported)})">reset</button>` : ""}</div></td>
       <td class="num ${soon ? "due-soon" : "muted"}">${fmtDate(c.due_date)}</td>
       <td class="num muted" title="${c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}">${c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}</td></tr>`; }).join("")}</table>
-    <p class="help" style="margin-top:12px">Statements marked <b>bank</b> come from the card issuer through Plaid, along with the closing and due dates;
-      the rest are worked out from each card's transactions. An amount you enter is used until the next statement closes.
-      Future payments use each card's average over its last 3 statements.</p>`;
+    `;
 }
 
 function wireCards(root) {
@@ -509,8 +503,7 @@ async function renderTxPage(el, mode) {
       ${review ? `<button class="btn primary" id="ai-suggest" ${STATE.has_api_key ? "" : "disabled title=\"Add an OpenRouter key in Settings → Connections first\""}>Suggest categories with AI</button>` : ""}</div>
     <div class="subtabs" role="tablist"><a href="#transactions" role="tab" class="${review ? "" : "active"}">All</a>
       <a href="#review" role="tab" class="${review ? "active" : ""}">To review <span class="badge review-count" ${STATE.review_count ? "" : "hidden"}>${STATE.review_count || ""}</span></a></div>
-    ${review ? `<p class="help">Pick a category and it saves right away.
-      ${STATE.has_api_key ? "Or ask the AI: it suggests one category per merchant, and nothing changes until you apply each one." : `Add an OpenRouter key in <a href="#setup/connections">Settings → Connections</a> to get AI suggestions.`}</p>
+    ${review ? `
       <div id="ai-panel"></div>
       ${STATE.has_api_key ? `<details class="card ai-log" id="ai-log" ${aiLogOpen ? "open" : ""}><summary><b>AI activity</b> <span class="muted small" id="ai-log-sum"></span></summary>
         <div id="ai-log-body" class="small muted">Loading…</div></details>` : ""}` : ""}
@@ -540,8 +533,7 @@ async function renderTxPage(el, mode) {
       (!f.month || e.date.startsWith(f.month)));
     if (!events.length) { box.innerHTML = ""; return; }
     const shown = upcomingAll ? events : events.slice(0, 6);
-    box.innerHTML = `<div class="card scroll-x projected"><div class="card-head"><h2>Upcoming <span class="tag">projected</span></h2>
-        <span class="small muted">From recurring items and card statements · click an amount to change it for that date</span></div>
+    box.innerHTML = `<div class="card scroll-x projected"><div class="card-head"><h2>Upcoming <span class="tag">projected</span></h2></div>
       <table><tr><th>Date</th><th>Item</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th><th class="num">Balance after</th></tr>
       ${shown.map((e) => `<tr>
         <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
@@ -704,7 +696,7 @@ async function runAiSuggestions(btn, f, reload) {
   if (!groups.length) { panel.innerHTML = `<div class="card empty">Nothing waiting for a category.</div>`; return; }
   const answered = groups.filter((g) => g.category || g.new_category).length;
   panel.innerHTML = `<div class="card ai-card"><div class="card-head"><h2>AI suggestions · ${groups.length} merchant${groups.length === 1 ? "" : "s"}</h2>
-      <span class="small muted">Nothing changes until you click Apply. “Remember for this merchant” below also saves a rule.</span></div>
+      <span class="small muted">Nothing changes until you apply</span></div>
     <p class="help">${answered === groups.length ? `The AI suggested a category for every merchant.`
       : answered ? `The AI suggested a category for ${answered} of ${groups.length}; pick the rest yourself.`
       : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5).`}</p>
@@ -796,9 +788,7 @@ async function renderRecurring(el) {
   };
 
   el.innerHTML = `<h1>Recurring</h1>
-    <p class="help">Paychecks, mortgage, loans and bills. Transactions from the same merchant are matched automatically, whatever the amount;
-      matched ones show ↻ on the Transactions tab. For bills that vary, set “Forecast amount” to use the last payment or an average.
-      Use negative amounts for money going out.</p>
+    
     ${items.length ? items.map((r) => `<div class="card rec-item" data-id="${r.id}">
       <div class="card-head"><h2>↻ ${esc(r.name)} ${r.active ? "" : `<span class="tag">paused</span>`}</h2>
         <span class="small muted">${r.next_date ? `Next ${fmtDate(r.next_date)} · ${fmt(r.expected_amount)}` : "No upcoming date"}
@@ -942,18 +932,17 @@ async function renderBudget(el) {
     <div class="card"><h2>Budgets</h2>
       ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><thead><tr><th>Category</th><th class="num">Monthly budget</th><th class="pay-col"><span class="sr-only">Paid with</span></th><th class="num">Spent</th><th style="width:28%">Progress</th><th></th></tr></thead>
         ${inBudget.map((f) => familyRows(f, true)).join("")}</table></div>
-        ${pace > 0 && pace < 1 ? `<p class="help">The thin line in each bar marks where you'd be if you spent evenly through the month (day ${b.day} of ${b.days_in_month}).
-          A category's budget covers everything under it; you can also budget a subcategory on its own.</p>` : ""}
-        <p class="help">The budget forecast on the Overview charts each budget to the card you usually use for it; use “Set card” on a row to pick a different one.</p>`
-      : `<div class="empty">No budgets yet. Set one for any category below. Budgets repeat every month.</div>`}
+        ${pace > 0 && pace < 1 ? `` : ""}
+        `
+      : `<div class="empty">No budgets yet. Set one below.</div>`}
     </div>
     <div class="card"><h2>Not budgeted</h2>
-      <p class="help">Spending this month in categories without a budget. Type an amount to start budgeting one.</p>
+      
       <div class="scroll-x"><table class="budget-table">${notBudget.map((f) => familyRows(f, false)).join("")}
         ${unusedTops.length ? `<tr><td><select id="b-new-cat"><option value="">Another category…</option>${unusedTops.map((f) => [f.top, ...f.kids].map((c) => `<option value="${esc(c.name)}">${esc(c.parent ? `${c.parent} > ${c.name}` : c.name)}</option>`).join("")).join("")}</select></td>
           <td class="num"><input type="number" min="0" step="10" id="b-new-amt" class="b-amt" placeholder="Set budget"></td><td></td><td></td><td></td></tr>` : ""}</table></div>
     </div>
-    ${b.income ? `<p class="help">Money in this month (Income and Refunds): ${fmt(b.income)}. See the <a href="#reports">Reports</a> tab for where it went.</p>` : ""}`;
+    ${b.income ? `<p class="help">Money in this month: ${fmt(b.income)}</p>` : ""}`;
 
   $("#m-prev").addEventListener("click", () => shift(-1));
   $("#m-next").addEventListener("click", () => shift(1));
@@ -1009,8 +998,7 @@ async function renderReports(el) {
     </div>
     <div class="card"><h2>${short} cash flow</h2>
       ${empty ? `<div class="empty">No transactions in ${label}.</div>` : `<div class="scroll-x"><div class="sankey-wrap" id="sankey"></div></div>
-      <p class="help">Width of each band is proportional to the amount. Hover for exact figures. Categories under 2% of spending are grouped as “Everything else”.
-        Checking, savings and cards are included; card payments and transfers between your own accounts are not, so nothing is counted twice.</p>
+      
       <details><summary class="small muted">Show as table</summary>${cashflowTable(cf)}</details>`}
     </div>`;
   $("#r-prev").addEventListener("click", () => shift(-1));
@@ -1189,9 +1177,7 @@ async function openTrackedEditor(acctId, el) {
   row.hidden = false;
   row.firstElementChild.innerHTML = `<div class="card-inset tracked-editor">
     <h3>What this account holds</h3>
-    <p class="help">From your plan's website or latest statement: each fund's ticker and shares, and your contribution election (the % of each
-      paycheck that goes into it). For a fund with no ticker, enter its current value instead of shares. Runway prices the funds daily and, when the
-      synced balance jumps, invests the new money per your election. Update the shares from a statement every so often.</p>
+    <p class="help">Each fund's ticker and shares (or value, if it has no ticker) and your contribution split, from your plan's website.</p>
     <table class="tr-table"><tr><th>Ticker</th><th>Name</th><th>Shares</th><th>Value (no ticker)</th><th>Contribution %</th><th></th></tr>
       ${(t.positions.length ? t.positions : [{}]).map(fund).join("")}</table>
     <div class="form-row"><button class="btn link" id="tr-add">+ Add a fund</button><span class="small" id="tr-status"></span>
@@ -1232,9 +1218,7 @@ async function renderInvestments(el) {
   if (!status.inv_accounts) {
     el.innerHTML = `<h1>Investments</h1><div class="card empty">
       <h2>No investment accounts yet</h2>
-      <p>Positions come from SimpleFIN. Add your brokerage and retirement accounts at SimpleFIN Bridge, make sure their type is
-        <b>investment</b> in <a href="#setup/accounts">Settings → Accounts</a>. They show up here after the next sync.</p>
-      ${status.simplefin_connected ? "" : `<p class="small"><a href="#setup/connections">Connect SimpleFIN first</a></p>`}</div>`;
+      <p>Link your brokerage and retirement accounts in <a href="#setup/connections">Settings → Connections</a>.</p></div>`;
     return;
   }
   const d = await api(`/api/investments?period=${invPeriod}`);
@@ -1253,7 +1237,7 @@ async function renderInvestments(el) {
     ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup/connections">Reconnect in Settings</a></span></div>`).join("")}
     <div class="tiles tiles-4" id="inv-tiles">${invTiles(d, perf, beat)}</div>
 
-    <div class="card"><div class="card-head"><h2>Value</h2><span class="small muted">Portfolio value and what you've put in (net of withdrawals)</span></div>
+    <div class="card"><div class="card-head"><h2>Value</h2></div>
       <div class="chart-wrap" id="inv-value"></div>
       <h3>Return vs S&amp;P 500</h3>
       <div class="chart-wrap" id="inv-return"></div>
@@ -1263,7 +1247,7 @@ async function renderInvestments(el) {
         <tr><td>Gain after deposits</td>${Object.values(d.periods).map((p) => `<td class="num muted">${signed(p.gain)}</td>`).join("")}</tr></table></div>
     </div>
 
-    <div class="card"><div class="card-head"><h2>Holdings</h2><span class="small muted">Combined across accounts · click a column to sort</span></div>
+    <div class="card"><div class="card-head"><h2>Holdings</h2></div>
       <div class="scroll-x" id="inv-holdings"></div></div>
 
     <div class="grid-2">
@@ -1271,7 +1255,7 @@ async function renderInvestments(el) {
         <div class="seg" id="alloc-tabs">${[["asset_class", "Asset class"], ["account", "Account"], ["sector", "Sector"], ["holding", "Top holdings"]]
           .map(([k, l]) => `<button data-k="${k}" class="${k === invAllocTab ? "on" : ""}">${l}</button>`).join("")}</div></div>
         <div id="inv-alloc"></div></div>
-      <div class="card"><div class="card-head"><h2>X-ray</h2><span class="small muted">Quick checks on concentration, cash and fees</span></div>
+      <div class="card"><div class="card-head"><h2>X-ray</h2></div>
         <ul class="xray">${d.xray.map((r) => `<li class="${r.ok ? "ok" : r.info ? "info" : "warn-item"}"><span class="xr-icon">${r.ok ? "✓" : r.info ? "i" : "▲"}</span>
           <div><b>${esc(r.name)}</b> <span class="xr-state">${r.ok ? "looks fine" : r.info ? "note" : "worth a look"}</span><div class="small muted">${esc(r.detail)}</div></div></li>`).join("")}</ul></div>
     </div>
@@ -1286,7 +1270,7 @@ async function renderInvestments(el) {
         <select id="act-type"><option value="">All activity</option>${["buy", "sell", "cash", "fee", "transfer"].map((t) => `<option ${t === invActivityType ? "selected" : ""}>${t}</option>`).join("")}</select></div>
       <div class="scroll-x" id="inv-activity"></div></div>
 
-    <div class="card"><h2>Accounts</h2><p class="help">Untick an account to leave it out of everything on this page.</p>
+    <div class="card"><h2>Accounts</h2>
       <div class="scroll-x"><table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
         ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}</label></td>
         <td class="muted small">${a.source !== "simplefin" ? `via Plaid${a.subtype ? ` · ${esc(a.subtype)}` : ""}` : a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
@@ -1299,7 +1283,7 @@ async function renderInvestments(el) {
       ${status.simplefin_seen.length ? `<details><summary class="small">What SimpleFIN sends for each account</summary><table class="small">
         ${status.simplefin_seen.map((x) => `<tr><td>${esc(x.org || "")} · ${esc(x.name)}</td><td>${x.positions ? `${x.positions} positions` : "balance only, no positions"}</td>
           <td class="muted">${x.fields.length ? esc(x.fields.join(", ")) : ""}</td></tr>`).join("")}</table>
-        <p class="help">Balance-only accounts count toward your total and allocation as a single line, but Runway can't see what they're invested in.</p></details>` : ""}</div>`;
+        </details>` : ""}</div>`;
 
   $$("#inv-period button").forEach((b) => b.addEventListener("click", () => { invPeriod = b.dataset.p; renderInvestments(el); }));
   $$(".tr-edit").forEach((b) => b.addEventListener("click", () => openTrackedEditor(b.dataset.id, el)));
@@ -1442,8 +1426,7 @@ async function renderInvestments(el) {
 }
 
 function fireForm(f) {
-  return `<p class="help">Uses the 4% rule of thumb: you can retire when your investments are about 25× your yearly spending.
-    Spending is prefilled from your last 6 months in Runway; savings from what you added to these accounts over the last 12 months.</p>
+  return `<p class="help">Target: 25× yearly spending (the 4% rule).</p>
     <div class="form-row fire-form">
       <label>Yearly spending<input type="number" id="fi-spend" value="${Math.round(f.annual_spending)}" step="1000"></label>
       <label>Saved per year<input type="number" id="fi-save" value="${Math.round(f.yearly_savings)}" step="1000"></label>
@@ -1626,9 +1609,9 @@ async function renderNetWorth(el) {
       <div class="tile"><div class="label">Liabilities</div><div class="value">${fmt0(d.liabilities)}</div>
         <div class="sub">${d.groups.filter((g) => g.side === "liability").map((g) => nw(`${esc(g.label)} ${fmt0(g.total)}`)).join(" · ") || "nothing owed"}</div></div>
     </div>
-    <div class="card"><div class="card-head"><h2>Over time</h2><span class="small muted">Saved once a day from your synced balances and asset values</span></div>
+    <div class="card"><div class="card-head"><h2>Over time</h2></div>
       <div class="chart-wrap" id="nw-chart"></div>
-      ${d.history.length < 2 ? `<p class="help">Runway records your net worth every day from here on, so this chart fills in as the days go by.</p>` : ""}</div>
+      ${d.history.length < 2 ? `<p class="help">Fills in as the days go by.</p>` : ""}</div>
     <div class="card"><h2>What makes it up</h2>
       <div class="nw-bar" role="img" aria-label="Share of assets by type">${assetGroups.map((g, i) =>
         `<span class="nw-seg s${i}" style="width:${(g.total / d.assets * 100).toFixed(2)}%" title="${esc(g.label)} ${fmt0(g.total)}"></span>`).join("")}</div>
@@ -1639,10 +1622,7 @@ async function renderNetWorth(el) {
       </div></div>
     <div class="card"><div class="card-head"><h2>Home, vehicles and other assets</h2>
         <button class="btn primary" id="asset-new">Add an asset</button></div>
-      <p class="help">Things no bank reports. ${d.rentcast.configured
-        ? `Homes can update from RentCast (${d.rentcast.used} of ${d.rentcast.limit} free lookups used this month).`
-        : `Enter values yourself, or add a free RentCast key in <a href="#setup/connections">Settings</a> so homes can update automatically.`}
-        For a car, a yearly change like −15% keeps its value moving between your updates.</p>
+      
       <div id="asset-form-host"></div>
       <div class="asset-list">${d.assets_list.length ? d.assets_list.map((a) => assetCard(a, d)).join("") : `<div class="empty">No assets yet.</div>`}</div>
     </div>`;
@@ -1724,7 +1704,7 @@ function openAssetForm(a, d, el) {
       <label>Loan against it<select id="af-loan"><option value="">None</option>${d.loan_accounts.map((l) => `<option value="${esc(l.id)}" ${v.loan_account_id === l.id ? "selected" : ""}>${esc(l.name)}</option>`).join("")}</select></label>
       <label style="flex:1">Link to check the value (Zillow, KBB…)<input id="af-url" value="${esc(v.url || "")}" placeholder="https://" style="width:100%"></label>
     </div>
-    <div class="form-row">${a ? `<button class="btn link" id="af-cancel">Done</button><span class="small muted">Changes save as you make them.</span>`
+    <div class="form-row">${a ? `<button class="btn link" id="af-cancel">Done</button>`
       : `<button class="btn primary" id="af-save">Add</button><button class="btn link" id="af-cancel">Cancel</button>`}</div>
   </div>`;
   const syncKind = () => { $(".af-home", host).style.display = $("#af-kind").value === "home" ? "" : "none"; };
@@ -1916,7 +1896,7 @@ async function renderNotifications(box) {
   const num = (k, pre, post, step) => `<label class="inline n-num">${pre}<input type="number" min="0" step="${step}" class="n-pref" data-k="${k}" value="${p[k]}">${post}</label>`;
   box.innerHTML = `<div class="card"><h2>This device</h2>${status}</div>
     <div class="card"><h2>What to tell you about</h2>
-      <p class="help">Checked after each sync (once a day, and whenever you open Runway). Each alert is sent once.</p>
+      
       ${toggle("card_due", "A card payment is coming up", num("card_due_days", "", " days ahead", 1))}
       ${toggle("low_balance", "The forecast gets low in the next 30 days", num("low_balance_below", "below $", "", 50))}
       ${toggle("missed", "A recurring payment didn't show up")}
@@ -1992,9 +1972,7 @@ async function renderSetup(el, sub) {
       <label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label></div>
   </div>
   <div class="card"><h2>Accounts</h2>
-    <p class="help">For each credit card, set the statement closing day, the payment due day, and the account that pays it.
-      Only cards paid from the primary account show up in the forecast. ${(STATE.owners || []).length ? "" : "Owners are the people who have signed in to Runway; each shows up here after their first sign-in. "}Set brokerage and retirement accounts to <b>investment</b> so they appear on the
-      <a href="#investments">Investments</a> page.</p>
+    
     ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Owner</th><th>Details</th><th class="num">Balance</th></tr>
       ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
         <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${esc(a.org || "")} ${esc(a.name)}</div></td>
@@ -2002,9 +1980,10 @@ async function renderSetup(el, sub) {
         <td><select class="f-owner" aria-label="Owner of ${esc(name(a))}">${ownerOptions(a.owner)}</select></td>
         <td class="f-details">${a.kind === "credit"
           ? `<div class="form-row" style="margin:0">
-              <label>Closes on day<input type="number" min="1" max="31" class="f-close" value="${a.closing_day ?? ""}"></label>
-              <label>Due on day<input type="number" min="1" max="31" class="f-due" value="${a.due_day ?? ""}"></label>
               <label>Paid from<select class="f-payfrom"><option value="">—</option>${acctOptions(cash, a.pay_from)}</select></label></div>
+             <div class="desc">${a.plaid_link && a.plaid_link.closed
+               ? `Statements from ${esc(a.plaid_link.institution || "the issuer")}: last closed ${fmtDate(a.plaid_link.closed)}${a.plaid_link.due ? `, due ${fmtDate(a.plaid_link.due)}` : ""}`
+               : `No statements yet: link this card through Plaid in <a href="#setup/connections">Connections</a>`}</div>
              <label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>`
           : a.kind === "checking" || a.kind === "savings"
           ? `<label class="inline" title="Spreads this account's recent non-recurring spending evenly over every day of the forecast"><input type="checkbox" class="f-spend" ${a.daily_spend ? "checked" : ""}> Also subtract average everyday spending</label>`
@@ -2016,9 +1995,7 @@ async function renderSetup(el, sub) {
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
   </div>` },
     categories: { label: "Categories", html: () => `<div class="card"><h2>Categories</h2>
-    <p class="help">Rename a category by editing its name. Subcategories roll up into their parent in budgets and reports.
-      Use Move to put a category under a different parent, or back at the top level.
-      Categories marked “built-in” are used by Runway itself.</p>
+    
     <div class="scroll-x"><table id="cat-table"><tr><th>Category</th><th>Kind</th><th class="num">Transactions</th><th></th></tr>
       ${CATEGORIES.map((c) => `<tr data-name="${esc(c.name)}" class="${c.parent ? "sub-row" : ""}">
         <td style="padding-left:${10 + (c.depth || 0) * 20}px">${c.parent ? `<span class="muted">${esc(c.parent)} &gt;</span> ` : ""}${c.protected ? `<b>${esc(c.name)}</b> <span class="tag">built-in</span>`
@@ -2036,7 +2013,7 @@ async function renderSetup(el, sub) {
       <button class="btn primary" id="cat-add">Add</button></div>
   </div>` },
     rules: { label: "Rules", count: rules.length, html: () => `<div class="card"><h2>Rules</h2>
-    <p class="help">If a merchant or description contains the text, it gets the category. Longer matches win. Edits save when you change a field.</p>
+    
     <div class="form-row">
       <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
       <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
@@ -2055,19 +2032,13 @@ async function renderSetup(el, sub) {
     connections: { label: "Connections", html: () => `
   <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
     ${STATE.simplefin
-      ? `<p>Connected to SimpleFIN. Runway syncs once a day, and whenever you open it if the data is more than an hour old.</p>
+      ? `<p>Connected.</p>
          ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
          <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
-      : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
-         (a token can only be used once). Paste it here. It's exchanged for a private access link that stays in Runway's database.</p>${connectForm()}`}
+      : `<p class="help">Paste a setup token from <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>.</p>${connectForm()}`}
   </div>
-<div class="card" id="plaid-card"><h2>Plaid <span class="muted small">optional</span></h2>
-    <p class="help"><b>Banks and cards:</b> match each Plaid account to one of yours, then choose under Accounts whether its balance and
-      transactions come from SimpleFIN or Plaid (switching keeps your history and categories). Cards get their statement balance, closing
-      date and due date from the bank either way, and the forecast uses them.
-      <b>Investments:</b> for accounts SimpleFIN only knows the balance of, Plaid adds holdings and trade history; linking an institution
-      hides its SimpleFIN copy on the Investments page (net worth keeps using the SimpleFIN balance). Keys are under Developers → Keys at
-      <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
+<div class="card" id="plaid-card"><h2>Plaid</h2>
+    <p class="help">Keys: Developers → Keys at <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
     <div class="form-row">
       <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
       <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
@@ -2076,28 +2047,24 @@ async function renderSetup(el, sub) {
     <div id="pl-items"></div>
   </div>
 <div class="card"><h2>AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
-    <p class="help">With an OpenRouter API key, the To review list under Transactions can suggest a category for each merchant; you confirm each one.
-      Only the date, amount, merchant text and account type of those transactions are sent.</p>
+    <p class="help">Only the date, amount, merchant and account type of each transaction are sent.</p>
     <div class="form-row">
       <label>OpenRouter API key<input id="api-key" type="password" placeholder="${STATE.has_api_key ? "•••••••• saved" : "sk-or-…"}" style="width:260px" autocomplete="off"></label>
       <label>Model<input id="llm-model" value="${esc(STATE.llm_model)}" style="width:240px" spellcheck="false"></label>
       ${STATE.has_api_key ? `<button class="btn" id="clear-key">Remove key</button>` : ""}
     </div>
     <label class="inline"><input type="checkbox" id="auto-ai" ${STATE.auto_ai_on_sync ? "checked" : ""}>
-      During each sync, also ask the AI about new merchants and apply answers it's confident about (the rest wait under Transactions → To review)</label>
+      Categorize new merchants during each sync when the AI is confident</label>
     ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
   </div>
 <div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
-    <p class="help">Zillow and KBB don't offer their values to individuals, so homes and vehicles on the <a href="#networth">Net worth</a> page are entered by hand.
-      For homes, a free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast API key</a> gives an automated estimate (50 lookups a month on the free plan; Runway stops there so you're never charged).</p>
+    <p class="help">A free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast key</a> keeps home values current (Runway stays within the 50 free lookups a month).</p>
     <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
 ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
   </div>` },
     notifications: { label: "Notifications", html: () => `<div id="notif-box"><div class="card empty">Loading…</div></div>` },
     backup: { label: "Backup", html: () => `<div class="card"><h2>Backup &amp; restore</h2>
-    <p class="help">A backup is one file with all your data and settings. It works with either database, so it's also how you move
-      Runway to another machine, or from its built-in database to Postgres. Currently using: <b>${STATE.database === "postgres" ? "Postgres" : "the built-in database (SQLite)"}</b>.
-      The file includes your bank access and API keys, so keep it somewhere private.</p>
+    <p class="help">Everything, including bank access and API keys: keep it private. Database: ${STATE.database === "postgres" ? "Postgres" : "SQLite"}.</p>
     <div class="form-row"><a class="btn primary" href="/api/backup" download>Download a backup</a></div>
     <div class="form-row">
       <label>Restore from a backup<input type="file" id="restore-file" accept=".gz,.json,application/gzip,application/json"></label>
@@ -2156,7 +2123,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
         if (e.target.value === "plaid") api("/api/sync", { method: "POST" }).then(() => route(), () => {});
       } catch (err) { toast(err.message, true); route(); }
     });
-    onEdit($$(".f-name, .f-owner, .f-close, .f-due, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
+    onEdit($$(".f-name, .f-owner, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
   });
   onEdit([$("#llm-model")], async () => { await api("/api/settings", { method: "POST", body: { llm_model: $("#llm-model").value.trim() } }); await refreshState(); });
   onEdit([$("#api-key")], async () => {
@@ -2292,7 +2259,7 @@ function providerControl(a) {
 async function saveAccount(tr, rerender) {
   const body = { display_name: $(".f-name", tr).value, kind: $(".f-kind", tr).value, hidden: $(".f-hidden", tr).checked ? 1 : 0,
     owner: $(".f-owner", tr)?.value ?? undefined };
-  if ($(".f-close", tr)) { body.closing_day = $(".f-close", tr).value; body.due_day = $(".f-due", tr).value; body.pay_from = $(".f-payfrom", tr).value; }
+  if ($(".f-payfrom", tr)) body.pay_from = $(".f-payfrom", tr).value;
   if ($(".f-sign", tr)) body.owed_positive = $(".f-sign", tr).checked ? 1 : 0;
   if ($(".f-spend", tr)) body.daily_spend = $(".f-spend", tr).checked ? 1 : 0;
   try {
