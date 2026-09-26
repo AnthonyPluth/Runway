@@ -58,7 +58,8 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
     keys = sub.get("keys") or {}
     if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
         raise ValueError("That isn't a push subscription.")
-    webpush.decode_point(webpush.unb64u(keys["p256dh"]))   # a real P-256 key
+    if not webpush.valid_public_key(keys["p256dh"]):
+        raise ValueError("That isn't a push subscription.")
     conn.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?) "
                  "ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth, device=excluded.device",
                  (endpoint, keys["p256dh"], keys["auth"], (device or "This device")[:80], user_sub, time.time()))
@@ -79,13 +80,13 @@ def subject(conn) -> str:
 
 def send_all(conn, message: dict, only: str | None = None) -> dict:
     """Send to every device (or one endpoint). Dead subscriptions are removed."""
-    priv, pub = webpush.vapid_keys(conn)
+    vapid, _pub = webpush.vapid_keys(conn)
     sent, failed = 0, []
     for s in subscriptions(conn):
         if only and s["endpoint"] != only:
             continue
         try:
-            webpush.send(s, message, priv, pub, subject(conn))
+            webpush.send(s, message, vapid, subject(conn))
             conn.execute("UPDATE push_subscriptions SET last_ok=?, last_error=NULL WHERE endpoint=?", (time.time(), s["endpoint"]))
             sent += 1
         except webpush.Gone:

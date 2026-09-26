@@ -1,4 +1,6 @@
-"""Plaid client for investment accounts: Link tokens, token exchange, holdings and investment activity."""
+"""Plaid client: Link tokens, token exchange, and investment holdings and activity.
+
+Bank and credit card connections (transactions, balances and card statements) are in plaidbank.py."""
 from __future__ import annotations
 
 import json
@@ -7,7 +9,7 @@ import os
 import ssl
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from . import db
 
@@ -71,7 +73,9 @@ def call(conn, path: str, body: dict) -> dict:
 
 # ------------------------------------------------------------------------------------------------ linking
 
-def link_token(conn, item_id: str | None = None) -> str:
+def link_token(conn, item_id: str | None = None, kind: str = "investments") -> str:
+    """kind: "investments", or "bank" (transactions, plus card statements where the bank offers them), or "cards"
+    (card statements only, for a Plaid account without the Transactions product)."""
     body = {
         "client_name": "Runway",
         "user": {"client_user_id": "runway-local-user"},
@@ -83,6 +87,12 @@ def link_token(conn, item_id: str | None = None) -> str:
         if not row:
             raise PlaidError("Connection not found")
         body["access_token"] = row["access_token"]
+    elif kind == "bank":
+        body["products"] = ["transactions"]
+        body["optional_products"] = ["liabilities"]
+        body["transactions"] = {"days_requested": 730}
+    elif kind == "cards":
+        body["products"] = ["liabilities"]
     else:
         body["products"] = ["investments"]
     redirect = db.get_setting(conn, "plaid_redirect_uri")
@@ -95,10 +105,17 @@ def exchange(conn, public_token: str, institution: dict | None = None) -> str:
     res = call(conn, "/item/public_token/exchange", {"public_token": public_token})
     item_id, token = res["item_id"], res["access_token"]
     institution = institution or {}
+    try:   # which products this connection has (investments, or transactions and/or liabilities)
+        info = call(conn, "/item/get", {"access_token": token}).get("item") or {}
+        prods = sorted(set(info.get("products") or []) | set(info.get("billed_products") or []))
+    except PlaidError:
+        prods = []
+    prods = [p for p in prods if p in ("investments", "transactions", "liabilities")] or ["investments"]
     conn.execute(
-        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env) VALUES (?,?,?,?,?) "
-        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, error=NULL",
-        (item_id, token, institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production")),
+        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, products=excluded.products, error=NULL",
+        (item_id, token, institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
+         ",".join(prods)),
     )
     conn.commit()
     return item_id
@@ -113,6 +130,8 @@ def remove_item(conn, item_id: str) -> None:
     except PlaidError as e:
         if e.code not in ("ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"):
             raise
+    from . import plaidbank
+    plaidbank.forget_item(conn, item_id)
     ids = [r["id"] for r in conn.execute("SELECT id FROM inv_accounts WHERE item_id=?", (item_id,))]
     for aid in ids:
         for table in ("holdings", "inv_transactions", "inv_snapshots"):
@@ -143,6 +162,9 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     item = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     if not item:
         raise PlaidError("Connection not found")
+    from . import plaidbank
+    if plaidbank.is_bank_item(item):
+        return plaidbank.sync_item(conn, item_id, today)
     token = item["access_token"]
     conn.commit()
     try:
@@ -168,8 +190,10 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         conn.execute("DELETE FROM holdings WHERE account_id=?", (aid,))
     for x in h.get("holdings", []):
         conn.execute(
-            "INSERT OR REPLACE INTO holdings(account_id, security_id, quantity, price, price_as_of, value, cost_basis, currency) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO holdings(account_id, security_id, quantity, price, price_as_of, value, cost_basis, currency) "
+            "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(account_id, security_id) DO UPDATE SET quantity=excluded.quantity, "
+            "price=excluded.price, price_as_of=excluded.price_as_of, value=excluded.value, cost_basis=excluded.cost_basis, "
+            "currency=excluded.currency",
             (x["account_id"], x["security_id"], x.get("quantity"), x.get("institution_price"), x.get("institution_price_as_of"),
              x.get("institution_value"), x.get("cost_basis"), x.get("iso_currency_code") or "USD"),
         )
@@ -177,7 +201,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         total = conn.execute("SELECT SUM(value) FROM holdings WHERE account_id=?", (aid,)).fetchone()[0]
         if total is None:
             total = conn.execute("SELECT balance FROM inv_accounts WHERE id=?", (aid,)).fetchone()[0]
-        conn.execute("INSERT OR REPLACE INTO inv_snapshots(date, account_id, value) VALUES (?,?,?)", (today.isoformat(), aid, total))
+        conn.execute("INSERT INTO inv_snapshots(date, account_id, value) VALUES (?,?,?) ON CONFLICT(date, account_id) DO UPDATE SET value=excluded.value", (today.isoformat(), aid, total))
     conn.commit()
 
     # Activity: everything Plaid has on the first sync, then a rolling window.
@@ -193,8 +217,11 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         txs = res.get("investment_transactions", [])
         for t in txs:
             conn.execute(
-                "INSERT OR REPLACE INTO inv_transactions(id, account_id, security_id, date, name, type, subtype, quantity, amount, price, fees, currency) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO inv_transactions(id, account_id, security_id, date, name, type, subtype, quantity, amount, price, fees, currency) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id, "
+                "security_id=excluded.security_id, date=excluded.date, name=excluded.name, type=excluded.type, "
+                "subtype=excluded.subtype, quantity=excluded.quantity, amount=excluded.amount, price=excluded.price, "
+                "fees=excluded.fees, currency=excluded.currency",
                 (t["investment_transaction_id"], t["account_id"], t.get("security_id"), t["date"], t.get("name"), t.get("type"),
                  t.get("subtype"), t.get("quantity") or 0, t.get("amount") or 0, t.get("price"), t.get("fees") or 0,
                  t.get("iso_currency_code") or "USD"),
@@ -205,14 +232,17 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         conn.commit()
         if not txs:
             break
-    conn.execute("UPDATE plaid_items SET last_sync=datetime('now'), error=NULL WHERE item_id=?", (item_id,))
+    conn.execute("UPDATE plaid_items SET last_sync=?, error=NULL WHERE item_id=?",
+                 (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), item_id))
     conn.commit()
     return {"accounts": len(account_ids), "holdings": len(h.get("holdings", [])), "transactions": fetched}
 
 
 def sync_all(conn) -> dict:
     out = {"items": 0, "errors": []}
-    for row in conn.execute("SELECT item_id, institution_name FROM plaid_items").fetchall():
+    for row in conn.execute("SELECT item_id, institution_name, products FROM plaid_items").fetchall():
+        if "investments" not in (row["products"] or "investments"):
+            continue   # bank and card connections sync with the bank sync
         try:
             sync_item(conn, row["item_id"])
             out["items"] += 1
@@ -244,7 +274,7 @@ def hide_all_duplicates(conn) -> list[str]:
     if db.get_setting(conn, "dedupe_simplefin_v2"):
         return []
     hidden = []
-    for r in conn.execute("SELECT item_id FROM plaid_items").fetchall():
+    for r in conn.execute("SELECT item_id FROM plaid_items WHERE COALESCE(products, 'investments') LIKE '%investments%'").fetchall():
         hidden += hide_simplefin_duplicates(conn, r["item_id"])
     db.set_setting(conn, "dedupe_simplefin_v2", "1")
     return hidden

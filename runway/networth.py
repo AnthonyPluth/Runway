@@ -144,7 +144,8 @@ def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None
 def set_value(conn, asset_id: int, value: float, source: str, today: date, low=None, high=None) -> None:
     conn.execute("UPDATE assets SET value=?, as_of=?, source=?, low=?, high=? WHERE id=?",
                  (round(value, 2), today.isoformat(), source, low, high, asset_id))
-    conn.execute("INSERT OR REPLACE INTO asset_values(asset_id, date, value, source) VALUES (?,?,?,?)",
+    conn.execute("INSERT INTO asset_values(asset_id, date, value, source) VALUES (?,?,?,?) "
+                 "ON CONFLICT(asset_id, date) DO UPDATE SET value=excluded.value, source=excluded.source",
                  (asset_id, today.isoformat(), round(value, 2), source))
 
 

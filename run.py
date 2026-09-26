@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Start Runway:  python3 run.py  [--port 8765]  then open http://localhost:8765
+"""Start Runway:  poetry run python run.py  [--port 8765]  then open http://localhost:8765
+(first time: poetry install --no-root)
 
-Backups:  python3 run.py backup [file.json.gz]      save everything to a file
-          python3 run.py restore file.json.gz       replace everything with a backup (asks first; --yes to skip)
+Backups:  poetry run python run.py backup [file.json.gz]   save everything to a file
+          poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip)
 """
 import argparse
 import os

@@ -1,4 +1,16 @@
-# Runway: personal finance, forecasting and investments. Standard-library Python only, so the image stays small.
+# Runway: personal finance, forecasting and investments.
+
+# 1. Install the dependencies (pyproject.toml / poetry.lock) into a virtualenv with Poetry.
+FROM python:3.14-slim AS deps
+ENV PIP_NO_CACHE_DIR=1 \
+    POETRY_VIRTUALENVS_IN_PROJECT=true \
+    POETRY_NO_INTERACTION=1
+RUN pip install "poetry>=2.0,<3.0"
+WORKDIR /app
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only main --no-root --no-ansi
+
+# 2. The image itself: Python, that virtualenv and Runway, without Poetry.
 FROM python:3.14-slim
 
 LABEL org.opencontainers.image.source="https://github.com/AnthonyPluth/Runway" \
@@ -8,6 +20,7 @@ LABEL org.opencontainers.image.source="https://github.com/AnthonyPluth/Runway" \
 ARG VERSION=dev
 
 ENV RUNWAY_VERSION=$VERSION \
+    PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     RUNWAY_DATA=/data \
@@ -15,15 +28,13 @@ ENV RUNWAY_VERSION=$VERSION \
     RUNWAY_PORT=8765 \
     TZ=America/Chicago
 
-# The Postgres driver, used only when DATABASE_URL is set (otherwise Runway uses its built-in SQLite database).
-RUN pip install --no-cache-dir "psycopg[binary]>=3.1,<4"
-
 # Run as an ordinary user; your database lives in /data (mount a folder or volume there).
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin runway \
  && mkdir -p /data && chown runway:runway /data
 
 WORKDIR /app
-COPY --chown=runway:runway run.py ./
+COPY --from=deps /app/.venv ./.venv
+COPY --chown=runway:runway run.py alembic.ini ./
 COPY --chown=runway:runway runway ./runway
 
 USER runway

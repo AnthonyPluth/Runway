@@ -713,9 +713,9 @@ class ServerTests(unittest.TestCase):
 
     def test_budget_and_rules_api(self):
         with db.session() as c:
-            c.execute("INSERT OR IGNORE INTO accounts(id, name, kind, balance) VALUES ('b1','Card','credit',-10)")
+            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('b1','Card','credit',-10) ON CONFLICT(id) DO NOTHING")
             today = date.today()
-            c.execute("INSERT OR REPLACE INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
+            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
                       "('b1|1','b1',?, -80,'WHOLE FOODS','Whole Foods','Groceries'), ('b1|2','b1',?, -45,'SHELL','Shell','Auto & Gas'),"
                       "('b1|3','b1',?, 900,'PAYMENT','Payment','Credit Card Payment')",
                       (today.isoformat(), today.isoformat(), today.isoformat()))
@@ -740,8 +740,8 @@ class ServerTests(unittest.TestCase):
         d = today.isoformat()
         self.assertEqual(self.req("POST", "/api/categories", {"name": "Fast food", "parent": "Restaurants"})[0], 200)
         with db.session() as c:
-            c.execute("INSERT OR IGNORE INTO accounts(id, name, kind, balance) VALUES ('cf','Checking','checking',100)")
-            c.execute("INSERT OR REPLACE INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
+            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('cf','Checking','checking',100) ON CONFLICT(id) DO NOTHING")
+            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
                       "('cf|1','cf',?, -20,'SHAKE SHACK','Shake Shack','Fast food'),"
                       "('cf|2','cf',?, -50,'NICE PLACE','Nice Place','Restaurants'),"
                       "('cf|3','cf',?, 3000,'PAYROLL','Payroll','Income'),"

@@ -291,14 +291,14 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         for group, (cat, conf) in zip(groups, answers):
             for t in group:
                 if cat is None:
-                    conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND category_source IS NOT 'manual'", (t["id"],))
+                    conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
                     counts["review"] += 1
                     continue
                 review = 1 if conf < REVIEW_THRESHOLD else 0
                 conn.execute(
                     # Don't overwrite a choice you made while the model was thinking.
                     "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "
-                    "WHERE id=? AND category_source IS NOT 'manual'",
+                    "WHERE id=? AND COALESCE(category_source, '') <> 'manual'",
                     (cat, conf, review, t["id"]),
                 )
                 counts["review" if review else "ai"] += 1
@@ -379,7 +379,7 @@ def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[d
     txs = db.rows(conn.execute(
         "SELECT t.*, a.kind, COALESCE(a.display_name, a.name) AS account_name FROM transactions t "
         "JOIN accounts a ON a.id=t.account_id "
-        "WHERE (t.needs_review=1 OR t.category IS NULL) AND t.category_source IS NOT 'manual' ORDER BY t.posted DESC"
+        "WHERE (t.needs_review=1 OR t.category IS NULL) AND COALESCE(t.category_source, '') <> 'manual' ORDER BY t.posted DESC"
     ))
     groups = group_by_merchant(txs)
     groups.sort(key=lambda g: -len(g))
@@ -440,7 +440,7 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
     )
     cur = conn.execute(
         "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE id<>? AND category_source IS NOT 'manual' AND (needs_review=1 OR category IS NULL) "
+        "WHERE id<>? AND COALESCE(category_source, '') <> 'manual' AND (needs_review=1 OR category IS NULL) "
         "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)",
         (category, tx_id, key, key),
     )

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import gzip
 import json
-import re
 from datetime import datetime
 
-from . import db
+from sqlalchemy import inspect
+
+from . import db, schema
 
 FORMAT = "runway-backup"
 VERSION = 1
@@ -19,15 +20,11 @@ SKIP = {"auth_sessions", "auth_pending"}
 
 
 def tables() -> list[str]:
-    return [t for t in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", db.SCHEMA) if t not in SKIP]
+    return [t.name for t in schema.metadata.sorted_tables if t.name not in SKIP]
 
 
 def table_columns(conn, table: str) -> list[str]:
-    if db.using_postgres():
-        from . import pg
-        pg._table_columns.pop(table, None)
-        return pg.columns(conn, table)
-    return [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+    return [c["name"] for c in inspect(conn.sa).get_columns(table)]
 
 
 def export(conn) -> dict:
@@ -71,8 +68,7 @@ def restore(conn, data: dict) -> dict:
         if rows and cols:
             conn.executemany(f"INSERT INTO {t}({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", rows)
         counts[t] = len(rows)
-    if db.using_postgres():   # auto-numbered ids continue after the restored ones
-        from . import pg
-        for t in pg.SERIAL_TABLES:
+    if conn.postgres:   # auto-numbered ids continue after the restored ones
+        for t in sorted(schema.AUTO_ID):
             conn.execute(f"SELECT setval(pg_get_serial_sequence('{t}', 'id'), COALESCE((SELECT MAX(id) FROM {t}), 0) + 1, false)")
     return counts

@@ -9,7 +9,10 @@ const money0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "US
 const fmt = (n) => money.format(n ?? 0);
 const fmt0 = (n) => money0.format(n ?? 0);
 const parseDate = (s) => { const [y, m, d] = s.slice(0, 10).split("-").map(Number); return new Date(y, m - 1, d); };
-const fmtDate = (s, opts = { month: "short", day: "numeric" }) => parseDate(s).toLocaleDateString("en-US", opts);
+// Dates never break across lines ("Oct" at the end of one line, "30" on the next): spaces become non-breaking.
+const fmtDate = (s, opts = { month: "short", day: "numeric" }) => parseDate(s).toLocaleDateString("en-US", opts).replace(/ /g, "\u00a0");
+// Keep a short phrase (an account name, "balance $3,969.12") on one line.
+const nw = (html) => `<span class="nw">${html}</span>`;
 const fmtDow = (s) => fmtDate(s, { weekday: "short", month: "short", day: "numeric" });
 // "tomorrow", "Monday" (within a week) or "Oct 12"
 const relDay = (s, today) => {
@@ -191,8 +194,8 @@ async function renderOverview(el) {
       : `You’re on track. ${what} stays above <span class="hl">${fmt0(low.balance)}</span> for the next ${nb(span)}.`;
     lede = [
       low.date === fc.today ? "Today is the tightest point in the forecast."
-        : `The tightest moment is ${when}${lowEvents.length ? `, when ${lowEvents[0].kind === "card" ? `the ${esc(lowEvents[0].name.replace(/ statement$/, ""))} payment` : esc(lowEvents[0].name)} goes out` : ""}.`,
-      nextIn ? `Next money in: ${esc(nextIn.name)}, ${fmt0(nextIn.amount)} on ${relDay(nextIn.date, fc.today)}.` : "",
+        : `The tightest moment is ${when}${lowEvents.length ? `, when ${lowEvents[0].kind === "card" ? `the ${nw(esc(lowEvents[0].name.replace(/ statement$/, "")))} payment` : esc(lowEvents[0].name)} goes out` : ""}.`,
+      nextIn ? `Next money in: ${nw(esc(nextIn.name) + ",")} ${fmt0(nextIn.amount)} on ${nw(relDay(nextIn.date, fc.today))}.` : "",
     ].filter(Boolean).join(" ");
   }
 
@@ -233,7 +236,7 @@ async function renderOverview(el) {
     <div class="chart-wrap" id="chart"></div>
     ${fc.budget ? `<p class="help" style="margin-top:12px">The dashed line spends exactly your budgets (${fmt0(fc.budget.monthly)} a month) on the card you usually use for each
       (<a href="#budget">change it on the Budget page</a>), paying cards on their due dates, instead of the usual estimate of future card statements.
-      Spending in categories without a budget isn't included.${fc.budget.skipped.length ? ` Left out: ${fc.budget.skipped.map((k) => `${esc(k.category)} (${esc(k.reason)})`).join(", ")}.` : ""}</p>` : ""}
+      Spending in categories without a budget isn't included.${budgetSkipped(fc.budget.skipped)}</p>` : ""}
     <p class="help" style="margin-top:12px">The line moves only on dated items: recurring money in and out, and each card's statement payment on its due date.
       ${fc.accounts.filter((a) => a.daily_spend > 0).map((a) => `It also subtracts ${fmt(a.daily_spend)}/day of average everyday spending from ${esc(a.name)}.`).join(" ")}
       ${fc.accounts.length > 1 ? `Showing ${fc.accounts.length} accounts combined; pick a primary account in <a href="#setup/accounts">Settings</a>.` : ""}</p>
@@ -287,10 +290,10 @@ function eventsTable(events) {
   const shown = showAllEvents ? events : events.slice(0, 8);
   return `<div class="ev-list">${shown.map((e) => {
     const d = parseDate(e.date);
-    const sub = [e.kind === "card" ? "Card payment" : e.category || (e.kind === "recurring" ? "Recurring" : ""),
-      e.balance_after < 0 ? `<span class="neg-bal">balance ${fmt(e.balance_after)}</span>` : `balance ${fmt(e.balance_after)}`].filter(Boolean).join(" · ");
+    const sub = [e.kind === "card" ? "Card payment" : esc(e.category || (e.kind === "recurring" ? "Recurring" : "")),
+      e.balance_after < 0 ? `<span class="neg-bal">balance ${fmt(e.balance_after)}</span>` : `balance ${fmt(e.balance_after)}`].filter(Boolean).map(nw).join(" · ");
     return `<div class="ev-row">
-      <div class="ev-date"><span>${d.toLocaleDateString("en-US", { weekday: "short" })}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString("en-US", { month: "short" })}</span></div>
+      <div class="ev-date"><span>${d.toLocaleDateString("en-US", { month: "short" })}</span><b>${d.getDate()}</b></div>
       <div class="ev-main"><span class="ev-name">${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</span>
         <span class="ev-sub">${sub}</span></div>
       <div class="ev-amount">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : "−"}${fmt(Math.abs(e.amount))}</button>` : fmt(e.amount)}
@@ -308,12 +311,14 @@ function cardsTable(cards) {
       return `<tr><td><div class="card-name">${esc(c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
       <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
           title="Closed ${fmtDate(c.last_close)} · click to enter the amount on your statement">${fmt(c.statement_balance)}</button>
-        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>` : ""}
+        ${c.statement_set ? `<span class="tag edited" title="Entered by you · calculated ${fmt(c.statement_calculated)}">set</span>`
+          : c.statement_source === "bank" ? `<span class="tag" title="From your bank, through Plaid${c.minimum_payment != null ? ` · minimum payment ${fmt(c.minimum_payment)}` : ""}">bank</span>` : ""}
         <div class="cell-sub">${c.remaining > 0 ? (c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid") : `<span class="pos">Paid ✓</span>`}${c.statement_set
           ? ` · <button class="btn link stmt-reset" data-key="${esc(c.statement_key)}" title="Go back to the calculated amount (${fmt(c.statement_calculated)})">reset</button>` : ""}</div></td>
       <td class="num ${soon ? "due-soon" : "muted"}">${fmtDate(c.due_date)}</td>
       <td class="num muted" title="${c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}">${c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}</td></tr>`; }).join("")}</table>
-    <p class="help" style="margin-top:12px">Statements are worked out from each card's transactions. An amount you enter is used until the next statement closes.
+    <p class="help" style="margin-top:12px">Statements marked <b>bank</b> come from the card issuer through Plaid, along with the closing and due dates;
+      the rest are worked out from each card's transactions. An amount you enter is used until the next statement closes.
       Future payments use each card's average over its last 3 statements.</p>`;
 }
 
@@ -340,6 +345,20 @@ function wireCards(root) {
     try { await api("/api/overrides", { method: "DELETE", body: { key: b.dataset.key } }); toast("Back to the calculated amount"); route(); }
     catch (err) { toast(err.message, true); }
   }));
+}
+
+// "Left out: Mortgage and Utilities, which recurring items already cover; Medical, whose account isn't in the forecast."
+function budgetSkipped(skipped) {
+  if (!skipped.length) return "";
+  const list = (xs) => xs.length < 3 ? xs.join(" and ") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1];
+  const by = {};
+  for (const k of skipped) (by[k.reason] ||= []).push(esc(k.category));
+  const parts = Object.entries(by).map(([reason, cats]) => {
+    const why = reason.startsWith("a recurring") ? (cats.length > 1 ? "which recurring items already cover" : "which a recurring item already covers")
+      : reason.startsWith("its account") ? (cats.length > 1 ? "whose accounts aren't in the forecast" : "whose account isn't in the forecast") : esc(reason);
+    return `${list(cats)}, ${why}`;
+  });
+  return ` Left out: ${parts.join("; ")}.`;
 }
 
 function weeklyTable(fc) {
@@ -369,7 +388,7 @@ function drawChart(host, fc) {
   const series = fc.total;
   if (!series.length) { host.innerHTML = `<div class="empty">No cash accounts in the forecast yet.</div>`; return; }
   const W = Math.max(320, host.clientWidth), H = 280;
-  const m = { top: 24, right: 8, bottom: 28, left: 52 };
+  const m = { top: 30, right: 8, bottom: 28, left: 52 };
   const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
   const alt = fc.budget && fc.budget.total && fc.budget.total.length === series.length ? fc.budget.total : null;
   const both = alt ? series.concat(alt) : series;
@@ -404,6 +423,14 @@ function drawChart(host, fc) {
   svg += `<path class="area" d="M${pts[0]} L${pts.join(" L")} L${x(series.length - 1)},${y(y0)} L${x(0)},${y(y0)} Z"/>`;
   if (alt) svg += `<path class="line budget-line" d="M${alt.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" L")}"/>`;
   svg += `<path class="line" d="M${pts.join(" L")}"/>`;
+  // From the first estimated card payment on, the line includes spending that hasn't happened yet.
+  const firstEst = fc.events.filter((e) => e.kind === "card" && e.estimated).map((e) => e.date).sort()[0];
+  const ei = firstEst ? fc.dates.indexOf(firstEst) : -1;
+  if (ei > 0) {
+    const ex0 = x(ei), right = ex0 < W - m.right - 150;
+    svg += `<line class="est-start" x1="${ex0}" x2="${ex0}" y1="${m.top - 6}" y2="${m.top + ih}"/>`;
+    svg += `<text class="est-start-label" x="${ex0 + (right ? 6 : -6)}" y="${m.top - 10}" text-anchor="${right ? "start" : "end"}">${right ? "Estimated new spending from here →" : "← Estimated new spending from here"}</text>`;
+  }
   // low point
   const li = fc.dates.indexOf(fc.low.date);
   if (li >= 0) {
@@ -421,6 +448,7 @@ function drawChart(host, fc) {
   host.innerHTML = svg;
   // a small plate behind the low-point label so the line doesn't run through it
   const ll = $(".low-label", host), en = $(".end-note", host);
+  const plate = (el, cls) => { const b = el.getBBox(); el.insertAdjacentHTML("beforebegin", `<rect class="${cls}" x="${b.x - 6}" y="${b.y - 3}" width="${b.width + 12}" height="${b.height + 6}" rx="5"/>`); };
   if (ll) {
     const bb = ll.getBBox();
     ll.insertAdjacentHTML("beforebegin", `<rect class="low-label-bg" x="${bb.x - 7}" y="${bb.y - 4}" width="${bb.width + 14}" height="${bb.height + 8}" rx="6"/>`);
@@ -436,6 +464,8 @@ function drawChart(host, fc) {
       }
     }
   }
+
+  if (en && en.isConnected) plate(en, "end-note-bg");   // so the line doesn't run through "$1,631 by Dec 24"
 
   const hover = $("#hover", host), tip = $(".tooltip", host), hit = $("#hit", host), svgEl = $("svg", host);
   const move = (clientX) => {
@@ -1078,7 +1108,7 @@ function drawSankey(host, cf, monthName) {
   });
   $$(".node", host).forEach((r) => {
     const n = allNodes[Number(r.dataset.n)];
-    const extra = n.members ? `<div class="tt-ev" style="display:block">${n.members.map((mm) => `${esc(mm.name)} ${fmt0(mm.value)}`).join(" · ")}</div>` : "";
+    const extra = n.members ? `<div class="tt-ev" style="display:block">${n.members.map((mm) => nw(`${esc(mm.name)} ${fmt0(mm.value)}`)).join(" · ")}</div>` : "";
     r.addEventListener("mousemove", (ev) => show(tipFor(n.name, n.value, n.role) + extra, ev));
     r.addEventListener("mouseleave", () => (tip.hidden = true));
   });
@@ -1166,7 +1196,7 @@ async function openTrackedEditor(acctId, el) {
       ${(t.positions.length ? t.positions : [{}]).map(fund).join("")}</table>
     <div class="form-row"><button class="btn link" id="tr-add">+ Add a fund</button><span class="small" id="tr-status"></span>
       <button class="btn link" id="tr-done" style="margin-left:auto">Done</button></div>
-    ${t.contributions.length ? `<p class="small muted">Contributions spotted: ${t.contributions.slice(0, 6).map((c) => `${fmtDate(c.date)} ${fmt(c.amount)}`).join(" · ")}</p>` : ""}
+    ${t.contributions.length ? `<p class="small muted">Contributions spotted: ${t.contributions.slice(0, 6).map((c) => nw(`${fmtDate(c.date)} ${fmt(c.amount)}`)).join(" · ")}</p>` : ""}
   </div>`;
   const box = row.firstElementChild;
   let changed = false, timer;
@@ -1594,7 +1624,7 @@ async function renderNetWorth(el) {
       <div class="tile"><div class="label">Assets</div><div class="value">${fmt0(d.assets)}</div>
         <div class="sub">${assetGroups.map((g) => esc(g.label)).join(" · ")}</div></div>
       <div class="tile"><div class="label">Liabilities</div><div class="value">${fmt0(d.liabilities)}</div>
-        <div class="sub">${d.groups.filter((g) => g.side === "liability").map((g) => `${esc(g.label)} ${fmt0(g.total)}`).join(" · ") || "nothing owed"}</div></div>
+        <div class="sub">${d.groups.filter((g) => g.side === "liability").map((g) => nw(`${esc(g.label)} ${fmt0(g.total)}`)).join(" · ") || "nothing owed"}</div></div>
     </div>
     <div class="card"><div class="card-head"><h2>Over time</h2><span class="small muted">Saved once a day from your synced balances and asset values</span></div>
       <div class="chart-wrap" id="nw-chart"></div>
@@ -1733,20 +1763,25 @@ function loadPlaid() {
   });
 }
 
-async function openPlaidLink(itemId) {
+async function openPlaidLink(itemId, kind = "investments") {
   await loadPlaid();
-  const token = (await api("/api/plaid/link_token", { method: "POST", body: { item_id: itemId || null } })).link_token;
+  const lt = await api("/api/plaid/link_token", { method: "POST", body: { item_id: itemId || null, kind } });
+  const token = lt.link_token;
+  if (kind === "bank" && lt.kind === "cards") toast("Your Plaid account doesn't have Transactions, so this connects card statements only.");
   return new Promise((resolve) => {
     window.Plaid.create({
       token,
       onSuccess: async (publicToken, metadata) => {
         try {
-          toast("Connected. Pulling holdings and activity…");
+          toast(kind === "investments" ? "Connected. Pulling holdings and activity…" : "Connected. Reading accounts and statements…");
           const r = itemId
             ? await api(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
             : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution } });
-          toast(`Synced ${r.accounts} account${r.accounts === 1 ? "" : "s"}, ${r.holdings} holdings, ${r.transactions} activities` +
-            (r.hidden_simplefin && r.hidden_simplefin.length ? ` · hid the SimpleFIN copy of ${r.hidden_simplefin.join(", ")}` : ""));
+          toast(r.bank
+            ? `Found ${r.accounts} account${r.accounts === 1 ? "" : "s"}` + (r.matched && r.matched.length ? ` · matched ${r.matched.join(", ")}` : "") +
+              (r.statements ? ` · ${r.statements} card statement${r.statements === 1 ? "" : "s"}` : "")
+            : `Synced ${r.accounts} account${r.accounts === 1 ? "" : "s"}, ${r.holdings} holdings, ${r.transactions} activities` +
+              (r.hidden_simplefin && r.hidden_simplefin.length ? ` · hid the SimpleFIN copy of ${r.hidden_simplefin.join(", ")}` : ""));
         } catch (err) { toast(err.message, true); }
         resolve(true);
       },
@@ -1755,8 +1790,25 @@ async function openPlaidLink(itemId) {
   });
 }
 
+// A bank connection's accounts, each matched to one of yours (or added, or left out).
+function plaidBankAccounts(it, accounts) {
+  const mine = accounts.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind));
+  return `<table class="plaid-accts">${it.accounts.filter((p) => p.type !== "investment").map((p) => {
+    const sel = p.ignored ? "ignore" : p.account_id || "";
+    const stmt = p.last_statement_date ? `<div class="desc">Statement ${fmt(p.last_statement_balance)} · closed ${fmtDate(p.last_statement_date)}${p.next_due_date ? ` · due ${fmtDate(p.next_due_date)}` : ""}</div>` : "";
+    return `<tr data-pid="${esc(p.id)}"><td>${esc(p.name || p.official_name || "Account")}${p.mask ? ` <span class="muted">••${esc(p.mask)}</span>` : ""}
+        <div class="desc">${esc(p.subtype || p.type || "")} · ${fmt(p.balance)}</div>${stmt}</td>
+      <td><select class="pl-match" aria-label="Which of your accounts this is">
+        <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
+        ${p.account_id && p.account_id.startsWith("pl:") ? `<option value="${esc(p.account_id)}" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
+        ${mine.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
+        <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't use</option></select>
+        ${p.account_id ? `<div class="desc">${p.provider === "plaid" ? "Balance and transactions from Plaid" : p.last_statement_date ? "Statements from Plaid; transactions from SimpleFIN" : "Transactions from SimpleFIN"}</div>` : ""}</td></tr>`;
+  }).join("")}</table>`;
+}
+
 async function wirePlaidSetup() {
-  const st = await api("/api/plaid/status");
+  const [st, accounts] = await Promise.all([api("/api/plaid/status"), api("/api/accounts")]);
   if (!$("#plaid-card")) return;
   $("#pl-env").value = st.env === "sandbox" ? "sandbox" : "production";
   $("#pl-id").value = st.client_id;
@@ -1772,26 +1824,38 @@ async function wirePlaidSetup() {
   const box = $("#pl-items");
   box.innerHTML = `${st.items.length ? `<table>${st.items.map((it) => `<tr data-item="${esc(it.item_id)}">
       <td><b>${esc(it.institution_name || "Connection")}</b> ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}
-        <div class="desc">${it.accounts.map((a) => `${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`).join(", ") || "no accounts yet"}</div>
+        <span class="tag">${it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</span>
+        ${it.bank ? plaidBankAccounts(it, accounts) : `<div class="desc">${it.accounts.map((a) => `${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`).join(", ") || "no accounts yet"}</div>`}
         ${it.error ? `<div class="small" style="color:var(--critical)">▲ ${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired or changed; reconnect to fix" : it.error)}</div>` : ""}</td>
       <td class="small muted">${it.last_sync ? `synced ${esc(it.last_sync)} UTC` : "not synced"}</td>
       <td class="num" style="white-space:nowrap">${it.error ? `<button class="btn primary pl-reconnect">Reconnect</button>` : `<button class="btn pl-sync">Sync</button>`}
         <button class="btn link pl-remove">Remove</button></td></tr>`).join("")}</table>` : ""}
-    <div class="form-row"><button class="btn primary" id="pl-connect" ${st.configured ? "" : "disabled title=\"Add your Plaid client ID and secret first\""}>Connect an investment account</button></div>`;
-  $("#pl-connect").addEventListener("click", async (e) => {
+    <div class="form-row">${[["bank", "Connect a bank or card"], ["investments", "Connect an investment account"]].map(([k, label]) =>
+      `<button class="btn ${k === "bank" ? "primary" : ""} pl-connect" data-kind="${k}" ${st.configured ? "" : "disabled title=\"Add your Plaid client ID and secret first\""}>${label}</button>`).join("")}</div>`;
+  $$(".pl-connect").forEach((btn) => btn.addEventListener("click", async (e) => {
     const b = e.currentTarget; b.disabled = true;
-    try { if (await openPlaidLink(null)) route(); } catch (err) { toast(err.message, true); }
+    try { if (await openPlaidLink(null, b.dataset.kind)) route(); } catch (err) { toast(err.message, true); }
     b.disabled = false;
-  });
+  }));
+  $$(".pl-match").forEach((sel) => sel.addEventListener("change", async () => {
+    try {
+      await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: sel.closest("tr").dataset.pid, target: sel.value } });
+      toast(sel.value === "new" ? "Added" : sel.value === "ignore" ? "Left out" : sel.value ? "Matched. Choose where its data comes from under Accounts." : "Unmatched");
+      route();
+    } catch (err) { toast(err.message, true); }
+  }));
   $$("#pl-items tr[data-item]").forEach((tr) => {
     const id = tr.dataset.item;
     $(".pl-sync", tr)?.addEventListener("click", async (e) => {
       const b = e.currentTarget; b.disabled = true; b.textContent = "Syncing…";
-      try { const r = await api(`/api/plaid/items/${encodeURIComponent(id)}/sync`, { method: "POST" }); toast(`Synced ${r.holdings} holdings, ${r.transactions} activities`); }
+      try {
+        const r = await api(`/api/plaid/items/${encodeURIComponent(id)}/sync`, { method: "POST" });
+        toast(r.bank ? `Synced · ${r.new_transactions} new transactions · ${r.statements} statements` : `Synced ${r.holdings} holdings, ${r.transactions} activities`);
+      }
       catch (err) { toast(err.message, true); }
       route();
     });
-    $(".pl-reconnect", tr)?.addEventListener("click", async () => { try { if (await openPlaidLink(id)) route(); } catch (err) { toast(err.message, true); } });
+    $(".pl-reconnect", tr)?.addEventListener("click", async () => { try { if (await openPlaidLink(id, "update")) route(); } catch (err) { toast(err.message, true); } });
     $(".pl-remove", tr).addEventListener("click", async (e) => {
       if (!confirmInline(e.currentTarget, "Remove this connection?")) return;
       try { await api(`/api/plaid/items/${encodeURIComponent(id)}/remove`, { method: "POST" }); toast("Connection removed"); route(); }
@@ -1944,9 +2008,10 @@ async function renderSetup(el, sub) {
              <label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>`
           : a.kind === "checking" || a.kind === "savings"
           ? `<label class="inline" title="Spreads this account's recent non-recurring spending evenly over every day of the forecast"><input type="checkbox" class="f-spend" ${a.daily_spend ? "checked" : ""}> Also subtract average everyday spending</label>`
-          : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>
-             <div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}
-          <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label></td>
+          : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>` : ""}
+          <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label>
+          ${providerControl(a)}
+          ${a.kind === "loan" ? `<div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}</td>
         <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
   </div>` },
@@ -1989,16 +2054,19 @@ async function renderSetup(el, sub) {
   </div>` },
     connections: { label: "Connections", html: () => `
   <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
-    ${STATE.connected
+    ${STATE.simplefin
       ? `<p>Connected to SimpleFIN. Runway syncs once a day, and whenever you open it if the data is more than an hour old.</p>
          ${STATE.last_log ? `<p class="small muted">Last sync: ${esc(STATE.last_log.at)} UTC — ${esc(STATE.last_log.message)}</p>` : ""}
          <details><summary class="small">Replace the connection</summary>${connectForm()}</details>`
       : `<p class="help">In <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>, create a new setup token for Runway
          (a token can only be used once). Paste it here. It's exchanged for a private access link that stays in Runway's database.</p>${connectForm()}`}
   </div>
-<div class="card" id="plaid-card"><h2>Investment holdings <span class="muted small">optional, via Plaid</span></h2>
-    <p class="help">SimpleFIN already brings in holdings for most brokerages. For accounts it only knows the balance of, Plaid adds holdings and trade history. Linking an institution here hides its SimpleFIN copy on the Investments page;
-      net worth keeps using the SimpleFIN balance so nothing is counted twice. Keys are under Developers → Keys at
+<div class="card" id="plaid-card"><h2>Plaid <span class="muted small">optional</span></h2>
+    <p class="help"><b>Banks and cards:</b> match each Plaid account to one of yours, then choose under Accounts whether its balance and
+      transactions come from SimpleFIN or Plaid (switching keeps your history and categories). Cards get their statement balance, closing
+      date and due date from the bank either way, and the forecast uses them.
+      <b>Investments:</b> for accounts SimpleFIN only knows the balance of, Plaid adds holdings and trade history; linking an institution
+      hides its SimpleFIN copy on the Investments page (net worth keeps using the SimpleFIN balance). Keys are under Developers → Keys at
       <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
     <div class="form-row">
       <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
@@ -2081,6 +2149,13 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   });
   $$("#acct-table tr[data-id]").forEach((tr) => {
     $(".f-kind", tr).addEventListener("change", () => saveAccount(tr, true));
+    $(".f-provider", tr)?.addEventListener("change", async (e) => {
+      try {
+        await api(`/api/accounts/${encodeURIComponent(tr.dataset.id)}`, { method: "POST", body: { provider: e.target.value } });
+        toast(e.target.value === "plaid" ? "This account now comes from Plaid; its transactions arrive with the next sync" : "Back to SimpleFIN");
+        if (e.target.value === "plaid") api("/api/sync", { method: "POST" }).then(() => route(), () => {});
+      } catch (err) { toast(err.message, true); route(); }
+    });
     onEdit($$(".f-name, .f-owner, .f-close, .f-due, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
   });
   onEdit([$("#llm-model")], async () => { await api("/api/settings", { method: "POST", body: { llm_model: $("#llm-model").value.trim() } }); await refreshState(); });
@@ -2201,6 +2276,17 @@ function wireConnect() {
       await refreshState(); route();
     } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Connect and sync"; }
   });
+}
+
+// Where an account's balance and transactions come from. Shown once the account is matched to a Plaid account.
+function providerControl(a) {
+  if (a.id.startsWith("pl:")) return `<div class="desc">Data from Plaid${a.plaid_link ? ` · ${esc(a.plaid_link.institution || "")}` : ""}</div>`;
+  if (!a.plaid_link) return "";
+  const where = `${esc(a.plaid_link.institution || "Plaid")}${a.plaid_link.mask ? ` ••${esc(a.plaid_link.mask)}` : ""}`;
+  if (!a.plaid_link.transactions) return `<div class="desc">Card statements from ${where} (Plaid)</div>`;
+  return `<label class="inline" title="Balance and transactions come from here. Switching keeps your history; transactions both have are matched up.">Data from
+    <select class="f-provider"><option value="simplefin" ${a.provider !== "plaid" ? "selected" : ""}>SimpleFIN</option>
+    <option value="plaid" ${a.provider === "plaid" ? "selected" : ""}>Plaid (${where})</option></select></label>`;
 }
 
 async function saveAccount(tr, rerender) {

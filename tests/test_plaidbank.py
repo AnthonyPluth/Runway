@@ -1,0 +1,216 @@
+"""Banks and cards through Plaid: matching accounts, choosing the provider per account, transactions without
+duplicates, and card statements from the bank in the forecast."""
+import json
+import os
+import sys
+import tempfile
+import threading
+import unittest
+from datetime import date
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runway import db, forecast, plaid, plaidbank, simplefin  # noqa: E402
+
+TODAY = date(2026, 9, 23)
+
+
+class MockBank(BaseHTTPRequestHandler):
+    """A Plaid bank connection: a checking account and two cards (one has "1234" in its SimpleFIN name)."""
+    products = ["transactions", "liabilities"]
+    pages: list = []          # /transactions/sync responses, served in order
+    calls: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def reply(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+    def do_POST(self):
+        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        MockBank.calls.append((self.path, req))
+        if self.path == "/link/token/create":
+            if "transactions" in req.get("products", []) and "transactions" not in MockBank.products:
+                return self.reply(400, {"error_code": "INVALID_PRODUCT", "error_message": "transactions is not enabled"})
+            return self.reply(200, {"link_token": "link-1"})
+        if self.path == "/item/public_token/exchange":
+            return self.reply(200, {"access_token": "access-b", "item_id": "item-b"})
+        if self.path == "/item/remove":
+            return self.reply(200, {})
+        if self.path == "/item/get":
+            return self.reply(200, {"item": {"item_id": "item-b", "products": MockBank.products, "billed_products": MockBank.products}})
+        if self.path == "/accounts/get":
+            return self.reply(200, {"item": {"institution_name": "Chase"}, "accounts": [
+                {"account_id": "p-chk", "name": "Checking", "mask": "0001", "type": "depository", "subtype": "checking",
+                 "balances": {"current": 2500.0, "available": 2400.0}},
+                {"account_id": "p-csp", "name": "Sapphire Preferred", "mask": "1234", "type": "credit", "subtype": "credit card",
+                 "balances": {"current": 812.34}},
+                {"account_id": "p-new", "name": "Freedom", "mask": "9999", "type": "credit", "subtype": "credit card",
+                 "balances": {"current": 50.0}},
+            ]})
+        if self.path == "/transactions/sync":
+            page = MockBank.pages.pop(0) if MockBank.pages else {"added": [], "modified": [], "removed": [], "has_more": False}
+            return self.reply(200, {"next_cursor": f"c{len(MockBank.calls)}", "has_more": False, "added": [], "modified": [],
+                                    "removed": [], **page})
+        if self.path == "/liabilities/get":
+            return self.reply(200, {"liabilities": {"credit": [
+                {"account_id": "p-csp", "last_statement_balance": 640.5, "last_statement_issue_date": "2026-09-05",
+                 "next_payment_due_date": "2026-10-02", "minimum_payment_amount": 35, "last_payment_amount": 700,
+                 "last_payment_date": "2026-08-30", "is_overdue": False}]}})
+        self.reply(404, {"error_code": "NOT_FOUND"})
+
+
+def tx(tid, acct, day, amount, name, pending=False, pending_id=None):
+    return {"transaction_id": tid, "account_id": acct, "date": day, "amount": amount, "name": name, "merchant_name": name,
+            "pending": pending, "pending_transaction_id": pending_id}
+
+
+class PlaidBankTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = HTTPServer(("127.0.0.1", 0), MockBank)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        os.environ["RUNWAY_PLAID_URL"] = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        os.environ.pop("RUNWAY_PLAID_URL", None)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "t.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        MockBank.products = ["transactions", "liabilities"]
+        MockBank.pages, MockBank.calls = [], []
+        db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
+        # What SimpleFIN already brought in: checking and a card, with some history.
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-chk', 'Chase Checking', 'checking', 2500)")
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance, closing_day, due_day, pay_from) "
+                       "VALUES ('sf-csp', 'CSP ...1234', 'credit', -812.34, NULL, NULL, 'sf-chk')")
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)", [
+            ("sf-chk|1", "sf-chk", "2026-08-01", -40.0, "OLD GROCERY", "Old Grocery", "Groceries"),
+            ("sf-chk|2", "sf-chk", "2026-09-20", -12.5, "COFFEE", "Coffee", "Coffee & Snacks"),
+        ])
+        self.c.commit()
+
+    def tearDown(self):
+        self.c.close(); self.tmp.cleanup()
+
+    def link(self):
+        plaid.link_token(self.c, None, "bank")
+        item_id = plaid.exchange(self.c, "public-1", {"name": "Chase"})
+        return plaidbank.sync_item(self.c, item_id, TODAY)
+
+    def test_link_asks_for_transactions_and_statements(self):
+        self.link()
+        body = next(b for p, b in MockBank.calls if p == "/link/token/create")
+        self.assertEqual(body["products"], ["transactions"])
+        self.assertEqual(body["optional_products"], ["liabilities"])
+        self.assertEqual(body["transactions"]["days_requested"], 730)
+        item = self.c.execute("SELECT products FROM plaid_items").fetchone()
+        self.assertEqual(item["products"], "liabilities,transactions")
+
+    def test_accounts_matched_by_mask_or_balance_the_rest_wait_for_you(self):
+        r = self.link()
+        got = {a["id"]: a["plaid_account_id"] for a in db.rows(self.c.execute("SELECT id, plaid_account_id FROM accounts"))}
+        self.assertEqual(got["sf-csp"], "p-csp")   # "1234" in the name
+        self.assertEqual(got["sf-chk"], "p-chk")   # the only balance of 2,500
+        self.assertEqual(sorted(r["matched"]), ["CSP ...1234", "Chase Checking"])
+        # Freedom matches nothing; you add it as its own account.
+        plaidbank.match(self.c, "p-new", "new", TODAY)
+        new = self.c.execute("SELECT * FROM accounts WHERE id='pl:p-new'").fetchone()
+        self.assertEqual((new["kind"], new["provider"], new["owed_positive"], new["balance"]), ("credit", "plaid", 1, 50.0))
+        # Nothing changes for matched accounts until you pick Plaid for them.
+        self.assertEqual(self.c.execute("SELECT provider FROM accounts WHERE id='sf-chk'").fetchone()[0], "simplefin")
+
+    def test_switching_to_plaid_keeps_history_and_skips_duplicates(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        self.assertIsNone(self.c.execute("SELECT cursor FROM plaid_items").fetchone()[0])   # re-read from the start
+        MockBank.pages = [{"added": [
+            tx("a0", "p-chk", "2026-08-01", 40.0, "OLD GROCERY"),       # long before the switch: SimpleFIN has it
+            tx("a1", "p-chk", "2026-09-21", 12.5, "COFFEE"),            # the same coffee, a day later at Plaid
+            tx("a2", "p-chk", "2026-09-22", 3000.0 * -1, "PAYROLL"),     # new: money in
+            tx("a3", "p-chk", "2026-09-23", 20.0, "LUNCH", pending=True),
+            tx("c1", "p-csp", "2026-09-22", 99.0, "CARD CHARGE"),       # the card still uses SimpleFIN
+        ]}]
+        r = plaidbank.sync_item(self.c, "item-b", TODAY)
+        rows = {t["id"]: t for t in db.rows(self.c.execute("SELECT * FROM transactions WHERE account_id='sf-chk'"))}
+        self.assertEqual(sorted(rows), ["sf-chk|1", "sf-chk|2", "sf-chk|pl:a2", "sf-chk|pl:a3"])
+        self.assertEqual(rows["sf-chk|pl:a2"]["amount"], 3000.0)
+        self.assertEqual(sorted(r["new"]), ["sf-chk|pl:a2", "sf-chk|pl:a3"])
+        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE account_id='sf-csp'").fetchone())
+        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='sf-chk'").fetchone()[0], 2500.0)
+        # The lunch posts: it replaces the pending one and keeps the category you gave it.
+        self.c.execute("UPDATE transactions SET category='Restaurants', category_source='manual' WHERE id='sf-chk|pl:a3'")
+        MockBank.pages = [{"added": [tx("a4", "p-chk", "2026-09-24", 21.0, "LUNCH", pending_id="a3")], "removed": [{"transaction_id": "a3"}]}]
+        r = plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(r["new"], [])
+        lunch = self.c.execute("SELECT * FROM transactions WHERE id='sf-chk|pl:a4'").fetchone()
+        self.assertEqual((lunch["amount"], lunch["category"], lunch["pending"]), (-21.0, "Restaurants", 0))
+        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id='sf-chk|pl:a3'").fetchone())
+
+    def test_simplefin_leaves_plaid_accounts_alone(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        payload = {"accounts": [{"id": "sf-chk", "name": "Chase Checking", "balance": "1.00", "currency": "USD",
+                                 "transactions": [{"id": "9", "posted": 1790000000, "amount": "-5.00", "description": "SF ONLY"}]}]}
+        self.assertEqual(simplefin.store_payload(self.c, payload, date(2026, 9, 1)), [])
+        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='sf-chk'").fetchone()[0], 2500.0)
+
+    def test_switching_back_to_simplefin_matches_up_the_overlap(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", date(2026, 9, 1))
+        MockBank.pages = [{"added": [tx("b1", "p-chk", "2026-09-10", 30.0, "GAS")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        plaidbank.set_provider(self.c, "sf-chk", "simplefin", TODAY)
+        ts = int(__import__("datetime").datetime(2026, 9, 11, 12).timestamp())
+        payload = {"accounts": [{"id": "sf-chk", "name": "Chase Checking", "balance": "2400.00", "currency": "USD",
+                                 "transactions": [{"id": "g", "posted": ts, "amount": "-30.00", "description": "GAS"},
+                                                  {"id": "h", "posted": ts, "amount": "-8.00", "description": "SNACK"}]}]}
+        new = simplefin.store_payload(self.c, payload, date(2026, 9, 9))
+        self.assertEqual(new, ["sf-chk|h"])   # the gas is already here from Plaid
+
+    def test_bank_statement_drives_the_card_forecast(self):
+        self.link()
+        card = self.c.execute("SELECT closing_day, due_day FROM accounts WHERE id='sf-csp'").fetchone()
+        self.assertEqual((card["closing_day"], card["due_day"]), (5, 2))   # filled in from the bank
+        fc = forecast.build(self.c, TODAY, 30)
+        c = next(x for x in fc["cards"] if x["id"] == "sf-csp")
+        self.assertEqual((c["last_close"], c["statement_balance"], c["statement_source"], c["due_date"], c["minimum_payment"]),
+                         ("2026-09-05", 640.5, "bank", "2026-10-02", 35))
+        ev = next(e for e in fc["events"] if e["kind"] == "card" and not e["estimated"])
+        self.assertEqual((ev["date"], ev["amount"]), ("2026-10-02", -640.5))
+        # A statement you enter yourself still wins.
+        self.c.execute("INSERT INTO overrides(key, amount) VALUES (?, ?)", ("stmt:sf-csp:2026-09-05", 600))
+        c = next(x for x in forecast.build(self.c, TODAY, 30)["cards"] if x["id"] == "sf-csp")
+        self.assertEqual((c["statement_balance"], c["statement_source"]), (600, "you"))
+
+    def test_statements_only_when_transactions_isnt_enabled(self):
+        MockBank.products = ["liabilities"]
+        with self.assertRaises(plaid.PlaidError):
+            plaid.link_token(self.c, None, "bank")
+        plaid.link_token(self.c, None, "cards")
+        item_id = plaid.exchange(self.c, "public-1", {"name": "Chase"})
+        r = plaidbank.sync_item(self.c, item_id, TODAY)
+        self.assertEqual((r["statements"], r["new"]), (1, []))
+        self.assertFalse(any(p == "/transactions/sync" for p, _ in MockBank.calls))
+        with self.assertRaises(ValueError):
+            plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+
+    def test_removing_the_connection_goes_back_to_simplefin(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        plaid.remove_item(self.c, "item-b")
+        a = self.c.execute("SELECT provider, plaid_account_id FROM accounts WHERE id='sf-chk'").fetchone()
+        self.assertEqual((a["provider"], a["plaid_account_id"]), ("simplefin", None))
+        self.assertFalse(self.c.execute("SELECT 1 FROM card_statements").fetchone())
+
+
+if __name__ == "__main__":
+    unittest.main()

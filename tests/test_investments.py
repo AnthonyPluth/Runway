@@ -37,7 +37,8 @@ class Base(unittest.TestCase):
                        "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (id, "A", sec, d, id, type_, sub, qty, amount, price, fees))
 
     def price(self, ticker, d, close, adj=None):
-        self.c.execute("INSERT OR REPLACE INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?)", (ticker, d, close, adj or close))
+        self.c.execute("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
+                       "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", (ticker, d, close, adj or close))
 
 
 class HistoryTests(Base):

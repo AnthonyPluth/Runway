@@ -79,9 +79,8 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
         kind = "investment"
     iid = inv_id(acct_id)
     # Keep what SimpleFIN sent so positions can be re-checked once fresh prices arrive.
-    conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)",
-                 (f"sf_raw:{acct_id}", json.dumps({"acct": {k: acct.get(k) for k in ("name", "currency", "holdings")},
-                                                   "org": org, "balance": balance})))
+    db.set_setting(conn, f"sf_raw:{acct_id}", json.dumps({"acct": {k: acct.get(k) for k in ("name", "currency", "holdings")},
+                                                          "org": org, "balance": balance}))
     if kind != "investment":
         # No longer treated as an investment account: drop what we stored before.
         if conn.execute("SELECT 1 FROM inv_accounts WHERE id=?", (iid,)).fetchone():
@@ -152,15 +151,16 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
     if abs(leftover) >= 1.0:
         if tracked_leftover:
             cid = "sf:unexplained"
-            conn.execute("INSERT OR IGNORE INTO securities(id, ticker, name, type, is_cash, currency) "
-                         "VALUES (?,NULL,'Difference from synced balance','other',1,'USD')", (cid,))
+            conn.execute("INSERT INTO securities(id, ticker, name, type, is_cash, currency) "
+                         "VALUES (?,NULL,'Difference from synced balance','other',1,'USD') ON CONFLICT(id) DO NOTHING", (cid,))
         elif positions:
             cid = "sf:cash"
-            conn.execute("INSERT OR IGNORE INTO securities(id, ticker, name, type, is_cash, currency) VALUES (?,NULL,'Cash','cash',1,'USD')", (cid,))
+            conn.execute("INSERT INTO securities(id, ticker, name, type, is_cash, currency) VALUES (?,NULL,'Cash','cash',1,'USD') "
+                         "ON CONFLICT(id) DO NOTHING", (cid,))
         else:  # e.g. a 401(k) where SimpleFIN only knows the total: invested in something, we just can't see what
             cid = BALANCE_ONLY
-            conn.execute("INSERT OR IGNORE INTO securities(id, ticker, name, type, is_cash, currency) "
-                         "VALUES (?,NULL,'Balance only (no positions reported)','other',0,'USD')", (cid,))
+            conn.execute("INSERT INTO securities(id, ticker, name, type, is_cash, currency) "
+                         "VALUES (?,NULL,'Balance only (no positions reported)','other',0,'USD') ON CONFLICT(id) DO NOTHING", (cid,))
         p = positions.setdefault(cid, {"quantity": 0.0, "value": 0.0, "cost": 0.0, "cost_known": True})
         p["quantity"] += leftover
         p["value"] += leftover
@@ -175,7 +175,7 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
         )
         conn.execute("INSERT INTO holding_snapshots(date, account_id, security_id, quantity, value) VALUES (?,?,?,?,?)",
                      (today.isoformat(), iid, sec_id, p["quantity"], p["value"]))
-    conn.execute("INSERT OR REPLACE INTO inv_snapshots(date, account_id, value) VALUES (?,?,?)", (today.isoformat(), iid, balance))
+    conn.execute("INSERT INTO inv_snapshots(date, account_id, value) VALUES (?,?,?) ON CONFLICT(date, account_id) DO UPDATE SET value=excluded.value", (today.isoformat(), iid, balance))
 
     # What SimpleFIN actually sent, so Setup can show it (field names and counts only).
     seen = json.loads(db.get_setting(conn, "simplefin_holdings_seen") or "{}")

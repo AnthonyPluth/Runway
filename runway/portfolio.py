@@ -17,6 +17,8 @@ import statistics
 from collections import defaultdict
 from datetime import date, timedelta
 
+from dateutil.relativedelta import relativedelta
+
 from . import db, prices
 
 HISTORY_DAYS = 730
@@ -486,7 +488,7 @@ def performance(hist: dict, bench: list, period: str, today: date) -> dict:
 
 def monthly_spending(conn, today: date) -> float:
     """Average monthly spending from Runway's own transactions over the last 6 full months."""
-    start = date(today.year - (1 if today.month <= 6 else 0), (today.month - 7) % 12 + 1, 1)
+    start = date(today.year, today.month, 1) - relativedelta(months=6)
     end = date(today.year, today.month, 1)
     rows = conn.execute(
         "SELECT substr(t.posted,1,7) AS m, SUM(t.amount) AS s FROM transactions t JOIN accounts a ON a.id=t.account_id "

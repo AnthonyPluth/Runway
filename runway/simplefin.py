@@ -159,9 +159,18 @@ def guess_kind(name: str) -> str:
 
 def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     """Upsert accounts and transactions. Returns ids of newly inserted transactions."""
+    from . import plaidbank
     new_ids: list[str] = []
+    claimed: set = set()
     for acct in payload.get("accounts", []):
         acct_id = str(acct["id"])
+        setup = conn.execute("SELECT provider, provider_since FROM accounts WHERE id=?", (acct_id,)).fetchone()
+        if setup and setup["provider"] == "plaid":
+            continue   # this account's balance and transactions come from Plaid
+        # Just switched back from Plaid: the last few days may already be here from Plaid.
+        overlap = (setup and setup["provider_since"] and conn.execute(
+            "SELECT 1 FROM transactions WHERE account_id=? AND id LIKE ? LIMIT 1", (acct_id, "%|pl:%")).fetchone())
+        since = (date.fromisoformat(setup["provider_since"]) - timedelta(days=REFRESH_DAYS)).isoformat() if overlap else None
         name = acct.get("name") or acct_id
         org = (acct.get("org") or {}).get("name") or (acct.get("org") or {}).get("domain")
         balance = _to_float(acct.get("balance")) or 0.0
@@ -210,6 +219,8 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
                     (posted, amount, desc, pending, key),
                 )
             else:
+                if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
+                    continue
                 prior = carried.get((desc, round(amount, 2)))
                 if prior:
                     p = prior.pop(0)
