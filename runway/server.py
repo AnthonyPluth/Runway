@@ -23,7 +23,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin
+from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -207,6 +207,7 @@ def api_state(conn, _q, _b):
     last_log = conn.execute("SELECT at, ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     return {
         "connected": bank_configured(conn),
+        "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
         "simplefin": bool(db.get_setting(conn, "simplefin_access_url")),
         "has_api_key": bool(db.get_setting(conn, "openrouter_api_key")),
         "llm_model": db.get_setting(conn, "llm_model") or categorize.DEFAULT_MODEL,

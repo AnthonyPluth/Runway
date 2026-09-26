@@ -13,6 +13,15 @@ const parseDate = (s) => { const [y, m, d] = s.slice(0, 10).split("-").map(Numbe
 const fmtDate = (s, opts = { month: "short", day: "numeric" }) => parseDate(s).toLocaleDateString("en-US", opts).replace(/ /g, "\u00a0");
 // Keep a short phrase (an account name, "balance $3,969.12") on one line.
 const nw = (html) => `<span class="nw">${html}</span>`;
+// An account's institution logo (from runway/static/banks), or its first letter when there's no logo for it.
+function acctIcon(id) {
+  const b = (STATE.brands || {})[id];
+  if (!b) return "";
+  const title = esc(b.institution || "");
+  return b.logo ? `<img class="bank-icon" src="/banks/${esc(b.logo)}.svg" alt="" title="${title}" width="18" height="18" loading="lazy">`
+    : `<span class="bank-icon letter" title="${title}" aria-hidden="true">${esc(b.initial)}</span>`;
+}
+const acctLabel = (id, name) => `<span class="acct">${acctIcon(id)}<span>${esc(name || "")}</span></span>`;
 const fmtDow = (s) => fmtDate(s, { weekday: "short", month: "short", day: "numeric" });
 // "tomorrow", "Monday" (within a week) or "Oct 12"
 const relDay = (s, today) => {
@@ -304,7 +313,7 @@ function cardsTable(cards) {
       <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / stmt</th></tr>
     ${cards.map((c) => {
       const soon = c.remaining > 0 && (parseDate(c.due_date) - parseDate(new Date().toISOString().slice(0, 10))) / 864e5 <= 7;
-      return `<tr><td><div class="card-name">${esc(c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
+      return `<tr><td><div class="card-name">${acctLabel(c.id, c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
       <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
           title="Closed ${fmtDate(c.last_close)} · click to correct it">${fmt(c.statement_balance)}</button>
         ${c.statement_set ? `<span class="tag edited" title="Entered by you · the bank reported ${fmt(c.statement_reported)}">set</span>` : ""}
@@ -538,7 +547,7 @@ async function renderTxPage(el, mode) {
       ${shown.map((e) => `<tr>
         <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
         <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
-        <td class="muted hide-sm">${esc(e.account)}</td>
+        <td class="muted hide-sm">${acctLabel(e.account_id, e.account)}</td>
         <td class="num"><button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>
           ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}">reset</button>` : ""}</td>
         <td class="muted">${esc(e.category || "—")}</td>
@@ -617,8 +626,9 @@ function txRow(t, review) {
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
     <td><div class="merchant">${esc(t.payee || t.description)}
         <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button></div>
-      <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div></td>
-    <td class="muted hide-sm">${esc(t.account_name)}</td>
+      <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div>
+      <div class="desc show-sm">${acctLabel(t.account_id, t.account_name)}</div></td>
+    <td class="muted hide-sm">${acctLabel(t.account_id, t.account_name)}</td>
     <td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td>
     <td style="white-space:nowrap"><select class="cat" aria-label="Category">${categoryOptions(t.category)}</select>
       ${suggestion ? `<span class="tag ai" title="AI suggestion confidence">${Math.round((t.confidence || 0) * 100)}%</span>
@@ -1595,7 +1605,7 @@ async function renderNetWorth(el) {
   const since = d.first_snapshot ? fmtDate(d.first_snapshot, { month: "short", day: "numeric", year: "numeric" }) : null;
   const sideRows = (side) => d.groups.filter((g) => g.side === side).map((g) => `
       <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
-      ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${esc(i.name)}
+      ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${i.type === "account" ? acctLabel(i.id, i.name) : esc(i.name)}
           <div class="desc">${i.type === "account" ? [i.org, i.owner].filter(Boolean).map(esc).join(" · ") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
             i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
         <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
@@ -1975,7 +1985,7 @@ async function renderSetup(el, sub) {
     
     ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Owner</th><th>Details</th><th class="num">Balance</th></tr>
       ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
-        <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${esc(a.org || "")} ${esc(a.name)}</div></td>
+        <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${acctLabel(a.id, `${a.org || ""} ${a.name}`.trim())}</div></td>
         <td><select class="f-kind">${["checking", "savings", "credit", "loan", "investment"].map((k) => `<option ${k === a.kind ? "selected" : ""}>${k}</option>`).join("")}</select></td>
         <td><select class="f-owner" aria-label="Owner of ${esc(name(a))}">${ownerOptions(a.owner)}</select></td>
         <td class="f-details">${a.kind === "credit"
