@@ -88,7 +88,8 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
             ok = 1 if rows else 0
         except (urllib.error.URLError, ValueError, OSError):
             rows, splits, info, ok = [], [], {}, 0
-        conn.executemany("INSERT OR REPLACE INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?)", [(t, *r) for r in rows])
+        conn.executemany("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
+                         "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", [(t, *r) for r in rows])
         conn.execute(
             "INSERT INTO price_meta(ticker, fetched_at, ok, splits, instrument_type, long_name) VALUES (?,?,?,?,?,?) ON CONFLICT(ticker) DO UPDATE SET "
             "fetched_at=excluded.fetched_at, ok=excluded.ok, splits=CASE WHEN excluded.ok=1 THEN excluded.splits ELSE price_meta.splits END, "

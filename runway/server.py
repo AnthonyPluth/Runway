@@ -10,7 +10,6 @@ import mimetypes
 mimetypes.add_type("image/svg+xml", ".svg")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
-import sqlite3
 import os
 import threading
 import time
@@ -19,9 +18,12 @@ import urllib.parse
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import sqlalchemy.exc
+from dateutil.relativedelta import relativedelta
+
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import categories, categorize, db, forecast, plaid, portfolio, prices, recurring, simplefin
+from . import categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -49,16 +51,30 @@ class ApiError(Exception):
 
 # ------------------------------------------------------------------------------------------------ actions
 
+def plaid_banks(conn) -> bool:
+    return plaid.configured(conn) and any(plaidbank.is_bank_item(r) for r in conn.execute("SELECT products FROM plaid_items").fetchall())
+
+
+def bank_configured(conn) -> bool:
+    """Whether there's anything to sync bank accounts from: SimpleFIN, or a Plaid bank or card connection."""
+    return bool(db.get_setting(conn, "simplefin_access_url")) or plaid_banks(conn)
+
+
 def run_sync() -> dict:
     if not _sync_lock.acquire(blocking=False):
         raise ApiError("A sync is already running.", 409)
     try:
         with db.session() as conn:
             access_url = db.get_setting(conn, "simplefin_access_url")
-            if not access_url:
-                raise ApiError("Connect SimpleFIN in Settings first.")
+            use_plaid = plaid_banks(conn)
+            if not access_url and not use_plaid:
+                raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
             try:
-                result = simplefin.sync(conn, access_url)
+                result = simplefin.sync(conn, access_url) if access_url else {"new": [], "errors": []}
+                if use_plaid:   # accounts set to Plaid, and card statements
+                    pb = plaidbank.sync_all(conn)
+                    result["new"] += pb["new"]
+                    result["errors"] += pb["errors"]
                 counts = categorize.categorize(conn, result["new"])
                 recurring.auto_match(conn)
                 if conn.execute("SELECT 1 FROM inv_accounts WHERE source='simplefin'").fetchone():
@@ -153,7 +169,7 @@ def notify_now() -> None:
 def sync_on_visit() -> dict:
     """Someone opened Runway: sync in the background if the data is more than VISIT_SYNC_MINUTES old."""
     with db.session() as conn:
-        configured = bool(db.get_setting(conn, "simplefin_access_url"))
+        configured = bank_configured(conn)
         bank = configured and _older_than(db.get_setting(conn, "last_sync_ok"), minutes=VISIT_SYNC_MINUTES) \
             and _older_than(db.get_setting(conn, "last_auto_sync_attempt"), minutes=VISIT_SYNC_MINUTES)
         has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
@@ -170,7 +186,7 @@ def background_sync() -> None:
     while True:
         try:
             with db.session() as conn:
-                configured = bool(db.get_setting(conn, "simplefin_access_url"))
+                configured = bank_configured(conn)
                 last = db.get_setting(conn, "last_sync_ok")
                 last_try = db.get_setting(conn, "last_auto_sync_attempt")
                 last_inv = db.get_setting(conn, "last_inv_sync")
@@ -190,7 +206,8 @@ def background_sync() -> None:
 def api_state(conn, _q, _b):
     last_log = conn.execute("SELECT at, ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     return {
-        "connected": bool(db.get_setting(conn, "simplefin_access_url")),
+        "connected": bank_configured(conn),
+        "simplefin": bool(db.get_setting(conn, "simplefin_access_url")),
         "has_api_key": bool(db.get_setting(conn, "openrouter_api_key")),
         "llm_model": db.get_setting(conn, "llm_model") or categorize.DEFAULT_MODEL,
         "last_sync_ok": db.get_setting(conn, "last_sync_ok"),
@@ -269,7 +286,14 @@ def api_overview(conn, q, _b):
 
 
 def api_accounts(conn, _q, _b):
-    return db.rows(conn.execute("SELECT * FROM accounts ORDER BY hidden, kind, COALESCE(display_name, name)"))
+    accts = db.rows(conn.execute("SELECT * FROM accounts ORDER BY hidden, kind, COALESCE(display_name, name)"))
+    items = {r["plaid_account_id"]: r for r in db.rows(conn.execute(
+        "SELECT p.plaid_account_id, p.mask, i.products, i.institution_name FROM plaid_accounts p JOIN plaid_items i ON i.item_id=p.item_id"))}
+    for a in accts:   # which providers this account can use
+        it = items.get(a.get("plaid_account_id") or "")
+        a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
+                            "transactions": "transactions" in (it["products"] or "")} if it else None)
+    return accts
 
 
 def api_account_update(conn, _q, body, acct_id):
@@ -293,6 +317,11 @@ def api_account_update(conn, _q, body, acct_id):
         vals.append(v)
     if sets:
         conn.execute(f"UPDATE accounts SET {', '.join(sets)} WHERE id=?", (*vals, acct_id))
+    if body.get("provider"):
+        try:
+            plaidbank.set_provider(conn, acct_id, body["provider"])
+        except ValueError as e:
+            raise ApiError(str(e))
     return {"ok": True}
 
 
@@ -408,7 +437,7 @@ def api_rule_add(conn, _q, body):
     if body.get("apply"):
         conn.execute(
             "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-            "WHERE category_source IS NOT 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
+            "WHERE COALESCE(category_source, '') <> 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
             (cat, match, match),
         )
     return {"ok": True}
@@ -417,7 +446,7 @@ def api_rule_add(conn, _q, body):
 def _apply_rule(conn, match: str, cat: str) -> int:
     return conn.execute(
         "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE category_source IS NOT 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
+        "WHERE COALESCE(category_source, '') <> 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
         (cat, match, match),
     ).rowcount
 
@@ -590,7 +619,7 @@ def _month_range(q):
         start = date(y, m, 1)
     except ValueError:
         raise ApiError("Month must look like 2026-09")
-    return start, date(y + (m == 12), m % 12 + 1, 1)
+    return start, start + relativedelta(months=1)
 
 
 def _month_totals(conn, start: date, end: date) -> dict:
@@ -789,20 +818,31 @@ def api_settings(conn, _q, body):
 def api_recategorize(conn, _q, _b):
     """Send everything still uncategorized or awaiting review through rules (and the AI model, if set up) again."""
     ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM transactions WHERE category IS NULL OR (needs_review=1 AND category_source IS NOT 'manual')"
+        "SELECT id FROM transactions WHERE category IS NULL OR (needs_review=1 AND COALESCE(category_source, '') <> 'manual')"
     )]
     conn.execute(
         "UPDATE transactions SET category=NULL, category_source=NULL, confidence=NULL "
-        "WHERE needs_review=1 AND category_source IS NOT 'manual'"
+        "WHERE needs_review=1 AND COALESCE(category_source, '') <> 'manual'"
     )
     return categorize.categorize(conn, ids)
 
 
 def api_plaid_status(conn, _q, _b):
-    items = db.rows(conn.execute("SELECT item_id, institution_name, env, created_at, last_sync, error FROM plaid_items ORDER BY institution_name"))
+    items = db.rows(conn.execute("SELECT item_id, institution_name, env, created_at, last_sync, error, products FROM plaid_items ORDER BY institution_name"))
     for it in items:
-        it["accounts"] = db.rows(conn.execute(
-            "SELECT id, name, official_name, subtype, mask, balance, hidden FROM inv_accounts WHERE item_id=? ORDER BY name", (it["item_id"],)))
+        it["bank"] = plaidbank.is_bank_item(it)
+        it["products"] = sorted(plaidbank.products(it))
+        if it["bank"]:
+            it["accounts"] = db.rows(conn.execute(
+                "SELECT p.plaid_account_id AS id, p.name, p.official_name, p.subtype, p.type, p.mask, p.current AS balance, "
+                "p.ignored, a.id AS account_id, COALESCE(a.display_name, a.name) AS account_name, a.provider, "
+                "s.last_statement_date, s.last_statement_balance, s.next_due_date "
+                "FROM plaid_accounts p LEFT JOIN accounts a ON a.plaid_account_id=p.plaid_account_id "
+                "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id WHERE p.item_id=? ORDER BY p.type, p.name",
+                (it["item_id"],)))
+        else:
+            it["accounts"] = db.rows(conn.execute(
+                "SELECT id, name, official_name, subtype, mask, balance, hidden FROM inv_accounts WHERE item_id=? ORDER BY name", (it["item_id"],)))
     return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "production"),
             "client_id": db.get_setting(conn, "plaid_client_id") or "", "items": items,
             "last_inv_sync": db.get_setting(conn, "last_inv_sync"), "syncing": _inv_lock.locked(),
@@ -827,9 +867,19 @@ def api_plaid_settings(conn, _q, body):
 
 
 def api_plaid_link_token(conn, _q, body):
+    kind = body.get("kind") or "investments"
+    if body.get("item_id"):
+        kind = "investments"   # reconnecting: the connection keeps its products
+    if kind not in ("investments", "bank", "cards"):
+        raise ApiError("Unknown kind of connection")
     try:
-        return {"link_token": plaid.link_token(conn, body.get("item_id") or None)}
+        return {"link_token": plaid.link_token(conn, body.get("item_id") or None, kind), "kind": kind}
     except plaid.PlaidError as e:
+        if kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD"):
+            try:   # Transactions isn't enabled for this Plaid account: card statements only
+                return {"link_token": plaid.link_token(conn, None, "cards"), "kind": "cards"}
+            except plaid.PlaidError:
+                pass
         raise ApiError(str(e), 502)
 
 
@@ -837,6 +887,10 @@ def api_plaid_exchange(conn, _q, body):
     try:
         item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {})
         res = plaid.sync_item(conn, item_id)
+        item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        if plaidbank.is_bank_item(item):
+            n = len(res.pop("new", []))
+            return {"ok": True, "item_id": item_id, "bank": True, "new_transactions": n, **res}
         res["hidden_simplefin"] = plaid.hide_simplefin_duplicates(conn, item_id)
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
@@ -847,6 +901,11 @@ def api_plaid_exchange(conn, _q, body):
 def api_plaid_item_sync(conn, _q, _b, item_id):
     try:
         res = plaid.sync_item(conn, item_id)
+        if "new" in res:   # a bank connection
+            res["new_transactions"] = len(res["new"])
+            categorize.categorize(conn, res.pop("new"))
+            recurring.auto_match(conn)
+            return {"ok": True, "bank": True, **res}
         res["prices"] = refresh_prices(conn)
         return {"ok": True, **res}
     except plaid.PlaidError as e:
@@ -859,6 +918,13 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
     except plaid.PlaidError as e:
         raise ApiError(str(e), 502)
     return {"ok": True}
+
+
+def api_plaid_match(conn, _q, body):
+    try:
+        return plaidbank.match(conn, str(body.get("plaid_account_id") or ""), str(body.get("target") or ""))
+    except ValueError as e:
+        raise ApiError(str(e))
 
 
 def api_inv_account(conn, _q, body, acct_id):
@@ -1018,6 +1084,7 @@ ROUTES = [
     ("POST", "/api/plaid/items/{id}/sync", api_plaid_item_sync),
     ("POST", "/api/plaid/items/{id}/remove", api_plaid_item_remove),
     ("POST", "/api/plaid/accounts/{id}", api_inv_account),
+    ("POST", "/api/plaid/match", api_plaid_match),
     ("GET", "/api/investments", api_investments),
     ("GET", "/api/networth", api_networth),
     ("POST", "/api/assets", api_asset_add),
@@ -1225,7 +1292,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, result)
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
-            except sqlite3.OperationalError as e:
+            except sqlalchemy.exc.OperationalError as e:
                 if "locked" in str(e):
                     return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
                 traceback.print_exc()

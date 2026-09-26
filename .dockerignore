@@ -6,3 +6,7 @@ tests
 *.db-shm
 .env
 *.tar.gz
+.venv
+.git
+.github
+docs

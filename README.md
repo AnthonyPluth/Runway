@@ -11,8 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
-  <img src="https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.9+">
-  <img src="https://img.shields.io/badge/dependencies-standard%20library%20only-4cc38a" alt="Standard library only">
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/packaging-Poetry-60A5FA?logo=poetry&amp;logoColor=white" alt="Poetry">
+  <img src="https://img.shields.io/badge/database-SQLite%20%7C%20Postgres-4cc38a" alt="SQLite or Postgres">
 </p>
 
 <p align="center">
@@ -51,9 +52,17 @@ plain Python with no third-party packages.
 - **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain
   language ("Checking stays above $2,084 for the next 120 days").
 - **Credit cards paid the way you pay them:** each card's statement balance comes out of checking on its due date.
-  Statement balances are worked out from the card's transactions, or you can type in the real figure from your statement.
+  Statement balances come from the card issuer when the card is linked through Plaid (with the closing date, due date
+  and minimum payment); otherwise they're worked out from the card's transactions. You can always type in the real figure.
 - **Future statements** are estimated from each card's average spending over its last three statements.
 - **One-off edits:** click any upcoming amount to change it for that date only.
+
+### Your choice of bank connection, account by account
+- **SimpleFIN or Plaid for each account.** Link a bank or card through Plaid, match its accounts to the ones you already
+  have, and pick where each one's balance and transactions come from. Switching keeps your history, categories and
+  recurring matches: transactions both providers have are matched up so nothing is counted twice.
+- Accounts only Plaid can reach can be added on their own, and a card linked through Plaid gets its statements from the
+  issuer whichever provider its transactions come from.
 
 ### Recurring money in and out
 - Paychecks, mortgage, bills and subscriptions: weekly, every two weeks, twice a month, monthly, quarterly, twice a year,
@@ -106,22 +115,27 @@ plain Python with no third-party packages.
 
 ## Quick start
 
-You need Python 3.9 or newer. Nothing else to install.
+You need Python 3.10 or newer and [Poetry](https://python-poetry.org/docs/#installation) 2
+(`pipx install poetry`).
 
 ```bash
 git clone https://github.com/AnthonyPluth/Runway.git
 cd Runway
-python3 run.py
+poetry install --no-root     # the dependencies, into a virtualenv just for Runway
+poetry run python run.py
 ```
 
 Open <http://localhost:8765>, then:
 
 1. **Connect your bank.** In [SimpleFIN Bridge](https://beta-bridge.simplefin.org), create a setup token and paste it
-   into **Settings → Connections**. The first sync pulls about six months of history.
+   into **Settings → Connections**. The first sync pulls about six months of history. Or, with Plaid keys, use
+   **Connect a bank or card** there (up to two years of history), and set those accounts to Plaid under
+   **Settings → Accounts**. You can mix the two, account by account.
 2. **Pick your primary account** and add each credit card's closing day, due day and paying account under
    **Settings → Accounts**.
 3. **Add your paychecks and bills** on the **Recurring** page, or accept the ones Runway suggests.
-4. Optionally add an OpenRouter key (AI categorization), Plaid keys (more investment detail) and a RentCast key
+4. Optionally add an OpenRouter key (AI categorization), Plaid keys (banks and cards account by account, card
+   statements, more investment detail) and a RentCast key
    (home values) under **Settings → Connections**.
 
 Your data is stored in `data/runway.db` next to the code.
@@ -133,9 +147,9 @@ screen like an app. To get notifications (iOS 16.4 or later), go to **Settings �
 app and tap **Turn on notifications**. On a computer, the same button works in Chrome, Edge, Firefox or Safari.
 Notifications need Runway to be served over `https://`.
 
-Notifications are sent with Web Push. Runway signs and encrypts them itself (VAPID and RFC 8291, implemented in
-[`runway/webpush.py`](runway/webpush.py) and checked against the RFC's published test vectors), so no third-party
-notification service or account is involved.
+Notifications are sent with Web Push, signed (VAPID) and end-to-end encrypted (RFC 8291) by
+[pywebpush](https://github.com/web-push-libs/pywebpush). They go straight to your browser's push service (Apple's,
+Google's or Mozilla's), so no third-party notification service or account is involved.
 
 ## Running on a server
 
@@ -180,34 +194,43 @@ A backup is one gzip'd JSON file holding every table. It works across databases,
 between machines or from SQLite to Postgres.
 
 ```bash
-python3 run.py backup                  # writes runway-backup-YYYY-MM-DD.json.gz
-python3 run.py restore <file> [--yes]  # replaces everything with the backup
+poetry run python run.py backup                  # writes runway-backup-YYYY-MM-DD.json.gz
+poetry run python run.py restore <file> [--yes]  # replaces everything with the backup
 ```
 
 The same is available in **Settings → Backup**. Backups include your bank access and API keys, so keep them private.
 Sign-in sessions aren't included.
 
-To use **Postgres**, set `DATABASE_URL` and install the driver (`pip install "psycopg[binary]"`; the Docker image
-already has it). Runway creates its tables on first start; restore a backup to bring your data along.
+To use **Postgres**, set `DATABASE_URL` (the driver is already installed). Runway creates its tables on first start;
+restore a backup to bring your data along.
+
+Runway keeps its database schema up to date by itself: on every start it applies any new
+[Alembic](https://alembic.sqlalchemy.org) migrations, on SQLite and Postgres alike. Databases from before migrations
+were added are upgraded in place.
 
 ## How it works
 
 | Source | Used for | Needed? |
 |---|---|---|
-| [SimpleFIN Bridge](https://beta-bridge.simplefin.org) | Balances, transactions and investment positions from your bank and brokerages | Yes |
+| [SimpleFIN Bridge](https://beta-bridge.simplefin.org) | Balances, transactions and investment positions from your bank and brokerages | SimpleFIN or Plaid |
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to Claude Haiku) | Optional |
-| [Plaid](https://plaid.com) | Investment holdings and trades for accounts SimpleFIN only has balances for | Optional |
+| [Plaid](https://plaid.com) | Balances and transactions for accounts you set to Plaid (Transactions), card statements and due dates (Liabilities), investment holdings and trades (Investments) | SimpleFIN or Plaid |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
 | [RentCast](https://www.rentcast.io) | Automated home value estimates | Optional |
 
 - **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its
-  due date (statement balance = balance at the closing day, worked out from transactions after it), and optionally
+  due date (the issuer's statement through Plaid, or the balance at the closing day worked out from transactions after
+  it), and optionally
   spread average everyday spending across the days.
 - **Investment history:** rebuilt from activity where Plaid provides it, the way Ghostfolio does; otherwise from the
   position snapshots Runway saves on every sync. Changes in positions between snapshots count as money added or
   withdrawn, not as gains, and returns are time-weighted.
-- **Stack:** Python standard library (`http.server`, `sqlite3`, `urllib`), plain HTML/CSS/JavaScript with hand-drawn SVG
-  charts, the Geist typeface. The only optional dependency is `psycopg` for Postgres.
+- **Stack:** Python with a handful of well-known libraries: [SQLAlchemy](https://www.sqlalchemy.org) and
+  [Alembic](https://alembic.sqlalchemy.org) for SQLite/Postgres and migrations (psycopg 3 for Postgres),
+  [PyJWT](https://pyjwt.readthedocs.io) for sign-in tokens, [pywebpush](https://github.com/web-push-libs/pywebpush)
+  for notifications and [python-dateutil](https://dateutil.readthedocs.io) for recurring schedules. The web server is
+  the standard library's; the front end is plain HTML/CSS/JavaScript with hand-drawn SVG charts and the Geist typeface.
+  Dependencies are managed with [Poetry](https://python-poetry.org) (`pyproject.toml`, `poetry.lock`).
 
 ## Security and privacy
 
@@ -215,8 +238,9 @@ already has it). Runway creates its tables on first start; restore a backup to b
   the AI only sees the date, amount, merchant text and account type of transactions you ask it about.
 - **Sign-in on the network is mandatory.** Runway refuses to listen beyond `localhost` without OIDC, unless you
   explicitly say a proxy handles it.
-- **OIDC done carefully:** authorization code flow with PKCE, ID token signature verified against your provider's keys,
-  and issuer, audience, expiry and nonce checks. Sessions are random tokens stored hashed, in `HttpOnly`,
+- **OIDC done carefully:** authorization code flow with PKCE. ID tokens are verified with PyJWT against your provider's
+  published keys (RSA, RSA-PSS, EC or EdDSA; `none` and unexpected algorithms are refused), with issuer, audience,
+  authorized party, expiry, issued-at and nonce checks. Sessions are random tokens stored hashed, in `HttpOnly`,
   `SameSite=Lax` cookies (`Secure` over HTTPS).
 - **Host checking:** Runway only answers to addresses you've configured or that are clearly local.
 - The container runs as an unprivileged user, and secrets (`.env`, `data/`, backups) are excluded from Git.
@@ -224,26 +248,41 @@ already has it). Runway creates its tables on first start; restore a backup to b
 ## Development
 
 ```bash
-python3 run.py --no-sync               # run without touching your bank
-python3 -m unittest discover tests     # the test suite (SQLite)
-DATABASE_URL=postgresql://... python3 -m unittest discover tests   # the same tests against Postgres
+poetry install --no-root                               # dependencies, into .venv
+poetry run python run.py --no-sync                     # run without touching your bank
+poetry run python -m unittest discover tests           # the test suite (SQLite)
+DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # the same tests against Postgres
+poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
+
+Changing the database: edit `runway/schema.py`, then generate a migration and check it over:
+
+```bash
+poetry run alembic revision --autogenerate -m "add a column"   # writes runway/migrations/versions/…
+poetry run alembic check                                       # the schema and migrations agree
+```
+
+Runway applies it on its next start. Queries are plain SQL with `?` placeholders that both databases understand
+(`INSERT … ON CONFLICT`, not `INSERT OR REPLACE`).
 
 | Path | What |
 |---|---|
 | `run.py` | Starts the server; `backup` and `restore` commands |
 | `runway/server.py` | Web server, API routes, background sync |
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
-| `runway/plaid.py`, `tracked.py` | Plaid investments and hand-tracked holdings |
+| `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
+| `runway/tracked.py` | Hand-tracked holdings |
 | `runway/categorize.py`, `categories.py` | Rules, history and AI categorization; the category tree |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
 | `runway/networth.py`, `rentcast.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
-| `runway/db.py`, `pg.py`, `backup.py` | Schema, SQLite/Postgres layer, backups |
+| `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
+| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
 | `runway/static/` | The web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
+| `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
 | `data/` | Your database (not in Git) |
 
 ## Releases

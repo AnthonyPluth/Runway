@@ -16,7 +16,10 @@ from __future__ import annotations
 import calendar
 from collections import defaultdict
 import statistics
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+
+from dateutil.relativedelta import relativedelta
+from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 
 from . import db
 from . import recurring as rec
@@ -33,13 +36,12 @@ def _d(s: str) -> date:
 
 
 def clamp_day(year: int, month: int, day: int) -> date:
-    return date(year, month, min(day, calendar.monthrange(year, month)[1]))
+    """That day of the month, or the month's last day if it's shorter (Feb 31 -> Feb 28)."""
+    return date(year, month, 1) + relativedelta(day=day)
 
 
 def add_months(d: date, n: int, day: int | None = None) -> date:
-    m = d.month - 1 + n
-    y = d.year + m // 12
-    return clamp_day(y, m % 12 + 1, day or d.day)
+    return date(d.year, d.month, 1) + relativedelta(months=n, day=day or d.day)
 
 
 def last_on_or_before(today: date, day: int) -> date:
@@ -83,47 +85,41 @@ def parse_dates(text: str, freq: str) -> list[tuple[int, int]]:
     return sorted(set(out))
 
 
-def occurrences(item: dict, start: date, end: date) -> list[date]:
-    """Dates in (start, end] on which a recurring item happens."""
-    anchor = _d(item["anchor_date"])
-    stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
+def _monthly_rule(freq: int, interval: int, dtstart: datetime, day: int, **kw) -> rrule:
+    """A rule on `day` of the month that falls back to the last day in shorter months (the 31st -> Feb 28)."""
+    if day > 28:
+        return rrule(freq, interval=interval, dtstart=dtstart, bymonthday=(day, -1), bysetpos=1, **kw)
+    return rrule(freq, interval=interval, dtstart=dtstart, bymonthday=day, **kw)
+
+
+def schedule(item: dict) -> rruleset:
+    """A recurring item's dates, as a dateutil rule set starting at its anchor date."""
+    anchor = datetime.combine(_d(item["anchor_date"]), datetime.min.time())
     freq = item["frequency"]
-    out: list[date] = []
+    rules = rruleset()
     if freq in ("weekly", "biweekly"):
-        step = 7 if freq == "weekly" else 14
-        k = (start - anchor).days // step
-        d = anchor + timedelta(days=step * k)
-        while d <= stop:
-            if d > start:
-                out.append(d)
-            d += timedelta(days=step)
-    elif freq in ("semimonthly", "dates"):
-        # A list of days each month ("1,15") or of dates each year ("04-15,10-15").
-        spec = parse_dates(item.get("dates") or "", freq)
-        y, m = start.year, start.month
-        while True:
-            first = date(y, m, 1)
-            if first > stop:
-                break
-            for mo, dy in spec:
-                if freq == "dates" and mo != m:
-                    continue
-                last = calendar.monthrange(y, m)[1]
-                d = date(y, m, min(dy, last))
-                if start < d <= stop and d >= anchor:
-                    out.append(d)
-            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-        out.sort()
+        rules.rrule(rrule(WEEKLY, interval=1 if freq == "weekly" else 2, dtstart=anchor))
     elif freq in ("monthly", "quarterly", "semiannual", "yearly"):
         months = {"monthly": 1, "quarterly": 3, "semiannual": 6, "yearly": 12}[freq]
-        k = ((start.year - anchor.year) * 12 + start.month - anchor.month) // months - 1
-        d = add_months(anchor, k * months, anchor.day)
-        while d <= stop:
-            if d > start:
-                out.append(d)
-            k += 1
-            d = add_months(anchor, k * months, anchor.day)
-    return out
+        rules.rrule(_monthly_rule(MONTHLY, months, anchor, anchor.day))
+    elif freq in ("semimonthly", "dates"):
+        # A list of days each month ("1,15") or of dates each year ("04-15,10-15").
+        for month, day in parse_dates(item.get("dates") or "", freq):
+            if freq == "semimonthly":
+                rules.rrule(_monthly_rule(MONTHLY, 1, anchor, day))
+            else:
+                rules.rrule(_monthly_rule(YEARLY, 1, anchor, day, bymonth=month))
+    return rules
+
+
+def occurrences(item: dict, start: date, end: date) -> list[date]:
+    """Dates in (start, end] on which a recurring item happens."""
+    stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
+    if stop <= start:
+        return []
+    lo = datetime.combine(start + timedelta(days=1), datetime.min.time())
+    hi = datetime.combine(stop, datetime.min.time())
+    return [d.date() for d in schedule(item).between(lo, hi, inc=True)]
 
 
 # ------------------------------------------------------------------------------------------------ data
@@ -190,10 +186,22 @@ def statement_override(conn, card_id: str, close: date) -> float | None:
     return abs(r["amount"]) if r else None
 
 
-def card_cycle(conn, card: dict, today: date) -> dict:
-    """Where a card stands in its billing cycle today."""
+def bank_statement(conn, card: dict, today: date):
+    """The card's latest statement from the bank (Plaid Liabilities), if there's a recent one. When there is, the
+    card's closing and due days follow it."""
+    from . import plaidbank
+    st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+    if st:
+        card["closing_day"] = _d(st["last_statement_date"]).day
+        if st["next_due_date"] and _d(st["next_due_date"]) > _d(st["last_statement_date"]):
+            card["due_day"] = _d(st["next_due_date"]).day
+    return st
+
+
+def card_cycle(conn, card: dict, today: date, bank=None) -> dict:
+    """Where a card stands in its billing cycle today. bank: its latest statement from the bank, if any."""
     transfers = _transfer_categories(conn)
-    last_close = last_on_or_before(today, card["closing_day"])
+    last_close = _d(bank["last_statement_date"]) if bank else last_on_or_before(today, card["closing_day"])
     bal_date = _d(card["balance_date"]) if card.get("balance_date") else today
     txs = db.rows(conn.execute(
         "SELECT posted, amount, category, pending FROM transactions WHERE account_id=? AND posted>?",
@@ -205,16 +213,22 @@ def card_cycle(conn, card: dict, today: date) -> dict:
     balance_at_close = card["balance"] + posted_after_close if card.get("owed_positive") else card["balance"] - posted_after_close
     calculated = max(0.0, owed(card, balance_at_close))
     known = statement_override(conn, card["id"], last_close)
-    statement = known if known is not None else calculated
+    from_bank = bank is not None and bank["last_statement_balance"] is not None
+    # What you entered wins; then the bank's own statement; then the calculation.
+    statement = known if known is not None else max(0.0, bank["last_statement_balance"]) if from_bank else calculated
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers))
     due = next_after(last_close, card["due_day"])
+    if bank and bank["next_due_date"] and last_close < _d(bank["next_due_date"]) <= last_close + timedelta(days=40):
+        due = _d(bank["next_due_date"])
     spend = card_monthly_spend(conn, card, last_close)
     return {
         "last_close": last_close.isoformat(),
         "statement_balance": round(statement, 2),
         "statement_calculated": round(calculated, 2),
         "statement_set": known is not None,
+        "statement_source": "you" if known is not None else "bank" if from_bank else "calculated",
+        "minimum_payment": bank["minimum_payment"] if bank else None,
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "avg_monthly_spend": spend["average"],
         "avg_cycles": len(spend["cycles"]),
@@ -269,10 +283,11 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     for card in cards:
         label = card["display_name"] or card["name"]
+        bank = bank_statement(conn, card, today)   # (fills in the card's closing and due days from the bank)
         if not card["closing_day"] or not card["due_day"]:
             warnings.append(f"{label}: add its statement closing day and due day in Settings so its payments can be forecast.")
             continue
-        info = card_cycle(conn, card, today)
+        info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
         card_status.append(info)
         payer = by_id.get(card["pay_from"] or "")

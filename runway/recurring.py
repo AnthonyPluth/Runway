@@ -142,4 +142,4 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
 
 
 def dismiss(conn, key: str) -> None:
-    conn.execute("INSERT OR IGNORE INTO recurring_dismissed(key) VALUES (?)", (key,))
+    conn.execute("INSERT INTO recurring_dismissed(key) VALUES (?) ON CONFLICT(key) DO NOTHING", (key,))

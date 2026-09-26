@@ -1,0 +1,21 @@
+[project]
+name = "runway"
+version = "1.0.0"   # releases are versioned by Git tags (see README → Releases); this isn't bumped by hand
+description = "Self-hosted personal finance: bank sync, a cash-flow forecast, budgets, investments and net worth"
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "sqlalchemy (>=2.0,<3.0)",           # database engine for SQLite and Postgres
+    "alembic (>=1.13,<2.0)",             # schema migrations
+    "psycopg[binary] (>=3.1,<4.0)",      # Postgres driver (only used when DATABASE_URL is set)
+    "pyjwt[crypto] (>=2.8,<3.0)",        # verifying sign-in (OIDC) ID tokens
+    "pywebpush (>=2.0,<3.0)",            # push notifications (VAPID + encrypted payloads)
+    "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
+]
+
+[tool.poetry]
+package-mode = false   # an application, not a library: `poetry install` just installs the dependencies
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -196,6 +196,54 @@ class OIDCTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT next FROM auth_pending WHERE state=?", (state,)).fetchone()[0], "/")
 
 
+class TokenChecks(unittest.TestCase):
+    """verify_id_token on its own, with an EC-signed provider (ES256) and the claims that must be right."""
+
+    def setUp(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        import jwt as pyjwt
+        self.jwt = pyjwt
+        self.key = ec.generate_private_key(ec.SECP256R1())
+        jwk = json.loads(pyjwt.algorithms.ECAlgorithm.to_jwk(self.key.public_key()))
+        jwk.update({"kid": "ec1", "use": "sig", "alg": "ES256"})
+        self.jwks = {"keys": [jwk]}
+        os.environ.update({"OIDC_ISSUER": "https://id.example.com/", "OIDC_CLIENT_ID": "runway", "OIDC_CLIENT_SECRET": ""})
+        oidc._jwks.clear()
+        self.orig = oidc._get_json
+        oidc._get_json = lambda url, headers=None: self.jwks
+        self.d = {"jwks_uri": "https://id.example.com/jwks", "token_endpoint": "https://id.example.com/token"}
+
+    def tearDown(self):
+        oidc._get_json = self.orig
+        oidc._jwks.clear()
+        for k in ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET"):
+            os.environ.pop(k, None)
+
+    def token(self, **over):
+        now = int(time.time())
+        claims = {"iss": "https://id.example.com", "aud": "runway", "sub": "u1", "nonce": "n1", "iat": now, "exp": now + 300, **over}
+        return self.jwt.encode(claims, self.key, algorithm="ES256", headers={"kid": "ec1"})
+
+    def test_good_and_bad_tokens(self):
+        self.assertEqual(oidc.verify_id_token(self.token(), "n1", self.d)["sub"], "u1")
+        now = int(time.time())
+        for over, words in (({"exp": now - 600}, "expired"), ({"iat": now + 3600}, "future"), ({"nonce": "other"}, "this sign-in"),
+                            ({"iss": "https://evil.example.com"}, "different issuer"), ({"aud": "other"}, "different app")):
+            with self.assertRaises(oidc.OIDCError) as e:
+                oidc.verify_id_token(self.token(**over), "n1", self.d)
+            self.assertIn(words, str(e.exception), over)
+        unsigned = self.jwt.encode({"sub": "u1"}, None, algorithm="none")
+        with self.assertRaises(oidc.OIDCError):
+            oidc.verify_id_token(unsigned, "n1", self.d)
+        # a key the provider doesn't publish
+        from cryptography.hazmat.primitives.asymmetric import ec
+        other = self.jwt.encode({"iss": "https://id.example.com", "aud": "runway", "sub": "u1", "nonce": "n1", "iat": now, "exp": now + 300},
+                                ec.generate_private_key(ec.SECP256R1()), algorithm="ES256", headers={"kid": "ec1"})
+        with self.assertRaises(oidc.OIDCError) as e:
+            oidc.verify_id_token(other, "n1", self.d)
+        self.assertIn("signature", str(e.exception))
+
+
 class ConfigTests(unittest.TestCase):
     def test_hosts(self):
         ok = ["localhost:8765", "127.0.0.1:8765", "[::1]:8765", "192.168.1.50:8765", "10.0.0.9", "100.101.102.103:8765",

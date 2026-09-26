@@ -1,8 +1,7 @@
 """Sign-in with an OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID, Google, Microsoft, ...).
 
-Authorization code flow with PKCE. The ID token is checked for issuer, audience, expiry and nonce, and its RS256
-signature is verified against the provider's published keys. (For other signing algorithms Runway relies on having
-received the token straight from the provider's token endpoint over HTTPS, which the OIDC spec allows.)
+Authorization code flow with PKCE. The ID token is verified with PyJWT: its signature against the provider's published
+keys (RSA, RSA-PSS, EC or EdDSA; or the client secret for HS256), plus issuer, audience, expiry and this sign-in's nonce.
 Only people on the allow-list get in; sessions are random tokens kept (hashed) in the database.
 
 Configuration (environment variables):
@@ -29,6 +28,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import jwt
 
 from . import db
 
@@ -113,10 +114,6 @@ def discovery() -> dict:
         raise OIDCError(f"The provider says its issuer is {d.get('issuer')!r}, not {c['issuer']!r}. Check OIDC_ISSUER.")
     _discovery[c["issuer"]] = (time.time(), d)
     return d
-
-
-def _b64d(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
 def _b64e(b: bytes) -> str:
@@ -243,72 +240,63 @@ def authorize(info: dict) -> dict:
 
 # ------------------------------------------------------------------------------------------------ ID token
 
-def verify_id_token(id_token: str, nonce: str, d: dict, now: float | None = None) -> dict:
-    c = config()
-    now = now or time.time()
-    parts = id_token.split(".")
-    if len(parts) != 3:
-        raise OIDCError("The provider didn't return an ID token.")
-    try:
-        header, claims = json.loads(_b64d(parts[0])), json.loads(_b64d(parts[1]))
-    except ValueError as e:
-        raise OIDCError("The ID token couldn't be read.") from e
-    alg = header.get("alg")
-    if alg == "RS256":
-        if not _verify_rs256(f"{parts[0]}.{parts[1]}".encode(), _b64d(parts[2]), header.get("kid"), d):
-            raise OIDCError("The ID token's signature didn't check out.")
-    elif alg in (None, "none") or alg.startswith("HS") and not c["client_secret"]:
-        raise OIDCError(f"Unsupported ID token signature ({alg}).")
-    elif alg.startswith("HS"):
-        import hmac
-        digest = {"HS256": hashlib.sha256, "HS384": hashlib.sha384, "HS512": hashlib.sha512}.get(alg)
-        if not digest or not hmac.compare_digest(hmac.new(c["client_secret"].encode(), f"{parts[0]}.{parts[1]}".encode(), digest).digest(), _b64d(parts[2])):
-            raise OIDCError("The ID token's signature didn't check out.")
-    elif not d["token_endpoint"].startswith("https://"):
-        # Other algorithms (e.g. ES256): the spec lets us trust a token that came straight from the token
-        # endpoint over TLS. Over plain http we can't, so refuse.
-        raise OIDCError(f"ID tokens signed with {alg} need the provider to use https. Switch the provider's signing key to RS256 or use https.")
-    if claims.get("iss", "").rstrip("/") != c["issuer"].rstrip("/"):
-        raise OIDCError("The ID token is from a different issuer.")
-    aud = claims.get("aud")
-    if c["client_id"] not in (aud if isinstance(aud, list) else [aud]):
-        raise OIDCError("The ID token is meant for a different app.")
-    if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") not in (None, c["client_id"]):
-        raise OIDCError("The ID token is meant for a different app.")
-    if float(claims.get("exp", 0)) < now - 60:
-        raise OIDCError("The ID token has expired. Check this machine's clock.")
-    if float(claims.get("iat", now)) > now + 300:
-        raise OIDCError("The ID token is dated in the future. Check this machine's clock.")
-    if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
-        raise OIDCError("The ID token doesn't belong to this sign-in.")
-    if not claims.get("sub"):
-        raise OIDCError("The ID token has no subject.")
-    return claims
+ASYMMETRIC = {"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA"}
+SYMMETRIC = {"HS256", "HS384", "HS512"}
 
 
-_SHA256_PREFIX = bytes.fromhex("3031300d060960864801650304020105000420")
-
-
-def _verify_rs256(signed: bytes, sig: bytes, kid: str | None, d: dict, refreshed: bool = False) -> bool:
+def _signing_key(kid: str | None, alg: str, d: dict):
+    """The provider's public key for this token, from its JWKS (refetched once if the key isn't there: rotation)."""
     uri = d.get("jwks_uri")
     if not uri:
-        return False
-    if uri not in _jwks or refreshed:
-        _jwks[uri] = _get_json(uri).get("keys", [])
-    keys = [k for k in _jwks[uri] if k.get("kty") == "RSA" and k.get("use", "sig") == "sig" and (not kid or k.get("kid") == kid)]
-    if not keys and not refreshed:        # keys rotated since we cached them
-        return _verify_rs256(signed, sig, kid, d, refreshed=True)
-    digest = hashlib.sha256(signed).digest()
-    for k in keys:
-        n, e = int.from_bytes(_b64d(k["n"]), "big"), int.from_bytes(_b64d(k["e"]), "big")
-        size = (n.bit_length() + 7) // 8
-        if len(sig) != size or size < 256:   # require 2048-bit keys or bigger
-            continue
-        em = pow(int.from_bytes(sig, "big"), e, n).to_bytes(size, "big")
-        expected = b"\x00\x01" + b"\xff" * (size - 3 - len(_SHA256_PREFIX) - 32) + b"\x00" + _SHA256_PREFIX + digest
-        if secrets.compare_digest(em, expected):
-            return True
-    return False
+        raise OIDCError("The provider doesn't publish its signing keys (no jwks_uri).")
+    for refresh in (False, True):
+        if uri not in _jwks or refresh:
+            try:
+                _jwks[uri] = jwt.PyJWKSet.from_dict(_get_json(uri))
+            except (jwt.PyJWKSetError, urllib.error.URLError, ValueError, OSError) as e:
+                raise OIDCError(f"Couldn't read the provider's signing keys: {e}") from e
+        keys = [k for k in _jwks[uri].keys if (not kid or k.key_id == kid) and k.public_key_use in (None, "sig")]
+        if keys:
+            return keys[0].key
+    raise OIDCError("The ID token was signed with a key the provider doesn't publish.")
+
+
+def verify_id_token(id_token: str, nonce: str, d: dict) -> dict:
+    """Check an ID token the way OIDC requires: signature, issuer, audience, expiry, and this sign-in's nonce."""
+    c = config()
+    try:
+        header = jwt.get_unverified_header(id_token)
+    except jwt.DecodeError as e:
+        raise OIDCError("The provider didn't return a readable ID token.") from e
+    alg = header.get("alg")
+    if alg in ASYMMETRIC:
+        key = _signing_key(header.get("kid"), alg, d)
+    elif alg in SYMMETRIC and c["client_secret"]:
+        key = c["client_secret"]
+    else:
+        raise OIDCError(f"Unsupported ID token signature ({alg}).")
+    try:
+        claims = jwt.decode(id_token, key, algorithms=[alg], audience=c["client_id"], leeway=60,
+                            options={"require": ["iss", "sub", "aud", "exp", "iat"], "verify_iss": False})
+    except jwt.ExpiredSignatureError as e:
+        raise OIDCError("The ID token has expired. Check this machine's clock.") from e
+    except jwt.ImmatureSignatureError as e:
+        raise OIDCError("The ID token is dated in the future. Check this machine's clock.") from e
+    except (jwt.InvalidAudienceError, jwt.MissingRequiredClaimError) as e:
+        raise OIDCError(f"The ID token is meant for a different app, or is missing details ({e}).") from e
+    except jwt.InvalidSignatureError as e:
+        raise OIDCError("The ID token's signature didn't check out.") from e
+    except jwt.InvalidTokenError as e:
+        raise OIDCError(f"The ID token isn't valid: {e}") from e
+    # Issuers are compared without a trailing slash, since providers differ on it.
+    if str(claims.get("iss", "")).rstrip("/") != c["issuer"].rstrip("/"):
+        raise OIDCError("The ID token is from a different issuer.")
+    aud = claims.get("aud")
+    if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") not in (None, c["client_id"]):
+        raise OIDCError("The ID token is meant for a different app.")
+    if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
+        raise OIDCError("The ID token doesn't belong to this sign-in.")
+    return claims
 
 
 # ------------------------------------------------------------------------------------------------ sessions

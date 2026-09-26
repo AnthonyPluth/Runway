@@ -1,7 +1,8 @@
 # Running Runway in Docker
 
 Runway signs you in through your OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID, Google,
-Microsoft Entra, ...). The image is plain Python plus the Postgres driver, which is only used if you set `DATABASE_URL`.
+Microsoft Entra, ...). The image holds Python, Runway's dependencies (installed with Poetry from `poetry.lock`) and
+Runway itself. It uses SQLite in `/data`, or Postgres if you set `DATABASE_URL`.
 
 ## 1. Register Runway with your provider
 
@@ -12,7 +13,7 @@ Create an OIDC / OAuth2 application ("confidential" client, authorization code f
 | Redirect URI | `<RUNWAY_PUBLIC_URL>/auth/callback` |
 | Post-logout redirect URI | `<RUNWAY_PUBLIC_URL>/auth/signed-out` (optional) |
 | Scopes | `openid email profile` (+ `groups` if you use group-based access) |
-| ID token signing | RS256 (the usual default) |
+| ID token signing | RS256 (the usual default); PS256, ES256 and EdDSA work too |
 
 Note the issuer URL, client ID and client secret.
 
@@ -37,7 +38,7 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
 
 ## 2. First start
 
-1. Stop the Runway you run with `python3 run.py` (Ctrl-C) so the database is fully written.
+1. Stop the Runway you run with `poetry run python run.py` (Ctrl-C) so the database is fully written.
 2. In this folder:
    ```
    cp .env.example .env        # fill in RUNWAY_PUBLIC_URL, OIDC_* and OIDC_ALLOWED_EMAILS
@@ -52,7 +53,7 @@ If a setting is missing, the container stops with a message saying which one (se
 
 ## Moving your data from your Mac
 
-1. On the Mac: Settings → Backup → **Download a backup** (or `python3 run.py backup`).
+1. On the Mac: Settings → Backup → **Download a backup** (or `poetry run python run.py backup`).
 2. Start the container on the server, sign in, and go to Settings → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
@@ -61,14 +62,15 @@ The backup holds your bank access and API keys; delete stray copies once you've 
 ## Using Postgres (optional)
 
 Set `DATABASE_URL` in `.env` (e.g. `postgresql://runway:password@db-host:5432/runway`) and restart. Runway creates its
-tables on first start. To bring your data along, restore a backup into it as above. There's a commented-out
+tables on first start, and applies any schema migrations each time a new version starts. To bring your data along, restore a backup into it as above. There's a commented-out
 `db` service in `docker-compose.yml` if you want Postgres alongside Runway. Without `DATABASE_URL`, Runway keeps
 using its built-in database in `./data`.
 
 ## Everyday
 
 - Update to the newest image: `docker compose pull && docker compose up -d`
-  (or let Watchtower do it automatically). If you pinned a version, change the tag first.
+  (or let Watchtower do it automatically). If you pinned a version, change the tag first. Database changes are
+  applied automatically when the new version starts; take a backup first if you like to be careful.
 - Stop: `docker compose down` (data stays in `./data`)
 - Back up: Settings → Backup → Download a backup (works for either database)
 

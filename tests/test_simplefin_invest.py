@@ -36,7 +36,8 @@ class Base(unittest.TestCase):
         self.tmp.cleanup()
 
     def price(self, ticker, d, close):
-        self.c.execute("INSERT OR REPLACE INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?)", (ticker, d, close, close))
+        self.c.execute("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
+                       "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", (ticker, d, close, close))
 
 
 class CaptureTests(Base):
@@ -189,8 +190,10 @@ class RepairTests(Base):
 
 class SnapshotHistoryTests(Base):
     def snap(self, d, qty, cash):
-        self.c.execute("INSERT OR REPLACE INTO holding_snapshots VALUES (?, 'sf:wf1', 'sf:VTI', ?, ?)", (d, qty, qty * 100))
-        self.c.execute("INSERT OR REPLACE INTO holding_snapshots VALUES (?, 'sf:wf1', 'sf:cash', ?, ?)", (d, cash, cash))
+        self.c.execute("INSERT INTO holding_snapshots VALUES (?, 'sf:wf1', 'sf:VTI', ?, ?) "
+                       "ON CONFLICT(date, account_id, security_id) DO UPDATE SET quantity=excluded.quantity, value=excluded.value", (d, qty, qty * 100))
+        self.c.execute("INSERT INTO holding_snapshots VALUES (?, 'sf:wf1', 'sf:cash', ?, ?) "
+                       "ON CONFLICT(date, account_id, security_id) DO UPDATE SET quantity=excluded.quantity, value=excluded.value", (d, cash, cash))
 
     def test_returns_ignore_deposits_and_estimate_before_first_snapshot(self):
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('wf1', 'Wealthfront', 'investment')")

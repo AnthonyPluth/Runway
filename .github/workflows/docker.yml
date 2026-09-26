@@ -1,6 +1,6 @@
 name: Docker image
 
-# Every push to main: run the tests, tag the next version (v1.2.3) and publish a GitHub Release for it, build the image
+# Every push to main: run the tests (on SQLite and Postgres), tag the next version (v1.2.3) and publish a GitHub Release for it, build the image
 # for Intel/AMD and ARM with that version baked in, and publish it to GitHub Container Registry as
 # ghcr.io/<owner>/runway:latest plus :1.2.3, :v1.2.3, :1.2 and :1 (so you can pin a version), then delete untagged leftovers.
 #
@@ -24,13 +24,32 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        database: [sqlite, postgres]
+    services:
+      postgres:                # used by the postgres run; the sqlite run ignores it
+        image: postgres:16
+        env:
+          POSTGRES_USER: runway
+          POSTGRES_PASSWORD: runway
+          POSTGRES_DB: runway
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Run tests
-        run: python -m unittest discover -v tests
+      - name: Install Poetry
+        run: pipx install "poetry>=2.0,<3.0"
+      - name: Install dependencies
+        run: poetry install --no-root --no-interaction
+      - name: Run tests (${{ matrix.database }})
+        env:
+          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://runway:runway@localhost:5432/runway' || '' }}
+        run: poetry run python -m unittest discover -v tests
 
   version:
     needs: test

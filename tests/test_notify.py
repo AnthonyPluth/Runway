@@ -9,7 +9,7 @@ from http.server import HTTPServer
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, notify, webpush  # noqa: E402
-from tests.test_webpush import PushService  # noqa: E402
+from tests.test_webpush import PushService, decrypt, receiver  # noqa: E402
 
 TODAY = date(2026, 9, 23)
 
@@ -17,6 +17,7 @@ TODAY = date(2026, 9, 23)
 class NotifyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
         cls.srv = HTTPServer(("127.0.0.1", 0), PushService)
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
@@ -37,9 +38,9 @@ class NotifyTests(unittest.TestCase):
                        "VALUES ('cc|1','cc','2026-08-20',-400,'STORE','Store','Shopping')")
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) "
                        "VALUES ('chk|1','chk','2026-09-22',-812.5,'BEST BUY','Best Buy','Shopping')")
-        self.ua = webpush.new_private_key()
+        self.ua, self.p256dh, _ = receiver()
         self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, created) VALUES (?,?,?,?,0)",
-                       (f"http://127.0.0.1:{self.srv.server_port}/p/1", webpush.b64u(webpush.public_key(self.ua)),
+                       (f"http://127.0.0.1:{self.srv.server_port}/p/1", self.p256dh,
                         webpush.b64u(b"0123456789abcdef"), "Test phone"))
         PushService.received.clear()
 
@@ -49,7 +50,7 @@ class NotifyTests(unittest.TestCase):
 
     def titles(self):
         import json
-        return [json.loads(webpush.decrypt(b, self.ua, b"0123456789abcdef"))["title"] for _p, _h, b in PushService.received]
+        return [decrypt(b, self.ua, b"0123456789abcdef")["title"] for _p, _h, b in PushService.received]
 
     def test_alerts_sent_once(self):
         notify.run(self.c, TODAY)
@@ -84,7 +85,7 @@ class NotifyTests(unittest.TestCase):
     def test_subscribe_checks_the_key(self):
         with self.assertRaises(ValueError):
             notify.subscribe(self.c, {"endpoint": "https://push.example/1", "keys": {"p256dh": webpush.b64u(b"\x04" + bytes(64)), "auth": "x"}}, "d", None)
-        notify.subscribe(self.c, {"endpoint": "https://push.example/1", "keys": {"p256dh": webpush.b64u(webpush.public_key(self.ua)), "auth": "YWJj"}}, "iPhone · app", "u1")
+        notify.subscribe(self.c, {"endpoint": "https://push.example/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
         self.assertEqual(self.c.execute("SELECT device FROM push_subscriptions WHERE endpoint='https://push.example/1'").fetchone()[0], "iPhone · app")
 
 
