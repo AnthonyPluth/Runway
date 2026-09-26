@@ -8,7 +8,7 @@ accounts (plaid_accounts) are matched to Runway accounts (accounts.plaid_account
     both providers have is matched up (same amount within 3 days) so nothing is counted twice, and your categories
     stay on the transactions you already have.
   - Card statements (balance, closing date, due date, minimum payment) come from Plaid Liabilities for every matched
-    card, whatever its provider, and the forecast uses them in place of its own calculation.
+    card, whatever its provider; they're how the forecast knows what each card owes and when.
 """
 from __future__ import annotations
 
@@ -309,25 +309,14 @@ def sync_statements(conn, item, today: date) -> int:
              c.get("next_payment_due_date"), c.get("minimum_payment_amount"), c.get("last_payment_amount"),
              c.get("last_payment_date"), 1 if c.get("is_overdue") else 0, _now()))
         n += 1
-    # Cards without a closing or due day yet get them from the bank.
-    for r in db.rows(conn.execute(
-            "SELECT a.id, a.closing_day, a.due_day, s.last_statement_date, s.next_due_date FROM accounts a "
-            "JOIN card_statements s ON s.plaid_account_id=a.plaid_account_id WHERE a.kind='credit' AND s.item_id=?", (item["item_id"],))):
-        if not r["closing_day"] and r["last_statement_date"]:
-            conn.execute("UPDATE accounts SET closing_day=? WHERE id=?", (date.fromisoformat(r["last_statement_date"]).day, r["id"]))
-        if not r["due_day"] and r["next_due_date"]:
-            conn.execute("UPDATE accounts SET due_day=? WHERE id=?", (date.fromisoformat(r["next_due_date"]).day, r["id"]))
     return n
 
 
 def statement(conn, card_id: str, today: date):
-    """The bank's latest statement for a card, if Plaid has one from the last ~6 weeks."""
+    """The issuer's latest statement for a card, through Plaid."""
     r = conn.execute("SELECT s.* FROM card_statements s JOIN accounts a ON a.plaid_account_id=s.plaid_account_id WHERE a.id=?",
                      (card_id,)).fetchone()
-    if not r or not r["last_statement_date"]:
-        return None
-    close = date.fromisoformat(r["last_statement_date"])
-    if close > today or (today - close).days > 45:
+    if not r or not r["last_statement_date"] or date.fromisoformat(r["last_statement_date"]) > today:
         return None
     return r
 

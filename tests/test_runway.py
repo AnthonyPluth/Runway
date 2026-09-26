@@ -37,6 +37,17 @@ class Base(unittest.TestCase):
             f"INSERT INTO accounts({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", list(cols.values())
         )
 
+    def stmt(self, card, balance, closed, due, minimum=None):
+        """The card issuer's latest statement, as Plaid Liabilities reports it."""
+        self.conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (f"p-{card}", card))
+        self.conn.execute("DELETE FROM card_statements WHERE plaid_account_id=?", (f"p-{card}",))
+        self.conn.execute("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_balance, last_statement_date, "
+                          "next_due_date, minimum_payment) VALUES (?,?,?,?,?,?)", (f"p-{card}", "item", balance, closed, due, minimum))
+
+    def cycle(self, card_id, today=None):
+        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id=?", (card_id,)).fetchone())
+        return forecast.card_cycle(self.conn, card, today or TODAY, forecast.bank_statement(self.conn, card, today or TODAY))
+
     def tx(self, acct, posted, amount, desc="x", category=None, pending=0):
         n = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
         self.conn.execute(
@@ -63,10 +74,7 @@ class PayeeTests(unittest.TestCase):
 
 
 class DateTests(unittest.TestCase):
-    def test_last_and_next(self):
-        self.assertEqual(forecast.last_on_or_before(TODAY, 5), date(2026, 9, 5))
-        self.assertEqual(forecast.last_on_or_before(TODAY, 28), date(2026, 8, 28))
-        self.assertEqual(forecast.last_on_or_before(date(2026, 3, 15), 31), date(2026, 2, 28))
+    def test_next_after(self):
         self.assertEqual(forecast.next_after(date(2026, 9, 5), 2), date(2026, 10, 2))
         self.assertEqual(forecast.next_after(date(2026, 9, 5), 30), date(2026, 9, 30))
         self.assertEqual(forecast.next_after(date(2026, 1, 31), 31), date(2026, 2, 28))
@@ -88,8 +96,9 @@ class ForecastTests(Base):
     def setUp(self):
         super().setUp()
         self.acct("chk", "checking", 5000.0, daily_spend=0)
-        # Card closes on the 10th, due on the 5th. Owes 900 now (negative = owed).
-        self.acct("cc", "credit", -900.0, closing_day=10, due_day=5, pay_from="chk")
+        # Card owes 900 now (negative = owed). Its last statement: $800, closed Sep 10, due Oct 5.
+        self.acct("cc", "credit", -900.0, pay_from="chk")
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=40.0)
         # Since the Sep 10 close: 300 of new charges and a 200 payment toward the Aug statement.
         self.tx("cc", "2026-09-12", -100.0, "COFFEE", "Restaurants")
         self.tx("cc", "2026-09-20", -200.0, "GROCER", "Groceries")
@@ -97,11 +106,10 @@ class ForecastTests(Base):
         # Before the close (part of the statement)
         self.tx("cc", "2026-09-01", -800.0, "STUFF", "Shopping")
 
-    def test_statement_balance(self):
-        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
-        info = forecast.card_cycle(self.conn, card, TODAY)
-        # balance at close = -900 - (-100 -200 +200) = -800 -> statement 800
+    def test_statement_from_the_bank(self):
+        info = self.cycle("cc")
         self.assertEqual(info["last_close"], "2026-09-10")
+        self.assertEqual(info["minimum_payment"], 40.0)
         self.assertEqual(info["statement_balance"], 800.0)
         self.assertEqual(info["paid_since_close"], 200.0)
         self.assertEqual(info["remaining"], 600.0)
@@ -150,23 +158,23 @@ class ForecastTests(Base):
         self.assertEqual((b["used"], b["skipped"][0]["category"]), ([], "Groceries"))
 
     def test_statement_you_entered_wins(self):
-        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
-        key = forecast.card_cycle(self.conn, card, TODAY)["statement_key"]
+        key = self.cycle("cc")["statement_key"]
         self.assertEqual(key, "stmt:cc:2026-09-10")
         self.conn.execute("INSERT INTO overrides(key, amount) VALUES (?, 950)", (key,))
-        info = forecast.card_cycle(self.conn, card, TODAY)
-        self.assertEqual((info["statement_balance"], info["statement_calculated"], info["statement_set"], info["remaining"]),
+        info = self.cycle("cc")
+        self.assertEqual((info["statement_balance"], info["statement_reported"], info["statement_set"], info["remaining"]),
                          (950.0, 800.0, True, 750.0))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn(("2026-10-05", -750.0), [(e["date"], e["amount"]) for e in fc["events"] if e["kind"] == "card"])
-        # once the next statement closes, the entered amount no longer applies
-        info = forecast.card_cycle(self.conn, card, date(2026, 10, 12))
-        self.assertFalse(info["statement_set"])
+        # once the bank reports the next statement, the entered amount no longer applies
+        self.stmt("cc", 300.0, "2026-10-10", "2026-11-05")
+        info = self.cycle("cc", date(2026, 10, 12))
+        self.assertEqual((info["statement_set"], info["statement_balance"]), (False, 300.0))
 
     def test_owed_positive_convention(self):
         self.conn.execute("UPDATE accounts SET balance=900, owed_positive=1 WHERE id='cc'")
-        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
-        self.assertEqual(forecast.card_cycle(self.conn, card, TODAY)["statement_balance"], 800.0)
+        card = next(c for c in forecast.build(self.conn, TODAY, 30)["cards"] if c["id"] == "cc")
+        self.assertEqual((card["owed_now"], card["statement_balance"]), (900.0, 800.0))
 
     def test_build(self):
         self.conn.execute(
@@ -223,16 +231,16 @@ class ForecastTests(Base):
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertGreater(fc["accounts"][0]["daily_spend"], 0)
 
-    def test_missing_setup_warns(self):
-        self.conn.execute("UPDATE accounts SET closing_day=NULL WHERE id='cc'")
+    def test_card_without_bank_statements_warns(self):
+        self.conn.execute("DELETE FROM card_statements")
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertTrue(any("closing day" in w for w in fc["warnings"]))
+        self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
+        self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0}]))
 
     def test_paid_statement_no_event(self):
         self.tx("cc", "2026-09-22", 600.0, "PAYMENT", "Credit Card Payment")
         self.conn.execute("UPDATE accounts SET balance=-300 WHERE id='cc'")  # the payment lowers what's owed
-        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id='cc'").fetchone())
-        info = forecast.card_cycle(self.conn, card, TODAY)
+        info = self.cycle("cc")
         self.assertEqual((info["statement_balance"], info["remaining"]), (800.0, 0.0))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertFalse(any(e["name"] == "cc statement" for e in fc["events"]))

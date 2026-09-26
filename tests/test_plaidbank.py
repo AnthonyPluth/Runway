@@ -90,8 +90,8 @@ class PlaidBankTests(unittest.TestCase):
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         # What SimpleFIN already brought in: checking and a card, with some history.
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-chk', 'Chase Checking', 'checking', 2500)")
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance, closing_day, due_day, pay_from) "
-                       "VALUES ('sf-csp', 'CSP ...1234', 'credit', -812.34, NULL, NULL, 'sf-chk')")
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance, pay_from) "
+                       "VALUES ('sf-csp', 'CSP ...1234', 'credit', -812.34, 'sf-chk')")
         self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)", [
             ("sf-chk|1", "sf-chk", "2026-08-01", -40.0, "OLD GROCERY", "Old Grocery", "Groceries"),
             ("sf-chk|2", "sf-chk", "2026-09-20", -12.5, "COFFEE", "Coffee", "Coffee & Snacks"),
@@ -178,18 +178,16 @@ class PlaidBankTests(unittest.TestCase):
 
     def test_bank_statement_drives_the_card_forecast(self):
         self.link()
-        card = self.c.execute("SELECT closing_day, due_day FROM accounts WHERE id='sf-csp'").fetchone()
-        self.assertEqual((card["closing_day"], card["due_day"]), (5, 2))   # filled in from the bank
         fc = forecast.build(self.c, TODAY, 30)
         c = next(x for x in fc["cards"] if x["id"] == "sf-csp")
-        self.assertEqual((c["last_close"], c["statement_balance"], c["statement_source"], c["due_date"], c["minimum_payment"]),
-                         ("2026-09-05", 640.5, "bank", "2026-10-02", 35))
+        self.assertEqual((c["last_close"], c["statement_balance"], c["statement_set"], c["due_date"], c["minimum_payment"]),
+                         ("2026-09-05", 640.5, False, "2026-10-02", 35))
         ev = next(e for e in fc["events"] if e["kind"] == "card" and not e["estimated"])
         self.assertEqual((ev["date"], ev["amount"]), ("2026-10-02", -640.5))
         # A statement you enter yourself still wins.
         self.c.execute("INSERT INTO overrides(key, amount) VALUES (?, ?)", ("stmt:sf-csp:2026-09-05", 600))
         c = next(x for x in forecast.build(self.c, TODAY, 30)["cards"] if x["id"] == "sf-csp")
-        self.assertEqual((c["statement_balance"], c["statement_source"]), (600, "you"))
+        self.assertEqual((c["statement_balance"], c["statement_set"], c["statement_reported"]), (600, True, 640.5))
 
     def test_statements_only_when_transactions_isnt_enabled(self):
         MockBank.products = ["liabilities"]

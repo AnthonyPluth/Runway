@@ -44,12 +44,6 @@ def add_months(d: date, n: int, day: int | None = None) -> date:
     return date(d.year, d.month, 1) + relativedelta(months=n, day=day or d.day)
 
 
-def last_on_or_before(today: date, day: int) -> date:
-    """Most recent date on or before today whose day-of-month is `day` (clamped to month length)."""
-    this_month = clamp_day(today.year, today.month, day)
-    return this_month if this_month <= today else add_months(this_month, -1, day)
-
-
 def next_after(d: date, day: int) -> date:
     """First date strictly after d whose day-of-month is `day` (clamped)."""
     this_month = clamp_day(d.year, d.month, day)
@@ -187,48 +181,41 @@ def statement_override(conn, card_id: str, close: date) -> float | None:
 
 
 def bank_statement(conn, card: dict, today: date):
-    """The card's latest statement from the bank (Plaid Liabilities), if there's a recent one. When there is, the
-    card's closing and due days follow it."""
+    """The card's latest statement from its issuer (Plaid Liabilities). The card's billing cycle follows it:
+    card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
     from . import plaidbank
     st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
-    if st:
-        card["closing_day"] = _d(st["last_statement_date"]).day
-        if st["next_due_date"] and _d(st["next_due_date"]) > _d(st["last_statement_date"]):
-            card["due_day"] = _d(st["next_due_date"]).day
+    if not st:
+        return None
+    close = _d(st["last_statement_date"])
+    due = _d(st["next_due_date"]) if st["next_due_date"] else None
+    card["closing_day"] = close.day
+    card["due_day"] = (due if due and due > close else close + timedelta(days=25)).day
     return st
 
 
-def card_cycle(conn, card: dict, today: date, bank=None) -> dict:
-    """Where a card stands in its billing cycle today. bank: its latest statement from the bank, if any."""
+def card_cycle(conn, card: dict, today: date, bank) -> dict:
+    """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
-    last_close = _d(bank["last_statement_date"]) if bank else last_on_or_before(today, card["closing_day"])
-    bal_date = _d(card["balance_date"]) if card.get("balance_date") else today
+    last_close = _d(bank["last_statement_date"])
     txs = db.rows(conn.execute(
         "SELECT posted, amount, category, pending FROM transactions WHERE account_id=? AND posted>?",
         (card["id"], last_close.isoformat()),
     ))
-    posted_after_close = sum(t["amount"] for t in txs if not t["pending"] and _d(t["posted"]) <= bal_date)
-    # Transactions are signed the same way whatever the balance convention (charges negative), so undo them
-    # in "money in" terms first, then read the result as an amount owed.
-    balance_at_close = card["balance"] + posted_after_close if card.get("owed_positive") else card["balance"] - posted_after_close
-    calculated = max(0.0, owed(card, balance_at_close))
+    reported = max(0.0, bank["last_statement_balance"] or 0.0)
     known = statement_override(conn, card["id"], last_close)
-    from_bank = bank is not None and bank["last_statement_balance"] is not None
-    # What you entered wins; then the bank's own statement; then the calculation.
-    statement = known if known is not None else max(0.0, bank["last_statement_balance"]) if from_bank else calculated
+    statement = known if known is not None else reported   # a figure you entered wins over the bank's
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers))
-    due = next_after(last_close, card["due_day"])
-    if bank and bank["next_due_date"] and last_close < _d(bank["next_due_date"]) <= last_close + timedelta(days=40):
-        due = _d(bank["next_due_date"])
+    due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
+        else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
     return {
         "last_close": last_close.isoformat(),
         "statement_balance": round(statement, 2),
-        "statement_calculated": round(calculated, 2),
+        "statement_reported": round(reported, 2),
         "statement_set": known is not None,
-        "statement_source": "you" if known is not None else "bank" if from_bank else "calculated",
-        "minimum_payment": bank["minimum_payment"] if bank else None,
+        "minimum_payment": bank["minimum_payment"],
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "avg_monthly_spend": spend["average"],
         "avg_cycles": len(spend["cycles"]),
@@ -261,6 +248,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     events: list[dict] = []
     warnings: list[str] = []
     card_status: list[dict] = []
+    unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
 
     rec_cats: set[str] = set()
     for item in recurring:
@@ -283,9 +271,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     for card in cards:
         label = card["display_name"] or card["name"]
-        bank = bank_statement(conn, card, today)   # (fills in the card's closing and due days from the bank)
-        if not card["closing_day"] or not card["due_day"]:
-            warnings.append(f"{label}: add its statement closing day and due day in Settings so its payments can be forecast.")
+        bank = bank_statement(conn, card, today)
+        if not bank:
+            unlinked.append({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
             continue
         info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
@@ -323,6 +311,13 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
                                "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment"})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
+
+    if unlinked:
+        names = [c["name"] for c in unlinked]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        warnings.append(f"{listed} {'isn’t' if len(names) == 1 else 'aren’t'} linked through Plaid yet, so "
+                        f"{'its payments aren’t' if len(names) == 1 else 'their payments aren’t'} in the forecast. "
+                        "Link them to get their statements and due dates.")
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute("SELECT key, amount FROM overrides")}
@@ -387,6 +382,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "low": low(total),
         "events": events,
         "cards": card_status,
+        "unlinked_cards": unlinked,
         "warnings": warnings,
         "budget": scenario,
     }
