@@ -278,6 +278,7 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
+| `runway/brands.py`, `runway/static/banks/` | Which institution each account belongs to, and their logos |
 | `runway/static/` | The web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
@@ -302,4 +303,5 @@ up to date; each one runs the tests before it can be merged.
 
 ---
 
-<sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.</sub>
+<sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.
+Bank and card logos are from <a href="https://github.com/selfhst/icons">selfh.st/icons</a> (CC BY 4.0); they're trademarks of their owners.</sub>
