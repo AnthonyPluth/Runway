@@ -37,7 +37,7 @@ def assets(conn, today: date | None = None) -> list[dict]:
 def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
-        "SELECT id, COALESCE(display_name, name) AS name, org, kind, balance, balance_date, owed_positive, owner FROM accounts WHERE hidden=0"))
+        "SELECT a.id, " + db.label_sql("a") + " AS name, a.org, a.kind, a.balance, a.balance_date, a.owed_positive, a.owner FROM accounts a WHERE a.hidden=0"))
     groups = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},

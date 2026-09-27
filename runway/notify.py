@@ -123,7 +123,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         for c in fc["cards"]:
             days = (date.fromisoformat(c["due_date"]) - today).days
             if c["remaining"] > 0.005 and 0 <= days <= p["card_due_days"]:
-                pay = next((e for e in fc["events"] if e.get("kind") == "card" and e["date"] == c["due_date"]
+                pay = next((e for e in fc["events"] if e.get("kind") == "card" and e.get("key") == f"card:{c['id']}:{c['due_date']}"
                             and e["name"].startswith(c["name"])), None)
                 out.append({"key": f"card:{c['id']}:{c['due_date']}", "title": f"{c['name']} payment due {_when(c['due_date'], today)}",
                             "body": f"{_fmt(c['remaining'])}" + (f" comes out of {pay['account']}." if pay else " is left to pay on this statement."),
@@ -148,7 +148,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
     if p["big_charge"]:
         since = (today - timedelta(days=3)).isoformat()
         for t in conn.execute(
-                "SELECT t.id, t.amount, COALESCE(t.payee, t.description) AS who, COALESCE(a.display_name, a.name) AS acct "
+                "SELECT t.id, t.amount, COALESCE(t.payee, t.description) AS who, " + db.label_sql("a") + " AS acct "
                 "FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN categories c ON c.name=t.category "
                 "WHERE t.posted>=? AND t.amount<=? AND a.kind IN ('checking','savings','credit') AND a.hidden=0 "
                 "AND COALESCE(c.is_transfer, 0)=0", (since, -float(p["big_charge_over"]))).fetchall():

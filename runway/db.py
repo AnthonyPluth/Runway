@@ -361,5 +361,20 @@ def set_setting(conn, key: str, value: str | None) -> None:
     )
 
 
+def account_label(a) -> str:
+    """How an account is named in lists: your name for it, plus whose it is ("AAdvantage (Sara)") when an owner is set
+    and the name doesn't already say so."""
+    name = a["display_name"] or a["name"]
+    owner = a["owner"] if "owner" in a.keys() else None
+    return f"{name} ({owner})" if owner and owner.lower() not in name.lower() else name
+
+
+def label_sql(alias: str = "a") -> str:
+    """account_label as SQL (SQLite and Postgres)."""
+    n = f"COALESCE({alias}.display_name, {alias}.name)"
+    return (f"({n} || CASE WHEN {alias}.owner IS NOT NULL AND {alias}.owner <> '' AND instr(lower({n}), lower({alias}.owner)) = 0 "
+            f"THEN ' (' || {alias}.owner || ')' ELSE '' END)")
+
+
 def rows(cur) -> list[dict]:
     return [dict(r) for r in cur.fetchall()]

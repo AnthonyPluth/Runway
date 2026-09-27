@@ -823,6 +823,21 @@ docs = ["Sphinx", "furo"]
 test = ["objgraph", "psutil", "setuptools"]
 
 [[package]]
+name = "holidays"
+version = "0.105"
+description = "Open World Holidays Framework"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "holidays-0.105-py3-none-any.whl", hash = "sha256:7fbd87770f1128eb24514fbb4c3ec6afa1c72d65c346713dbc13c2d0297df481"},
+    {file = "holidays-0.105.tar.gz", hash = "sha256:fc9abc0c187b62e955f92aa12dbe7ed1998cc94712f295ec9244db788594d662"},
+]
+
+[package.dependencies]
+python-dateutil = ">=2.9.0.post0,<3"
+
+[[package]]
 name = "http-ece"
 version = "1.2.1"
 description = "Encrypted Content Encoding for HTTP"
@@ -1879,4 +1894,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "10cc9ec3a187563be7179997d638269b03f568cb9aeb343377c4c96f0be4bff3"
+content-hash = "2edb6a158658f2f33b8d54227fd5cb595bdbfd16f81ff6775505be4020442dc6"

@@ -117,7 +117,7 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     dismissed = {r["key"] for r in conn.execute("SELECT key FROM recurring_dismissed")}
     out = []
     for item in db.rows(conn.execute(
-            "SELECT r.*, COALESCE(a.display_name, a.name) AS account_name FROM recurring r "
+            "SELECT r.*, " + db.label_sql("a") + " AS account_name FROM recurring r "
             "LEFT JOIN accounts a ON a.id=r.account_id WHERE r.active=1")):
         window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
         first_tx = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (item["account_id"],)).fetchone()[0]

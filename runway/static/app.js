@@ -630,7 +630,7 @@ function txRow(t, review) {
       <div class="desc show-sm">${acctLabel(t.account_id, t.account_name)}</div></td>
     <td class="muted hide-sm">${acctLabel(t.account_id, t.account_name)}</td>
     <td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td>
-    <td style="white-space:nowrap"><select class="cat" aria-label="Category">${categoryOptions(t.category)}</select>
+    <td style="white-space:nowrap"><select class="cat ${review ? "" : "ghost"}" aria-label="Category">${categoryOptions(t.category)}</select>
       ${suggestion ? `<span class="tag ai" title="AI suggestion confidence">${Math.round((t.confidence || 0) * 100)}%</span>
         <button class="btn link keep" title="Keep the suggested category">✓ Keep</button>` : ""}
       ${!review && t.needs_review ? `<span class="tag review">review</span>` : ""}</td></tr>`;
@@ -760,6 +760,7 @@ function wireMissed(root) {
 }
 
 // ------------------------------------------------------------------------------------------ recurring
+const openRecurring = new Set();
 async function renderRecurring(el) {
   const [accounts, items] = await Promise.all([api("/api/accounts"), api("/api/recurring")]);
   const suggestions = STATE.connected ? await api("/api/recurring/suggestions") : [];
@@ -797,28 +798,45 @@ async function renderRecurring(el) {
     $(".r-date", box).parentElement.firstChild.textContent = needs ? "Starting" : "A date it happens";
   };
 
-  el.innerHTML = `<h1>Recurring</h1>
-    
-    ${items.length ? items.map((r) => `<div class="card rec-item" data-id="${r.id}">
-      <div class="card-head"><h2>↻ ${esc(r.name)} ${r.active ? "" : `<span class="tag">paused</span>`}</h2>
-        <span class="small muted">${r.next_date ? `Next ${fmtDate(r.next_date)} · ${fmt(r.expected_amount)}` : "No upcoming date"}
-          · ${r.matched_count} matched${r.last_matched ? ` · last ${fmtDate(r.last_matched.posted)} ${fmt(r.last_matched.amount)}` : ""}</span></div>
+  const FREQ = { monthly: "monthly", biweekly: "every 2 weeks", weekly: "weekly", semimonthly: "twice a month", quarterly: "quarterly",
+    semiannual: "every 6 months", yearly: "yearly", dates: "on set dates" };
+  const recRow = (r) => {
+    const amt = r.expected_amount ?? r.amount;
+    const sub = [FREQ[r.frequency] || r.frequency, r.next_date ? `next ${fmtDate(r.next_date)}` : "no upcoming date",
+      r.matched_count ? `${r.matched_count} matched` : "", (r.missed || []).length ? `<span class="warn-text">missed a payment</span>` : ""].filter(Boolean);
+    return `<details class="acct-row rec-item" data-id="${r.id}" ${openRecurring.has(String(r.id)) ? "open" : ""}>
+      <summary>${acctIcon(r.account_id) || `<span class="bank-icon letter">↻</span>`}
+        <span class="acct-main"><span class="acct-title">${esc(r.name)}${r.active ? "" : ` <span class="tag">paused</span>`}</span>
+          <span class="acct-sub">${sub.map(nw).join(" · ")}</span></span>
+        <span class="acct-bal ${amt > 0 ? "pos" : ""}">${amt > 0 ? "+" : "−"}${fmt(Math.abs(amt))}</span>
+        <span class="acct-chev" aria-hidden="true">›</span></summary>
       ${(r.missed || []).map((m) => missedLine(m)).join("")}
-      <div class="form-row">${fields(r)}
-        <label class="inline"><input type="checkbox" class="r-active" ${r.active ? "checked" : ""}> Active</label></div>
-      <div class="form-row">
-        ${r.matched_count ? `<button class="btn r-show">Show matched transactions</button>` : ""}
-        <button class="btn link r-del">Remove</button></div>
-      <div class="r-matches"></div></div>`).join("")
-    : `<div class="card empty">No recurring items yet. Add one below, pick from what's spotted in your history,
-        or use ↻ on any transaction to start one from it.</div>`}
-    <div class="card" id="rec-new"><h2>Add a recurring item</h2><div class="form-row">${fields()}</div>
-      <button class="btn primary" id="r-add">Add</button></div>
-    ${suggestions.length ? `<div class="card"><h2>Spotted in your history</h2><div class="scroll-x"><table>${suggestions.map((s, i) => `<tr>
-      <td>${esc(s.name)}</td><td class="muted">${esc(acctName(s.account_id))}</td><td class="num">${fmt(s.amount)}</td>
-      <td>${esc(s.frequency)} · ${s.count}×</td><td class="muted">last ${fmtDate(s.anchor_date)}</td>
-      <td class="num"><button class="btn add-sug" data-i="${i}">Add</button></td></tr>`).join("")}</table></div></div>` : ""}`;
+      <div class="acct-edit">${fields(r)}
+        <div class="acct-checks wide"><label class="inline"><input type="checkbox" class="r-active" ${r.active ? "checked" : ""}> Active</label>
+          ${r.matched_count ? `<button class="btn link r-show">Show matched transactions</button>` : ""}
+          <button class="btn link r-del" style="margin-left:auto">Remove</button></div>
+        <div class="r-matches wide"></div></div></details>`;
+  };
+  const moneyIn = items.filter((r) => (r.expected_amount ?? r.amount) > 0), moneyOut = items.filter((r) => !((r.expected_amount ?? r.amount) > 0));
+  const group = (title, list) => list.length ? `<div class="acct-group"><div class="acct-group-title">${title}</div>${list.map(recRow).join("")}</div>` : "";
 
+  el.innerHTML = `<div class="card-head"><h1>Recurring</h1><button class="btn primary" id="r-new-btn">Add</button></div>
+    <div class="card acct-form" id="rec-new" ${items.length ? "hidden" : ""}><h2>Add a recurring item</h2><div class="acct-edit" style="padding-left:0">${fields()}</div>
+      <div class="form-row"><button class="btn primary" id="r-add">Add</button>${items.length ? `<button class="btn link" id="r-cancel">Cancel</button>` : ""}</div></div>
+    ${items.length ? `<div class="card">${group("Money in", moneyIn)}${group("Money out", moneyOut)}</div>`
+      : `<div class="card empty">No recurring items yet. Add one above, pick from what's spotted in your history,
+        or use ↻ on any transaction to start one from it.</div>`}
+    ${suggestions.length ? `<div class="card"><h2>Spotted in your history</h2>${suggestions.map((s, i) => `<div class="acct-row sug-row"><div class="sug-inner">
+      ${acctIcon(s.account_id) || `<span class="bank-icon letter">↻</span>`}
+      <span class="acct-main"><span class="acct-title">${esc(s.name)}</span><span class="acct-sub">${nw(esc(s.frequency))} · ${nw(`${s.count}×`)} · ${nw(`last ${fmtDate(s.anchor_date)}`)}</span></span>
+      <span class="acct-bal ${s.amount > 0 ? "pos" : ""}">${fmt(s.amount)}</span>
+      <button class="btn add-sug" data-i="${i}">Add</button></div></div>`).join("")}</div>` : ""}`;
+
+  $("#r-new-btn").addEventListener("click", () => { const f = $("#rec-new"); f.hidden = false; $(".r-name", f).focus(); });
+  $("#r-cancel")?.addEventListener("click", () => { $("#rec-new").hidden = true; });
+  $$(".rec-item").forEach((box) => box.addEventListener("toggle", () => {
+    if (box.open) openRecurring.add(box.dataset.id); else openRecurring.delete(box.dataset.id);
+  }));
   $$(".rec-item").forEach((box) => {
     const id = box.dataset.id;
     $(".r-freq", box).addEventListener("change", () => syncFreq(box));
@@ -921,13 +939,15 @@ async function renderBudget(el) {
       <option value="">${usual ? `Automatic (usually ${esc(usual)})` : "Automatic"}</option>
       <optgroup label="Cards">${opts("credit")}</optgroup><optgroup label="Bank accounts">${opts("cash")}</optgroup></select>`;
   };
-  const row = (c, sub, budgets, last) => `<tr data-cat="${esc(c.name)}" class="${sub ? `sub-row${last ? " last-sub" : ""}` : "parent-row"}">
-    <td class="cat-cell"><a href="#transactions" class="cat-link">${esc(c.name)}</a>
-      ${!sub && c.has_children && c.own_spent !== c.spent ? `<span class="incl">incl. subcategories</span>` : ""}</td>
-    <td class="num"><input type="number" min="0" step="10" class="b-amt" value="${c.budget ?? ""}" placeholder="${c.budget == null ? (sub ? "—" : "Set budget") : ""}" aria-label="Budget for ${esc(c.name)}"></td>
-    ${budgets ? `<td>${payWith(c)}</td>` : ""}
-    <td class="num"><a href="#transactions" class="spent-link" title="See the transactions behind this amount">${fmt(c.spent)}</a></td><td>${bar(c)}</td><td class="small" style="white-space:nowrap">${status(c)}</td></tr>`;
-  const familyRows = (f, budgets) => `<tbody class="family">${row(f.top, false, budgets)}${f.kids.map((k, i) => row(k, true, budgets, i === f.kids.length - 1)).join("")}</tbody>`;
+  // One line per category: name, spent "of" budget (edited in place), then the bar underneath. Works at any width.
+  const row = (c, sub, budgets) => `<div data-cat="${esc(c.name)}" class="brow ${sub ? "sub" : ""}">
+    <div class="brow-top">
+      <a href="#transactions" class="cat-link">${esc(c.name)}</a>${budgets ? payWith(c) : ""}
+      <span class="brow-amt"><a href="#transactions" class="spent-link" title="See the transactions behind this amount">${fmt(c.spent)}</a>
+        ${c.budget != null || budgets ? `<span class="muted">of</span>` : ""}
+        <span class="money-input ${c.budget == null ? "blank" : ""}"><input type="number" min="0" step="10" class="b-amt ghost" value="${c.budget ?? ""}" placeholder="${c.budget == null ? (sub ? "—" : "Budget") : ""}" aria-label="Budget for ${esc(c.name)}"></span></span></div>
+    ${c.budget != null ? `<div class="brow-bar">${bar(c)}<span class="small brow-status">${status(c)}</span></div>` : ""}</div>`;
+  const familyRows = (f, budgets) => `<div class="family">${row(f.top, false, budgets)}${f.kids.filter((k) => budgets ? true : k.spent > 0.005).map((k) => row(k, true, budgets)).join("")}</div>`;
   const unusedTops = families.filter((f) => !isBudgeted(f) && !(f.top.spent > 0.005));
 
   el.innerHTML = `<div class="card-head"><h1>Budget</h1>
@@ -940,17 +960,13 @@ async function renderBudget(el) {
         <div class="sub">${b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget"}</div></div>
     </div>
     <div class="card"><h2>Budgets</h2>
-      ${inBudget.length ? `<div class="scroll-x"><table class="budget-table"><thead><tr><th>Category</th><th class="num">Monthly budget</th><th class="pay-col"><span class="sr-only">Paid with</span></th><th class="num">Spent</th><th style="width:28%">Progress</th><th></th></tr></thead>
-        ${inBudget.map((f) => familyRows(f, true)).join("")}</table></div>
-        ${pace > 0 && pace < 1 ? `` : ""}
-        `
+      ${inBudget.length ? `<div class="blist">${inBudget.map((f) => familyRows(f, true)).join("")}</div>`
       : `<div class="empty">No budgets yet. Set one below.</div>`}
     </div>
     <div class="card"><h2>Not budgeted</h2>
-      
-      <div class="scroll-x"><table class="budget-table">${notBudget.map((f) => familyRows(f, false)).join("")}
-        ${unusedTops.length ? `<tr><td><select id="b-new-cat"><option value="">Another category…</option>${unusedTops.map((f) => [f.top, ...f.kids].map((c) => `<option value="${esc(c.name)}">${esc(c.parent ? `${c.parent} > ${c.name}` : c.name)}</option>`).join("")).join("")}</select></td>
-          <td class="num"><input type="number" min="0" step="10" id="b-new-amt" class="b-amt" placeholder="Set budget"></td><td></td><td></td><td></td></tr>` : ""}</table></div>
+      <div class="blist">${notBudget.map((f) => familyRows(f, false)).join("")}
+        ${unusedTops.length ? `<div class="brow"><div class="brow-top"><select id="b-new-cat" class="ghost"><option value="">Another category…</option>${unusedTops.map((f) => [f.top, ...f.kids].map((c) => `<option value="${esc(c.name)}">${esc(c.parent ? `${c.parent} > ${c.name}` : c.name)}</option>`).join("")).join("")}</select>
+          <span class="brow-amt"><span class="money-input blank"><input type="number" min="0" step="10" id="b-new-amt" class="b-amt ghost" placeholder="Budget"></span></span></div></div>` : ""}</div>
     </div>
     ${b.income ? `<p class="help">Money in this month: ${fmt(b.income)}</p>` : ""}`;
 
@@ -960,12 +976,12 @@ async function renderBudget(el) {
     try { await api("/api/budget", { method: "POST", body: { category, amount } }); toast(amount ? "Budget saved" : "Budget removed"); renderBudget(el); }
     catch (err) { toast(err.message, true); }
   };
-  $$("tr[data-cat] .b-amt").forEach((input) => input.addEventListener("change", () => saveBudget(input.closest("tr").dataset.cat, input.value)));
-  $$("tr[data-cat] .pay-btn").forEach((btn) => btn.addEventListener("click", () => {
-    const cat = btn.closest("tr").dataset.cat, c = b.categories.find((x) => x.name === cat);
-    const cell = btn.parentElement;
-    cell.innerHTML = paySelect(c);
-    const sel = $("select", cell);
+  $$("[data-cat] .b-amt").forEach((input) => input.addEventListener("change", () => saveBudget(input.closest("[data-cat]").dataset.cat, input.value)));
+  $$("[data-cat] .pay-btn").forEach((btn) => btn.addEventListener("click", () => {
+    const cat = btn.closest("[data-cat]").dataset.cat, c = b.categories.find((x) => x.name === cat);
+    btn.insertAdjacentHTML("afterend", paySelect(c));
+    const sel = btn.nextElementSibling;
+    btn.remove();
     sel.focus();
     let done = false;
     const finish = async (save) => {
@@ -974,7 +990,7 @@ async function renderBudget(el) {
         try { await api("/api/budget", { method: "POST", body: { category: cat, pay_with: sel.value } }); toast("Saved"); }
         catch (err) { toast(err.message, true); }
       }
-      renderBudget(el);
+      if (location.hash.startsWith("#budget")) renderBudget(el);   // not if you've moved to another page meanwhile
     };
     sel.addEventListener("change", () => finish(true));
     sel.addEventListener("blur", () => finish(true));
@@ -983,7 +999,7 @@ async function renderBudget(el) {
   $("#b-new-amt")?.addEventListener("change", () => { const c = $("#b-new-cat").value; if (c) saveBudget(c, $("#b-new-amt").value); else toast("Choose a category first", true); });
   // The category name and the Spent amount both open Transactions showing exactly what adds up to that number.
   $$(".cat-link, .spent-link").forEach((a) => a.addEventListener("click", () => {
-    Object.assign(LIST_STATE.transactions, { category: a.closest("tr").dataset.cat, q: "", account: "", month: b.month, scope: "budget" });
+    Object.assign(LIST_STATE.transactions, { category: a.closest("[data-cat]").dataset.cat, q: "", account: "", month: b.month, scope: "budget" });
   }));
 }
 
@@ -1606,7 +1622,7 @@ async function renderNetWorth(el) {
   const sideRows = (side) => d.groups.filter((g) => g.side === side).map((g) => `
       <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
       ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${i.type === "account" ? acctLabel(i.id, i.name) : esc(i.name)}
-          <div class="desc">${i.type === "account" ? [i.org, i.owner].filter(Boolean).map(esc).join(" · ") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
+          <div class="desc">${i.type === "account" ? esc(i.org || "") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
             i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
         <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
   const assetGroups = d.groups.filter((g) => g.side === "asset" && g.total > 0);
@@ -1817,24 +1833,42 @@ async function resumePlaidOAuth() {
 // A bank connection's accounts, each matched to one of yours (or added, or left out).
 function plaidBankAccounts(it, accounts) {
   const mine = accounts.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind));
-  return `<table class="plaid-accts">${it.accounts.filter((p) => p.type !== "investment").map((p) => {
+  return `<div class="pl-accts">${it.accounts.filter((p) => p.type !== "investment").map((p) => {
     const sel = p.ignored ? "ignore" : p.account_id || "";
-    const stmt = p.last_statement_date ? `<div class="desc">Statement ${fmt(p.last_statement_balance)} · closed ${fmtDate(p.last_statement_date)}${p.next_due_date ? ` · due ${fmtDate(p.next_due_date)}` : ""}</div>` : "";
-    return `<tr data-pid="${esc(p.id)}"><td>${esc(p.name || p.official_name || "Account")}${p.mask ? ` <span class="muted">••${esc(p.mask)}</span>` : ""}
-        <div class="desc">${esc(p.subtype || p.type || "")} · ${fmt(p.balance)}</div>${stmt}</td>
-      <td><select class="pl-match" aria-label="Which of your accounts this is">
+    return `<div class="pl-acct" data-pid="${esc(p.id)}">
+      <span class="acct-main"><span>${esc(p.name || p.official_name || "Account")}${p.mask ? ` <span class="muted">••${esc(p.mask)}</span>` : ""}</span>
+        <span class="acct-sub">${nw(esc(p.subtype || p.type || ""))} · ${nw(fmt(p.balance))}</span></span>
+      <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
         <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
         ${p.account_id && p.account_id.startsWith("pl:") ? `<option value="${esc(p.account_id)}" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
         ${mine.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
-        <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't use</option></select>
-        ${p.account_id ? `<div class="desc">${p.provider === "plaid" ? "Balance and transactions from Plaid" : p.last_statement_date ? "Statements from Plaid; transactions from SimpleFIN" : "Transactions from SimpleFIN"}</div>` : ""}</td></tr>`;
-  }).join("")}</table>`;
+        <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't use</option></select></div>`;
+  }).join("")}</div>`;
+}
+
+// The logo for an institution by name (Plaid connections), or its first letter.
+function bankIconFor(name) {
+  const slug = brandFor(name || "");
+  return slug ? `<img class="bank-icon" src="/banks/${slug}.svg" alt="" width="28" height="28">`
+    : `<span class="bank-icon letter">${esc((name || "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "?")}</span>`;
+}
+// The same institution matching as runway/brands.py, for names the server hasn't matched to an account.
+function brandFor(name) {
+  const n = name.toLowerCase();
+  const pats = [[/\bchase\b|jpmorgan/, "chase"], [/capital ?one/, "capital-one"], [/\bciti/, "citibank"], [/american express|\bamex\b/, "american-express"],
+    [/\bdiscover\b/, "discover-card"], [/bank of america|\bbofa\b|merrill/, "bank-of-america"], [/wells ?fargo/, "wells-fargo"], [/\bu\.? ?s\.? bank\b/, "u-s-bank"],
+    [/navy federal/, "navy-federal-credit-union"], [/\busaa\b/, "usaa"], [/fidelity/, "fidelity"], [/vanguard/, "vanguard"], [/schwab/, "charles-schwab"],
+    [/e\*? ?trade/, "e-trade"], [/interactive brokers/, "interactive-brokers"], [/robinhood/, "robinhood"], [/\bsofi\b/, "sofi"], [/paypal/, "paypal"]];
+  const hit = pats.find(([re]) => re.test(n));
+  return hit ? hit[1] : null;
 }
 
 async function wirePlaidSetup() {
   const [st, accounts] = await Promise.all([api("/api/plaid/status"), api("/api/accounts")]);
   if (!$("#plaid-card")) return;
   $("#pl-env").value = st.env === "sandbox" ? "sandbox" : "production";
+  $("#pl-keys").open = !st.configured;
+  $("#pl-keys-sum").textContent = st.configured ? `Keys · saved · ${st.env === "sandbox" ? "Sandbox" : "Production"}` : "Keys";
   $("#pl-id").value = st.client_id;
   $("#pl-secret").placeholder = st.configured ? "•••••••• saved" : "secret";
   onEdit([$("#pl-env"), $("#pl-id")], async () => {
@@ -1847,14 +1881,17 @@ async function wirePlaidSetup() {
   });
   if (st.redirect_uri) $("#pl-redirect").innerHTML = `In the Plaid Dashboard, add <code>${esc(st.redirect_uri)}</code> under Allowed redirect URIs (for banks like Chase that sign you in on their own site).`;
   const box = $("#pl-items");
-  box.innerHTML = `${st.items.length ? `<table>${st.items.map((it) => `<tr data-item="${esc(it.item_id)}">
-      <td><b>${esc(it.institution_name || "Connection")}</b> ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}
-        <span class="tag">${it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</span>
-        ${it.bank ? plaidBankAccounts(it, accounts) : `<div class="desc">${it.accounts.map((a) => `${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`).join(", ") || "no accounts yet"}</div>`}
-        ${it.error ? `<div class="small" style="color:var(--critical)">▲ ${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired or changed; reconnect to fix" : it.error)}</div>` : ""}</td>
-      <td class="small muted">${it.last_sync ? `synced ${esc(it.last_sync)} UTC` : "not synced"}</td>
-      <td class="num" style="white-space:nowrap">${it.error ? `<button class="btn primary pl-reconnect">Reconnect</button>` : `<button class="btn pl-sync">Sync</button>`}
-        <button class="btn link pl-remove">Remove</button></td></tr>`).join("")}</table>` : ""}
+  const synced = (t) => { if (!t) return "not synced"; const d = new Date(t.replace(" ", "T") + "Z");
+    return isNaN(d) ? `synced ${esc(t)}` : `synced ${d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`; };
+  box.innerHTML = `${st.items.length ? `<div class="pl-list">${st.items.map((it) => `<div class="pl-item" data-item="${esc(it.item_id)}">
+      <div class="pl-head">${bankIconFor(it.institution_name)}
+        <span class="acct-main"><span class="acct-title">${esc(it.institution_name || "Connection")}
+          ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}<span class="tag">${it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</span></span>
+          <span class="acct-sub">${it.error ? `<span class="warn-text">${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired; reconnect to fix" : it.error)}</span>` : synced(it.last_sync)}</span></span>
+        <span class="pl-btns">${it.error ? `<button class="btn primary pl-reconnect">Reconnect</button>` : `<button class="btn pl-sync">Sync</button>`}
+          <button class="btn link pl-remove">Remove</button></span></div>
+      ${it.bank ? plaidBankAccounts(it, accounts) : `<div class="acct-sub pl-inv">${it.accounts.map((a) => nw(`${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`)).join(" · ") || "no accounts yet"}</div>`}
+    </div>`).join("")}</div>` : ""}
     <div class="form-row">${[["bank", "Connect a bank or card"], ["investments", "Connect an investment account"]].map(([k, label]) =>
       `<button class="btn ${k === "bank" ? "primary" : ""} pl-connect" data-kind="${k}" ${st.configured ? "" : "disabled title=\"Add your Plaid client ID and secret first\""}>${label}</button>`).join("")}</div>`;
   $$(".pl-connect").forEach((btn) => btn.addEventListener("click", async (e) => {
@@ -1864,12 +1901,12 @@ async function wirePlaidSetup() {
   }));
   $$(".pl-match").forEach((sel) => sel.addEventListener("change", async () => {
     try {
-      await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: sel.closest("tr").dataset.pid, target: sel.value } });
+      await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: sel.closest("[data-pid]").dataset.pid, target: sel.value } });
       toast(sel.value === "new" ? "Added" : sel.value === "ignore" ? "Left out" : sel.value ? "Matched. Choose where its data comes from under Accounts." : "Unmatched");
       route();
     } catch (err) { toast(err.message, true); }
   }));
-  $$("#pl-items tr[data-item]").forEach((tr) => {
+  $$("#pl-items [data-item]").forEach((tr) => {
     const id = tr.dataset.item;
     $(".pl-sync", tr)?.addEventListener("click", async (e) => {
       const b = e.currentTarget; b.disabled = true; b.textContent = "Syncing…";
@@ -2017,62 +2054,41 @@ async function renderSetup(el, sub) {
       <label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label></div>
   </div>
   <div class="card"><h2>Accounts</h2>
-    
-    ${accounts.length ? `<div class="scroll-x"><table id="acct-table"><tr><th>Account</th><th>Type</th><th>Owner</th><th>Details</th><th class="num">Balance</th></tr>
-      ${accounts.map((a) => `<tr data-id="${esc(a.id)}">
-        <td><input class="f-name" value="${esc(name(a))}" style="width:190px"><div class="desc">${acctLabel(a.id, `${a.org || ""} ${a.name}`.trim())}</div></td>
-        <td><select class="f-kind">${["checking", "savings", "credit", "loan", "investment"].map((k) => `<option ${k === a.kind ? "selected" : ""}>${k}</option>`).join("")}</select></td>
-        <td><select class="f-owner" aria-label="Owner of ${esc(name(a))}">${ownerOptions(a.owner)}</select></td>
-        <td class="f-details">${a.kind === "credit"
-          ? `<div class="form-row" style="margin:0">
-              <label>Paid from<select class="f-payfrom"><option value="">—</option>${acctOptions(cash, a.pay_from)}</select></label></div>
-             <div class="desc">${a.plaid_link && a.plaid_link.closed
-               ? `Statements from ${esc(a.plaid_link.institution || "the issuer")}: last closed ${fmtDate(a.plaid_link.closed)}${a.plaid_link.due ? `, due ${fmtDate(a.plaid_link.due)}` : ""}`
-               : `No statements yet: link this card through Plaid in <a href="#setup/connections">Connections</a>`}</div>
-             <label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>`
-          : a.kind === "checking" || a.kind === "savings"
-          ? `<label class="inline" title="Spreads this account's recent non-recurring spending evenly over every day of the forecast"><input type="checkbox" class="f-spend" ${a.daily_spend ? "checked" : ""}> Also subtract average everyday spending</label>`
-          : a.kind === "loan" ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank shows amount owed as a positive number</label>` : ""}
-          <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide</label>
-          ${providerControl(a)}
-          ${a.kind === "loan" ? `<div class="desc">Add the monthly payment under Recurring so it comes out of checking.</div>` : ""}</td>
-        <td class="num">${fmt(a.balance)}</td></tr>`).join("")}</table></div>`
+    ${accounts.length ? accountGroups(accounts, cash)
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
   </div>` },
-    categories: { label: "Categories", html: () => `<div class="card"><h2>Categories</h2>
-    
-    <div class="scroll-x"><table id="cat-table"><tr><th>Category</th><th>Kind</th><th class="num">Transactions</th><th></th></tr>
-      ${CATEGORIES.map((c) => `<tr data-name="${esc(c.name)}" class="${c.parent ? "sub-row" : ""}">
-        <td style="padding-left:${10 + (c.depth || 0) * 20}px">${c.parent ? `<span class="muted">${esc(c.parent)} &gt;</span> ` : ""}${c.protected ? `<b>${esc(c.name)}</b> <span class="tag">built-in</span>`
-          : `<input class="cat-name" value="${esc(c.name)}" aria-label="Category name" style="width:200px">`}</td>
-        <td class="muted small">${c.is_transfer ? "not spending" : c.is_income ? "money in" : "spending"}</td>
-        <td class="num muted">${c.transactions}</td>
-        <td class="num cat-actions" style="white-space:nowrap">${(c.depth || 0) < CAT_MAX_DEPTH - 1 ? `<button class="btn link cat-sub">+ Subcategory</button>` : ""}
-          ${c.protected ? "" : `<button class="btn link cat-move">Move</button> <button class="btn link cat-del">Remove</button>`}</td></tr>`).join("")}
-    </table></div>
-    <h3>Add a category</h3>
-    <div class="form-row"><label>Name<input id="cat-new-name"></label>
+    categories: { label: "Categories", html: () => `<div class="card"><div class="card-head"><h2>Categories</h2>
+      <button class="btn" id="cat-new-btn">Add</button></div>
+    <div class="acct-form" id="cat-new" hidden><div class="form-row"><label>Name<input id="cat-new-name"></label>
       <label>Subcategory of<select id="cat-new-parent"><option value="">— none (top level) —</option>${categoryOptions("", { blank: false, canHoldChildren: true })}</select></label>
       <label class="inline"><input type="checkbox" id="cat-transfer"> Not spending (a transfer)</label>
       <label class="inline"><input type="checkbox" id="cat-income"> Money in</label>
-      <button class="btn primary" id="cat-add">Add</button></div>
+      <button class="btn primary" id="cat-add">Add</button></div></div>
+    <div id="cat-table" class="tidy-list">
+      ${CATEGORIES.map((c) => `<div data-name="${esc(c.name)}" class="tidy-row ${c.parent ? "sub" : ""}" style="--depth:${c.depth || 0}">
+        <span class="tidy-main">${c.protected ? `<span class="tidy-name">${esc(c.name)}</span>`
+          : `<input class="cat-name ghost" value="${esc(c.name)}" aria-label="Category name">`}
+          ${c.is_transfer ? `<span class="tag">not spending</span>` : c.is_income ? `<span class="tag">money in</span>` : ""}${c.protected ? `<span class="tag">built-in</span>` : ""}</span>
+        <span class="tidy-count" title="Transactions">${c.transactions || ""}</span>
+        <span class="cat-actions tidy-actions">${(c.depth || 0) < CAT_MAX_DEPTH - 1 ? `<button class="btn link cat-sub">+ Sub</button>` : ""}
+          ${c.protected ? "" : `<button class="btn link cat-move">Move</button><button class="btn link cat-del">Remove</button>`}</span></div>`).join("")}
+    </div>
   </div>` },
-    rules: { label: "Rules", count: rules.length, html: () => `<div class="card"><h2>Rules</h2>
-    
-    <div class="form-row">
+    rules: { label: "Rules", count: rules.length, html: () => `<div class="card"><div class="card-head"><h2>Rules</h2>
+      <button class="btn" id="rule-new-btn">Add</button></div>
+    <div class="form-row acct-form" id="rule-new" ${rules.length ? "hidden" : ""}>
       <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
       <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
       <label class="inline"><input type="checkbox" id="rule-apply" checked> Apply to past transactions</label>
       <button class="btn primary" id="rule-add">Add rule</button>
     </div>
-    ${rules.length ? `<details class="rules-box" id="rules-box" ${rulesOpen ? "open" : ""}>
-      <summary><span class="rules-sum">${rules.length} rule${rules.length === 1 ? "" : "s"}</span> <span class="muted small">· show, search and edit</span></summary>
-      <div class="form-row"><label>Search rules<input id="rule-filter" placeholder="text or category" value="${esc(rulesFilter)}" style="width:240px"></label></div>
-      <div class="scroll-x"><table id="rules-table"><tr><th>Text contains</th><th>Category</th><th></th></tr>${rules.map((r) => `<tr data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
-      <td><input class="rule-m" value="${esc(r.match)}" style="width:260px" aria-label="Rule text"></td>
-      <td><select class="rule-c" aria-label="Rule category">${categoryOptions(r.category, { blank: false })}</select></td>
-      <td class="num" style="white-space:nowrap"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply to matching</button>
-        <button class="btn link del-rule">Remove</button></td></tr>`).join("")}</table></div></details>` : ""}
+    ${rules.length ? `<input id="rule-filter" class="tidy-search" placeholder="Search ${rules.length} rules" value="${esc(rulesFilter)}">
+      <div id="rules-table" class="tidy-list">${rules.map((r) => `<div class="tidy-row rule-row" data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
+      <span class="tidy-main"><input class="rule-m ghost" value="${esc(r.match)}" aria-label="Text the merchant or description contains"></span>
+      <span class="rule-arrow" aria-hidden="true">→</span>
+      <select class="rule-c ghost" aria-label="Category">${categoryOptions(r.category, { blank: false })}</select>
+      <span class="tidy-actions"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply</button>
+        <button class="btn link del-rule">Remove</button></span></div>`).join("")}</div>` : ""}
   </div>` },
     connections: { label: "Connections", html: () => `
   <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
@@ -2083,15 +2099,17 @@ async function renderSetup(el, sub) {
       : `<p class="help">Paste a setup token from <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN Bridge</a>.</p>${connectForm()}`}
   </div>
 <div class="card" id="plaid-card"><h2>Plaid</h2>
-    <p class="help">Keys: Developers → Keys at <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
-    <p class="help" id="pl-redirect"></p>
-    <p class="help" id="pl-session">${plaidSessionLine()}</p>
-    <div class="form-row">
-      <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
-      <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
-      <label>Secret<input id="pl-secret" type="password" style="width:220px" autocomplete="off"></label>
-    </div>
     <div id="pl-items"></div>
+    <details id="pl-keys" class="pl-keys"><summary class="small"><span id="pl-keys-sum">Keys</span></summary>
+      <p class="help">From Developers → Keys at <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
+      <div class="form-row">
+        <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
+        <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
+        <label>Secret<input id="pl-secret" type="password" style="width:220px" autocomplete="off"></label>
+      </div>
+      <p class="help" id="pl-redirect"></p>
+    </details>
+    <p class="help" id="pl-session">${plaidSessionLine()}</p>
   </div>
 <div class="card"><h2>AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
     <p class="help">Only the date, amount, merchant and account type of each transaction are sent.</p>
@@ -2148,7 +2166,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   const filterRules = () => {
     const q = ($("#rule-filter")?.value || "").trim().toLowerCase();
     rulesFilter = q;
-    $$("#rules-table tr[data-id]").forEach((tr) => { tr.hidden = !!q && !tr.dataset.q.includes(q); });
+    $$("#rules-table [data-id]").forEach((tr) => { tr.hidden = !!q && !tr.dataset.q.includes(q); });
   };
   $("#rule-filter")?.addEventListener("input", filterRules);
   filterRules();
@@ -2161,8 +2179,10 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     try { await api("/api/settings", { method: "POST", body: { primary_account: e.target.value } }); toast("Primary account saved"); await refreshState(); }
     catch (err) { toast(err.message, true); }
   });
-  $$("#acct-table tr[data-id]").forEach((tr) => {
+  $$(".acct-row[data-id]").forEach((tr) => {
+    tr.addEventListener("toggle", () => { if (tr.open) openAccounts.add(tr.dataset.id); else openAccounts.delete(tr.dataset.id); });
     $(".f-kind", tr).addEventListener("change", () => saveAccount(tr, true));
+    $(".type-change", tr).addEventListener("click", (e) => { e.currentTarget.hidden = true; $(".f-kind", tr).hidden = false; $(".f-kind", tr).focus(); });
     $(".f-provider", tr)?.addEventListener("change", async (e) => {
       try {
         await api(`/api/accounts/${encodeURIComponent(tr.dataset.id)}`, { method: "POST", body: { provider: e.target.value } });
@@ -2170,7 +2190,9 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
         if (e.target.value === "plaid") api("/api/sync", { method: "POST" }).then(() => route(), () => {});
       } catch (err) { toast(err.message, true); route(); }
     });
-    onEdit($$(".f-name, .f-owner, .f-payfrom, .f-sign, .f-spend, .f-hidden", tr), () => saveAccount(tr, false));
+    onEdit($$(".f-name, .f-sign, .f-spend", tr), () => saveAccount(tr, false));
+    onEdit($$(".f-owner, .f-payfrom, .f-hidden", tr), () => saveAccount(tr, true));   // these change the row's summary
+    $(".f-name", tr).addEventListener("input", (e) => { $(".acct-title", tr).textContent = e.target.value.trim() || e.target.placeholder; });
   });
   onEdit([$("#llm-model")], async () => { await api("/api/settings", { method: "POST", body: { llm_model: $("#llm-model").value.trim() } }); await refreshState(); });
   onEdit([$("#api-key")], async () => {
@@ -2187,7 +2209,8 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     try { await api("/api/rules", { method: "POST", body: { match: $("#rule-match").value, category: $("#rule-cat").value, apply: $("#rule-apply").checked } });
       toast("Rule added"); await refreshState(); route(); } catch (err) { toast(err.message, true); }
   });
-  $$("#rules-table tr[data-id]").forEach((tr) => {
+  $("#rule-new-btn")?.addEventListener("click", () => { $("#rule-new").hidden = false; $("#rule-match").focus(); });
+  $$("#rules-table [data-id]").forEach((tr) => {
     const id = tr.dataset.id;
     const saveRule = async () => {
       try { await api(`/api/rules/${id}`, { method: "POST", body: { match: $(".rule-m", tr).value, category: $(".rule-c", tr).value } }); toast("Rule saved"); }
@@ -2214,7 +2237,8 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   });
   $("#cat-add")?.addEventListener("click", () => addCategory($("#cat-new-name").value, $("#cat-new-parent").value || null,
     $("#cat-transfer").checked, $("#cat-income").checked));
-  $$("#cat-table tr[data-name]").forEach((tr) => {
+  $("#cat-new-btn")?.addEventListener("click", () => { $("#cat-new").hidden = false; $("#cat-new-name").focus(); });
+  $$("#cat-table [data-name]").forEach((tr) => {
     const name = tr.dataset.name;
     $(".cat-name", tr)?.addEventListener("change", async (e) => {
       try { await api("/api/categories/rename", { method: "POST", body: { name, new_name: e.target.value } }); toast("Renamed"); route(); }
@@ -2292,13 +2316,61 @@ function wireConnect() {
   });
 }
 
+// Settings → Accounts: one compact row per account, grouped by type; click a row to edit it.
+const openAccounts = new Set();
+const KIND_GROUPS = [["Cash", ["checking", "savings"]], ["Credit cards", ["credit"]], ["Loans", ["loan"]], ["Investments", ["investment"]]];
+
+function accountGroups(accounts, cash) {
+  const shown = accounts.filter((a) => !a.hidden), hidden = accounts.filter((a) => a.hidden);
+  const byName = Object.fromEntries(accounts.map((a) => [a.id, a.display_name || a.name]));
+  const section = (title, list) => list.length ? `<div class="acct-group"><div class="acct-group-title">${esc(title)}</div>
+      ${list.map((a) => accountRow(a, cash, byName)).join("")}</div>` : "";
+  return KIND_GROUPS.map(([title, kinds]) => section(title, shown.filter((a) => kinds.includes(a.kind)))).join("")
+    + section("Hidden", hidden);
+}
+
+function accountSummary(a, byName) {
+  const bits = [];
+  if (a.id === STATE.primary_account) bits.push(`<span class="tag">primary</span>`);
+  if (a.owner) bits.push(esc(a.owner));
+  if (a.kind === "credit") {
+    bits.push(a.pay_from ? `paid from ${esc(byName[a.pay_from] || "?")}` : `<span class="warn-text">no paying account</span>`);
+    if (!(a.plaid_link && a.plaid_link.closed)) bits.push(`<span class="warn-text">not linked through Plaid</span>`);
+  }
+  if (a.provider === "plaid" || a.id.startsWith("pl:")) bits.push("via Plaid");
+  return bits.map(nw).join(" · ");
+}
+
+function accountRow(a, cash, byName) {
+  const bank = `${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`;
+  const owes = a.kind === "credit" || a.kind === "loan";
+  return `<details class="acct-row" data-id="${esc(a.id)}" ${openAccounts.has(a.id) ? "open" : ""}>
+    <summary>${acctIcon(a.id) || `<span class="bank-icon letter">?</span>`}
+      <span class="acct-main"><span class="acct-title">${esc(a.display_name || a.name)}</span>
+        <span class="acct-sub">${accountSummary(a, byName)}</span></span>
+      <span class="acct-bal ${a.balance < 0 ? "" : ""}">${fmt(a.balance)}</span>
+      <span class="acct-chev" aria-hidden="true">›</span></summary>
+    <div class="acct-edit">
+      <label class="wide">Name<input class="f-name" value="${esc(a.display_name || "")}" placeholder="${esc(a.name)}">
+        ${a.display_name ? `<span class="field-note" title="${esc(bank)}">From the bank: ${esc(bank)}</span>` : ""}</label>
+      <label>Owner<select class="f-owner">${ownerOptions(a.owner)}</select></label>
+      ${a.kind === "credit" ? `<label>Paid from<select class="f-payfrom"><option value="">—</option>${cash.map((c) => `<option value="${esc(c.id)}" ${c.id === a.pay_from ? "selected" : ""}>${esc(c.display_name || c.name)}</option>`).join("")}</select></label>` : ""}
+      ${providerControl(a)}
+      <div class="acct-checks wide">
+        ${a.kind === "checking" || a.kind === "savings" ? `<label class="inline" title="Spreads this account's recent non-recurring spending evenly over every day of the forecast"><input type="checkbox" class="f-spend" ${a.daily_spend ? "checked" : ""}> Subtract average everyday spending</label>` : ""}
+        ${owes ? `<label class="inline"><input type="checkbox" class="f-sign" ${a.owed_positive ? "checked" : ""}> Bank reports what's owed as a positive number</label>` : ""}
+        <label class="inline"><input type="checkbox" class="f-hidden" ${a.hidden ? "checked" : ""}> Hide this account</label>
+        <span class="type-fix">${esc(a.kind)} account · <button type="button" class="btn link type-change">change type</button>
+          <select class="f-kind" hidden aria-label="Account type">${["checking", "savings", "credit", "loan", "investment"].map((k) => `<option ${k === a.kind ? "selected" : ""}>${k}</option>`).join("")}</select></span>
+      </div>
+    </div></details>`;
+}
+
 // Where an account's balance and transactions come from. Shown once the account is matched to a Plaid account.
 function providerControl(a) {
-  if (a.id.startsWith("pl:")) return `<div class="desc">Data from Plaid${a.plaid_link ? ` · ${esc(a.plaid_link.institution || "")}` : ""}</div>`;
-  if (!a.plaid_link) return "";
+  if (a.id.startsWith("pl:") || !a.plaid_link || !a.plaid_link.transactions) return "";
   const where = `${esc(a.plaid_link.institution || "Plaid")}${a.plaid_link.mask ? ` ••${esc(a.plaid_link.mask)}` : ""}`;
-  if (!a.plaid_link.transactions) return `<div class="desc">Card statements from ${where} (Plaid)</div>`;
-  return `<label class="inline" title="Balance and transactions come from here. Switching keeps your history; transactions both have are matched up.">Data from
+  return `<label title="Where balances and transactions come from. Switching keeps your history; transactions both have are matched up.">Transactions from
     <select class="f-provider"><option value="simplefin" ${a.provider !== "plaid" ? "selected" : ""}>SimpleFIN</option>
     <option value="plaid" ${a.provider === "plaid" ? "selected" : ""}>Plaid (${where})</option></select></label>`;
 }

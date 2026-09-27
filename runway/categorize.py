@@ -377,7 +377,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
 def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[dict]:
     """Suggestions for everything waiting in Review, one per merchant. Nothing is applied."""
     txs = db.rows(conn.execute(
-        "SELECT t.*, a.kind, COALESCE(a.display_name, a.name) AS account_name FROM transactions t "
+        "SELECT t.*, a.kind, " + db.label_sql("a") + " AS account_name FROM transactions t "
         "JOIN accounts a ON a.id=t.account_id "
         "WHERE (t.needs_review=1 OR t.category IS NULL) AND COALESCE(t.category_source, '') <> 'manual' ORDER BY t.posted DESC"
     ))

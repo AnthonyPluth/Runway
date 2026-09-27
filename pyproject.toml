@@ -11,6 +11,7 @@ dependencies = [
     "pyjwt[crypto] (>=2.8,<3.0)",        # verifying sign-in (OIDC) ID tokens
     "pywebpush (>=2.0,<3.0)",            # push notifications (VAPID + encrypted payloads)
     "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
+    "holidays (>=0.60,<1.0)",             # bank holidays, for when payments actually land
 ]
 
 [tool.poetry]
