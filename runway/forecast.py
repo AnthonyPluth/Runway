@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 
-from . import db
+from . import bankdays, db
 from . import recurring as rec
 
 SPEND_WINDOW_DAYS = 90
@@ -106,14 +106,35 @@ def schedule(item: dict) -> rruleset:
     return rules
 
 
-def occurrences(item: dict, start: date, end: date) -> list[date]:
-    """Dates in (start, end] on which a recurring item happens."""
+def scheduled(item: dict, start: date, end: date) -> list[date]:
+    """The dates in (start, end] a recurring item is scheduled for, before moving any off weekends and holidays."""
     stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
     if stop <= start:
         return []
     lo = datetime.combine(start + timedelta(days=1), datetime.min.time())
     hi = datetime.combine(stop, datetime.min.time())
     return [d.date() for d in schedule(item).between(lo, hi, inc=True)]
+
+
+def occurrences(item: dict, start: date, end: date) -> list[date]:
+    """Dates in (start, end] on which a recurring item's money actually moves: its scheduled dates, moved off weekends
+    and bank holidays (money in to the business day before, money out to the one after; see bankdays)."""
+    stop = min(end, _d(item["end_date"])) if item.get("end_date") else end
+    if stop <= start:
+        return []
+    money_in = (item.get("amount") or 0) > 0
+    # Look a few days beyond the window: a date just outside it can move inside, and the other way round.
+    lo = datetime.combine(start - timedelta(days=6), datetime.min.time())
+    hi = datetime.combine(stop + timedelta(days=6), datetime.min.time())
+    out = []
+    for d in schedule(item).between(lo, hi, inc=True):
+        nominal = d.date()
+        if item.get("end_date") and nominal > _d(item["end_date"]):
+            continue
+        moved = bankdays.settles(nominal, money_in)
+        if start < moved <= end and moved not in out:
+            out.append(moved)
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ data
@@ -270,7 +291,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "category": cat_row["category"] if cat_row else None})
 
     for card in cards:
-        label = card["display_name"] or card["name"]
+        label = db.account_label(card)
         bank = bank_statement(conn, card, today)
         if not bank:
             unlinked.append({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
@@ -285,11 +306,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         if payer not in cash:
             continue  # paid from an account that isn't being forecast
         due = _d(info["due_date"])
-        if due >= today and info["remaining"] > 0.005:
-            events.append({"date": due.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
+        pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
+        if pays >= today and info["remaining"] > 0.005:
+            events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -info["remaining"], "kind": "card", "estimated": False,
                            "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment"})
-        elif due < today and info["remaining"] > 0.005:
+        elif pays < today and info["remaining"] > 0.005:
             warnings.append(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.")
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle
         # in progress, at least what's been charged already). Without enough history, the recent daily rate.
@@ -307,7 +329,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 days_in_cycle = (close - (today if first else prev_close)).days
                 est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle
             if est > 0.005:
-                events.append({"date": due_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
+                events.append({"date": bankdays.next_business_day(due_k).isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
                                "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment"})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
@@ -371,14 +393,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             running[k] = series_by_acct[acct][i - 1] - rates.get(acct, 0.0)
         running[k] += e["amount"]
         e["balance_after"] = round(running[k], 2)
-        e["account"] = by_id[acct]["display_name"] or by_id[acct]["name"]
+        e["account"] = db.account_label(by_id[acct])
 
     return {
         "today": today.isoformat(),
         "primary_id": cash[0]["id"] if len(cash) == 1 else None,
         "dates": dates,
         "accounts": [
-            {"id": a["id"], "name": a["display_name"] or a["name"], "kind": a["kind"], "balance": round(a["balance"], 2),
+            {"id": a["id"], "name": db.account_label(a), "kind": a["kind"], "balance": round(a["balance"], 2),
              "daily_spend": rates.get(a["id"], 0.0), "series": series_by_acct[a["id"]],
              "low": low(series_by_acct[a["id"]])}
             for a in cash
@@ -451,7 +473,7 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                 per_day = p["amount"] / dim
             spend[acct][d.isoformat()] += per_day
         used.append({"category": p["category"], "amount": p["amount"], "account_id": acct,
-                     "account": by_id[acct]["display_name"] or by_id[acct]["name"], "chosen": bool(p["pay_with"])})
+                     "account": db.account_label(by_id[acct]), "chosen": bool(p["pay_with"])})
 
     base = [e for e in events if not (e["kind"] == "card" and e.get("estimated"))]
     extra: list[tuple[str, str, float]] = []   # (account, date, amount)
@@ -473,7 +495,7 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                 break
             amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
             if amt > 0.005:
-                extra.append((payer, due.isoformat(), -round(amt, 2)))
+                extra.append((payer, bankdays.next_business_day(due).isoformat(), -round(amt, 2)))
             prev, close, first = close, next_after(close, card["closing_day"]), False
 
     by_day: dict[tuple, float] = defaultdict(float)

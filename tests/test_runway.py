@@ -79,17 +79,35 @@ class DateTests(unittest.TestCase):
         self.assertEqual(forecast.next_after(date(2026, 9, 5), 30), date(2026, 9, 30))
         self.assertEqual(forecast.next_after(date(2026, 1, 31), 31), date(2026, 2, 28))
 
-    def test_occurrences(self):
+    def test_scheduled_dates(self):
         m = {"anchor_date": "2026-01-31", "frequency": "monthly", "end_date": None}
-        self.assertEqual(forecast.occurrences(m, TODAY, date(2026, 12, 31)),
+        self.assertEqual(forecast.scheduled(m, TODAY, date(2026, 12, 31)),
                          [date(2026, 9, 30), date(2026, 10, 31), date(2026, 11, 30), date(2026, 12, 31)])
         b = {"anchor_date": "2026-09-18", "frequency": "biweekly", "end_date": None}
-        self.assertEqual(forecast.occurrences(b, TODAY, date(2026, 10, 31)), [date(2026, 10, 2), date(2026, 10, 16), date(2026, 10, 30)])
+        self.assertEqual(forecast.scheduled(b, TODAY, date(2026, 10, 31)), [date(2026, 10, 2), date(2026, 10, 16), date(2026, 10, 30)])
         # future anchor
         f = {"anchor_date": "2026-10-10", "frequency": "monthly", "end_date": "2026-11-15"}
-        self.assertEqual(forecast.occurrences(f, TODAY, date(2026, 12, 31)), [date(2026, 10, 10), date(2026, 11, 10)])
+        self.assertEqual(forecast.scheduled(f, TODAY, date(2026, 12, 31)), [date(2026, 10, 10), date(2026, 11, 10)])
         y = {"anchor_date": "2025-12-01", "frequency": "yearly", "end_date": None}
-        self.assertEqual(forecast.occurrences(y, TODAY, date(2027, 12, 31)), [date(2026, 12, 1), date(2027, 12, 1)])
+        self.assertEqual(forecast.scheduled(y, TODAY, date(2027, 12, 31)), [date(2026, 12, 1), date(2027, 12, 1)])
+
+    def test_money_moves_on_business_days(self):
+        from runway import bankdays
+        # Paychecks on the 15th and the last day: a weekend or holiday moves them to the business day before.
+        pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None, "amount": 4180}
+        self.assertEqual(forecast.occurrences(pay, date(2026, 1, 31), date(2026, 3, 31)),
+                         [date(2026, 2, 13), date(2026, 2, 27), date(2026, 3, 13), date(2026, 3, 31)])   # Sun 15th, Sat 28th, Sun 15th
+        # Money out moves to the business day after, skipping bank holidays (Labor Day, Columbus Day).
+        gym = {"frequency": "monthly", "anchor_date": "2026-07-05", "end_date": None, "amount": -40}
+        self.assertEqual(forecast.occurrences(gym, date(2026, 8, 31), date(2026, 9, 30)), [date(2026, 9, 8)])   # Sat 5th, Mon 7th Labor Day
+        self.assertEqual(bankdays.next_business_day(date(2026, 10, 10)), date(2026, 10, 13))
+        # Federal Reserve rules: a Sunday holiday is observed Monday; a Saturday one isn't moved to Friday.
+        self.assertFalse(bankdays.is_business_day(date(2027, 7, 5)))    # July 4 2027 is a Sunday
+        self.assertTrue(bankdays.is_business_day(date(2026, 7, 3)))     # July 4 2026 is a Saturday
+        self.assertFalse(bankdays.is_business_day(date(2026, 11, 26)))  # Thanksgiving
+        # A date just outside the window can move into it: Sat Oct 31 -> Mon Nov 2.
+        rent = {"frequency": "monthly", "anchor_date": "2026-01-31", "end_date": None, "amount": -1500}
+        self.assertEqual(forecast.occurrences(rent, date(2026, 11, 1), date(2026, 11, 30)), [date(2026, 11, 2), date(2026, 11, 30)])
 
 
 class ForecastTests(Base):
@@ -128,7 +146,7 @@ class ForecastTests(Base):
         self.assertEqual((card["avg_monthly_spend"], card["avg_cycles"]), (1066.67, 3))
         est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
         self.assertEqual(est["2026-11-05"], 1066.67)   # cycle in progress: 300 charged so far, so the average wins
-        self.assertEqual(est["2026-12-05"], 1066.67)
+        self.assertEqual(est["2026-12-07"], 1066.67)   # Dec 5 is a Saturday: paid Monday
         # if the cycle in progress is already past the average, it's at least what's been charged
         self.tx("cc", "2026-09-21", -2000.0, "LAPTOP", "Shopping")
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
@@ -145,8 +163,8 @@ class ForecastTests(Base):
         self.assertAlmostEqual(paid("2026-10-05"), 600.0, places=2)
         # Nov 5: $300 charged so far this cycle + $300 (rest of Sept) + 10 days of October at 500/31
         self.assertAlmostEqual(paid("2026-11-05"), 300 + 300 + 500 / 31 * 10, places=1)
-        # Dec 5: Oct 11-31 and Nov 1-10
-        self.assertAlmostEqual(paid("2026-12-05"), 500 / 31 * 21 + 500 / 30 * 10, places=1)
+        # Dec 5 (a Saturday, so paid Monday the 7th): Oct 11-31 and Nov 1-10
+        self.assertAlmostEqual(paid("2026-12-07"), 500 / 31 * 21 + 500 / 30 * 10, places=1)
         # no daily drain: nothing moves between those dates
         self.assertEqual(b["total"][fc["dates"].index("2026-10-20")], b["total"][fc["dates"].index("2026-10-25")])
 
@@ -298,8 +316,8 @@ class RecurringTests(Base):
         self.assertEqual(recurring.expected_amount({**item, "amount_mode": "fixed"}, hist), -120.0)
         fc = forecast.build(self.conn, TODAY, 60)
         elec = [e for e in fc["events"] if e.get("recurring_id") == self.rid]
-        # Sep 15 already posted, so the next ones are Oct 15 and Nov 15 at the 3-month average
-        self.assertEqual([e["date"] for e in elec], ["2026-10-15", "2026-11-15"])
+        # Sep 15 already posted, so the next ones are Oct 15 and Nov 15 (a Sunday: Monday the 16th) at the 3-month average
+        self.assertEqual([e["date"] for e in elec], ["2026-10-15", "2026-11-16"])
         self.assertEqual(elec[0]["amount"], round((-118.40 - 160.02 - 143.77) / 3, 2))
 
     def test_early_payment_not_counted_twice(self):
@@ -307,7 +325,7 @@ class RecurringTests(Base):
         recurring.auto_match(self.conn)
         fc = forecast.build(self.conn, date(2026, 10, 13), 40)
         dates = [e["date"] for e in fc["events"] if e.get("recurring_id") == self.rid]
-        self.assertEqual(dates, ["2026-11-15"])
+        self.assertEqual(dates, ["2026-11-16"])   # Nov 15 is a Sunday
 
     def test_override_one_occurrence(self):
         recurring.auto_match(self.conn)
@@ -787,13 +805,13 @@ class ScheduleAndMissedTests(Base):
     def test_dates_each_year_and_twice_a_month(self):
         from runway import forecast
         tax = {"frequency": "dates", "dates": "04-15,10-15", "anchor_date": "2026-01-01", "end_date": None}
-        self.assertEqual([d.isoformat() for d in forecast.occurrences(tax, date(2026, 1, 1), date(2027, 12, 31))],
+        self.assertEqual([d.isoformat() for d in forecast.scheduled(tax, date(2026, 1, 1), date(2027, 12, 31))],
                          ["2026-04-15", "2026-10-15", "2027-04-15", "2027-10-15"])
         pay = {"frequency": "semimonthly", "dates": "15,31", "anchor_date": "2026-01-01", "end_date": None}
-        self.assertEqual([d.isoformat() for d in forecast.occurrences(pay, date(2026, 1, 31), date(2026, 3, 1))],
+        self.assertEqual([d.isoformat() for d in forecast.scheduled(pay, date(2026, 1, 31), date(2026, 3, 1))],
                          ["2026-02-15", "2026-02-28"])        # 31st becomes the last day of a short month
         q = {"frequency": "quarterly", "anchor_date": "2026-01-10", "end_date": None}
-        self.assertEqual([d.isoformat() for d in forecast.occurrences(q, date(2026, 1, 1), date(2026, 12, 31))],
+        self.assertEqual([d.isoformat() for d in forecast.scheduled(q, date(2026, 1, 1), date(2026, 12, 31))],
                          ["2026-01-10", "2026-04-10", "2026-07-10", "2026-10-10"])
         self.assertEqual(forecast.parse_dates("Apr 15, oct 15th", "dates"), [(4, 15), (10, 15)])
         with self.assertRaises(ValueError):
@@ -820,8 +838,8 @@ class ScheduleAndMissedTests(Base):
         recurring.auto_match(self.conn)
         today = date(2026, 9, 23)
         m = recurring.missed(self.conn, today)
-        self.assertEqual([x["date"] for x in m], ["2026-09-05"])                   # September never came
-        self.assertEqual(recurring.missed(self.conn, date(2026, 9, 9)), [])        # still inside the grace window
+        self.assertEqual([x["date"] for x in m], ["2026-09-08"])                   # September never came (Sat 5th, then Labor Day)
+        self.assertEqual(recurring.missed(self.conn, date(2026, 9, 12)), [])       # still inside the grace window
         recurring.dismiss(self.conn, m[0]["key"])
         self.assertEqual(recurring.missed(self.conn, today), [])
         # linking the payment that did happen also clears it

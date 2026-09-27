@@ -55,6 +55,8 @@ plain Python with no third-party packages.
   Statement balances, closing dates, due dates and minimum payments come straight from the card issuer through Plaid
   (Liabilities), so there's nothing to set up by hand. You can still correct a statement figure if you need to.
 - **Future statements** are estimated from each card's average spending over its last three statements.
+- **Business days:** money doesn't move on weekends or bank holidays, so a payment due then lands on the next business
+  day, and a paycheck on the business day before (Federal Reserve holiday calendar).
 - **One-off edits:** click any upcoming amount to change it for that date only.
 
 ### Your choice of bank connection, account by account
@@ -226,7 +228,8 @@ were added are upgraded in place.
 - **Stack:** Python with a handful of well-known libraries: [SQLAlchemy](https://www.sqlalchemy.org) and
   [Alembic](https://alembic.sqlalchemy.org) for SQLite/Postgres and migrations (psycopg 3 for Postgres),
   [PyJWT](https://pyjwt.readthedocs.io) for sign-in tokens, [pywebpush](https://github.com/web-push-libs/pywebpush)
-  for notifications and [python-dateutil](https://dateutil.readthedocs.io) for recurring schedules. The web server is
+  for notifications, [python-dateutil](https://dateutil.readthedocs.io) for recurring schedules and
+  [holidays](https://github.com/vacanza/holidays) for bank holidays. The web server is
   the standard library's; the front end is plain HTML/CSS/JavaScript with hand-drawn SVG charts and the Geist typeface.
   Dependencies are managed with [Poetry](https://python-poetry.org) (`pyproject.toml`, `poetry.lock`).
 

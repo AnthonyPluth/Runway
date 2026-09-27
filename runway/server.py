@@ -358,7 +358,7 @@ def api_transactions(conn, q, _b):
     limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
     offset = max(0, int(q.get("offset", ["0"])[0]))
     sql = (
-        "SELECT t.*, COALESCE(a.display_name, a.name) AS account_name, a.kind AS account_kind, r.name AS recurring_name "
+        "SELECT t.*, " + db.label_sql("a") + " AS account_name, a.kind AS account_kind, r.name AS recurring_name "
         "FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN recurring r ON r.id=t.recurring_id "
         f"WHERE {' AND '.join(where)} ORDER BY t.posted DESC, t.id LIMIT ? OFFSET ?"
     )
@@ -491,7 +491,7 @@ def api_recurring_dismiss(conn, _q, body):
 
 def api_recurring(conn, _q, _b):
     items = db.rows(conn.execute(
-        "SELECT r.*, COALESCE(a.display_name, a.name) AS account_name FROM recurring r "
+        "SELECT r.*, " + db.label_sql("a") + " AS account_name FROM recurring r "
         "LEFT JOIN accounts a ON a.id=r.account_id ORDER BY r.active DESC, r.name"
     ))
     today = date.today()
@@ -837,7 +837,7 @@ def api_plaid_status(conn, _q, _b):
         if it["bank"]:
             it["accounts"] = db.rows(conn.execute(
                 "SELECT p.plaid_account_id AS id, p.name, p.official_name, p.subtype, p.type, p.mask, p.current AS balance, "
-                "p.ignored, a.id AS account_id, COALESCE(a.display_name, a.name) AS account_name, a.provider, "
+                "p.ignored, a.id AS account_id, " + db.label_sql("a") + " AS account_name, a.provider, "
                 "s.last_statement_date, s.last_statement_balance, s.next_due_date "
                 "FROM plaid_accounts p LEFT JOIN accounts a ON a.plaid_account_id=p.plaid_account_id "
                 "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id WHERE p.item_id=? ORDER BY p.type, p.name",

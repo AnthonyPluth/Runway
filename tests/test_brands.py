@@ -35,3 +35,20 @@ class BrandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LabelTests(unittest.TestCase):
+    def test_owner_in_account_names(self):
+        path = os.path.join(tempfile.mkdtemp(), "l.db")
+        db.init(path)
+        with db.session(path) as c:
+            c.executemany("INSERT INTO accounts(id, name, display_name, owner, kind) VALUES (?,?,?,?,'credit')", [
+                ("a", "Citi AAdvantage 8312", "AAdvantage", "Sara"),     # -> AAdvantage (Sara)
+                ("b", "CSP", "CSP (Sara)", "Sara"),                       # already says so
+                ("c", "Blue Cash", None, None),                           # no owner
+                ("d", "Checking", None, "Joint")])
+            got = {r[0]: r[1] for r in c.execute("SELECT a.id, " + db.label_sql("a") + " FROM accounts a")}
+            py = {r["id"]: db.account_label(r) for r in c.execute("SELECT * FROM accounts").fetchall()}
+        want = {"a": "AAdvantage (Sara)", "b": "CSP (Sara)", "c": "Blue Cash", "d": "Checking (Joint)"}
+        self.assertEqual(got, want)
+        self.assertEqual(py, want)
