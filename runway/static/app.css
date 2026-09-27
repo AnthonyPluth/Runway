@@ -669,3 +669,24 @@ tr.selected td { background: var(--accent-wash); }
 .bulk-rename { display: inline-flex; gap: 6px; }
 .bulk-rename input { width: 180px; }
 @media (max-width: 640px) { .bulk-count { flex-basis: 100%; } .bulk-rename input { width: 140px; } }
+
+/* Rules: what a rule looks for, what it does, and the editor */
+.rule-item .rule-when { color: var(--text); }
+.rule-then { color: var(--text-2); font-size: 13px; }
+.rule-editor { padding: 12px 4px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+#rule-editor-new .rule-editor { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.rule-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.rule-editor fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.rule-editor legend { font-weight: 600; color: var(--text-strong); margin-bottom: 6px; padding: 0; }
+.rule-editor .form-row { margin-bottom: 8px; }
+.rule-text { display: flex; gap: 6px; }
+.rule-text .re-match { flex: 1; min-width: 0; }
+.rule-editor .re-min, .rule-editor .re-max { width: 100px; }
+.rule-editor .rs-pct { width: 80px; }
+.re-examples table { width: 100%; }
+.re-examples td { padding: 3px 6px; }
+.re-foot { justify-content: space-between; }
+
+/* Merchant logos (from Plaid, served by Runway) or the merchant's initial */
+.m-logo { width: 20px; height: 20px; border-radius: 6px; flex: none; object-fit: contain; background: #fff; }
+.m-initial { display: inline-grid; place-items: center; background: var(--surface-3); color: var(--text-2); font-size: 11px; font-weight: 700; }
