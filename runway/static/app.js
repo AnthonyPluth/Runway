@@ -1848,6 +1848,24 @@ function plaidBankAccounts(it, accounts) {
   }).join("")}</div>`;
 }
 
+// An investment connection's accounts: each is its own account, the same as one you have from SimpleFIN (so it's
+// counted once), or left out. Runway decides when it's clear; the rest wait here with "Choose…".
+function plaidInvestmentAccounts(it) {
+  if (!it.accounts.length) return `<div class="acct-sub pl-inv">no accounts yet</div>`;
+  const cands = it.candidates || [];
+  return `<div class="pl-accts" data-inv>${it.accounts.map((p) => {
+    const sel = p.account_id || "";
+    return `<div class="pl-acct" data-pid="${esc(p.id)}">
+      <span class="acct-main"><span>${esc(p.name || p.official_name || "Account")}${p.mask ? ` <span class="muted">••${esc(p.mask)}</span>` : ""}</span>
+        <span class="acct-sub">${nw(esc(p.subtype || "investment"))} · ${nw(fmt(p.balance))}</span></span>
+      <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
+        <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
+        ${sel.startsWith("pl:") ? `<option value="new" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
+        ${cands.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)} (${esc(fmt(a.balance))})</option>`).join("")}
+        <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't count it</option></select></div>`;
+  }).join("")}</div>`;
+}
+
 // The logo for an institution by name (Plaid connections), or its first letter.
 function bankIconFor(name) {
   const slug = brandFor(name || "");
@@ -1883,16 +1901,33 @@ async function wirePlaidSetup() {
   });
   if (st.redirect_uri) $("#pl-redirect").innerHTML = `In the Plaid Dashboard, add <code>${esc(st.redirect_uri)}</code> under Allowed redirect URIs (for banks like Chase that sign you in on their own site).`;
   const box = $("#pl-items");
+  // Two connections to the same institution look alike, so each says when it was made (with the time, if there's a twin).
+  const connectedOn = (it) => {
+    const d = it.created_at ? new Date(it.created_at.replace(" ", "T") + "Z") : null;
+    if (!d || isNaN(d)) return "";
+    const twin = st.items.some((o) => o !== it && (o.institution_name || "") === (it.institution_name || ""));
+    const opts = twin ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", year: "numeric" };
+    return `connected ${esc(d.toLocaleString("en-US", opts))} · `;
+  };
+  const duplicateNote = (it, items) => {
+    const d = (it.duplicates || [])[0];
+    if (!d) return "";
+    const other = items.find((o) => o.item_id === d.item_id);
+    const same = d.shared === it.accounts.length && d.shared === (other?.accounts.length ?? -1);
+    return `<div class="pl-dup warn-text">${same ? `Same ${d.shared === 1 ? "account" : `${d.shared} accounts`} as the other ${esc(it.institution_name || "")} connection`
+      : `${d.shared} of these accounts ${d.shared === 1 ? "is" : "are"} also in the other ${esc(it.institution_name || "")} connection`}, so ${d.shared === 1 ? "it's" : "they're"} counted twice. Remove one of the two.</div>`;
+  };
   const synced = (t) => { if (!t) return "not synced"; const d = new Date(t.replace(" ", "T") + "Z");
     return isNaN(d) ? `synced ${esc(t)}` : `synced ${d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`; };
   box.innerHTML = `${st.items.length ? `<div class="pl-list">${st.items.map((it) => `<div class="pl-item" data-item="${esc(it.item_id)}">
       <div class="pl-head">${bankIconFor(it.institution_name)}
         <span class="acct-main"><span class="acct-title">${esc(it.institution_name || "Connection")}
           ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}<span class="tag">${it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</span></span>
-          <span class="acct-sub">${it.error ? `<span class="warn-text">${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired; reconnect to fix" : it.error)}</span>` : synced(it.last_sync)}</span></span>
+          <span class="acct-sub">${connectedOn(it)}${it.error ? `<span class="warn-text">${esc(it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired; reconnect to fix" : it.error)}</span>` : synced(it.last_sync)}</span></span>
         <span class="pl-btns">${it.error ? `<button class="btn primary pl-reconnect">Reconnect</button>` : `<button class="btn pl-sync">Sync</button>`}
           <button class="btn link pl-remove">Remove</button></span></div>
-      ${it.bank ? plaidBankAccounts(it, accounts) : `<div class="acct-sub pl-inv">${it.accounts.map((a) => nw(`${esc(a.name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}`)).join(" · ") || "no accounts yet"}</div>`}
+      ${duplicateNote(it, st.items)}
+      ${it.bank ? plaidBankAccounts(it, accounts) : plaidInvestmentAccounts(it)}
     </div>`).join("")}</div>` : ""}
     <div class="form-row">${[["bank", "Connect a bank or card"], ["investments", "Connect an investment account"]].map(([k, label]) =>
       `<button class="btn ${k === "bank" ? "primary" : ""} pl-connect" data-kind="${k}" ${st.configured ? "" : "disabled title=\"Add your Plaid client ID and secret first\""}>${label}</button>`).join("")}</div>`;
@@ -1904,8 +1939,10 @@ async function wirePlaidSetup() {
   $$(".pl-match").forEach((sel) => sel.addEventListener("change", async () => {
     try {
       await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: sel.closest("[data-pid]").dataset.pid, target: sel.value } });
-      toast(sel.value === "new" ? "Added" : sel.value === "ignore" ? "Left out" : sel.value ? "Matched. Choose where its data comes from under Accounts." : "Unmatched");
-      route();
+      const inv = !!sel.closest("[data-inv]");
+      toast(sel.value === "new" ? "Added to your accounts" : sel.value === "ignore" ? "Left out" : !sel.value ? "Unmatched"
+        : inv ? "Matched: it's counted once" : "Matched. Choose where its data comes from under Accounts.");
+      await refreshState(); route();
     } catch (err) { toast(err.message, true); }
   }));
   $$("#pl-items [data-item]").forEach((tr) => {
@@ -2055,6 +2092,9 @@ async function renderSetup(el, sub) {
       <select id="primary-acct">${cash.length > 1 || !STATE.primary_account ? `<option value="">Choose…</option>` : ""}${acctOptions(cash, STATE.primary_account || (cash.filter((a) => a.kind === "checking").length === 1 ? cash.find((a) => a.kind === "checking").id : ""))}</select></label>
       <label>Forecast length (days)<input id="horizon-days" type="number" min="14" max="365" value="${STATE.horizon_days}"></label></div>
   </div>
+  ${STATE.plaid_undecided ? `<div class="warn"><span class="icon">!</span><span>${STATE.plaid_undecided === 1 ? "An account" : `${STATE.plaid_undecided} accounts`}
+    from Plaid ${STATE.plaid_undecided === 1 ? "is" : "are"} waiting for you to say what ${STATE.plaid_undecided === 1 ? "it is" : "they are"}, so ${STATE.plaid_undecided === 1 ? "it isn't" : "they aren't"}
+    listed here or counted in net worth yet. <a href="#setup/connections">Connections</a></span></div>` : ""}
   <div class="card"><h2>Accounts</h2>
     ${accounts.length ? accountGroups(accounts, cash)
     : `<div class="empty">Accounts appear here after the first sync.</div>`}
