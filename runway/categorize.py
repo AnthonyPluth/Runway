@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 from . import categories as catmod
-from . import db, splits
+from . import db, rules as rulesmod, splits
 
 REVIEW_THRESHOLD = 0.85
 DEFAULT_MODEL = "anthropic/claude-haiku-4.5"  # any OpenRouter model id works
@@ -75,21 +75,7 @@ def heuristic_category(tx: dict, account_kind: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------------------------------------
-# Rules
-
-def load_rules(conn) -> list[tuple[str, str]]:
-    rules = [(r["match"].lower(), r["category"]) for r in conn.execute("SELECT match, category FROM rules")]
-    rules.sort(key=lambda r: len(r[0]), reverse=True)  # most specific first
-    return rules
-
-
-def rule_category(tx: dict, rules: list[tuple[str, str]]) -> str | None:
-    hay = f"{tx.get('payee') or ''} || {tx.get('description') or ''}".lower()
-    for match, cat in rules:
-        if match and match in hay:
-            return cat
-    return None
-
+# Rules (runway/rules.py)
 
 def rule_key(tx: dict) -> str:
     return (tx.get("payee") or tx.get("description") or "").strip().lower()
@@ -254,7 +240,7 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
                 chunk,
             ))
     counts = {"auto": 0, "rule": 0, "history": 0, "ai": 0, "review": 0}
-    rules = load_rules(conn)
+    rules = rulesmod.load(conn)
     # What each merchant was settled as most recently (rules, your own picks, or confident AI answers).
     history = {
         (r["k"], r["sign"]): r["category"]
@@ -265,11 +251,21 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         )
     }
     leftover: list[dict] = []
+    review_after: list[str] = []
     for tx in todo:
+        acts = rulesmod.actions_for(tx, rules)
+        if acts["rename"]:   # before the history lookup, which goes by merchant
+            rulesmod.apply_actions(conn, tx, {"rename": acts["rename"]})
+        if acts["review"]:
+            review_after.append(tx["id"])
         cat = heuristic_category(tx, tx["kind"])
         source = "auto"
+        if not cat and acts["split"]:
+            rulesmod.apply_actions(conn, tx, {"split": acts["split"]})
+            counts["rule"] += 1
+            continue
         if not cat:
-            cat, source = rule_category(tx, rules), "rule"
+            cat, source = acts["category"], "rule"
         if not cat and tx.get("payee"):
             cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
         if cat:
@@ -309,6 +305,8 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         for t in leftover:
             conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (t["id"],))
             counts["review"] += 1
+    for tid in review_after:   # a rule said to look at these, whatever category they got
+        conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tid,))
     return counts
 
 
@@ -438,10 +436,7 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
     key = rule_key(dict(tx))
     if len(key) < 3:
         return 0
-    conn.execute(
-        "INSERT INTO rules(match, category) VALUES (?,?) ON CONFLICT(match) DO UPDATE SET category=excluded.category",
-        (key, category),
-    )
+    rulesmod.remember(conn, key, category)
     cur = conn.execute(
         "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
         "WHERE id<>? AND COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
