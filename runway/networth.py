@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
-from . import db, forecast
+from . import db, equity, forecast
 
 ASSET_KINDS = {"home": "Real estate", "vehicle": "Vehicles", "other": "Other assets"}
 
@@ -41,6 +41,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     groups = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
+        "equity": {"key": "equity", "label": "Equity (vested)", "side": "asset", "items": []},
         "home": {"key": "home", "label": "Real estate", "side": "asset", "items": []},
         "vehicle": {"key": "vehicle", "label": "Vehicles", "side": "asset", "items": []},
         "other": {"key": "other", "label": "Other assets", "side": "asset", "items": []},
@@ -67,6 +68,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
                             "owed": owed_by_account[a["loan_account_id"]]}
             item["equity"] = round(a["current_value"] - owed_by_account[a["loan_account_id"]], 2)
         groups[a["kind"] if a["kind"] in groups else "other"]["items"].append(item)
+    groups["equity"]["items"] = equity.networth_items(conn, today)
     for g in groups.values():
         g["items"].sort(key=lambda i: -abs(i["value"]))
         g["total"] = round(sum(i["value"] for i in g["items"]), 2)
