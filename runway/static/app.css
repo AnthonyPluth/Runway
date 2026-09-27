@@ -482,3 +482,4 @@ tbody.family:hover .pay-btn.unset, .pay-btn.unset:focus-visible { opacity: 1; }
 .bank-icon.letter { display: inline-grid; place-items: center; background: var(--surface-3, #2a2a28); color: var(--text-2); font-size: 10.5px; font-weight: 600; padding: 0; }
 .show-sm { display: none; }
 @media (max-width: 700px) { .show-sm { display: block; } }
+code.copyable { user-select: all; -webkit-user-select: all; }

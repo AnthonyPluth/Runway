@@ -1760,6 +1760,12 @@ async function openPlaidLink(itemId, kind = "investments") {
   return runPlaidLink(lt.link_token, itemId, lt.kind || kind);
 }
 
+// The last Plaid Link session that ended without connecting, for quoting to Plaid support.
+let lastPlaidSession = null;
+const plaidSessionLine = () => lastPlaidSession
+  ? `Last Link attempt (${esc(lastPlaidSession.at)}): Link Session ID <code class="copyable">${esc(lastPlaidSession.sid)}</code>${
+    lastPlaidSession.request ? ` · Request ID <code class="copyable">${esc(lastPlaidSession.request)}</code>` : ""}` : "";
+
 // Runs Plaid Link. receivedRedirectUri: continuing after a bank's own sign-in page sent you back (OAuth).
 function runPlaidLink(token, itemId, kind, receivedRedirectUri) {
   return new Promise((resolve) => {
@@ -1780,7 +1786,18 @@ function runPlaidLink(token, itemId, kind, receivedRedirectUri) {
         } catch (err) { toast(err.message, true); }
         resolve(true);
       },
-      onExit: (err) => { if (err) toast(err.display_message || err.error_message || "Plaid closed", true); resolve(false); },
+      onExit: (err, metadata) => {
+        // Shown so you can quote it to Plaid support ("Link Session ID"); also in the browser console.
+        const sid = metadata && metadata.link_session_id;
+        if (sid) console.info("Plaid Link session", sid, "request", metadata.request_id || "", "institution", metadata.institution?.name || "");
+        if (err) toast(err.display_message || err.error_message || "Plaid closed", true);
+        if (sid) {
+          lastPlaidSession = { sid, request: metadata.request_id || "", at: new Date().toLocaleString() };
+          const box = $("#pl-session");
+          if (box) box.innerHTML = plaidSessionLine();
+        }
+        resolve(false);
+      },
     }).open();
   });
 }
@@ -2068,6 +2085,7 @@ async function renderSetup(el, sub) {
 <div class="card" id="plaid-card"><h2>Plaid</h2>
     <p class="help">Keys: Developers → Keys at <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
     <p class="help" id="pl-redirect"></p>
+    <p class="help" id="pl-session">${plaidSessionLine()}</p>
     <div class="form-row">
       <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
       <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
