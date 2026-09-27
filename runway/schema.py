@@ -77,6 +77,61 @@ tx_splits = Table(
     info={'doc': 'one transaction spread across categories ($100 at Target: $60 Groceries, $40 Shopping)'},
 )
 
+retail_orders = Table(
+    'retail_orders', metadata,
+    Column('id', Text, primary_key=True, doc="'<retailer>:<order number>'"),
+    Column('retailer', Text, nullable=False, doc='amazon | target'),
+    Column('order_number', Text, nullable=False),
+    Column('channel', Text, doc='online | store'),
+    Column('placed', Text, doc='YYYY-MM-DD'),
+    Column('total', Float, doc='what the order cost, positive'),
+    Column('subtotal', Float),
+    Column('tax', Float),
+    Column('shipping', Float),
+    Column('payment', Text, doc='how it was paid ("Visa 1234"), as the retailer says'),
+    Column('details', Integer, server_default=text('0'), doc='1 once its items have been read'),
+    Column('attempts', Integer, server_default=text('0'), doc='times its details page could not be read'),
+    Column('raw', Text, doc="Target: what its API sent (JSON), to troubleshoot or re-read later"),
+    Column('updated', Text, server_default=now_text()),
+    info={'doc': 'orders from Amazon and Target (online and in store), sent by the browser extension'},
+)
+
+retail_items = Table(
+    'retail_items', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('order_id', Text, nullable=False),
+    Column('position', Integer, server_default=text('0')),
+    Column('title', Text),
+    Column('quantity', Float),
+    Column('amount', Float, doc='the line: unit price x quantity, positive'),
+    Column('department', Text, doc="the retailer's own department or product type, if it says"),
+    Column('category', Text),
+    Column('category_source', Text, doc='manual | memory | ai | department; NULL = not decided yet'),
+    Column('confidence', Float),
+    sqlite_autoincrement=True,
+)
+
+retail_charges = Table(
+    'retail_charges', metadata,
+    Column('id', Text, primary_key=True),
+    Column('order_id', Text, nullable=False),
+    Column('date', Text, nullable=False),
+    Column('amount', Float, nullable=False, doc='as the bank shows it: negative = a charge, positive = a refund'),
+    Column('payment', Text),
+    Column('tx_id', Text, doc='the bank transaction it is'),
+    Column('match_source', Text, doc='auto | manual'),
+    Column('not_tx', Text, doc='transactions you said it is not (JSON list)'),
+    Column('applied', Text, doc='JSON: the split or category Runway gave the transaction, and what it had before'),
+    info={'doc': 'what a retailer charged to a card for an order (Amazon charges each shipment separately)'},
+)
+
+retail_item_memory = Table(
+    'retail_item_memory', metadata,
+    Column('key', Text, primary_key=True, doc='the item title, lowercased'),
+    Column('category', Text, nullable=False),
+    info={'doc': 'categories you picked for items, reused when you buy them again'},
+)
+
 categories = Table(
     'categories', metadata,
     Column('name', Text, primary_key=True),
@@ -446,6 +501,9 @@ Index('tx_review', transactions.c.needs_review)
 Index('inv_tx_account_date', inv_transactions.c.account_id, inv_transactions.c.date)
 Index('tx_recurring', transactions.c.recurring_id)
 Index('tx_splits_tx', tx_splits.c.tx_id)
+Index('retail_items_order', retail_items.c.order_id)
+Index('retail_charges_order', retail_charges.c.order_id)
+Index('retail_charges_tx', retail_charges.c.tx_id)
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}

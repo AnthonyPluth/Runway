@@ -621,3 +621,39 @@ input.ghost::placeholder { color: var(--accent); opacity: .85; }
 @media (max-width: 700px) { .pl-head .acct-main { flex: 1 1 0; } .pl-head .pl-btns { flex-basis: 100%; margin-left: 40px; } .pl-head .acct-title { white-space: normal; } }
 .brand-ver { font-size: 11px; font-weight: 500; letter-spacing: 0; color: var(--text-3); background: var(--surface-2); border-radius: 6px; padding: 2px 6px; margin-left: -2px; font-variant-numeric: tabular-nums; }
 @media (max-width: 480px) { .brand-ver { display: none; } }   /* the phone header is full; the version is at the bottom of Settings */
+
+/* Amazon and Target orders: the tag on a transaction, and the order under it (or in Settings) */
+.tag.order-tag { margin-left: 0; border: 0; cursor: pointer; font-family: inherit; background: var(--surface-3); color: var(--text-2); }
+.tag.order-tag:hover, .tag.order-tag:focus-visible { background: var(--accent-wash); color: var(--accent-ink); }
+.order-box { padding: 10px 4px 12px; display: flex; flex-direction: column; gap: 10px; white-space: normal; }
+.order-edit .order-box { width: 0; min-width: 100%; box-sizing: border-box; }   /* fill the row without widening the table */
+.order-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.order-head .btn.link { margin-left: auto; }
+.order-items, .order-charges { display: flex; flex-direction: column; gap: 4px; }
+.order-item { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(140px, 190px) 120px; gap: 10px; align-items: center; }
+.order-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.order-charge { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.order-actions { margin-left: auto; display: flex; gap: 8px; }
+.order-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 12px; }
+.retail-recent { margin-top: 12px; }
+.retail-row { flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; }
+.retail-row .tidy-main { flex: 1 0 auto; }
+.retail-order .order-open { width: 100%; background: none; border: 0; border-bottom: 1px solid var(--border); color: inherit;
+  font: inherit; text-align: left; cursor: pointer; display: grid; grid-template-columns: 56px minmax(0, 1fr) auto 104px;
+  gap: 10px; align-items: baseline; padding: 10px 4px; }
+.retail-order .order-open > :last-child { text-align: right; }
+.order-name .muted { white-space: nowrap; }
+.retail-order .order-open:hover { background: var(--surface-2); }
+.retail-order .order-box { padding-left: 12px; border-bottom: 1px solid var(--border); }
+ol.steps { padding-left: 20px; }
+ol.steps li { margin-bottom: 6px; }
+@media (max-width: 640px) {
+  .order-item { grid-template-columns: minmax(0, 1fr) auto; }
+  .order-item .item-cat { grid-column: 1 / -1; }
+  .order-item .item-src { display: none; }
+  /* the table scrolls sideways on a phone; the order stays in view */
+  .order-edit .order-box { min-width: 0; width: calc(100vw - 72px); position: sticky; left: 0; }
+  .retail-order .order-open { grid-template-columns: 48px minmax(0, 1fr) auto; }
+  .retail-order .order-open > :last-child { grid-column: 2 / -1; text-align: left; }
+}

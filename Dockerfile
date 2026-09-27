@@ -36,6 +36,7 @@ WORKDIR /app
 COPY --from=deps /app/.venv ./.venv
 COPY --chown=runway:runway run.py alembic.ini ./
 COPY --chown=runway:runway runway ./runway
+COPY --chown=runway:runway extension ./extension
 
 USER runway
 VOLUME ["/data"]
