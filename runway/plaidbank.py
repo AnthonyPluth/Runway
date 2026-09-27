@@ -235,11 +235,20 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         except PlaidError as e:
             if e.code != "PRODUCT_NOT_READY":   # the first pull takes Plaid a little while; the next sync gets it
                 raise
-    if "liabilities" in prods:
+    # Card statements: ask whenever the connection has a card, even if Liabilities wasn't listed when it was linked
+    # (optional products don't always show up there). What happened is kept for Settings to explain.
+    has_card = conn.execute("SELECT 1 FROM plaid_accounts WHERE item_id=? AND type='credit'", (item_id,)).fetchone()
+    if "liabilities" in prods or has_card:
         try:
             out["statements"] = sync_statements(conn, item, today)
+            db.set_setting(conn, f"plaid_stmt_note:{item_id}", None)
+            if "liabilities" not in prods:
+                conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(sorted(prods | {"liabilities"})), item_id))
         except PlaidError as e:
-            if e.code not in ("PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY", "NO_LIABILITY_ACCOUNTS"):
+            if e.code in ("PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY", "NO_LIABILITY_ACCOUNTS", "ADDITIONAL_CONSENT_REQUIRED",
+                          "INVALID_PRODUCT", "PRODUCTS_NOT_ENABLED", "INSTITUTION_NOT_SUPPORTED"):
+                db.set_setting(conn, f"plaid_stmt_note:{item_id}", e.code)
+            else:
                 raise
     conn.execute("UPDATE plaid_items SET last_sync=?, error=NULL WHERE item_id=?", (_now(), item_id))
     return out

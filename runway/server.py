@@ -289,14 +289,15 @@ def api_overview(conn, q, _b):
 def api_accounts(conn, _q, _b):
     accts = db.rows(conn.execute("SELECT * FROM accounts ORDER BY hidden, kind, COALESCE(display_name, name)"))
     items = {r["plaid_account_id"]: r for r in db.rows(conn.execute(
-        "SELECT p.plaid_account_id, p.mask, i.products, i.institution_name, s.last_statement_date, s.next_due_date "
+        "SELECT p.plaid_account_id, p.mask, p.item_id, i.products, i.institution_name, s.last_statement_date, s.next_due_date "
         "FROM plaid_accounts p JOIN plaid_items i ON i.item_id=p.item_id "
         "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id"))}
     for a in accts:   # which providers this account can use, and (cards) its latest statement dates
         it = items.get(a.get("plaid_account_id") or "")
         a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
                             "transactions": "transactions" in (it["products"] or ""),
-                            "closed": it["last_statement_date"], "due": it["next_due_date"]} if it else None)
+                            "closed": it["last_statement_date"], "due": it["next_due_date"],
+                            "statement_note": db.get_setting(conn, f"plaid_stmt_note:{it['item_id']}")} if it else None)
     return accts
 
 

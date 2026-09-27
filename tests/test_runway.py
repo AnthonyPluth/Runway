@@ -252,8 +252,10 @@ class ForecastTests(Base):
     def test_card_without_bank_statements_warns(self):
         self.conn.execute("DELETE FROM card_statements")
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
-        self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0}]))
+        self.assertIn("Plaid hasn’t sent a statement for cc yet", fc["warnings"][0])     # linked, statement not in yet
+        self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
+        self.conn.execute("UPDATE accounts SET plaid_account_id=NULL WHERE id='cc'")                  # not linked at all
+        self.assertIn("cc isn’t linked through Plaid yet", forecast.build(self.conn, TODAY, 30)["warnings"][0])
 
     def test_paid_statement_no_event(self):
         self.tx("cc", "2026-09-22", 600.0, "PAYMENT", "Credit Card Payment")

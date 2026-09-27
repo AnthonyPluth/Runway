@@ -124,7 +124,8 @@ def exchange(conn, public_token: str, institution: dict | None = None) -> str:
     institution = institution or {}
     try:   # which products this connection has (investments, or transactions and/or liabilities)
         info = call(conn, "/item/get", {"access_token": token}).get("item") or {}
-        prods = sorted(set(info.get("products") or []) | set(info.get("billed_products") or []))
+        # Optional products (card statements) can show up only as consented until they're first used.
+        prods = sorted(set(info.get("products") or []) | set(info.get("billed_products") or []) | set(info.get("consented_products") or []))
     except PlaidError:
         prods = []
     prods = [p for p in prods if p in ("investments", "transactions", "liabilities")] or ["investments"]

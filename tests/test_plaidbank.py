@@ -248,6 +248,13 @@ class PlaidBankTests(unittest.TestCase):
         c = next(x for x in forecast.build(self.c, TODAY, 30)["cards"] if x["id"] == "sf-csp")
         self.assertEqual((c["statement_balance"], c["statement_set"], c["statement_reported"]), (600, True, 640.5))
 
+    def test_statements_asked_for_even_if_not_listed_when_linked(self):
+        MockBank.products = ["transactions"]        # Liabilities was optional and didn't show up on the Item
+        self.link()
+        self.assertTrue(any(p == "/liabilities/get" for p, _ in MockBank.calls))
+        self.assertIn("liabilities", self.c.execute("SELECT products FROM plaid_items").fetchone()[0])
+        self.assertTrue(self.c.execute("SELECT 1 FROM card_statements WHERE plaid_account_id='p-csp'").fetchone())
+
     def test_statements_only_when_transactions_isnt_enabled(self):
         MockBank.products = ["liabilities"]
         with self.assertRaises(plaid.PlaidError):

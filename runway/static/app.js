@@ -2331,13 +2331,23 @@ function accountGroups(accounts, cash) {
     + section("Hidden", hidden);
 }
 
+// Why a linked card has no statement yet (Plaid's error code, if it gave one).
+function statementNote(code) {
+  return ({ ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Connections.",
+    PRODUCTS_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.", INSTITUTION_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.",
+    INVALID_PRODUCT: "Card statements (Liabilities) aren't enabled for your Plaid account.", PRODUCTS_NOT_ENABLED: "Card statements (Liabilities) aren't enabled for your Plaid account.",
+    PRODUCT_NOT_READY: "Plaid is still gathering the statement; it usually arrives with the next sync.",
+    NO_LIABILITY_ACCOUNTS: "Plaid didn't find card statements at this bank." })[code] || "It usually arrives with the next sync.";
+}
+
 function accountSummary(a, byName) {
   const bits = [];
   if (a.id === STATE.primary_account) bits.push(`<span class="tag">primary</span>`);
   if (a.owner) bits.push(esc(a.owner));
   if (a.kind === "credit") {
     bits.push(a.pay_from ? `paid from ${esc(byName[a.pay_from] || "?")}` : `<span class="warn-text">no paying account</span>`);
-    if (!(a.plaid_link && a.plaid_link.closed)) bits.push(`<span class="warn-text">not linked through Plaid</span>`);
+    if (!a.plaid_link) bits.push(`<span class="warn-text">not linked through Plaid</span>`);
+    else if (!a.plaid_link.closed) bits.push(`<span class="warn-text" title="${esc(statementNote(a.plaid_link.statement_note))}">no statement from ${esc(a.plaid_link.institution || "the bank")} yet</span>`);
   }
   if (a.provider === "plaid" || a.id.startsWith("pl:")) bits.push("via Plaid");
   return bits.map(nw).join(" · ");
