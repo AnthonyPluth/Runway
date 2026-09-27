@@ -63,6 +63,19 @@ transactions = Table(
     Column('created_at', Text, server_default=now_text()),
     Column('recurring_id', Integer, doc='NULL = not matched, 0 = never match'),
     Column('is_split', Integer, server_default=text('0'), doc='split across categories: the parts are in tx_splits, and they, not this row, count'),
+    Column('merchant_id', Text, doc='the merchant as Plaid named it (merchants.id)'),
+)
+
+merchants = Table(
+    'merchants', metadata,
+    Column('id', Text, primary_key=True, doc="Plaid's merchant entity id, or 'name:<lowercased name>'"),
+    Column('name', Text),
+    Column('website', Text),
+    Column('logo_url', Text, doc="where Plaid has the logo (plaid.com only)"),
+    Column('logo', Text, doc='the logo itself, base64 (downloaded once, served by Runway)'),
+    Column('logo_type', Text, doc='image/png, ...'),
+    Column('logo_checked', Text, doc='when Runway last tried to download it'),
+    info={'doc': 'merchants Plaid knows, and their logos'},
 )
 
 tx_splits = Table(
@@ -143,9 +156,17 @@ categories = Table(
 rules = Table(
     'rules', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('match', Text, nullable=False, unique=True, doc='lowercase text found in the payee or description'),
-    Column('category', Text, nullable=False),
+    Column('match', Text, nullable=False, doc="lowercase text in the payee or description ('' = any)"),
+    Column('category', Text, doc='set this category (NULL: leave it to the other rules, history or the AI)'),
     Column('created_at', Text, server_default=now_text()),
+    Column('match_mode', Text, server_default=text("'contains'"), doc='contains | exact | starts'),
+    Column('amount_min', Float, doc='only amounts at least this much (dollars, either direction)'),
+    Column('amount_max', Float, doc='only amounts at most this much'),
+    Column('direction', Text, doc='out | in | NULL (either)'),
+    Column('account_id', Text, doc='only this account'),
+    Column('rename', Text, doc='show the merchant as this'),
+    Column('review', Integer, server_default=text('0'), doc='1: put matching transactions in Review'),
+    Column('split', Text, doc='JSON [{"category", "percent"}]: split matching transactions this way'),
     sqlite_autoincrement=True,
 )
 

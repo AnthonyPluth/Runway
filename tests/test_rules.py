@@ -1,0 +1,155 @@
+"""Rules with conditions (text, amount, direction, account) and actions (category, rename, split, review)."""
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runway import categories, categorize, db, rules, splits  # noqa: E402
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "r.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        for aid, kind in (("chk", "checking"), ("cc", "credit")):
+            self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES (?,?,?,0)", (aid, aid.upper(), kind))
+        self.n = 0
+
+    def tearDown(self):
+        self.c.close()
+        self.tmp.cleanup()
+
+    def tx(self, amount, desc, acct="chk", category=None, source=None):
+        self.n += 1
+        tid = f"{acct}|{self.n}"
+        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source) "
+                       "VALUES (?,?,?,?,?,?,?,?)", (tid, acct, f"2026-09-{self.n:02d}", amount, desc,
+                                                    categorize.clean_payee(desc), category, source))
+        return tid
+
+    def rule(self, **kw):
+        return rules.save(self.c, kw)
+
+    def row(self, tid):
+        return self.c.execute("SELECT * FROM transactions WHERE id=?", (tid,)).fetchone()
+
+
+class MatchingTests(Base):
+    def test_most_specific_rule_wins_each_action(self):
+        self.rule(match="venmo", category="Transfer")
+        self.rule(match="venmo", amount_min=1000, direction="out", category="Mortgage")
+        self.rule(match="venmo", rename="Venmo")
+        rent = self.tx(-1850, "VENMO *PAYMENT 1234")
+        lunch = self.tx(-18, "VENMO *PAYMENT 5678")
+        refund = self.tx(1850, "VENMO *CASHOUT")
+        categorize.categorize(self.c, use_ai=False)
+        self.assertEqual((self.row(rent)["category"], self.row(rent)["payee"]), ("Mortgage", "Venmo"))
+        self.assertEqual((self.row(lunch)["category"], self.row(lunch)["payee"]), ("Transfer", "Venmo"))
+        self.assertEqual(self.row(refund)["category"], "Transfer")          # money in: not the rent rule
+
+    def test_account_and_text_modes(self):
+        self.rule(match="interest", match_mode="starts", account_id="chk", category="Income")
+        self.rule(match="apple.com/bill", match_mode="exact", category="Subscriptions")
+        a = self.tx(1.25, "INTEREST PAYMENT")
+        b = self.tx(-5, "INTEREST PAYMENT", acct="cc")          # other account
+        c = self.tx(3, "MONTHLY INTEREST")                       # doesn't start with it
+        d = self.tx(-2.99, "APPLE.COM/BILL")
+        e = self.tx(-2.99, "APPLE.COM/BILL ITUNES")             # not exactly
+        categorize.categorize(self.c, use_ai=False)
+        self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e)], ["Income", None, None, "Subscriptions", None])
+
+    def test_rename_feeds_history(self):
+        self.rule(match="sq *joes", rename="Joe's Coffee")
+        old = self.tx(-4, "SQ *JOES 123", category="Coffee & Snacks", source="manual")
+        self.c.execute("UPDATE transactions SET payee=? WHERE id=?", ("Joe's Coffee", old))
+        new = self.tx(-5, "SQ *JOES 456")
+        categorize.categorize(self.c, [new], use_ai=False)
+        self.assertEqual((self.row(new)["payee"], self.row(new)["category"], self.row(new)["category_source"]),
+                         ("Joe's Coffee", "Coffee & Snacks", "history"))
+
+    def test_split_and_review(self):
+        self.rule(match="costco", split=[{"category": "Groceries", "percent": 70}, {"category": "Shopping", "percent": 30}])
+        self.rule(match="cash app", category="Transfer", review=True)
+        big = self.tx(-100.01, "COSTCO WHSE #123")
+        cash = self.tx(-40, "CASH APP*FRIEND")
+        categorize.categorize(self.c, use_ai=False)
+        self.assertEqual([(p["category"], p["amount"]) for p in splits.get(self.c, big)], [("Groceries", -70.01), ("Shopping", -30.0)])
+        self.assertEqual((self.row(cash)["category"], self.row(cash)["needs_review"]), ("Transfer", 1))
+
+
+class EditingTests(Base):
+    def test_checks(self):
+        for bad, msg in [({"match": "x", "category": "Shopping"}, "two letters"),
+                         ({"category": "Shopping"}, "some text"),
+                         ({"match": "shop"}, "what the rule should do"),
+                         ({"match": "shop", "category": "Nope"}, "Unknown category"),
+                         ({"match": "shop", "amount_min": 50, "amount_max": 10, "category": "Shopping"}, "bigger"),
+                         ({"match": "shop", "split": [{"category": "Groceries", "percent": 50}, {"category": "Shopping", "percent": 40}]}, "100%")]:
+            with self.assertRaisesRegex(rules.RuleError, msg):
+                rules.clean(self.c, bad)
+        # An amount alone is enough of a condition.
+        self.assertEqual(rules.clean(self.c, {"amount_min": 5000, "review": True})["review"], 1)
+
+    def test_preview_and_apply_leave_your_choices(self):
+        mine = self.tx(-12, "CHIPOTLE 0123", category="Groceries", source="manual")
+        other = self.tx(-14, "CHIPOTLE 0456", category="Shopping", source="ai")
+        self.tx(-9, "PANERA")
+        body = {"match": "chipotle", "category": "Restaurants", "rename": "Chipotle Mexican Grill"}
+        p = rules.preview(self.c, body)
+        self.assertEqual((p["matches"], p["changes"]), (2, 2))    # both get renamed; only one recategorized
+        rid = self.rule(**body)
+        self.assertEqual(rules.apply_rule(self.c, rid), 2)
+        self.assertEqual((self.row(mine)["category"], self.row(mine)["payee"]), ("Groceries", "Chipotle Mexican Grill"))
+        self.assertEqual((self.row(other)["category"], self.row(other)["category_source"]), ("Restaurants", "rule"))
+        self.assertEqual(rules.apply_rule(self.c, rid), 0)
+        self.assertIn("error", rules.preview(self.c, {"match": "c"}))
+
+    def test_remember_updates_only_the_plain_rule(self):
+        self.rule(match="shell", amount_min=100, category="Travel")
+        self.rule(match="shell", category="Shopping")
+        rules.remember(self.c, "shell", "Auto & Gas")
+        got = sorted((r["amount_min"] or 0, r["category"]) for r in rules.load(self.c))
+        self.assertEqual(got, [(0, "Auto & Gas"), (100, "Travel")])
+        rules.remember(self.c, "bp", "Auto & Gas")
+        self.assertEqual(len(rules.load(self.c)), 3)
+
+    def test_categories_follow_renames_and_removals(self):
+        self.rule(match="costco", split=[{"category": "Groceries", "percent": 60}, {"category": "Shopping", "percent": 40}])
+        self.rule(match="kroger", category="Groceries", rename="Kroger")
+        self.rule(match="trader joe", category="Groceries")
+        categories.rename(self.c, "Groceries", "Food")
+        split = next(r for r in rules.load(self.c) if r["match"] == "costco")["split"]
+        self.assertEqual([p["category"] for p in split], ["Food", "Shopping"])
+        categories.remove(self.c, "Food")
+        left = {r["match"]: (r["category"], r["rename"], r["split"]) for r in rules.load(self.c)}
+        # the split and the category-only rule had nothing left to do; the rename stays
+        self.assertEqual(left, {"kroger": (None, "Kroger", None)})
+
+    def test_describe(self):
+        rid = self.rule(match="venmo", match_mode="starts", amount_min=1000, amount_max=2500, direction="out",
+                        account_id="chk", category="Mortgage")
+        r = next(x for x in rules.load(self.c) if x["id"] == rid)
+        self.assertEqual(rules.describe(r, {"chk": "Checking"}),
+                         "merchant starts with 'venmo' · $1,000.00–$2,500.00 · money out · in Checking")
+
+
+class UpgradeTests(unittest.TestCase):
+    def test_existing_rules_survive_and_texts_may_repeat(self):
+        from alembic import command
+        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        with db.engine(path).begin() as sa_conn:
+            command.upgrade(db.alembic_config(sa_conn), "0006")   # before richer rules: one rule per text
+            sa_conn.exec_driver_sql("INSERT INTO rules(match, category) VALUES ('venmo', 'Transfer')")
+        db.init(path)
+        with db.session(path) as c:
+            rules.save(c, {"match": "venmo", "amount_min": 1000, "category": "Mortgage"})
+            self.assertEqual(sorted((r["match"], r["category"]) for r in rules.load(c)),
+                             [("venmo", "Mortgage"), ("venmo", "Transfer")])
+
+
+if __name__ == "__main__":
+    unittest.main()
