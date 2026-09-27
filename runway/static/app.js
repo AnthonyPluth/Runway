@@ -95,6 +95,8 @@ async function refreshState() {
   STATE = await api("/api/state");
   $$("#review-badge, .review-count").forEach((b) => { b.hidden = !STATE.review_count; b.textContent = STATE.review_count || ""; });
   showSyncStatus();
+  const ver = $("#brand-ver");   // the running version, next to the name (hover for the full build)
+  if (ver) { ver.textContent = STATE.version && STATE.version !== "dev" ? STATE.version : "dev"; ver.title = `Runway ${ver.textContent}`; ver.hidden = false; }
   const u = STATE.user;
   if (u && !u.local) {
     const name = u.name || u.email || "Signed in";
