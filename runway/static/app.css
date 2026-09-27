@@ -674,3 +674,7 @@ ol.steps li { margin-bottom: 6px; }
 .re-examples table { width: 100%; }
 .re-examples td { padding: 3px 6px; }
 .re-foot { justify-content: space-between; }
+
+/* Merchant logos (from Plaid, served by Runway) or the merchant's initial */
+.m-logo { width: 20px; height: 20px; border-radius: 6px; flex: none; object-fit: contain; background: #fff; }
+.m-initial { display: inline-grid; place-items: center; background: var(--surface-3); color: var(--text-2); font-size: 11px; font-weight: 700; }
