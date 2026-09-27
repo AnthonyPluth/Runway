@@ -110,6 +110,10 @@ plain Python with a handful of well-known libraries.
 ### Net worth
 - Every account plus homes, vehicles and anything else you own, minus cards and loans, recorded daily.
 - Optional automated home values through RentCast (it stays within the free tier).
+- **Equity compensation:** stock options (ISO/NSO), RSUs, restricted stock and shares, each with its vesting schedule
+  (cliff, monthly or quarterly), exercise price and exercises. Runway shows what has vested and what's still to come at
+  each company's latest share price, and counts the vested part in net worth. Enter grants by hand, or read them from
+  **Carta** with its Portfolio API (Carta has to approve the app; its sample data works without that).
 
 ### Everyday
 - **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old.
