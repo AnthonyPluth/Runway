@@ -145,6 +145,41 @@ retail_item_memory = Table(
     info={'doc': 'categories you picked for items, reused when you buy them again'},
 )
 
+equity_companies = Table(
+    'equity_companies', metadata,
+    Column('id', Text, primary_key=True, doc="'m<n>' for one you entered, 'carta:<issuer id>' from Carta"),
+    Column('name', Text, nullable=False),
+    Column('share_price', Float, doc="what a share is worth (the latest 409A fair market value, or the price you set)"),
+    Column('price_as_of', Text),
+    Column('in_networth', Integer, server_default=text('1'), doc='count vested equity in net worth'),
+    Column('source', Text, server_default=text("'manual'"), doc='manual | carta'),
+    Column('raw', Text, doc='what Carta sent (JSON)'),
+    Column('updated', Text, server_default=now_text()),
+    info={'doc': 'companies you hold stock or options in'},
+)
+
+equity_grants = Table(
+    'equity_grants', metadata,
+    Column('id', Text, primary_key=True),
+    Column('company_id', Text, nullable=False),
+    Column('kind', Text, nullable=False, doc='iso | nso | rsu | rsa | shares'),
+    Column('label', Text, doc='the grant\'s name, e.g. ES-12'),
+    Column('granted_on', Text),
+    Column('quantity', Float, nullable=False, doc='shares or options granted'),
+    Column('strike', Float, doc='exercise price per share (options)'),
+    Column('vest_start', Text, doc='vesting start date'),
+    Column('vest_months', Integer, doc='months until fully vested (0 or NULL: vested at once)'),
+    Column('cliff_months', Integer, doc='nothing vests before this many months, then the months so far vest at once'),
+    Column('vest_every', Integer, server_default=text('1'), doc='vests every this many months (1 monthly, 3 quarterly)'),
+    Column('exercised', Float, server_default=text('0'), doc='options exercised (now shares you hold)'),
+    Column('vested_reported', Float, doc='vested amount as Carta last reported it'),
+    Column('vested_reported_on', Text),
+    Column('expires_on', Text),
+    Column('source', Text, server_default=text("'manual'")),
+    Column('raw', Text, doc='what Carta sent (JSON)'),
+    info={'doc': 'stock options, RSUs and shares you were granted'},
+)
+
 categories = Table(
     'categories', metadata,
     Column('name', Text, primary_key=True),
@@ -522,6 +557,7 @@ Index('tx_review', transactions.c.needs_review)
 Index('inv_tx_account_date', inv_transactions.c.account_id, inv_transactions.c.date)
 Index('tx_recurring', transactions.c.recurring_id)
 Index('tx_splits_tx', tx_splits.c.tx_id)
+Index('equity_grants_company', equity_grants.c.company_id)
 Index('retail_items_order', retail_items.c.order_id)
 Index('retail_charges_order', retail_charges.c.order_id)
 Index('retail_charges_tx', retail_charges.c.tx_id)

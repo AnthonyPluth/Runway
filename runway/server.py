@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
+from . import brands, carta, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -580,6 +580,87 @@ def extension_zip() -> bytes | None:
                 full = os.path.join(root, f)
                 z.write(full, os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR)))
     return buf.getvalue()
+
+
+# ------------------------------------------------------------------------------------------------ equity and Carta
+
+def carta_redirect_uri(origin: str | None = None) -> str:
+    """Where Carta sends you back: Runway's public address (or the one you're using) + /carta/callback. It must be
+    registered as a redirect URI for your app in Carta's developer portal."""
+    base = (os.environ.get("RUNWAY_PUBLIC_URL") or "").rstrip("/")
+    if not base and origin and host_allowed(urllib.parse.urlsplit(origin).netloc):
+        base = origin.rstrip("/")
+    return (base or "http://localhost:8765") + "/carta/callback"
+
+
+def api_equity(conn, _q, _b):
+    out = equity.overview(conn)
+    out["carta"] = carta.settings(conn)
+    return out
+
+
+def _equity(fn, *args):
+    try:
+        return fn(*args)
+    except equity.EquityError as e:
+        raise ApiError(str(e))
+
+
+def api_equity_company_add(conn, _q, body):
+    return {"id": _equity(equity.save_company, conn, body)}
+
+
+def api_equity_company_update(conn, _q, body, cid):
+    return {"id": _equity(equity.save_company, conn, body, cid)}
+
+
+def api_equity_company_remove(conn, _q, _b, cid):
+    equity.remove_company(conn, cid)
+    return {"ok": True}
+
+
+def api_equity_grant_add(conn, _q, body, cid):
+    return {"id": _equity(equity.save_grant, conn, cid, body)}
+
+
+def api_equity_grant_update(conn, _q, body, gid):
+    row = conn.execute("SELECT company_id FROM equity_grants WHERE id=?", (gid,)).fetchone()
+    if not row:
+        raise ApiError("Grant not found", 404)
+    return {"id": _equity(equity.save_grant, conn, row["company_id"], body, gid)}
+
+
+def api_equity_grant_remove(conn, _q, _b, gid):
+    equity.remove_grant(conn, gid)
+    return {"ok": True}
+
+
+def api_carta_settings(conn, _q, body):
+    try:
+        carta.save_settings(conn, body)
+    except carta.CartaError as e:
+        raise ApiError(str(e))
+    return {"ok": True, "redirect_uri": carta_redirect_uri(body.get("origin"))}
+
+
+def api_carta_connect(conn, _q, body):
+    """Where to send you to approve Runway at Carta."""
+    try:
+        return {"url": carta.authorize_url(conn, carta_redirect_uri(body.get("origin")))}
+    except carta.CartaError as e:
+        raise ApiError(str(e))
+
+
+def api_carta_sync(conn, _q, _b):
+    try:
+        return carta.sync(conn)
+    except carta.CartaError as e:
+        raise ApiError(str(e), 502)
+
+
+def api_carta_disconnect(conn, _q, _b):
+    carta.disconnect(conn)
+    return {"ok": True}
 
 
 def api_categories(conn, _q, _b):
@@ -1386,6 +1467,17 @@ ROUTES = [
     ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),
     ("POST", "/api/settings", api_settings),
+    ("GET", "/api/equity", api_equity),
+    ("POST", "/api/equity/companies", api_equity_company_add),
+    ("POST", "/api/equity/companies/{id}", api_equity_company_update),
+    ("POST", "/api/equity/companies/{id}/remove", api_equity_company_remove),
+    ("POST", "/api/equity/companies/{id}/grants", api_equity_grant_add),
+    ("POST", "/api/equity/grants/{id}", api_equity_grant_update),
+    ("POST", "/api/equity/grants/{id}/remove", api_equity_grant_remove),
+    ("POST", "/api/carta/settings", api_carta_settings),
+    ("POST", "/api/carta/connect", api_carta_connect),
+    ("POST", "/api/carta/sync", api_carta_sync),
+    ("POST", "/api/carta/disconnect", api_carta_disconnect),
     ("GET", "/api/retail", api_retail),
     ("POST", "/api/retail/token", api_retail_token),
     ("POST", "/api/retail/token/remove", api_retail_token_remove),
@@ -1636,6 +1728,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
                 back = (url.path or "/") + ("?" + url.query if url.query else "")   # e.g. /plaid/oauth?oauth_state_id=…
                 return self._redirect("/auth/login?next=" + urllib.parse.quote(back, safe=""))
+        if url.path == "/carta/callback" and method == "GET":
+            return self._carta_callback(url)
         if not url.path.startswith("/api/"):
             if method != "GET":
                 return self._send(405, b"", "text/plain")
@@ -1766,6 +1860,21 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
+
+    def _carta_callback(self, url) -> None:
+        """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
+        if q.get("error"):
+            return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/connections", "Back to Settings"))
+        try:
+            with db.session() as conn:
+                if not q.get("mock"):
+                    carta.finish_authorize(conn, q.get("code", ""), q.get("state", ""))
+            with db.session() as conn:
+                carta.sync(conn)
+        except carta.CartaError as e:
+            return self._page(502, "Carta wasn't connected", str(e), ("/#setup/connections", "Back to Settings"))
+        self._redirect("/#networth")
 
     def _extension(self, method: str, path: str) -> None:
         """A call from Runway's browser extension. It carries the key made under Settings → Connections (a bearer
