@@ -661,6 +661,18 @@ ol.steps li { margin-bottom: 6px; }
   .retail-order .order-open > :last-child { grid-column: 2 / -1; text-align: left; }
 }
 
+/* Bulk editing: a checkbox per transaction, and a bar for what to do with the ones ticked */
+th.sel, td.sel { width: 28px; padding-right: 4px; }
+td.sel input, th.sel input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+tr.selected td { background: var(--accent-wash); }
+.bulk-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 10px; border-radius: 10px; background: var(--surface-2); box-shadow: 0 0 0 1px var(--border); }
+.bulk-bar[hidden] { display: none; }
+.bulk-count { margin-right: auto; }
+.bulk-rename { display: inline-flex; gap: 6px; }
+.bulk-rename input { width: 180px; }
+@media (max-width: 640px) { .bulk-count { flex-basis: 100%; } .bulk-rename input { width: 140px; } }
+
 /* Rules: what a rule looks for, what it does, and the editor */
 .rule-item .rule-when { color: var(--text); }
 .rule-then { color: var(--text-2); font-size: 13px; }
