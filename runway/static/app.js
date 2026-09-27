@@ -530,6 +530,7 @@ async function renderTxPage(el, mode) {
         <input type="checkbox" id="tx-remember" ${f.remember ? "checked" : ""}> Remember for this merchant</label>
     </div>
     ${review ? "" : `<div id="tx-upcoming"></div>`}
+    <div id="bulk-bar" class="bulk-bar" hidden></div>
     <div class="card scroll-x" id="tx-list"><div class="empty">Loading…</div></div>`;
 
   // Upcoming (projected) items for the forecast account, filtered the same way as the list below.
@@ -568,14 +569,17 @@ async function renderTxPage(el, mode) {
     if (!box || !$("#tx-count")) return;  // you've moved to another page meanwhile
     const filtered = f.q || f.account || f.category || f.month;
     $("#tx-count").textContent = review ? (data.total ? `${data.total} to go` : "") : `${data.total}`;
+    const bulkBar = $("#bulk-bar");
+    if (bulkBar) { bulkBar.hidden = true; bulkBar.innerHTML = ""; }
     if (!data.items.length) {
       box.innerHTML = `<div class="empty">${review && !filtered ? "All caught up. New transactions that need a decision will show up here." : "No transactions match."}</div>`;
       return;
     }
-    box.innerHTML = `<table><tr><th>Date</th><th>Merchant</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th></tr>
+    box.innerHTML = `<table><tr><th class="sel"><input type="checkbox" id="tx-sel-all" aria-label="Select all shown"></th><th>Date</th><th>Merchant</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th></tr>
       ${data.items.map((t) => txRow(t, review)).join("")}
     </table>${data.total > data.items.length ? `<p class="help">Showing ${data.items.length} of ${data.total}. Narrow the search to see more.</p>` : ""}`;
     const byId = Object.fromEntries(data.items.map((t) => [t.id, t]));
+    wireBulk(box, byId, load);
     $$("tr[data-id]", box).forEach((tr) => {
       $("select.cat", tr)?.addEventListener("change", (e) => { if (e.target.value) save(tr, e.target.value); });
       $(".keep", tr)?.addEventListener("click", () => save(tr, $("select.cat", tr).value));
@@ -636,6 +640,7 @@ function txRow(t, review) {
   const linked = t.recurring_id > 0;
   const split = t.is_split && (t.splits || []).length;
   return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}" ${split ? 'class="has-split"' : ""}>
+    <td class="sel"><input type="checkbox" class="tx-sel" aria-label="Select this transaction"></td>
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
     <td><div class="merchant">${merchantIcon(t)}${esc(t.payee || t.description)}
         <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button>
@@ -654,6 +659,57 @@ function txRow(t, review) {
       <button class="btn link split-btn" title="Spread this across several categories">${split ? "Edit split" : "Split"}</button></td></tr>`;
 }
 
+// Tick transactions (shift-click for a range) to change them together: a category, the merchant's name, or
+// marking them reviewed.
+function wireBulk(box, byId, reload) {
+  const boxes = $$(".tx-sel", box);
+  const bar = $("#bulk-bar");   // outside the list's card, so it can stay in view while you scroll
+  bar.innerHTML = "";
+  bar.hidden = true;
+  let last = null;
+  const chosen = () => boxes.filter((b) => b.checked).map((b) => b.closest("tr").dataset.id);
+  const draw = () => {
+    const ids = chosen();
+    boxes.forEach((b) => b.closest("tr").classList.toggle("selected", b.checked));
+    $("#tx-sel-all", box).checked = ids.length > 0 && ids.length === boxes.length;
+    $("#tx-sel-all", box).indeterminate = ids.length > 0 && ids.length < boxes.length;
+    bar.hidden = !ids.length;
+    if (!ids.length) return;
+    const total = ids.reduce((n, id) => n + (byId[id]?.amount || 0), 0);
+    if (!bar.firstChild) {
+      bar.innerHTML = `<span class="bulk-count"></span>
+        <select id="bulk-cat" aria-label="Category for the selected transactions"><option value="">Set category…</option>${categoryOptions("", { blank: false })}</select>
+        <span class="bulk-rename"><input id="bulk-payee" placeholder="Rename merchant to…" aria-label="New merchant name"><button class="btn" id="bulk-payee-go">Rename</button></span>
+        <button class="btn" id="bulk-reviewed" title="Keep their categories and take them out of Review">Mark reviewed</button>
+        <button class="btn link" id="bulk-clear">Clear</button>`;
+      const send = async (body, what) => {
+        const ids = chosen();
+        try {
+          const r = await api("/api/transactions/bulk", { method: "POST", body: { ids, ...body } });
+          toast(`${what} · ${r.updated} transaction${r.updated === 1 ? "" : "s"}`);
+          refreshState(); reload();
+        } catch (err) { toast(err.message, true); }
+      };
+      $("#bulk-cat", bar).addEventListener("change", (e) => { if (e.target.value) send({ category: e.target.value }, `Set to ${e.target.value}`); });
+      const rename = () => { const v = $("#bulk-payee", bar).value.trim(); if (v) send({ payee: v }, `Renamed to ${v}`); };
+      $("#bulk-payee-go", bar).addEventListener("click", rename);
+      $("#bulk-payee", bar).addEventListener("keydown", (e) => { if (e.key === "Enter") rename(); });
+      $("#bulk-reviewed", bar).addEventListener("click", () => send({ reviewed: true }, "Marked reviewed"));
+      $("#bulk-clear", bar).addEventListener("click", () => { boxes.forEach((b) => { b.checked = false; }); draw(); });
+    }
+    $(".bulk-count", bar).innerHTML = `<b>${ids.length} selected</b> <span class="muted">${fmt(total)}</span>`;
+  };
+  boxes.forEach((b, i) => b.addEventListener("click", (e) => {
+    if (e.shiftKey && last !== null) {   // shift-click: everything between the last tick and this one
+      const [a, z] = [Math.min(last, i), Math.max(last, i)];
+      for (let k = a; k <= z; k++) boxes[k].checked = b.checked;
+    }
+    last = i;
+    draw();
+  }));
+  $("#tx-sel-all", box).addEventListener("change", (e) => { boxes.forEach((b) => { b.checked = e.target.checked; }); draw(); });
+}
+
 // Spread one transaction across categories: each part gets its own category and amount, and they must add up.
 // Amounts are typed as plain numbers; the transaction's own sign (a charge or a deposit) is kept.
 function openSplitEditor(tr, t, reload) {
@@ -664,7 +720,7 @@ function openSplitEditor(tr, t, reload) {
   const parts = existing.length ? existing : [{ category: t.category || "", amount: total.toFixed(2) }, { category: "", amount: "" }];
   const row = document.createElement("tr");
   row.className = "split-edit";
-  row.innerHTML = `<td colspan="5"><div class="split-box">
+  row.innerHTML = `<td colspan="6"><div class="split-box">
     <div class="split-head"><b>Split ${fmt(total)}</b> <span class="muted small">${esc(t.payee || t.description)}</span></div>
     <div class="split-rows"></div>
     <div class="split-foot">
@@ -740,7 +796,7 @@ function openOrderRow(tr, orderId, reload) {
   if (next?.classList.contains("order-edit")) { next.remove(); return; }
   const row = document.createElement("tr");
   row.className = "order-edit";
-  row.innerHTML = `<td colspan="5"><div class="order-box">Loading…</div></td>`;
+  row.innerHTML = `<td colspan="6"><div class="order-box">Loading…</div></td>`;
   tr.after(row);
   renderOrder($(".order-box", row), orderId, () => { reload?.(); });
 }
