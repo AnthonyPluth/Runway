@@ -843,9 +843,11 @@ class ServerTests(unittest.TestCase):
         self.req("POST", "/api/rules", {"match": "whole", "category": "Shopping"})
         _, rules = self.req("GET", "/api/rules")
         rid = next(r["id"] for r in rules if r["match"] == "whole")
-        self.assertEqual(self.req("POST", f"/api/rules/{rid}", {"match": "whole foods", "category": "Groceries"})[0], 200)
+        self.assertEqual(self.req("POST", f"/api/rules/{rid}", {"match": "whole foods", "category": "Shopping"})[0], 200)
         _, res = self.req("POST", f"/api/rules/{rid}/apply", {})
         self.assertEqual(res["updated"], 1)
+        _, res = self.req("POST", f"/api/rules/{rid}/apply", {})
+        self.assertEqual(res["updated"], 0)   # counts only what changed
 
     def test_subcategory_rollup_and_cashflow(self):
         today = date.today()

@@ -326,13 +326,13 @@ def sync_transactions(conn, item, today: date) -> list[str]:
         prior, old = None, None
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
-            prior = conn.execute("SELECT category, category_source, confidence, needs_review, recurring_id FROM transactions WHERE id=?",
+            prior = conn.execute("SELECT payee, category, category_source, confidence, needs_review, recurring_id FROM transactions WHERE id=?",
                                  (old,)).fetchone()
             conn.execute("DELETE FROM transactions WHERE id=?", (old,))
         if prior and prior["category"]:
             conn.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending, category, "
                          "category_source, confidence, needs_review, recurring_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                         (key, aid, posted, amount, desc, payee, pending, prior["category"], prior["category_source"],
+                         (key, aid, posted, amount, desc, prior["payee"] or payee, pending, prior["category"], prior["category_source"],
                           prior["confidence"], prior["needs_review"], prior["recurring_id"]))
         else:
             conn.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending) VALUES (?,?,?,?,?,?,?)",

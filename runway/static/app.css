@@ -657,3 +657,20 @@ ol.steps li { margin-bottom: 6px; }
   .retail-order .order-open { grid-template-columns: 48px minmax(0, 1fr) auto; }
   .retail-order .order-open > :last-child { grid-column: 2 / -1; text-align: left; }
 }
+
+/* Rules: what a rule looks for, what it does, and the editor */
+.rule-item .rule-when { color: var(--text); }
+.rule-then { color: var(--text-2); font-size: 13px; }
+.rule-editor { padding: 12px 4px 16px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+#rule-editor-new .rule-editor { border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+.rule-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.rule-editor fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.rule-editor legend { font-weight: 600; color: var(--text-strong); margin-bottom: 6px; padding: 0; }
+.rule-editor .form-row { margin-bottom: 8px; }
+.rule-text { display: flex; gap: 6px; }
+.rule-text .re-match { flex: 1; min-width: 0; }
+.rule-editor .re-min, .rule-editor .re-max { width: 100px; }
+.rule-editor .rs-pct { width: 80px; }
+.re-examples table { width: 100%; }
+.re-examples td { padding: 3px 6px; }
+.re-foot { justify-content: space-between; }

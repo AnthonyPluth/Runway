@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, retail, simplefin, splits
+from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -609,54 +609,40 @@ def api_category_remove(conn, _q, body):
 
 
 def api_rules(conn, _q, _b):
-    return db.rows(conn.execute("SELECT * FROM rules ORDER BY match"))
+    names = {r["id"]: db.account_label(r) for r in conn.execute("SELECT id, name, display_name, owner FROM accounts")}
+    out = []
+    for r in sorted(rules.load(conn), key=lambda r: (r["match"] or "~", r["id"])):
+        r["summary"] = rules.describe(r, names)
+        out.append(r)
+    return out
 
 
 def api_rule_add(conn, _q, body):
-    match = (body.get("match") or "").strip().lower()
-    cat = body.get("category") or ""
-    if len(match) < 2 or not conn.execute("SELECT 1 FROM categories WHERE name=?", (cat,)).fetchone():
-        raise ApiError("Rule needs match text and a valid category")
-    conn.execute(
-        "INSERT INTO rules(match, category) VALUES (?,?) ON CONFLICT(match) DO UPDATE SET category=excluded.category",
-        (match, cat),
-    )
-    if body.get("apply"):
-        conn.execute(
-            "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-            "WHERE COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
-            "AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
-            (cat, match, match),
-        )
-    return {"ok": True}
-
-
-def _apply_rule(conn, match: str, cat: str) -> int:
-    return conn.execute(
-        "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
-        "AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
-        (cat, match, match),
-    ).rowcount
+    try:
+        rid = rules.save(conn, body)
+        return {"ok": True, "id": rid, "updated": rules.apply_rule(conn, rid) if body.get("apply") else 0}
+    except rules.RuleError as e:
+        raise ApiError(str(e))
 
 
 def api_rule_update(conn, _q, body, rule_id):
-    match = (body.get("match") or "").strip().lower()
-    cat = body.get("category") or ""
-    if len(match) < 2 or not conn.execute("SELECT 1 FROM categories WHERE name=?", (cat,)).fetchone():
-        raise ApiError("Rule needs match text and a valid category")
-    clash = conn.execute("SELECT id FROM rules WHERE match=? AND id<>?", (match, int(rule_id))).fetchone()
-    if clash:
-        raise ApiError("Another rule already uses that text")
-    conn.execute("UPDATE rules SET match=?, category=? WHERE id=?", (match, cat, int(rule_id)))
+    try:
+        rules.save(conn, body, int(rule_id))
+    except rules.RuleError as e:
+        raise ApiError(str(e))
     return {"ok": True}
 
 
+def api_rule_preview(conn, _q, body):
+    """What a rule you're writing would match, before you save it."""
+    return rules.preview(conn, body)
+
+
 def api_rule_apply(conn, _q, _b, rule_id):
-    r = conn.execute("SELECT * FROM rules WHERE id=?", (int(rule_id),)).fetchone()
-    if not r:
-        raise ApiError("Rule not found", 404)
-    return {"ok": True, "updated": _apply_rule(conn, r["match"], r["category"])}
+    try:
+        return {"ok": True, "updated": rules.apply_rule(conn, int(rule_id))}
+    except rules.RuleError as e:
+        raise ApiError(str(e), 404)
 
 
 def api_rule_delete(conn, _q, _b, rule_id):
@@ -1289,6 +1275,7 @@ ROUTES = [
     ("GET", "/api/cashflow", api_cashflow),
     ("GET", "/api/rules", api_rules),
     ("POST", "/api/rules", api_rule_add),
+    ("POST", "/api/rules/preview", api_rule_preview),
     ("DELETE", "/api/rules/{id}", api_rule_delete),
     ("POST", "/api/rules/{id}", api_rule_update),
     ("POST", "/api/rules/{id}/apply", api_rule_apply),

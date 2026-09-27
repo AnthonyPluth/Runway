@@ -194,7 +194,7 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
         # wholesale, but remember their categories so the replacements don't go back through review.
         carried: dict[tuple, list] = {}
         for old in conn.execute(
-            "SELECT id, description, amount, category, category_source, confidence, needs_review, is_split FROM transactions "
+            "SELECT id, description, payee, amount, category, category_source, confidence, needs_review, is_split FROM transactions "
             "WHERE account_id=? AND pending=1 AND posted>=?",
             (acct_id, window_start.isoformat()),
         ).fetchall():
@@ -227,7 +227,7 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
                     conn.execute(
                         "INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending, "
                         "category, category_source, confidence, needs_review) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        (key, acct_id, posted, amount, desc, payee, pending,
+                        (key, acct_id, posted, amount, desc, p["payee"] or payee, pending,   # a rule may have renamed it
                          p["category"], p["category_source"], p["confidence"], p["needs_review"]),
                     )
                     if p["is_split"]:
