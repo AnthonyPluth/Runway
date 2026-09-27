@@ -457,3 +457,39 @@ def accept_suggestion(conn, tx_id: str) -> None:
         "UPDATE transactions SET needs_review=0, category_source='manual', confidence=1 WHERE id=? AND category IS NOT NULL",
         (tx_id,),
     )
+
+
+MAX_BULK = 2000
+
+
+def bulk_update(conn, tx_ids: list[str], category: str | None = None, payee: str | None = None,
+                reviewed: bool = False) -> int:
+    """Change many transactions at once: a category (as if you picked it for each, so a split one goes back
+    together), a merchant name, and/or marking them reviewed. Returns how many transactions there were."""
+    ids = list(dict.fromkeys(str(i) for i in tx_ids or []))
+    if not ids:
+        raise ValueError("Select some transactions first")
+    if len(ids) > MAX_BULK:
+        raise ValueError(f"Change at most {MAX_BULK:,} transactions at once")
+    if category and not conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone():
+        raise ValueError(f"Unknown category: {category}")
+    payee = " ".join((payee or "").split())[:80] or None
+    if not (category or payee or reviewed):
+        raise ValueError("Choose what to change")
+    found = 0
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        q = ",".join("?" * len(chunk))
+        found += conn.execute(f"SELECT COUNT(*) FROM transactions WHERE id IN ({q})", chunk).fetchone()[0]
+        if category:
+            for r in conn.execute(f"SELECT id FROM transactions WHERE id IN ({q}) AND is_split=1", chunk).fetchall():
+                splits.clear(conn, r["id"])
+            conn.execute(f"UPDATE transactions SET category=?, category_source='manual', confidence=1, needs_review=0 "
+                         f"WHERE id IN ({q})", (category, *chunk))
+        if payee:
+            conn.execute(f"UPDATE transactions SET payee=? WHERE id IN ({q})", (payee, *chunk))
+        if reviewed:
+            conn.execute(f"UPDATE transactions SET needs_review=0, category_source=CASE WHEN category IS NULL "
+                         f"THEN category_source ELSE 'manual' END WHERE id IN ({q})", chunk)
+    return found
+
