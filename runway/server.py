@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
+from . import brands, categories, categorize, db, forecast, merchants, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -393,9 +393,11 @@ def api_transactions(conn, q, _b):
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items if t["amount"] < 0])
+    logos = merchants.for_transactions(conn, items)
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
+        t["logo"] = f"/api/merchants/{urllib.parse.quote(logos[t['id']], safe='')}/logo" if t["id"] in logos else None
     total = conn.execute(
         f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
     ).fetchone()[0]
@@ -1574,6 +1576,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"')
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            self._security_headers()
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+            return
+        if method == "GET" and url.path.startswith("/api/merchants/") and url.path.endswith("/logo"):
+            mid = urllib.parse.unquote(url.path[len("/api/merchants/"):-len("/logo")])
+            with db.session() as conn:
+                found = merchants.logo(conn, mid)
+            if not found:
+                return self._send(404, b"", "text/plain")
+            data, ctype = found
+            etag = '"' + hashlib.sha256(data).hexdigest()[:20] + '"'
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self._security_headers()
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "private, max-age=604800")
+            self.send_header("ETag", etag)
             self._security_headers()
             self.end_headers()
             if self.command != "HEAD":
