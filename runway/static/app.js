@@ -2263,6 +2263,175 @@ function barChart(host, labels, values, opts = {}) {
   });
 }
 
+// ------------------------------------------------------------------------------------------ equity
+const EQ_KINDS = { iso: "ISO options", nso: "NSO options", rsu: "RSUs", rsa: "Restricted stock", shares: "Shares" };
+const isOption = (k) => k === "iso" || k === "nso";
+const shares = (n) => (n == null ? "—" : Number(n).toLocaleString("en-US", { maximumFractionDigits: 2 }));
+const eqDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// Stock options, RSUs and shares: what's vested and what it's worth, by company; from Carta or entered by hand.
+async function renderEquityCard(card, refresh) {
+  const d = await api("/api/equity");
+  const c = d.carta;
+  card.innerHTML = `<div class="card-head"><h2>Equity</h2><span class="card-head-actions">
+      ${c.connected ? `<button class="btn" id="eq-sync">Sync from Carta</button>` : ""}
+      <button class="btn primary" id="eq-new">Add a company</button></span></div>
+    <p class="help">${c.connected ? `From Carta${c.last_sync ? `, last read ${esc(fmtDate(c.last_sync))}` : ""}. ` : `Stock options, RSUs and shares. Enter them here, or <a href="#setup/connections">connect Carta</a>. `}
+      Only what has vested counts toward net worth, at each company's latest share price (its 409A value, for a private company).</p>
+    ${c.last_error ? `<div class="warn critical"><span class="icon">!</span><span>Carta: ${esc(c.last_error)}</span></div>` : ""}
+    ${d.companies.length ? `<div class="tiles tiles-inline">
+        <div class="tile"><div class="label">Vested now</div><div class="value">${fmt0(d.vested_value)}</div><div class="sub">${d.in_networth !== d.vested_value ? `${fmt0(d.in_networth)} counted in net worth` : "counted in net worth"}</div></div>
+        <div class="tile"><div class="label">Still to vest</div><div class="value">${fmt0(d.unvested_value)}</div><div class="sub">at today's share prices</div></div></div>
+      <div class="chart-wrap" id="eq-chart"></div>` : ""}
+    <div id="eq-form-host"></div>
+    ${d.companies.map((co) => `<div class="eq-company" data-id="${esc(co.id)}">
+      <div class="eq-head"><b>${esc(co.name)}</b>${co.source === "carta" ? `<span class="tag">Carta</span>` : ""}
+        <label class="eq-price">Share price<span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input type="number" min="0" step="0.01" class="eq-price-in" value="${co.share_price ?? ""}" placeholder="0.00"></span></label>
+        <span class="muted small">${co.price_as_of ? `as of ${esc(fmtDate(co.price_as_of, { month: "short", day: "numeric", year: "numeric" }))}` : "no price yet"}</span>
+        <label class="inline small"><input type="checkbox" class="eq-nw" ${co.in_networth ? "checked" : ""}> Count in net worth</label>
+        <span class="eq-actions"><button class="btn link eq-add-grant">Add a grant</button><button class="btn link eq-remove">Remove</button></span></div>
+      ${co.grants.length ? `<div class="scroll-x"><table class="eq-table"><tr><th>Grant</th><th class="hide-sm">Granted</th><th class="num">Shares</th><th class="num hide-sm">Strike</th>
+          <th>Vested</th><th class="num">Worth now</th><th class="num hide-sm">Still to vest</th><th></th></tr>
+        ${co.grants.map((g) => { const pct = g.quantity ? g.vested / g.quantity : 0; return `<tr data-g="${esc(g.id)}">
+          <td>${esc(g.label || EQ_KINDS[g.kind])}<div class="desc">${[g.label ? EQ_KINDS[g.kind] : "", g.expires_on && isOption(g.kind) ? `expires ${fmtDate(g.expires_on, { month: "short", year: "numeric" })}` : ""].filter(Boolean).map(esc).join(" · ")}</div></td>
+          <td class="muted hide-sm">${g.granted_on ? esc(fmtDate(g.granted_on, { month: "short", year: "numeric" })) : "—"}</td>
+          <td class="num">${shares(g.quantity)}</td><td class="num muted hide-sm">${isOption(g.kind) ? fmt(g.strike) : "—"}</td>
+          <td><div class="eq-vest"><span class="eq-vest-bar"><i style="width:${(pct * 100).toFixed(1)}%"></i></span><span class="small">${Math.round(pct * 100)}%</span></div>
+            <div class="desc">${shares(g.vested)} of ${shares(g.quantity)}${g.fully_vested_on && pct < 1 ? ` · all by ${esc(fmtDate(g.fully_vested_on, { month: "short", year: "numeric" }))}` : ""}${g.exercised ? ` · ${shares(g.exercised)} exercised` : ""}</div></td>
+          <td class="num">${fmt(g.vested_value)}</td><td class="num muted hide-sm">${fmt(g.unvested_value)}</td>
+          <td class="eq-row-actions"><button class="btn link eq-edit">Edit</button><button class="btn link eq-del">Remove</button></td></tr>
+          <tr class="eq-edit-row" data-for="${esc(g.id)}" hidden><td colspan="8"></td></tr>`; }).join("")}</table></div>`
+        : `<p class="muted small">No grants yet.</p>`}
+      <div class="eq-grant-host"></div></div>`).join("")}`;
+
+  // Vested value over time, one line per company, from the first grant to the last share vesting.
+  if (d.companies.length) {
+    const starts = d.companies.flatMap((co) => co.grants.map((g) => g.schedule[0]?.[0]).filter(Boolean)).sort();
+    const ends = d.companies.flatMap((co) => co.grants.map((g) => g.fully_vested_on || g.schedule.at(-1)?.[0]).filter(Boolean)).sort();
+    if (starts.length) {
+      const xs = [];
+      for (let t = parseDate(starts[0]); eqDay(t) <= (ends.at(-1) || starts[0]) || xs.length < 2; t = new Date(t.getFullYear(), t.getMonth() + 1, 1)) {
+        xs.push(eqDay(new Date(t.getFullYear(), t.getMonth() + 1, 0)));
+        if (xs.length > 240) break;
+      }
+      const vestedAt = (g, day) => { let v = 0; for (const [dd, q] of g.schedule) if (dd <= day) v = q; return v; };
+      const worth = (co, g, v) => isOption(g.kind) ? Math.max(0, (co.share_price || 0) - (g.strike || 0)) * v : (co.share_price || 0) * v;
+      const series = d.companies.slice(0, 3).map((co, i) => ({ name: co.name, cls: ["s-main", "s-alt", "s-muted"][i], step: true,
+        values: xs.map((day) => co.grants.reduce((a, g) => a + worth(co, g, vestedAt(g, day)), 0)) }));
+      lineChart($("#eq-chart", card), xs.map((x) => fmtDate(x, { month: "short", year: "numeric" })), series,
+        { fmtY: shortMoney, fmtTip: fmt, height: 200, zero: true, labels: true });
+    }
+  }
+
+  const post = async (url, body, msg) => {
+    try { await api(url, { method: "POST", body }); if (msg) toast(msg); refresh(); } catch (err) { toast(err.message, true); }
+  };
+  $("#eq-new", card).addEventListener("click", () => {
+    const host = $("#eq-form-host", card);
+    host.innerHTML = `<div class="form-row acct-form"><label>Company<input id="eq-co-name" placeholder="Acme, Inc."></label>
+      <label>Share price<span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input type="number" min="0" step="0.01" id="eq-co-price" placeholder="0.00"></span></label>
+      <button class="btn primary" id="eq-co-add">Add</button><button class="btn link" id="eq-co-cancel">Cancel</button></div>`;
+    $("#eq-co-name", host).focus();
+    $("#eq-co-cancel", host).addEventListener("click", () => { host.innerHTML = ""; });
+    $("#eq-co-add", host).addEventListener("click", () => post("/api/equity/companies", { name: $("#eq-co-name", host).value, share_price: $("#eq-co-price", host).value }, "Company added"));
+  });
+  $("#eq-sync", card)?.addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Reading Carta…";
+    try { const r = await api("/api/carta/sync", { method: "POST" }); toast(`Carta: ${r.companies} compan${r.companies === 1 ? "y" : "ies"}, ${r.grants} grant${r.grants === 1 ? "" : "s"}`); refresh(); }
+    catch (err) { toast(err.message, true); refresh(); }
+  });
+  $$(".eq-company", card).forEach((box) => {
+    const id = encodeURIComponent(box.dataset.id);
+    const co = d.companies.find((x) => x.id === box.dataset.id);
+    onEdit([$(".eq-price-in", box)], () => post(`/api/equity/companies/${id}`, { share_price: $(".eq-price-in", box).value }, "Share price saved"));
+    $(".eq-nw", box).addEventListener("change", (e) => post(`/api/equity/companies/${id}`, { in_networth: e.target.checked }, "Saved"));
+    $(".eq-remove", box).addEventListener("click", (e) => { if (confirmInline(e.currentTarget, "Remove it and its grants?")) post(`/api/equity/companies/${id}/remove`, {}, "Removed"); });
+    $(".eq-add-grant", box).addEventListener("click", () => grantForm($(".eq-grant-host", box), null, (body) => post(`/api/equity/companies/${id}/grants`, body, "Grant added")));
+    $$("tr[data-g]", box).forEach((tr) => {
+      const g = co.grants.find((x) => x.id === tr.dataset.g);
+      const gid = encodeURIComponent(g.id);
+      $(".eq-edit", tr).addEventListener("click", () => {
+        const row = tr.nextElementSibling; row.hidden = !row.hidden;
+        if (!row.hidden) grantForm($("td", row), g, (body) => post(`/api/equity/grants/${gid}`, body, "Grant saved"), () => { row.hidden = true; });
+      });
+      $(".eq-del", tr).addEventListener("click", (e) => { if (confirmInline(e.currentTarget, "Remove?")) post(`/api/equity/grants/${gid}/remove`, {}, "Removed"); });
+    });
+  });
+}
+
+function grantForm(host, g, save, cancel) {
+  g = g || { kind: "iso", vest_months: 48, cliff_months: 12, vest_every: 1 };
+  host.innerHTML = `<div class="eq-grant-form">
+    <div class="form-row">
+      <label>Kind<select class="gf-kind">${Object.entries(EQ_KINDS).map(([k, v]) => `<option value="${k}" ${k === g.kind ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+      <label>Name<input class="gf-label" value="${esc(g.label || "")}" placeholder="ES-12 (optional)"></label>
+      <label>Shares<input class="gf-qty num" type="number" min="0" step="1" value="${g.quantity ?? ""}"></label>
+      <label class="gf-opt">Strike price<span class="cb-price"><span class="cb-cur" aria-hidden="true">$</span><input class="gf-strike" type="number" min="0" step="0.0001" value="${g.strike ?? ""}"></span></label>
+      <label class="gf-opt">Exercised<input class="gf-ex num" type="number" min="0" step="1" value="${g.exercised || ""}" placeholder="0"></label></div>
+    <div class="form-row gf-vesting">
+      <label>Granted<input class="gf-granted" type="date" value="${esc(g.granted_on || "")}"></label>
+      <label>Vesting starts<input class="gf-start" type="date" value="${esc(g.vest_start || "")}"></label>
+      <label>Vests over (months)<input class="gf-months num" type="number" min="0" step="1" value="${g.vest_months ?? ""}"></label>
+      <label>Cliff (months)<input class="gf-cliff num" type="number" min="0" step="1" value="${g.cliff_months ?? ""}"></label>
+      <label>Every<select class="gf-every">${[[1, "month"], [3, "quarter"], [12, "year"]].map(([v, l]) => `<option value="${v}" ${Number(g.vest_every || 1) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label class="gf-opt">Expires<input class="gf-exp" type="date" value="${esc(g.expires_on || "")}"></label></div>
+    <div class="form-row"><button class="btn primary gf-save">${g.id ? "Save grant" : "Add grant"}</button><button class="btn link gf-cancel">Cancel</button></div></div>`;
+  const q = (sel) => $(sel, host);
+  const kind = () => {
+    const k = q(".gf-kind").value;
+    $$(".gf-opt", host).forEach((el) => { el.hidden = !isOption(k); });
+    q(".gf-vesting").hidden = k === "shares";
+  };
+  q(".gf-kind").addEventListener("change", kind);
+  kind();
+  q(".gf-cancel").addEventListener("click", () => { host.innerHTML = ""; cancel?.(); });
+  q(".gf-save").addEventListener("click", () => save({
+    kind: q(".gf-kind").value, label: q(".gf-label").value, quantity: q(".gf-qty").value, strike: q(".gf-strike").value,
+    exercised: q(".gf-ex").value, granted_on: q(".gf-granted").value, vest_start: q(".gf-start").value,
+    vest_months: q(".gf-months").value, cliff_months: q(".gf-cliff").value, vest_every: q(".gf-every").value, expires_on: q(".gf-exp").value,
+  }));
+  q(".gf-qty").focus();
+}
+
+// Settings → Connections: Carta's Portfolio API (access comes from Carta), or its sample data.
+async function renderCartaCard(card) {
+  const d = await api("/api/equity");
+  const c = d.carta;
+  const redirect = `${location.origin}/carta/callback`;
+  card.innerHTML = `<h2>Carta <span class="muted small">optional: stock options, RSUs and shares</span></h2>
+    <p class="help">Runway reads your equity with Carta's Portfolio API. Carta approves each app that uses it: create one in Carta's
+      developer portal (Carta says customers can ask for access to their own data), add <code>${esc(redirect)}</code> as its redirect URI,
+      and enter its client id and secret here. <b>Carta's sample data</b> works without any of that, to see how it looks.
+      You can also enter grants by hand on the Net worth page.</p>
+    <div class="form-row">
+      <label>Environment<select id="ct-env"><option value="production" ${c.env === "production" ? "selected" : ""}>Carta (your real account)</option>
+        <option value="mock" ${c.env === "mock" ? "selected" : ""}>Carta's sample data</option></select></label>
+      <label class="ct-prod">Client id<input id="ct-id" value="${esc(c.client_id || "")}" autocomplete="off" spellcheck="false" style="width:220px"></label>
+      <label class="ct-prod">Client secret<input id="ct-secret" type="password" placeholder="${c.has_secret ? "•••••••• saved" : ""}" autocomplete="off" style="width:220px"></label></div>
+    <div class="form-row">
+      ${c.connected ? `<span>Connected${c.last_sync ? ` · last read ${esc(fmtDate(c.last_sync))}` : ""}</span>
+        <button class="btn" id="ct-sync">Sync now</button><button class="btn link" id="ct-off">Disconnect</button>`
+        : `<button class="btn primary" id="ct-connect">Connect Carta</button>`}</div>
+    ${c.last_error ? `<div class="warn critical"><span class="icon">!</span><span>${esc(c.last_error)}</span></div>` : ""}`;
+  const env = () => { $$(".ct-prod", card).forEach((el) => { el.hidden = $("#ct-env", card).value === "mock"; }); };
+  env();
+  const save = () => api("/api/carta/settings", { method: "POST", body: { env: $("#ct-env", card).value, client_id: $("#ct-id", card).value,
+    client_secret: $("#ct-secret", card).value, origin: location.origin } });
+  $("#ct-env", card).addEventListener("change", async () => { env(); try { await save(); renderCartaCard(card); } catch (err) { toast(err.message, true); } });
+  onEdit([$("#ct-id", card), $("#ct-secret", card)], async () => { try { await save(); toast("Saved"); } catch (err) { toast(err.message, true); } });
+  $("#ct-connect", card)?.addEventListener("click", async () => {
+    try { await save(); const r = await api("/api/carta/connect", { method: "POST", body: { origin: location.origin } }); location.href = r.url; }
+    catch (err) { toast(err.message, true); }
+  });
+  $("#ct-sync", card)?.addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Reading…";
+    try { const r = await api("/api/carta/sync", { method: "POST" }); toast(`Carta: ${r.companies} compan${r.companies === 1 ? "y" : "ies"}, ${r.grants} grant${r.grants === 1 ? "" : "s"}`); }
+    catch (err) { toast(err.message, true); }
+    renderCartaCard(card);
+  });
+  $("#ct-off", card)?.addEventListener("click", async () => { await api("/api/carta/disconnect", { method: "POST" }); toast("Disconnected"); renderCartaCard(card); });
+}
+
 // ------------------------------------------------------------------------------------------ net worth
 const ASSET_KIND_LABEL = { home: "Home / property", vehicle: "Vehicle", other: "Other" };
 const assetLookupLink = (a) => a.url ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
@@ -2276,7 +2445,8 @@ async function renderNetWorth(el) {
   const sideRows = (side) => d.groups.filter((g) => g.side === side).map((g) => `
       <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
       ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${i.type === "account" ? acctLabel(i.id, i.name) : esc(i.name)}
-          <div class="desc">${i.type === "account" ? esc(i.org || "") : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
+          <div class="desc">${i.type === "account" ? esc(i.org || "") : i.type === "equity" ? `Vested${i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}${i.source === "carta" ? " · from Carta" : ""}`
+            : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
             i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
         <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
   const assetGroups = d.groups.filter((g) => g.side === "asset" && g.total > 0);
@@ -2300,6 +2470,7 @@ async function renderNetWorth(el) {
         <div><h3>Assets</h3><table class="nw-table">${sideRows("asset")}</table></div>
         <div><h3>Liabilities</h3><table class="nw-table">${sideRows("liability") || `<tr><td class="muted">Nothing owed</td></tr>`}</table></div>
       </div></div>
+    <div class="card" id="equity-card"><div class="card-head"><h2>Equity</h2></div><div class="muted">Loading…</div></div>
     <div class="card"><div class="card-head"><h2>Home, vehicles and other assets</h2>
         <button class="btn primary" id="asset-new">Add an asset</button></div>
       
@@ -2313,6 +2484,7 @@ async function renderNetWorth(el) {
   } else {
     $("#nw-chart").innerHTML = `<div class="empty small">Today: ${fmt0(d.net)}</div>`;
   }
+  renderEquityCard($("#equity-card"), () => renderNetWorth(el));
   $("#asset-new").addEventListener("click", () => openAssetForm(null, d, el));
   $$(".asset-card").forEach((card) => {
     const a = d.assets_list.find((x) => String(x.id) === card.dataset.id);
@@ -2817,6 +2989,7 @@ async function renderSetup(el, sub) {
       Categorize new merchants during each sync when the AI is confident</label>
     ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
   </div>
+<div class="card" id="carta-card"><h2>Carta</h2><div class="muted">Loading…</div></div>
 <div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
     <p class="help">A free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast key</a> keeps home values current (Runway stays within the 50 free lookups a month).</p>
     <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
@@ -2857,6 +3030,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Restore…"; }
   });
   if ($("#plaid-card")) wirePlaidSetup();
+  if ($("#carta-card")) renderCartaCard($("#carta-card"));
   if ($("#retail-card")) renderRetailCard($("#retail-card"));
   $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
   const filterRules = () => {
