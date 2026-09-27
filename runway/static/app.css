@@ -30,6 +30,9 @@
   --flow-in: #4cc38a;
   --flow-out: #5b9bf0;
   --series-2: #f08a4b;
+  /* categorical series, in this order (validated for colorblind separation and contrast on --surface) */
+  --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;
+  --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-8: #e66767; --cat-other: #6b6a66;
   --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0;
   --radius: 16px;
   --radius-sm: 10px;
@@ -678,3 +681,31 @@ ol.steps li { margin-bottom: 6px; }
 /* Merchant logos (from Plaid, served by Runway) or the merchant's initial */
 .m-logo { width: 20px; height: 20px; border-radius: 6px; flex: none; object-fit: contain; background: #fff; }
 .m-initial { display: inline-grid; place-items: center; background: var(--surface-3); color: var(--text-2); font-size: 11px; font-weight: 700; }
+
+/* Reports: controls, stacked and grouped columns, tables you can click, the treemap */
+.report-controls { justify-content: flex-start; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; flex: none; }
+.chart-wrap.bars { position: relative; }
+.chart-wrap.bars svg { height: auto; }
+.chart-wrap .axis-t { fill: var(--text-4); font-size: 11.5px; }
+.chart-wrap .bar-hit { cursor: pointer; }
+.chart-wrap .bar-hit.on { fill: rgba(255, 255, 255, 0.04); }
+.small-chart { margin: 4px 0 8px; }
+.report-table { width: 100%; }
+.report-table td:first-child { white-space: nowrap; }
+.rt-row, .rm-row { cursor: pointer; }
+.rt-row:hover td, .rm-row:hover td, .rt-row.on td { background: var(--surface-2); }
+.rt-row:focus-visible, .rm-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.merchants-table td:first-child { position: relative; min-width: 180px; white-space: normal; }
+.rm-name { position: relative; z-index: 1; }
+.inline-bar { display: block; height: 4px; border-radius: 2px; background: var(--accent); opacity: .55; margin-top: 4px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.crumbs .btn.link { padding: 0; }
+.treemap { position: relative; }
+.treemap svg { display: block; width: 100%; height: auto; }
+.tm-block { cursor: pointer; outline: none; }
+.tm-block rect { transition: opacity .12s; }
+.tm-block:hover rect, .tm-block:focus-visible rect { opacity: .82; }
+.tm-block:focus-visible rect { stroke: var(--text-strong); stroke-width: 2; }
+.tm-name { fill: var(--on-accent); font-size: 12.5px; font-weight: 600; pointer-events: none; }
+.tm-val { fill: var(--on-accent); opacity: .8; font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; }
