@@ -50,6 +50,9 @@ jobs:
         env:
           DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://runway:runway@localhost:5432/runway' || '' }}
         run: poetry run python -m unittest discover -v tests
+      - name: Check dependencies for known vulnerabilities
+        if: matrix.database == 'sqlite'
+        run: poetry run pip install --quiet pip-audit && poetry run pip-audit
 
   version:
     needs: test

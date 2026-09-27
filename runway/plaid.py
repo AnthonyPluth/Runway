@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import db
+from . import db, secretbox
 
 HOSTS = {"sandbox": "https://sandbox.plaid.com", "production": "https://production.plaid.com"}
 HISTORY_DAYS = 730      # Plaid keeps up to 24 months of investment activity
@@ -51,6 +51,11 @@ def call(conn, path: str, body: dict) -> dict:
     client_id, secret = db.get_setting(conn, "plaid_client_id"), db.get_setting(conn, "plaid_secret")
     if not client_id or not secret:
         raise PlaidError("Add your Plaid client ID and secret in Settings first.")
+    if body.get("access_token"):   # stored encrypted (runway/secretbox.py); decrypted only to send to Plaid
+        try:
+            body = {**body, "access_token": secretbox.decrypt(body["access_token"])}
+        except secretbox.SecretError as e:
+            raise PlaidError(str(e), "RUNWAY_SECRET_KEY") from e
     payload = json.dumps({"client_id": client_id, "secret": secret, **body}).encode()
     req = urllib.request.Request(
         base_url(conn) + path, data=payload, method="POST",
@@ -132,7 +137,7 @@ def exchange(conn, public_token: str, institution: dict | None = None) -> str:
     conn.execute(
         "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
         "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, products=excluded.products, error=NULL",
-        (item_id, token, institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
+        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
          ",".join(prods)),
     )
     conn.commit()
