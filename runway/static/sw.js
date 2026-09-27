@@ -1,6 +1,6 @@
 // Runway's service worker: shows push notifications, and keeps the app's shell around so it opens without a
 // connection (with the last-loaded page). Data always comes fresh from the server; nothing from /api is cached.
-const CACHE = "runway-shell-v1";
+const CACHE = "runway-shell-v2";
 const SHELL = ["/", "/app.css", "/app.js", "/logo.svg", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {

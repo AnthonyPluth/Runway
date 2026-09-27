@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
-from . import schema
+from . import schema, secretbox
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
@@ -339,6 +339,7 @@ def init(path: str | None = None) -> None:
         if not conn.execute("SELECT 1 FROM settings WHERE key='migrated_daily_spend_off'").fetchone():
             conn.execute("UPDATE accounts SET daily_spend=0")
             conn.execute("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
+        secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
         if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
             conn.executemany(
                 "INSERT INTO categories(name, is_transfer, is_income) VALUES (?,?,?)", DEFAULT_CATEGORIES
@@ -351,10 +352,19 @@ PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
     row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return row["value"] if row and row["value"] is not None else default
+    value = row["value"] if row and row["value"] is not None else None
+    if value is not None and key in secretbox.SECRET_SETTINGS:
+        try:
+            value = secretbox.decrypt(value)
+        except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
+            print(f"Warning: {key}: {e}", flush=True)
+            value = None
+    return value if value is not None else default
 
 
 def set_setting(conn, key: str, value: str | None) -> None:
+    if value is not None and key in secretbox.SECRET_SETTINGS:
+        value = secretbox.encrypt(value)   # secrets are stored encrypted (runway/secretbox.py)
     conn.execute(
         "INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),

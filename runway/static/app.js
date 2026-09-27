@@ -2422,6 +2422,15 @@ async function syncOnVisit() {
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") syncOnVisit(); });
 
+// Signing out is a POST (so no other site can sign you out with a link); then on to the provider's sign-out page.
+$("#sign-out").addEventListener("click", async (e) => {
+  e.preventDefault();
+  try {
+    const r = await api("/auth/logout", { method: "POST" });
+    location.href = r.redirect || "/auth/signed-out";
+  } catch (err) { toast(err.message, true); }
+});
+
 // Installable app: the service worker shows notifications and keeps the app's shell for offline starts.
 if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("Service worker:", err));

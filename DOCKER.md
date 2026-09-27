@@ -57,7 +57,8 @@ If a setting is missing, the container stops with a message saying which one (se
 2. Start the container on the server, sign in, and go to Settings → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
-The backup holds your bank access and API keys; delete stray copies once you've restored it.
+The backup holds your bank access and API keys; delete stray copies once you've restored it. The server encrypts them
+again with its own key as they're restored.
 
 ## Using Postgres (optional)
 
@@ -65,6 +66,25 @@ Set `DATABASE_URL` in `.env` (e.g. `postgresql://runway:password@db-host:5432/ru
 tables on first start, and applies any schema migrations each time a new version starts. To bring your data along, restore a backup into it as above. There's a commented-out
 `db` service in `docker-compose.yml` if you want Postgres alongside Runway. Without `DATABASE_URL`, Runway keeps
 using its built-in database in `./data`.
+
+## Putting Runway on the internet
+
+Runway is built to be reachable from anywhere, as long as it's set up like this:
+
+1. **HTTPS in front.** Run it behind a reverse proxy with a certificate (Caddy, Traefik, nginx) or Tailscale Funnel,
+   and set `RUNWAY_PUBLIC_URL` to that `https://` address. Runway refuses to start with a plain `http://` internet
+   address. If the proxy runs on the same machine, publish the port on localhost only
+   (`"127.0.0.1:8765:8765"` in `docker-compose.yml`) so nothing reaches Runway around it.
+2. **Sign-in limited to you.** `OIDC_ALLOWED_EMAILS` and/or `OIDC_ALLOWED_GROUPS`; avoid `OIDC_ALLOW_ANY_USER`.
+   Turn on two-factor sign-in at your identity provider: it guards everything behind it.
+3. **A secret key.** Set `RUNWAY_SECRET_KEY` (`openssl rand -base64 32`) and keep a copy in your password manager.
+   It encrypts your saved bank access and API keys. (Without it, the key is `./data/secret.key`: back it up with the
+   database.)
+4. **Rate limiting at the proxy** (optional but good): Runway caps how many requests it handles at once, and the proxy
+   can limit requests per address, e.g. Caddy's `rate_limit` or Traefik's `RateLimit` middleware.
+5. **Backups kept private.** They contain your bank access in the clear so they restore anywhere.
+6. **Updates.** Pull new images regularly; each release is tested, and its dependencies are checked for known
+   vulnerabilities.
 
 ## Everyday
 
@@ -86,7 +106,7 @@ using its built-in database in `./data`.
 - Sessions last 14 days (`RUNWAY_SESSION_DAYS`). Signing out ends the Runway session and your provider session.
 - Runway answers only to addresses that are yours: `RUNWAY_PUBLIC_URL`'s host, local IPs, `*.local`, plain names like
   `nas`, and Tailscale names. Add others to `RUNWAY_ALLOWED_HOSTS`.
-- Use `https://` for `RUNWAY_PUBLIC_URL` when you can (a reverse proxy like Caddy or Traefik, or Tailscale).
-  Session cookies are then marked Secure.
+- Use `https://` for `RUNWAY_PUBLIC_URL` (a reverse proxy like Caddy or Traefik, or Tailscale). Session cookies are
+  then marked Secure. On an internet address Runway requires it.
 - Already sign in through a proxy (Authelia forward-auth, Cloudflare Access, oauth2-proxy)? Leave `OIDC_ISSUER`
   empty and set `RUNWAY_ALLOW_NO_AUTH=1` instead, and don't expose port 8765 except through that proxy.
