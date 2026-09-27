@@ -547,7 +547,7 @@ input.ghost::placeholder { color: var(--accent); opacity: .85; }
 /* Recurring */
 .acct-bal.pos { color: var(--good); }
 .rec-item .warn { margin: 0 4px 10px 44px; }
-.acct-edit label input, .acct-edit label select { width: 100% !important; }
+.acct-edit label input:not([type=checkbox]), .acct-edit label select { width: 100% !important; }
 .sug-row { padding: 10px 4px; }
 .sug-inner { display: flex; align-items: center; gap: 12px; }
 .sug-inner .bank-icon { width: 28px; height: 28px; border-radius: 7px; padding: 3px; font-size: 13px; }

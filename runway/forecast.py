@@ -294,7 +294,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         label = db.account_label(card)
         bank = bank_statement(conn, card, today)
         if not bank:
-            unlinked.append({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
+            unlinked.append({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2),
+                             "linked": bool(card.get("plaid_account_id"))})
             continue
         info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
@@ -334,17 +335,23 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                                "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment"})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
 
-    if unlinked:
-        names = [c["name"] for c in unlinked]
-        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    def listed(names):
+        return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    not_linked = [c["name"] for c in unlinked if not c["linked"]]
+    no_statement = [c["name"] for c in unlinked if c["linked"]]
+    if not_linked:
         waiting = conn.execute(
             "SELECT COUNT(*) FROM plaid_accounts p WHERE p.type='credit' AND p.ignored=0 AND p.plaid_account_id NOT IN "
             "(SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)").fetchone()[0]
-        these = "it" if len(names) == 1 else "them"
-        warnings.append(f"{listed} {'isn’t' if len(names) == 1 else 'aren’t'} linked through Plaid yet, so "
-                        f"{'its payments aren’t' if len(names) == 1 else 'their payments aren’t'} in the forecast. "
+        one = len(not_linked) == 1
+        warnings.append(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
+                        f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
                         + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Connections, "
-                           f"choose “Same as …” for each." if waiting else f"Link {these} to get statements and due dates."))
+                           f"choose “Same as …” for each." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."))
+    if no_statement:
+        one = len(no_statement) == 1
+        warnings.append(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
+                        "in the forecast. It usually arrives with the next sync.")
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute("SELECT key, amount FROM overrides")}
