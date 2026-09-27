@@ -34,6 +34,7 @@ import jwt
 from . import db
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
+MAX_PENDING = 1000         # unfinished sign-ins kept at once
 _discovery: dict = {}
 _jwks: dict = {}
 
@@ -63,6 +64,20 @@ def config() -> dict:
     }
 
 
+def local_host(host: str) -> bool:
+    """Names and addresses that only make sense at home: this machine, private and Tailscale addresses, .local and
+    similar names, and bare names like "nas". Plain http is tolerable there; anywhere else it isn't."""
+    import ipaddress
+    host = host.strip("[]").lower()
+    if host == "localhost" or "." not in host:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private or ip in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        return host.endswith((".local", ".lan", ".home.arpa", ".internal", ".ts.net"))
+
+
 def enabled() -> bool:
     return bool(os.environ.get("OIDC_ISSUER"))
 
@@ -76,6 +91,10 @@ def check_config() -> list[str]:
             problems.append(f"{env} is not set")
     if c["public_url"] and not c["public_url"].startswith(("http://", "https://")):
         problems.append("RUNWAY_PUBLIC_URL must start with http:// or https://")
+    elif (c["public_url"].startswith("http://") and not local_host(urllib.parse.urlsplit(c["public_url"]).hostname or "")
+          and os.environ.get("RUNWAY_ALLOW_INSECURE_HTTP") != "1"):
+        problems.append("RUNWAY_PUBLIC_URL must use https:// for an address reachable from the internet (put Runway behind "
+                        "a reverse proxy with a certificate), or set RUNWAY_ALLOW_INSECURE_HTTP=1 if you really mean it")
     if not (c["emails"] or c["groups"] or c["any_user"]):
         problems.append("set OIDC_ALLOWED_EMAILS and/or OIDC_ALLOWED_GROUPS (or OIDC_ALLOW_ANY_USER=1) so only you get in")
     return problems
@@ -131,15 +150,29 @@ def start_login(conn, next_path: str = "/") -> tuple[str, str]:
     c, d = config(), discovery()
     state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     challenge = _b64e(hashlib.sha256(verifier.encode()).digest())
-    if not next_path.startswith("/") or next_path.startswith("//"):
-        next_path = "/"
+    next_path = safe_next(next_path)
     conn.execute("DELETE FROM auth_pending WHERE created < ?", (time.time() - LOGIN_TTL,))
+    # Anyone can start a sign-in, so keep the table of unfinished ones bounded (the oldest go first).
+    conn.execute("DELETE FROM auth_pending WHERE state IN (SELECT state FROM auth_pending ORDER BY created DESC LIMIT -1 OFFSET ?)"
+                 if not conn.postgres else
+                 "DELETE FROM auth_pending WHERE state IN (SELECT state FROM auth_pending ORDER BY created DESC OFFSET ?)",
+                 (MAX_PENDING - 1,))
     conn.execute("INSERT INTO auth_pending(state, nonce, verifier, next, created) VALUES (?,?,?,?,?)",
                  (state, nonce, verifier, next_path, time.time()))
     params = {"response_type": "code", "client_id": c["client_id"], "redirect_uri": c["redirect_uri"],
               "scope": c["scopes"], "state": state, "nonce": nonce,
               "code_challenge": challenge, "code_challenge_method": "S256"}
     return d["authorization_endpoint"] + ("&" if "?" in d["authorization_endpoint"] else "?") + urllib.parse.urlencode(params), state
+
+
+def safe_next(next_path: str | None) -> str:
+    """Where to go after signing in: a path on this site only. Browsers read a backslash as a slash, so "/\\evil.com"
+    would leave the site like "//evil.com" does; control characters are refused too."""
+    p = next_path or "/"
+    if (not p.startswith("/") or p.startswith("//") or "\\" in p or any(ord(ch) < 32 or ord(ch) == 127 for ch in p)
+            or len(p) > 2000):
+        return "/"
+    return p
 
 
 def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str]:
@@ -194,7 +227,7 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
                  (_hash(token), who["sub"], who["email"], who["name"], now, now + c["session_days"] * 86400,
                   tokens.get("id_token")))
     remember_user(conn, who["sub"], who["email"], who["name"], info.get("given_name"), now)
-    return token, row["next"] or "/"
+    return token, safe_next(row["next"])
 
 
 def first_name(name: str | None, email: str | None, given: str | None = None) -> str:

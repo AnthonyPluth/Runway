@@ -110,8 +110,8 @@ class OIDCTests(unittest.TestCase):
             os.environ.pop(k, None)
         cls.tmp.cleanup()
 
-    def req(self, path, cookies=None, method="GET"):
-        r = urllib.request.Request(self.base + path, method=method)
+    def req(self, path, cookies=None, method="GET", headers=None):
+        r = urllib.request.Request(self.base + path, method=method, headers=headers or {})
         if cookies:
             r.add_header("Cookie", "; ".join(f"{k}={v}" for k, v in cookies.items()))
         opener = urllib.request.build_opener(NoRedirect)
@@ -158,9 +158,16 @@ class OIDCTests(unittest.TestCase):
         self.assertIn("Anthony", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
         with db.session() as conn:   # only a hash of the token is stored
             self.assertIsNone(conn.execute("SELECT 1 FROM auth_sessions WHERE token_hash=?", (ck["runway_session"],)).fetchone())
-        status, loc, ck2, _ = self.req("/auth/logout", session)
+        # Signing out takes a POST from Runway's own page: a link, or a POST without the app's header, does nothing.
+        self.assertEqual(self.req("/auth/logout", session)[0], 405)
+        self.assertEqual(self.req("/auth/logout", session, "POST")[0], 403)
+        self.assertEqual(self.req("/auth/logout", session, "POST", {"X-Runway": "1", "Origin": "https://evil.example"})[0], 403)
+        self.assertEqual(self.req("/api/state", session)[0], 200)
+        status, _, ck2, body = self.req("/auth/logout", session, "POST", {"X-Runway": "1"})
+        loc = json.loads(body)["redirect"]
         self.assertTrue(loc.startswith(f"http://127.0.0.1:{self.idp.server_port}/logout?"))
         self.assertIn("id_token_hint", loc)
+        self.assertEqual(ck2.get("runway_session"), "")
         self.assertEqual(self.req("/api/state", session)[0], 401)
 
     def test_group_membership_is_enough(self):
