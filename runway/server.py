@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin, splits
+from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, retail, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -81,6 +81,10 @@ def run_sync() -> dict:
                     result["errors"] += pb["errors"]
                 counts = categorize.categorize(conn, result["new"])
                 recurring.auto_match(conn)
+                try:   # new card transactions may be Amazon or Target orders the extension already sent
+                    retail.match_and_apply(conn)
+                except Exception:
+                    traceback.print_exc()
                 if conn.execute("SELECT 1 FROM inv_accounts WHERE source='simplefin'").fetchone():
                     try:
                         refresh_prices(conn)
@@ -388,8 +392,10 @@ def api_transactions(conn, q, _b):
     )
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
+    orders = retail.for_transactions(conn, [t["id"] for t in items if t["amount"] < 0])
     for t in items:
         t["splits"] = parts.get(t["id"], [])
+        t["retail"] = orders.get(t["id"])
     total = conn.execute(
         f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
     ).fetchone()[0]
@@ -419,6 +425,146 @@ def api_tx_split(conn, _q, body, tx_id):
 def api_tx_accept(conn, _q, _b, tx_id):
     categorize.accept_suggestion(conn, tx_id)
     return {"ok": True}
+
+
+# ------------------------------------------------------------------------------------------------ Amazon and Target
+
+def api_retail(conn, _q, _b):
+    return retail.status(conn)
+
+
+def api_retail_token(conn, _q, _b):
+    """A new key for the browser extension; shown once."""
+    return {"token": retail.new_token(conn)}
+
+
+def api_retail_token_remove(conn, _q, _b):
+    retail.remove_token(conn)
+    return {"ok": True}
+
+
+def api_retail_settings(conn, _q, body):
+    if "ai" in body:
+        db.set_setting(conn, "retail_ai", "1" if body.get("ai") else "0")
+    return {"ok": True}
+
+
+def api_retail_match(conn, _q, _b):
+    """Categorize items still waiting (with the AI, if set up), then match and split again."""
+    items = retail.categorize_items(conn)
+    out = retail.match_and_apply(conn)
+    for ch in conn.execute("SELECT id FROM retail_charges WHERE tx_id IS NOT NULL AND applied IS NOT NULL").fetchall():
+        r = retail.apply(conn, ch["id"])
+        if r in ("split", "category"):
+            out[r] += 1
+    out["items"] = items
+    return out
+
+
+def api_retail_order(conn, _q, _b, oid):
+    try:
+        return retail.order_detail(conn, oid)
+    except retail.RetailError as e:
+        raise ApiError(str(e), 404)
+
+
+def api_retail_item(conn, _q, body, item_id):
+    try:
+        return retail.set_item_category(conn, int(item_id), body.get("category") or "", body.get("remember", True) is not False)
+    except retail.RetailError as e:
+        raise ApiError(str(e))
+
+
+def api_retail_unlink(conn, _q, _b, charge_id):
+    retail.unlink(conn, charge_id)
+    return {"ok": True}
+
+
+def api_retail_link(conn, _q, body, charge_id):
+    try:
+        return {"result": retail.link(conn, charge_id, body.get("tx_id") or "")}
+    except retail.RetailError as e:
+        raise ApiError(str(e))
+
+
+def api_retail_apply(conn, _q, _b, charge_id):
+    """Split this charge's transaction by its items even if you had categorized it yourself."""
+    return {"result": retail.apply(conn, charge_id, force=True)}
+
+
+def api_retail_candidates(conn, _q, _b, charge_id):
+    try:
+        return retail.candidates(conn, charge_id)
+    except retail.RetailError as e:
+        raise ApiError(str(e), 404)
+
+
+# The browser extension's calls (/api/ext/...), signed with its key rather than a sign-in. Each takes one page the
+# extension read from the store, and says what to fetch next.
+TARGET_DETAIL_URLS = {
+    # {base} is Target's order API as the extension found it on target.com, {key} its API key, {order} the order.
+    "store": ["{base}/{order}/store_order_details?key={key}"],
+    "online": ["{base}/{order}/orders?key={key}", "{base}/orders/{order}?key={key}"],
+}
+
+
+def ext_start(conn, body):
+    r = body.get("retailer")
+    if r not in retail.RETAILERS:
+        raise retail.RetailError("Unknown store")
+    return {"since": retail.since(conn, r), "detail_urls": TARGET_DETAIL_URLS if r == "target" else None,
+            "version": os.environ.get("RUNWAY_VERSION") or "dev"}
+
+
+def ext_amazon_transactions(conn, body):
+    return retail.amazon_transactions(conn, str(body.get("html") or ""))
+
+
+def ext_amazon_order(conn, body):
+    return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""))
+
+
+def ext_target_history(conn, body):
+    return retail.target_history(conn, body.get("data"), body.get("purchase_type"))
+
+
+def ext_target_order(conn, body):
+    return retail.target_order(conn, str(body.get("order_number") or ""), body.get("data"))
+
+
+def ext_finish(conn, body):
+    return retail.finish(conn, body.get("retailer"))
+
+
+EXT_ROUTES = {
+    "/api/ext/ping": lambda conn, body: {"ok": True},
+    "/api/ext/start": ext_start,
+    "/api/ext/amazon/transactions": ext_amazon_transactions,
+    "/api/ext/amazon/order": ext_amazon_order,
+    "/api/ext/target/history": ext_target_history,
+    "/api/ext/target/order": ext_target_order,
+    "/api/ext/finish": ext_finish,
+}
+MAX_EXT_BODY = 16 * 1024 * 1024      # one store page (Amazon's order pages are large)
+EXTENSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
+
+
+def extension_zip() -> bytes | None:
+    """The browser extension (extension/ next to runway/), zipped into a folder to load unpacked."""
+    import io
+    import zipfile
+    if not os.path.isfile(os.path.join(EXTENSION_DIR, "manifest.json")):
+        return None
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, dirs, files in os.walk(EXTENSION_DIR):
+            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+            for f in sorted(files):
+                if f.startswith("."):
+                    continue
+                full = os.path.join(root, f)
+                z.write(full, os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR)))
+    return buf.getvalue()
 
 
 def api_categories(conn, _q, _b):
@@ -1175,6 +1321,17 @@ ROUTES = [
     ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),
     ("POST", "/api/settings", api_settings),
+    ("GET", "/api/retail", api_retail),
+    ("POST", "/api/retail/token", api_retail_token),
+    ("POST", "/api/retail/token/remove", api_retail_token_remove),
+    ("POST", "/api/retail/settings", api_retail_settings),
+    ("POST", "/api/retail/match", api_retail_match),
+    ("GET", "/api/retail/orders/{id}", api_retail_order),
+    ("POST", "/api/retail/items/{id}", api_retail_item),
+    ("POST", "/api/retail/charges/{id}/unlink", api_retail_unlink),
+    ("POST", "/api/retail/charges/{id}/link", api_retail_link),
+    ("POST", "/api/retail/charges/{id}/apply", api_retail_apply),
+    ("GET", "/api/retail/charges/{id}/candidates", api_retail_candidates),
     ("POST", "/api/recategorize", api_recategorize),
 ]
 
@@ -1242,7 +1399,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
-        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        # The browser extension reads the answers to its own calls (it has its key, and permission for this site).
+        self.send_header("Cross-Origin-Resource-Policy",
+                         "cross-origin" if getattr(self, "_ext_call", False) else "same-origin")
         self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
         if oidc.config()["secure_cookie"]:   # served over https: tell browsers never to use plain http
             self.send_header("Strict-Transport-Security", "max-age=31536000")
@@ -1356,6 +1515,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str) -> None:
         self._started, self._responded = time.monotonic(), False
+        self._ext_call = False
         try:
             self._route(method)
         except Exception as e:   # never show internals; never leave the browser hanging
@@ -1393,6 +1553,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, b"ok", "text/plain")
         if not self._host_ok():
             return self._send(403, b"Runway doesn't recognise this address. Add it to RUNWAY_ALLOWED_HOSTS.", "text/plain")
+        if url.path.startswith("/api/ext/"):   # the browser extension: its own key instead of a sign-in
+            return self._extension(method, url.path)
         if method != "GET" and not self._same_site():
             return self._json(403, {"error": "forbidden"})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
@@ -1423,6 +1585,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/gzip")
             self.send_header("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self._security_headers()
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+            return
+        if method == "GET" and url.path == "/api/retail/extension.zip":
+            data = extension_zip()
+            if data is None:
+                return self._json(404, {"error": "The extension isn't included with this copy of Runway."})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="runway-orders-extension.zip"')
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self._security_headers()
@@ -1501,6 +1677,37 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
+
+    def _extension(self, method: str, path: str) -> None:
+        """A call from Runway's browser extension. It carries the key made under Settings → Connections (a bearer
+        token, which a web page can't send on your behalf), so it needs no sign-in or same-site checks."""
+        self._ext_call = True
+        fn = EXT_ROUTES.get(path)
+        if method != "POST" or not fn:
+            return self._json(404, {"error": "Not found"})
+        with db.session() as conn:
+            ok = retail.check_token(conn, self.headers.get("Authorization"))
+        if not ok:
+            self.close_connection = True
+            return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Connections."})
+        n = self._body_length(MAX_EXT_BODY)
+        if n is None:
+            return
+        try:
+            body = json.loads(self.rfile.read(n).decode() or "{}") if n else {}
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._json(400, {"error": "Bad JSON"})
+        if not isinstance(body, dict):
+            return self._json(400, {"error": "Bad JSON"})
+        try:
+            with db.session() as conn:
+                return self._json(200, fn(conn, body))
+        except retail.RetailError as e:
+            return self._json(400, {"error": str(e)})
+        except sqlalchemy.exc.OperationalError as e:
+            if "locked" in str(e):
+                return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
+            return self._error(e)
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")

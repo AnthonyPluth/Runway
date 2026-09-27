@@ -1,0 +1,20 @@
+:root { color-scheme: dark; --bg: #121212; --surface: #1b1b1a; --border: #2c2c2a; --text: #ececea; --text-2: #a8a7a2;
+  --accent: #5b9bf0; --good: #4cc38a; --bad: #ef6b6b; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+main { padding: 16px; }
+h1 { font-size: 16px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+h1 img { width: 20px; height: 20px; }
+p, .help { color: var(--text-2); margin: 0 0 12px; }
+label { display: block; margin: 0 0 12px; color: var(--text-2); }
+label.inline { display: flex; gap: 8px; align-items: center; }
+input[type=text], input[type=url], input[type=password] { display: block; width: 100%; box-sizing: border-box; margin-top: 4px;
+  padding: 8px 10px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; font: inherit; }
+button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #0e1116; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.store { border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.store b { display: block; }
+.ok { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--text-2); font-size: 12px; }
+a { color: #7fb0f5; }
