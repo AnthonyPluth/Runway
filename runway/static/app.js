@@ -581,6 +581,7 @@ async function renderTxPage(el, mode) {
       $(".keep", tr)?.addEventListener("click", () => save(tr, $("select.cat", tr).value));
       $(".rec-btn", tr).addEventListener("click", () => openRecurringPicker(tr, recurringItems, load));
       $(".split-btn", tr).addEventListener("click", () => openSplitEditor(tr, byId[tr.dataset.id], load));
+      $(".order-tag", tr)?.addEventListener("click", () => openOrderRow(tr, byId[tr.dataset.id].retail.order_id, load));
     });
   };
 
@@ -630,14 +631,15 @@ function txRow(t, review) {
   return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}" ${split ? 'class="has-split"' : ""}>
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
     <td><div class="merchant">${esc(t.payee || t.description)}
-        <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button></div>
+        <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button>
+        ${t.retail ? `<button class="tag order-tag" title="See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order">${orderLabel(t.retail)}</button>` : ""}</div>
       <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div>
       <div class="desc show-sm">${acctLabel(t.account_id, t.account_name)}</div></td>
     <td class="muted hide-sm">${acctLabel(t.account_id, t.account_name)}</td>
     <td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td>
     <td style="white-space:nowrap">${split
       ? `<span class="tag split">split</span><span class="split-parts">${t.splits.map((s) =>
-          `${esc(s.category)} ${fmt(Math.abs(s.amount))}`).join(" · ")}</span>`
+          `<span ${s.note ? `title="${esc(s.note)}"` : ""}>${esc(s.category)} ${fmt(Math.abs(s.amount))}</span>`).join(" · ")}</span>`
       : `<select class="cat ${review ? "" : "ghost"}" aria-label="Category">${categoryOptions(t.category)}</select>`}
       ${suggestion ? `<span class="tag ai" title="AI suggestion confidence">${Math.round((t.confidence || 0) * 100)}%</span>
         <button class="btn link keep" title="Keep the suggested category">✓ Keep</button>` : ""}
@@ -651,7 +653,7 @@ function openSplitEditor(tr, t, reload) {
   if (tr.nextElementSibling?.classList.contains("split-edit")) return;
   const sign = t.amount < 0 ? -1 : 1;
   const total = Math.abs(t.amount);
-  const existing = (t.splits || []).map((s) => ({ category: s.category, amount: Math.abs(s.amount).toFixed(2) }));
+  const existing = (t.splits || []).map((s) => ({ category: s.category, amount: Math.abs(s.amount).toFixed(2), note: s.note }));
   const parts = existing.length ? existing : [{ category: t.category || "", amount: total.toFixed(2) }, { category: "", amount: "" }];
   const row = document.createElement("tr");
   row.className = "split-edit";
@@ -718,6 +720,172 @@ function openSplitEditor(tr, t, reload) {
   $(".split-cat", rows)?.focus();
 }
 
+// ------------------------------------------------------------------------------------------------ Amazon and Target orders
+
+const STORES = { amazon: "Amazon", target: "Target" };
+const orderLabel = (o) => `${STORES[o.retailer] || o.retailer}${o.channel === "store" ? " in store" : ""}${o.items ? ` · ${o.items} item${o.items === 1 ? "" : "s"}` : ""}`;
+const ITEM_SOURCES = { manual: "you picked", memory: "as before", ai: "AI", department: "store's department" };
+
+// An order under its transaction (or in Settings): its items, each with a category you can change (remembered for
+// the next time you buy it), and the card charges it was paid with.
+function openOrderRow(tr, orderId, reload) {
+  const next = tr.nextElementSibling;
+  if (next?.classList.contains("order-edit")) { next.remove(); return; }
+  const row = document.createElement("tr");
+  row.className = "order-edit";
+  row.innerHTML = `<td colspan="5"><div class="order-box">Loading…</div></td>`;
+  tr.after(row);
+  renderOrder($(".order-box", row), orderId, () => { reload?.(); });
+}
+
+async function renderOrder(box, orderId, changed) {
+  let o;
+  try { o = await api(`/api/retail/orders/${encodeURIComponent(orderId)}`); }
+  catch (err) { box.innerHTML = `<div class="muted">${esc(err.message)}</div>`; return; }
+  const store = STORES[o.retailer] || o.retailer;
+  const totals = [o.subtotal != null ? `items ${fmt(o.subtotal)}` : "", o.shipping ? `shipping ${fmt(o.shipping)}` : "",
+    o.tax != null ? `tax ${fmt(o.tax)}` : ""].filter(Boolean).join(" · ");
+  box.innerHTML = `<div class="order-head"><b>${esc(store)} ${o.channel === "store" ? "purchase" : "order"} ${esc(o.order_number)}</b>
+      <span class="muted small">${o.placed ? fmtDate(o.placed, { month: "short", day: "numeric", year: "numeric" }) : ""}
+        ${o.total != null ? ` · ${fmt(o.total)}` : ""}${totals ? ` (${totals})` : ""}${o.payment ? ` · ${esc(o.payment)}` : ""}</span>
+      <a class="btn link" href="${esc(o.url)}" target="_blank" rel="noopener">Open on ${esc(o.retailer === "amazon" ? "amazon.com" : "target.com")}</a></div>
+    ${o.items.length ? `<div class="order-items">${o.items.map((i) => `<div class="order-item" data-id="${i.id}">
+        <span class="order-title" title="${esc(i.title)}">${i.quantity > 1 ? `<span class="muted">${i.quantity}×</span> ` : ""}${esc(i.title)}</span>
+        <span class="num muted">${fmt(i.amount)}</span>
+        <select class="item-cat ghost" aria-label="Category for ${esc(i.title)}">${categoryOptions(i.category)}</select>
+        <span class="muted small item-src">${i.category ? esc(ITEM_SOURCES[i.category_source] || "") : "uses the transaction's category"}</span></div>`).join("")}</div>
+      <p class="help small">A category you pick here is used for this item in every order, now and next time.</p>`
+    : `<p class="muted">${o.details ? "No items in this order." : "Runway hasn't read this order's items yet; they come with the next import."}</p>`}
+    <div class="order-charges">${o.charges.map((c) => `<div class="order-charge" data-id="${esc(c.id)}">
+        <span class="muted">${c.amount > 0 ? "Refund" : "Charged"} ${fmtDate(c.date)} · ${fmt(Math.abs(c.amount))}${c.payment ? ` · ${esc(c.payment)}` : ""}</span>
+        ${c.tx_id ? `<span>→ ${esc(c.payee || c.description || "")} ${fmtDate(c.posted)} <span class="muted">${esc(c.account_name || "")}</span>
+            ${c.applied ? `<span class="tag">${c.applied === "split" ? "split by items" : "categorized by items"}</span>` : ""}</span>
+          <span class="order-actions">${c.amount < 0 && !c.applied && o.items.length ? `<button class="btn link ch-apply" title="Replace the category you set with the order's items">Split by items</button>` : ""}
+            <button class="btn link ch-unlink" title="This charge isn't that transaction">Not this transaction</button></span>`
+        : `<span class="muted">not matched to a transaction</span><span class="order-actions"><button class="btn link ch-pick">Pick one…</button></span>`}
+      </div>`).join("") || `<p class="muted small">No card charges for this order yet.</p>`}</div>`;
+
+  const redo = () => { changed?.(); renderOrder(box, orderId, changed); };
+  $$(".item-cat", box).forEach((sel) => sel.addEventListener("change", async () => {
+    if (!sel.value) return;
+    try {
+      const r = await api(`/api/retail/items/${sel.closest("[data-id]").dataset.id}`, { method: "POST", body: { category: sel.value } });
+      toast(r.orders > 1 ? `Saved · used in ${r.orders} orders` : "Saved");
+      redo();
+    } catch (err) { toast(err.message, true); }
+  }));
+  $$(".order-charge", box).forEach((line) => {
+    const id = encodeURIComponent(line.dataset.id);
+    $(".ch-unlink", line)?.addEventListener("click", async () => {
+      try { await api(`/api/retail/charges/${id}/unlink`, { method: "POST" }); toast("Unmatched, and the transaction is back as it was"); redo(); }
+      catch (err) { toast(err.message, true); }
+    });
+    $(".ch-apply", line)?.addEventListener("click", async () => {
+      try { await api(`/api/retail/charges/${id}/apply`, { method: "POST" }); toast("Split by items"); redo(); }
+      catch (err) { toast(err.message, true); }
+    });
+    $(".ch-pick", line)?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const list = await api(`/api/retail/charges/${id}/candidates`).catch(() => []);
+      const pick = document.createElement("div");
+      pick.className = "order-pick";
+      pick.innerHTML = list.length ? list.map((t) => `<button class="btn link" data-tx="${esc(t.id)}">${fmtDate(t.posted)} · ${esc(t.payee || t.description)} · ${fmt(t.amount)}
+          <span class="muted">${esc(t.account_name)}</span></button>`).join("") : `<span class="muted small">No transactions near that date and amount.</span>`;
+      line.after(pick);
+      $$("[data-tx]", pick).forEach((b) => b.addEventListener("click", async () => {
+        try { await api(`/api/retail/charges/${id}/link`, { method: "POST", body: { tx_id: b.dataset.tx } }); toast("Matched"); redo(); }
+        catch (err) { toast(err.message, true); }
+      }));
+    });
+  });
+}
+
+async function renderRetailCard(box) {
+  let r;
+  try { r = await api("/api/retail"); } catch (err) { box.innerHTML = `<h2>Amazon and Target orders</h2><p class="muted">${esc(err.message)}</p>`; return; }
+  const storeLine = (k) => {
+    const s = r.stores[k];
+    if (!s.last && !s.orders) return `<div class="tidy-row retail-row"><span class="tidy-main"><b>${esc(s.name)}</b></span><span class="muted small">not imported yet</span></div>`;
+    return `<div class="tidy-row retail-row"><span class="tidy-main"><b>${esc(s.name)}</b></span>
+      <span class="muted small">${s.orders} order${s.orders === 1 ? "" : "s"} · ${s.matched} charge${s.matched === 1 ? "" : "s"} matched
+        ${s.unmatched ? ` · <span class="warn-text" title="Charges with no transaction: paid with a card that isn't in Runway, or not posted yet">${s.unmatched} not matched</span>` : ""}
+        ${s.last ? ` · imported ${esc(relTime(s.last))}` : ""}</span></div>`;
+  };
+  box.innerHTML = `<h2>Amazon and Target orders <span class="muted small">optional, via the Runway browser extension</span></h2>
+    <p class="help">Runway matches each Amazon or Target charge to its order (online, or in store with your Target account) and
+      splits the transaction by what you bought. Neither store has an API for this, so a small extension in your browser reads your
+      orders with the sign-in you already have there and sends them only to Runway.</p>
+    <ol class="help steps">
+      <li><a href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
+        <code>chrome://extensions</code>, turn on Developer mode and choose <b>Load unpacked</b>.</li>
+      <li>Give it Runway's address (${esc(location.origin)}) and a key:
+        ${r.token ? `<span class="muted">key made ${esc(relTime(r.token_created))}</span> <button class="btn link" id="rt-new">Make a new key</button>
+          <button class="btn link" id="rt-remove">Remove</button>` : `<button class="btn" id="rt-new">Make a key</button>`}
+        <div id="rt-shown"></div></li>
+      <li>Stay signed in to Amazon and Target in that browser, and use the extension's <b>Import</b> button.</li>
+    </ol>
+    <div class="tidy-list">${storeLine("amazon")}${storeLine("target")}</div>
+    <div class="form-row" style="margin-top:10px">
+      ${STATE.has_api_key ? `<label class="inline"><input type="checkbox" id="rt-ai" ${r.ai ? "checked" : ""}> Categorize items with AI
+        <span class="muted small">(only item names and prices are sent)</span></label>`
+        : `<span class="help small">Add an OpenRouter key below and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>`}
+      ${r.recent.length ? `<button class="btn" id="rt-match">Match and split again</button>` : ""}
+    </div>
+    ${r.recent.length ? `<details class="retail-recent"><summary class="small">Recent orders</summary>
+      <div class="tidy-list">${r.recent.map((o) => `<div class="retail-order">
+        <button class="order-open" data-id="${esc(o.id)}">
+          <span class="muted small">${o.placed ? fmtDate(o.placed) : ""}</span>
+          <span class="order-name">${esc(orderLabel(o))} <span class="muted small">${esc(o.order_number)}</span></span>
+          <span class="num">${o.total != null ? fmt(o.total) : ""}</span>
+          <span class="small ${o.charges && o.matched === o.charges ? "muted" : "warn-text"}">${!o.details ? "items not read"
+            : !o.charges ? "no charge" : o.matched === o.charges ? "matched" : `${o.charges - o.matched} not matched`}</span></button>
+        <div class="order-box" hidden></div></div>`).join("")}</div></details>` : ""}`;
+
+  const again = () => renderRetailCard(box);
+  $("#rt-new", box)?.addEventListener("click", async (e) => {
+    if (r.token && !confirmInline(e.currentTarget, "Replace the key? The extension will need the new one")) return;
+    try {
+      const { token } = await api("/api/retail/token", { method: "POST" });
+      await again();
+      $("#rt-shown", box).innerHTML = `<div class="form-row"><input id="rt-key" readonly value="${esc(token)}" style="width:340px">
+        <button class="btn" id="rt-copy">Copy</button><span class="muted small">Shown once: paste it into the extension's options now.</span></div>`;
+      $("#rt-copy", box).addEventListener("click", () => { navigator.clipboard?.writeText(token).then(() => toast("Copied"), () => {}); $("#rt-key", box).select(); });
+      $("#rt-key", box).select();
+    } catch (err) { toast(err.message, true); }
+  });
+  $("#rt-remove", box)?.addEventListener("click", async (e) => {
+    if (!confirmInline(e.currentTarget, "Remove? The extension stops working")) return;
+    await api("/api/retail/token/remove", { method: "POST" }); toast("Key removed"); again();
+  });
+  $("#rt-ai", box)?.addEventListener("change", async (e) => {
+    await api("/api/retail/settings", { method: "POST", body: { ai: e.target.checked } }); toast("Saved");
+  });
+  $("#rt-match", box)?.addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.textContent = "Working…";
+    try {
+      const out = await api("/api/retail/match", { method: "POST" });
+      toast(`${out.matched} newly matched · ${out.split} split · ${out.category} categorized`);
+      refreshState(); again();
+    } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Match and split again"; }
+  });
+  $$(".order-open", box).forEach((b) => b.addEventListener("click", () => {
+    const panel = b.nextElementSibling;
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) { panel.innerHTML = "Loading…"; renderOrder(panel, b.dataset.id, null); }
+  }));
+}
+
+function relTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  const s = (Date.now() - d) / 1000;
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} hours ago`;
+  return fmtDate(d.toISOString().slice(0, 10), { month: "short", day: "numeric", year: "numeric" });
+}
+
 // Link a transaction to a recurring item, start a new one from it, or mark it as not recurring.
 function openRecurringPicker(tr, items, reload) {
   const btn = $(".rec-btn", tr);
@@ -756,12 +924,12 @@ async function loadAiLog() {
   if (!$("#ai-log-body")) return;
   const last = rows[0];
   $("#ai-log-sum").textContent = last
-    ? `· last ${last.purpose === "review" ? "run" : "automatic run"} ${new Date(last.at.replace(" ", "T")).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}: ${last.ok ? `${last.answered} of ${last.merchants} suggested` : "failed"}`
+    ? `· last ${last.purpose === "review" ? "run" : last.purpose === "orders" ? "order items run" : "automatic run"} ${new Date(last.at.replace(" ", "T")).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}: ${last.ok ? `${last.answered} of ${last.merchants} suggested` : "failed"}`
     : "· nothing yet";
   body.innerHTML = rows.length ? `<table class="ai-log-table"><tr><th>When</th><th>What</th><th>Model</th><th class="num">Result</th><th class="num">Time</th></tr>
     ${rows.map((r) => `<tr class="${r.ok ? "" : "ai-fail"}">
       <td style="white-space:nowrap">${esc(new Date(r.at.replace(" ", "T")).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }))}</td>
-      <td>${r.purpose === "review" ? "Suggest button" : "Automatic, during sync"}<div class="desc ai-msg">${r.ok ? "" : "▲ "}${esc(r.message || "")}</div>
+      <td>${r.purpose === "review" ? "Suggest button" : r.purpose === "orders" ? "Amazon and Target items" : "Automatic, during sync"}<div class="desc ai-msg">${r.ok ? "" : "▲ "}${esc(r.message || "")}</div>
         ${r.reply ? `<details class="ai-reply"><summary>What the model said</summary><pre>${esc(r.reply)}</pre></details>` : ""}</td>
       <td><code>${esc(r.model || "")}</code></td>
       <td class="num">${r.ok ? `${r.answered}/${r.merchants}` : "error"}</td>
@@ -2233,6 +2401,7 @@ async function renderSetup(el, sub) {
     </details>
     <p class="help" id="pl-session">${plaidSessionLine()}</p>
   </div>
+<div class="card" id="retail-card"><h2>Amazon and Target orders</h2><div class="muted">Loading…</div></div>
 <div class="card"><h2>AI categorization <span class="muted small">optional, via OpenRouter</span></h2>
     <p class="help">Only the date, amount, merchant and account type of each transaction are sent.</p>
     <div class="form-row">
@@ -2284,6 +2453,7 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Restore…"; }
   });
   if ($("#plaid-card")) wirePlaidSetup();
+  if ($("#retail-card")) renderRetailCard($("#retail-card"));
   $("#rules-box")?.addEventListener("toggle", (e) => { rulesOpen = e.currentTarget.open; });
   const filterRules = () => {
     const q = ($("#rule-filter")?.value || "").trim().toLowerCase();
