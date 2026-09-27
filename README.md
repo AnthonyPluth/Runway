@@ -80,6 +80,11 @@ plain Python with a handful of well-known libraries.
   categories when nothing fits. Every AI call is logged so you can see what happened.
 - **Split transactions:** a $100 run to Target can be $60 Groceries and $40 Shopping. Budgets, reports and category
   filters count each part on its own; pick a single category again and the transaction goes back together.
+- **Amazon and Target orders:** a small browser extension reads your Amazon orders and your Target online orders and
+  in-store purchases, with the sign-in already in your browser (neither store has an API for this), and Runway splits
+  each card charge by what you bought: tax and shipping shared out, each Amazon shipment charged on its own matched to
+  its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for
+  the next time you buy it. See [extension/README.md](extension/README.md).
 - Categories with one level of subcategories, a review queue for anything uncategorized, and search and filters.
 
 ### Budgets and reports
@@ -257,6 +262,10 @@ were added are upgraded in place.
 - **Browser protections:** a strict Content-Security-Policy (only Runway's own scripts, with a per-page nonce, plus
   Plaid Link), no framing, `Referrer-Policy: no-referrer`, HSTS over HTTPS. State-changing requests need Runway's own
   header and are refused from other sites; signing out is a POST.
+- **The browser extension** (Amazon and Target orders) never sees your store passwords: it reads orders with the
+  sign-in in your browser and sends them only to your Runway, with a key you make in Settings (only its hash is kept;
+  it opens nothing but the extension's own calls, which can only add orders). Item names and prices go to the AI only
+  if you've turned it on.
 - **Hardened server:** request size limits, a timeout for slow clients, a cap on requests handled at once, and errors
   that never show internals (they log a reference instead). One access-log line per request, without query strings.
 - The container runs as an unprivileged user without extra capabilities, and secrets (`.env`, `data/`, backups) are

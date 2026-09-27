@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Runway orders</title><link rel="stylesheet" href="ui.css">
+<style>body { width: 320px; }</style></head>
+<body><main>
+  <h1><img src="icons/icon-32.png" alt="">Runway orders</h1>
+  <div id="setup" hidden><p>Set your Runway address and key first.</p><button class="primary" id="open-options">Open options</button></div>
+  <div id="ready" hidden>
+    <div class="store" data-store="amazon"><b>Amazon</b><span class="muted result">Not imported yet</span></div>
+    <div class="store" data-store="target"><b>Target</b><span class="muted result">Not imported yet</span></div>
+    <p id="progress" class="muted" hidden></p>
+    <div class="row">
+      <button class="primary" data-import="all">Import both</button>
+      <button data-import="amazon">Amazon</button>
+      <button data-import="target">Target</button>
+    </div>
+    <p class="muted">Stay signed in to Amazon and Target in this browser. Each import opens the store in a background tab and closes it when done.
+      <a href="#" id="options-link">Options</a></p>
+  </div>
+</main><script src="popup.js"></script></body></html>

@@ -12,6 +12,7 @@ dependencies = [
     "pywebpush (>=2.0,<3.0)",            # push notifications (VAPID + encrypted payloads)
     "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
     "holidays (>=0.60,<1.0)",             # bank holidays, for when payments actually land
+    "amazon-orders (>=4.6,<5.0)",       # reading Amazon order pages your browser fetched (see extension/),
 ]
 
 [tool.poetry]
