@@ -79,6 +79,9 @@ using its built-in database in `./data`.
 - Installing Runway on an iPhone and push notifications both need `RUNWAY_PUBLIC_URL` to be `https://`. Notifications
   go out through Apple's, Google's or Mozilla's push service, so the server needs outbound HTTPS to them.
 
+- Plaid: banks that sign you in on their own site (Chase, Capital One, …) send you back to
+  `<RUNWAY_PUBLIC_URL>/plaid/oauth`. Add that address under **Allowed redirect URIs** in the Plaid Dashboard (Runway
+  shows it in Settings → Connections); it's what makes those banks work from a phone or the installed app.
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
 - Sessions last 14 days (`RUNWAY_SESSION_DAYS`). Signing out ends the Runway session and your provider session.
 - Runway answers only to addresses that are yours: `RUNWAY_PUBLIC_URL`'s host, local IPs, `*.local`, plain names like

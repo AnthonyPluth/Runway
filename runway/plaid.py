@@ -95,10 +95,27 @@ def link_token(conn, item_id: str | None = None, kind: str = "investments") -> s
         body["products"] = ["liabilities"]
     else:
         body["products"] = ["investments"]
-    redirect = db.get_setting(conn, "plaid_redirect_uri")
+    redirect = redirect_uri(conn)
     if redirect:
         body["redirect_uri"] = redirect
-    return call(conn, "/link/token/create", body)["link_token"]
+    try:
+        return call(conn, "/link/token/create", body)["link_token"]
+    except PlaidError as e:
+        if redirect and "redirect" in str(e).lower():   # not added to Plaid's allowed redirect URIs (yet): pop-up only
+            body.pop("redirect_uri")
+            return call(conn, "/link/token/create", body)["link_token"]
+        raise
+
+
+def redirect_uri(conn) -> str | None:
+    """Where banks that sign you in on their own site (OAuth: Chase, Capital One, ...) send you back to Runway.
+    Needed on phones and in the installed app, where the bank can't open in a pop-up. It must be listed under
+    Allowed redirect URIs in the Plaid Dashboard; without it, those banks only work from a computer's browser."""
+    explicit = db.get_setting(conn, "plaid_redirect_uri")
+    if explicit:
+        return explicit
+    public = (os.environ.get("RUNWAY_PUBLIC_URL") or "").rstrip("/")
+    return public + "/plaid/oauth" if public.startswith("https://") else None
 
 
 def exchange(conn, public_token: str, institution: dict | None = None) -> str:

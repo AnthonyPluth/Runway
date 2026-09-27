@@ -19,6 +19,7 @@ TODAY = date(2026, 9, 23)
 class MockBank(BaseHTTPRequestHandler):
     """A Plaid bank connection: a checking account and two cards (one has "1234" in its SimpleFIN name)."""
     products = ["transactions", "liabilities"]
+    reject_redirect = False
     pages: list = []          # /transactions/sync responses, served in order
     calls: list = []
 
@@ -33,6 +34,9 @@ class MockBank(BaseHTTPRequestHandler):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         MockBank.calls.append((self.path, req))
         if self.path == "/link/token/create":
+            if req.get("redirect_uri") and MockBank.reject_redirect:
+                return self.reply(400, {"error_code": "INVALID_FIELD",
+                                        "error_message": "OAuth redirect URI must be configured in the developer dashboard"})
             if "transactions" in req.get("products", []) and "transactions" not in MockBank.products:
                 return self.reply(400, {"error_code": "INVALID_PRODUCT", "error_message": "transactions is not enabled"})
             return self.reply(200, {"link_token": "link-1"})
@@ -86,7 +90,7 @@ class PlaidBankTests(unittest.TestCase):
         db.init(self.path)
         self.c = db.connect(self.path)
         MockBank.products = ["transactions", "liabilities"]
-        MockBank.pages, MockBank.calls = [], []
+        MockBank.pages, MockBank.calls, MockBank.reject_redirect = [], [], False
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         # What SimpleFIN already brought in: checking and a card, with some history.
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-chk', 'Chase Checking', 'checking', 2500)")
@@ -127,6 +131,61 @@ class PlaidBankTests(unittest.TestCase):
         self.assertEqual((new["kind"], new["provider"], new["owed_positive"], new["balance"]), ("credit", "plaid", 1, 50.0))
         # Nothing changes for matched accounts until you pick Plaid for them.
         self.assertEqual(self.c.execute("SELECT provider FROM accounts WHERE id='sf-chk'").fetchone()[0], "simplefin")
+
+    def test_redirect_for_banks_that_sign_in_on_their_own_site(self):
+        os.environ["RUNWAY_PUBLIC_URL"] = "https://runway.example.com"
+        try:
+            plaid.link_token(self.c, None, "bank")
+            self.assertEqual(MockBank.calls[-1][1]["redirect_uri"], "https://runway.example.com/plaid/oauth")
+            # Not registered in the Plaid Dashboard yet: Link still opens, with pop-ups only.
+            MockBank.reject_redirect = True
+            self.assertEqual(plaid.link_token(self.c, None, "bank"), "link-1")
+            self.assertNotIn("redirect_uri", MockBank.calls[-1][1])
+        finally:
+            os.environ.pop("RUNWAY_PUBLIC_URL", None)
+        self.assertIsNone(plaid.redirect_uri(self.c))   # plain http: no redirect
+
+    def test_resume_after_the_bank_sends_you_back(self):
+        from runway import server
+        with self.assertRaises(server.ApiError):
+            server.api_plaid_oauth_resume(self.c, {}, {})
+        r = server.api_plaid_link_token(self.c, {}, {"kind": "bank"})
+        self.assertEqual(server.api_plaid_oauth_resume(self.c, {}, {}), {"link_token": r["link_token"], "kind": "bank", "item_id": None})
+
+    def test_matching_by_initials_words_and_institution(self):
+        c = self.c
+        c.execute("DELETE FROM accounts")
+        for aid, name, bal in [("csr", "CSR", -1203.10), ("csp", "CSP (Sara)", -455.00), ("citi", "Citi Double Cash", -88.20),
+                               ("boa", "BofA Premium Rewards", -310.00)]:
+            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES (?,?,'credit',?)", (aid, name, bal))
+        def item(item_id, inst, accts):
+            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES (?,?,?, 'liabilities')",
+                      (item_id, "t-" + item_id, inst))
+            for pid, name, official, mask, cur in accts:
+                c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, official_name, mask, type, subtype, current) "
+                          "VALUES (?,?,?,?,?,'credit','credit card',?)", (pid, item_id, name, official, mask, cur))
+        # Balances differ a little from SimpleFIN's (pending charges), and none of the names carry the last 4 digits.
+        item("chase", "Chase", [("p1", "Sapphire Preferred", "Chase Sapphire Preferred", "4417", 461.12),
+                                ("p2", "Sapphire Reserve", "Chase Sapphire Reserve", "9921", 1203.10)])
+        item("citi", "Citi", [("p3", "Citi Double Cash® Card", None, "0042", 91.00)])
+        item("boa", "Bank of America", [("p4", "Premium Rewards Visa Signature", None, "7788", 300.00)])
+        for i in ("chase", "citi", "boa"):
+            plaidbank.auto_match(c, i)
+        got = {r["id"]: r["plaid_account_id"] for r in c.execute("SELECT id, plaid_account_id FROM accounts")}
+        self.assertEqual(got, {"csr": "p2", "csp": "p1", "citi": "p3", "boa": "p4"})
+
+    def test_no_match_across_institutions_or_when_unsure(self):
+        c = self.c
+        c.execute("DELETE FROM accounts")
+        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('citi', 'Citi Double Cash', 'credit', -50)")
+        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('c1', 'Card one', 'credit', -20)")
+        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('c2', 'Card two', 'credit', -20)")
+        c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('ch','t','Chase','liabilities')")
+        c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type, subtype, current) "
+                  "VALUES ('px','ch','Freedom Unlimited','credit','credit card',50)")
+        c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type, subtype, current) "
+                  "VALUES ('py','ch','Card','credit','credit card',20)")
+        self.assertEqual(plaidbank.auto_match(c, "ch"), [])   # same balance as the Citi card, but Chase; two equal "Card"s
 
     def test_switching_to_plaid_keeps_history_and_skips_duplicates(self):
         self.link()

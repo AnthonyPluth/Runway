@@ -54,28 +54,69 @@ def _compatible(kind: str, runway: str) -> bool:
 
 # ------------------------------------------------------------------------------------------------ matching
 
+GENERIC = {"card", "credit", "visa", "signature", "mastercard", "world", "elite", "infinite", "account", "checking", "savings",
+           "the", "bank", "of", "and", "my", "plus", "rewards", "cash", "back"}
+
+
+def _words(text: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower().replace("&", " "))
+
+
+def _score(pa: dict, acct: dict, institution: str | None) -> int:
+    """How sure we are that Plaid account `pa` is Runway account `acct` (0 = no reason to think so)."""
+    from . import brands
+    runway_text = f"{acct['name']} {acct.get('display_name') or ''}"
+    plaid_names = [pa.get("official_name"), pa.get("name")]
+    score = 0
+    if pa.get("mask") and re.search(r"(?<!\d)" + re.escape(pa["mask"]) + r"(?!\d)", runway_text):
+        score += 100                                         # "…1234" in the name
+    theirs = set(_words(runway_text))
+    for n in plaid_names:
+        w = [x for x in _words(n) if x not in {"visa", "signature", "card", "credit", "mastercard", "infinite", "world", "elite"}]
+        for skip in (0, 1):                                  # "Chase Sapphire Reserve" -> CSR; "Sapphire Reserve" -> SR
+            if len(w) - skip >= 2 and "".join(x[0] for x in w[skip:]) in theirs:
+                score += 60
+                break
+    mine = {x for n in plaid_names for x in _words(n) if x not in GENERIC and len(x) > 2}
+    score += 25 * len(mine & (theirs - GENERIC))             # "Double Cash", "Premium Rewards", "Venture"
+    if pa.get("current") is not None:
+        diff = abs(abs(acct["balance"] or 0) - abs(pa["current"]))
+        score += 40 if diff < 0.01 else 15 if diff <= max(25.0, 0.05 * abs(pa["current"])) else 0
+    theirs_brand = brands.brand(acct.get("org"), acct.get("display_name"), acct["name"])
+    ours_brand = brands.brand(institution, pa.get("official_name"), pa.get("name"))
+    if theirs_brand and ours_brand:
+        score = score + 20 if theirs_brand == ours_brand else -1000   # never a Chase card for a Citi one
+    return score
+
+
 def auto_match(conn, item_id: str) -> list[str]:
-    """Match this connection's unmatched accounts to Runway accounts when there's exactly one clear candidate."""
-    matched = []
-    for pa in db.rows(conn.execute(
-            "SELECT * FROM plaid_accounts WHERE item_id=? AND ignored=0 AND plaid_account_id NOT IN "
-            "(SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)", (item_id,))):
+    """Match this connection's unmatched accounts to your existing ones where one candidate clearly fits best: the last 4
+    digits in its name, its initials ("CSR" for Chase Sapphire Reserve), shared words ("Double Cash"), the same
+    institution and a similar balance all count. Anything unclear waits for you in Settings → Connections."""
+    item = conn.execute("SELECT institution_name FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    institution = item["institution_name"] if item else None
+    theirs = [p for p in db.rows(conn.execute(
+        "SELECT * FROM plaid_accounts WHERE item_id=? AND ignored=0 AND plaid_account_id NOT IN "
+        "(SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)", (item_id,))) if runway_kind(p)]
+    free = db.rows(conn.execute("SELECT * FROM accounts WHERE plaid_account_id IS NULL AND id NOT LIKE 'pl:%'"))
+    pairs = []
+    for pa in theirs:
         kind = runway_kind(pa)
-        if not kind:
+        scored = sorted(((_score(pa, a, institution), a["id"]) for a in free if _compatible(kind, a["kind"])), reverse=True)
+        scored = [x for x in scored if x[0] > 0]
+        if not scored:
             continue
-        free = [a for a in db.rows(conn.execute("SELECT * FROM accounts WHERE plaid_account_id IS NULL AND id NOT LIKE 'pl:%'"))
-                if _compatible(kind, a["kind"])]
-        pick = None
-        if pa["mask"]:
-            pat = re.compile(r"(?<!\d)" + re.escape(pa["mask"]) + r"(?!\d)")
-            hits = [a for a in free if pat.search(f"{a['name']} {a['display_name'] or ''}")]
-            pick = hits[0] if len(hits) == 1 else None
-        if pick is None and pa["current"] is not None:
-            hits = [a for a in free if abs(abs(a["balance"] or 0) - abs(pa["current"])) < 0.01]
-            pick = hits[0] if len(hits) == 1 else None
-        if pick:
-            conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (pa["plaid_account_id"], pick["id"]))
-            matched.append(pick["display_name"] or pick["name"])
+        # A clear winner: enough evidence, and well ahead of the next candidate.
+        if scored[0][0] >= 35 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 20):
+            pairs.append((scored[0][0], pa["plaid_account_id"], scored[0][1]))
+    matched, used_p, used_a = [], set(), set()
+    for _score_, pid, aid in sorted(pairs, reverse=True):   # strongest first; each account matched once
+        if pid in used_p or aid in used_a:
+            continue
+        used_p.add(pid); used_a.add(aid)
+        conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (pid, aid))
+        acct = next(a for a in free if a["id"] == aid)
+        matched.append(acct["display_name"] or acct["name"])
     return matched
 
 

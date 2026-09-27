@@ -1756,11 +1756,16 @@ function loadPlaid() {
 async function openPlaidLink(itemId, kind = "investments") {
   await loadPlaid();
   const lt = await api("/api/plaid/link_token", { method: "POST", body: { item_id: itemId || null, kind } });
-  const token = lt.link_token;
   if (kind === "bank" && lt.kind === "cards") toast("Your Plaid account doesn't have Transactions, so this connects card statements only.");
+  return runPlaidLink(lt.link_token, itemId, lt.kind || kind);
+}
+
+// Runs Plaid Link. receivedRedirectUri: continuing after a bank's own sign-in page sent you back (OAuth).
+function runPlaidLink(token, itemId, kind, receivedRedirectUri) {
   return new Promise((resolve) => {
     window.Plaid.create({
       token,
+      ...(receivedRedirectUri ? { receivedRedirectUri } : {}),
       onSuccess: async (publicToken, metadata) => {
         try {
           toast(kind === "investments" ? "Connected. Pulling holdings and activity…" : "Connected. Reading accounts and statements…");
@@ -1778,6 +1783,18 @@ async function openPlaidLink(itemId, kind = "investments") {
       onExit: (err) => { if (err) toast(err.display_message || err.error_message || "Plaid closed", true); resolve(false); },
     }).open();
   });
+}
+
+// Back from a bank's sign-in page (/plaid/oauth?oauth_state_id=…): finish linking where it left off.
+async function resumePlaidOAuth() {
+  const back = location.href;
+  history.replaceState(null, "", "/#setup/connections");
+  route();
+  try {
+    const p = await api("/api/plaid/oauth_resume");
+    await loadPlaid();
+    if (await runPlaidLink(p.link_token, p.item_id, p.kind, back)) route();
+  } catch (err) { toast(err.message, true); }
 }
 
 // A bank connection's accounts, each matched to one of yours (or added, or left out).
@@ -1811,6 +1828,7 @@ async function wirePlaidSetup() {
     await api("/api/plaid/settings", { method: "POST", body: { secret: $("#pl-secret").value } });
     toast("Plaid secret saved"); route();
   });
+  if (st.redirect_uri) $("#pl-redirect").innerHTML = `In the Plaid Dashboard, add <code>${esc(st.redirect_uri)}</code> under Allowed redirect URIs (for banks like Chase that sign you in on their own site).`;
   const box = $("#pl-items");
   box.innerHTML = `${st.items.length ? `<table>${st.items.map((it) => `<tr data-item="${esc(it.item_id)}">
       <td><b>${esc(it.institution_name || "Connection")}</b> ${it.env === "sandbox" ? `<span class="tag">sandbox</span>` : ""}
@@ -2049,6 +2067,7 @@ async function renderSetup(el, sub) {
   </div>
 <div class="card" id="plaid-card"><h2>Plaid</h2>
     <p class="help">Keys: Developers → Keys at <a href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
+    <p class="help" id="pl-redirect"></p>
     <div class="form-row">
       <label>Environment<select id="pl-env"><option value="production">Production (your real accounts)</option><option value="sandbox">Sandbox (test data)</option></select></label>
       <label>Client ID<input id="pl-id" style="width:220px" autocomplete="off" spellcheck="false"></label>
@@ -2308,7 +2327,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 
 (async () => {
   await refreshState();
-  route();
+  if (location.pathname === "/plaid/oauth") resumePlaidOAuth(); else route();
   syncOnVisit();
   setInterval(refreshState, 60_000);
 })();
