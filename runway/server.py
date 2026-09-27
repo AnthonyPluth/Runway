@@ -424,6 +424,19 @@ def api_tx_split(conn, _q, body, tx_id):
     return {"ok": True, "splits": saved}
 
 
+def api_tx_bulk(conn, _q, body, *_):
+    """Change many transactions at once (the checkboxes on Transactions)."""
+    ids = body.get("ids")
+    if not isinstance(ids, list):
+        raise ApiError("Select some transactions first")
+    try:
+        n = categorize.bulk_update(conn, ids, body.get("category") or None, body.get("payee") or None,
+                                   bool(body.get("reviewed")))
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"ok": True, "updated": n}
+
+
 def api_tx_accept(conn, _q, _b, tx_id):
     categorize.accept_suggestion(conn, tx_id)
     return {"ok": True}
@@ -1253,6 +1266,7 @@ ROUTES = [
     ("GET", "/api/accounts", api_accounts),
     ("POST", "/api/accounts/{id}", api_account_update),
     ("GET", "/api/transactions", api_transactions),
+    ("POST", "/api/transactions/bulk", api_tx_bulk),
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
     ("POST", "/api/transactions/{id}/split", api_tx_split),
