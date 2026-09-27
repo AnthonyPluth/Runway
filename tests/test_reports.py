@@ -1,0 +1,105 @@
+"""Reports: spending over time, merchants, income against spending, and the breakdown."""
+import os
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from runway import categories, db, reports, splits  # noqa: E402
+
+
+class ReportTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "r.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk','Checking','checking',0), ('cc','Card','credit',0), "
+                       "('old','Old','credit',0)")
+        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='old'")
+        categories.add(self.c, "Fast food", parent="Restaurants")
+        self.n = 0
+        rows = [
+            ("chk", "2026-07-01", 3000, "PAYROLL", "Income"),
+            ("chk", "2026-08-01", 3000, "PAYROLL", "Income"),
+            ("chk", "2026-09-01", 3100, "PAYROLL", "Income"),
+            ("cc", "2026-07-05", -100, "Whole Foods", "Groceries"),
+            ("cc", "2026-08-05", -150, "Whole Foods", "Groceries"),
+            ("cc", "2026-08-06", 20, "Whole Foods", "Groceries"),        # a refund lowers spending
+            ("cc", "2026-09-05", -120, "Whole Foods", "Groceries"),
+            ("cc", "2026-09-07", -12, "Shake Shack", "Fast food"),
+            ("cc", "2026-09-08", -40, "Nice Place", "Restaurants"),
+            ("chk", "2026-09-10", -500, "CARD PAYMENT", "Credit Card Payment"),   # not spending
+            ("cc", "2026-09-11", -30, "Mystery", None),                           # uncategorized money out is
+            ("old", "2026-09-12", -999, "Hidden account", "Shopping"),             # not counted: hidden account
+        ]
+        for acct, day, amt, payee, cat in rows:
+            self.tx(acct, day, amt, payee, cat)
+        target = self.tx("cc", "2026-09-15", -100, "Target", "Shopping")
+        splits.set_splits(self.c, target, [{"amount": -60, "category": "Groceries"}, {"amount": -40, "category": "Shopping"}])
+
+    def tearDown(self):
+        self.c.close()
+        self.tmp.cleanup()
+
+    def tx(self, acct, day, amt, payee, cat):
+        self.n += 1
+        tid = f"t{self.n}"
+        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)",
+                       (tid, acct, day, amt, payee.upper(), payee, cat))
+        return tid
+
+    def test_spending_over_time(self):
+        d = reports.spending_over_time(self.c, "2026-09", 3)
+        self.assertEqual(d["months"], ["2026-07", "2026-08", "2026-09"])
+        by = {s["name"]: s["values"] for s in d["series"]}
+        self.assertEqual(by["Groceries"], [100.0, 130.0, 180.0])      # 120 + the split's 60
+        self.assertEqual(by["Restaurants"], [0.0, 0.0, 52.0])          # a subcategory counts toward its top
+        self.assertEqual(by["Shopping"], [0.0, 0.0, 40.0])
+        self.assertEqual(by["Uncategorized"], [0.0, 0.0, 30.0])
+        self.assertNotIn("Credit Card Payment", by)
+        self.assertEqual(d["totals"], [100.0, 130.0, 302.0])
+        m = {s["name"] for s in reports.spending_over_time(self.c, "2026-09", 3, "merchant")["series"]}
+        self.assertEqual(m, {"Whole Foods", "Target", "Nice Place", "Mystery", "Shake Shack"})
+        with self.assertRaises(ValueError):
+            reports.spending_over_time(self.c, "2026-09", 3, "planet")
+
+    def test_the_rest_fold_into_everything_else(self):
+        for i in range(10):
+            self.tx("cc", "2026-09-20", -(i + 1), f"Shop {i}", "Shopping")
+        d = reports.spending_over_time(self.c, "2026-09", 2, "merchant")
+        self.assertEqual(len(d["series"]), reports.TOP + 1)
+        self.assertTrue(d["series"][-1]["other"])
+        self.assertAlmostEqual(sum(s["values"][1] for s in d["series"]), d["totals"][1])
+
+    def test_income_vs_spending(self):
+        d = reports.income_vs_spending(self.c, "2026-09", 3)
+        sept = d["months"][-1]
+        self.assertEqual((sept["income"], sept["spending"], sept["net"]), (3100.0, 302.0, 2798.0))
+        self.assertAlmostEqual(sept["rate"], 2798 / 3100, places=4)
+        self.assertEqual((d["year"]["income"], d["year"]["spending"]), (9100.0, 532.0))
+
+    def test_merchants_and_one_merchant(self):
+        d = reports.merchants(self.c, "2026-07-01", "2026-10-01")
+        top = d["merchants"][0]
+        self.assertEqual((top["name"], top["total"], top["count"], top["category"]), ("Whole Foods", 350.0, 4, "Groceries"))
+        target = next(m for m in d["merchants"] if m["name"] == "Target")
+        self.assertEqual((target["total"], target["count"], target["category"]), (100.0, 1, "Groceries"))   # one visit, split
+        one = reports.merchant(self.c, "whole foods", "2026-09", 3)
+        self.assertEqual(one["values"], [100.0, 130.0, 120.0])
+        self.assertEqual(len(one["transactions"]), 4)
+
+    def test_breakdown_and_its_transactions(self):
+        tree = reports.breakdown(self.c, "2026-09-01", "2026-10-01")["tree"]
+        self.assertEqual(tree["value"], 302.0)
+        rest = next(c for c in tree["children"] if c["name"] == "Restaurants")
+        self.assertEqual([(c["name"], c["value"]) for c in rest["children"]], [("Restaurants (general)", 40.0), ("Fast food", 12.0)])
+        groc = next(c for c in tree["children"] if c["name"] == "Groceries")
+        self.assertEqual([c["name"] for c in groc["children"]], ["Whole Foods", "Target"])   # no subcategories: straight to merchants
+        txs = reports.transactions(self.c, "2026-09-01", "2026-10-01", "Groceries", "Target")
+        self.assertEqual([(t["amount"], t["part"]) for t in txs], [(-60.0, False)])
+
+
+if __name__ == "__main__":
+    unittest.main()
