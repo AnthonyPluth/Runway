@@ -2366,19 +2366,19 @@ async function renderSetup(el, sub) {
   </div>` },
     rules: { label: "Rules", count: rules.length, html: () => `<div class="card"><div class="card-head"><h2>Rules</h2>
       <button class="btn" id="rule-new-btn">Add</button></div>
-    <div class="form-row acct-form" id="rule-new" ${rules.length ? "hidden" : ""}>
-      <label>Text contains<input id="rule-match" placeholder="whole foods"></label>
-      <label>Category<select id="rule-cat">${categoryOptions("", { blank: false })}</select></label>
-      <label class="inline"><input type="checkbox" id="rule-apply" checked> Apply to past transactions</label>
-      <button class="btn primary" id="rule-add">Add rule</button>
-    </div>
+    <p class="help">When a transaction matches everything a rule asks for, the rule acts on it. Rules run on new transactions as
+      they sync; <b>Apply</b> runs one over past ones too (it won't change a category you picked yourself). The most specific rule wins.</p>
+    <div id="rule-editor-new"></div>
     ${rules.length ? `<input id="rule-filter" class="tidy-search" placeholder="Search ${rules.length} rules" value="${esc(rulesFilter)}">
-      <div id="rules-table" class="tidy-list">${rules.map((r) => `<div class="tidy-row rule-row" data-id="${r.id}" data-q="${esc((r.match + " " + r.category).toLowerCase())}">
-      <span class="tidy-main"><input class="rule-m ghost" value="${esc(r.match)}" aria-label="Text the merchant or description contains"></span>
-      <span class="rule-arrow" aria-hidden="true">→</span>
-      <select class="rule-c ghost" aria-label="Category">${categoryOptions(r.category, { blank: false })}</select>
-      <span class="tidy-actions"><button class="btn link rule-apply" title="Recategorize matching transactions you haven't set by hand">Apply</button>
-        <button class="btn link del-rule">Remove</button></span></div>`).join("")}</div>` : ""}
+      <div id="rules-table" class="tidy-list">${rules.map((r) => `<div class="rule-item" data-id="${r.id}" data-q="${esc((r.summary + " " + ruleActions(r)).toLowerCase())}">
+        <div class="tidy-row rule-row">
+          <span class="tidy-main rule-when">${esc(r.summary || "any transaction")}</span>
+          <span class="rule-arrow" aria-hidden="true">→</span>
+          <span class="rule-then">${esc(ruleActions(r))}</span>
+          <span class="tidy-actions"><button class="btn link rule-edit">Edit</button>
+            <button class="btn link rule-apply" title="Run this rule over past transactions (not ones you categorized yourself)">Apply</button>
+            <button class="btn link del-rule">Remove</button></span></div>
+        <div class="rule-editor-slot"></div></div>`).join("")}</div>` : ""}
   </div>` },
     connections: { label: "Connections", html: () => `
   <div class="card"><h2>Bank connection <span class="muted small">SimpleFIN</span></h2>
@@ -2497,24 +2497,17 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
   $("#auto-ai")?.addEventListener("change", async (e) => {
     await api("/api/settings", { method: "POST", body: { auto_ai_on_sync: e.target.checked } }); toast("Saved"); refreshState();
   });
-  $("#rule-add")?.addEventListener("click", async () => {
-    try { await api("/api/rules", { method: "POST", body: { match: $("#rule-match").value, category: $("#rule-cat").value, apply: $("#rule-apply").checked } });
-      toast("Rule added"); await refreshState(); route(); } catch (err) { toast(err.message, true); }
-  });
-  $("#rule-new-btn")?.addEventListener("click", () => { $("#rule-new").hidden = false; $("#rule-match").focus(); });
-  $$("#rules-table [data-id]").forEach((tr) => {
-    const id = tr.dataset.id;
-    const saveRule = async () => {
-      try { await api(`/api/rules/${id}`, { method: "POST", body: { match: $(".rule-m", tr).value, category: $(".rule-c", tr).value } }); toast("Rule saved"); }
-      catch (err) { toast(err.message, true); }
-    };
-    $(".rule-m", tr).addEventListener("change", saveRule);
-    $(".rule-c", tr).addEventListener("change", saveRule);
-    $(".rule-apply", tr).addEventListener("click", async () => {
+  const byRule = Object.fromEntries(rules.map((r) => [String(r.id), r]));
+  $("#rule-new-btn")?.addEventListener("click", () => openRuleEditor($("#rule-editor-new"), null, accounts));
+  if (!rules.length && $("#rule-editor-new")) openRuleEditor($("#rule-editor-new"), null, accounts);
+  $$("#rules-table [data-id]").forEach((item) => {
+    const id = item.dataset.id;
+    $(".rule-edit", item).addEventListener("click", () => openRuleEditor($(".rule-editor-slot", item), byRule[id], accounts));
+    $(".rule-apply", item).addEventListener("click", async () => {
       try { const r = await api(`/api/rules/${id}/apply`, { method: "POST" }); toast(`${r.updated} transaction${r.updated === 1 ? "" : "s"} updated`); refreshState(); }
       catch (err) { toast(err.message, true); }
     });
-    $(".del-rule", tr).addEventListener("click", async (e) => {
+    $(".del-rule", item).addEventListener("click", async (e) => {
       if (!confirmInline(e.currentTarget, "Remove?")) return;
       await api(`/api/rules/${id}`, { method: "DELETE" }); toast("Rule removed"); route();
     });
@@ -2587,6 +2580,123 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     await api("/api/settings", { method: "POST", body: { horizon_days: Number($("#horizon-days").value) } });
     horizon = null; await refreshState();
   });
+}
+
+// What a rule does, in a few words: "Restaurants · rename to Chipotle · review".
+function ruleActions(r) {
+  const bits = [];
+  if (r.split) bits.push("split " + r.split.map((p) => `${p.percent}% ${p.category}`).join(", "));
+  if (r.category) bits.push(r.category);
+  if (r.rename) bits.push(`rename to ${r.rename}`);
+  if (r.review) bits.push("put in Review");
+  return bits.join(" · ");
+}
+
+// Add or edit a rule: conditions on the left, what it does on the right, and a live count of what it would match.
+function openRuleEditor(slot, r, accounts) {
+  if (slot.firstChild) { slot.innerHTML = ""; return; }
+  r = r || { match: "", match_mode: "contains", category: "", review: 0 };
+  const splitParts = r.split ? r.split.map((p) => ({ ...p })) : [];
+  slot.innerHTML = `<div class="rule-editor">
+    <div class="rule-cols">
+      <fieldset><legend>When a transaction</legend>
+        <div class="form-row"><label>Merchant or description
+            <span class="rule-text"><select class="re-mode" aria-label="How the text matches">
+              ${[["contains", "contains"], ["exact", "is exactly"], ["starts", "starts with"]].map(([v, l]) =>
+                `<option value="${v}" ${r.match_mode === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+            <input class="re-match" value="${esc(r.match || "")}" placeholder="whole foods" spellcheck="false"></span></label></div>
+        <div class="form-row"><label>Amount from<input class="re-min num" type="number" min="0" step="0.01" inputmode="decimal" value="${r.amount_min ?? ""}" placeholder="any"></label>
+          <label>to<input class="re-max num" type="number" min="0" step="0.01" inputmode="decimal" value="${r.amount_max ?? ""}" placeholder="any"></label>
+          <label>Direction<select class="re-dir"><option value="">Either</option>
+            <option value="out" ${r.direction === "out" ? "selected" : ""}>Money out</option>
+            <option value="in" ${r.direction === "in" ? "selected" : ""}>Money in</option></select></label></div>
+        <div class="form-row"><label>Account<select class="re-acct"><option value="">Any account</option>
+          ${accounts.map((a) => `<option value="${esc(a.id)}" ${a.id === r.account_id ? "selected" : ""}>${esc(a.display_name || a.name)}</option>`).join("")}</select></label></div>
+      </fieldset>
+      <fieldset><legend>Then</legend>
+        <div class="form-row"><label>Category<select class="re-cat" ${splitParts.length ? "disabled" : ""}>
+            <option value="">Leave it (other rules, history or AI decide)</option>${categoryOptions(r.category || "", { blank: false })}</select></label>
+          <button class="btn link re-split-toggle">${splitParts.length ? "Don't split" : "Split instead…"}</button></div>
+        <div class="re-split"></div>
+        <div class="form-row"><label>Rename the merchant to<input class="re-rename" value="${esc(r.rename || "")}" placeholder="keep as is"></label></div>
+        <label class="inline"><input type="checkbox" class="re-review" ${r.review ? "checked" : ""}> Put it in Review so I look at it</label>
+      </fieldset>
+    </div>
+    <div class="re-preview muted small"></div>
+    <div class="re-examples"></div>
+    <div class="form-row re-foot">
+      <label class="inline"><input type="checkbox" class="re-apply" ${r.id ? "" : "checked"}> Apply to past transactions</label>
+      <span class="split-actions"><button class="btn re-cancel">Cancel</button><button class="btn primary re-save">${r.id ? "Save rule" : "Add rule"}</button></span>
+    </div></div>`;
+  const q = (sel) => $(sel, slot);
+  const drawSplit = () => {
+    const box = q(".re-split");
+    q(".re-cat").disabled = splitParts.length > 0;
+    q(".re-split-toggle").textContent = splitParts.length ? "Don't split" : "Split instead…";
+    if (!splitParts.length) { box.innerHTML = ""; return; }
+    const total = splitParts.reduce((n, p) => n + (parseFloat(p.percent) || 0), 0);
+    box.innerHTML = `${splitParts.map((p, i) => `<div class="split-row" data-i="${i}">
+        <select class="rs-cat" aria-label="Category">${categoryOptions(p.category || "")}</select>
+        <input class="rs-pct num" type="number" min="0" max="100" step="0.01" value="${esc(p.percent ?? "")}" aria-label="Percent"> %
+        <button class="btn link rs-drop" aria-label="Remove this part">✕</button></div>`).join("")}
+      <div class="split-foot"><button class="btn link rs-add">+ Add a part</button>
+        <span class="split-left ${Math.abs(total - 100) > 0.01 ? "over" : "muted"}">${Math.abs(total - 100) > 0.01 ? `${Math.round(total * 100) / 100}% of 100%` : "adds up"}</span></div>`;
+    $$(".split-row", box).forEach((row) => {
+      const p = splitParts[row.dataset.i];
+      $(".rs-cat", row).addEventListener("change", (e) => { p.category = e.target.value; refresh(); });
+      $(".rs-pct", row).addEventListener("change", (e) => { p.percent = e.target.value; drawSplit(); refresh(); });
+      $(".rs-drop", row).addEventListener("click", () => { splitParts.splice(row.dataset.i, 1); if (splitParts.length === 1) splitParts.length = 0; drawSplit(); refresh(); });
+    });
+    $(".rs-add", box).addEventListener("click", () => {
+      const left = 100 - splitParts.reduce((n, p) => n + (parseFloat(p.percent) || 0), 0);
+      splitParts.push({ category: "", percent: left > 0 ? Math.round(left * 100) / 100 : "" }); drawSplit();
+    });
+  };
+  const body = () => ({
+    match: q(".re-match").value, match_mode: q(".re-mode").value,
+    amount_min: q(".re-min").value, amount_max: q(".re-max").value, direction: q(".re-dir").value,
+    account_id: q(".re-acct").value, category: splitParts.length ? "" : q(".re-cat").value,
+    rename: q(".re-rename").value, review: q(".re-review").checked,
+    split: splitParts.length ? splitParts.map((p) => ({ category: p.category, percent: parseFloat(p.percent) })) : null,
+  });
+  let timer, seq = 0;
+  const refresh = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const mine = ++seq;
+      const p = await api("/api/rules/preview", { method: "POST", body: body() }).catch((e) => ({ error: e.message }));
+      if (mine !== seq || !slot.isConnected) return;
+      q(".re-preview").textContent = p.error ? p.error
+        : `Matches ${p.matches} past transaction${p.matches === 1 ? "" : "s"}${p.matches ? ` · applying it would change ${p.changes}` : ""}`;
+      q(".re-examples").innerHTML = p.examples?.length ? `<table class="small">${p.examples.map((t) => `<tr>
+          <td class="muted">${fmtDate(t.posted)}</td><td>${esc(t.payee || t.description)}</td><td class="muted hide-sm">${esc(t.account_name)}</td>
+          <td class="num">${fmt(t.amount)}</td><td class="muted">${esc(t.category || "—")}</td></tr>`).join("")}</table>` : "";
+    }, 250);
+  };
+  q(".re-split-toggle").addEventListener("click", () => {
+    if (splitParts.length) splitParts.length = 0;
+    else splitParts.push({ category: q(".re-cat").value || "", percent: 50 }, { category: "", percent: 50 });
+    drawSplit(); refresh();
+  });
+  $$("input, select", slot).forEach((el) => el.addEventListener(el.type === "checkbox" || el.tagName === "SELECT" ? "change" : "input", refresh));
+  q(".re-cancel").addEventListener("click", () => { slot.innerHTML = ""; });
+  q(".re-save").addEventListener("click", async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try {
+      let updated = 0;
+      if (r.id) {
+        await api(`/api/rules/${r.id}`, { method: "POST", body: body() });
+        if (q(".re-apply").checked) updated = (await api(`/api/rules/${r.id}/apply`, { method: "POST" })).updated;
+      } else {
+        updated = (await api("/api/rules", { method: "POST", body: { ...body(), apply: q(".re-apply").checked } })).updated;
+      }
+      toast(`${r.id ? "Rule saved" : "Rule added"}${updated ? ` · ${updated} transaction${updated === 1 ? "" : "s"} updated` : ""}`);
+      refreshState(); route();
+    } catch (err) { toast(err.message, true); b.disabled = false; }
+  });
+  drawSplit();
+  refresh();
+  q(".re-match").focus();
 }
 
 function connectForm() {
