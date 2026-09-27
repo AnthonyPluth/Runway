@@ -575,10 +575,12 @@ async function renderTxPage(el, mode) {
     box.innerHTML = `<table><tr><th>Date</th><th>Merchant</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th></tr>
       ${data.items.map((t) => txRow(t, review)).join("")}
     </table>${data.total > data.items.length ? `<p class="help">Showing ${data.items.length} of ${data.total}. Narrow the search to see more.</p>` : ""}`;
+    const byId = Object.fromEntries(data.items.map((t) => [t.id, t]));
     $$("tr[data-id]", box).forEach((tr) => {
-      $("select.cat", tr).addEventListener("change", (e) => { if (e.target.value) save(tr, e.target.value); });
+      $("select.cat", tr)?.addEventListener("change", (e) => { if (e.target.value) save(tr, e.target.value); });
       $(".keep", tr)?.addEventListener("click", () => save(tr, $("select.cat", tr).value));
       $(".rec-btn", tr).addEventListener("click", () => openRecurringPicker(tr, recurringItems, load));
+      $(".split-btn", tr).addEventListener("click", () => openSplitEditor(tr, byId[tr.dataset.id], load));
     });
   };
 
@@ -624,7 +626,8 @@ async function renderTxPage(el, mode) {
 function txRow(t, review) {
   const suggestion = t.needs_review && t.category && t.category_source === "ai";
   const linked = t.recurring_id > 0;
-  return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}">
+  const split = t.is_split && (t.splits || []).length;
+  return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}" ${split ? 'class="has-split"' : ""}>
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
     <td><div class="merchant">${esc(t.payee || t.description)}
         <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button></div>
@@ -632,10 +635,87 @@ function txRow(t, review) {
       <div class="desc show-sm">${acctLabel(t.account_id, t.account_name)}</div></td>
     <td class="muted hide-sm">${acctLabel(t.account_id, t.account_name)}</td>
     <td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td>
-    <td style="white-space:nowrap"><select class="cat ${review ? "" : "ghost"}" aria-label="Category">${categoryOptions(t.category)}</select>
+    <td style="white-space:nowrap">${split
+      ? `<span class="tag split">split</span><span class="split-parts">${t.splits.map((s) =>
+          `${esc(s.category)} ${fmt(Math.abs(s.amount))}`).join(" · ")}</span>`
+      : `<select class="cat ${review ? "" : "ghost"}" aria-label="Category">${categoryOptions(t.category)}</select>`}
       ${suggestion ? `<span class="tag ai" title="AI suggestion confidence">${Math.round((t.confidence || 0) * 100)}%</span>
         <button class="btn link keep" title="Keep the suggested category">✓ Keep</button>` : ""}
-      ${!review && t.needs_review ? `<span class="tag review">review</span>` : ""}</td></tr>`;
+      ${!review && t.needs_review ? `<span class="tag review">review</span>` : ""}
+      <button class="btn link split-btn" title="Spread this across several categories">${split ? "Edit split" : "Split"}</button></td></tr>`;
+}
+
+// Spread one transaction across categories: each part gets its own category and amount, and they must add up.
+// Amounts are typed as plain numbers; the transaction's own sign (a charge or a deposit) is kept.
+function openSplitEditor(tr, t, reload) {
+  if (tr.nextElementSibling?.classList.contains("split-edit")) return;
+  const sign = t.amount < 0 ? -1 : 1;
+  const total = Math.abs(t.amount);
+  const existing = (t.splits || []).map((s) => ({ category: s.category, amount: Math.abs(s.amount).toFixed(2) }));
+  const parts = existing.length ? existing : [{ category: t.category || "", amount: total.toFixed(2) }, { category: "", amount: "" }];
+  const row = document.createElement("tr");
+  row.className = "split-edit";
+  row.innerHTML = `<td colspan="5"><div class="split-box">
+    <div class="split-head"><b>Split ${fmt(total)}</b> <span class="muted small">${esc(t.payee || t.description)}</span></div>
+    <div class="split-rows"></div>
+    <div class="split-foot">
+      <button class="btn link split-add">+ Add a part</button>
+      <span class="split-left muted"></span>
+      <span class="split-actions">
+        ${existing.length ? `<button class="btn link split-remove">Remove split</button>` : ""}
+        <button class="btn split-cancel">Cancel</button>
+        <button class="btn primary split-save">Save split</button></span></div></div></td>`;
+  tr.after(row);
+
+  const rows = $(".split-rows", row);
+  const addRow = (part) => {
+    const line = document.createElement("div");
+    line.className = "split-row";
+    line.innerHTML = `<select class="split-cat" aria-label="Category">${categoryOptions(part.category)}</select>
+      <input class="split-amt num" type="number" step="0.01" min="0" inputmode="decimal" aria-label="Amount" value="${esc(part.amount)}">
+      <input class="split-note" placeholder="Note (optional)" value="${esc(part.note || "")}">
+      <button class="btn link split-drop" title="Remove this part" aria-label="Remove this part">✕</button>`;
+    rows.append(line);
+    $(".split-amt", line).addEventListener("input", left);
+    $(".split-drop", line).addEventListener("click", () => { line.remove(); left(); });
+  };
+  const typed = () => $$(".split-row", rows).map((line) => ({
+    category: $(".split-cat", line).value,
+    amount: parseFloat($(".split-amt", line).value),
+    note: $(".split-note", line).value,
+  }));
+  function left() {
+    const sum = typed().reduce((n, p) => n + (isFinite(p.amount) ? p.amount : 0), 0);
+    const rest = Math.round((total - sum) * 100) / 100;
+    $(".split-left", row).textContent = rest ? `${fmt(Math.abs(rest))} ${rest > 0 ? "left to assign" : "over"}` : "adds up";
+    $(".split-left", row).classList.toggle("over", rest < 0);
+  }
+  parts.forEach(addRow);
+  left();
+
+  $(".split-add", row).addEventListener("click", () => {
+    const sum = typed().reduce((n, p) => n + (isFinite(p.amount) ? p.amount : 0), 0);
+    const rest = Math.round((total - sum) * 100) / 100;
+    addRow({ category: "", amount: rest > 0 ? rest.toFixed(2) : "" });
+    left();
+  });
+  $(".split-cancel", row).addEventListener("click", () => row.remove());
+  const send = async (body, msg) => {
+    try {
+      await api(`/api/transactions/${encodeURIComponent(t.id)}/split`, { method: "POST", body });
+      toast(msg);
+      refreshState();
+      reload();
+    } catch (err) { toast(err.message, true); }
+  };
+  $(".split-remove", row)?.addEventListener("click", () => send({ splits: [] }, "Split removed"));
+  $(".split-save", row).addEventListener("click", () => {
+    const parts = typed();
+    if (parts.some((p) => !p.category)) return toast("Give every part a category", true);
+    if (parts.some((p) => !isFinite(p.amount) || p.amount <= 0)) return toast("Give every part an amount", true);
+    send({ splits: parts.map((p) => ({ category: p.category, amount: sign * p.amount, note: p.note })) }, "Split saved");
+  });
+  $(".split-cat", rows)?.focus();
 }
 
 // Link a transaction to a recurring item, start a new one from it, or mark it as not recurring.
