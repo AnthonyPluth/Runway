@@ -85,6 +85,8 @@ plain Python with a handful of well-known libraries.
   each card charge by what you bought: tax and shipping shared out, each Amazon shipment charged on its own matched to
   its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for
   the next time you buy it. See [extension/README.md](extension/README.md).
+- **Bulk editing:** tick transactions (shift-click for a range) to give them a category, rename their merchant or mark
+  them reviewed all at once.
 - Categories with one level of subcategories, a review queue for anything uncategorized, and search and filters.
 
 ### Budgets and reports
