@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from . import db
+from . import db, splits
 from .categorize import clean_payee
 from .plaid import PlaidError, call
 
@@ -323,7 +323,7 @@ def sync_transactions(conn, item, today: date) -> list[str]:
             if duplicate(conn, aid, posted, amount, True, claimed):
                 continue
         # A posted transaction replaces its pending version: keep the category you gave it.
-        prior = None
+        prior, old = None, None
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
             prior = conn.execute("SELECT category, category_source, confidence, needs_review, recurring_id FROM transactions WHERE id=?",
@@ -338,8 +338,11 @@ def sync_transactions(conn, item, today: date) -> list[str]:
             conn.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending) VALUES (?,?,?,?,?,?,?)",
                          (key, aid, posted, amount, desc, payee, pending))
             new_ids.append(key)
+        if old:
+            splits.carry_over(conn, old, key, amount)
     for r in removed:
         conn.execute("DELETE FROM transactions WHERE id LIKE ?", (f"%|pl:{r['transaction_id']}",))
+    splits.prune(conn)
     conn.execute("UPDATE plaid_items SET cursor=? WHERE item_id=?", (cursor, item["item_id"]))
     return new_ids
 

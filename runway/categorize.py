@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 
 from . import categories as catmod
-from . import db
+from . import db, splits
 
 REVIEW_THRESHOLD = 0.85
 DEFAULT_MODEL = "anthropic/claude-haiku-4.5"  # any OpenRouter model id works
@@ -240,7 +240,8 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
     """Categorize the given transactions (or every uncategorized one). Returns counts by outcome."""
     if tx_ids is None:
         todo = db.rows(conn.execute(
-            "SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.category IS NULL"
+            "SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
+            "WHERE t.category IS NULL AND COALESCE(t.is_split, 0)=0"
         ))
     else:
         todo = []
@@ -248,7 +249,8 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
             chunk = tx_ids[i : i + 500]
             q = ",".join("?" * len(chunk))
             todo += db.rows(conn.execute(
-                f"SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.id IN ({q})",
+                f"SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
+                f"WHERE t.id IN ({q}) AND COALESCE(t.is_split, 0)=0",
                 chunk,
             ))
     counts = {"auto": 0, "rule": 0, "history": 0, "ai": 0, "review": 0}
@@ -429,6 +431,8 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
         "UPDATE transactions SET category=?, category_source='manual', confidence=1, needs_review=0 WHERE id=?",
         (category, tx_id),
     )
+    if tx["is_split"]:   # one category for the whole thing means it isn't split any more
+        splits.clear(conn, tx_id)
     if not remember:
         return 0
     key = rule_key(dict(tx))
@@ -440,7 +444,8 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
     )
     cur = conn.execute(
         "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE id<>? AND COALESCE(category_source, '') <> 'manual' AND (needs_review=1 OR category IS NULL) "
+        "WHERE id<>? AND COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
+        "AND (needs_review=1 OR category IS NULL) "
         "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)",
         (category, tx_id, key, key),
     )

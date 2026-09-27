@@ -78,6 +78,8 @@ plain Python with a handful of well-known libraries.
 - **Optional AI categorization** through OpenRouter, guided by examples of how you've categorized before and shown with
   confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new
   categories when nothing fits. Every AI call is logged so you can see what happened.
+- **Split transactions:** a $100 run to Target can be $60 Groceries and $40 Shopping. Budgets, reports and category
+  filters count each part on its own; pick a single category again and the transaction goes back together.
 - Categories with one level of subcategories, a review queue for anything uncategorized, and search and filters.
 
 ### Budgets and reports

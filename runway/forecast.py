@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 
-from . import bankdays, db
+from . import bankdays, db, splits
 from . import recurring as rec
 
 SPEND_WINDOW_DAYS = 90
@@ -440,7 +440,7 @@ def budget_plan(conn, today: date) -> list[dict]:
             continue
         names = [name] + [k["name"] for k in cats if name in k["path"][:-1]]
         q = ",".join("?" * len(names))
-        base = (f"FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.category IN ({q}) AND a.hidden=0 "
+        base = (f"FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id WHERE t.category IN ({q}) AND a.hidden=0 "
                 "AND a.kind IN ('checking','savings','credit')")
         spent = -(conn.execute(f"SELECT COALESCE(SUM(t.amount), 0) {base} AND t.posted>=? AND t.posted<=?",
                                (*names, month_start, today.isoformat())).fetchone()[0] or 0.0)

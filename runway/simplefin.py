@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import db, sfinvest
+from . import db, sfinvest, splits
 from .categorize import clean_payee
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
@@ -194,11 +194,11 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
         # wholesale, but remember their categories so the replacements don't go back through review.
         carried: dict[tuple, list] = {}
         for old in conn.execute(
-            "SELECT description, amount, category, category_source, confidence, needs_review FROM transactions "
+            "SELECT id, description, amount, category, category_source, confidence, needs_review, is_split FROM transactions "
             "WHERE account_id=? AND pending=1 AND posted>=?",
             (acct_id, window_start.isoformat()),
         ).fetchall():
-            if old["category"]:
+            if old["category"] or old["is_split"]:
                 carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
         conn.execute(
             "DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted>=?",
@@ -230,12 +230,15 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
                         (key, acct_id, posted, amount, desc, payee, pending,
                          p["category"], p["category_source"], p["confidence"], p["needs_review"]),
                     )
+                    if p["is_split"]:
+                        splits.carry_over(conn, p["id"], key, amount)
                 else:
                     conn.execute(
                         "INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending) VALUES (?,?,?,?,?,?,?)",
                         (key, acct_id, posted, amount, desc, payee, pending),
                     )
                     new_ids.append(key)
+    splits.prune(conn)
     return new_ids
 
 

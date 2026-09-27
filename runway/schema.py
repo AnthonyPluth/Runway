@@ -62,6 +62,19 @@ transactions = Table(
     Column('pending', Integer, server_default=text('0')),
     Column('created_at', Text, server_default=now_text()),
     Column('recurring_id', Integer, doc='NULL = not matched, 0 = never match'),
+    Column('is_split', Integer, server_default=text('0'), doc='split across categories: the parts are in tx_splits, and they, not this row, count'),
+)
+
+tx_splits = Table(
+    'tx_splits', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('tx_id', Text, nullable=False),
+    Column('amount', Float, nullable=False, doc='same sign as the transaction; the parts add up to it'),
+    Column('category', Text),
+    Column('note', Text),
+    Column('position', Integer, server_default=text('0')),
+    sqlite_autoincrement=True,
+    info={'doc': 'one transaction spread across categories ($100 at Target: $60 Groceries, $40 Shopping)'},
 )
 
 categories = Table(
@@ -432,6 +445,7 @@ Index('tx_account_posted', transactions.c.account_id, transactions.c.posted)
 Index('tx_review', transactions.c.needs_review)
 Index('inv_tx_account_date', inv_transactions.c.account_id, inv_transactions.c.date)
 Index('tx_recurring', transactions.c.recurring_id)
+Index('tx_splits_tx', tx_splits.c.tx_id)
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}
