@@ -159,11 +159,113 @@ def remove_item(conn, item_id: str) -> None:
     for aid in ids:
         for table in ("holdings", "inv_transactions", "inv_snapshots"):
             conn.execute(f"DELETE FROM {table} WHERE account_id=?", (aid,))
+        conn.execute("DELETE FROM accounts WHERE id=?", ("pl:" + aid,))   # its entry in your accounts, if it had one
     conn.execute("DELETE FROM inv_accounts WHERE item_id=?", (item_id,))
     conn.execute("DELETE FROM plaid_items WHERE item_id=?", (item_id,))
 
 
+def item_accounts(conn, item_id: str) -> set[tuple[str, str]]:
+    """A connection's accounts as (name, last four digits), whichever kind of connection it is."""
+    rows = conn.execute("SELECT name, mask FROM inv_accounts WHERE item_id=? UNION ALL SELECT name, mask FROM plaid_accounts "
+                        "WHERE item_id=?", (item_id, item_id)).fetchall()
+    return {(" ".join((r["name"] or "").lower().split()), r["mask"] or "") for r in rows}
+
+
+def duplicates(conn, item_id: str) -> list[dict]:
+    """Other connections to the same institution, of the same kind, that include some of this one's accounts: the same
+    login linked twice. Those accounts then count twice (investments and net worth)."""
+    from . import plaidbank
+    me = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    mine = item_accounts(conn, item_id)
+    if not me or not mine:
+        return []
+    out = []
+    for other in conn.execute("SELECT * FROM plaid_items WHERE item_id<>? AND (institution_id=? OR lower(institution_name)=lower(?))",
+                              (item_id, me["institution_id"] or "", me["institution_name"] or "")).fetchall():
+        if plaidbank.is_bank_item(other) != plaidbank.is_bank_item(me):
+            continue   # e.g. a bank's card statements and its brokerage: different accounts by design
+        shared = mine & item_accounts(conn, other["item_id"])
+        if shared:
+            out.append({"item_id": other["item_id"], "shared": len(shared), "adds_nothing": mine <= shared})
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ syncing
+
+# ------------------------------------------------------------------------------------------------ in your accounts
+
+def _compact_institution(name: str | None) -> str:
+    """"E*TRADE from Morgan Stanley" and "E*Trade" → comparable keys ("etradefrommorganstanley", "etrade")."""
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (name or "").lower()))
+
+
+def _same_institution(a: str | None, b: str | None) -> bool:
+    x, y = _compact_institution(a), _compact_institution(b)
+    return len(x) >= 4 and len(y) >= 4 and (x in y or y in x)
+
+
+def investment_candidates(conn, item_id: str) -> list[dict]:
+    """Your investment accounts (from SimpleFIN) that a Plaid account at this institution could be."""
+    item = conn.execute("SELECT institution_name FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    inst = item["institution_name"] if item else None
+    return [dict(a) for a in conn.execute(
+        "SELECT id, name, display_name, org, balance FROM accounts WHERE kind='investment' AND id NOT LIKE 'pl:%' ORDER BY name").fetchall()
+        if _same_institution(a["org"] or a["name"], inst)]
+
+
+def match_investment(conn, inv_id: str, target: str, today: date | None = None) -> dict:
+    """Your choice for an investment account from Plaid: "new" (its own account), the id of the account it already is
+    (from SimpleFIN, so it isn't counted twice), "ignore", or "" (decide later)."""
+    inv = conn.execute("SELECT i.*, p.institution_name FROM inv_accounts i LEFT JOIN plaid_items p ON p.item_id=i.item_id "
+                       "WHERE i.id=? AND i.source='plaid'", (inv_id,)).fetchone()
+    if not inv:
+        raise ValueError("That account isn't here any more.")
+    own = "pl:" + inv_id
+    if target == "new":
+        name = (inv["name"] or inv["official_name"] or "Investment account") + (f" ••{inv['mask']}" if inv["mask"] else "")
+        conn.execute("INSERT INTO accounts(id, name, org, kind, balance, balance_date, provider, provider_since) "
+                     "VALUES (?,?,?, 'investment', ?,?, 'plaid', ?) ON CONFLICT(id) DO UPDATE SET balance=excluded.balance, hidden=0",
+                     (own, name, inv["institution_name"], inv["balance"] or 0.0, (today or date.today()).isoformat(),
+                      (today or date.today()).isoformat()))
+        conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (own, inv_id))
+        return {"ok": True, "account_id": own}
+    if target and target != "ignore":
+        if not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind='investment' AND id NOT LIKE 'pl:%'", (target,)).fetchone():
+            raise ValueError("Pick one of your investment accounts.")
+    conn.execute("DELETE FROM accounts WHERE id=?", (own,))   # it had its own account before: not any more
+    conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (target or None, inv_id))
+    return {"ok": True, "account_id": target or None}
+
+
+def update_investment_accounts(conn, item_id: str, today: date | None = None) -> None:
+    """After a sync: keep the balances of Plaid investment accounts that are accounts of their own up to date, and decide
+    what a new one is when it's clear: the same as one of your SimpleFIN accounts at that institution when exactly one
+    has the same balance, or its own account when you have none there. Anything else waits for you (Settings)."""
+    today = today or date.today()
+    for inv in conn.execute("SELECT * FROM inv_accounts WHERE item_id=? AND source='plaid'", (item_id,)).fetchall():
+        if inv["account_id"] and inv["account_id"].startswith("pl:"):
+            conn.execute("UPDATE accounts SET balance=?, balance_date=? WHERE id=?", (inv["balance"] or 0.0, today.isoformat(), inv["account_id"]))
+            continue
+        if inv["account_id"]:
+            continue
+        taken = {r[0] for r in conn.execute("SELECT account_id FROM inv_accounts WHERE account_id IS NOT NULL")}
+        cands = [c for c in investment_candidates(conn, item_id) if c["id"] not in taken]
+        if not cands:
+            match_investment(conn, inv["id"], "new", today)
+            continue
+        bal = inv["balance"] or 0.0
+        close = [c for c in cands if bal and abs((c["balance"] or 0.0) - bal) <= max(5.0, abs(bal) * 0.01)]
+        if len(close) == 1:
+            match_investment(conn, inv["id"], close[0]["id"], today)
+
+
+def undecided_count(conn) -> int:
+    """Accounts from Plaid waiting for you to say what they are (bank and card accounts, and investment accounts)."""
+    banks = conn.execute("SELECT COUNT(*) FROM plaid_accounts p WHERE p.ignored=0 AND p.type<>'investment' AND p.plaid_account_id "
+                         "NOT IN (SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)").fetchone()[0]
+    invest = conn.execute("SELECT COUNT(*) FROM inv_accounts WHERE source='plaid' AND account_id IS NULL").fetchone()[0]
+    return banks + invest
+
 
 def _store_securities(conn, securities: list[dict]) -> None:
     for s in securities or []:
@@ -208,6 +310,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
              bal.get("current"), bal.get("iso_currency_code") or "USD"),
         )
     _store_securities(conn, h.get("securities", []))
+    update_investment_accounts(conn, item_id, today)
     account_ids = [a["account_id"] for a in h.get("accounts", [])]
     for aid in account_ids:  # holdings are a full snapshot: replace
         conn.execute("DELETE FROM holdings WHERE account_id=?", (aid,))

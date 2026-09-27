@@ -593,12 +593,13 @@ input.ghost::placeholder { color: var(--accent); opacity: .85; }
 .pl-acct { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .pl-acct select { margin-left: auto; max-width: 240px; }
 .pl-inv { margin: 6px 0 0 40px; }
+.pl-dup { margin: 8px 0 0 40px; font-size: 13px; }
 .pl-keys { margin: 4px 0 8px; }
 .pl-keys > summary { cursor: pointer; color: var(--text-3); padding: 4px 0; }
 @media (max-width: 700px) {
   .pl-head { flex-wrap: wrap; }
   .pl-btns { margin-left: 40px; }
-  .pl-accts, .pl-inv { margin-left: 0; }
+  .pl-accts, .pl-inv, .pl-dup { margin-left: 0; }
   .pl-acct select { margin-left: 0; max-width: none; width: 100%; }
 }
 @media (max-width: 700px) { .pl-head .acct-main { flex: 1 1 0; } .pl-head .pl-btns { flex-basis: 100%; margin-left: 40px; } .pl-head .acct-title { white-space: normal; } }

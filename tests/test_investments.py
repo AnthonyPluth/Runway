@@ -4,6 +4,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -272,3 +273,115 @@ class SyncTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateConnectionTests(unittest.TestCase):
+    """The same login linked twice (two Wealthfront connections with the same accounts) is flagged, and refused at link."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "d.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+
+    def tearDown(self):
+        self.c.close(); self.tmp.cleanup()
+
+    def add(self, item, accounts, institution="Wealthfront", products="investments"):
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, products) VALUES (?,?,?,?,?)",
+                       (item, "tok", "ins_wf", institution, products))
+        for i, (name, mask) in enumerate(accounts):
+            self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask) VALUES (?,?,?,?)", (f"{item}-{i}", item, name, mask))
+
+    def test_duplicates_are_found(self):
+        kids = [("Roth IRA", "3639"), ("Oliver's 529 Account", "6624")]
+        self.add("a", kids)
+        self.add("b", kids)
+        self.add("c", [("Individual", "1111")])            # a different Wealthfront login: fine
+        self.assertEqual(plaid.duplicates(self.c, "a"), [{"item_id": "b", "shared": 2, "adds_nothing": True}])
+        self.assertEqual(plaid.duplicates(self.c, "c"), [])
+        self.add("d", kids + [("Joint", "2222")])           # overlaps, but brings a new account too
+        self.assertEqual([d["adds_nothing"] for d in plaid.duplicates(self.c, "d")], [False, False])
+
+    def test_linking_the_same_login_again_is_undone(self):
+        from runway import server
+        kids = [("Roth IRA", "3639")]
+        self.add("a", kids)
+
+        def exchange(conn, *_):
+            self.add("b", kids)
+            return "b"
+
+        removed = []
+        with mock.patch.object(plaid, "exchange", side_effect=exchange), \
+                mock.patch.object(plaid, "sync_item", return_value={"accounts": 1}), \
+                mock.patch.object(plaid, "remove_item", side_effect=lambda conn, i: removed.append(i)):
+            with self.assertRaises(server.ApiError) as e:
+                server.api_plaid_exchange(self.c, {}, {"public_token": "p", "institution": {"name": "Wealthfront"}})
+        self.assertEqual(e.exception.status, 409)
+        self.assertIn("already connected", str(e.exception))
+        self.assertEqual(removed, ["b"])
+
+
+class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
+    """Investment accounts linked through Plaid show under Settings → Accounts and count in net worth, once."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "i.db")
+        db.init(self.path)
+        self.c = db.connect(self.path)
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('wf', 't', 'Wealthfront', 'investments')")
+
+    def tearDown(self):
+        self.c.close(); self.tmp.cleanup()
+
+    def inv(self, id_, name, balance):
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES (?, 'wf', ?, '1234', ?)", (id_, name, balance))
+
+    def sf(self, id_, name, balance, org="Wealthfront"):
+        self.c.execute("INSERT INTO accounts(id, name, org, kind, balance) VALUES (?,?,?, 'investment', ?)", (id_, name, org, balance))
+
+    def acct(self, id_):
+        return self.c.execute("SELECT account_id FROM inv_accounts WHERE id=?", (id_,)).fetchone()[0]
+
+    def test_its_own_account_when_simplefin_has_nothing_there(self):
+        self.sf("et", "E*Trade", 1000, org="E*Trade")
+        self.inv("a1", "Individual", 5000)
+        plaid.update_investment_accounts(self.c, "wf")
+        self.assertEqual(self.acct("a1"), "pl:a1")
+        row = self.c.execute("SELECT name, kind, balance FROM accounts WHERE id='pl:a1'").fetchone()
+        self.assertEqual((row["name"], row["kind"], row["balance"]), ("Individual ••1234", "investment", 5000))
+        from runway import networth
+        self.assertAlmostEqual(networth.summary(self.c)["assets"], 6000)      # counted in net worth (with E*Trade's 1000)
+        self.c.execute("UPDATE inv_accounts SET balance=5100 WHERE id='a1'")
+        plaid.update_investment_accounts(self.c, "wf")                       # balances follow each sync
+        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='pl:a1'").fetchone()[0], 5100)
+
+    def test_same_as_simplefin_when_the_balance_says_so_and_asks_otherwise(self):
+        self.sf("sf-roth", "Roth IRA", 4943.43)
+        self.sf("sf-529", "529 Plan", 0.0)
+        self.inv("roth", "Roth IRA", 4943.43)
+        self.inv("529", "Madeleine's 529 Account", 12000)
+        self.inv("new", "Joint", 700)
+        plaid.update_investment_accounts(self.c, "wf")
+        self.assertEqual(self.acct("roth"), "sf-roth")                       # counted once
+        self.assertIsNone(self.acct("529"))                                  # not clear: waits for you
+        self.assertIsNone(self.acct("new"))
+        self.assertEqual(plaid.undecided_count(self.c), 2)
+        self.assertEqual([c["id"] for c in plaid.investment_candidates(self.c, "wf")], ["sf-529", "sf-roth"])
+        plaid.match_investment(self.c, "529", "sf-529")
+        plaid.match_investment(self.c, "new", "new")
+        self.assertEqual(plaid.undecided_count(self.c), 0)
+        self.assertTrue(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:new'").fetchone())
+        plaid.match_investment(self.c, "new", "ignore")                      # changing your mind removes its entry
+        self.assertIsNone(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:new'").fetchone())
+        with self.assertRaises(ValueError):
+            plaid.match_investment(self.c, "529", "not-an-account")
+
+    def test_removing_the_connection_removes_its_accounts(self):
+        self.inv("a1", "Individual", 5000)
+        plaid.update_investment_accounts(self.c, "wf")
+        with mock.patch.object(plaid, "call", return_value={}):
+            plaid.remove_item(self.c, "wf")
+        self.assertIsNone(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:a1'").fetchone())
