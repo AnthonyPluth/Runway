@@ -73,8 +73,11 @@ plain Python with a handful of well-known libraries.
 - Suggestions for recurring items it spots in your history.
 
 ### Transactions and categorization
-- **Rules** ("contains *whole foods*" → Groceries) plus built-in heuristics; tick "Remember for this merchant" and a
-  category you pick becomes a rule.
+- **Rules** with conditions and actions: when the merchant contains, is or starts with some text, the amount is in a
+  range, the money goes out or comes in, or it's in a particular account, then set a category, rename the merchant,
+  split it by percentages ("Costco: 70% Groceries, 30% Household") or put it in Review. The most specific rule wins, and
+  a preview shows what a rule would match before you save it. Tick "Remember for this merchant" and a category you
+  pick becomes a rule; built-in heuristics handle card payments and sweeps.
 - **Optional AI categorization** through OpenRouter, guided by examples of how you've categorized before and shown with
   confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new
   categories when nothing fits. Every AI call is logged so you can see what happened.

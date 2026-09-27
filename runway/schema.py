@@ -143,9 +143,17 @@ categories = Table(
 rules = Table(
     'rules', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('match', Text, nullable=False, unique=True, doc='lowercase text found in the payee or description'),
-    Column('category', Text, nullable=False),
+    Column('match', Text, nullable=False, doc="lowercase text in the payee or description ('' = any)"),
+    Column('category', Text, doc='set this category (NULL: leave it to the other rules, history or the AI)'),
     Column('created_at', Text, server_default=now_text()),
+    Column('match_mode', Text, server_default=text("'contains'"), doc='contains | exact | starts'),
+    Column('amount_min', Float, doc='only amounts at least this much (dollars, either direction)'),
+    Column('amount_max', Float, doc='only amounts at most this much'),
+    Column('direction', Text, doc='out | in | NULL (either)'),
+    Column('account_id', Text, doc='only this account'),
+    Column('rename', Text, doc='show the merchant as this'),
+    Column('review', Integer, server_default=text('0'), doc='1: put matching transactions in Review'),
+    Column('split', Text, doc='JSON [{"category", "percent"}]: split matching transactions this way'),
     sqlite_autoincrement=True,
 )
 
