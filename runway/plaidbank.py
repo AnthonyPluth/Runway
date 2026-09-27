@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from . import db, splits
+from . import db, merchants, splits
 from .categorize import clean_payee
 from .plaid import PlaidError, call
 
@@ -312,9 +312,10 @@ def sync_transactions(conn, item, today: date) -> list[str]:
         desc = (t.get("original_description") or t.get("name") or "").strip()
         payee = clean_payee(t.get("merchant_name") or t.get("name") or desc)
         pending = 1 if t.get("pending") else 0
+        merchant = merchants.note(conn, t)
         if conn.execute("SELECT 1 FROM transactions WHERE id=?", (key,)).fetchone():
-            conn.execute("UPDATE transactions SET posted=?, amount=?, description=?, pending=? WHERE id=?",
-                         (posted, amount, desc, pending, key))
+            conn.execute("UPDATE transactions SET posted=?, amount=?, description=?, pending=?, merchant_id=COALESCE(?, merchant_id) "
+                         "WHERE id=?", (posted, amount, desc, pending, merchant, key))
             continue
         since = acct["provider_since"]
         if aid in earlier and since:
@@ -338,6 +339,8 @@ def sync_transactions(conn, item, today: date) -> list[str]:
             conn.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending) VALUES (?,?,?,?,?,?,?)",
                          (key, aid, posted, amount, desc, payee, pending))
             new_ids.append(key)
+        if merchant:
+            conn.execute("UPDATE transactions SET merchant_id=? WHERE id=?", (merchant, key))
         if old:
             splits.carry_over(conn, old, key, amount)
     for r in removed:
@@ -386,6 +389,10 @@ def sync_all(conn, today: date | None = None) -> dict:
             conn.commit()
         except PlaidError as e:
             out["errors"].append(f"{item['institution_name'] or 'Plaid'}: {e}")
+    try:   # logos for merchants Plaid named: nice to have, never a reason to fail the sync
+        merchants.fetch_logos(conn)
+    except Exception:
+        pass
     return out
 
 
