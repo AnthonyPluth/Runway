@@ -847,6 +847,7 @@ def api_plaid_status(conn, _q, _b):
                 "SELECT id, name, official_name, subtype, mask, balance, hidden FROM inv_accounts WHERE item_id=? ORDER BY name", (it["item_id"],)))
     return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "production"),
             "client_id": db.get_setting(conn, "plaid_client_id") or "", "items": items,
+            "redirect_uri": plaid.redirect_uri(conn),
             "last_inv_sync": db.get_setting(conn, "last_inv_sync"), "syncing": _inv_lock.locked(),
             "inv_accounts": conn.execute("SELECT COUNT(*) FROM inv_accounts").fetchone()[0],
             "simplefin_connected": bool(db.get_setting(conn, "simplefin_access_url")),
@@ -875,14 +876,30 @@ def api_plaid_link_token(conn, _q, body):
     if kind not in ("investments", "bank", "cards"):
         raise ApiError("Unknown kind of connection")
     try:
-        return {"link_token": plaid.link_token(conn, body.get("item_id") or None, kind), "kind": kind}
+        token = plaid.link_token(conn, body.get("item_id") or None, kind)
     except plaid.PlaidError as e:
-        if kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD"):
-            try:   # Transactions isn't enabled for this Plaid account: card statements only
-                return {"link_token": plaid.link_token(conn, None, "cards"), "kind": "cards"}
-            except plaid.PlaidError:
-                pass
-        raise ApiError(str(e), 502)
+        if not (kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD")):
+            raise ApiError(str(e), 502)
+        try:   # Transactions isn't enabled for this Plaid account: card statements only
+            token, kind = plaid.link_token(conn, None, "cards"), "cards"
+        except plaid.PlaidError:
+            raise ApiError(str(e), 502)
+    # Kept so Link can pick up where it left off when a bank sends you back to /plaid/oauth (possibly in another
+    # browser, like Safari from the installed app). Link tokens expire after 4 hours.
+    db.set_setting(conn, "plaid_pending_link", json.dumps({"token": token, "kind": kind, "item_id": body.get("item_id") or None,
+                                                          "at": time.time()}))
+    return {"link_token": token, "kind": kind}
+
+
+def api_plaid_oauth_resume(conn, _q, _b):
+    """The Link session to continue after the bank's sign-in page sends you back."""
+    try:
+        p = json.loads(db.get_setting(conn, "plaid_pending_link") or "{}")
+    except ValueError:
+        p = {}
+    if not p.get("token") or time.time() - p.get("at", 0) > 4 * 3600:
+        raise ApiError("That bank connection has expired. Start it again from Settings → Connections.", 404)
+    return {"link_token": p["token"], "kind": p.get("kind"), "item_id": p.get("item_id")}
 
 
 def api_plaid_exchange(conn, _q, body):
@@ -1087,6 +1104,7 @@ ROUTES = [
     ("POST", "/api/plaid/items/{id}/remove", api_plaid_item_remove),
     ("POST", "/api/plaid/accounts/{id}", api_inv_account),
     ("POST", "/api/plaid/match", api_plaid_match),
+    ("GET", "/api/plaid/oauth_resume", api_plaid_oauth_resume),
     ("GET", "/api/investments", api_investments),
     ("GET", "/api/networth", api_networth),
     ("POST", "/api/assets", api_asset_add),
@@ -1218,7 +1236,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.user:
                 if url.path.startswith("/api/"):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
-                return self._redirect("/auth/login?next=" + urllib.parse.quote(url.path or "/"))
+                back = (url.path or "/") + ("?" + url.query if url.query else "")   # e.g. /plaid/oauth?oauth_state_id=…
+                return self._redirect("/auth/login?next=" + urllib.parse.quote(back, safe=""))
         if not url.path.startswith("/api/"):
             if method != "GET":
                 return self._send(405, b"", "text/plain")

@@ -315,9 +315,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     if unlinked:
         names = [c["name"] for c in unlinked]
         listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        waiting = conn.execute(
+            "SELECT COUNT(*) FROM plaid_accounts p WHERE p.type='credit' AND p.ignored=0 AND p.plaid_account_id NOT IN "
+            "(SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)").fetchone()[0]
+        these = "it" if len(names) == 1 else "them"
         warnings.append(f"{listed} {'isn’t' if len(names) == 1 else 'aren’t'} linked through Plaid yet, so "
                         f"{'its payments aren’t' if len(names) == 1 else 'their payments aren’t'} in the forecast. "
-                        "Link them to get their statements and due dates.")
+                        + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Connections, "
+                           f"choose “Same as …” for each." if waiting else f"Link {these} to get statements and due dates."))
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute("SELECT key, amount FROM overrides")}

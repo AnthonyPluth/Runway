@@ -138,10 +138,12 @@ class OIDCTests(unittest.TestCase):
 
     def test_signed_out_requests_go_to_login(self):
         status, loc, _, _ = self.req("/")
-        self.assertEqual((status, loc), (302, "/auth/login?next=/"))
+        self.assertEqual((status, loc), (302, "/auth/login?next=%2F"))
         status, _, _, body = self.req("/api/state")
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(body)["login"], "/auth/login")
+        status, loc, _, _ = self.req("/plaid/oauth?oauth_state_id=abc-123")   # back from a bank: keep where you were
+        self.assertEqual((status, loc), (302, "/auth/login?next=%2Fplaid%2Foauth%3Foauth_state_id%3Dabc-123"))
         self.assertEqual(self.req("/app.css")[0], 200)          # the sign-in pages can still be styled
         self.assertEqual(self.req("/healthz")[0], 200)
 
