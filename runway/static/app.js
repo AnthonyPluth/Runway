@@ -624,13 +624,20 @@ async function renderTxPage(el, mode) {
   load();
 }
 
+// The merchant's logo when Plaid has one (Runway serves it; nothing is fetched from elsewhere), else its initial.
+function merchantIcon(t) {
+  const name = (t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "");
+  return t.logo ? `<img class="m-logo" src="${esc(t.logo)}" alt="" loading="lazy" width="20" height="20">`
+    : `<span class="m-logo m-initial" aria-hidden="true">${esc((name[0] || "?").toUpperCase())}</span>`;
+}
+
 function txRow(t, review) {
   const suggestion = t.needs_review && t.category && t.category_source === "ai";
   const linked = t.recurring_id > 0;
   const split = t.is_split && (t.splits || []).length;
   return `<tr data-id="${esc(t.id)}" data-account="${esc(t.account_id)}" ${split ? 'class="has-split"' : ""}>
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
-    <td><div class="merchant">${esc(t.payee || t.description)}
+    <td><div class="merchant">${merchantIcon(t)}${esc(t.payee || t.description)}
         <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button>
         ${t.retail ? `<button class="tag order-tag" title="See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order">${orderLabel(t.retail)}</button>` : ""}</div>
       <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div>

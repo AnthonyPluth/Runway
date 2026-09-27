@@ -214,6 +214,19 @@ class PlaidBankTests(unittest.TestCase):
         self.assertEqual((lunch["amount"], lunch["category"], lunch["pending"]), (-21.0, "Restaurants", 0))
         self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id='sf-chk|pl:a3'").fetchone())
 
+    def test_merchants_and_their_logos_are_noted(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        joe = {**tx("m1", "p-chk", "2026-09-23", 4.5, "SQ *JOES"), "merchant_name": "Joe's Coffee",
+               "merchant_entity_id": "ent-joe", "logo_url": "https://plaid-merchant-logos.plaid.com/joes.png",
+               "website": "joescoffee.com"}
+        MockBank.pages = [{"added": [joe, tx("m2", "p-chk", "2026-09-23", 9.0, "NO LOGO SHOP")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        ids = dict(self.c.execute("SELECT id, merchant_id FROM transactions WHERE id LIKE '%pl:m%'").fetchall())
+        self.assertEqual(ids, {"sf-chk|pl:m1": "ent-joe", "sf-chk|pl:m2": None})
+        m = self.c.execute("SELECT name, website, logo_url FROM merchants").fetchone()
+        self.assertEqual(tuple(m), ("Joe's Coffee", "joescoffee.com", "https://plaid-merchant-logos.plaid.com/joes.png"))
+
     def test_simplefin_leaves_plaid_accounts_alone(self):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)

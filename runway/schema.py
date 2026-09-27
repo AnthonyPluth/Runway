@@ -63,6 +63,19 @@ transactions = Table(
     Column('created_at', Text, server_default=now_text()),
     Column('recurring_id', Integer, doc='NULL = not matched, 0 = never match'),
     Column('is_split', Integer, server_default=text('0'), doc='split across categories: the parts are in tx_splits, and they, not this row, count'),
+    Column('merchant_id', Text, doc='the merchant as Plaid named it (merchants.id)'),
+)
+
+merchants = Table(
+    'merchants', metadata,
+    Column('id', Text, primary_key=True, doc="Plaid's merchant entity id, or 'name:<lowercased name>'"),
+    Column('name', Text),
+    Column('website', Text),
+    Column('logo_url', Text, doc="where Plaid has the logo (plaid.com only)"),
+    Column('logo', Text, doc='the logo itself, base64 (downloaded once, served by Runway)'),
+    Column('logo_type', Text, doc='image/png, ...'),
+    Column('logo_checked', Text, doc='when Runway last tried to download it'),
+    info={'doc': 'merchants Plaid knows, and their logos'},
 )
 
 tx_splits = Table(
