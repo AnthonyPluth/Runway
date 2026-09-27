@@ -234,6 +234,7 @@ def api_state(conn, _q, _b):
         "last_log": dict(last_log) if last_log else None,
         "last_llm_error": db.get_setting(conn, "last_llm_error"),
         "review_count": conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0],
+        "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are
         "horizon_days": int(db.get_setting(conn, "horizon_days", "90") or 90),
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
         "primary_account": db.get_setting(conn, "primary_account"),
@@ -856,6 +857,7 @@ def api_plaid_status(conn, _q, _b):
     for it in items:
         it["bank"] = plaidbank.is_bank_item(it)
         it["products"] = sorted(plaidbank.products(it))
+        it["duplicates"] = plaid.duplicates(conn, it["item_id"])
         if it["bank"]:
             it["accounts"] = db.rows(conn.execute(
                 "SELECT p.plaid_account_id AS id, p.name, p.official_name, p.subtype, p.type, p.mask, p.current AS balance, "
@@ -866,7 +868,9 @@ def api_plaid_status(conn, _q, _b):
                 (it["item_id"],)))
         else:
             it["accounts"] = db.rows(conn.execute(
-                "SELECT id, name, official_name, subtype, mask, balance, hidden FROM inv_accounts WHERE item_id=? ORDER BY name", (it["item_id"],)))
+                "SELECT id, name, official_name, subtype, mask, balance, hidden, account_id FROM inv_accounts WHERE item_id=? ORDER BY name",
+                (it["item_id"],)))
+            it["candidates"] = plaid.investment_candidates(conn, it["item_id"])   # what each account could be
     return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "production"),
             "client_id": db.get_setting(conn, "plaid_client_id") or "", "items": items,
             "redirect_uri": plaid.redirect_uri(conn),
@@ -928,6 +932,13 @@ def api_plaid_exchange(conn, _q, body):
     try:
         item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {})
         res = plaid.sync_item(conn, item_id)
+        # The same login linked a second time: its accounts would count twice. Undo it (at Plaid too) and say so.
+        if any(d["adds_nothing"] for d in plaid.duplicates(conn, item_id)):
+            name = (body.get("institution") or {}).get("name") or "That institution"
+            plaid.remove_item(conn, item_id)
+            conn.commit()
+            raise ApiError(f"{name} is already connected with these accounts, so nothing was added. To fix a connection, "
+                           "use its Sync or Reconnect button instead.", 409)
         item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
         if plaidbank.is_bank_item(item):
             n = len(res.pop("new", []))
@@ -962,8 +973,11 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
 
 
 def api_plaid_match(conn, _q, body):
+    pid, target = str(body.get("plaid_account_id") or ""), str(body.get("target") or "")
     try:
-        return plaidbank.match(conn, str(body.get("plaid_account_id") or ""), str(body.get("target") or ""))
+        if conn.execute("SELECT 1 FROM inv_accounts WHERE id=? AND source='plaid'", (pid,)).fetchone():
+            return plaid.match_investment(conn, pid, target)
+        return plaidbank.match(conn, pid, target)
     except ValueError as e:
         raise ApiError(str(e))
 
@@ -1627,6 +1641,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
         categories.flatten(conn)      # subcategories are one level deep
         plaid.hide_all_duplicates(conn)  # an institution linked through both Plaid and SimpleFIN is counted once
+        for r in conn.execute("SELECT item_id FROM plaid_items WHERE COALESCE(products, 'investments') LIKE '%investments%'").fetchall():
+            plaid.update_investment_accounts(conn, r["item_id"])   # investment accounts from Plaid in your accounts
         oidc.backfill_users(conn)        # people who signed in before owners existed
     global AUTO_SYNC
     AUTO_SYNC = auto_sync
