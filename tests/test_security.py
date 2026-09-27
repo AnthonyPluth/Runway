@@ -199,6 +199,9 @@ class SyncStatusTests(unittest.TestCase):
 
     def tearDown(self):
         server.AUTO_SYNC = True
+        with db.session() as c:   # on Postgres the tests share one database: leave it as found
+            db.set_setting(c, "simplefin_access_url", None)
+            c.execute("DELETE FROM sync_log")
         self.tmp.cleanup()
         if self.saved is None:
             os.environ.pop("RUNWAY_DATA", None)
