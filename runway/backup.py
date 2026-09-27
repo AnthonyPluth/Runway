@@ -12,7 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import inspect
 
-from . import db, schema
+from . import db, schema, secretbox
 
 FORMAT = "runway-backup"
 VERSION = 1
@@ -27,13 +27,43 @@ def table_columns(conn, table: str) -> list[str]:
     return [c["name"] for c in inspect(conn.sa).get_columns(table)]
 
 
+def _secret_columns(table: str, cols: list[str]):
+    """Which values in a row are stored encrypted: returns a test (row -> list of column indexes)."""
+    if table == "settings" and "key" in cols and "value" in cols:
+        k, v = cols.index("key"), cols.index("value")
+        return lambda row: [v] if row[k] in secretbox.SECRET_SETTINGS else []
+    if table == "plaid_items" and "access_token" in cols:
+        i = cols.index("access_token")
+        return lambda row: [i]
+    return None
+
+
+def _convert(table: str, cols: list[str], rows: list[list], fn) -> list[list]:
+    which = _secret_columns(table, cols)
+    if not which:
+        return rows
+    for row in rows:
+        for i in which(row):
+            row[i] = fn(row[i])
+    return rows
+
+
 def export(conn) -> dict:
+    """Secrets are written decrypted, so the backup restores under any key (on another machine, say)."""
     out = {"format": FORMAT, "version": VERSION, "created": datetime.now().isoformat(timespec="seconds"),
            "source": "postgres" if db.using_postgres() else "sqlite", "tables": {}}
     for t in tables():
         cols = table_columns(conn, t)
-        out["tables"][t] = {"columns": cols, "rows": [list(r) for r in conn.execute(f"SELECT {', '.join(cols)} FROM {t}")]}
+        rows = [list(r) for r in conn.execute(f"SELECT {', '.join(cols)} FROM {t}")]
+        out["tables"][t] = {"columns": cols, "rows": _convert(t, cols, rows, _decrypt_or_drop)}
     return out
+
+
+def _decrypt_or_drop(value):
+    try:
+        return secretbox.decrypt(value)
+    except secretbox.SecretError:
+        return value   # unreadable under the current key: kept as it is rather than failing the whole backup
 
 
 def dump(conn) -> bytes:
@@ -64,7 +94,7 @@ def restore(conn, data: dict) -> dict:
         have = table_columns(conn, t)
         cols = [c for c in payload["columns"] if c in have]
         keep = [payload["columns"].index(c) for c in cols]
-        rows = [[r[i] for i in keep] for r in payload["rows"]]
+        rows = _convert(t, cols, [[r[i] for i in keep] for r in payload["rows"]], secretbox.encrypt)
         if rows and cols:
             conn.executemany(f"INSERT INTO {t}({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", rows)
         counts[t] = len(rows)

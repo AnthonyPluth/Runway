@@ -44,7 +44,7 @@ your paychecks and bills, and what each credit card will actually charge you on 
 day by day for the next few months, so you can see the tightest moment before you get there.
 
 It runs on your own computer or home server, keeps its data in a single database file you control, and is written in
-plain Python with no third-party packages.
+plain Python with a handful of well-known libraries.
 
 ## Features
 
@@ -183,6 +183,9 @@ the database. Everything about how and where Runway runs is set with environment
 | `OIDC_SCOPES` | `openid email profile` | Add `groups` if your provider needs it to send group membership. |
 | `RUNWAY_SESSION_DAYS` | `14` | How long you stay signed in. |
 | `RUNWAY_ALLOWED_HOSTS` | | Extra host names Runway answers to (local IPs, `*.local`, bare names and Tailscale names always work). |
+| `RUNWAY_SECRET_KEY` | | Encrypts the bank access and API keys Runway saves (at least 32 characters: `openssl rand -base64 32`). Without it, Runway makes `secret.key` in `RUNWAY_DATA`. |
+| `RUNWAY_SECRET_KEY_OLD` | | The previous key, for one start after changing `RUNWAY_SECRET_KEY`; everything is re-encrypted with the new one. |
+| `RUNWAY_ALLOW_INSECURE_HTTP` | | `1` allows an `http://` `RUNWAY_PUBLIC_URL` on an internet address. Don't. |
 | `RUNWAY_ALLOW_NO_AUTH` | | `1` runs without sign-in on the network, for when a proxy in front already handles it. |
 | `DATABASE_URL` | | `postgresql://user:password@host:5432/db` to use Postgres instead of the built-in SQLite file. |
 | `RUNWAY_DATA` | `./data` (`/data` in Docker) | Where the SQLite database lives. |
@@ -244,7 +247,18 @@ were added are upgraded in place.
   authorized party, expiry, issued-at and nonce checks. Sessions are random tokens stored hashed, in `HttpOnly`,
   `SameSite=Lax` cookies (`Secure` over HTTPS).
 - **Host checking:** Runway only answers to addresses you've configured or that are clearly local.
-- The container runs as an unprivileged user, and secrets (`.env`, `data/`, backups) are excluded from Git.
+- **Secrets encrypted at rest:** bank access (SimpleFIN, Plaid access tokens), API keys and the push signing key are
+  stored encrypted (Fernet, with `RUNWAY_SECRET_KEY` or a generated key file), so a copy of the database alone doesn't
+  give them away. Backup files hold them decrypted so they restore anywhere: keep backups private.
+- **HTTPS on the internet:** with sign-in on, Runway won't start with an `http://` `RUNWAY_PUBLIC_URL` unless it's a
+  home-network address.
+- **Browser protections:** a strict Content-Security-Policy (only Runway's own scripts, with a per-page nonce, plus
+  Plaid Link), no framing, `Referrer-Policy: no-referrer`, HSTS over HTTPS. State-changing requests need Runway's own
+  header and are refused from other sites; signing out is a POST.
+- **Hardened server:** request size limits, a timeout for slow clients, a cap on requests handled at once, and errors
+  that never show internals (they log a reference instead). One access-log line per request, without query strings.
+- The container runs as an unprivileged user without extra capabilities, and secrets (`.env`, `data/`, backups) are
+  excluded from Git. Found a problem? See [SECURITY.md](SECURITY.md).
 
 ## Development
 

@@ -7,7 +7,10 @@ services:
     container_name: runway
     restart: unless-stopped
     ports:
-      - "8765:8765"
+      - "8765:8765"      # behind a reverse proxy on this machine, use "127.0.0.1:8765:8765" so only the proxy can reach it
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]      # Runway needs no special privileges
     volumes:
       - ./data:/data                                   # your database: back this folder up
     environment:
@@ -20,6 +23,7 @@ services:
       OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
       OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
       RUNWAY_ALLOWED_HOSTS: ${RUNWAY_ALLOWED_HOSTS:-}
+      RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}             # encrypts saved bank access and API keys
       # Optional: use Postgres instead of the built-in database (see DOCKER.md for moving your data over).
       DATABASE_URL: ${DATABASE_URL:-}
     # depends_on: [db]            # if you use the Postgres service below

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import calendar
+import gzip
+import hashlib
 import html
 import ipaddress
 from http.cookies import SimpleCookie
@@ -11,6 +13,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 import os
+import secrets
 import threading
 import time
 import traceback
@@ -34,6 +37,7 @@ DAILY_SYNC_HOUR = 6          # the daily sync runs on the first check after this
 VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
+AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
 
 ACCOUNT_FIELDS = {
     "display_name": str, "kind": str, "pay_from": str,
@@ -64,12 +68,12 @@ def run_sync() -> dict:
     if not _sync_lock.acquire(blocking=False):
         raise ApiError("A sync is already running.", 409)
     try:
-        with db.session() as conn:
-            access_url = db.get_setting(conn, "simplefin_access_url")
-            use_plaid = plaid_banks(conn)
-            if not access_url and not use_plaid:
-                raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
-            try:
+        try:
+            with db.session() as conn:
+                access_url = db.get_setting(conn, "simplefin_access_url")
+                use_plaid = plaid_banks(conn)
+                if not access_url and not use_plaid:
+                    raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
                 result = simplefin.sync(conn, access_url) if access_url else {"new": [], "errors": []}
                 if use_plaid:   # accounts set to Plaid, and card statements
                     pb = plaidbank.sync_all(conn)
@@ -93,11 +97,24 @@ def run_sync() -> dict:
                 conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, ?)", (msg,))
                 db.set_setting(conn, "last_sync_ok", datetime.now().isoformat(timespec="seconds"))
                 return {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
-            except simplefin.SimpleFinError as e:
-                conn.execute("INSERT INTO sync_log(ok, message) VALUES (0, ?)", (str(e),))
-                raise ApiError(str(e), 502)
+        except ApiError:
+            raise
+        except simplefin.SimpleFinError as e:
+            _record_failed_sync(str(e))
+            raise ApiError(str(e), 502)
+        except Exception as e:
+            traceback.print_exc()
+            _record_failed_sync(f"The sync stopped with an error ({type(e).__name__}); the details are in Runway's log.")
+            raise ApiError("The sync failed; the details are in Runway's log.", 500)
     finally:
         _sync_lock.release()
+
+
+def _record_failed_sync(message: str) -> None:
+    """Written in a session of its own: the sync's session rolled back, and the failure must still show (the
+    sidebar's "Last sync failed", and the can't-sync notification)."""
+    with db.session() as conn:
+        conn.execute("INSERT INTO sync_log(ok, message) VALUES (0, ?)", (message,))
 
 
 def run_investment_sync() -> dict:
@@ -168,6 +185,8 @@ def notify_now() -> None:
 
 def sync_on_visit() -> dict:
     """Someone opened Runway: sync in the background if the data is more than VISIT_SYNC_MINUTES old."""
+    if not AUTO_SYNC:   # --no-sync / RUNWAY_NO_SYNC=1: only when you ask (Settings or the sync buttons)
+        return {"started": False}
     with db.session() as conn:
         configured = bank_configured(conn)
         bank = configured and _older_than(db.get_setting(conn, "last_sync_ok"), minutes=VISIT_SYNC_MINUTES) \
@@ -790,7 +809,9 @@ def api_connect(conn, _q, body):
     if not token:
         raise ApiError("Paste a SimpleFIN setup token.")
     try:
-        access_url = token if token.startswith("http") else simplefin.claim_setup_token(token)
+        if token.startswith("http") and not token.startswith("https://"):
+            raise ApiError("A SimpleFIN access URL must start with https://.")
+        access_url = token if token.startswith("https://") else simplefin.claim_setup_token(token)
         simplefin.fetch_accounts(access_url, date.today() - timedelta(days=3))  # prove it works before saving
     except simplefin.SimpleFinError as e:
         raise ApiError(str(e), 502)
@@ -1135,20 +1156,90 @@ def _match(pattern: str, path: str):
     return params
 
 
+MAX_JSON_BODY = 1024 * 1024          # API requests are small; anything bigger is refused before it's read
+MAX_RESTORE_BODY = 200 * 1024 * 1024
+REQUEST_TIMEOUT = 60                 # seconds a client may stall while sending or receiving (slow-client protection)
+MAX_CONCURRENT_REQUESTS = 64
+
+# Plaid Link (Settings → Connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
+PLAID_ORIGINS = "https://cdn.plaid.com"
+PLAID_API = "https://production.plaid.com https://sandbox.plaid.com"
+
+
+def content_security_policy(nonce: str | None = None) -> str:
+    """Only Runway's own scripts run (the page's <script> tags carry a per-response nonce; scripts they add, like Plaid
+    Link, are trusted through 'strict-dynamic'). No framing, no plugins, no <base> tricks."""
+    scripts = f"'nonce-{nonce}' 'strict-dynamic' 'self' {PLAID_ORIGINS}" if nonce else "'self'"
+    return ("default-src 'self'; "
+            f"script-src {scripts}; "
+            "style-src 'self' 'unsafe-inline'; "     # inline style attributes (and Plaid Link) need this
+            "img-src 'self' data:; font-src 'self'; "
+            f"connect-src 'self' {PLAID_API}; "
+            f"frame-src {PLAID_ORIGINS}; worker-src 'self'; manifest-src 'self'; "
+            "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+
+def request_ref() -> str:
+    return secrets.token_hex(4)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Runway"
+    sys_version = ""                  # don't advertise the Python version
+    timeout = REQUEST_TIMEOUT
 
-    def log_message(self, fmt, *args):  # quiet
-        pass
+    def log_message(self, fmt, *args):
+        pass   # the standard per-request line includes query strings (sign-in codes); log_request writes our own
 
-    def _send(self, status: int, body: bytes, ctype: str = "application/json") -> None:
+    def log_request(self, code="-", size="-"):
+        # One line per request, path only (no query string: /auth/callback carries sign-in codes).
+        path = urllib.parse.urlsplit(getattr(self, "path", "") or "").path
+        if path == "/healthz":
+            return   # the container health check, every minute
+        started = getattr(self, "_started", None)
+        ms = f" {int((time.monotonic() - started) * 1000)}ms" if started else ""
+        print(f"{self.client_address[0]} {getattr(self, 'command', '-')} {path} {code}{ms}", flush=True)
+
+    def _security_headers(self, nonce: str | None = None) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy", content_security_policy(nonce))
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if oidc.config()["secure_cookie"]:   # served over https: tell browsers never to use plain http
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+
+    def _send(self, status: int, body: bytes, ctype: str = "application/json", cache: str = "no-store",
+              nonce: str | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", cache)
+        self._security_headers(nonce)
         self.end_headers()
-        self.wfile.write(body)
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def _error(self, e: BaseException) -> None:
+        """An unexpected failure: log the details, show only a reference to them."""
+        ref = request_ref()
+        print(f"[error {ref}] {self.command} {urllib.parse.urlsplit(self.path).path}", flush=True)
+        traceback.print_exception(type(e), e, e.__traceback__)
+        self._json(500, {"error": f"Something went wrong on Runway's side (reference {ref}; the details are in its log)."})
+
+    def _body_length(self, limit: int) -> int | None:
+        """The request's Content-Length, or None (after answering) if it's missing a number or too big."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0 or n > limit:
+            self.close_connection = True
+            self._json(413 if n > limit else 400, {"error": "That request is too large." if n > limit else "Bad request."})
+            return None
+        return n
 
     def _json(self, status: int, obj) -> None:
         self._send(status, json.dumps(obj).encode())
@@ -1179,6 +1270,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", ck)
         self.send_header("Content-Length", "0")
         self.send_header("Cache-Control", "no-store")
+        self._security_headers()
         self.end_headers()
 
     def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None) -> None:
@@ -1216,21 +1308,63 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect(nxt, [self._cookie_header("runway_session", token, days * 86400),
                                  self._cookie_header("runway_login", "", 0, "/auth")]); return True
         if url.path == "/auth/logout":
-            with db.session() as conn:
-                target = oidc.logout(conn, self._cookie("runway_session")) if oidc.enabled() else "/"
-            self._redirect(target, [self._cookie_header("runway_session", "", 0)]); return True
+            # Signing out is a POST from the app (see _logout), so another site can't sign you out with a link or image.
+            self._page(405, "Sign out from Runway", "Use the sign-out button at the bottom of Runway's sidebar.", ("/", "Open Runway")); return True
         if url.path == "/auth/signed-out":
             self._page(200, "Signed out", "You've signed out of Runway.", ("/auth/login", "Sign in again")); return True
         return False
 
+    def send_response(self, code, message=None):
+        self._responded = True
+        super().send_response(code, message)
+
     def _dispatch(self, method: str) -> None:
+        self._started, self._responded = time.monotonic(), False
+        try:
+            self._route(method)
+        except Exception as e:   # never show internals; never leave the browser hanging
+            if not self._responded:
+                self._error(e)
+            else:
+                traceback.print_exc()
+
+    def _same_site(self) -> bool:
+        """A state-changing request must come from Runway's own pages (defense in depth beside the X-Runway header)."""
+        if (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+            return False
+        origin = self.headers.get("Origin")
+        if origin:   # "null" (sandboxed frames, file: pages) is never Runway
+            return origin != "null" and host_allowed(urllib.parse.urlsplit(origin).netloc)
+        return True
+
+    def _logout(self) -> None:
+        """POST /auth/logout from the app: end the session and say where to go next (the provider's sign-out page)."""
+        with db.session() as conn:
+            target = oidc.logout(conn, self._cookie("runway_session")) if oidc.enabled() else "/"
+        body = json.dumps({"redirect": target}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Set-Cookie", self._cookie_header("runway_session", "", 0))
+        self._security_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _route(self, method: str) -> None:
         url = urllib.parse.urlsplit(self.path)
         if url.path == "/healthz" and method == "GET":   # container health check: says nothing about your data
             return self._send(200, b"ok", "text/plain")
         if not self._host_ok():
             return self._send(403, b"Runway doesn't recognise this address. Add it to RUNWAY_ALLOWED_HOSTS.", "text/plain")
+        if method != "GET" and not self._same_site():
+            return self._json(403, {"error": "forbidden"})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
+        if url.path == "/auth/logout" and method == "POST":
+            if self.headers.get("X-Runway") != "1":
+                return self._json(403, {"error": "forbidden"})
+            return self._logout()
         # The look of the sign-in pages is public; everything else needs you signed in.
         if url.path not in PUBLIC_FILES:
             self.user = self._user()
@@ -1255,13 +1389,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"')
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            self._security_headers()
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
             return
         if method == "POST" and url.path == "/api/restore":
             from . import backup
-            n = int(self.headers.get("Content-Length") or 0)
-            if not n or n > 200 * 1024 * 1024:
+            n = self._body_length(MAX_RESTORE_BODY)
+            if n is None:
+                return
+            if not n:
                 return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
             try:
                 data = backup.load(self.rfile.read(n))
@@ -1275,11 +1413,15 @@ class Handler(BaseHTTPRequestHandler):
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
         if method in ("POST", "DELETE"):
-            n = int(self.headers.get("Content-Length") or 0)
+            n = self._body_length(MAX_JSON_BODY)
+            if n is None:
+                return
             if n:
                 try:
                     body = json.loads(self.rfile.read(n).decode() or "{}")
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    return self._json(400, {"error": "Bad JSON"})
+                if not isinstance(body, dict):
                     return self._json(400, {"error": "Bad JSON"})
         q = urllib.parse.parse_qs(url.query)
         _current.user = getattr(self, "user", None)
@@ -1317,30 +1459,123 @@ class Handler(BaseHTTPRequestHandler):
             except sqlalchemy.exc.OperationalError as e:
                 if "locked" in str(e):
                     return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-                traceback.print_exc()
-                return self._json(500, {"error": f"{type(e).__name__}: {e}"})
-            except Exception as e:
-                traceback.print_exc()
-                return self._json(500, {"error": f"{type(e).__name__}: {e}"})
+                return self._error(e)
+            except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
+                ref = request_ref()
+                print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
+                return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
 
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
-        full = os.path.normpath(os.path.join(STATIC, rel))
-        if not full.startswith(STATIC) or not os.path.isfile(full):
-            full = os.path.join(STATIC, "index.html")
-        with open(full, "rb") as f:
-            data = f.read()
-        self._send(200, data, mimetypes.guess_type(full)[0] or "application/octet-stream")
+        full = os.path.realpath(os.path.join(STATIC, rel))
+        if os.path.commonpath([full, STATIC]) != STATIC or not os.path.isfile(full):
+            full = INDEX   # the app handles its own routes (#budget, /plaid/oauth, ...)
+        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+        gz_ok = "gzip" in (self.headers.get("Accept-Encoding") or "")
+        if full == INDEX:
+            # A fresh nonce per page, so only this page's own <script> tags may run (see content_security_policy).
+            nonce = secrets.token_urlsafe(16)
+            with open(full, "rb") as f:
+                data = f.read().replace(b"<script ", f'<script nonce="{nonce}" '.encode())
+            return self._send_file(data, ctype, "no-store", None, gz_ok, nonce)
+        entry = _static_entry(full)
+        if self.headers.get("If-None-Match") == entry["etag"]:
+            self.send_response(304)
+            self.send_header("ETag", entry["etag"])
+            self.send_header("Cache-Control", "no-cache")
+            self._security_headers()
+            self.end_headers()
+            return
+        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once.
+        self._send_file(entry["data"], ctype, "no-cache", entry["etag"], gz_ok, None, entry.get("gz"))
+
+    def _send_file(self, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
+                   gz: bytes | None = None) -> None:
+        if gz_ok and _compressible(ctype) and len(data) > 1024:
+            data, encoded = gz or gzip.compress(data, 6), True
+        else:
+            encoded = False
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        self.send_header("Vary", "Accept-Encoding")
+        if etag:
+            self.send_header("ETag", etag)
+        if encoded:
+            self.send_header("Content-Encoding", "gzip")
+        self._security_headers(nonce)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
 
     def do_GET(self):
         self._dispatch("GET")
+
+    def do_HEAD(self):
+        self._dispatch("GET")   # same answer without the body (_send and _send_file skip it for HEAD)
 
     def do_POST(self):
         self._dispatch("POST")
 
     def do_DELETE(self):
         self._dispatch("DELETE")
+
+
+STATIC = os.path.realpath(STATIC)
+INDEX = os.path.join(STATIC, "index.html")
+_static_files: dict[str, dict] = {}
+_static_lock = threading.Lock()
+
+
+def _compressible(ctype: str) -> bool:
+    return ctype.startswith("text/") or ctype in ("application/javascript", "application/json", "image/svg+xml",
+                                                  "application/manifest+json")
+
+
+def _static_entry(full: str) -> dict:
+    """A static file's bytes, ETag and gzip'd copy, kept in memory until the file changes."""
+    st = os.stat(full)
+    key = (st.st_mtime_ns, st.st_size)
+    with _static_lock:
+        entry = _static_files.get(full)
+        if entry and entry["key"] == key:
+            return entry
+    with open(full, "rb") as f:
+        data = f.read()
+    ctype = mimetypes.guess_type(full)[0] or ""
+    entry = {"key": key, "data": data, "etag": '"' + hashlib.sha256(data).hexdigest()[:20] + '"',
+             "gz": gzip.compress(data, 6) if _compressible(ctype) and len(data) > 1024 else None}
+    with _static_lock:
+        _static_files[full] = entry
+    return entry
+
+
+class Server(ThreadingHTTPServer):
+    """The standard threaded server, with a cap on requests handled at once so a flood can't exhaust the machine."""
+    daemon_threads = True
+    request_queue_size = 128
+
+    def __init__(self, *a, **k):
+        self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+        super().__init__(*a, **k)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(timeout=REQUEST_TIMEOUT):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 _current = threading.local()
@@ -1371,6 +1606,13 @@ def host_allowed(host_header: str) -> bool:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> None:
+    from . import secretbox
+    problems = secretbox.check_config()
+    if problems:
+        raise SystemExit("\n".join(problems))
+    if db.using_postgres() and not os.environ.get("RUNWAY_SECRET_KEY"):
+        print(f"Note: set RUNWAY_SECRET_KEY. Without it, the key that encrypts your saved bank access and API keys is "
+              f"{secretbox.key_file_path()}, and losing that file means reconnecting them.", flush=True)
     if oidc.enabled():
         problems = oidc.check_config()
         if problems:
@@ -1386,9 +1628,11 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         categories.flatten(conn)      # subcategories are one level deep
         plaid.hide_all_duplicates(conn)  # an institution linked through both Plaid and SimpleFIN is counted once
         oidc.backfill_users(conn)        # people who signed in before owners existed
+    global AUTO_SYNC
+    AUTO_SYNC = auto_sync
     if auto_sync:
         threading.Thread(target=background_sync, daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd = Server((host, port), Handler)
     where = f"http://localhost:{port}" if host in ("127.0.0.1", "localhost") else f"port {port} on all network addresses"
     print(f"Runway is running at {where}  (data: {db.describe()})"
           f"{'  · sign-in via ' + oidc.config()['issuer'] if oidc.enabled() else ''}", flush=True)
