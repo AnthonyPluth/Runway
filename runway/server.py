@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, merchants, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
+from . import brands, categories, categorize, db, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -891,6 +891,62 @@ def api_cashflow(conn, q, _b):
             "total_in": total_in, "total_out": total_out, "net": round(total_in - total_out, 2)}
 
 
+def _ym(q, key="end") -> str:
+    v = (q.get(key, [""])[0] or f"{date.today():%Y-%m}")[:7]
+    try:
+        date(int(v[:4]), int(v[5:7]), 1)
+    except ValueError:
+        raise ApiError("Month must look like 2026-09")
+    return v
+
+
+def _day(q, key: str, default: date) -> str:
+    v = q.get(key, [""])[0]
+    if not v:
+        return default.isoformat()
+    try:
+        return date.fromisoformat(v).isoformat()
+    except ValueError:
+        raise ApiError("Dates must look like 2026-09-01")
+
+
+def _months(q) -> int:
+    return max(2, min(int(q.get("months", ["12"])[0]), 36))
+
+
+def _span(q):
+    """start (inclusive) and end (exclusive) days; this month by default."""
+    first = date.today().replace(day=1)
+    return _day(q, "start", first), _day(q, "end", first + relativedelta(months=1))
+
+
+def api_report_spending(conn, q, _b):
+    try:
+        return reports.spending_over_time(conn, _ym(q), _months(q), q.get("group", ["category"])[0])
+    except ValueError as e:
+        raise ApiError(str(e))
+
+
+def api_report_income(conn, q, _b):
+    return reports.income_vs_spending(conn, _ym(q), _months(q))
+
+
+def api_report_merchants(conn, q, _b):
+    return reports.merchants(conn, *_span(q))
+
+
+def api_report_merchant(conn, q, _b):
+    return reports.merchant(conn, q.get("name", [""])[0], _ym(q), _months(q))
+
+
+def api_report_breakdown(conn, q, _b):
+    return reports.breakdown(conn, *_span(q))
+
+
+def api_report_transactions(conn, q, _b):
+    return reports.transactions(conn, *_span(q), q.get("category", [""])[0] or None, q.get("merchant", [""])[0] or None)
+
+
 def api_budget_set(conn, _q, body):
     cat = body.get("category") or ""
     if not conn.execute("SELECT 1 FROM categories WHERE name=? AND is_transfer=0 AND is_income=0", (cat,)).fetchone():
@@ -1275,6 +1331,12 @@ ROUTES = [
     ("POST", "/api/categories/remove", api_category_remove),
     ("POST", "/api/categories/move", api_category_move),
     ("GET", "/api/cashflow", api_cashflow),
+    ("GET", "/api/reports/spending", api_report_spending),
+    ("GET", "/api/reports/income", api_report_income),
+    ("GET", "/api/reports/merchants", api_report_merchants),
+    ("GET", "/api/reports/merchant", api_report_merchant),
+    ("GET", "/api/reports/breakdown", api_report_breakdown),
+    ("GET", "/api/reports/transactions", api_report_transactions),
     ("GET", "/api/rules", api_rules),
     ("POST", "/api/rules", api_rule_add),
     ("POST", "/api/rules/preview", api_rule_preview),

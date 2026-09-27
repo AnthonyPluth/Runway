@@ -1262,16 +1262,357 @@ async function renderBudget(el) {
 
 // ------------------------------------------------------------------------------------------ reports
 let reportMonth = null;
-async function renderReports(el) {
+const REPORT_TABS = [["cashflow", "Cash flow"], ["trends", "Over time"], ["merchants", "Merchants"], ["income", "Income vs spending"], ["breakdown", "Breakdown"]];
+const REPORT_STATE = { group: "category", months: 12, range: "3m", focus: null, path: [] };
+const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const monthShort = (m, withYear) => { const [y, mo] = m.split("-").map(Number); return new Date(y, mo - 1, 1).toLocaleDateString("en-US", withYear ? { month: "short", year: "2-digit" } : { month: "short" }); };
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// Date ranges for Merchants and Breakdown: [start, end) as YYYY-MM-DD.
+const RANGES = { "1m": "This month", "3m": "3 months", "12m": "12 months", ytd: "This year" };
+function rangeDates(key) {
+  const now = new Date(), next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const back = { "1m": 0, "3m": 2, "12m": 11 }[key];
+  const start = key === "ytd" ? new Date(now.getFullYear(), 0, 1) : new Date(now.getFullYear(), now.getMonth() - back, 1);
+  return { start: isoDay(start), end: isoDay(next) };
+}
+// Categorical colors in fixed order (validated for the dark surface); "everything else" is always gray.
+const CAT_COLORS = 8;
+const catColor = (i, other) => (other || i >= CAT_COLORS ? "var(--cat-other)" : `var(--cat-${i + 1})`);
+const segControl = (id, options, current) => `<div class="seg" id="${id}">${Object.entries(options).map(([k, v]) =>
+  `<button data-v="${esc(k)}" class="${String(k) === String(current) ? "on" : ""}" aria-pressed="${String(k) === String(current)}">${esc(v)}</button>`).join("")}</div>`;
+const wireSeg = (root, id, fn) => $$(`#${id} button`, root).forEach((b) => b.addEventListener("click", () => fn(b.dataset.v)));
+
+async function renderReports(el, sub) {
+  const tab = REPORT_TABS.some(([k]) => k === sub) ? sub : "cashflow";
+  el.innerHTML = `<h1>Reports</h1>
+    <div class="subtabs" role="tablist">${REPORT_TABS.map(([k, v]) =>
+      `<a href="#reports/${k}" role="tab" class="${k === tab ? "active" : ""}" aria-selected="${k === tab}">${v}</a>`).join("")}</div>
+    <div id="report-body"><div class="card empty">Loading…</div></div>`;
+  const body = $("#report-body");
+  return { cashflow: renderCashflowReport, trends: renderTrendsReport, merchants: renderMerchantsReport,
+           income: renderIncomeReport, breakdown: renderBreakdownReport }[tab](body);
+}
+
+// ---- Over time: each month's spending, stacked by category, merchant or account
+async function renderTrendsReport(el) {
+  const st = REPORT_STATE;
+  const d = await api(`/api/reports/spending?end=${thisMonth()}&months=${st.months}&group=${st.group}`);
+  const colored = d.series.map((s, i) => ({ ...s, color: catColor(i, s.other) }));
+  const focus = colored.find((s) => s.name === st.focus);
+  const shown = focus ? [focus] : colored;
+  const n = d.months.length, cur = n - 1;
+  const avg = (s) => s.values.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, n - 1);
+  const change = (a, b) => (b > 0 ? (a - b) / b : null);
+  const pctTxt = (x) => (x == null ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(Math.round(x * 100))}%`);
+  const lastYear = n >= 13 ? n - 13 : null;
+  el.innerHTML = `<div class="toolbar report-controls">
+      ${segControl("rt-group", { category: "Category", merchant: "Merchant", account: "Account" }, st.group)}
+      ${segControl("rt-months", { 6: "6 months", 12: "12 months", 24: "24 months" }, st.months)}
+      ${focus ? `<span class="filter-chip">${esc(focus.name)}<button class="chip-x" id="rt-unfocus" aria-label="Show everything">✕</button></span>` : ""}</div>
+    <div class="card"><div class="card-head"><h2>${focus ? esc(focus.name) : "Spending"} by month</h2>
+        <span class="muted small">${fmt0(d.totals.reduce((a, b) => a + b, 0) / n)} a month on average</span></div>
+      ${d.series.length ? `${shown.length > 1 ? `<div class="chart-legend">${shown.map((s) => `<span><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</span>`).join("")}</div>` : ""}
+        <div class="chart-wrap bars" id="rt-chart"></div>` : `<div class="empty">No spending in these months.</div>`}
+    </div>
+    ${d.series.length ? `<div class="card scroll-x"><table class="report-table">
+      <tr><th>${{ category: "Category", merchant: "Merchant", account: "Account" }[st.group]}</th><th class="num">${monthShort(d.months[cur])}</th>
+        <th class="num">vs ${monthShort(d.months[cur - 1])}</th>${lastYear != null ? `<th class="num hide-sm">vs ${monthShort(d.months[lastYear], true)}</th>` : ""}
+        <th class="num hide-sm">Monthly average</th><th class="num">${n} months</th></tr>
+      ${colored.map((s) => { const c = change(s.values[cur], s.values[cur - 1]); return `<tr class="rt-row ${s.name === st.focus ? "on" : ""}" data-name="${esc(s.name)}" tabindex="0" title="Show only ${esc(s.name)}">
+        <td><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</td><td class="num">${fmt(s.values[cur])}</td>
+        <td class="num ${c > 0.1 ? "warn-text" : "muted"}">${pctTxt(c)}</td>
+        ${lastYear != null ? `<td class="num muted hide-sm">${pctTxt(change(s.values[cur], s.values[lastYear]))}</td>` : ""}
+        <td class="num muted hide-sm">${fmt(avg(s))}</td><td class="num">${fmt(s.total)}</td></tr>`; }).join("")}
+    </table><p class="help small">The current month is still going. Click a row to show just that one.</p></div>` : ""}`;
+  wireSeg(el, "rt-group", (v) => { st.group = v; st.focus = null; renderTrendsReport(el); });
+  wireSeg(el, "rt-months", (v) => { st.months = Number(v); renderTrendsReport(el); });
+  $("#rt-unfocus", el)?.addEventListener("click", () => { st.focus = null; renderTrendsReport(el); });
+  $$(".rt-row", el).forEach((tr) => {
+    const go = () => { st.focus = st.focus === tr.dataset.name ? null : tr.dataset.name; renderTrendsReport(el); };
+    tr.addEventListener("click", go);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  });
+  if (d.series.length) stackedBars($("#rt-chart", el), d.months.map((m) => monthShort(m, n > 12 && m.endsWith("-01"))), shown,
+    { tipTitle: (i) => monthLabel(d.months[i]) });
+}
+
+// Columns per month; several series stack with a 2px gap between them. Hover a column for its breakdown.
+function stackedBars(host, labels, series, opts = {}) {
+  if (!host) return;
+  const W = Math.max(320, host.clientWidth), H = opts.height || 260;
+  const m = { top: 12, right: 8, bottom: 26, left: 52 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+  const n = labels.length;
+  const totals = labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] || 0), 0));
+  const hi = Math.max(...totals, 0);
+  if (hi <= 0) { host.innerHTML = `<div class="empty small">Nothing to show for these months.</div>`; return; }
+  const ticks = niceTicks(0, hi, 4), y1 = ticks[ticks.length - 1];
+  const y = (v) => m.top + (1 - v / y1) * ih;
+  const bw = iw / n, w = Math.max(4, Math.min(40, bw * 0.62));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label || "Spending by month")}">`;
+  svg += `<g class="grid">${ticks.map((t) => `<line x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>`).join("")}</g>`;
+  svg += `<g class="axis">${ticks.map((t) => `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${shortMoney(t)}</text>`).join("")}</g>`;
+  const every = Math.ceil(n / Math.max(1, Math.floor(iw / 44)));
+  for (let i = 0; i < n; i++) {
+    const cx = m.left + bw * i + bw / 2;
+    let base = 0;
+    const segs = series.map((s) => ({ s, v: s.values[i] || 0 })).filter((x) => x.v > 0);
+    segs.forEach((x, k) => {
+      const top = y(base + x.v), bottom = y(base) - (k ? 2 : 0), h = Math.max(0, bottom - top);   // 2px gap above the segment below
+      const last = k === segs.length - 1, r = last ? Math.min(4, h) : 0;
+      // the top of each column is rounded; segments below are separated by a 2px surface-colored gap
+      svg += `<path class="stack-seg" style="fill:${x.s.color}" d="M${cx - w / 2},${bottom} V${top + r} ${r ? `Q${cx - w / 2},${top} ${cx - w / 2 + r},${top} H${cx + w / 2 - r} Q${cx + w / 2},${top} ${cx + w / 2},${top + r}` : `H${cx + w / 2}`} V${bottom} Z"/>`;
+      base += x.v;
+    });
+    if (i % every === 0 || i === n - 1) svg += `<text class="axis-t" x="${cx}" y="${H - 8}" text-anchor="middle">${esc(labels[i])}</text>`;
+    svg += `<rect class="bar-hit" data-i="${i}" x="${m.left + bw * i}" y="${m.top}" width="${bw}" height="${ih}" fill="transparent"/>`;
+  }
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+  const tip = $(".tooltip", host);
+  $$(".bar-hit", host).forEach((r) => {
+    const show = (clientX) => {
+      const i = Number(r.dataset.i), box = host.getBoundingClientRect();
+      const rows = series.map((s) => ({ s, v: s.values[i] || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
+      tip.innerHTML = `<div class="tt-date">${esc(opts.tipTitle ? opts.tipTitle(i) : labels[i])}</div><div class="tt-val">${fmt(totals[i])}</div>` +
+        (series.length > 1 ? rows.map((x) => `<div class="tt-ev"><span><i class="swatch" style="background:${x.s.color}"></i>${esc(x.s.name)}</span><span>${fmt(x.v)}</span></div>`).join("") : "");
+      tip.hidden = false;
+      tip.style.left = Math.max(0, Math.min(clientX - box.left + 12, box.width - tip.offsetWidth)) + "px"; tip.style.top = "0px";
+      $$(".bar-hit", host).forEach((o) => o.classList.toggle("on", o === r));
+    };
+    r.addEventListener("mousemove", (e) => show(e.clientX));
+    r.addEventListener("click", (e) => show(e.clientX));
+    r.addEventListener("mouseleave", () => { tip.hidden = true; r.classList.remove("on"); });
+  });
+}
+
+// ---- Merchants: where the money went, biggest first; open one for its months and transactions
+async function renderMerchantsReport(el) {
+  const st = REPORT_STATE, { start, end } = rangeDates(st.range);
+  const d = await api(`/api/reports/merchants?start=${start}&end=${end}`);
+  const top = d.merchants[0]?.total || 1;
+  el.innerHTML = `<div class="toolbar report-controls">${segControl("rm-range", RANGES, st.range)}
+      <input type="search" id="rm-q" placeholder="Find a merchant" style="max-width:260px"></div>
+    <div class="card scroll-x">${d.merchants.length ? `<table class="report-table merchants-table">
+      <tr><th>Merchant</th><th class="hide-sm">Usual category</th><th class="num">Visits</th><th class="num hide-sm">Average</th><th class="hide-sm">Last</th><th class="num">Spent</th></tr>
+      ${d.merchants.map((x) => `<tr class="rm-row" data-name="${esc(x.name)}" data-q="${esc(x.name.toLowerCase())}" tabindex="0">
+        <td><span class="rm-name">${esc(x.name)}</span><span class="inline-bar" style="width:${Math.max(2, (x.total / top) * 100)}%"></span></td>
+        <td class="muted hide-sm">${esc(x.category)}</td><td class="num">${x.count}</td><td class="num muted hide-sm">${fmt(x.average)}</td>
+        <td class="muted hide-sm">${fmtDate(x.last)}</td><td class="num">${fmt(x.total)}</td></tr>`).join("")}
+    </table>${d.count > d.merchants.length ? `<p class="help small">The top ${d.merchants.length} of ${d.count} merchants.</p>` : ""}`
+      : `<div class="empty">No spending in this period.</div>`}</div>`;
+  wireSeg(el, "rm-range", (v) => { st.range = v; renderMerchantsReport(el); });
+  $("#rm-q", el).addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    $$(".rm-row", el).forEach((tr) => { tr.hidden = !!q && !tr.dataset.q.includes(q); if (tr.hidden && tr.nextElementSibling?.classList.contains("rm-detail")) tr.nextElementSibling.remove(); });
+  });
+  $$(".rm-row", el).forEach((tr) => {
+    const open = async () => {
+      if (tr.nextElementSibling?.classList.contains("rm-detail")) { tr.nextElementSibling.remove(); return; }
+      const row = document.createElement("tr");
+      row.className = "rm-detail";
+      row.innerHTML = `<td colspan="6"><div class="order-box">Loading…</div></td>`;
+      tr.after(row);
+      const m = await api(`/api/reports/merchant?name=${encodeURIComponent(tr.dataset.name)}&end=${thisMonth()}&months=12`);
+      const box = $(".order-box", row);
+      box.innerHTML = `<div class="order-head"><b>${esc(m.name)}</b><span class="muted small">${fmt(m.total)} in the last 12 months</span>
+          <a class="btn link" href="#transactions" id="rm-all">All its transactions</a></div>
+        <div class="chart-wrap bars small-chart"></div>
+        <table class="small">${m.transactions.slice(0, 12).map((t) => `<tr><td class="muted">${fmtDate(t.posted)}</td><td class="muted">${esc(t.account_name)}</td>
+          <td class="muted">${esc(t.category || "—")}</td><td class="num ${t.amount > 0 ? "pos" : ""}">${fmt(t.amount)}</td></tr>`).join("")}</table>`;
+      stackedBars($(".small-chart", box), m.months.map((x) => monthShort(x)), [{ name: m.name, values: m.values, color: "var(--cat-1)" }],
+        { height: 160, tipTitle: (i) => monthLabel(m.months[i]), label: `Spending at ${m.name} by month` });
+      $("#rm-all", box).addEventListener("click", () => { Object.assign(LIST_STATE.transactions, { q: m.name, category: "", account: "", month: "", scope: "" }); });
+    };
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
+  });
+}
+
+// ---- Income vs spending: each month side by side, what was left, and the share of income kept
+async function renderIncomeReport(el) {
+  const st = REPORT_STATE;
+  const d = await api(`/api/reports/income?end=${thisMonth()}&months=${st.months}`);
+  const y = d.year, rate = (r) => (r == null ? "—" : `${Math.round(r * 100)}%`);
+  const IN = "var(--cat-3)", OUT = "var(--cat-1)";
+  el.innerHTML = `<div class="toolbar report-controls">${segControl("ri-months", { 6: "6 months", 12: "12 months", 24: "24 months" }, st.months)}</div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Money in, ${y.year}</div><div class="value">${fmt0(y.income)}</div><div class="sub">${y.months} month${y.months === 1 ? "" : "s"} so far</div></div>
+      <div class="tile"><div class="label">Spent, ${y.year}</div><div class="value">${fmt0(y.spending)}</div><div class="sub">not card payments or transfers</div></div>
+      <div class="tile ${y.net < 0 ? "alert" : ""}"><div class="label">${y.net >= 0 ? "Kept" : "▲ Spent more than came in"}</div><div class="value">${fmt0(Math.abs(y.net))}</div>
+        <div class="sub">${y.rate != null ? `savings rate ${rate(y.rate)}` : ""}</div></div>
+    </div>
+    <div class="card"><div class="card-head"><h2>Money in and out by month</h2></div>
+      <div class="chart-legend"><span><i class="swatch" style="background:${IN}"></i>Money in</span><span><i class="swatch" style="background:${OUT}"></i>Spent</span></div>
+      <div class="chart-wrap bars" id="ri-chart"></div></div>
+    <div class="card scroll-x"><table class="report-table"><tr><th>Month</th><th class="num">Money in</th><th class="num">Spent</th><th class="num">Left over</th><th class="num">Savings rate</th></tr>
+      ${d.months.slice().reverse().map((r) => `<tr><td>${esc(monthLabel(r.month))}</td><td class="num">${fmt(r.income)}</td><td class="num">${fmt(r.spending)}</td>
+        <td class="num ${r.net < 0 ? "warn-text" : ""}">${r.net < 0 ? "−" : ""}${fmt(Math.abs(r.net))}</td><td class="num muted">${rate(r.rate)}</td></tr>`).join("")}</table>
+      <p class="help small">Savings rate is the share of money in that wasn't spent. The current month is still going.</p></div>`;
+  wireSeg(el, "ri-months", (v) => { st.months = Number(v); renderIncomeReport(el); });
+  groupedBars($("#ri-chart", el), d.months.map((r) => monthShort(r.month, d.months.length > 12 && r.month.endsWith("-01"))),
+    [{ name: "Money in", color: IN, values: d.months.map((r) => r.income) }, { name: "Spent", color: OUT, values: d.months.map((r) => r.spending) }],
+    { tipTitle: (i) => monthLabel(d.months[i].month), extra: (i) => `<div class="tt-ev"><span>Left over</span><span>${fmt(d.months[i].net)}</span></div>` });
+}
+
+// Two or three bars per month, side by side, on one axis.
+function groupedBars(host, labels, series, opts = {}) {
+  if (!host) return;
+  const W = Math.max(320, host.clientWidth), H = opts.height || 260;
+  const m = { top: 12, right: 8, bottom: 26, left: 52 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom, n = labels.length;
+  const hi = Math.max(0, ...series.flatMap((s) => s.values));
+  if (hi <= 0) { host.innerHTML = `<div class="empty small">Nothing to show for these months.</div>`; return; }
+  const ticks = niceTicks(0, hi, 4), y1 = ticks[ticks.length - 1];
+  const y = (v) => m.top + (1 - v / y1) * ih;
+  const bw = iw / n, gap = 2, w = Math.max(3, Math.min(18, (bw * 0.7 - gap * (series.length - 1)) / series.length));
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map((s) => s.name).join(" and "))} by month">`;
+  svg += `<g class="grid">${ticks.map((t) => `<line x1="${m.left}" x2="${W - m.right}" y1="${y(t)}" y2="${y(t)}"/>`).join("")}</g>`;
+  svg += `<g class="axis">${ticks.map((t) => `<text x="${m.left - 8}" y="${y(t) + 4}" text-anchor="end">${shortMoney(t)}</text>`).join("")}</g>`;
+  const every = Math.ceil(n / Math.max(1, Math.floor(iw / 44)));
+  for (let i = 0; i < n; i++) {
+    const cx = m.left + bw * i + bw / 2, groupW = series.length * w + gap * (series.length - 1);
+    series.forEach((s, k) => {
+      const v = s.values[i] || 0;
+      if (v <= 0) return;
+      const x0 = cx - groupW / 2 + k * (w + gap), top = y(v), base = y(0), r = Math.min(3, base - top, w / 2);
+      svg += `<path style="fill:${s.color}" d="M${x0},${base} V${top + r} Q${x0},${top} ${x0 + r},${top} H${x0 + w - r} Q${x0 + w},${top} ${x0 + w},${top + r} V${base} Z"/>`;
+    });
+    if (i % every === 0 || i === n - 1) svg += `<text class="axis-t" x="${cx}" y="${H - 8}" text-anchor="middle">${esc(labels[i])}</text>`;
+    svg += `<rect class="bar-hit" data-i="${i}" x="${m.left + bw * i}" y="${m.top}" width="${bw}" height="${ih}" fill="transparent"/>`;
+  }
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+  const tip = $(".tooltip", host);
+  $$(".bar-hit", host).forEach((r) => {
+    const show = (clientX) => {
+      const i = Number(r.dataset.i), box = host.getBoundingClientRect();
+      tip.innerHTML = `<div class="tt-date">${esc(opts.tipTitle ? opts.tipTitle(i) : labels[i])}</div>` +
+        series.map((s) => `<div class="tt-ev"><span><i class="swatch" style="background:${s.color}"></i>${esc(s.name)}</span><span>${fmt(s.values[i] || 0)}</span></div>`).join("") +
+        (opts.extra ? opts.extra(i) : "");
+      tip.hidden = false;
+      tip.style.left = Math.max(0, Math.min(clientX - box.left + 12, box.width - tip.offsetWidth)) + "px"; tip.style.top = "0px";
+      $$(".bar-hit", host).forEach((o) => o.classList.toggle("on", o === r));
+    };
+    r.addEventListener("mousemove", (e) => show(e.clientX));
+    r.addEventListener("click", (e) => show(e.clientX));
+    r.addEventListener("mouseleave", () => { tip.hidden = true; r.classList.remove("on"); });
+  });
+}
+
+// ---- Breakdown: a treemap you click into: categories -> subcategories -> merchants -> transactions
+async function renderBreakdownReport(el) {
+  const st = REPORT_STATE, { start, end } = rangeDates(st.range);
+  const d = await api(`/api/reports/breakdown?start=${start}&end=${end}`);
+  // Each top-level category keeps its color at every level below it.
+  const colorOf = {};
+  d.tree.children.forEach((c, i) => { colorOf[c.name] = catColor(i); });
+  let node = d.tree;
+  const trail = [];
+  for (const name of st.path) {
+    const next = (node.children || []).find((c) => c.name === name);
+    if (!next) break;
+    trail.push(next); node = next;
+  }
+  // A level with only one thing in it (a category with one merchant) opens straight onto that one.
+  while (trail.length && trail.length < 3 && node.children?.length === 1) { node = node.children[0]; trail.push(node); }
+  st.path = trail.map((t) => t.name);
+  const color = trail.length ? colorOf[trail[0].name] : null;
+  const crumbs = [`<button class="btn link" data-depth="0">All spending</button>`, ...trail.map((t, i) =>
+    i === trail.length - 1 ? `<b>${esc(t.name)}</b>` : `<button class="btn link" data-depth="${i + 1}">${esc(t.name)}</button>`)].join(` <span class="muted">›</span> `);
+  const leaf = !node.children || trail.length >= 3;
+  el.innerHTML = `<div class="toolbar report-controls">${segControl("rb-range", RANGES, st.range)}</div>
+    <div class="card"><div class="card-head"><div class="crumbs">${crumbs}</div><span class="muted">${fmt(node.value || 0)}</span></div>
+      ${!d.tree.children.length ? `<div class="empty">No spending in this period.</div>`
+        : leaf ? `<div id="rb-tx"><div class="empty small">Loading…</div></div>`
+        : `<div class="treemap" id="rb-map"></div><p class="help small">Each block is sized by what was spent. Click one to look inside.</p>
+          <details><summary class="small muted">Show as table</summary><table class="report-table">${node.children.map((c) =>
+            `<tr><td><i class="swatch" style="background:${color || colorOf[c.name]}"></i>${esc(c.name)}</td><td class="num">${fmt(c.value)}</td>
+              <td class="num muted">${Math.round((c.value / node.value) * 100)}%</td></tr>`).join("")}</table></details>`}
+    </div>`;
+  wireSeg(el, "rb-range", (v) => { st.range = v; renderBreakdownReport(el); });
+  $$(".crumbs [data-depth]", el).forEach((b) => b.addEventListener("click", () => { st.path = st.path.slice(0, Number(b.dataset.depth)); renderBreakdownReport(el); }));
+  if (!d.tree.children.length) return;
+  if (leaf) {
+    const cat = trail.length >= 2 ? trail[1].name : trail[0]?.name;
+    const merchant = trail.length >= 3 ? trail[2].name : null;
+    const qs = new URLSearchParams({ start, end, category: cat || "", merchant: merchant || "" });
+    const txs = await api(`/api/reports/transactions?${qs}`);
+    $("#rb-tx", el).innerHTML = txs.length ? `<table class="report-table">${txs.map((t) => `<tr><td class="muted">${fmtDate(t.posted)}</td>
+        <td>${esc(t.payee)}${t.part ? ` <span class="tag">part of a split</span>` : ""}</td><td class="muted hide-sm">${esc(t.account_name)}</td>
+        <td class="num">${fmt(t.amount)}</td></tr>`).join("")}</table>` : `<div class="empty small">No transactions.</div>`;
+    return;
+  }
+  treemap($("#rb-map", el), node.children.map((c) => ({ ...c, color: color || colorOf[c.name] })), node.value, (c) => {
+    st.path = [...st.path, c.name]; renderBreakdownReport(el);
+  });
+}
+
+// Squarified treemap: blocks sized by value, a 2px gap between them, names inside the ones big enough to hold them.
+function treemap(host, items, total, onPick) {
+  const W = Math.max(300, host.clientWidth), H = Math.round(Math.min(460, Math.max(260, W * 0.5)));
+  const vals = items.filter((c) => c.value > 0);
+  const area = W * H, scale = area / (total || 1);
+  const rects = [];
+  const worst = (row, side) => {
+    const s = row.reduce((a, c) => a + c.a, 0), max = Math.max(...row.map((c) => c.a)), min = Math.min(...row.map((c) => c.a));
+    return Math.max((side * side * max) / (s * s), (s * s) / (side * side * min));
+  };
+  let x = 0, y = 0, w = W, h = H;
+  let queue = vals.map((c) => ({ c, a: c.value * scale }));
+  while (queue.length) {
+    const side = Math.min(w, h);
+    let row = [queue[0]], i = 1;
+    while (i < queue.length && worst([...row, queue[i]], side) <= worst(row, side)) { row.push(queue[i]); i++; }
+    queue = queue.slice(i);
+    const s = row.reduce((a, c) => a + c.a, 0);
+    if (w >= h) {   // lay the row down the left side
+      const rw = s / h; let yy = y;
+      for (const r of row) { const rh = r.a / rw; rects.push({ ...r, x, y: yy, w: rw, h: rh }); yy += rh; }
+      x += rw; w -= rw;
+    } else {        // along the top
+      const rh = s / w; let xx = x;
+      for (const r of row) { const rw = r.a / rh; rects.push({ ...r, x: xx, y, w: rw, h: rh }); xx += rw; }
+      y += rh; h -= rh;
+    }
+  }
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending by ${esc(vals.map((v) => v.name).slice(0, 5).join(", "))}">`;
+  rects.forEach((r, i) => {
+    const g = 1, rx = r.x + g, ry = r.y + g, rw = Math.max(0, r.w - 2 * g), rh = Math.max(0, r.h - 2 * g);
+    const fits = rw > 70 && rh > 34, name = r.c.name.length * 7 > rw - 16 ? r.c.name.slice(0, Math.max(3, Math.floor((rw - 16) / 7))) + "…" : r.c.name;
+    svg += `<g class="tm-block" data-i="${i}" tabindex="0" role="button" aria-label="${esc(r.c.name)}: ${esc(fmt(r.c.value))}">
+      <rect x="${rx}" y="${ry}" width="${rw}" height="${rh}" rx="4" style="fill:${r.c.color}"/>
+      ${fits ? `<text class="tm-name" x="${rx + 8}" y="${ry + 17}">${esc(name)}</text><text class="tm-val" x="${rx + 8}" y="${ry + 32}">${esc(fmt0(r.c.value))}</text>` : ""}</g>`;
+  });
+  svg += `</svg><div class="tooltip" hidden></div>`;
+  host.innerHTML = svg;
+  const tip = $(".tooltip", host);
+  $$(".tm-block", host).forEach((b) => {
+    const r = rects[Number(b.dataset.i)];
+    b.addEventListener("mousemove", (e) => {
+      const box = host.getBoundingClientRect();
+      tip.innerHTML = `<div class="tt-date">${esc(r.c.name)}</div><div class="tt-val">${fmt(r.c.value)}</div><div class="tt-ev"><span>of this view</span><span>${Math.round((r.c.value / total) * 100)}%</span></div>`;
+      tip.hidden = false;
+      tip.style.left = Math.max(0, Math.min(e.clientX - box.left + 12, box.width - tip.offsetWidth)) + "px";
+      tip.style.top = Math.max(0, Math.min(e.clientY - box.top + 12, box.height - tip.offsetHeight)) + "px";
+    });
+    b.addEventListener("mouseleave", () => { tip.hidden = true; });
+    b.addEventListener("click", () => onPick(r.c));
+    b.addEventListener("keydown", (e) => { if (e.key === "Enter") onPick(r.c); });
+  });
+}
+
+// ---- Cash flow: the month as a Sankey
+async function renderCashflowReport(el) {
   const now = new Date();
   reportMonth = reportMonth || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const cf = await api(`/api/cashflow?month=${reportMonth}`);
   const [y, m] = cf.month.split("-").map(Number);
   const label = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const short = new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long" });
-  const shift = (n) => { const d = new Date(y, m - 1 + n, 1); reportMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderReports(el); };
+  const shift = (n) => { const d = new Date(y, m - 1 + n, 1); reportMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; renderCashflowReport(el); };
   const empty = !cf.income.length && !cf.spending.length;
-  el.innerHTML = `<div class="card-head"><h1>Where money went</h1>
+  el.innerHTML = `<div class="toolbar report-controls">
       <div class="seg"><button id="r-prev" aria-label="Previous month">‹</button><button class="on" disabled>${label}</button><button id="r-next" aria-label="Next month">›</button></div></div>
     <div class="tiles">
       <div class="tile"><div class="label">Money in</div><div class="value">${fmt0(cf.total_in)}</div><div class="sub">income and refunds</div></div>

@@ -95,6 +95,10 @@ plain Python with a handful of well-known libraries.
 ### Budgets and reports
 - Monthly budgets per category with pace markers; click any amount to jump to the transactions behind it.
 - A **cash-flow Sankey chart** showing where each month's money went.
+- **Spending over time** by category, merchant or account (6, 12 or 24 months), with each one's change from last
+  month and from a year ago; **merchants** ranked by what you spent, each with its months and transactions; **income
+  against spending** with your savings rate; and a **breakdown** treemap you click into, from categories to
+  subcategories to merchants to the transactions behind them.
 
 ### Investments
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a
