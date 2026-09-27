@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin
+from . import brands, categories, categorize, db, forecast, plaid, plaidbank, portfolio, prices, recurring, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -360,11 +360,14 @@ def api_transactions(conn, q, _b):
     if q.get("category", [""])[0]:
         cat = q["category"][0]
         if cat == "__none__":
-            where.append("t.category IS NULL")
+            where.append("t.category IS NULL AND COALESCE(t.is_split, 0)=0")
         else:
             family = [cat] + categories.descendants(conn, cat)   # a category includes its subcategories
-            where.append(f"t.category IN ({','.join('?' * len(family))})")
-            args.extend(family)
+            ph = ",".join("?" * len(family))
+            # a split transaction counts under every category it's split into, not the one on the row
+            where.append(f"((COALESCE(t.is_split, 0)=0 AND t.category IN ({ph})) OR EXISTS "
+                         f"(SELECT 1 FROM tx_splits s WHERE s.tx_id=t.id AND s.category IN ({ph})))")
+            args.extend(family * 2)
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
         where.append("t.posted>=? AND t.posted<?")
@@ -383,6 +386,9 @@ def api_transactions(conn, q, _b):
         f"WHERE {' AND '.join(where)} ORDER BY t.posted DESC, t.id LIMIT ? OFFSET ?"
     )
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
+    parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
+    for t in items:
+        t["splits"] = parts.get(t["id"], [])
     total = conn.execute(
         f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
     ).fetchone()[0]
@@ -397,6 +403,18 @@ def api_tx_category(conn, _q, body, tx_id):
     return {"ok": True, "also_updated": n}
 
 
+def api_tx_split(conn, _q, body, tx_id):
+    """Split one transaction across categories, or (with no parts) put it back together."""
+    parts = body.get("splits")
+    if not isinstance(parts, list):
+        raise ApiError("Send the parts to split this into")
+    try:
+        saved = splits.set_splits(conn, tx_id, parts)
+    except splits.SplitError as e:
+        raise ApiError(str(e))
+    return {"ok": True, "splits": saved}
+
+
 def api_tx_accept(conn, _q, _b, tx_id):
     categorize.accept_suggestion(conn, tx_id)
     return {"ok": True}
@@ -404,7 +422,7 @@ def api_tx_accept(conn, _q, _b, tx_id):
 
 def api_categories(conn, _q, _b):
     cats = categories.all_categories(conn)
-    counts = {r["category"]: r["n"] for r in conn.execute("SELECT category, COUNT(*) AS n FROM transactions GROUP BY category")}
+    counts = {r["category"]: r["n"] for r in conn.execute(f"SELECT category, COUNT(*) AS n FROM {splits.PARTS} t GROUP BY category")}
     for c in cats:
         c["transactions"] = counts.get(c["name"], 0)
     return cats
@@ -459,7 +477,8 @@ def api_rule_add(conn, _q, body):
     if body.get("apply"):
         conn.execute(
             "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-            "WHERE COALESCE(category_source, '') <> 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
+            "WHERE COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
+            "AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
             (cat, match, match),
         )
     return {"ok": True}
@@ -468,7 +487,8 @@ def api_rule_add(conn, _q, body):
 def _apply_rule(conn, match: str, cat: str) -> int:
     return conn.execute(
         "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE COALESCE(category_source, '') <> 'manual' AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
+        "WHERE COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
+        "AND (instr(lower(payee), ?)>0 OR instr(lower(description), ?)>0)",
         (cat, match, match),
     ).rowcount
 
@@ -647,7 +667,7 @@ def _month_range(q):
 def _month_totals(conn, start: date, end: date) -> dict:
     """Net amount per category for the month, across checking, savings and cards (not loans or investments)."""
     rows_ = conn.execute(
-        "SELECT t.category AS category, SUM(t.amount) AS total FROM transactions t JOIN accounts a ON a.id=t.account_id "
+        f"SELECT t.category AS category, SUM(t.amount) AS total FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id "
         "WHERE t.posted>=? AND t.posted<? AND a.hidden=0 AND a.kind IN ('checking','savings','credit') GROUP BY t.category",
         (start.isoformat(), end.isoformat()),
     ).fetchall()
@@ -842,7 +862,8 @@ def api_settings(conn, _q, body):
 def api_recategorize(conn, _q, _b):
     """Send everything still uncategorized or awaiting review through rules (and the AI model, if set up) again."""
     ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM transactions WHERE category IS NULL OR (needs_review=1 AND COALESCE(category_source, '') <> 'manual')"
+        "SELECT id FROM transactions WHERE COALESCE(is_split, 0)=0 "
+        "AND (category IS NULL OR (needs_review=1 AND COALESCE(category_source, '') <> 'manual'))"
     )]
     conn.execute(
         "UPDATE transactions SET category=NULL, category_source=NULL, confidence=NULL "
@@ -1086,6 +1107,7 @@ ROUTES = [
     ("GET", "/api/transactions", api_transactions),
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
+    ("POST", "/api/transactions/{id}/split", api_tx_split),
     ("POST", "/api/transactions/{id}/recurring", api_tx_recurring),
     ("POST", "/api/overrides", api_override_set),
     ("DELETE", "/api/overrides", api_override_delete),
