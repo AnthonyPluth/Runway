@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import categories, categorize, db, forecast, recurring, simplefin  # noqa: E402
+from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits  # noqa: E402
 
 TODAY = date(2026, 9, 23)
 
@@ -571,6 +571,90 @@ class CategoryTests(Base):
         row = self.conn.execute("SELECT category, needs_review FROM transactions").fetchone()
         self.assertEqual(tuple(row), (None, 1))
         self.assertIsNone(self.conn.execute("SELECT 1 FROM rules").fetchone())
+
+
+class SplitTests(Base):
+    """One transaction spread across categories: the parts, not the transaction, are what gets counted."""
+
+    def setUp(self):
+        super().setUp()
+        self.acct("cc", "credit", -100.0)
+        self.tx("cc", "2026-09-10", -100.0, "TARGET", "Shopping")
+        self.tx_id = self.conn.execute("SELECT id FROM transactions").fetchone()[0]
+
+    def split(self, *parts):
+        return splits.set_splits(self.conn, self.tx_id, [{"amount": a, "category": c} for a, c in parts])
+
+    def test_parts_must_add_up_to_the_transaction(self):
+        with self.assertRaises(splits.SplitError):
+            self.split((-60.0, "Groceries"), (-30.0, "Shopping"))
+        with self.assertRaises(splits.SplitError):
+            self.split((-100.0, "Groceries"))                       # a split needs two parts
+        with self.assertRaises(splits.SplitError):
+            self.split((-60.0, "Groceries"), (-40.0, "Nonsense"))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+
+    def test_budget_and_reports_count_the_parts(self):
+        self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Groceries', 500)")
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        self.conn.commit()
+        spent = {c["name"]: c["spent"] for c in server.api_budget(self.conn, {"month": ["2026-09"]}, None)["categories"]}
+        self.assertEqual((spent["Groceries"], spent["Shopping"]), (60.0, 40.0))
+        self.assertEqual(forecast.budget_plan(self.conn, date(2026, 9, 20))[0]["spent"], 60.0)
+        cf = server.api_cashflow(self.conn, {"month": ["2026-09"]}, None)
+        self.assertEqual({n["name"]: n["value"] for n in cf["spending"]}, {"Groceries": 60.0, "Shopping": 40.0})
+
+    def test_the_list_shows_and_filters_by_the_parts(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        self.conn.commit()
+        item = server.api_transactions(self.conn, {}, None)["items"][0]
+        self.assertEqual(item["is_split"], 1)
+        self.assertEqual([(s["category"], s["amount"]) for s in item["splits"]], [("Groceries", -60.0), ("Shopping", -40.0)])
+        for cat in ("Groceries", "Shopping"):
+            self.assertEqual(len(server.api_transactions(self.conn, {"category": [cat]}, None)["items"]), 1)
+        self.assertEqual(server.api_transactions(self.conn, {"category": ["Travel"]}, None)["items"], [])
+
+    def test_categorizing_a_split_transaction_puts_it_back_together(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        categorize.set_category(self.conn, self.tx_id, "Travel")
+        row = self.conn.execute("SELECT category, is_split FROM transactions").fetchone()
+        self.assertEqual((row["category"], row["is_split"]), ("Travel", 0))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+
+    def test_rules_and_review_leave_a_split_alone(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        self.conn.execute("UPDATE transactions SET category=NULL, category_source=NULL")
+        server.api_rule_add(self.conn, None, {"match": "target", "category": "Travel", "apply": True})
+        categorize.categorize(self.conn, use_ai=False)
+        row = self.conn.execute("SELECT category, is_split, needs_review FROM transactions").fetchone()
+        self.assertEqual((row["category"], row["is_split"], row["needs_review"]), (None, 1, 0))
+
+    def test_renaming_and_removing_a_category_follow_the_parts(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        categories.rename(self.conn, "Groceries", "Food shopping")
+        self.assertEqual([s["category"] for s in splits.get(self.conn, self.tx_id)], ["Food shopping", "Shopping"])
+        categories.remove(self.conn, "Food shopping")   # no replacement: the whole split goes back to Review
+        row = self.conn.execute("SELECT category, is_split, needs_review FROM transactions").fetchone()
+        self.assertEqual((row["category"], row["is_split"], row["needs_review"]), (None, 0, 1))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+
+    def test_a_split_pending_transaction_keeps_its_parts_when_it_posts(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        self.tx("cc", "2026-09-11", -100.0, "TARGET")
+        posted = self.conn.execute("SELECT id FROM transactions WHERE id<>?", (self.tx_id,)).fetchone()[0]
+        splits.carry_over(self.conn, self.tx_id, posted, -100.0)
+        self.assertEqual(len(splits.get(self.conn, posted)), 2)
+        self.assertEqual(self.conn.execute("SELECT is_split FROM transactions WHERE id=?", (posted,)).fetchone()[0], 1)
+        # a different amount means the parts no longer describe it, so they go
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        splits.carry_over(self.conn, self.tx_id, posted, -120.0)
+        self.assertEqual(splits.get(self.conn, self.tx_id), [])
+
+    def test_parts_of_a_deleted_transaction_are_pruned(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        self.conn.execute("DELETE FROM transactions WHERE id=?", (self.tx_id,))
+        splits.prune(self.conn)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
 
 
 class SimpleFinStoreTests(Base):

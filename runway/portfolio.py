@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
 
-from . import db, prices
+from . import db, prices, splits
 
 HISTORY_DAYS = 730
 # Cash moving in or out of the account from outside (not investment results).
@@ -491,7 +491,7 @@ def monthly_spending(conn, today: date) -> float:
     start = date(today.year, today.month, 1) - relativedelta(months=6)
     end = date(today.year, today.month, 1)
     rows = conn.execute(
-        "SELECT substr(t.posted,1,7) AS m, SUM(t.amount) AS s FROM transactions t JOIN accounts a ON a.id=t.account_id "
+        f"SELECT substr(t.posted,1,7) AS m, SUM(t.amount) AS s FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id "
         "JOIN categories c ON c.name=t.category WHERE c.is_transfer=0 AND c.is_income=0 AND a.hidden=0 "
         "AND a.kind IN ('checking','savings','credit') AND t.posted>=? AND t.posted<? GROUP BY m",
         (start.isoformat(), end.isoformat())).fetchall()

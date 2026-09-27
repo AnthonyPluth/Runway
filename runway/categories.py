@@ -133,6 +133,7 @@ def rename(conn, old: str, new: str) -> None:
     conn.execute("UPDATE categories SET name=? WHERE name=?", (new, old))
     conn.execute("UPDATE categories SET parent=? WHERE parent=?", (new, old))
     conn.execute("UPDATE transactions SET category=? WHERE category=?", (new, old))
+    conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (new, old))
     conn.execute("UPDATE rules SET category=? WHERE category=?", (new, old))
     conn.execute("UPDATE budgets SET category=? WHERE category=?", (new, old))
 
@@ -150,12 +151,19 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
         if move_to == name or not conn.execute("SELECT 1 FROM categories WHERE name=?", (move_to,)).fetchone():
             raise CategoryError("Pick a different category to move things to")
         n = conn.execute("UPDATE transactions SET category=? WHERE category=?", (move_to, name)).rowcount
+        n += conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (move_to, name)).rowcount
         conn.execute("UPDATE rules SET category=? WHERE category=?", (move_to, name))
     else:
         n = conn.execute(
             "UPDATE transactions SET category=NULL, category_source=NULL, confidence=NULL, needs_review=1 WHERE category=?",
             (name,),
         ).rowcount
+        # parts of a split lose their category too, and the transaction goes back to Review
+        for tx_id in [r["tx_id"] for r in conn.execute("SELECT DISTINCT tx_id FROM tx_splits WHERE category=?", (name,))]:
+            conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (tx_id,))
+            conn.execute("UPDATE transactions SET is_split=0, category=NULL, category_source=NULL, confidence=NULL, "
+                         "needs_review=1 WHERE id=?", (tx_id,))
+            n += 1
         conn.execute("DELETE FROM rules WHERE category=?", (name,))
     conn.execute("DELETE FROM budgets WHERE category=?", (name,))
     conn.execute("DELETE FROM categories WHERE name=?", (name,))
