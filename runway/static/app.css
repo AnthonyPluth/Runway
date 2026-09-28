@@ -186,6 +186,8 @@ input:hover, select:hover, textarea:hover { border-color: #3a3a38; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(91, 155, 240, 0.18); }
 input::placeholder, textarea::placeholder { color: var(--text-4); }
 input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+/* Phones zoom into any field smaller than 16px when you tap it. */
+@media (hover: none) and (pointer: coarse) { input, select, textarea { font-size: 16px; } }
 input[type=number] { width: 72px; }
 input[type=checkbox] { width: auto; }
 textarea { width: 100%; min-height: 70px; }

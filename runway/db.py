@@ -13,7 +13,7 @@ import re
 import threading
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
@@ -131,7 +131,7 @@ def _postgres_engine(url: str, path: str | None) -> Engine:
     test_schema = None if path is None else "t_" + hashlib.sha1(path.encode()).hexdigest()[:12]
     # Tests make an engine per database; they don't keep connections open, so they don't run Postgres out of them.
     eng = (create_engine(url, poolclass=NullPool) if test_schema
-           else create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10))
+           else create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=60))   # up to 64 requests plus syncs at once
 
     @event.listens_for(eng, "connect")
     def _setup(dbapi_conn, _record):

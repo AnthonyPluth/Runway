@@ -62,5 +62,5 @@ def send(sub: dict, message: dict, vapid: py_vapid.Vapid02, subject: str, ttl: i
         status = e.response.status_code if e.response is not None else None
         if status in (404, 410):
             raise Gone(sub["endpoint"]) from e
-        detail = (e.response.text[:300] if e.response is not None else str(e))
-        raise RuntimeError(f"push service said {status}: {detail}") from e
+        # Only the status: the reply's text is the push service's (or whoever answered), not something to pass on.
+        raise RuntimeError(f"push service said {status}" if status else "couldn't reach the push service") from e
