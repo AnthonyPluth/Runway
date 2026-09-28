@@ -34,7 +34,7 @@ from . import brands, carta, carta_web, categories, categorize, db, equity, fore
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
 # without cookies). None of them hold any data.
-PUBLIC_FILES = {"/app.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
+PUBLIC_FILES = {"/page.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
                 "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 DAILY_SYNC_HOUR = 6          # the daily sync runs on the first check after this hour (local time)
 VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
@@ -1780,7 +1780,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None) -> None:
         body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)} · Runway</title><link rel="icon" href="/logo.svg"><link rel="stylesheet" href="/app.css"></head>
+<title>{html.escape(title)} · Runway</title><link rel="icon" href="/logo.svg"><link rel="stylesheet" href="/page.css"></head>
 <body><main style="max-width:520px;margin:12vh auto"><div class="card" style="text-align:center">
 <img src="/logo.svg" width="48" height="48" alt=""><h1 style="margin-top:12px">{html.escape(title)}</h1>
 <p class="help" style="margin:0 auto 16px">{html.escape(message)}</p>
@@ -2140,19 +2140,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e)
 
     def _static(self, path: str) -> None:
-        rel = "index.html" if path in ("", "/") else path.lstrip("/")
-        full = os.path.realpath(os.path.join(STATIC, rel))
-        index = INDEX
-        if path == "/next" or path.startswith("/next/"):   # the new app (frontend/, built into static/next/)
-            index = NEXT_INDEX
-            if not os.path.isfile(index):
-                return self._page(404, "The new app isn't built", "Run npm run build in frontend/ (the Docker image does this for you).",
-                                  ("/", "Open Runway"))
-        if os.path.commonpath([full, STATIC]) != STATIC or not os.path.isfile(full):
-            full = index   # the app handles its own routes (#budget, /plaid/oauth, ...)
+        if path == "/next" or path.startswith("/next/"):   # where the web app lived while it was being rebuilt
+            return self._redirect("/")                      # (the browser keeps the #page on the way)
+        # The web app's built files (frontend/, built into static/app/), then Runway's own (icons, fonts, the service
+        # worker). Anything else is a route of the app itself (/plaid/oauth, ...), so it gets the app's page.
+        rel = path.lstrip("/")
+        full = None
+        for base in (APP_DIR, STATIC):
+            cand = os.path.realpath(os.path.join(base, rel))
+            if rel and os.path.commonpath([cand, base]) == base and os.path.isfile(cand):
+                full = cand
+                break
+        if full is None or full == APP_INDEX:
+            full = APP_INDEX
+            if not os.path.isfile(full):
+                return self._page(404, "The web app isn't built", "Run npm run build in frontend/ (the Docker image does this for you).")
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         gz_ok = "gzip" in (self.headers.get("Accept-Encoding") or "")
-        if full in (INDEX, NEXT_INDEX):
+        if full == APP_INDEX:
             # A fresh nonce per page, so only this page's own <script> tags may run (see content_security_policy).
             nonce = secrets.token_urlsafe(16)
             with open(full, "rb") as f:
@@ -2166,9 +2171,9 @@ class Handler(BaseHTTPRequestHandler):
             self._security_headers()
             self.end_headers()
             return
-        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once. The new
+        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once. The
         # app's built files have their content's hash in their name, so they never change and can be kept for good.
-        cache = "public, max-age=31536000, immutable" if path.startswith("/next/assets/") else "no-cache"
+        cache = "public, max-age=31536000, immutable" if full.startswith(APP_DIR + os.sep + "assets" + os.sep) else "no-cache"
         self._send_file(entry["data"], ctype, cache, entry["etag"], gz_ok, None, entry.get("gz"))
 
     def _send_file(self, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
@@ -2205,8 +2210,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 STATIC = os.path.realpath(STATIC)
-INDEX = os.path.join(STATIC, "index.html")
-NEXT_INDEX = os.path.join(STATIC, "next", "index.html")
+APP_DIR = os.path.join(STATIC, "app")       # the web app, built from frontend/
+APP_INDEX = os.path.join(APP_DIR, "index.html")
 _static_files: dict[str, dict] = {}
 _static_lock = threading.Lock()
 

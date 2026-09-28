@@ -10,7 +10,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 RUN poetry install --only main --no-root --no-ansi
 
-# 2. Build the web app (frontend/) into runway/static/next. It's plain files, so it's built once on the build machine
+# 2. Build the web app (frontend/) into runway/static/app. It's plain files, so it's built once on the build machine
 #    whatever the image's architecture.
 FROM --platform=$BUILDPLATFORM node:26-slim AS web
 WORKDIR /web/frontend
@@ -45,7 +45,7 @@ WORKDIR /app
 COPY --from=deps /app/.venv ./.venv
 COPY --chown=runway:runway run.py alembic.ini ./
 COPY --chown=runway:runway runway ./runway
-COPY --from=web --chown=runway:runway /web/runway/static/next ./runway/static/next
+COPY --from=web --chown=runway:runway /web/runway/static/app ./runway/static/app
 COPY --chown=runway:runway extension ./extension
 
 USER runway

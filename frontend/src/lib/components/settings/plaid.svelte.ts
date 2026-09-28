@@ -75,12 +75,11 @@ export function runPlaidLink(token: string, itemId: string | null, kind: string,
   });
 }
 
-/** Back from a bank's sign-in page (/next/plaid/oauth?oauth_state_id=…): finish linking where it left off. Nothing calls
- *  this yet: the OAuth redirect still returns to the classic app (see plaid.redirect_uri), and the app would call it on
- *  boot when location.pathname is /next/plaid/oauth. */
+/** Back from a bank's sign-in page (/plaid/oauth?oauth_state_id=…, see plaid.redirect_uri): finish linking where it
+ *  left off. main.ts calls this when the app opens at that address. */
 export async function resumePlaidOAuth(): Promise<boolean> {
   const back = location.href;
-  history.replaceState(null, "", "/next/#setup/connections");
+  history.replaceState(null, "", "/#setup/connections");
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   try {
     const p = await api<{ link_token: string; item_id: string | null; kind: string }>("/api/plaid/oauth_resume", { keep: true });
