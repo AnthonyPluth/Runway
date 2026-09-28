@@ -58,6 +58,16 @@ class CaptureTests(Base):
         self.assertEqual(ov["unrealized_gain"], 500.0)
         self.assertEqual(ov["accounts"][0]["institution_name"], "Wealthfront")
 
+    def test_hiding_the_account_in_settings_hides_it_here(self):
+        simplefin.store_payload(self.c, {"accounts": [account(holdings=[VTI, MMF])]}, TODAY)
+        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='wf1'")   # Settings -> Accounts -> Hide this account
+        ov = portfolio.overview(self.c, "1Y", TODAY)
+        self.assertEqual(ov["total"], 0)
+        self.assertEqual(portfolio.holdings(self.c), [])
+        self.assertEqual((ov["accounts"][0]["hidden"], ov["accounts"][0]["hidden_in_accounts"]), (1, 1))
+        self.c.execute("UPDATE accounts SET hidden=0 WHERE id='wf1'")
+        self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 3500.0)
+
     def test_cost_from_per_share_purchase_price(self):
         h = dict(VTI); h.pop("cost_basis")
         simplefin.store_payload(self.c, {"accounts": [account(balance="3000", holdings=[h])]}, TODAY)
