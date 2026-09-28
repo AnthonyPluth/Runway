@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Runway's palette (the same colors as the classic app, runway/static/app.css), named the way shadcn-svelte
+   components expect, plus Runway's own: good, warning, low, critical and the chart series. */
+@font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+:root {
+  color-scheme: dark;
+  --radius: 0.875rem;
+  --background: #121212;
+  --foreground: #ececea;
+  --foreground-strong: #f5f5f3;
+  --sidebar: #0e0e0e;
+  --card: #1b1b1a;
+  --card-foreground: #ececea;
+  --popover: #232322;
+  --popover-foreground: #ececea;
+  --primary: #5b9bf0;
+  --primary-foreground: #0e1116;
+  --primary-ink: #7fb0f5;
+  --primary-wash: rgba(91, 155, 240, 0.12);
+  --secondary: #232322;
+  --secondary-foreground: #ececea;
+  --muted: #232322;
+  --muted-foreground: #9b9a95;
+  --subtle-foreground: #a8a7a2;
+  --faint-foreground: #85847e;
+  --accent: #2c2c2a;
+  --accent-foreground: #f5f5f3;
+  --destructive: #f07167;
+  --destructive-wash: rgba(240, 113, 103, 0.12);
+  --border: #2c2c2a;
+  --line: #272726;
+  --input: #2c2c2a;
+  --ring: #5b9bf0;
+  --good: #4cc38a;
+  --warning: #f0b84b;
+  --warning-wash: rgba(240, 184, 75, 0.1);
+  --low: #f08a4b;
+  --grid: #232322;
+}
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 2px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-foreground-strong: var(--foreground-strong);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-wash: var(--primary-wash);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-faint-foreground: var(--faint-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-wash: var(--destructive-wash);
+  --color-border: var(--border);
+  --color-line: var(--line);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-warning-wash: var(--warning-wash);
+  --color-low: var(--low);
+  --color-grid: var(--grid);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  html, body { @apply bg-background text-foreground font-sans antialiased; font-size: 15px; }
+  /* Phones zoom into any field smaller than 16px when you tap it. */
+  @media (hover: none) and (pointer: coarse) { input, select, textarea { font-size: 16px !important; } }
+}
+
+@utility tabular { font-variant-numeric: tabular-nums; }

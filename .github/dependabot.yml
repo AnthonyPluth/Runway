@@ -25,7 +25,19 @@ updates:
     commit-message:
       prefix: ci
 
-  # The python:3.14-slim base image in the Dockerfile
+  # The web app's packages (frontend/package.json)
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      web:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: web
+
+  # The base images in the Dockerfile (python:3.14-slim, node:22-slim)
   - package-ecosystem: docker
     directory: /
     schedule:

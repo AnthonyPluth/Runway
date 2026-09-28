@@ -16,3 +16,7 @@ venv/
 # Packages and OS files
 *.tar.gz
 .DS_Store
+
+# The new web app: its dependencies, and what it builds (the Docker image builds it)
+frontend/node_modules/
+runway/static/next/
