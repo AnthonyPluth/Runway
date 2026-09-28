@@ -106,7 +106,8 @@ class _SameRules(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-LAST_ERROR = "logodev_last_error"   # setting: why the last Logo.dev download failed (not "no such brand"), for Settings
+# Settings: why the last Logo.dev lookup by website, and by name, failed (not "no such brand"), for Settings.
+LAST_ERROR = {"site": "logodev_last_error", "name": "logodev_last_error_name"}
 _why = ""   # why the last _download returned nothing
 
 
@@ -151,11 +152,17 @@ def _todo(conn, limit: int) -> list:
 def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     """Download logos Runway doesn't have yet (from Plaid), and Logo.dev logos it doesn't have or last checked a month
     ago (when there's a Logo.dev key). Returns how many it got."""
+    global _why
     now = datetime.now()
     token = db.get_setting(conn, TOKEN_SETTING)
     todo = _todo(conn, limit)
     got = 0
+    refused: set[str] = set()   # kinds of Logo.dev lookup that failed this round: the rest of that kind wait for next time
     for m in todo:
+        kind = "site" if m["id"].startswith(SITE) else "name" if m["id"].startswith(BRAND) else None
+        if kind in refused:
+            continue
+        _why = ""   # (a merchant skipped below isn't a failed download)
         params = urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
         if m["id"].startswith(SITE):
             s = m["id"][len(SITE):]
@@ -164,8 +171,13 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
             found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'] or '', safe='')}?{params}", opener) if m["name"] else None
         else:
             found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
-        if m["id"].startswith((SITE, BRAND)):   # remember how Logo.dev last answered, for Settings
-            db.set_setting(conn, LAST_ERROR, None if found or not _why else f"{now:%b %d %H:%M}: {_why}")
+        if kind:   # remember how Logo.dev last answered, for Settings
+            db.set_setting(conn, LAST_ERROR[kind], None if found or not _why else f"{now:%b %d %H:%M}: {_why}")
+            if not found and _why:
+                # A refused key or no connection isn't "no such brand": this one (and the rest of its kind) isn't
+                # marked as looked up, so it's tried again next time rather than a month from now.
+                refused.add(kind)
+                continue
         if found:
             data, ctype = found
             conn.execute("UPDATE merchants SET logo=?, logo_type=?, logo_checked=? WHERE id=?",
@@ -329,5 +341,11 @@ def status(conn) -> dict:
         "logodev": count(f"logo IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
         "unknown": count(f"logo IS NULL AND logo_checked IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
         "waiting": len(_todo(conn, 100000)),
-        "last_error": db.get_setting(conn, LAST_ERROR),
+        "last_error": db.get_setting(conn, LAST_ERROR["site"]),
+        "last_error_name": db.get_setting(conn, LAST_ERROR["name"]),
     }
+
+
+def retry_unknown(conn) -> None:
+    """Look up again the merchants Logo.dev had no logo for (their lookups may have failed, not found nothing)."""
+    conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL", (SITE + "%", BRAND + "%"))
