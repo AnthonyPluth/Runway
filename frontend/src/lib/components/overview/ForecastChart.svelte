@@ -32,9 +32,9 @@
   }
   const ticks = $derived.by(() => {
     const both = alt ? shown(series).concat(shown(alt)) : shown(series);
-    let lo = Math.min(...both);
-    const hi = Math.max(...both);
-    if (lo > 0 && lo < hi * 0.25) lo = 0;   // near zero: show the floor
+    // The axis always starts at $0 (zoomed in too), so the line's height is the balance; it only goes lower to show
+    // a balance that dips below zero.
+    const lo = Math.min(0, ...both), hi = Math.max(0, ...both);
     return niceTicks(lo, hi);
   });
   const y0 = $derived(ticks[0]), y1 = $derived(ticks[ticks.length - 1]);
