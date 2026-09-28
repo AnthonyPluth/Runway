@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.parse
 from datetime import date, timedelta
 
 from . import db, webpush
@@ -58,11 +59,24 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
     keys = sub.get("keys") or {}
     if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
         raise ValueError("That isn't a push subscription.")
+    if not push_host_allowed(endpoint):   # Runway posts to this address, so it mustn't be just any server
+        raise ValueError("That push service isn't one Runway knows. Add its host to RUNWAY_PUSH_HOSTS if you trust it.")
     if not webpush.valid_public_key(keys["p256dh"]):
         raise ValueError("That isn't a push subscription.")
     conn.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?) "
                  "ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth, device=excluded.device",
                  (endpoint, keys["p256dh"], keys["auth"], (device or "This device")[:80], user_sub, time.time()))
+
+
+# The browsers' push services (Chrome and Edge through Google or Windows, Firefox through Mozilla, Safari through Apple).
+PUSH_HOSTS = ("fcm.googleapis.com", "android.googleapis.com", "push.services.mozilla.com", "push.apple.com",
+              "notify.windows.com")
+
+
+def push_host_allowed(endpoint: str) -> bool:
+    host = (urllib.parse.urlsplit(endpoint).hostname or "").lower()
+    extra = tuple(h.strip().lower() for h in (os.environ.get("RUNWAY_PUSH_HOSTS") or "").split(",") if h.strip())
+    return bool(host) and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS + extra)
 
 
 def unsubscribe(conn, endpoint: str) -> None:
@@ -180,8 +194,10 @@ def run(conn, today: date | None = None) -> dict:
     for a in alerts(conn, today, p):
         if conn.execute("SELECT 1 FROM notify_log WHERE key=?", (a["key"],)).fetchone():
             continue
-        r = send_all(conn, {"title": a["title"], "body": a["body"], "url": a.get("url", "/"), "tag": a["key"]})
+        # Saved before sending: if anything later rolled this back, the next run would send the same alert again.
         conn.execute("INSERT INTO notify_log(key, sent, title) VALUES (?,?,?)", (a["key"], time.time(), a["title"]))
+        conn.commit()
+        r = send_all(conn, {"title": a["title"], "body": a["body"], "url": a.get("url", "/"), "tag": a["key"]})
         sent += r["sent"]
     conn.execute("DELETE FROM notify_log WHERE sent < ?", (time.time() - 120 * 86400,))
     return {"sent": sent}

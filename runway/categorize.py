@@ -55,7 +55,12 @@ def clean_payee(raw: str | None) -> str:
 # ---------------------------------------------------------------------------------------------------------
 # Built-in heuristics that are safe without asking anyone.
 
-_CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit card|cardmember|autopay|epay|payment to .*card|amex|chase credit|citi autopay|discover e-payment|capital one", re.I)
+_CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit ?card|cardmember|payment to .*card|amex|chase credit|citi autopay|"
+                               r"discover e-payment|applecard|capital one\b.*\b(?:pmt|payment)", re.I)
+# "autopay" and "epay" are just as often a utility, insurer or loan: only a card payment when something says card.
+_AUTOPAY = re.compile(r"autopay|e-?pay", re.I)
+_CARD_WORDS = re.compile(r"card|visa|mastercard|amex|american express|discover|citi|chase|barclay|synchrony|capital one", re.I)
+_NOT_CARD = re.compile(r"auto fin|auto loan|mortgage|\bloan\b|lease|insurance", re.I)
 _CARD_PAYMENT_IN = re.compile(r"payment|autopay|thank you|pymt|pmt", re.I)
 _SWEEP = re.compile(r"core account|money market|spaxx|fdrxx|sweep", re.I)
 
@@ -69,7 +74,8 @@ def heuristic_category(tx: dict, account_kind: str) -> str | None:
         return "Ignore"
     if account_kind == "credit" and amt > 0 and _CARD_PAYMENT_IN.search(desc):
         return "Credit Card Payment"
-    if account_kind in ("checking", "savings") and amt < 0 and _CARD_PAYMENT_OUT.search(desc):
+    if account_kind in ("checking", "savings") and amt < 0 and not _NOT_CARD.search(desc) and (
+            _CARD_PAYMENT_OUT.search(desc) or (_AUTOPAY.search(desc) and _CARD_WORDS.search(desc))):
         return "Credit Card Payment"
     return None
 
@@ -258,14 +264,16 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
             rulesmod.apply_actions(conn, tx, {"rename": acts["rename"]})
         if acts["review"]:
             review_after.append(tx["id"])
-        cat = heuristic_category(tx, tx["kind"])
-        source = "auto"
-        if not cat and acts["split"]:
-            rulesmod.apply_actions(conn, tx, {"split": acts["split"]})
-            counts["rule"] += 1
-            continue
+        # Your rules come before the built-in guesses: a rule saying an "autopay" is Utilities wins.
+        if acts["split"]:
+            if rulesmod.apply_actions(conn, tx, {"split": acts["split"]}):
+                counts["rule"] += 1
+                continue
+            if abs(tx["amount"] or 0) >= 0.005:
+                review_after.append(tx["id"])   # the rule couldn't split it: categorize it as usual, and ask
+        cat, source = acts["category"], "rule"
         if not cat:
-            cat, source = acts["category"], "rule"
+            cat, source = heuristic_category(tx, tx["kind"]), "auto"
         if not cat and tx.get("payee"):
             cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
         if cat:

@@ -14,7 +14,6 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import db
 
 BENCHMARK = "SPY"   # S&P 500
 STALE_HOURS = 20
