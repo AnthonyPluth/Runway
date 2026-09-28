@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import re
 import ssl
@@ -78,6 +79,8 @@ def claim_setup_token(setup_token: str) -> str:
         raise SimpleFinError(f"Couldn't claim the SimpleFIN token ({detail}).") from e
     except urllib.error.URLError as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: {e.reason}") from e
+    except (OSError, http.client.HTTPException, ValueError) as e:   # a timeout or a dropped connection mid-reply
+        raise SimpleFinError(f"Couldn't reach SimpleFIN: {str(e) or type(e).__name__}") from e
     if not access_url.startswith("http"):
         raise SimpleFinError("SimpleFIN returned an unexpected response when claiming the token.")
     return access_url
@@ -117,6 +120,10 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
         raise SimpleFinError(f"SimpleFIN request failed ({detail}).") from e
     except urllib.error.URLError as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:   # a timeout or a dropped connection mid-reply
+        raise SimpleFinError(f"Couldn't reach SimpleFIN: {str(e) or type(e).__name__}") from e
+    except ValueError as e:   # not JSON: an error page, or a reply cut short
+        raise SimpleFinError("SimpleFIN sent back a reply Runway couldn't read.") from e
     return payload
 
 
@@ -242,22 +249,41 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     return new_ids
 
 
+def _backfill_state(conn) -> tuple[set, set]:
+    """SimpleFIN accounts ever seen, and those whose BACKFILL_DAYS of history were read in full."""
+    st = json.loads(db.get_setting(conn, "simplefin_backfill") or "{}")
+    return set(st.get("seen") or []), set(st.get("done") or [])
+
+
+def _save_backfill_state(conn, seen: set, done: set) -> None:
+    db.set_setting(conn, "simplefin_backfill", json.dumps({"seen": sorted(seen), "done": sorted(done)}))
+
+
 def sync(conn, access_url: str, today: date | None = None, fetch=fetch_accounts) -> dict:
-    """Pull recent data. First run backfills BACKFILL_DAYS in CHUNK_DAYS windows."""
+    """Pull recent data. Backfills BACKFILL_DAYS in CHUNK_DAYS windows until every account SimpleFIN has shown has had
+    its history read in full: on the first run, after a backfill that stopped part way, and for a bank added later."""
     today = today or date.today()
-    first_run = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
-    span = BACKFILL_DAYS if first_run else REFRESH_DAYS
+    seen, done = _backfill_state(conn)
+    backfill = not seen or bool(seen - done)
+    span = BACKFILL_DAYS if backfill else REFRESH_DAYS
     start = today - timedelta(days=span)
     new_ids: list[str] = []
     errors: list[str] = []
+    got: set = set()
     chunk_start = start
     while chunk_start <= today:
         chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS - 1), today)
         payload = fetch(access_url, chunk_start, chunk_end)
         errors.extend(str(e) for e in payload.get("errors", []) or [])
         new_ids.extend(store_payload(conn, payload, chunk_start))
+        got |= {str(a["id"]) for a in payload.get("accounts", []) or []}
+        seen |= got
+        _save_backfill_state(conn, seen, done)
         conn.commit()  # release the write lock before the next network call
         chunk_start = chunk_end + timedelta(days=1)
         if chunk_start <= today:
             time.sleep(0.5)
-    return {"new": new_ids, "errors": errors, "backfill": first_run}
+    if backfill:   # every window came back: those accounts' history is complete
+        done |= got
+        _save_backfill_state(conn, seen, done)
+    return {"new": new_ids, "errors": errors, "backfill": backfill}

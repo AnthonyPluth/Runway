@@ -711,6 +711,43 @@ class SimpleFinStoreTests(Base):
         self.assertFalse(r["backfill"])
         self.assertEqual(calls, [(TODAY - timedelta(days=simplefin.REFRESH_DAYS), TODAY)])
 
+    def test_backfill_that_stops_part_way_is_finished_later(self):
+        calls, fail = [], {"at": 2}
+
+        def fake_fetch(url, start, end):
+            calls.append((start, end))
+            if len(calls) == fail["at"]:
+                raise simplefin.SimpleFinError("Couldn't reach SimpleFIN: timed out")
+            return self.payload([{"id": f"t{len(calls)}", "posted": ts(start), "amount": "-1", "description": "X"}])
+
+        with self.assertRaises(simplefin.SimpleFinError):
+            simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        calls.clear(); fail["at"] = 0
+        r = simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertTrue(r["backfill"])   # the middle is read, not just the last 14 days
+        self.assertEqual(calls[0][0], TODAY - timedelta(days=simplefin.BACKFILL_DAYS))
+        calls.clear()
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+
+    def test_a_bank_added_later_gets_its_history(self):
+        accts = ["A1"]
+
+        def fake_fetch(url, start, end):
+            return {"accounts": [{"id": a, "name": a, "balance": "1", "currency": "USD", "transactions": []} for a in accts]}
+
+        simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+        accts.append("B2")
+        simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertTrue(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+
+    def test_simplefin_timeout_is_a_simplefin_error(self):
+        from unittest import mock
+        for exc in (TimeoutError("timed out"), ConnectionResetError()):
+            with mock.patch("urllib.request.urlopen", side_effect=exc), self.assertRaises(simplefin.SimpleFinError):
+                simplefin.fetch_accounts("https://u:p@h/simplefin", TODAY)
+
     def test_kind_guess(self):
         self.assertEqual(simplefin.guess_kind("Venture X"), "credit")
         self.assertEqual(simplefin.guess_kind("Mortgage 1588"), "loan")
