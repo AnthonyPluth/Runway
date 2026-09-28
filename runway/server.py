@@ -28,7 +28,7 @@ import sqlalchemy.exc
 from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
-from . import networth, notify, rentcast, webpush
+from . import networth, notify, realie, webpush
 from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -102,7 +102,7 @@ def run_sync() -> dict:
                 if result["errors"]:
                     msg += " · bank messages: " + "; ".join(result["errors"])[:500]
                 try:
-                    rentcast.refresh_due(conn)
+                    realie.refresh_due(conn)
                 except Exception:
                     pass
                 networth.summary(conn)   # record today's net worth
@@ -254,7 +254,7 @@ def api_state(conn, _q, _b):
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
         "primary_account": db.get_setting(conn, "primary_account"),
         "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
-        "rentcast_configured": rentcast.configured(conn),
+        "realie_configured": realie.configured(conn),
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
@@ -1439,9 +1439,12 @@ def api_live_quotes(conn, _q, _b):
 def api_networth(conn, _q, _b):
     out = networth.summary(conn)
     out["assets_list"] = networth.assets(conn)
+    for a in out["assets_list"]:   # homes are looked up once a week at most: when the next lookup is allowed
+        nxt = realie.next_lookup(a.get("last_lookup"))
+        a["next_lookup"] = nxt.isoformat() if nxt and nxt > date.today() else None
     out["loan_accounts"] = db.rows(conn.execute(
         "SELECT id, COALESCE(display_name, name) AS name, kind FROM accounts WHERE kind='loan' AND hidden=0 ORDER BY name"))
-    out["rentcast"] = {"configured": rentcast.configured(conn), "used": rentcast.used_this_month(conn), "limit": rentcast.MONTHLY_LIMIT}
+    out["realie"] = {"configured": realie.configured(conn), "used": realie.used_this_month(conn), "limit": realie.monthly_limit()}
     return out
 
 
@@ -1467,19 +1470,19 @@ def api_asset_remove(conn, _q, _b, asset_id):
 
 def api_asset_refresh(conn, _q, _b, asset_id):
     try:
-        est = rentcast.refresh_asset(conn, int(asset_id))
-    except rentcast.RentCastError as e:
+        est = realie.refresh_asset(conn, int(asset_id))
+    except realie.RealieError as e:
         raise ApiError(str(e), 502)
-    return {"ok": True, **est, "used": rentcast.used_this_month(conn)}
+    return {"ok": True, **est, "used": realie.used_this_month(conn)}
 
 
-def api_rentcast_settings(conn, _q, body):
+def api_realie_settings(conn, _q, body):
     key = (body.get("api_key") or "").strip()
     if body.get("clear"):
-        db.set_setting(conn, "rentcast_api_key", None)
+        db.set_setting(conn, "realie_api_key", None)
     elif key:
-        db.set_setting(conn, "rentcast_api_key", key)
-    return {"ok": True, "configured": rentcast.configured(conn)}
+        db.set_setting(conn, "realie_api_key", key)
+    return {"ok": True, "configured": realie.configured(conn)}
 
 
 def api_logodev_settings(conn, _q, body):
@@ -1585,7 +1588,7 @@ ROUTES = [
     ("POST", "/api/assets/{id}", api_asset_update),
     ("POST", "/api/assets/{id}/remove", api_asset_remove),
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
-    ("POST", "/api/rentcast/settings", api_rentcast_settings),
+    ("POST", "/api/realie/settings", api_realie_settings),
     ("POST", "/api/logodev/settings", api_logodev_settings),
     ("GET", "/api/investments/live", api_live_quotes),
     ("POST", "/api/investments/fire", api_fire_save),

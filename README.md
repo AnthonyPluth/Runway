@@ -117,7 +117,7 @@ plain Python with a handful of well-known libraries.
 
 ### Net worth
 - Every account plus homes, vehicles and anything else you own, minus cards and loans, recorded daily.
-- Optional automated home values through RentCast (it stays within the free tier).
+- Optional automated home values through Realie (each home is looked up once a week at most, within the free tier).
 - **Equity compensation:** stock options (ISO/NSO), RSUs, restricted stock and shares, each with its vesting schedule
   (cliff, monthly or quarterly), exercise price and exercises. Runway shows what has vested and what's still to come at
   each company's latest share price, and counts the vested part in net worth. Enter grants by hand, or read them from
@@ -164,7 +164,7 @@ Open <http://localhost:8765>, then:
    then pick your primary account and each card's paying account under **Settings → Accounts**.
 3. **Add your paychecks and bills** on the **Recurring** page, or accept the ones Runway suggests.
 4. Optionally add an OpenRouter key (AI categorization), Plaid keys (banks and cards account by account, card
-   statements, more investment detail) and a RentCast key
+   statements, more investment detail) and a Realie key
    (home values) under **Settings → Connections**.
 
 Your data is stored in `data/runway.db` next to the code.
@@ -250,7 +250,7 @@ were added are upgraded in place.
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to Claude Haiku) | Optional |
 | [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | For credit cards |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
-| [RentCast](https://www.rentcast.io) | Automated home value estimates | Optional |
+| [Realie](https://www.realie.ai) | Automated home value estimates | Optional |
 
 - **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its
   due date (both from the issuer through Plaid), and optionally spread average everyday spending across the days.
@@ -334,7 +334,7 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/categorize.py`, `categories.py` | Rules, history and AI categorization; the category tree |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
-| `runway/networth.py`, `rentcast.py` | Net worth and home values |
+| `runway/networth.py`, `realie.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
