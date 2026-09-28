@@ -74,6 +74,10 @@ export interface ForecastEvent {
   balance_after: number;
   account_id?: string;
   account?: string;
+  /** Its merchant's logo (a recurring item's: from its last matched transaction). */
+  logo?: string | null;
+  /** A card statement's card. */
+  card_id?: string;
 }
 
 export interface CardSummary {
