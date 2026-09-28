@@ -1,4 +1,5 @@
-"""Which institution an account belongs to, for showing its logo (runway/static/banks/<slug>.svg).
+"""Which institution an account belongs to, for showing its logo (runway/static/banks/<slug>.svg), and which big
+merchant a transaction is from (its website, for its logo from Logo.dev: runway/merchants.py).
 
 Matched from the institution's name (SimpleFIN's org, or the Plaid connection's institution) and, failing that, the
 account's own name ("Venture X" is Capital One). Accounts without a match get a letter badge instead.
@@ -60,3 +61,121 @@ def account_brands(conn) -> dict[str, dict]:
         label = inst or r["display_name"] or r["name"] or "?"
         out[r["id"]] = {"logo": logo, "institution": inst, "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
     return out
+
+
+# (pattern, website) for big merchants, whose logo Logo.dev has by website (runway/merchants.py): checked in order
+# against the lowercased payee, then the bank's description, so the more specific names come first ("uber eats" before
+# "uber"). Only big, unambiguous names: a wrong logo is worse than a letter. Merchants Plaid names come with their
+# own website and don't need to be here.
+MERCHANT_PATTERNS = [
+    (r"prime ?video", "primevideo.com"),
+    (r"\baudible\b", "audible.com"),
+    (r"amazon|\bamzn\b", "amazon.com"),
+    (r"\btarget\b", "target.com"),
+    (r"wal-?mart|\bwm supercenter\b", "walmart.com"),
+    (r"\bcostco\b", "costco.com"),
+    (r"\betsy\b", "etsy.com"),
+    (r"\bebay\b", "ebay.com"),
+    (r"\bnike\b", "nike.com"),
+    (r"\bold navy\b", "oldnavy.com"),
+    (r"\bkohl'?s\b", "kohls.com"),
+    (r"lululemon", "lululemon.com"),
+    (r"american eagle|\bae outfitters\b", "ae.com"),
+    (r"aliexpress", "aliexpress.com"),
+    (r"\btemu\b", "temu.com"),
+    (r"newegg", "newegg.com"),
+    (r"micro ?center", "microcenter.com"),
+    (r"\bikea\b", "ikea.com"),
+    (r"\bmacy'?s\b", "macys.com"),
+    (r"\bh ?& ?m\b|\bhm\.com\b", "hm.com"),
+    (r"\bzara\b", "zara.com"),
+    (r"uniqlo", "uniqlo.com"),
+    (r"\badidas\b", "adidas.com"),
+    (r"\blidl\b", "lidl.com"),
+    (r"instacart", "instacart.com"),
+    (r"uber ?eats", "ubereats.com"),
+    (r"\buber\b", "uber.com"),
+    (r"\blyft\b", "lyft.com"),
+    (r"doordash", "doordash.com"),
+    (r"starbucks", "starbucks.com"),
+    (r"mcdonald'?s", "mcdonalds.com"),
+    (r"burger king", "bk.com"),
+    (r"\bkfc\b", "kfc.com"),
+    (r"taco bell", "tacobell.com"),
+    (r"youtube", "youtube.com"),
+    (r"google ?fi\b", "fi.google.com"),
+    (r"^google\b|\bgoogle \*", "google.com"),
+    (r"apple\.com|\bapple (store|music|tv|one|arcade|services)\b|^apple\b", "apple.com"),
+    (r"netflix", "netflix.com"),
+    (r"spotify", "spotify.com"),
+    (r"\bhulu\b", "hulu.com"),
+    (r"disney ?(plus|\+)", "disneyplus.com"),
+    (r"hbo ?max|\bmax\.com\b", "max.com"),
+    (r"paramount", "paramountplus.com"),
+    (r"\bpeacock\b", "peacocktv.com"),
+    (r"steampowered|steam games|^steam\b", "steampowered.com"),
+    (r"playstation|sony interactive", "playstation.com"),
+    (r"\bxbox\b", "xbox.com"),
+    (r"nintendo", "nintendo.com"),
+    (r"microsoft|\bmsft\b", "microsoft.com"),
+    (r"chatgpt", "chatgpt.com"),
+    (r"openai", "openai.com"),
+    (r"claude\.ai|^claude\b", "claude.ai"),
+    (r"anthropic", "anthropic.com"),
+    (r"github", "github.com"),
+    (r"1password", "1password.com"),
+    (r"dropbox", "dropbox.com"),
+    (r"\bnotion\b", "notion.so"),
+    (r"patreon", "patreon.com"),
+    (r"\badobe\b", "adobe.com"),
+    (r"duolingo", "duolingo.com"),
+    (r"humble ?bundle", "humblebundle.com"),
+    (r"kickstarter", "kickstarter.com"),
+    (r"\bstrava\b", "strava.com"),
+    (r"\bpeloton\b", "onepeloton.com"),
+    (r"new york times|nytimes", "nytimes.com"),
+    (r"fandango", "fandango.com"),
+    (r"^ring\b|\bring\.com\b", "ring.com"),
+    (r"delta air|\bdelta\.com\b", "delta.com"),
+    (r"american airlines|\baa\.com\b", "aa.com"),
+    (r"united airlines|\bunited\.com\b", "united.com"),
+    (r"southwest", "southwest.com"),
+    (r"jetblue", "jetblue.com"),
+    (r"alaska air", "alaskaair.com"),
+    (r"spirit airlines|\bspirit air\b", "spirit.com"),
+    (r"airbnb", "airbnb.com"),
+    (r"marriott", "marriott.com"),
+    (r"\bhilton\b", "hilton.com"),
+    (r"expedia", "expedia.com"),
+    (r"booking\.com", "booking.com"),
+    (r"\btesla\b", "tesla.com"),
+    (r"^shell\b|\bshell (oil|service)", "shell.com"),
+    (r"t-?mobile", "t-mobile.com"),
+    (r"verizon", "verizon.com"),
+    (r"\bat ?& ?t\b", "att.com"),
+    (r"xfinity|comcast", "xfinity.com"),
+    (r"mint mobile", "mintmobile.com"),
+    (r"progressive", "progressive.com"),
+    (r"paypal", "paypal.com"),
+    (r"\bvenmo\b", "venmo.com"),
+    (r"\bzelle\b", "zellepay.com"),
+    (r"cash ?app", "cash.app"),
+    (r"coinbase", "coinbase.com"),
+    (r"\busps\b", "usps.com"),
+    (r"^ups\b|\bups store\b", "ups.com"),
+    (r"fedex", "fedex.com"),
+    (r"\bdhl\b", "dhl.com"),
+]
+_merchants = [(re.compile(p), site) for p, site in MERCHANT_PATTERNS]
+
+
+def merchant(*names: str | None) -> str | None:
+    """The website of the big merchant the first name (payee, then description) names, if any."""
+    for name in names:
+        text = " ".join((name or "").lower().split())
+        if not text:
+            continue
+        for rx, site in _merchants:
+            if rx.search(text):
+                return site
+    return None
