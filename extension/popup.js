@@ -26,3 +26,4 @@ $("#open-options").addEventListener("click", () => chrome.runtime.openOptionsPag
 $("#options-link").addEventListener("click", (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
 chrome.storage.onChanged.addListener(render);
 render();
+chrome.runtime.sendMessage({ type: "refresh" }).catch(() => {});   // counts that changed in Runway since the import

@@ -563,6 +563,8 @@ def ext_carta_data(conn, body):
 
 EXT_ROUTES = {
     "/api/ext/ping": lambda conn, body: {"ok": True},
+    # Charges still without a transaction, now (you may have matched some yourself since the last import).
+    "/api/ext/status": lambda conn, body: {"unmatched": {r: retail.unmatched_count(conn, r) for r in retail.RETAILERS}},
     "/api/ext/carta/start": lambda conn, body: carta_web.start(conn),
     "/api/ext/carta/data": ext_carta_data,
     "/api/ext/carta/finish": lambda conn, body: carta_web.finish(conn),
