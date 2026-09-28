@@ -1555,6 +1555,16 @@ def api_realie_settings(conn, _q, body):
     return {"ok": True, "configured": realie.configured(conn)}
 
 
+def api_logodev_status(conn, _q, _b):
+    return {**merchants.status(conn), "fetching": _logo_lock.locked()}
+
+
+def api_logodev_fetch(conn, _q, _b):
+    """Fetch every merchant logo that's waiting now, in the background, instead of a batch at each sync."""
+    start_logo_backfill()
+    return {"ok": True}
+
+
 def api_logodev_settings(conn, _q, body):
     """The Logo.dev publishable key, for merchant logos Plaid doesn't have."""
     key = (body.get("token") or "").strip()
@@ -1683,6 +1693,8 @@ ROUTES = [
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
     ("POST", "/api/realie/settings", api_realie_settings),
     ("POST", "/api/logodev/settings", api_logodev_settings),
+    ("GET", "/api/logodev/status", api_logodev_status),
+    ("POST", "/api/logodev/fetch", api_logodev_fetch),
     ("GET", "/api/investments/live", api_live_quotes),
     ("POST", "/api/investments/fire", api_fire_save),
     ("GET", "/api/tracked/{id}", api_tracked_get),

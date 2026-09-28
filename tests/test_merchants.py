@@ -198,6 +198,21 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(got, 0)
         self.assertEqual(self.asked, [self.logo_dev("svg.com")])        # never a website that isn't one
 
+    def test_status_says_why_logo_dev_failed(self):
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        merchants.site_logos(self.c, ["target.com", "walmart.com"])
+        def refused(req):
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+        merchants.fetch_logos(self.c, opener=refused)
+        st = merchants.status(self.c)
+        self.assertIn("401", st["last_error"])
+        self.assertEqual((st["logodev"], st["unknown"], st["waiting"]), (0, 2, 0))
+        self.c.execute("UPDATE merchants SET logo_checked=NULL")
+        merchants.fetch_logos(self.c, opener=self.opener({self.logo_dev("target.com"): (b"png", "image/png")}))
+        st = merchants.status(self.c)   # a 404 is "no such brand", not an error; a success clears the last one
+        self.assertEqual((st["logodev"], st["unknown"]), (1, 1))
+        self.assertIsNone(st["last_error"])
+
     def test_redirects_only_to_the_same_sources(self):
         rules = merchants._SameRules()
         req = urllib.request.Request(self.logo_dev("target.com"))
