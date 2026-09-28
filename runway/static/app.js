@@ -1977,8 +1977,8 @@ async function renderInvestments(el) {
       <div class="scroll-x" id="inv-activity"></div></div>
 
     <div class="card"><h2>Accounts</h2>
-      <div class="scroll-x"><table>${d.accounts.map((a) => `<tr><td><label class="inline"><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"}>
-        ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}</label></td>
+      <div class="scroll-x"><table>${d.accounts.map((a) => `<tr><td><label class="inline" ${a.hidden_in_accounts ? `title="Hidden in Settings → Accounts; show it there to count it here"` : ""}><input type="checkbox" class="inv-acct" data-id="${esc(a.id)}" ${a.hidden ? "" : "checked"} ${a.hidden_in_accounts ? "disabled" : ""}>
+        ${esc(a.institution_name || "")} · ${esc(a.name || a.official_name || "")}${a.mask ? ` ••${esc(a.mask)}` : ""}${a.hidden_in_accounts ? `<span class="tag">hidden in Settings</span>` : ""}</label></td>
         <td class="muted small">${a.source !== "simplefin" ? `via Plaid${a.subtype ? ` · ${esc(a.subtype)}` : ""}` : a.source === "simplefin" ? `via SimpleFIN${seenBy[a.id.slice(3)] ? ` · ${seenBy[a.id.slice(3)].positions ? `${seenBy[a.id.slice(3)].positions} positions` : "balance only"}` : ""}` : esc(a.subtype || "")}</td>
         <td class="num">${fmt(a.balance)}</td>
         <td class="num" style="white-space:nowrap">${a.source === "simplefin" && (a.tracked || (seenBy[a.id.slice(3)] && !seenBy[a.id.slice(3)].positions))
