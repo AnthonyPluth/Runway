@@ -26,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
 from . import networth, notify, rentcast, webpush
-from . import brands, carta, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
+from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -551,8 +551,18 @@ def ext_finish(conn, body):
     return retail.finish(conn, body.get("retailer"))
 
 
+def ext_carta_data(conn, body):
+    try:
+        return carta_web.ingest(conn, str(body.get("url") or ""), body.get("data"))
+    except carta_web.CartaWebError as e:
+        raise retail.RetailError(str(e))
+
+
 EXT_ROUTES = {
     "/api/ext/ping": lambda conn, body: {"ok": True},
+    "/api/ext/carta/start": lambda conn, body: carta_web.start(conn),
+    "/api/ext/carta/data": ext_carta_data,
+    "/api/ext/carta/finish": lambda conn, body: carta_web.finish(conn),
     "/api/ext/start": ext_start,
     "/api/ext/amazon/transactions": ext_amazon_transactions,
     "/api/ext/amazon/order": ext_amazon_order,
@@ -1770,6 +1780,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "private, max-age=604800")
             self.send_header("ETag", etag)
+            self._security_headers()
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(data)
+            return
+        if method == "GET" and url.path == "/api/carta/capture":
+            # What the extension last read from Carta, to see why something wasn't picked up.
+            with db.session() as conn:
+                data = (db.get_setting(conn, "carta_web_capture") or "[]").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition", 'attachment; filename="runway-carta-read.json"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
             self._security_headers()
             self.end_headers()
             if self.command != "HEAD":

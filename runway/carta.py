@@ -1,8 +1,9 @@
 """Carta: your equity (option grants, RSUs, shares) and each company's latest fair market value, through Carta's
 Portfolio API.
 
-Access: Carta's API is OAuth 2.0, and production access has to be granted by Carta (partners apply; Carta says its
-customers can ask for access to their own data). With a client id and secret from Carta's developer portal, you
+Access: Carta's API is OAuth 2.0. An app made in Carta's developer portal is a Playground app (Carta's test
+environment, dummy data, its own sign-in at login.playground.carta.team); reading your real account needs Carta to
+grant the app production access, with production credentials. With a client id and secret from Carta's developer portal, you
 connect once from Settings (you sign in at Carta and approve read access to your portfolio), and Runway keeps the
 token (encrypted) and refreshes it. Carta's mock environment serves sample data with any token, to try it out.
 
@@ -27,6 +28,10 @@ from . import db
 ENVS = {
     "production": {"api": "https://api.carta.com", "authorize": "https://login.app.carta.com/o/authorize/",
                    "token": "https://login.app.carta.com/o/access_token/"},
+    # Apps made in Carta's developer portal start here: Carta's Playground, with its own sign-in and dummy data. They
+    # work against production only once Carta grants the app production access.
+    "playground": {"api": "https://api.playground.carta.team", "authorize": "https://login.playground.carta.team/o/authorize/",
+                   "token": "https://login.playground.carta.team/o/access_token/"},
     "mock": {"api": "https://mock-api.carta.com", "authorize": None, "token": None},
 }
 SCOPES = "read_portfolio_info read_portfolio_securities"
@@ -44,13 +49,16 @@ def settings(conn) -> dict:
             "has_secret": bool(db.get_setting(conn, "carta_client_secret")),
             "connected": bool(db.get_setting(conn, "carta_access_token")) or (db.get_setting(conn, "carta_env") == "mock"
                                                                                 and bool(db.get_setting(conn, "carta_mock_on"))),
-            "last_sync": db.get_setting(conn, "carta_last_sync"), "last_error": db.get_setting(conn, "carta_last_error")}
+            "last_sync": db.get_setting(conn, "carta_last_sync"), "last_error": db.get_setting(conn, "carta_last_error"),
+            # through the browser extension
+            "web_last": db.get_setting(conn, "carta_web_last"), "web_error": db.get_setting(conn, "carta_web_last_error"),
+            "web_capture": bool(db.get_setting(conn, "carta_web_capture") not in (None, "[]"))}
 
 
 def save_settings(conn, body: dict) -> None:
     env = body.get("env") or db.get_setting(conn, "carta_env") or "production"
     if env not in ENVS:
-        raise CartaError("Environment is production or mock")
+        raise CartaError("Environment is production, playground or mock")
     if env != (db.get_setting(conn, "carta_env") or "production"):
         disconnect(conn)
     db.set_setting(conn, "carta_env", env)
@@ -181,8 +189,13 @@ def _items(data) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ reading
 
+def _snake(k: str) -> str:
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", k).lower()
+
+
 def _pick(d: dict, *keys):
-    """The first of these keys with a value, in the object or one level down."""
+    """The first of these keys with a value (camelCase or snake_case), in the object or one level down."""
+    keys = tuple(dict.fromkeys([*keys, *(_snake(k) for k in keys)]))
     for k in keys:
         if isinstance(d, dict) and d.get(k) not in (None, "", [], {}):
             return d[k]
