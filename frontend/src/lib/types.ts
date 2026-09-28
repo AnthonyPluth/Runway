@@ -4,18 +4,55 @@ export interface User { name?: string; email?: string; local?: boolean }
 export interface Brand { institution?: string; logo?: string; initial?: string }
 export interface SyncLog { ok: boolean; message?: string }
 
+/** GET /api/state (runway/server.py api_state). */
 export interface AppState {
   connected: boolean;
-  horizon_days?: number;
-  review_count?: number;
-  syncing?: boolean;
-  last_log?: SyncLog | null;
-  last_sync_ok?: string | null;
-  version?: string;
-  user?: User | null;
   brands?: Record<string, Brand>;
-  primary_account?: string;
+  simplefin?: boolean;
+  has_api_key?: boolean;
+  llm_model?: string;
+  last_sync_ok?: string | null;
+  last_log?: SyncLog | null;
+  last_llm_error?: string | null;
+  review_count?: number;
+  plaid_undecided?: number;
+  horizon_days?: number;
+  syncing?: boolean;
+  primary_account?: string | null;
+  auto_ai_on_sync?: boolean;
+  rentcast_configured?: boolean;
+  logodev_configured?: boolean;
+  database?: "sqlite" | "postgres";
+  version?: string;
+  owners?: string[];
+  user?: User | null;
 }
+
+/** GET /api/categories, in tree order: each category followed by its subcategories. */
+export interface Category {
+  name: string;
+  parent?: string | null;
+  is_transfer?: boolean | number;
+  is_income?: boolean | number;
+  path: string[];
+  depth: number;
+  top: string;
+  transactions?: number;
+  [key: string]: unknown;
+}
+
+/** GET /api/accounts (a row of the accounts table, plus its Plaid link). */
+export interface Account {
+  id: string;
+  name: string;
+  display_name?: string | null;
+  kind: string;
+  balance?: number | null;
+  hidden?: boolean | number;
+  owner?: string | null;
+  [key: string]: unknown;
+}
+export const accountName = (a: Account) => a.display_name || a.name;
 
 export interface ForecastEvent {
   date: string;
