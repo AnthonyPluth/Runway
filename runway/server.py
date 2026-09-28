@@ -316,6 +316,17 @@ def api_overview(conn, q, _b):
     horizon = max(14, min(horizon, 365))
     fc = forecast.build(conn, date.today(), horizon)
     fc["missed"] = recurring.missed(conn)
+    # a recurring item wears the logo of the last transaction matched to it
+    ids = sorted({e["recurring_id"] for e in fc["events"] if e.get("recurring_id")})
+    if ids:
+        ph = ",".join("?" * len(ids))
+        last: dict[int, dict] = {}
+        for t in db.rows(conn.execute(f"SELECT * FROM transactions WHERE recurring_id IN ({ph}) ORDER BY posted DESC", ids)):
+            last.setdefault(t["recurring_id"], t)
+        logos = tx_logos(conn, list(last.values()))
+        for e in fc["events"]:
+            t = last.get(e.get("recurring_id"))
+            e["logo"] = logos.get(t["id"]) if t else None
     fc["all_accounts"] = db.rows(conn.execute(
         "SELECT id, COALESCE(display_name, name) AS name, kind, balance, balance_date, owed_positive, hidden "
         "FROM accounts ORDER BY kind, name"
@@ -365,6 +376,19 @@ def api_account_update(conn, _q, body, acct_id):
     return {"ok": True}
 
 
+def tx_logos(conn, items: list[dict]) -> dict[str, str]:
+    """{transaction id: the URL of its merchant's logo}: Plaid's, else Logo.dev's (by the merchant's website or name;
+    a sync, or adding the key, fetches it), and a logo you chose for the merchant over both (or none at all)."""
+    logos = merchants.for_transactions(conn, items)
+    logos.update(merchants.logo_dev_logos(conn, [t for t in items if t["id"] not in logos]))
+    for tid, mid in merchants.chosen_for(conn, items).items():
+        if mid:
+            logos[tid] = mid
+        else:
+            logos.pop(tid, None)
+    return {tid: f"/api/merchants/{urllib.parse.quote(mid, safe='')}/logo" for tid, mid in logos.items()}
+
+
 def api_transactions(conn, q, _b):
     where, args = ["t." + db.NOT_INVESTMENT], []
     if q.get("review", ["0"])[0] == "1":
@@ -406,19 +430,11 @@ def api_transactions(conn, q, _b):
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
-    logos = merchants.for_transactions(conn, items)
-    # no logo from Plaid: Logo.dev's, by the merchant's website or name (a sync, or adding the key, fetches it)
-    logos.update(merchants.logo_dev_logos(conn, [t for t in items if t["id"] not in logos]))
-    chosen = merchants.chosen_for(conn, items)   # a logo you chose for the merchant wins (None: no logo)
-    for tid, mid in chosen.items():
-        if mid:
-            logos[tid] = mid
-        else:
-            logos.pop(tid, None)
+    logos = tx_logos(conn, items)
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
-        t["logo"] = f"/api/merchants/{urllib.parse.quote(logos[t['id']], safe='')}/logo" if t["id"] in logos else None
+        t["logo"] = logos.get(t["id"])
     total = conn.execute(
         f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
     ).fetchone()[0]

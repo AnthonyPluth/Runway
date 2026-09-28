@@ -567,6 +567,20 @@ class CategoryTests(Base):
         self.assertEqual(got["total"], 1)
         self.assertEqual(server.api_state(self.conn, {}, None)["review_count"], 1)   # the card's, not the buy
 
+    def test_coming_up_wears_its_merchants_logo(self):
+        self.acct("chk", "checking", 1000.0)
+        last = (date.today() - timedelta(days=20)).isoformat()
+        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, active) "
+                          "VALUES ('Netflix', 'chk', -15.49, 'monthly', ?, 1)", (last,))
+        rid = self.conn.execute("SELECT id FROM recurring").fetchone()[0]
+        self.tx("chk", last, -15.49, "NETFLIX.COM")
+        self.conn.execute("UPDATE transactions SET recurring_id=?, merchant_id='m-netflix' WHERE description='NETFLIX.COM'", (rid,))
+        self.conn.execute("INSERT INTO merchants(id, name, logo, logo_type) VALUES ('m-netflix', 'Netflix', 'cG5n', 'image/png')")
+        fc = server.api_overview(self.conn, {"days": ["60"]}, None)
+        ev = [e for e in fc["events"] if e.get("recurring_id") == rid]
+        self.assertTrue(ev)
+        self.assertEqual({e["logo"] for e in ev}, {"/api/merchants/m-netflix/logo"})
+
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)
         self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))
