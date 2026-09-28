@@ -5,7 +5,7 @@ function pageHtml() { return { url: location.href, html: document.documentElemen
 
 async function pageFetch(url, init) {
   try {
-    const res = await fetch(url, { credentials: "include", ...init });
+    const res = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(45000), ...init });
     return { ok: res.ok, status: res.status, url: res.url, text: await res.text() };
   } catch (e) {
     return { ok: false, status: 0, url, text: "", error: String(e && e.message || e) };

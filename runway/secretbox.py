@@ -13,6 +13,7 @@ one start; Runway re-encrypts everything with the new key.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import os
 import threading
@@ -35,8 +36,15 @@ class SecretError(Exception):
     """A stored secret can't be decrypted with the keys Runway has (the key changed or was lost)."""
 
 
+@functools.lru_cache(maxsize=8)
 def _from_passphrase(text: str) -> bytes:
-    # RUNWAY_SECRET_KEY is a long random string; SHA-256 turns it into the 32 bytes Fernet wants.
+    # RUNWAY_SECRET_KEY should be a long random string, but may be a passphrase: scrypt makes guessing it slow.
+    return base64.urlsafe_b64encode(hashlib.scrypt(text.encode(), salt=b"runway-secretbox", n=2 ** 15, r=8, p=1,
+                                                   maxmem=64 * 1024 * 1024, dklen=32))
+
+
+def _from_passphrase_v1(text: str) -> bytes:
+    """How earlier versions made the key (one SHA-256), still read so secrets saved then are re-encrypted at start."""
     return base64.urlsafe_b64encode(hashlib.sha256(text.encode()).digest())
 
 
@@ -83,9 +91,9 @@ def _box() -> MultiFernet:
         if ident not in _cache:
             keys = []
             if env:
-                keys.append(Fernet(_from_passphrase(env)))
+                keys += [Fernet(_from_passphrase(env)), Fernet(_from_passphrase_v1(env))]
                 if old:
-                    keys.append(Fernet(_from_passphrase(old)))
+                    keys += [Fernet(_from_passphrase(old)), Fernet(_from_passphrase_v1(old))]
                 file_key = _read_or_make_key_file(create=False)   # secrets encrypted before the env key was set
             else:
                 file_key = _read_or_make_key_file(create=True)

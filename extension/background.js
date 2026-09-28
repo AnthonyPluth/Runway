@@ -18,6 +18,19 @@ const EVERYDAY = ["amazon", "target"];   // "Import both"; Carta has its own but
 const AMAZON_PARALLEL = 4;   // order pages read at once: quicker, and still a light load on Amazon
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const PAGE_CALL_MS = 90000;     // longest a store page may take to answer the extension (its own fetches stop at 45s)
+const RUNWAY_CALL_MS = 120000;  // and Runway
+
+// The promise, or an error once `ms` have passed without it settling (so a stalled page can't hold an import forever).
+function withTimeout(promise, ms, message, ErrorType = Error) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new ErrorType(message)), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+// Errors that end a store's import rather than skipping one order: signed out, a robot check, the store refusing
+// more reads for now, or the hidden page giving out (the import starts again in a tab).
+const stopsImport = (e) => e instanceof HiddenUnavailable || !!(e && (e.signin || e.limited || e.code === "signin" || e.code === "robot"));
 
 // Runs fn over items, `width` at a time; the first failure stops it.
 async function inParallel(items, width, fn) {
@@ -38,9 +51,14 @@ async function settings() {
   return { runwayUrl: (s.runwayUrl || "").replace(/\/+$/, ""), token: s.token || "", auto: !!s.auto };
 }
 
-async function setStatus(patch) {
-  const { status = {} } = await store.get("status");
-  await store.set({ status: { ...status, ...patch, at: new Date().toISOString() } });
+// One write at a time, in order, so a late progress message can't land after "done" and leave the popup "running".
+let statusChain = Promise.resolve();
+function setStatus(patch) {
+  statusChain = statusChain.then(async () => {
+    const { status = {} } = await store.get("status");
+    await store.set({ status: { ...status, ...patch, at: new Date().toISOString() } });
+  }).catch(() => {});
+  return statusChain;
 }
 
 async function runway(path, body) {
@@ -52,12 +70,13 @@ async function runway(path, body) {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
+      signal: AbortSignal.timeout(RUNWAY_CALL_MS),
     });
   } catch (e) {
     throw new Error(`Couldn't reach Runway at ${runwayUrl} (${e.message}).`);
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Runway answered ${res.status}.`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Runway answered ${res.status}.`), { code: data.code });
   return data;
 }
 
@@ -92,7 +111,8 @@ async function closeTab(tabId) {
 }
 
 async function inPage(tabId, func, args = [], world = "ISOLATED") {
-  const [r] = await chrome.scripting.executeScript({ target: { tabId }, func, args, world });
+  const [r] = await withTimeout(chrome.scripting.executeScript({ target: { tabId }, func, args, world }), PAGE_CALL_MS,
+    "The store's page stopped answering.");
   if (r && r.error) throw new Error(String(r.error.message || r.error));
   return r ? r.result : undefined;
 }
@@ -108,10 +128,11 @@ class TabPage {
   get url() { return this.tab.url || ""; }
   run(cmd, ...args) { const [func, world] = PAGE_COMMANDS[cmd]; return inPage(this.tab.id, func, args, world); }
   async navigate(url) { await chrome.tabs.update(this.tab.id, { url }); this.tab = await waitForLoad(this.tab.id); }
-  async signIn(site) {
+  async signIn(site, robot = false) {
     this.keep = true;
     await chrome.tabs.update(this.tab.id, { active: true });
-    return new Error(`Sign in to ${site} in the tab that just opened, then import again.`);
+    return new Error(robot ? `Answer ${site}'s robot check in the tab that just opened, then import again.`
+      : `Sign in to ${site} in the tab that just opened, then import again.`);
   }
   async close() { if (!this.keep) await closeTab(this.tab.id); }
 }
@@ -194,13 +215,14 @@ class HiddenPage {
   async run(cmd, ...args) {
     for (let attempt = 0; ; attempt++) {
       if (!this.port) await this.loaded().catch(() => { throw new HiddenUnavailable("the hidden page stopped answering"); });
+      const id = ++this.next;
       try {
-        return await new Promise((resolve, reject) => {
-          const id = ++this.next;
+        return await withTimeout(new Promise((resolve, reject) => {
           this.pending.set(id, { resolve, reject });
           this.port.postMessage({ id, cmd, args });
-        });
+        }), PAGE_CALL_MS, "the hidden page stopped answering", HiddenUnavailable);
       } catch (e) {
+        this.pending.delete(id);
         if (!e.moved || attempt >= 2) throw e;   // the page went elsewhere (a redirect): ask the new one
       }
     }
@@ -276,15 +298,18 @@ async function importAmazon(progress, Page) {
   await runway("/api/ext/start", { retailer: "amazon" });
   progress("Opening your Amazon payments…");
   const page = await Page.open(AMAZON_TRANSACTIONS);
+  let complete = false;   // read back as far as Runway asked (not stopped by MAX_PAGES)
   try {
     if (/\/ap\/signin|\/ax\/claim/.test(page.url)) throw await page.signIn("Amazon");
     let html = (await page.run("html")).html;
     const orders = new Set();
+    let seen = {};
     for (let n = 1; n <= MAX_PAGES; n++) {
       progress(`Reading Amazon payments, page ${n}…`);
-      const r = await runway("/api/ext/amazon/transactions", { html });
+      const r = await runway("/api/ext/amazon/transactions", { html, seen });
       r.orders.forEach((o) => orders.add(o));
-      if (!r.next_form) break;
+      seen = r.seen || {};
+      if (!r.next_form) { complete = true; break; }
       const res = await page.run("fetch", AMAZON_TRANSACTIONS, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -296,27 +321,42 @@ async function importAmazon(progress, Page) {
     }
     let done = 0;
     const unread = [];
+    // A first read of each order doesn't count towards giving up on it (final: false); the second, below, does.
     await inParallel([...orders], AMAZON_PARALLEL, async (order) => {
-      const res = await page.run("fetch", AMAZON_ORDER(order));
-      const r = res.ok ? await runway("/api/ext/amazon/order", { order_number: order, html: res.text }) : { read: false };
-      if (!r.read) unread.push(order);
+      try {
+        const res = await page.run("fetch", AMAZON_ORDER(order));
+        const r = res.ok ? await runway("/api/ext/amazon/order", { order_number: order, html: res.text, final: false }) : { read: false };
+        if (!r.read) unread.push(order);
+      } catch (e) {
+        if (stopsImport(e)) throw e;
+        unread.push(order);
+      }
       progress(`Reading Amazon orders, ${++done} of ${orders.size}…`);
       await sleep(PAUSE_MS);
     });
     let i = 0;
     for (const order of unread) {   // some pages only fill in once their scripts run: load each for real and read what shows
       progress(`Loading Amazon order ${++i} of ${unread.length}…`);
-      await page.navigate(AMAZON_ORDER(order));
-      await sleep(1500);
-      const shown = await page.run("html");
-      await runway("/api/ext/amazon/order", { order_number: order, html: shown.html });
+      try {
+        await page.navigate(AMAZON_ORDER(order));
+        await sleep(1500);
+        const shown = await page.run("html");
+        await runway("/api/ext/amazon/order", { order_number: order, html: shown.html, final: true });
+      } catch (e) {   // one order that won't load doesn't stop the rest; it counts as a try, so it isn't asked for forever
+        if (stopsImport(e)) throw e;
+        console.warn(`Runway: Amazon order ${order}: ${e.message}`);
+        await runway("/api/ext/amazon/order", { order_number: order, html: "", final: true }).catch(() => {});
+      }
       await sleep(PAUSE_MS);
     }
+  } catch (e) {
+    if (e.code === "signin" || e.code === "robot") throw await page.signIn("Amazon", e.code === "robot");
+    throw e;
   } finally {
     await page.close();
   }
   progress("Matching Amazon orders to your transactions…");
-  return runway("/api/ext/finish", { retailer: "amazon" });
+  return runway("/api/ext/finish", { retailer: "amazon", complete });
 }
 
 // ------------------------------------------------------------------------------------------------ Target
@@ -326,6 +366,8 @@ const targetPause = () => sleep(1500 + Math.random() * 2000);
 
 // A reply from Target's API as JSON (null if none). A refusal (401/403) means signed out when reading the order
 // history; for an order's details it may only mean that address isn't one this account can use, so it's null too.
+// "Too many requests" (429) stops the import either way: reading on would only look more like a bot. So does any
+// failure reading the history, whose pages can't be skipped.
 async function targetJson(page, url, token, { detail = false } = {}) {
   const headers = { Accept: "application/json" };
   let res = await page.run("fetch", url, { headers });
@@ -333,6 +375,10 @@ async function targetJson(page, url, token, { detail = false } = {}) {
     res = await page.run("fetch", url, { headers: { ...headers, Authorization: `Bearer ${token}` } });
   }
   if ((res.status === 401 || res.status === 403) && !detail) throw Object.assign(new Error("signin"), { signin: true });
+  if (res.status === 429 || (!detail && !res.ok)) {
+    throw Object.assign(new Error(`Target stopped answering (${res.status ? `it answered ${res.status}` : res.error || "no reply"}). ` +
+      "Runway kept what it read and will read the rest next time."), { limited: true });
+  }
   if (!res.ok) return null;
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
@@ -389,11 +435,15 @@ async function learnTargetDetail(kind, url, api, order) {
 }
 
 // Reads one address for an order's details and sends it to Runway. True when Runway found the order's items in it.
+// Not the order's last try in this import, so it doesn't count towards giving up on it.
 async function targetDetail(page, api, order, url) {
   const data = await targetJson(page, url, api.token, { detail: true });
   if (!data) return false;
-  return (await runway("/api/ext/target/order", { order_number: order, data })).read;
+  return (await runway("/api/ext/target/order", { order_number: order, data, final: false })).read;
 }
+
+// The order couldn't be read in this import: one try used, so it isn't asked for forever.
+const targetGaveUp = (order) => runway("/api/ext/target/order", { order_number: order, data: {}, final: true });
 
 // The target.com addresses an order's page called for that order (waiting a little for it to make them).
 async function targetCallsFor(page, order) {
@@ -411,6 +461,7 @@ async function importTarget(progress, Page) {
   const start = await runway("/api/ext/start", { retailer: "target" });
   progress("Opening your Target orders…");
   const page = await Page.open(TARGET_ORDERS);
+  let complete = true;   // every page of history Runway asked for was read
   try {
     if (/login|signin/i.test(new URL(page.url || TARGET_ORDERS).pathname)) throw await page.signIn("Target");
     // Let the orders page make its own calls, so we can see how it calls the API (it can take a while to start).
@@ -436,17 +487,19 @@ async function importTarget(progress, Page) {
     const need = [];
     try {
       for (const type of ["ONLINE", "STORE"]) {
+        let whole = false;
         for (let n = 1; n <= MAX_PAGES; n++) {
           progress(`Reading Target ${type === "STORE" ? "in-store purchases" : "online orders"}, page ${n}…`);
           const url = `${api.base}/order_history?page_number=${n}&page_size=10&order_purchase_type=${type}` +
             `&pending_order=true&shipt_status=true&key=${encodeURIComponent(api.key)}`;
           const data = await targetJson(page, url, api.token);
-          if (!data) break;
+          if (!data) break;   // not JSON: this page of history couldn't be read
           const r = await runway("/api/ext/target/history", { purchase_type: type, page: n, data });
           r.orders.forEach((o) => need.push({ n: o, type }));
-          if (!r.more) break;
+          if (!r.more) { whole = true; break; }
           await targetPause();
         }
+        if (!whole) complete = false;   // the next import reads this stretch again
       }
       // Each order's items: first from the addresses Runway names (and any this browser learned from target.com
       // before), then, for orders those don't cover, by loading the order's own page and re-reading what it called.
@@ -456,9 +509,14 @@ async function importTarget(progress, Page) {
       for (const order of need) {
         progress(`Reading Target ${order.type === "STORE" ? "receipt" : "order"} ${++i} of ${need.length}…`);
         let read = false;
-        for (const tpl of templates[order.type === "STORE" ? "store" : "online"]) {
-          if (await targetDetail(page, api, order.n, targetUrl(tpl, api, order.n))) { read = true; break; }
-          await targetPause();
+        try {
+          for (const tpl of templates[order.type === "STORE" ? "store" : "online"]) {
+            if (await targetDetail(page, api, order.n, targetUrl(tpl, api, order.n))) { read = true; break; }
+            await targetPause();
+          }
+        } catch (e) {
+          if (stopsImport(e)) throw e;
+          console.warn(`Runway: Target order ${order.n}: ${e.message}`);
         }
         if (!read) unread.push(order);
         await targetPause();
@@ -467,30 +525,38 @@ async function importTarget(progress, Page) {
       for (const { n, type } of unread) {
         const kind = type === "STORE" ? "store" : "online";
         const tpl = (start.order_pages || {})[kind];
-        if (!tpl) continue;
         progress(`Loading Target ${type === "STORE" ? "receipt" : "order"} ${++i} of ${unread.length}…`);
         let read = false;
-        for (const learned of (await targetDetailTemplates(null))[kind]) {   // one learned from an earlier order here
-          if (!templates[kind].includes(learned) && await targetDetail(page, api, n, targetUrl(learned, api, n))) { read = true; break; }
-        }
-        if (!read) {
-          await page.navigate(tpl.replace("{order}", encodeURIComponent(n)));
-          for (const url of await targetCallsFor(page, n)) {
-            if (await targetDetail(page, api, n, url)) { read = true; await learnTargetDetail(kind, url, api, n); break; }
+        try {
+          for (const learned of (await targetDetailTemplates(null))[kind]) {   // one learned from an earlier order here
+            if (!templates[kind].includes(learned) && await targetDetail(page, api, n, targetUrl(learned, api, n))) { read = true; break; }
           }
+          if (!read && tpl) {
+            await page.navigate(tpl.replace("{order}", encodeURIComponent(n)));
+            for (const url of await targetCallsFor(page, n)) {
+              if (await targetDetail(page, api, n, url)) { read = true; await learnTargetDetail(kind, url, api, n); break; }
+            }
+          }
+        } catch (e) {   // one order that won't load doesn't stop the rest
+          if (stopsImport(e)) throw e;
+          console.warn(`Runway: Target order ${n}: ${e.message}`);
         }
-        if (!read) await runway("/api/ext/target/order", { order_number: n, data: {} });   // counts as a try, so it's not reloaded forever
+        if (!read) await targetGaveUp(n);
         await targetPause();
       }
     } catch (e) {
       if (e.signin) throw await page.signIn("Target");
+      if (e.limited) {   // keep what was read (matched now), without moving the last import's date on
+        progress("Matching Target orders to your transactions…");
+        await runway("/api/ext/finish", { retailer: "target", complete: false }).catch(() => {});
+      }
       throw e;
     }
   } finally {
     await page.close();
   }
   progress("Matching Target orders to your transactions…");
-  return runway("/api/ext/finish", { retailer: "target" });
+  return runway("/api/ext/finish", { retailer: "target", complete });
 }
 
 // ------------------------------------------------------------------------------------------------ Carta
@@ -572,12 +638,13 @@ function summary(r) {
 async function run(which) {
   if (running) return running;
   running = (async () => {
+    let live = true;   // progress messages still arriving after the run ends are dropped
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);   // a long import outlives the idle timer
     const { results = {} } = await store.get("results");
     try {
       const everyday = which === "daily" ? [...EVERYDAY, ...(results.carta?.ok ? ["carta"] : [])] : EVERYDAY;
       for (const retailer of which === "all" || which === "daily" ? everyday : [which]) {
-        const progress = (message) => setStatus({ running: true, retailer, message });
+        const progress = (message) => { if (live) setStatus({ running: true, retailer, message }); };
         try {
           const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer], progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r), data: r };
@@ -587,6 +654,7 @@ async function run(which) {
         await store.set({ results });
       }
     } finally {
+      live = false;
       clearInterval(keepAlive);
       await setStatus({ running: false, retailer: null, message: "" });
       running = null;
@@ -622,11 +690,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   return true;
 });
 
-// Once a day, if you asked for it (Options): the same import, out of sight.
+// Once a day, if you asked for it (Options): the same import, out of sight. An alarm already set is kept, so
+// restarting Chrome doesn't start an extra import (Chrome keeps alarms across restarts).
 async function scheduleAuto() {
   const { auto } = await settings();
-  await chrome.alarms.clear("daily");
-  if (auto) chrome.alarms.create("daily", { delayInMinutes: 5, periodInMinutes: 24 * 60 });
+  if (!auto) return chrome.alarms.clear("daily");
+  if (!(await chrome.alarms.get("daily"))) chrome.alarms.create("daily", { delayInMinutes: 5, periodInMinutes: 24 * 60 });
 }
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === "daily") run("daily"); });
 chrome.runtime.onInstalled.addListener((d) => {
