@@ -172,6 +172,18 @@ class CartaTests(Base):
             carta.sync(self.c, opener=refuse)
         self.assertIn("refused", db.get_setting(self.c, "carta_last_error"))
 
+    def test_playground_apps_sign_in_at_the_playground(self):
+        api = FakeCarta()
+        carta.save_settings(self.c, {"env": "playground", "client_id": "pg-cid", "client_secret": "pg-sec"})
+        url = carta.authorize_url(self.c, "https://runway.example.com/carta/callback")
+        self.assertTrue(url.startswith("https://login.playground.carta.team/o/authorize/"))
+        state = db.get_setting(self.c, "carta_oauth_state").split(" ")[0]
+        seen = []
+        carta.finish_authorize(self.c, "code-1", state, opener=lambda req: seen.append(req.full_url) or api(req))
+        carta.sync(self.c, opener=lambda req: seen.append(req.full_url) or api(req))
+        self.assertEqual(seen[0], "https://login.playground.carta.team/o/access_token/")
+        self.assertTrue(all(u.startswith("https://api.playground.carta.team/") for u in seen[1:]))
+
     def test_schedule_names(self):
         self.assertEqual(carta._schedule("1/48 monthly, 1 year cliff"), (48, 12, 1))
         self.assertEqual(carta._schedule("4 years quarterly, 12 month cliff"), (48, 12, 3))
