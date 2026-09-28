@@ -77,7 +77,8 @@ plain Python with a handful of well-known libraries.
   range, the money goes out or comes in, or it's in a particular account, then set a category, rename the merchant,
   split it by percentages ("Costco: 70% Groceries, 30% Household") or put it in Review. The most specific rule wins, and
   a preview shows what a rule would match before you save it. When you pick a category, Runway asks whether to use it
-  for that merchant from now on (a rule); built-in heuristics handle card payments and sweeps.
+  for that merchant from now on (a rule) — including after you apply an AI suggestion, so nothing writes a rule
+  behind your back; built-in heuristics handle card payments and sweeps.
 - **Optional AI categorization** through OpenRouter, guided by examples of how you've categorized before and shown with
   confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new
   categories when nothing fits. Every AI call is logged so you can see what happened.
@@ -104,7 +105,8 @@ plain Python with a handful of well-known libraries.
 
 ### Investments
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a
-  comparison with the S&P 500, gain per holding, allocation and a financial-independence calculator.
+  comparison with the S&P 500, gain per holding, allocation and a financial-independence calculator whose
+  assumptions (spending, saving, return, withdrawal rate) start from your own numbers and keep whatever you change.
 - **Near-real-time prices** while the market is open, with each holding's gain today.
 - Positions from SimpleFIN, or optionally from Plaid for accounts SimpleFIN only knows the balance of. Accounts that
   neither can see into, like some 401(k)s, can be **tracked by hand**: enter shares and your contribution split, and

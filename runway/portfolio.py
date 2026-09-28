@@ -546,14 +546,55 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
     return rules
 
 
+# The assumptions behind the financial-independence projection. Runway works out the first two from your own
+# spending and saving; change any of them and your figure is kept (in settings) until you reset it.
+FIRE_FIELDS = {"annual_spending": (0.0, 1e9), "yearly_savings": (0.0, 1e9),
+               "expected_return": (-0.5, 0.5), "withdrawal_rate": (0.001, 0.5)}
+
+
+def fire_saved(conn) -> dict:
+    """The assumptions you've changed by hand."""
+    out = {}
+    for field in FIRE_FIELDS:
+        value = db.get_setting(conn, f"fire_{field}")
+        if value not in (None, ""):
+            try:
+                out[field] = float(value)
+            except ValueError:
+                pass
+    return out
+
+
+def save_fire(conn, values: dict) -> dict:
+    """Keep the assumptions you typed. A field set to None goes back to Runway's own figure."""
+    for field, value in values.items():
+        if field not in FIRE_FIELDS:
+            raise ValueError(f"Unknown assumption: {field}")
+        if value is None:
+            db.set_setting(conn, f"fire_{field}", None)
+            continue
+        low, high = FIRE_FIELDS[field]
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{field.replace('_', ' ').capitalize()} must be a number")
+        if not low <= number <= high:
+            raise ValueError(f"{field.replace('_', ' ').capitalize()} is out of range")
+        db.set_setting(conn, f"fire_{field}", repr(round(number, 6)))
+    return fire_saved(conn)
+
+
 def fire_defaults(conn, hist: dict, today: date) -> dict:
     spend = monthly_spending(conn, today)
     flows = hist.get("flows") or []
     dates = hist.get("dates") or []
     cutoff = (today - timedelta(days=365)).isoformat()
     yearly_savings = sum(f for d, f in zip(dates, flows) if d > cutoff)
-    return {"annual_spending": round(spend * 12, 2), "yearly_savings": round(max(0.0, yearly_savings), 2),
-            "current": hist["value"][-1] if hist.get("value") else 0.0, "withdrawal_rate": 0.04, "expected_return": 0.05}
+    computed = {"annual_spending": round(spend * 12, 2), "yearly_savings": round(max(0.0, yearly_savings), 2),
+                "withdrawal_rate": 0.04, "expected_return": 0.05}
+    saved = fire_saved(conn)
+    return {**computed, **saved, "current": hist["value"][-1] if hist.get("value") else 0.0,
+            "computed": computed, "saved": sorted(saved)}
 
 
 # ------------------------------------------------------------------------------------------------ everything for the page

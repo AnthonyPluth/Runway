@@ -141,6 +141,36 @@ class XrayTests(Base):
         self.assertEqual(ov["income"]["fees_12m"], 80.0)
 
 
+class FireTests(Base):
+    """The financial-independence assumptions you type are kept, so the page comes back the way you left it."""
+
+    def setUp(self):
+        super().setUp()
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','VTI',10,300,3000,2500)")
+
+    def fire(self):
+        return portfolio.overview(self.c, "1Y", TODAY)["fire"]
+
+    def test_saved_assumptions_win_and_can_be_reset(self):
+        computed = self.fire()["computed"]
+        portfolio.save_fire(self.c, {"annual_spending": 62000, "withdrawal_rate": 0.035})
+        f = self.fire()
+        self.assertEqual((f["annual_spending"], f["withdrawal_rate"]), (62000.0, 0.035))
+        self.assertEqual(f["saved"], ["annual_spending", "withdrawal_rate"])
+        self.assertEqual(f["expected_return"], computed["expected_return"])   # untouched ones stay Runway's
+        self.assertEqual(f["computed"], computed)
+        portfolio.save_fire(self.c, {"annual_spending": None, "withdrawal_rate": None})
+        back = self.fire()
+        self.assertEqual(back["saved"], [])
+        self.assertEqual(back["annual_spending"], computed["annual_spending"])
+
+    def test_nonsense_assumptions_are_refused(self):
+        for bad in ({"withdrawal_rate": 4.0}, {"annual_spending": -1}, {"expected_return": "soon"}, {"nope": 1}):
+            with self.assertRaises(ValueError):
+                portfolio.save_fire(self.c, bad)
+        self.assertEqual(portfolio.fire_saved(self.c), {})
+
+
 # ---------------------------------------------------------------------------------------------- mock servers
 
 class MockPlaid(BaseHTTPRequestHandler):

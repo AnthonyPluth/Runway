@@ -138,6 +138,15 @@ class EditingTests(Base):
         self.assertEqual(categorize.rule_offer(self.c, tid, "Restaurants")["replaces"], "Coffee & Snacks")
         self.assertIsNone(categorize.rule_offer(self.c, self.tx(-5, "BP"), "Auto & Gas"))  # too short to make a rule
 
+    def test_applying_an_ai_suggestion_asks_instead_of_making_a_rule(self):
+        from runway import server
+        ids = [self.tx(-5, "SQ *BLUE BOTTLE 123"), self.tx(-6, "SQ *BLUE BOTTLE 456")]
+        r = server.api_ai_apply(self.c, None, {"tx_ids": ids, "category": "Coffee & Snacks"})
+        self.assertEqual(r["updated"], 2)
+        self.assertEqual(rules.load(self.c), [])                    # nothing written behind your back
+        self.assertEqual(r["offer_rule"]["match"], "blue bottle")   # it's offered instead
+        self.assertEqual(self.row(ids[1])["category"], "Coffee & Snacks")
+
     def test_describe(self):
         rid = self.rule(match="venmo", match_mode="starts", amount_min=1000, amount_max=2500, direction="out",
                         account_id="chk", category="Mortgage")
