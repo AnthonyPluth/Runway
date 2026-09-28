@@ -24,7 +24,7 @@
 </script>
 
 {#if !cards.length}
-  <p class="py-6 text-center text-sm text-muted-foreground">Link your cards through Plaid in <a class="text-primary-ink" href="/#setup/connections">Settings → Connections</a> to see their statements and due dates.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">Link your cards through Plaid in <a class="font-medium text-foreground underline underline-offset-4" href="/#setup/connections">Settings → Connections</a> to see their statements and due dates.</p>
 {:else}
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
@@ -37,20 +37,20 @@
       <tbody>
         {#each cards as c (c.id)}
           {@const soon = c.remaining > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}
-          <tr class="border-t border-line align-top [&>td]:py-2.5">
-            <td><div class="font-medium"><AcctLabel id={c.id} name={c.name} /></div><div class="text-xs text-muted-foreground tabular">owes {fmt(c.owed_now)} now</div></td>
+          <tr class="border-t align-top [&>td]:py-2.5">
+            <td><div class="font-medium"><AcctLabel id={c.id} name={c.name} /></div><div class="text-xs text-muted-foreground tabular-nums">owes {fmt(c.owed_now)} now</div></td>
             <td class="text-right">
               <AmountEdit amount={c.statement_balance} label="Statement balance" title={`Closed ${fmtDate(c.last_close)} · click to correct it`}
                 save={(v) => setStatement(c, v)} />
-              {#if c.statement_set}<Badge variant="primary" title={`Entered by you · the bank reported ${fmt(c.statement_reported)}`}>set</Badge>{/if}
-              <div class="text-xs text-muted-foreground tabular">
-                {#if c.remaining > 0}{c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid"}{:else}<span class="text-good">Paid ✓</span>{/if}
+              {#if c.statement_set}<Badge variant="secondary" title={`Entered by you · the bank reported ${fmt(c.statement_reported)}`}>set</Badge>{/if}
+              <div class="text-xs text-muted-foreground tabular-nums">
+                {#if c.remaining > 0}{c.remaining < c.statement_balance - 0.005 ? `${fmt(c.remaining)} left` : "unpaid"}{:else}<span class="text-emerald-500">Paid ✓</span>{/if}
                 {#if c.remaining > 0 && c.minimum_payment} · {nb(`min ${fmt(c.minimum_payment)}`)}{/if}
-                {#if c.statement_set} · <Button variant="link" size="xs" class="p-0" title={`Go back to the bank's figure (${fmt(c.statement_reported)})`} onclick={() => reset(c)}>reset</Button>{/if}
+                {#if c.statement_set} · <Button variant="link" size="sm" class="h-auto p-0" title={`Go back to the bank's figure (${fmt(c.statement_reported)})`} onclick={() => reset(c)}>reset</Button>{/if}
               </div>
             </td>
-            <td class={["text-right tabular", soon ? "font-medium text-warning" : "text-muted-foreground"]}>{fmtDate(c.due_date)}</td>
-            <td class="text-right text-muted-foreground tabular"
+            <td class={["text-right tabular-nums", soon ? "font-medium text-amber-500" : "text-muted-foreground"]}>{fmtDate(c.due_date)}</td>
+            <td class="text-right text-muted-foreground tabular-nums"
               title={c.avg_cycles ? `From the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : "Not enough history yet; using recent daily spending"}>
               {c.avg_monthly_spend != null ? fmt(c.avg_monthly_spend) : "—"}
             </td>

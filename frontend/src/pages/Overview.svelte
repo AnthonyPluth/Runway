@@ -10,12 +10,14 @@
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
   import { Button } from "$lib/components/ui/button";
+  import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
   import type { Missed, Overview } from "$lib/types";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
@@ -50,21 +52,25 @@
 </script>
 
 {#snippet warn(text: string, href?: string, linkText?: string)}
-  <div class="mb-2.5 flex items-start gap-2.5 rounded-xl bg-warning-wash px-3.5 py-2.5 text-sm ring-1 ring-warning/30">
-    <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-warning text-xs font-extrabold text-[#1a1406]">!</span>
-    <span>{text} {#if href}<a class="text-primary-ink" {href}>{linkText}</a>{/if}</span>
-  </div>
+  <Alert.Root class="mb-3">
+    <TriangleAlert />
+    <Alert.Description>
+      <p>{text} {#if href}<a class="font-medium text-foreground underline underline-offset-4" {href}>{linkText}</a>{/if}</p>
+    </Alert.Description>
+  </Alert.Root>
 {/snippet}
 
 {#if !connected}
   <Card.Root class="mx-auto mt-10 max-w-lg text-center">
-    <h2 class="text-lg font-semibold text-foreground-strong">Connect your bank to get started</h2>
-    <p class="mt-2 text-sm text-muted-foreground">Link SimpleFIN or Plaid and Runway projects where your cash is headed.</p>
-    <Button class="mt-5" href="/#setup/connections">Go to Settings</Button>
+    <Card.Header>
+      <Card.Title>Connect your bank to get started</Card.Title>
+      <Card.Description>Link SimpleFIN or Plaid and Runway projects where your cash is headed.</Card.Description>
+    </Card.Header>
+    <Card.Content><Button href="/#setup/connections">Go to Settings</Button></Card.Content>
   </Card.Root>
 {:else}
   {#await data}
-    <div class="h-40 animate-pulse rounded-xl bg-card"></div>
+    <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
   {:then fc}
     {@const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0)}
     {@const low = fc.low}
@@ -80,34 +86,34 @@
 
     {#each fc.warnings as w (w)}{@render warn(w, `/#setup/${/Plaid/.test(w) ? "connections" : "accounts"}`, "Settings")}{/each}
     {#each (fc.missed ?? []).filter((m) => !dismissed.includes(m.key)) as m (m.key)}
-      <div class="mb-2.5 flex items-start gap-2.5 rounded-xl bg-warning-wash px-3.5 py-2.5 text-sm ring-1 ring-warning/30">
-        <span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-warning text-xs font-extrabold text-[#1a1406]">!</span>
-        <span>
+      <Alert.Root class="mb-3">
+        <TriangleAlert />
+        <Alert.Description><p>
           <b>{m.name}</b>: {fmt(Math.abs(m.amount))} {m.amount > 0 ? "expected in" : "expected"} {fmtDate(m.date)} hasn't shown up in {m.account_name || "the account"}.
-          <a class="text-primary-ink" href="/#transactions">Find it</a> ·
-          <Button variant="link" size="xs" class="p-0" onclick={() => dismiss(m)}>Dismiss</Button>
-        </span>
-      </div>
+          <a class="font-medium text-foreground underline underline-offset-4" href="/#transactions">Find it</a> ·
+          <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-4" onclick={() => dismiss(m)}>Dismiss</button>
+        </p></Alert.Description>
+      </Alert.Root>
     {/each}
     {#if !fc.accounts.length}{@render warn("No account to forecast yet. Choose your primary checking account in", "/#setup/accounts", "Settings.")}{/if}
 
-    <section class="mb-7 mt-1 flex flex-col justify-between gap-6 md:flex-row md:items-end md:gap-10">
-      <div class="flex max-w-[900px] flex-col gap-3">
-        <span class="text-[12.5px] uppercase tracking-[0.14em] text-muted-foreground">
+    <section class="mb-8 flex flex-col justify-between gap-6 md:flex-row md:items-end md:gap-10">
+      <div class="flex max-w-4xl flex-col gap-3">
+        <span class="text-sm text-muted-foreground">
           {parseDate(fc.today).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
         </span>
-        <h1 class="text-balance text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground-strong md:text-4xl">
+        <h1 class="text-balance text-3xl font-semibold tracking-tight md:text-4xl">
           {#if low && fc.accounts.length}
             {#if lowBad}
-              Heads up. {what} dips to <span class="font-bold text-destructive tabular">{fmt0(low.balance)}</span>
+              Heads up. {what} dips to <span class="font-bold text-destructive tabular-nums">{fmt0(low.balance)}</span>
               {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}.
             {:else}
-              You’re on track. {what} stays above <span class="font-bold text-primary tabular">{fmt0(low.balance)}</span> for the next {nb(span(days))}.
+              You’re on track. {what} stays above <span class="font-bold tabular-nums">{fmt0(low.balance)}</span> for the next {nb(span(days))}.
             {/if}
           {:else}Overview{/if}
         </h1>
         {#if low && fc.accounts.length}
-          <p class="text-[15px] leading-relaxed text-subtle-foreground">
+          <p class="leading-relaxed text-muted-foreground">
             {#if low.date === fc.today}Today is the tightest point in the forecast.
             {:else}The tightest moment is {lowWhen(fc)}{#if lowEvents.length}, when {lowEvents[0].kind === "card" ? `the ${nb(lowEvents[0].name.replace(/ statement$/, ""))} payment` : lowEvents[0].name} goes out{/if}.{/if}
             {#if nextIn}Next money in: {nb(nextIn.name + ",")} {fmt0(nextIn.amount)} on {nb(relDay(nextIn.date, fc.today))}.{/if}
@@ -115,64 +121,72 @@
         {/if}
       </div>
       <div class="flex shrink-0 flex-col gap-1 md:items-end">
-        <span class="text-[13px] text-muted-foreground">{allChecking ? "In checking today" : "Cash today"}</span>
-        <span class="text-[40px] font-semibold leading-none tracking-[-0.025em] text-foreground-strong tabular">{fmt(cashNow)}</span>
-        <span class="text-[13px] text-muted-foreground">{fc.accounts.map((a) => a.name).join(" + ") || "—"}</span>
+        <span class="text-sm text-muted-foreground">{allChecking ? "In checking today" : "Cash today"}</span>
+        <span class="text-4xl font-semibold tracking-tight tabular-nums">{fmt(cashNow)}</span>
+        <span class="text-sm text-muted-foreground">{fc.accounts.map((a) => a.name).join(" + ") || "—"}</span>
       </div>
     </section>
 
-    <div class="mb-5 grid gap-4 md:grid-cols-3">
+    <div class="mb-6 grid gap-4 md:grid-cols-3">
       {#each [
         { label: lowBad ? "Goes negative" : "Lowest point", sub: low ? fmtDow(low.date) : "", value: low ? fmt(low.balance) : "—", alert: lowBad, low: true, tone: "" },
-        { label: `In ${span(days)}`, sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`, value: fmt(end), alert: false, low: false, tone: end - cashNow >= 0 ? "text-good" : "text-destructive" },
+        { label: `In ${span(days)}`, sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`, value: fmt(end), alert: false, low: false, tone: end - cashNow >= 0 ? "text-emerald-500" : "text-destructive" },
         { label: "Owed on cards", sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}`, value: fmt(owed), alert: false, low: false, tone: "" },
       ] as t (t.label)}
-        <div class={cn("flex items-center justify-between gap-4 rounded-[14px] bg-card px-5 py-4 ring-1 ring-border", t.alert && "bg-destructive-wash ring-destructive")}>
-          <div><div class="text-[13px] text-muted-foreground">{t.label}</div><div class={cn("mt-1 text-[13px] text-muted-foreground tabular", t.tone)}>{t.sub}</div></div>
-          <div class={cn("text-2xl font-semibold tracking-[-0.02em] text-foreground-strong tabular", t.low && (t.alert ? "text-destructive" : "text-low"))}>{t.value}</div>
-        </div>
+        <Card.Root class={cn("gap-2", t.alert && "border-destructive")}>
+          <Card.Header>
+            <Card.Description>{t.label}</Card.Description>
+            <Card.Title class={cn("text-2xl tabular-nums", t.alert && "text-destructive")}>{t.value}</Card.Title>
+          </Card.Header>
+          <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.tone)}>{t.sub}</Card.Content>
+        </Card.Root>
       {/each}
     </div>
 
-    <Card.Root class="mb-5">
-      <Card.Header>
+    <Card.Root class="mb-6">
+      <Card.Header class="max-sm:has-data-[slot=card-action]:grid-cols-1">
         <Card.Title>The next {span(days)}{fc.accounts.length === 1 && !allChecking ? ` · ${fc.accounts[0].name}` : ""}</Card.Title>
-        <Segmented label="Forecast length" value={String(days)} onchange={setDays}
-          options={[...new Set([30, 60, 90, 180, days])].sort((a, b) => a - b).map((d) => ({ value: String(d), label: span(d) }))} />
+        <Card.Description>Projected balance, day by day</Card.Description>
+        <Card.Action class="max-sm:col-start-1 max-sm:row-span-1 max-sm:row-start-3 max-sm:justify-self-start"><Segmented label="Forecast length" value={String(days)} onchange={setDays}
+          options={[...new Set([30, 60, 90, 180, days])].sort((a, b) => a - b).map((d) => ({ value: String(d), label: span(d) }))} /></Card.Action>
       </Card.Header>
+      <Card.Content>
       {#if fc.budget}
         <div class="mb-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-          <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-primary"></i>Forecast</span>
+          <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
           <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's card, in place of estimated card statements.${budgetSkipped(fc.budget.skipped)}`}>
-            <i class="inline-block h-0 w-4 border-t-2 border-dashed border-good"></i>If you stick to your budget · low {fmt0(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
+            <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
           </span>
         </div>
       {/if}
       <ForecastChart {fc} />
       {#if fc.accounts.length > 1}
-        <p class="mt-3 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined · <a class="text-primary-ink" href="/#setup/accounts">pick a primary account</a></p>
+        <p class="mt-3 text-sm text-muted-foreground">{fc.accounts.length} accounts combined · <a class="font-medium text-foreground underline underline-offset-4" href="/#setup/accounts">pick a primary account</a></p>
       {/if}
       <details class="mt-2">
-        <summary class="cursor-pointer text-[13px] text-muted-foreground">Show as table</summary>
-        <table class="mt-2 w-full max-w-[360px] text-sm">
+        <summary class="cursor-pointer text-sm text-muted-foreground">Show as table</summary>
+        <table class="mt-2 w-full max-w-sm text-sm">
           <thead><tr class="text-left text-xs text-muted-foreground"><th class="pb-1 font-medium">Date</th><th class="pb-1 text-right font-medium">Projected balance</th></tr></thead>
           <tbody>
             {#each fc.dates.filter((_, i) => i % 7 === 0) as d, k (d)}
-              <tr class="border-t border-line"><td class="py-1.5">{fmtDow(d)}</td><td class="py-1.5 text-right tabular">{fmt(fc.total[k * 7])}</td></tr>
+              <tr class="border-t border-border"><td class="py-1.5">{fmtDow(d)}</td><td class="py-1.5 text-right tabular-nums">{fmt(fc.total[k * 7])}</td></tr>
             {/each}
           </tbody>
         </table>
       </details>
+      </Card.Content>
     </Card.Root>
 
-    <div class="grid gap-5 lg:grid-cols-2">
-      <Card.Root><Card.Header><Card.Title>Coming up</Card.Title></Card.Header><EventsList events={fc.events} /></Card.Root>
-      <Card.Root><Card.Header><Card.Title>Credit cards</Card.Title></Card.Header><CardsTable cards={fc.cards} /></Card.Root>
+    <div class="grid gap-6 lg:grid-cols-2">
+      <Card.Root><Card.Header><Card.Title>Coming up</Card.Title></Card.Header><Card.Content><EventsList events={fc.events} /></Card.Content></Card.Root>
+      <Card.Root><Card.Header><Card.Title>Credit cards</Card.Title></Card.Header><Card.Content><CardsTable cards={fc.cards} /></Card.Content></Card.Root>
     </div>
   {:catch err}
     <Card.Root>
-      <p class="text-sm">Something went wrong: {err.message}</p>
-      <Button class="mt-3" variant="secondary" onclick={reload}>Try again</Button>
+      <Card.Content>
+        <p class="text-sm">Something went wrong: {err.message}</p>
+        <Button class="mt-3" variant="outline" onclick={reload}>Try again</Button>
+      </Card.Content>
     </Card.Root>
   {/await}
 {/if}

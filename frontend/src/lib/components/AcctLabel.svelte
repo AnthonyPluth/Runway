@@ -8,9 +8,9 @@
 
 <span class="inline-flex min-w-0 items-center gap-2">
   {#if b?.logo}
-    <img class="size-[18px] shrink-0 rounded" src={`/banks/${b.logo}.svg`} alt="" title={b.institution ?? ""} width="18" height="18" loading="lazy" />
+    <img class="size-5 shrink-0 rounded" src={`/banks/${b.logo}.svg`} alt="" title={b.institution ?? ""} width="18" height="18" loading="lazy" />
   {:else if b}
-    <span class="flex size-[18px] shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-muted-foreground"
+    <span class="flex size-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-semibold text-muted-foreground"
       title={b.institution ?? ""} aria-hidden="true">{b.initial}</span>
   {/if}
   <span class="truncate">{name ?? ""}</span>

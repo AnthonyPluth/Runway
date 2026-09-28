@@ -9,7 +9,9 @@
 </script>
 
 <Card.Root class="mx-auto mt-10 max-w-md text-center">
-  <h2 class="text-lg font-semibold text-foreground-strong">{names[page] ?? "This page"} is coming soon</h2>
-  <p class="mt-2 text-sm text-muted-foreground">It hasn't moved to the new app yet. Use it in the classic app in the meantime.</p>
-  <Button class="mt-5" href={`/#${page}${sub ? "/" + sub : ""}`}>Open in the classic app</Button>
+  <Card.Header>
+    <Card.Title>{names[page] ?? "This page"} is coming soon</Card.Title>
+    <Card.Description>It hasn't moved to the new app yet. Use it in the classic app in the meantime.</Card.Description>
+  </Card.Header>
+  <Card.Content><Button href={`/#${page}${sub ? "/" + sub : ""}`}>Open in the classic app</Button></Card.Content>
 </Card.Root>

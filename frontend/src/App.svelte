@@ -13,13 +13,15 @@
 
 <div class="flex min-h-dvh flex-col md:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 px-4 py-6 md:px-10 md:py-9">
-    <div class="mx-auto max-w-[1280px]">
+  <main class="min-w-0 flex-1 p-4 md:p-8">
+    <div class="mx-auto max-w-7xl">
       {#if app.bootError && !app.state}
         <Card.Root class="mx-auto mt-10 max-w-md">
-          <h2 class="text-lg font-semibold text-foreground-strong">Can't reach Runway</h2>
-          <p class="mt-1 text-sm text-muted-foreground">{app.bootError}</p>
-          <Button class="mt-4" variant="secondary" onclick={boot}>Try again</Button>
+          <Card.Header>
+            <Card.Title>Can't reach Runway</Card.Title>
+            <Card.Description>{app.bootError}</Card.Description>
+          </Card.Header>
+          <Card.Content><Button variant="outline" onclick={boot}>Try again</Button></Card.Content>
         </Card.Root>
       {:else if app.state}
         {#key `${route.page}/${route.sub}/${app.version}`}
