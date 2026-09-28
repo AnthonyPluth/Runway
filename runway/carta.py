@@ -224,6 +224,8 @@ def _num(v) -> float | None:
 def _day(v) -> str | None:
     if not v:
         return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 1e8:   # a timestamp (Carta's web app: *_ts_ms)
+        return date.fromtimestamp(v / 1000 if v > 1e11 else v).isoformat() if 0 < v < 1e14 else None
     if isinstance(v, dict):
         v = _pick(v, "value", "date")
     m = re.match(r"(\d{4}-\d{2}-\d{2})", str(v))
@@ -257,7 +259,7 @@ def _grant(item: dict, kind_hint: str) -> dict | None:
     if not gid or not qty:
         return None
     kind = kind_hint
-    t = str(_pick(item, "optionType", "type", "securityType", "stockOptionType") or "").lower()
+    t = str(_pick(item, "optionType", "subType", "type", "securityType", "stockOptionType") or "").lower()
     if kind_hint == "option":
         kind = "iso" if "iso" in t or "incentive" in t else "nso"
     total, cliff, every = _schedule(_pick(item, "vestingSchedule", "vestingScheduleName", "vestingPlan", "vesting"))
@@ -266,12 +268,12 @@ def _grant(item: dict, kind_hint: str) -> dict | None:
         "label": _pick(item, "label", "securityLabel", "name", "certificateLabel"),
         "quantity": qty,
         "strike": _num(_pick(item, "exercisePrice", "strikePrice", "exercisePricePerShare")) if kind in ("iso", "nso") else None,
-        "granted_on": _day(_pick(item, "issueDate", "grantDate", "issuedDate", "boardApprovalDate")),
+        "granted_on": _day(_pick(item, "issueDate", "grantDate", "issuedDate", "boardApprovalDate", "issueTsMs", "grantTsMs")),
         "vest_start": _day(_pick(item, "vestingStartDate", "vestingStart", "vestingCommencementDate")),
         "vest_months": total, "cliff_months": cliff, "vest_every": every,
         "exercised": _num(_pick(item, "exercisedQuantity", "quantityExercised", "exercised")) or 0.0,
-        "vested_reported": _num(_pick(item, "vestedQuantity", "quantityVested", "vested")),
-        "expires_on": _day(_pick(item, "lastExercisableDate", "grantExpirationDate", "expirationDate")),
+        "vested_reported": _num(_pick(item, "vestedQuantity", "quantityVested", "vested", "cumulativeVestedShares")),
+        "expires_on": _day(_pick(item, "lastExercisableDate", "grantExpirationDate", "expirationDate", "expirationTsMs")),
     }
 
 

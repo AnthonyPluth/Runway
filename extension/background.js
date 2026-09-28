@@ -1,8 +1,9 @@
 // Runway orders: reads your Amazon and Target order history with the sign-in already in this browser and sends it to
 // your Runway, which does all the reading of those pages. Nothing goes anywhere but the Runway address you set.
 //
-// Each store is read in a background tab of its own site, so every request is the site's own kind of request (same
-// cookies, same origin), and the tab is closed afterwards.
+// Each store is read in a hidden page of its own site (see "pages" below), so nothing opens while it works.
+
+if (typeof importScripts === "function") importScripts("page.js");   // Chrome; Firefox loads it from the manifest
 
 const AMAZON = "https://www.amazon.com";
 const AMAZON_TRANSACTIONS = `${AMAZON}/cpe/yourpayments/transactions`;
@@ -14,7 +15,22 @@ const PAUSE_MS = 400;        // between order pages, to go at a person's pace ra
 const RETAILERS = { amazon: "Amazon", target: "Target", carta: "Carta" };
 const EVERYDAY = ["amazon", "target"];   // "Import both"; Carta has its own button (and joins the daily import once it's worked)
 
+const AMAZON_PARALLEL = 4;   // order pages read at once: quicker, and still a light load on Amazon
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Runs fn over items, `width` at a time; the first failure stops it.
+async function inParallel(items, width, fn) {
+  let next = 0, failed = false;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    try {
+      while (next < items.length && !failed) await fn(items[next++]);
+    } catch (e) {
+      failed = true;
+      throw e;
+    }
+  }));
+}
 const store = chrome.storage.local;
 
 async function settings() {
@@ -45,7 +61,21 @@ async function runway(path, body) {
   return data;
 }
 
-// ------------------------------------------------------------------------------------------------ tabs
+// ------------------------------------------------------------------------------------------------ pages
+//
+// A store is read in a page of its own site, so every request is the site's own kind of request (same cookies, same
+// origin). That page is a hidden frame (in Chrome's offscreen document, or Firefox's background page), so no tab or
+// window opens. If a store won't load there, or looks signed out there, it's read in a background tab instead, and
+// that store keeps to tabs for a week (or until the extension is updated).
+
+const HIDDEN_SUPPORTED = typeof document !== "undefined" || !!(chrome.offscreen && chrome.offscreen.createDocument);
+const HIDDEN_LOAD_MS = 30000;
+const HIDDEN_RETRY_MS = 7 * 24 * 3600 * 1000;
+const HIDDEN_RULE = 7101;
+const STORE_HOSTS = ["amazon.com", "target.com", "carta.com"];
+const STORE_MATCHES = ["https://www.amazon.com/*", "https://www.target.com/*", "https://*.carta.com/*"];
+
+class HiddenUnavailable extends Error {}
 
 function waitForLoad(tabId, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
@@ -55,16 +85,6 @@ function waitForLoad(tabId, timeoutMs = 45000) {
     chrome.tabs.onUpdated.addListener(listener);
     chrome.tabs.get(tabId).then((t) => { if (t.status === "complete" && t.url && t.url !== "about:blank") { done(); resolve(t); } }, () => {});
   });
-}
-
-async function openTab(url) {
-  const tab = await chrome.tabs.create({ url, active: false });
-  return waitForLoad(tab.id).then((t) => t, async (e) => { await closeTab(tab.id); throw e; });
-}
-
-async function navigate(tabId, url) {
-  await chrome.tabs.update(tabId, { url });
-  return waitForLoad(tabId);
 }
 
 async function closeTab(tabId) {
@@ -77,80 +97,223 @@ async function inPage(tabId, func, args = [], world = "ISOLATED") {
   return r ? r.result : undefined;
 }
 
-// These run inside the store's page.
-function pageHtml() { return { url: location.href, html: document.documentElement.outerHTML }; }
+// A background tab (not focused), closed afterwards unless you need to sign in there.
+class TabPage {
+  static async open(url) {
+    const tab = await chrome.tabs.create({ url, active: false });
+    const loaded = await waitForLoad(tab.id).catch(async (e) => { await closeTab(tab.id); throw e; });
+    return new TabPage(loaded);
+  }
+  constructor(tab) { this.tab = tab; this.hidden = false; this.keep = false; }
+  get url() { return this.tab.url || ""; }
+  run(cmd, ...args) { const [func, world] = PAGE_COMMANDS[cmd]; return inPage(this.tab.id, func, args, world); }
+  async navigate(url) { await chrome.tabs.update(this.tab.id, { url }); this.tab = await waitForLoad(this.tab.id); }
+  async signIn(site) {
+    this.keep = true;
+    await chrome.tabs.update(this.tab.id, { active: true });
+    return new Error(`Sign in to ${site} in the tab that just opened, then import again.`);
+  }
+  async close() { if (!this.keep) await closeTab(this.tab.id); }
+}
 
-async function pageFetch(url, init) {
-  try {
-    const res = await fetch(url, { credentials: "include", ...init });
-    return { ok: res.ok, status: res.status, url: res.url, text: await res.text() };
-  } catch (e) {
-    return { ok: false, status: 0, url, text: "", error: String(e && e.message || e) };
+// Where hidden frames live: Firefox's background page, or Chrome's offscreen document.
+const frameHost = typeof document !== "undefined" ? {
+  async open(name, url) {
+    const f = document.createElement("iframe");
+    Object.assign(f, { name, id: name, src: url, width: 1280, height: 900 });
+    document.body.append(f);
+  },
+  async close(name) { document.getElementById(name)?.remove(); },
+  async done() {},
+} : {
+  async open(name, url) {
+    try {
+      await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["DOM_SCRAPING"],
+        justification: "Reads your Amazon, Target and Carta pages, with your sign-in, without opening a tab." });
+    } catch (e) {
+      if (!/single offscreen|already/i.test(String(e && e.message))) throw new HiddenUnavailable(`offscreen: ${e.message}`);
+    }
+    for (let i = 0; ; i++) {
+      try { return await chrome.runtime.sendMessage({ to: "offscreen", cmd: "open", name, url }); } catch (e) {
+        if (i >= 10) throw new HiddenUnavailable(`offscreen: ${e.message}`);
+        await sleep(100);
+      }
+    }
+  },
+  async close(name) { await chrome.runtime.sendMessage({ to: "offscreen", cmd: "close", name }).catch(() => {}); },
+  async done() { await chrome.offscreen.closeDocument().catch(() => {}); },
+};
+
+const frames = new Map();   // frame name -> HiddenPage
+chrome.runtime.onConnect.addListener((port) => {
+  const page = frames.get(port.name);
+  if (!page || (port.sender && port.sender.id !== chrome.runtime.id)) { port.disconnect(); return; }
+  page.attach(port);
+});
+
+// A store page in a hidden frame. frame.js in it answers over a port, a new one each time the frame loads a page.
+class HiddenPage {
+  static async open(url) {
+    const page = new HiddenPage(`runway-hidden-${crypto.randomUUID()}`);
+    frames.set(page.name, page);
+    const ready = page.loaded();
+    try {
+      await frameHost.open(page.name, url);
+      await ready;
+    } catch (e) {
+      await page.close();
+      throw e instanceof HiddenUnavailable ? e : new HiddenUnavailable(`${url} didn't load in a hidden frame (${e.message})`);
+    }
+    return page;
+  }
+  constructor(name) { Object.assign(this, { name, hidden: true, port: null, url: "", waiting: [], pending: new Map(), next: 0 }); }
+  attach(port) {
+    this.port = port;
+    this.url = (port.sender && port.sender.url) || this.url;
+    port.onMessage.addListener((m) => {
+      const p = this.pending.get(m.id);
+      if (!p) return;
+      this.pending.delete(m.id);
+      m.error ? p.reject(new Error(m.error)) : p.resolve(m.result);
+    });
+    port.onDisconnect.addListener(() => {
+      if (this.port !== port) return;
+      this.port = null;
+      for (const p of this.pending.values()) p.reject(Object.assign(new Error("The page moved on."), { moved: true }));
+      this.pending.clear();
+    });
+    this.waiting.splice(0).forEach((w) => w());
+  }
+  loaded(ms = HIDDEN_LOAD_MS) {   // the next page to load in the frame
+    return new Promise((resolve, reject) => {
+      const ok = () => { clearTimeout(timer); resolve(); };
+      const timer = setTimeout(() => { this.waiting = this.waiting.filter((w) => w !== ok); reject(new Error("timed out")); }, ms);
+      this.waiting.push(ok);
+    });
+  }
+  async run(cmd, ...args) {
+    for (let attempt = 0; ; attempt++) {
+      if (!this.port) await this.loaded().catch(() => { throw new HiddenUnavailable("the hidden page stopped answering"); });
+      try {
+        return await new Promise((resolve, reject) => {
+          const id = ++this.next;
+          this.pending.set(id, { resolve, reject });
+          this.port.postMessage({ id, cmd, args });
+        });
+      } catch (e) {
+        if (!e.moved || attempt >= 2) throw e;   // the page went elsewhere (a redirect): ask the new one
+      }
+    }
+  }
+  async navigate(url) {
+    const ready = this.loaded();
+    await this.run("go", url);
+    await ready.catch(() => { throw new HiddenUnavailable(`${url} didn't load in a hidden frame`); });
+  }
+  async signIn() { return new HiddenUnavailable("looked signed out"); }   // perhaps only in a frame: a tab will tell
+  async close() {
+    frames.delete(this.name);
+    try { if (this.port) this.port.disconnect(); } catch (_) { /* gone */ }
+    await frameHost.close(this.name);
   }
 }
 
-// Target's order API and its key, as target.com's own orders page called it (or as its page settings give it).
-function targetDiscover(fallbackBase) {
-  const seen = performance.getEntriesByType("resource").map((e) => e.name).filter((u) => u.includes("guest_order_aggregations"));
-  for (const u of seen) {
-    try {
-      const url = new URL(u);
-      const at = url.pathname.indexOf("/guest_order_aggregations/");
-      const base = url.origin + url.pathname.slice(0, at) + "/guest_order_aggregations/v1";
-      const key = url.searchParams.get("key");
-      if (key) return { base, key, from: "page" };
-    } catch (_) { /* keep looking */ }
+// While hidden frames are in use: let the stores' pages load in a frame (their "don't show me in a frame" headers are
+// dropped, but only for frames that aren't in any tab, i.e. the extension's own), and put frame.js in those frames.
+async function hiddenFramesOn() {
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [HIDDEN_RULE],
+    addRules: [{
+      id: HIDDEN_RULE, priority: 1,
+      action: { type: "modifyHeaders",
+                responseHeaders: ["x-frame-options", "content-security-policy"].map((header) => ({ header, operation: "remove" })) },
+      condition: { requestDomains: STORE_HOSTS, resourceTypes: ["sub_frame"], tabIds: [chrome.tabs.TAB_ID_NONE] },
+    }],
+  });
+  const have = await chrome.scripting.getRegisteredContentScripts({ ids: ["runway-hidden"] }).catch(() => []);
+  if (!have.length) {
+    await chrome.scripting.registerContentScripts([{ id: "runway-hidden", matches: STORE_MATCHES, js: ["page.js", "frame.js"],
+      allFrames: true, runAt: "document_idle", persistAcrossSessions: false }]);
   }
-  const html = document.documentElement.innerHTML;
-  const m = html.match(/"apiKey"\s*:\s*"([0-9a-f]{32,64})"/i) || html.match(/[?&]key=([0-9a-f]{32,64})/i);
-  const token = (document.cookie.match(/(?:^|;\s*)accessToken=([^;]+)/) || [])[1] || null;
-  return { base: fallbackBase, key: m ? m[1] : null, from: m ? "settings" : null, token, signedIn: !/login|signin/i.test(location.pathname) };
+}
+
+async function hiddenFramesOff() {
+  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [HIDDEN_RULE] }).catch(() => {});
+  await chrome.scripting.unregisterContentScripts({ ids: ["runway-hidden"] }).catch(() => {});
+  await frameHost.done();
+}
+
+// One store's import: in hidden frames if they work for it in this browser, otherwise in a background tab.
+async function importStore(retailer, importer, progress) {
+  const { hiddenOff = {} } = await store.get("hiddenOff");
+  let why = null;
+  if (HIDDEN_SUPPORTED && !(hiddenOff[retailer] > Date.now() - HIDDEN_RETRY_MS)) {
+    try {
+      try {
+        await hiddenFramesOn();
+      } catch (e) {
+        throw new HiddenUnavailable(`couldn't set up hidden frames (${e.message})`);
+      }
+      return await importer(progress, HiddenPage);
+    } catch (e) {
+      if (!(e instanceof HiddenUnavailable)) throw e;
+      why = e.message;
+    } finally {
+      await hiddenFramesOff();
+    }
+  }
+  const r = await importer(progress, TabPage);
+  if (why) {   // a tab worked where a hidden frame didn't: keep to tabs for this store for a while
+    console.info(`Runway: reading ${retailer} in a tab (in a hidden frame: ${why})`);
+    await store.set({ hiddenOff: { ...hiddenOff, [retailer]: Date.now() } });
+  }
+  return r;
 }
 
 // ------------------------------------------------------------------------------------------------ Amazon
 
-async function importAmazon(progress) {
+async function importAmazon(progress, Page) {
   await runway("/api/ext/start", { retailer: "amazon" });
   progress("Opening your Amazon payments…");
-  const tab = await openTab(AMAZON_TRANSACTIONS);
-  let keepTab = false;
+  const page = await Page.open(AMAZON_TRANSACTIONS);
   try {
-    if (/\/ap\/signin|\/ax\/claim/.test(tab.url || "")) {
-      keepTab = true;
-      await chrome.tabs.update(tab.id, { active: true });
-      throw new Error("Sign in to Amazon in the tab that just opened, then import again.");
-    }
-    let page = await inPage(tab.id, pageHtml);
+    if (/\/ap\/signin|\/ax\/claim/.test(page.url)) throw await page.signIn("Amazon");
+    let html = (await page.run("html")).html;
     const orders = new Set();
     for (let n = 1; n <= MAX_PAGES; n++) {
       progress(`Reading Amazon payments, page ${n}…`);
-      const r = await runway("/api/ext/amazon/transactions", { html: page.html });
+      const r = await runway("/api/ext/amazon/transactions", { html });
       r.orders.forEach((o) => orders.add(o));
       if (!r.next_form) break;
-      const res = await inPage(tab.id, pageFetch, [AMAZON_TRANSACTIONS, {
+      const res = await page.run("fetch", AMAZON_TRANSACTIONS, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams(r.next_form).toString(),
-      }]);
+      });
       if (!res.ok) throw new Error(`Amazon's payments page answered ${res.status}.`);
-      page = { html: res.text };
+      html = res.text;
       await sleep(PAUSE_MS);
     }
+    let done = 0;
+    const unread = [];
+    await inParallel([...orders], AMAZON_PARALLEL, async (order) => {
+      const res = await page.run("fetch", AMAZON_ORDER(order));
+      const r = res.ok ? await runway("/api/ext/amazon/order", { order_number: order, html: res.text }) : { read: false };
+      if (!r.read) unread.push(order);
+      progress(`Reading Amazon orders, ${++done} of ${orders.size}…`);
+      await sleep(PAUSE_MS);
+    });
     let i = 0;
-    for (const order of orders) {
-      progress(`Reading Amazon order ${++i} of ${orders.size}…`);
-      const res = await inPage(tab.id, pageFetch, [AMAZON_ORDER(order)]);
-      let r = res.ok ? await runway("/api/ext/amazon/order", { order_number: order, html: res.text }) : { read: false };
-      if (!r.read) {   // some pages only fill in once their scripts run: load it for real and read what shows
-        await navigate(tab.id, AMAZON_ORDER(order));
-        await sleep(1500);
-        const shown = await inPage(tab.id, pageHtml);
-        r = await runway("/api/ext/amazon/order", { order_number: order, html: shown.html });
-      }
+    for (const order of unread) {   // some pages only fill in once their scripts run: load each for real and read what shows
+      progress(`Loading Amazon order ${++i} of ${unread.length}…`);
+      await page.navigate(AMAZON_ORDER(order));
+      await sleep(1500);
+      const shown = await page.run("html");
+      await runway("/api/ext/amazon/order", { order_number: order, html: shown.html });
       await sleep(PAUSE_MS);
     }
   } finally {
-    if (!keepTab) await closeTab(tab.id);
+    await page.close();
   }
   progress("Matching Amazon orders to your transactions…");
   return runway("/api/ext/finish", { retailer: "amazon" });
@@ -158,46 +321,41 @@ async function importAmazon(progress) {
 
 // ------------------------------------------------------------------------------------------------ Target
 
-async function targetJson(tabId, url, token) {
+async function targetJson(page, url, token) {
   const headers = { Accept: "application/json" };
-  let res = await inPage(tabId, pageFetch, [url, { headers }]);
+  let res = await page.run("fetch", url, { headers });
   if ((res.status === 401 || res.status === 403) && token) {
-    res = await inPage(tabId, pageFetch, [url, { headers: { ...headers, Authorization: `Bearer ${token}` } }]);
+    res = await page.run("fetch", url, { headers: { ...headers, Authorization: `Bearer ${token}` } });
   }
   if (res.status === 401 || res.status === 403) throw Object.assign(new Error("signin"), { signin: true });
   if (!res.ok) return null;
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
 
-async function importTarget(progress) {
+async function importTarget(progress, Page) {
   const start = await runway("/api/ext/start", { retailer: "target" });
   progress("Opening your Target orders…");
-  const tab = await openTab(TARGET_ORDERS);
-  let keepTab = false;
-  const signIn = async () => {
-    keepTab = true;
-    await chrome.tabs.update(tab.id, { active: true });
-    return new Error("Sign in to Target in the tab that just opened, then import again.");
-  };
+  const page = await Page.open(TARGET_ORDERS);
   try {
-    if (/login|signin/i.test(new URL(tab.url || TARGET_ORDERS).pathname)) throw await signIn();
+    if (/login|signin/i.test(new URL(page.url || TARGET_ORDERS).pathname)) throw await page.signIn("Target");
     await sleep(3000);   // let the orders page make its own calls, so we can see how it calls the API
-    const api = await inPage(tab.id, targetDiscover, [TARGET_API], "MAIN");
+    const api = await page.run("discover", TARGET_API);
     if (!api.key) {
-      if (api.signedIn === false) throw await signIn();
+      if (api.signedIn === false) throw await page.signIn("Target");
+      if (page.hidden) throw new HiddenUnavailable("no order API key in the hidden page");
       throw new Error("Couldn't find how target.com reads your orders. Runway may need an update for Target's site.");
     }
     const need = [];
     try {
       for (const type of ["ONLINE", "STORE"]) {
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          progress(`Reading Target ${type === "STORE" ? "in-store purchases" : "online orders"}, page ${page}…`);
-          const url = `${api.base}/order_history?page_number=${page}&page_size=10&order_purchase_type=${type}` +
+        for (let n = 1; n <= MAX_PAGES; n++) {
+          progress(`Reading Target ${type === "STORE" ? "in-store purchases" : "online orders"}, page ${n}…`);
+          const url = `${api.base}/order_history?page_number=${n}&page_size=10&order_purchase_type=${type}` +
             `&pending_order=true&shipt_status=true&key=${encodeURIComponent(api.key)}`;
-          const data = await targetJson(tab.id, url, api.token);
+          const data = await targetJson(page, url, api.token);
           if (!data) break;
-          const r = await runway("/api/ext/target/history", { purchase_type: type, page, data });
-          r.orders.forEach((n) => need.push({ n, type }));
+          const r = await runway("/api/ext/target/history", { purchase_type: type, page: n, data });
+          r.orders.forEach((o) => need.push({ n: o, type }));
           if (!r.more) break;
           await sleep(PAUSE_MS);
         }
@@ -207,7 +365,7 @@ async function importTarget(progress) {
         progress(`Reading Target ${type === "STORE" ? "receipt" : "order"} ${++i} of ${need.length}…`);
         for (const tpl of (start.detail_urls || {})[type === "STORE" ? "store" : "online"] || []) {
           const url = tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(n));
-          const data = await targetJson(tab.id, url, api.token);
+          const data = await targetJson(page, url, api.token);
           if (!data) continue;
           const r = await runway("/api/ext/target/order", { order_number: n, data });
           if (r.read) break;
@@ -215,11 +373,11 @@ async function importTarget(progress) {
         await sleep(PAUSE_MS);
       }
     } catch (e) {
-      if (e.signin) throw await signIn();
+      if (e.signin) throw await page.signIn("Target");
       throw e;
     }
   } finally {
-    if (!keepTab) await closeTab(tab.id);
+    await page.close();
   }
   progress("Matching Target orders to your transactions…");
   return runway("/api/ext/finish", { retailer: "target" });
@@ -228,36 +386,23 @@ async function importTarget(progress) {
 // ------------------------------------------------------------------------------------------------ Carta
 //
 // Carta's pages load your holdings from Carta's own data addresses. The extension notes which ones a page used,
-// reads them again (reads only, on carta.com), and sends the replies to Runway, which finds the grants in them.
+// reads them again (reads only, on carta.com), and sends the replies to Runway, which finds the grants in them (and
+// names more addresses worth reading).
 
 const CARTA_MAX_PAGES = 12;
 const CARTA_PAGE = /portfolio|holding|securit|equity|grant|option|certificate|compan|issuer/i;
 const CARTA_NEVER = /logout|log-out|sign-?out|delete|remove|cancel|accept|exercise|consent|download|export|upload|\.pdf/i;
 
-// Runs in the Carta page: the data addresses it has used, JSON embedded in the page, and links to other holdings pages.
-function cartaLook() {
-  const same = (u) => { try { return /(^|\.)carta\.com$/.test(new URL(u, location.href).hostname); } catch (_) { return false; } };
-  const used = performance.getEntriesByType("resource")
-    .filter((e) => (e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest") && same(e.name))
-    .map((e) => e.name);
-  const embedded = [...document.querySelectorAll('script[type="application/json"], script#__NEXT_DATA__')]
-    .map((s) => s.textContent).filter((t) => t && t.length < 3000000);
-  const links = [...document.querySelectorAll("a[href]")].map((a) => a.href).filter(same);
-  return { url: location.href, used: [...new Set(used)], embedded, links: [...new Set(links)],
-           signedOut: /\/(login|signin|accounts\/login)/i.test(location.pathname) };
-}
-
-async function importCarta(progress) {
+async function importCarta(progress, Page) {
   const start = await runway("/api/ext/carta/start", {});
   progress("Opening Carta…");
-  const tab = await openTab(start.start_url);
-  let keepTab = false;
+  const page = await Page.open(start.start_url);
   const seen = new Set(), queue = [], pagesVisited = new Set();
   let sent = 0;
   const readData = async (url) => {
     if (seen.has(url) || CARTA_NEVER.test(url) || sent >= start.max_follow) return;
     seen.add(url);
-    const res = await inPage(tab.id, pageFetch, [url, { headers: { Accept: "application/json" } }]);
+    const res = await page.run("fetch", url, { headers: { Accept: "application/json" } });
     if (!res.ok || !res.text || !/^\s*[[{]/.test(res.text)) return;
     let data;
     try { data = JSON.parse(res.text); } catch (_) { return; }
@@ -267,23 +412,23 @@ async function importCarta(progress) {
   };
   try {
     await sleep(4000);   // Carta's pages load their data after they appear
-    let look = await inPage(tab.id, cartaLook);
-    if (look.signedOut) {
-      keepTab = true;
-      await chrome.tabs.update(tab.id, { active: true });
-      throw new Error("Sign in to Carta in the tab that just opened, then import again.");
-    }
+    let look = await page.run("look");
+    if (look.signedOut) throw await page.signIn("Carta");
     const pages = [look.url];
     for (let p = 0; p < pages.length && p < CARTA_MAX_PAGES; p++) {
       if (p > 0) {
         progress(`Reading Carta page ${p + 1}…`);
-        await navigate(tab.id, pages[p]);
+        await page.navigate(pages[p]);
         await sleep(3500);
-        look = await inPage(tab.id, cartaLook);
+        look = await page.run("look");
       }
       pagesVisited.add(look.url);
       for (const [i, text] of look.embedded.entries()) {
-        try { await runway("/api/ext/carta/data", { url: `${look.url}#embedded-${i}`, data: JSON.parse(text) }); sent++; } catch (_) { /* not JSON */ }
+        try {
+          const r = await runway("/api/ext/carta/data", { url: `${look.url}#embedded-${i}`, data: JSON.parse(text) });
+          sent++;
+          (r.follow || []).forEach((u) => queue.push(u));
+        } catch (_) { /* not JSON */ }
       }
       for (const u of look.used) { progress(`Reading Carta (${sent} replies so far)…`); await readData(u); }
       while (queue.length) await readData(queue.shift());
@@ -293,7 +438,7 @@ async function importCarta(progress) {
       }
     }
   } finally {
-    if (!keepTab) await closeTab(tab.id);
+    await page.close();
   }
   progress("Saving your equity in Runway…");
   return runway("/api/ext/carta/finish", {});
@@ -324,7 +469,7 @@ async function run(which) {
       for (const retailer of which === "all" || which === "daily" ? everyday : [which]) {
         const progress = (message) => setStatus({ running: true, retailer, message });
         try {
-          const r = await { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer](progress);
+          const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer], progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r) };
         } catch (e) {
           results[retailer] = { ok: false, at: new Date().toISOString(), message: e.message || String(e) };
@@ -350,7 +495,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   return true;
 });
 
-// Once a day, if you asked for it (Options): the same import, in background tabs.
+// Once a day, if you asked for it (Options): the same import, out of sight.
 async function scheduleAuto() {
   const { auto } = await settings();
   await chrome.alarms.clear("daily");
@@ -359,6 +504,7 @@ async function scheduleAuto() {
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === "daily") run("daily"); });
 chrome.runtime.onInstalled.addListener((d) => {
   scheduleAuto();
+  store.remove("hiddenOff");   // a new version: try hidden frames again for every store
   if (d.reason === "install") chrome.runtime.openOptionsPage();
 });
 chrome.runtime.onStartup.addListener(scheduleAuto);
