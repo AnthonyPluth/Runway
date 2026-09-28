@@ -2401,10 +2401,13 @@ async function renderCartaCard(card) {
   card.innerHTML = `<h2>Carta <span class="muted small">optional: stock options, RSUs and shares</span></h2>
     <p class="help">Runway reads your equity with Carta's Portfolio API. Carta approves each app that uses it: create one in Carta's
       developer portal (Carta says customers can ask for access to their own data), add <code>${esc(redirect)}</code> as its redirect URI,
-      and enter its client id and secret here. <b>Carta's sample data</b> works without any of that, to see how it looks.
+      and enter its client id and secret here. An app you just made in the portal is a <b>Playground</b> app: it signs in to
+      Carta's test environment with dummy data, and needs Carta to grant it production access before it can read your real
+      account. <b>Carta's sample data</b> works without any of that, to see how it looks.
       You can also enter grants by hand on the Net worth page.</p>
     <div class="form-row">
       <label>Environment<select id="ct-env"><option value="production" ${c.env === "production" ? "selected" : ""}>Carta (your real account)</option>
+        <option value="playground" ${c.env === "playground" ? "selected" : ""}>Carta Playground (developer portal test app)</option>
         <option value="mock" ${c.env === "mock" ? "selected" : ""}>Carta's sample data</option></select></label>
       <label class="ct-prod">Client id<input id="ct-id" value="${esc(c.client_id || "")}" autocomplete="off" spellcheck="false" style="width:220px"></label>
       <label class="ct-prod">Client secret<input id="ct-secret" type="password" placeholder="${c.has_secret ? "•••••••• saved" : ""}" autocomplete="off" style="width:220px"></label></div>
