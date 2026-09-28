@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import base64
+import http.client
+import ipaddress
 import json
 import re
+import socket
 import ssl
 import time
 import urllib.error
@@ -37,6 +40,48 @@ def _ssl_context() -> ssl.SSLContext:
 USER_AGENT = "Runway/0.1 (personal cash-flow app; +https://www.simplefin.org)"
 
 
+def _public_ip(address: str) -> bool:
+    return ipaddress.ip_address(address.split("%")[0]).is_global
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    """An https connection that hangs up before saying anything if the address it reached isn't on the internet: the
+    name may have been checked a moment ago (check_address) and point somewhere else now (DNS rebinding), or the
+    address may come from a restored backup, which was never checked."""
+    def connect(self):
+        http.client.HTTPConnection.connect(self)   # just the TCP connection (and a proxy's tunnel, if one is set)
+        if not self._tunnel_host and not _public_ip(self.sock.getpeername()[0]):   # through a proxy, it decides
+            self.sock.close()
+            raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+class _NoPlainHTTP(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        raise SimpleFinError("A SimpleFIN address must start with https://. Reconnect SimpleFIN in Settings.")
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """SimpleFIN answers where it's asked. A redirect would carry the access credentials (urllib keeps the
+    Authorization header) to wherever it points, so none is followed."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SimpleFinError(f"SimpleFIN answered HTTP {code}, sending Runway to another address, which it doesn't follow.")
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(_PublicHTTPSHandler(context=_ssl_context()), _NoPlainHTTP(), _NoRedirects())
+
+
+def _open(req: urllib.request.Request, timeout: float):
+    """Every request to SimpleFIN: public https addresses only, no redirects."""
+    return _opener().open(req, timeout=timeout)
+
+
 def _describe_http_error(e: urllib.error.HTTPError) -> str:
     """A short, human-readable account of what the server sent back, for diagnosing failures."""
     try:
@@ -57,8 +102,6 @@ def _describe_http_error(e: urllib.error.HTTPError) -> str:
 def check_address(url: str) -> None:
     """SimpleFIN addresses come from what you paste, and Runway fetches them and shows what comes back, so they must
     be on the internet, not this machine or your network (where other services would answer)."""
-    import ipaddress
-    import socket
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "https" or not parts.hostname:
         raise SimpleFinError("That doesn't look like a SimpleFIN address.")
@@ -67,8 +110,7 @@ def check_address(url: str) -> None:
     except (socket.gaierror, UnicodeError) as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: can't find {parts.hostname}.") from e
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if not ip.is_global:
+        if not _public_ip(info[4][0]):
             raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
 
 
@@ -85,7 +127,7 @@ def claim_setup_token(setup_token: str) -> str:
     req = urllib.request.Request(claim_url, data=b"", method="POST",
                                  headers={"Content-Length": "0", "User-Agent": USER_AGENT, "Accept": "*/*"})
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+        with _open(req, timeout=30) as resp:
             access_url = resp.read().decode("utf-8").strip()
     except urllib.error.HTTPError as e:
         detail = _describe_http_error(e)
@@ -127,7 +169,7 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
     url = f"{base}/accounts?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"Authorization": auth, "Accept": "application/json", "User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
+        with _open(req, timeout=60) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = _describe_http_error(e)
