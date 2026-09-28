@@ -1,0 +1,37 @@
+name: Dependabot auto-merge
+
+# Turns on auto-merge for Dependabot's patch and minor updates, so GitHub squash-merges them once the checks the
+# branch rule for main requires have passed. Major updates (and anything Dependabot can't classify) wait for a person.
+#
+# Needs two repository settings: "Allow auto-merge" (Settings > General), and a branch rule for main that requires
+# the test and web checks to pass; without the rule GitHub would merge straight away.
+#
+# Runs on pull_request, not pull_request_target, so it never checks out or runs the pull request's code with a write
+# token. It doesn't check out anything at all.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  automerge:
+    # Only Dependabot's own pull requests, and only runs Dependabot started (not a person pushing to its branch).
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # merge the pull request
+      pull-requests: write     # turn on auto-merge
+    steps:
+      - name: Read what Dependabot is updating
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98   # v3.1.0
+
+      # A grouped pull request reports its largest update, so one major version in a group holds the whole group.
+      - name: Auto-merge patch and minor updates once the checks pass
+        if: steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
