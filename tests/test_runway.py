@@ -494,6 +494,14 @@ class CategoryTests(Base):
         self.conn.execute("INSERT INTO rules(match, category) VALUES ('chipotle', 'Restaurants')")
         self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Restaurants', 300)")
 
+    def test_setup_steps(self):
+        steps = server.setup_steps(self.conn)
+        self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))
+        self.acct("chk", "checking", 10.0)        # the only checking account is the primary one
+        self.assertTrue(server.setup_steps(self.conn)["primary"])
+        server.api_settings(self.conn, {}, {"setup_dismissed": True})
+        self.assertTrue(server.setup_steps(self.conn)["dismissed"])
+
     def test_looks(self):
         categories.add(self.conn, "Fast food", parent="Restaurants")
         categories.add(self.conn, "Zebra Rides")

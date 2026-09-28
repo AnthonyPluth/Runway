@@ -26,6 +26,8 @@ export interface AppState {
   version?: string;
   owners?: string[];
   user?: User | null;
+  /** The getting-started checklist: which steps are done, and whether it's been put away. */
+  setup?: { bank: boolean; primary: boolean; recurring: boolean; budgets: boolean; dismissed: boolean };
 }
 
 /** GET /api/categories, in tree order: each category followed by its subcategories. */

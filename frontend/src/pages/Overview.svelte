@@ -10,6 +10,8 @@
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
+  import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
+  import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
@@ -21,6 +23,8 @@
 
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
+  const setup = $derived(app.state?.setup);
+  const setupLeft = $derived(!!setup && !setup.dismissed && !(setup.bank && setup.primary && setup.recurring && setup.budgets));
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
@@ -56,14 +60,9 @@
 {/snippet}
 
 {#if !connected}
-  <Card.Root class="mx-auto mt-10 max-w-lg text-center">
-    <Card.Header>
-      <Card.Title>Connect your bank to get started</Card.Title>
-      <Card.Description>Link SimpleFIN or Plaid and Runway projects where your cash is headed.</Card.Description>
-    </Card.Header>
-    <Card.Content><Button href="/#setup/connections">Go to Settings</Button></Card.Content>
-  </Card.Root>
+  <SetupChecklist welcome />
 {:else}
+  {#if setupLeft}<SetupChecklist />{/if}
   {#await data}
     <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
   {:then fc}
@@ -167,6 +166,8 @@
       <Card.Root><Card.Header><Card.Title>Coming up</Card.Title></Card.Header><Card.Content><EventsList events={fc.events} /></Card.Content></Card.Root>
       <Card.Root><Card.Header><Card.Title>Credit cards</Card.Title></Card.Header><Card.Content><CardsTable cards={fc.cards} /></Card.Content></Card.Root>
     </div>
+
+    <ThisMonth />
   {:catch err}
     <Card.Root>
       <Card.Content>
