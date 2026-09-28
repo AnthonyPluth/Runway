@@ -1,0 +1,159 @@
+name: Preview
+
+# A live copy of Runway for a pull request, filled with made-up sample data (runway/demo.py), for about an hour.
+# Start it by adding the "needs_preview" label to a pull request, at any time (or run this workflow by hand on a
+# branch). A comment on the pull request gives the address and a one-off password, and the label comes off again.
+# Adding it again builds a fresh preview from the pull request's latest commit, replacing the one that's up.
+#
+# How: the image is built and run on the Actions runner, behind nginx with a password, and reached through a
+# Cloudflare quick tunnel (a random https://<words>.trycloudflare.com address, no Cloudflare account). No secrets are
+# used: no bank access, no sign-in provider, no real data. Bank sync is off and its address points nowhere.
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: How long to keep it up (minutes, at most 120)
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'needs_preview' && github.event.pull_request.head.repo.full_name == github.repository)
+    # On the job, not the workflow, so adding some other label doesn't stop a preview that's up.
+    concurrency:
+      group: preview-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true   # a new preview replaces the one that's up
+    runs-on: ubuntu-latest
+    timeout-minutes: 135
+    permissions:
+      contents: read
+      pull-requests: write     # post the address and take the label off
+    env:
+      CLOUDFLARED_VERSION: "2026.9.3"
+      CLOUDFLARED_SHA256: 77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
+      PR: ${{ github.event.pull_request.number }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069   # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: runway:preview
+          build-args: |
+            VERSION=preview-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || github.ref_name }}
+          cache-from: type=gha
+
+      - name: Open the tunnel
+        run: |
+          curl -fsSL -o cloudflared "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  cloudflared" | sha256sum -c -
+          chmod +x cloudflared
+          # --no-autoupdate: this exact, checked binary is what runs.
+          nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080 > cloudflared.log 2>&1 &
+          for i in $(seq 1 60); do
+            url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log | head -1 || true)
+            [ -n "$url" ] && break
+            sleep 1
+          done
+          if [ -z "$url" ]; then cat cloudflared.log; exit 1; fi
+          echo "URL=$url" >> "$GITHUB_ENV"
+
+      - name: Start Runway with sample data
+        run: |
+          # Runway itself has no sign-in here (no provider to sign in with); nginx asks for this password instead.
+          password=$(openssl rand -base64 18 | tr -d '/+=')
+          secret_key=$(openssl rand -base64 32)
+          echo "::add-mask::$password"; echo "::add-mask::$secret_key"
+          echo "PASSWORD=$password" >> "$GITHUB_ENV"
+          trap 'echo "::error::Failed at line $LINENO"; docker logs runway || true; cat "$RUNNER_TEMP/nginx-error.log" cloudflared.log 2>/dev/null || true' ERR
+          set -x
+          run_env=(-e RUNWAY_ALLOW_NO_AUTH=1 -e RUNWAY_NO_SYNC=1 -e "RUNWAY_PUBLIC_URL=$URL" -e "RUNWAY_SECRET_KEY=$secret_key")
+          docker volume create runway-preview
+          docker run --rm "${run_env[@]}" -v runway-preview:/data runway:preview python run.py demo
+          # Only this machine can reach Runway's port; the outside world gets in through nginx.
+          docker run -d --name runway "${run_env[@]}" -v runway-preview:/data -p 127.0.0.1:8765:8765 runway:preview
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8765/healthz && break; sleep 1; done
+
+          command -v nginx >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq nginx-light; }
+          printf 'preview:%s\n' "$(openssl passwd -apr1 "$password")" > "$RUNNER_TEMP/htpasswd"
+          cat > "$RUNNER_TEMP/nginx.conf" <<EOF
+          user $(id -un);   # the files below are in the runner's own folder
+          worker_processes 1;
+          pid $RUNNER_TEMP/nginx.pid;
+          error_log $RUNNER_TEMP/nginx-error.log;
+          events {}
+          http {
+            access_log off;
+            client_max_body_size 20m;
+            server {
+              listen 127.0.0.1:8080;
+              auth_basic "Runway preview";
+              auth_basic_user_file $RUNNER_TEMP/htpasswd;
+              location / {
+                proxy_pass http://127.0.0.1:8765;
+                proxy_set_header Host ${URL#https://};
+                proxy_http_version 1.1;
+                proxy_buffering off;          # live prices stream
+                proxy_read_timeout 1h;
+              }
+            }
+          }
+          EOF
+          sudo nginx -c "$RUNNER_TEMP/nginx.conf"
+
+          # Check the whole path from outside: no password is turned away, the password gets the app.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/accounts" || true)
+            [ "$code" = 401 ] && break
+            sleep 2
+          done
+          [ "$code" = 401 ] || { echo "Expected 401 without the password, got $code"; cat cloudflared.log; exit 1; }
+          curl -fsS -u "preview:$password" -H 'X-Runway: 1' "$URL/api/accounts" | grep -q demo-checking
+
+      - name: Post the address
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          minutes="${{ github.event.inputs.minutes || '60' }}"
+          case "$minutes" in ''|*[!0-9]*) minutes=60;; esac
+          [ "$minutes" -gt 120 ] && minutes=120
+          echo "MINUTES=$minutes" >> "$GITHUB_ENV"
+          until=$(TZ=America/Chicago date -d "+$minutes min" '+%-I:%M %p %Z')
+          body=$(printf '%s\n' \
+            "**Preview is up** until about $until: $URL" \
+            "" \
+            "User \`preview\`, password \`$PASSWORD\`" \
+            "" \
+            "Sample data only (made-up accounts and transactions); nothing here is real, and bank sync is off." \
+            "Built from ${HEAD_SHA::7}. Add \`needs_preview\` again for a fresh one.")
+          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"
+            # Done with the label, so adding it again later asks for a new preview. (Changes made with this token
+            # don't start workflows, so this doesn't trigger anything.)
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label needs_preview || true
+          fi
+
+      - name: Keep it up
+        run: |
+          end=$(( $(date +%s) + MINUTES * 60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            docker inspect -f '{{.State.Running}}' runway | grep -q true || { docker logs runway; exit 1; }
+            pgrep -x cloudflared >/dev/null || { cat cloudflared.log; exit 1; }
+            sleep 30
+          done
+
+      - name: Say it ended
+        if: always() && env.PR != ''
+        run: |
+          # If it failed before the label came off, take it off so adding it again retries.
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label needs_preview 2>/dev/null || true
+          if [ -n "${URL:-}" ]; then gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "Preview at $URL has ended."; fi
+
