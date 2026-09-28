@@ -1111,11 +1111,26 @@ def api_ai_apply(conn, _q, body):
                 else:
                     raise ApiError(str(e))
             category, created = name, True
+    remember = bool(body.get("remember"))
     try:
-        n = categorize.apply_to_group(conn, ids, category, bool(body.get("remember")))
+        n = categorize.apply_to_group(conn, ids, category, remember)
     except ValueError as e:
         raise ApiError(str(e))
-    return {"ok": True, "updated": n, "category": category, "created": created}
+    # Applying a suggestion categorizes; the app then asks whether this merchant should always be this category.
+    offer = None if remember or not ids else categorize.rule_offer(conn, ids[0], category)
+    return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer}
+
+
+def api_fire_save(conn, _q, body):
+    """Keep the financial-independence assumptions, so they're still there next time the page loads."""
+    values = {k: v for k, v in (body or {}).items() if k in portfolio.FIRE_FIELDS}
+    if not values:
+        raise ApiError("Nothing to save")
+    try:
+        saved = portfolio.save_fire(conn, values)
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"ok": True, "saved": sorted(saved)}
 
 
 def api_recurring_suggestions(conn, _q, _b):
@@ -1476,6 +1491,7 @@ ROUTES = [
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
     ("POST", "/api/rentcast/settings", api_rentcast_settings),
     ("GET", "/api/investments/live", api_live_quotes),
+    ("POST", "/api/investments/fire", api_fire_save),
     ("GET", "/api/tracked/{id}", api_tracked_get),
     ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),

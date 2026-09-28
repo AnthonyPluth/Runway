@@ -1045,7 +1045,7 @@ async function runAiSuggestions(btn, f, reload) {
   if (!groups.length) { panel.innerHTML = `<div class="card empty">Nothing waiting for a category.</div>`; return; }
   const answered = groups.filter((g) => g.category || g.new_category).length;
   panel.innerHTML = `<div class="card ai-card"><div class="card-head"><h2>AI suggestions · ${groups.length} merchant${groups.length === 1 ? "" : "s"}</h2>
-      <span class="small muted">Nothing changes until you apply; applying also saves a rule for the merchant</span></div>
+      <span class="small muted">Nothing changes until you apply</span></div>
     <p class="help">${answered === groups.length ? `The AI suggested a category for every merchant.`
       : answered ? `The AI suggested a category for ${answered} of ${groups.length}; pick the rest yourself.`
       : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5).`}</p>
@@ -1067,12 +1067,14 @@ async function runAiSuggestions(btn, f, reload) {
       if (!choice) { toast("Choose a category first", true); return; }
       btn.disabled = true;
       try {
-        const body = { tx_ids: g.tx_ids, remember: true, direction: g.direction };
+        const body = { tx_ids: g.tx_ids, direction: g.direction };
         if (choice === "__new__") body.new_category = g.new_category; else body.category = choice;
         const r = await api("/api/ai/apply", { method: "POST", body });
         if (r.created) await loadCategories();
         toast(`${g.merchant}: ${r.category}${r.created ? " (new category)" : ""} applied to ${r.updated}`);
         done(tr); refreshState(); reload();
+        // Applying categorizes; whether this merchant should always be that category is a separate question.
+        if (r.offer_rule) askRemember(g.tx_ids[0], r.category, r.offer_rule, reload);
       } catch (err) { toast(err.message, true); btn.disabled = false; }
     });
   });
@@ -2131,17 +2133,46 @@ async function renderInvestments(el) {
   wireFire(d.fire);
 }
 
+// The four assumptions, and how each maps to its input: what it's called here, and how a percentage is typed.
+const FIRE_FIELDS = [
+  { key: "annual_spending", id: "fi-spend", pct: false },
+  { key: "yearly_savings", id: "fi-save", pct: false },
+  { key: "expected_return", id: "fi-ret", pct: true },
+  { key: "withdrawal_rate", id: "fi-wr", pct: true },
+];
+
 function fireForm(f) {
-  return `<p class="help">Target: 25× yearly spending (the 4% rule).</p>
+  return `<p class="help">Target: 25× yearly spending (the 4% rule). Anything you change here is kept.</p>
     <div class="form-row fire-form">
       <label>Yearly spending<input type="number" id="fi-spend" value="${Math.round(f.annual_spending)}" step="1000"></label>
       <label>Saved per year<input type="number" id="fi-save" value="${Math.round(f.yearly_savings)}" step="1000"></label>
-      <label>Return after inflation<input type="number" id="fi-ret" value="${(f.expected_return * 100).toFixed(1)}" step="0.5"></label>
-      <label>Withdrawal rate<input type="number" id="fi-wr" value="${(f.withdrawal_rate * 100).toFixed(1)}" step="0.25"></label>
-    </div>`;
+      <label>Return after inflation<input type="number" id="fi-ret" value="${+(f.expected_return * 100).toFixed(2)}" step="0.5"></label>
+      <label>Withdrawal rate<input type="number" id="fi-wr" value="${+(f.withdrawal_rate * 100).toFixed(2)}" step="0.25"></label>
+    </div>
+    <p class="help fire-saved" ${f.saved?.length ? "" : "hidden"}>Using your own figures.
+      <button class="btn link" id="fi-reset">Go back to Runway's</button></p>`;
 }
 
 function wireFire(f) {
+  // Typing a figure keeps it, so the projection is the same when you come back to this page.
+  let saveTimer;
+  const keep = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      const body = Object.fromEntries(FIRE_FIELDS.map((x) => {
+        const typed = Number($("#" + x.id).value);
+        const v = isFinite(typed) && $("#" + x.id).value !== "" ? (x.pct ? typed / 100 : typed) : null;
+        // A figure that matches Runway's own isn't an override, so that one keeps following your accounts.
+        const same = v != null && Math.abs(v - f.computed[x.key]) < (x.pct ? 1e-6 : 0.5);
+        return [x.key, same ? null : v];
+      }));
+      try {
+        const r = await api("/api/investments/fire", { method: "POST", body });
+        f.saved = r.saved;
+        $(".fire-saved")?.toggleAttribute("hidden", !r.saved.length);
+      } catch (err) { toast(err.message, true); }
+    }, 600);
+  };
   const calc = () => {
     const spend = Number($("#fi-spend").value) || 0, save = Number($("#fi-save").value) || 0;
     const r = (Number($("#fi-ret").value) || 0) / 100, wr = (Number($("#fi-wr").value) || 4) / 100;
@@ -2163,7 +2194,20 @@ function wireFire(f) {
       { name: "Target", values: path.map(() => target), cls: "s-muted" },
     ], { fmtY: shortMoney, fmtTip: fmt, height: 170, labels: true });
   };
-  $$(".fire-form input").forEach((i) => i.addEventListener("input", calc));
+  $$(".fire-form input").forEach((i) => i.addEventListener("input", () => { calc(); keep(); }));
+  $("#fi-reset")?.addEventListener("click", async () => {
+    try {
+      await api("/api/investments/fire", { method: "POST", body: Object.fromEntries(FIRE_FIELDS.map((x) => [x.key, null])) });
+    } catch (err) { return toast(err.message, true); }
+    FIRE_FIELDS.forEach((x) => {
+      const v = f.computed[x.key];
+      $("#" + x.id).value = x.pct ? +(v * 100).toFixed(2) : Math.round(v);
+    });
+    f.saved = [];
+    $(".fire-saved")?.setAttribute("hidden", "");
+    toast("Back to Runway's own figures");
+    calc();
+  });
   calc();
 }
 
