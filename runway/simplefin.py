@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import db, sfinvest, splits
+from . import sfinvest, splits
 from .categorize import clean_payee
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
@@ -56,6 +56,24 @@ def _describe_http_error(e: urllib.error.HTTPError) -> str:
     return "; ".join(parts)
 
 
+def check_address(url: str) -> None:
+    """SimpleFIN addresses come from what you paste, and Runway fetches them and shows what comes back, so they must
+    be on the internet, not this machine or your network (where other services would answer)."""
+    import ipaddress
+    import socket
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise SimpleFinError("That doesn't look like a SimpleFIN address.")
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, UnicodeError) as e:
+        raise SimpleFinError(f"Couldn't reach SimpleFIN: can't find {parts.hostname}.") from e
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if not ip.is_global:
+            raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
+
+
 def claim_setup_token(setup_token: str) -> str:
     """Exchange a one-time setup token for a long-lived access URL."""
     token = setup_token.strip()
@@ -65,6 +83,7 @@ def claim_setup_token(setup_token: str) -> str:
         raise SimpleFinError("That doesn't look like a SimpleFIN setup token.") from e
     if not claim_url.startswith("https://"):
         raise SimpleFinError("That doesn't look like a SimpleFIN setup token.")
+    check_address(claim_url)
     req = urllib.request.Request(claim_url, data=b"", method="POST",
                                  headers={"Content-Length": "0", "User-Agent": USER_AGENT, "Accept": "*/*"})
     try:
@@ -223,12 +242,14 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
             payee = clean_payee(tx.get("payee") or desc)
             key = f"{acct_id}|{tx['id']}"
-            row = conn.execute("SELECT id, pending FROM transactions WHERE id=?", (key,)).fetchone()
+            row = conn.execute("SELECT id, pending, is_split FROM transactions WHERE id=?", (key,)).fetchone()
             if row:
                 conn.execute(
                     "UPDATE transactions SET posted=?, amount=?, description=?, pending=? WHERE id=?",
                     (posted, amount, desc, pending, key),
                 )
+                if row["is_split"]:
+                    splits.follow_amount(conn, key, amount)
             else:
                 if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
                     continue
