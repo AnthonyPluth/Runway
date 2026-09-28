@@ -49,7 +49,10 @@ def settings(conn) -> dict:
             "has_secret": bool(db.get_setting(conn, "carta_client_secret")),
             "connected": bool(db.get_setting(conn, "carta_access_token")) or (db.get_setting(conn, "carta_env") == "mock"
                                                                                 and bool(db.get_setting(conn, "carta_mock_on"))),
-            "last_sync": db.get_setting(conn, "carta_last_sync"), "last_error": db.get_setting(conn, "carta_last_error")}
+            "last_sync": db.get_setting(conn, "carta_last_sync"), "last_error": db.get_setting(conn, "carta_last_error"),
+            # through the browser extension
+            "web_last": db.get_setting(conn, "carta_web_last"), "web_error": db.get_setting(conn, "carta_web_last_error"),
+            "web_capture": bool(db.get_setting(conn, "carta_web_capture") not in (None, "[]"))}
 
 
 def save_settings(conn, body: dict) -> None:
@@ -186,8 +189,13 @@ def _items(data) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ reading
 
+def _snake(k: str) -> str:
+    return re.sub(r"(?<!^)([A-Z])", r"_\1", k).lower()
+
+
 def _pick(d: dict, *keys):
-    """The first of these keys with a value, in the object or one level down."""
+    """The first of these keys with a value (camelCase or snake_case), in the object or one level down."""
+    keys = tuple(dict.fromkeys([*keys, *(_snake(k) for k in keys)]))
     for k in keys:
         if isinstance(d, dict) and d.get(k) not in (None, "", [], {}):
             return d[k]

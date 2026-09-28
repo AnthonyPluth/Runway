@@ -117,7 +117,8 @@ plain Python with a handful of well-known libraries.
 - **Equity compensation:** stock options (ISO/NSO), RSUs, restricted stock and shares, each with its vesting schedule
   (cliff, monthly or quarterly), exercise price and exercises. Runway shows what has vested and what's still to come at
   each company's latest share price, and counts the vested part in net worth. Enter grants by hand, or read them from
-  **Carta** with its Portfolio API (Carta has to approve the app; its sample data works without that).
+  **Carta** with the browser extension (with your Carta sign-in, like Amazon and Target) or with Carta's Portfolio API
+  if Carta approves your app.
 
 ### Everyday
 - **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old.
