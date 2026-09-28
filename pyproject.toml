@@ -3,7 +3,7 @@ name = "runway"
 version = "1.0.0"   # releases are versioned by Git tags (see README → Releases); this isn't bumped by hand
 description = "Self-hosted personal finance: bank sync, a cash-flow forecast, budgets, investments and net worth"
 readme = "README.md"
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.14,<4.0"
 dependencies = [
     "sqlalchemy (>=2.0,<3.0)",           # database engine for SQLite and Postgres
     "alembic (>=1.13,<2.0)",             # schema migrations
@@ -23,7 +23,7 @@ requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py314"
 
 [tool.ruff.lint]
 # Mistakes rather than style: undefined names, unused imports and variables, syntax errors. The code's own style
