@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app, boot, route } from "$lib/app.svelte";
+  import MobileNav from "$lib/components/MobileNav.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
@@ -23,7 +24,7 @@
 
 <div class="flex min-h-dvh flex-col md:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 p-4 md:p-8">
+  <main class="min-w-0 flex-1 p-4 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:p-8">
     <div class="mx-auto max-w-7xl">
       {#if app.bootError && !app.state}
         <Card.Root class="mx-auto mt-10 max-w-md">
@@ -42,4 +43,5 @@
     </div>
   </main>
 </div>
-<Toaster theme="dark" position="bottom-center" />
+<MobileNav />
+<Toaster theme="dark" position="bottom-center" mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 5rem)" }} />
