@@ -92,7 +92,7 @@
           {#each t.splits ?? [] as s, i (i)}{#if i}{" · "}{/if}<span title={s.note || undefined}>{s.category} {fmt(Math.abs(s.amount))}</span>{/each}
         </span>
       {:else}
-        <CategorySelect value={t.category ?? ""} ghost={!review} disabled={saving} class="w-52" onchange={save} />
+        <CategorySelect short value={t.category ?? ""} ghost={!review} disabled={saving} class="w-52" onchange={save} />
       {/if}
       {#if suggestion}
         <Badge class="bg-primary/15 text-primary" title="AI suggestion confidence">{Math.round((t.confidence || 0) * 100)}%</Badge>
