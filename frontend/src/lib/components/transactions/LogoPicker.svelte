@@ -16,6 +16,18 @@
   let website = $state("");
   let busy = $state(false);
   let root = $state<HTMLElement>();
+  let panel = $state<HTMLElement>();
+  // The panel floats over the page (a grouped list clips what spills out of it): under the logo, or above it when
+  // there isn't room below, and kept inside the window.
+  let pos = $state({ top: 0, left: 0 });
+  function place() {
+    if (!root) return;
+    const r = root.getBoundingClientRect(), h = panel?.offsetHeight ?? 260, w = panel?.offsetWidth ?? 320;
+    const below = r.bottom + 8, above = r.top - 8 - h;
+    pos = { top: below + h > window.innerHeight - 8 && above > 8 ? above : below,
+            left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) };
+  }
+  $effect(() => { if (open) { void opts; requestAnimationFrame(place); } });
 
   async function show() {
     open = !open;
@@ -35,7 +47,8 @@
   function outside(e: MouseEvent) { if (open && root && !root.contains(e.target as Node)) open = false; }
 </script>
 
-<svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") open = false; }} />
+<svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") open = false; }}
+  onscroll={() => open && place()} onresize={() => open && place()} />
 
 <span class="relative block" bind:this={root}>
   <button type="button" class="block cursor-pointer rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -43,8 +56,9 @@
     {@render children()}
   </button>
   {#if open}
-    <div data-editor role="dialog" aria-label={`Logo for ${name}`}
-      class="absolute top-11 left-0 z-20 w-80 rounded-xl bg-popover p-3 text-sm text-popover-foreground shadow-xl ring-1 ring-border">
+    <div data-editor role="dialog" aria-label={`Logo for ${name}`} bind:this={panel}
+      style:top={`${pos.top}px`} style:left={`${pos.left}px`}
+      class="fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl bg-popover p-3 text-sm text-popover-foreground shadow-xl ring-1 ring-border">
       <div class="mb-2 font-medium">Logo for {name}</div>
       {#if !opts}
         <p class="text-muted-foreground">Loading…</p>
