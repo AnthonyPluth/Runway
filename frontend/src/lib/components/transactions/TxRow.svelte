@@ -1,20 +1,23 @@
 <script lang="ts">
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
+  import CatIcon from "$lib/components/CatIcon.svelte";
   import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
   import { orderLabel } from "$lib/components/orders/retail";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDate } from "$lib/format";
+  import { fmt } from "$lib/format";
   import { cn } from "$lib/utils";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import RecurringPicker from "./RecurringPicker.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { RecurringItem, Tx } from "./types";
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor and the
-  // Amazon or Target order it paid for; ↻ links it to a recurring item.
-  let { t, review, selected, recurring, onselect, onsave, onchanged }: {
-    t: Tx; review: boolean; selected: boolean; recurring: RecurringItem[];
+  // Amazon or Target order it paid for; ↻ links it to a recurring item. On a phone the category sits under the
+  // merchant; on a wider screen it has a column of its own.
+  let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
+    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
     onselect: (e: MouseEvent, checked: boolean) => void;
     onsave: (category: string) => Promise<void>;
     onchanged: () => void;
@@ -29,8 +32,13 @@
   const linked = $derived((t.recurring_id ?? 0) > 0);
   const split = $derived(!!t.is_split && !!t.splits?.length);
   const name = $derived(t.payee || t.description || "");
+  // The bank's own text, only when it says more than the merchant name does.
+  const detail = $derived.by(() => {
+    const d = (t.description ?? "").trim(), squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return d && squash(d) !== squash(name) ? d : "";
+  });
   const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
-  // Shown on hover (and always on touch screens, and while focused), as in the classic list.
+  // Shown on hover (and always on touch screens, and while focused).
   const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
 
   async function save(category: string) {
@@ -40,69 +48,92 @@
   }
 </script>
 
-<tr class={cn("group border-t align-middle", selected && "bg-muted/60")}>
-  <td class="w-8 py-2 pl-3 pr-1">
-    <input type="checkbox" class="size-4 cursor-pointer accent-primary align-middle" aria-label="Select this transaction" checked={selected}
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 border-t px-3 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_15rem_7.5rem] md:px-4",
+  selected ? "bg-primary/10" : "hover:bg-muted/40")}>
+  <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-1", !selecting && "max-md:hidden",
+    !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
+    <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label={`Select ${name}`} checked={selected}
       onclick={(e) => onselect(e, e.currentTarget.checked)} />
-  </td>
-  <td class="whitespace-nowrap px-2 py-2 text-muted-foreground tabular-nums">
-    {fmtDate(t.posted)}{#if t.pending}<Badge variant="secondary" class="ml-1.5">pending</Badge>{/if}
-  </td>
-  <td class="min-w-64 px-2 py-2">
-    <div class="flex flex-wrap items-center gap-1.5 font-medium">
-      {#if t.logo}
-        <img class="size-5 shrink-0 rounded-md bg-white object-contain" src={t.logo} alt="" loading="lazy" width="20" height="20" />
-      {:else}
-        <span class="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
-      {/if}
-      {name}
+  </label>
+
+  <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-1">
+    {#if t.logo}
+      <img class="size-9 rounded-full bg-white object-contain p-0.5" src={t.logo} alt="" loading="lazy" width="36" height="36" />
+    {:else}
+      <span class="flex size-9 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
+    {/if}
+  </div>
+
+  <div class="col-start-3 row-start-1 min-w-0 pr-3">
+    <div class="flex min-w-0 items-center gap-1.5">
+      <span class="truncate font-medium">{name}</span>
+      {#if t.pending}<Badge variant="secondary" class="shrink-0">pending</Badge>{/if}
+      {#if !review && t.needs_review}<Badge variant="outline" class="shrink-0 border-amber-500/50 text-amber-500">review</Badge>{/if}
       {#if picking}
         <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
       {:else}
         <button type="button" onclick={() => (picking = true)}
           title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
-          class={cn("cursor-pointer rounded px-1 text-[13px] font-normal text-muted-foreground hover:text-foreground",
+          class={cn("shrink-0 cursor-pointer rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
             linked ? "bg-primary/15 font-semibold text-primary" : onHover)}>
-          ↻{#if linked}<span class="ml-1 text-xs font-normal">{t.recurring_name}</span>{/if}
+          ↻{#if linked}<span class="ml-1 text-xs font-normal max-sm:hidden">{t.recurring_name}</span>{/if}
         </button>
       {/if}
       {#if t.retail}
         <button type="button" aria-expanded={showOrder} onclick={() => (showOrder = !showOrder)}
           title={`See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order`}
-          class="cursor-pointer rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+          class="shrink-0 cursor-pointer rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
           {orderLabel(t.retail)}</button>
       {/if}
     </div>
-    <div class="max-w-[22rem] truncate text-xs text-muted-foreground" title={t.description ?? ""}>{t.description}</div>
-    <div class="text-xs text-muted-foreground sm:hidden"><AcctLabel id={t.account_id} name={t.account_name ?? ""} /></div>
-  </td>
-  <td class="px-2 py-2 text-muted-foreground max-sm:hidden"><AcctLabel id={t.account_id} name={t.account_name ?? ""} /></td>
-  <td class={cn("whitespace-nowrap px-2 py-2 text-right tabular-nums", t.amount > 0 && "font-semibold text-emerald-500")}>{fmt(t.amount)}</td>
-  <td class="whitespace-nowrap px-2 py-2 pr-3">
-    <div class="flex items-center gap-1.5">
-      {#if split}
-        <Badge class="bg-primary/15 text-primary">split</Badge>
-        <span class="text-xs text-muted-foreground">
-          {#each t.splits ?? [] as s, i (i)}{#if i}{" · "}{/if}<span title={s.note || undefined}>{s.category} {fmt(Math.abs(s.amount))}</span>{/each}
-        </span>
-      {:else}
-        <CategorySelect value={t.category ?? ""} ghost={!review} disabled={saving} class="w-52" onchange={save} />
-      {/if}
-      {#if suggestion}
-        <Badge class="bg-primary/15 text-primary" title="AI suggestion confidence">{Math.round((t.confidence || 0) * 100)}%</Badge>
-        <Button variant="link" size="sm" class="h-auto px-1" title="Keep the suggested category" disabled={saving}
-          onclick={() => save(t.category ?? "")}>✓ Keep</Button>
-      {/if}
-      {#if !review && t.needs_review}<Badge variant="outline" class="border-amber-500/50 text-amber-500">review</Badge>{/if}
-      <Button variant="link" size="sm" class={cn("h-auto px-1", !split && onHover)} title="Spread this across several categories"
-        onclick={() => (splitting = true)}>{split ? "Edit split" : "Split"}</Button>
+    <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-md:hidden">
+      <AcctLabel id={t.account_id} name={t.account_name ?? ""} />
+      {#if detail}<span aria-hidden="true">·</span><span class="truncate" title={detail}>{detail}</span>{/if}
     </div>
-  </td>
-</tr>
-{#if splitting}
-  <tr><td colspan="6" class="px-3 pb-3"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></td></tr>
-{/if}
-{#if showOrder && t.retail}
-  <tr><td colspan="6" class="px-3 pb-3" data-editor><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></td></tr>
-{/if}
+  </div>
+
+  <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
+  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-start-1">
+    {#if split}
+      <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
+        <Badge class="bg-primary/15 text-primary">split</Badge>
+        <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+          {#each t.splits ?? [] as s, i (i)}
+            <span class="inline-flex items-center gap-1" title={s.note || undefined}><CatIcon name={s.category} size={16} />{s.category} {fmt(Math.abs(s.amount))}</span>
+          {/each}
+        </span>
+      </button>
+    {:else}
+      <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
+      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors",
+        t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
+        saving && "opacity-60")}>
+        {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
+        <span class="truncate">{t.category || "Choose category"}</span>
+        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
+        <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
+          class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />
+      </span>
+    {/if}
+    {#if suggestion}
+      <Badge class="bg-primary/15 text-primary" title="AI suggestion confidence">{Math.round((t.confidence || 0) * 100)}%</Badge>
+      <Button variant="link" size="sm" class="h-auto px-1" title="Keep the suggested category" disabled={saving}
+        onclick={() => save(t.category ?? "")}>✓ Keep</Button>
+    {/if}
+    {#if !split}
+      <Button variant="link" size="sm" class={cn("h-auto px-1 text-xs text-muted-foreground max-md:hidden", onHover)}
+        title="Spread this across several categories" onclick={() => (splitting = true)}>Split</Button>
+    {/if}
+  </div>
+
+  <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-1",
+    t.amount > 0 ? "font-semibold text-emerald-500" : "font-medium")}>{fmt(t.amount)}</div>
+
+  {#if splitting}
+    <div class="col-span-full pt-2"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></div>
+  {/if}
+  {#if showOrder && t.retail}
+    <div class="col-span-full pt-2" data-editor><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></div>
+  {/if}
+</div>
