@@ -113,7 +113,7 @@
 {:else if !status}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else if !status.inv_accounts || !d}
-  <h1 class="mb-6 text-3xl font-semibold tracking-tight">Investments</h1>
+  <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Investments</h1>
   <Card.Root class="mx-auto mt-10 max-w-lg text-center">
     <Card.Header>
       <Card.Title>No investment accounts yet</Card.Title>
@@ -122,7 +122,7 @@
   </Card.Root>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-3xl font-semibold tracking-tight">Investments</h1>
+    <h1 class="text-[34px] leading-tight font-bold tracking-tight">Investments</h1>
     <div class="flex flex-wrap items-center gap-3">
       <span class={cn("inline-flex items-center gap-1.5 text-sm", live?.market === "open" ? "text-foreground/80" : "text-muted-foreground")} role="status"
         title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined}>

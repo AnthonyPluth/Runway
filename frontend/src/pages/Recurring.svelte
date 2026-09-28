@@ -54,7 +54,7 @@
 </script>
 
 <div class="mb-6 flex items-center justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight">Recurring</h1>
+  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Recurring</h1>
   <Button onclick={openForm}><Plus />Add</Button>
 </div>
 

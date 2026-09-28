@@ -1,7 +1,7 @@
 // Settings is mostly forms, and its fields autosave (`use:autosave`), which needs the native element rather than a
 // component: these are the ui/ Input and NativeSelect looks as plain classes, plus the few layouts every card repeats.
-export const inputCls = "border-input bg-background dark:bg-input/30 placeholder:text-muted-foreground text-foreground h-9 min-w-0 rounded-md border px-3 py-1 text-base shadow-xs outline-none transition-[color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
-export const selectCls = "border-input dark:bg-input/30 text-foreground h-9 min-w-0 cursor-pointer rounded-md border bg-transparent py-1 pl-2.5 pr-8 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&>optgroup]:bg-popover [&_option]:bg-popover";
+export const inputCls = "border-transparent bg-background dark:bg-input placeholder:text-muted-foreground text-foreground h-9 min-w-0 rounded-lg border px-3 py-1 text-base outline-none transition-[color,box-shadow] disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+export const selectCls = "border-transparent dark:bg-input text-foreground h-9 min-w-0 cursor-pointer rounded-lg border bg-transparent py-1 pl-2.5 pr-8 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 [&>optgroup]:bg-popover [&_option]:bg-popover";
 /** A field's label: the caption above, the control below. */
 export const fieldCls = "flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground";
 /** A row of fields that wraps on a phone. */
