@@ -460,10 +460,6 @@ def sync_all(conn, today: date | None = None) -> dict:
                 out["errors"].append(f"{item['institution_name'] or 'Plaid'}: {r['error']}")
         except PlaidError as e:
             out["errors"].append(f"{item['institution_name'] or 'Plaid'}: {e}")
-    try:   # logos for merchants Plaid named: nice to have, never a reason to fail the sync
-        merchants.fetch_logos(conn)
-    except Exception:
-        pass
     return out
 
 

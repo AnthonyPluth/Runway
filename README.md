@@ -92,7 +92,9 @@ plain Python with a handful of well-known libraries.
 - **Bulk editing:** tick transactions (shift-click for a range) to give them a category, rename their merchant or mark
   them reviewed all at once.
 - **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself (nothing else is
-  asked); SimpleFIN transactions from the same merchant get the logo too.
+  asked); SimpleFIN transactions from the same merchant get the logo too. With a free Logo.dev publishable key
+  (Settings), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names
+  like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway.
 - Categories with one level of subcategories, a review queue for anything uncategorized, and search and filters.
 
 ### Budgets and reports
@@ -364,4 +366,4 @@ up to date; each one runs the tests before it can be merged.
 ---
 
 <sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.
-Bank and card logos are from <a href="https://github.com/selfhst/icons">selfh.st/icons</a> (CC BY 4.0); they're trademarks of their owners.</sub>
+Bank and card logos are from <a href="https://github.com/selfhst/icons">selfh.st/icons</a> (CC BY 4.0); merchant logos from Plaid and <a href="https://logo.dev">Logo.dev</a>. They're trademarks of their owners.</sub>
