@@ -139,6 +139,7 @@ def _token(conn, opener=None) -> str:
         _store_token(conn, _post_form(ENVS[env]["token"], {"grant_type": "refresh_token",
                                                             "refresh_token": db.get_setting(conn, "carta_refresh_token")},
                                       db.get_setting(conn, "carta_client_id"), db.get_setting(conn, "carta_client_secret"), opener))
+        conn.commit()   # Carta may have rotated the refresh token: keep the new one even if the sync then fails
         tok = db.get_setting(conn, "carta_access_token")
     return tok
 
@@ -325,7 +326,9 @@ def sync(conn, opener=None) -> dict:
         db.set_setting(conn, "carta_last_sync", date.today().isoformat())
         db.set_setting(conn, "carta_last_error", None)
     except CartaError as e:
+        conn.rollback()   # none of a half-read sync, but the error is kept (the caller's session rolls back too)
         db.set_setting(conn, "carta_last_error", str(e)[:300])
+        conn.commit()
         raise
     return out
 

@@ -18,6 +18,7 @@ from .categorize import clean_payee
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
 BACKFILL_DAYS = 180      # history pulled on the first sync
 REFRESH_DAYS = 14        # window re-read on routine syncs (catches pending -> posted)
+STALE_PENDING_DAYS = 30  # a hold this much older than a routine sync's window that still hasn't posted is gone
 
 
 class SimpleFinError(Exception):
@@ -211,6 +212,9 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             "DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted>=?",
             (acct_id, window_start.isoformat()),
         )
+        # Older than any window re-read: a hold that dropped off without posting would otherwise stay forever.
+        conn.execute("DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted<?",
+                     (acct_id, (window_start - timedelta(days=STALE_PENDING_DAYS - REFRESH_DAYS)).isoformat()))
 
         for tx in acct.get("transactions", []) or []:
             pending = 1 if tx.get("pending") else 0
