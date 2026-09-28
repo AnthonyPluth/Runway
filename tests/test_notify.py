@@ -5,6 +5,7 @@ import threading
 import unittest
 from datetime import date
 from http.server import HTTPServer
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -41,6 +42,9 @@ class NotifyTests(unittest.TestCase):
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) "
                        "VALUES ('chk|1','chk','2026-09-22',-812.5,'BEST BUY','Best Buy','Shopping')")
         self.ua, self.p256dh, _ = receiver()
+        env = mock.patch.dict(os.environ, {"RUNWAY_PUSH_HOSTS": "127.0.0.1"})   # the test's own push service
+        env.start()
+        self.addCleanup(env.stop)
         self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, created) VALUES (?,?,?,?,0)",
                        (f"http://127.0.0.1:{self.srv.server_port}/p/1", self.p256dh,
                         webpush.b64u(b"0123456789abcdef"), "Test phone"))

@@ -155,7 +155,7 @@ def _num(v, name, allow_none=True):
             return None
         raise EquityError(f"Enter the {name}")
     try:
-        n = float(v)
+        n = db.number(v)
     except (TypeError, ValueError):
         raise EquityError(f"The {name} must be a number")
     if n < 0:

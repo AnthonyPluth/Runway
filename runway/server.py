@@ -833,7 +833,7 @@ def _recurring_values(conn, body):
     acct = body.get("account_id") or ""
     freq = body.get("frequency") or "monthly"
     try:
-        amount = float(body.get("amount"))
+        amount = db.number(body.get("amount"))
         anchor = date.fromisoformat(body.get("anchor_date") or "").isoformat()
     except (TypeError, ValueError):
         raise ApiError("Amount and a date (YYYY-MM-DD) are required")
@@ -919,7 +919,7 @@ def api_override_set(conn, _q, body):
     if not key.startswith(("rec:", "card:", "stmt:")):
         raise ApiError("Unknown item")
     try:
-        amount = float(body.get("amount"))
+        amount = db.number(body.get("amount"))
     except (TypeError, ValueError):
         raise ApiError("Enter an amount")
     conn.execute(
@@ -1106,7 +1106,7 @@ def api_budget_set(conn, _q, body):
         conn.execute("DELETE FROM budgets WHERE category=?", (cat,))
         return {"ok": True}
     try:
-        amt = abs(float(amt))
+        amt = abs(db.number(amt))
     except (TypeError, ValueError):
         raise ApiError("Enter an amount")
     conn.execute("INSERT INTO budgets(category, amount) VALUES (?,?) ON CONFLICT(category) DO UPDATE SET amount=excluded.amount", (cat, amt))
@@ -1368,7 +1368,7 @@ def api_cost_basis(conn, _q, body):
         conn.execute("DELETE FROM cost_overrides WHERE account_id=? AND security_id=?", (acct, sec))
         return {"ok": True, "cleared": True}
     try:
-        v = float(str(v).replace(",", "").replace("$", ""))
+        v = db.number(str(v).replace(",", "").replace("$", ""))
     except ValueError:
         raise ApiError("Enter a number")
     if v < 0:
