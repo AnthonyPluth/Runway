@@ -1,24 +1,37 @@
-"""Merchant logos, from Plaid only.
+"""Merchant logos, from Plaid, and from Logo.dev for merchants Plaid has no logo for.
 
 Plaid tells Runway who a transaction's merchant is (an entity id, a name, a website) and often has a logo for it.
 Runway downloads each logo once from Plaid, keeps it in the database and serves it itself, so the app never asks
 anyone else for anything (and the page's content policy stays "images from Runway only"). Transactions from
 SimpleFIN show the logo too when their merchant has the same name as one Plaid knows.
+
+When Plaid has no logo, Runway asks Logo.dev for one by the merchant's website: the one Plaid gave, or for big names
+(brands.MERCHANT_PATTERNS) the one Runway knows. That needs a Logo.dev publishable key (Settings). Runway, never the
+browser, downloads each during a sync, keeps it as merchant "site:<website>", and checks it again every month so a
+brand's new logo shows up by itself. Logo.dev only ever learns merchants' websites, never what you bought or paid.
 """
 from __future__ import annotations
 
 import base64
+import re
 import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
+from . import brands, db
+
 
 MAX_LOGO = 256 * 1024
 TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}   # never SVG: it can carry scripts
 RETRY_DAYS = 30        # a logo that couldn't be fetched is tried again after this long
 PER_SYNC = 60          # logos fetched per sync at most
+REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in case it changed
+SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
+TOKEN_SETTING = "logodev_token"   # the Logo.dev publishable key (pk_...)
+LOGO_DEV = "https://img.logo.dev/"
+_SITE_RX = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
 
 
 def _plaid_host(url: str | None) -> bool:
@@ -29,6 +42,31 @@ def _plaid_host(url: str | None) -> bool:
         return False
     host = (u.hostname or "").lower()
     return u.scheme == "https" and (host == "plaid.com" or host.endswith(".plaid.com"))
+
+
+def site(website: str | None) -> str | None:
+    """A merchant's website as Logo.dev looks it up: "https://www.Target.com/x" -> "target.com"."""
+    text = (website or "").strip().lower()
+    if not text:
+        return None
+    try:
+        host = urllib.parse.urlsplit(text if "//" in text else "https://" + text).hostname or ""
+    except ValueError:
+        return None
+    host = host.removeprefix("www.")
+    return host if len(host) <= 253 and _SITE_RX.match(host) else None
+
+
+def _logo_dev_url(url: str | None) -> bool:
+    try:
+        u = urllib.parse.urlsplit(url or "")
+    except ValueError:
+        return False
+    return u.scheme == "https" and (u.hostname or "").lower() == "img.logo.dev"
+
+
+def configured(conn) -> bool:
+    return bool(db.get_setting(conn, TOKEN_SETTING))
 
 
 def key(name: str | None) -> str:
@@ -56,13 +94,22 @@ def note(conn, t: dict) -> str | None:
     return mid
 
 
+class _SameRules(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to where Runway would fetch from anyway."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not (_plaid_host(newurl) or _logo_dev_url(newurl)):
+            raise urllib.error.URLError("redirected elsewhere")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _download(url: str, opener=None) -> tuple[bytes, str] | None:
     req = urllib.request.Request(url, headers={"User-Agent": "Runway", "Accept": "image/png,image/*"})
     try:
         if opener:
             resp = opener(req)
         else:
-            resp = urllib.request.urlopen(req, timeout=8, context=ssl.create_default_context())
+            resp = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+                                               _SameRules()).open(req, timeout=8)
         with resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = resp.read(MAX_LOGO + 1)
@@ -74,22 +121,75 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
 
 
 def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
-    """Download logos Runway doesn't have yet (from Plaid only). Returns how many it got."""
+    """Download logos Runway doesn't have yet (from Plaid), and Logo.dev logos it doesn't have or last checked a month
+    ago (when there's a Logo.dev key). Returns how many it got."""
     now = datetime.now()
     retry_before = (now - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
-    todo = conn.execute("SELECT id, logo_url FROM merchants WHERE logo IS NULL AND logo_url IS NOT NULL "
-                        "AND (logo_checked IS NULL OR logo_checked < ?) ORDER BY id LIMIT ?", (retry_before, limit)).fetchall()
+    refresh_before = (now - timedelta(days=REFRESH_DAYS)).isoformat(timespec="seconds")
+    token = db.get_setting(conn, TOKEN_SETTING)
+    todo = conn.execute("SELECT id, logo_url FROM merchants WHERE logo_url IS NOT NULL AND ("
+                        "(id NOT LIKE ? AND logo IS NULL AND (logo_checked IS NULL OR logo_checked < ?)) OR "
+                        "(? AND id LIKE ? AND (logo_checked IS NULL OR logo_checked < ?))) "
+                        "ORDER BY logo_checked IS NOT NULL, id LIMIT ?",
+                        (SITE + "%", retry_before, bool(token), SITE + "%", refresh_before, limit)).fetchall()
     got = 0
     for m in todo:
-        found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
+        if m["id"].startswith(SITE):
+            s = m["id"][len(SITE):]
+            url = f"{LOGO_DEV}{s}?" + urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
+            found = _download(url, opener) if site(s) == s else None
+        else:
+            found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
         if found:
             data, ctype = found
             conn.execute("UPDATE merchants SET logo=?, logo_type=?, logo_checked=? WHERE id=?",
                          (base64.b64encode(data).decode(), ctype, now.isoformat(timespec="seconds"), m["id"]))
             got += 1
         else:
+            # (a Logo.dev logo that couldn't be fetched again keeps the one Runway has)
             conn.execute("UPDATE merchants SET logo_checked=? WHERE id=?", (now.isoformat(timespec="seconds"), m["id"]))
     return got
+
+
+def site_logos(conn, sites) -> set[str]:
+    """The websites (of sites) Runway has a Logo.dev logo for. Ones it has never seen are noted, for a sync to fetch."""
+    sites = sorted({s for s in sites if s})
+    if not sites:
+        return set()
+    ids = [SITE + s for s in sites]
+    ph = ",".join("?" * len(ids))
+    rows = {r["id"]: r["logo"] is not None for r in conn.execute(f"SELECT id, logo FROM merchants WHERE id IN ({ph})", ids)}
+    for s in sites:
+        if SITE + s not in rows:
+            conn.execute("INSERT INTO merchants(id, logo_url) VALUES (?, ?)", (SITE + s, LOGO_DEV + s))
+    return {s for s in sites if rows.get(SITE + s)}
+
+
+def sites_for(conn, txs: list[dict]) -> dict[str, str]:
+    """{transaction id: the merchant's website}: the one Plaid gave for its merchant, else a big name's."""
+    mids = sorted({t["merchant_id"] for t in txs if t.get("merchant_id")})
+    websites = {}
+    if mids:
+        ph = ",".join("?" * len(mids))
+        websites = {r["id"]: site(r["website"]) for r in conn.execute(f"SELECT id, website FROM merchants WHERE id IN ({ph})", mids)}
+    out = {}
+    for t in txs:
+        s = websites.get(t.get("merchant_id")) or brands.merchant(t.get("payee"), t.get("description"))
+        if s:
+            out[t["id"]] = s
+    return out
+
+
+def note_sites(conn, days: int = 400) -> None:
+    """Note the websites of the last year's merchants that have no Plaid logo, so a sync fetches their logos from
+    Logo.dev before anyone looks."""
+    if not configured(conn):
+        return
+    since = (datetime.now() - timedelta(days=days)).date().isoformat()
+    rows = db.rows(conn.execute("SELECT DISTINCT merchant_id, payee, description FROM transactions WHERE posted>=?", (since,)))
+    plaid = {r["id"] for r in conn.execute("SELECT id FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ?", (SITE + "%",))}
+    txs = [{**r, "id": str(i)} for i, r in enumerate(rows) if r["merchant_id"] not in plaid]
+    site_logos(conn, sites_for(conn, txs).values())
 
 
 def logo(conn, mid: str) -> tuple[bytes, str] | None:
@@ -100,7 +200,8 @@ def logo(conn, mid: str) -> tuple[bytes, str] | None:
 def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
     """{transaction id: merchant id with a logo}: by the merchant Plaid named, else by the merchant name ("Starbucks
     Store 99" is Starbucks: the longest known name it starts with, as whole words)."""
-    have = {r["id"]: key(r["name"]) for r in conn.execute("SELECT id, name FROM merchants WHERE logo IS NOT NULL")}
+    have = {r["id"]: key(r["name"]) for r in conn.execute("SELECT id, name FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ?",
+                                                          (SITE + "%",))}
     if not have:
         return {}
     by_name: dict[str, str] = {}

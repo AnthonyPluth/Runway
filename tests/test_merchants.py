@@ -1,9 +1,12 @@
-"""Merchant logos: noted from Plaid, downloaded from Plaid only, served by Runway; bundled ones for big names."""
+"""Merchant logos: noted from Plaid, downloaded from Plaid (or the icon CDN for big names), served by Runway."""
 import io
 import os
 import sys
 import tempfile
 import unittest
+from datetime import date
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -33,6 +36,8 @@ class MerchantTests(unittest.TestCase):
     def opener(self, replies):
         def open_(req):
             self.asked.append(req.full_url)
+            if req.full_url not in replies:
+                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
             data, ctype = replies[req.full_url]
             return FakeResponse(data, ctype)
         return open_
@@ -68,19 +73,93 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(merchants.for_transactions(self.c, txs), {"a": "ent-bb", "b": "ent-bb", "d": "ent-bb"})
 
 
-    def test_plaid_logo_first_then_a_bundled_one(self):
+    def logo_dev(self, site, token="pk_test123456"):
+        return f"https://img.logo.dev/{site}?token={token}&size=64&format=png&fallback=404"
+
+    def test_plaid_logo_first_then_logo_dev_by_website(self):
         merchants.note(self.c, {"merchant_name": "Target", "merchant_entity_id": "ent-t", "logo_url": "https://plaid.com/t.png"})
+        merchants.note(self.c, {"merchant_name": "Joe's Coffee", "merchant_entity_id": "ent-j", "website": "www.JoesCoffee.com"})
         merchants.fetch_logos(self.c, opener=self.opener({"https://plaid.com/t.png": (PNG, "image/png")}))
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
         self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, merchant_id) "
                            "VALUES (?, 'a', '2026-09-20', -5, ?, ?, ?)", [
-                               ("t1", "TARGET 0001", "Target", "ent-t"),          # Plaid's logo
-                               ("t2", "WAL-MART #12", "Walmart", None),          # bundled
-                               ("t3", "SQ *JOES COFFEE", "Joe's Coffee", None)])  # neither: its initial
+                               ("t1", "TARGET 0001", "Target", "ent-t"),              # Plaid's logo
+                               ("t2", "WAL-MART #12", "Walmart", None),              # a big name: walmart.com
+                               ("t3", "SQ *JOES COFFEE", "Joe's Coffee", "ent-j"),   # Plaid's website, no logo
+                               ("t4", "CORNER SHOP", "Corner Shop", None)])           # neither: its initial
         self.c.commit()
-        got = {t["id"]: t["logo"] for t in server.api_transactions(self.c, {}, None)["items"]}
-        self.assertEqual(got, {"t1": "/api/merchants/ent-t/logo", "t2": "/merchants/walmart.svg", "t3": None})
 
+        def logos():
+            return {t["id"]: t["logo"] for t in server.api_transactions(self.c, {}, None)["items"]}
+        want = {"t1": "/api/merchants/ent-t/logo", "t2": None, "t3": None, "t4": None}
+        self.assertEqual(logos(), want)                                                 # no Logo.dev key
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({})), 0)
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        self.assertEqual(logos(), want)                                                 # noted, not fetched yet
+        got = merchants.fetch_logos(self.c, opener=self.opener({self.logo_dev("walmart.com"): (PNG, "image/png"),
+                                                                 self.logo_dev("joescoffee.com"): (PNG, "image/png")}))
+        self.assertEqual(got, 2)
+        self.assertEqual(logos(), {**want, "t2": "/api/merchants/site%3Awalmart.com/logo",
+                                   "t3": "/api/merchants/site%3Ajoescoffee.com/logo"})
+        self.assertEqual(merchants.logo(self.c, "site:walmart.com"), (PNG, "image/png"))
+
+    def test_a_sync_notes_the_websites_it_has_seen(self):
+        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
+        today = date.today().isoformat()
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee) VALUES (?, 'a', ?, -5, ?, ?)",
+                           [("t1", today, "STARBUCKS 123", "Starbucks"), ("t2", today, "AMZN MKTP", "Amazon"),
+                            ("t3", "2020-01-01", "TARGET", "Target"), ("t4", today, "CORNER SHOP", "Corner Shop")])
+        merchants.note_sites(self.c)
+        self.assertIsNone(self.c.execute("SELECT 1 FROM merchants").fetchone())        # not without a key
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        merchants.note_sites(self.c)
+        self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")), ["site:amazon.com", "site:starbucks.com"])
+
+    def test_logo_dev_logos_are_checked_again_monthly(self):
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        url = self.logo_dev("target.com")
+        merchants.site_logos(self.c, ["target.com"])
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG, "image/png")})), 1)
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG + b"new", "image/png")})), 0)
+        self.c.execute("UPDATE merchants SET logo_checked='2026-01-01T00:00:00'")
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({})), 0)          # a miss keeps the old one
+        self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG, "image/png"))
+        self.c.execute("UPDATE merchants SET logo_checked='2026-01-01T00:00:00'")
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG + b"new", "image/png")})), 1)
+        self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG + b"new", "image/png"))
+
+    def test_the_key_setting(self):
+        with self.assertRaises(server.ApiError):
+            server.api_logodev_settings(self.c, {}, {"token": "sk_secret_abcdefgh"})
+        self.assertFalse(merchants.configured(self.c))
+        merchants.site_logos(self.c, ["target.com"])
+        self.c.execute("UPDATE merchants SET logo_checked='2099-01-01T00:00:00'")
+        self.assertEqual(server.api_logodev_settings(self.c, {}, {"token": " pk_abcdefgh123 "})["configured"], True)
+        self.assertEqual(db.get_setting(self.c, merchants.TOKEN_SETTING), "pk_abcdefgh123")
+        self.assertIsNone(self.c.execute("SELECT logo_checked FROM merchants").fetchone()[0])   # tried at the next sync
+        self.assertEqual(server.api_logodev_settings(self.c, {}, {"clear": True})["configured"], False)
+
+    def test_websites(self):
+        cases = {"https://www.Target.com/stores": "target.com", "joescoffee.com": "joescoffee.com", "fi.google.com": "fi.google.com",
+                 "localhost": None, "http://127.0.0.1/x": "127.0.0.1", "": None, None: None, "not a site": None,
+                 "evil.com?x=1": "evil.com", "a.com/../..": "a.com"}
+        for web, want in cases.items():
+            self.assertEqual(merchants.site(web), want, web)
+
+    def test_only_images_from_logo_dev(self):
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        self.c.execute("INSERT INTO merchants(id, logo_url) VALUES ('site:bad site', 'https://img.logo.dev/bad site')")
+        merchants.site_logos(self.c, ["svg.com"])
+        got = merchants.fetch_logos(self.c, opener=self.opener({self.logo_dev("svg.com"): (b"<svg/>", "image/svg+xml")}))
+        self.assertEqual(got, 0)
+        self.assertEqual(self.asked, [self.logo_dev("svg.com")])        # never a website that isn't one
+
+    def test_redirects_only_to_the_same_sources(self):
+        rules = merchants._SameRules()
+        req = urllib.request.Request(self.logo_dev("target.com"))
+        with self.assertRaises(urllib.error.URLError):
+            rules.redirect_request(req, None, 302, "Found", {}, "https://evil.example.com/x.png")
+        self.assertIsNotNone(rules.redirect_request(req, None, 302, "Found", {}, "https://img.logo.dev/walmart.com?token=x"))
 
 if __name__ == "__main__":
     unittest.main()
