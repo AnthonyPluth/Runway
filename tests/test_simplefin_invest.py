@@ -295,7 +295,7 @@ class TrackedHoldingsTests(Base):
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 1)
         self.assertNotIn("sf:unexplained", h)
         # the contribution shows up as money added in history, not as a gain
-        hist = portfolio.history(self.c, TODAY, days=3)
+        portfolio.history(self.c, TODAY, days=3)
         self.assertEqual(round(portfolio.overview(self.c, "1M", TODAY)["total"], 2), round(63.5 * 210 + 83 * 100, 2))
 
     def test_drift_and_funds_without_ticker(self):
