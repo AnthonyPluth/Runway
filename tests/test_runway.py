@@ -171,6 +171,24 @@ class ForecastTests(Base):
         self.assertAlmostEqual(paid("2026-12-07"), 500 / 31 * 21 + 500 / 30 * 10, places=1)
         # no daily drain: nothing moves between those dates
         self.assertEqual(b["total"][fc["dates"].index("2026-10-20")], b["total"][fc["dates"].index("2026-10-25")])
+        # the table's view: each budgeted card payment, and nothing taken from checking day by day
+        card = {c["date"]: c for c in b["changes"] if c["kind"] == "card"}
+        self.assertAlmostEqual(-card["2026-11-05"]["amount"], paid("2026-11-05"), places=1)
+        self.assertEqual((card["2026-11-05"]["charged"], card["2026-12-07"]["charged"]), (300.0, 0.0))
+        self.assertNotIn("2026-10-05", card)                       # the closed statement is the forecast's own event
+        self.assertEqual([c for c in b["changes"] if c["kind"] == "budget"], [])
+
+    def test_a_budget_paid_from_checking_comes_out_day_by_day(self):
+        # $310/month on Groceries from checking; $200 spent in September, so $110 over Sep 24-30 ($15.71 a day)
+        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 310, 'chk')")
+        fc = forecast.build(self.conn, TODAY, 40)
+        b, days = fc["budget"], fc["dates"]
+        out = {c["date"]: c for c in b["changes"] if c["kind"] == "budget"}
+        self.assertEqual((out["2026-09-24"]["category"], out["2026-09-24"]["amount"]), ("Groceries", -15.71))
+        self.assertEqual(out["2026-10-15"]["amount"], -10.0)        # October: 310 / 31
+        self.assertEqual(len(out), 40)                              # every day after today
+        drop = b["total"][days.index("2026-10-14")] - b["total"][days.index("2026-10-15")]
+        self.assertAlmostEqual(drop, 10.0 - sum(e["amount"] for e in fc["events"] if e["date"] == "2026-10-15"), places=2)
 
     def test_budget_covered_by_a_recurring_item_is_left_out(self):
         self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES (7, 'Grocery box','chk',-100,'monthly','2026-09-01')")

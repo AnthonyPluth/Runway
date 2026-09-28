@@ -509,6 +509,7 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     cards = {c["id"]: c for c in card_status}
     spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))   # account -> date -> amount
     used, skipped = [], []
+    changes: list[dict] = []   # what this scenario takes out of the forecast's accounts, day by day (for the table)
     for p in plan:
         if set(p["names"]) & rec_cats:
             skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
@@ -525,6 +526,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             else:
                 per_day = p["amount"] / dim
             spend[acct][d.isoformat()] += per_day
+            if acct in cash_ids and per_day > 0.005:
+                changes.append({"date": d.isoformat(), "account_id": acct, "kind": "budget", "category": p["category"],
+                                "name": p["category"], "amount": -round(per_day, 2)})
         used.append({"category": p["category"], "amount": p["amount"], "account_id": acct,
                      "account": db.account_label(by_id[acct]), "chosen": bool(p["pay_with"])})
 
@@ -548,7 +552,13 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                 break
             amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
             if amt > 0.005:
-                extra.append((payer, bankdays.next_business_day(due).isoformat(), -round(amt, 2)))
+                paid = bankdays.next_business_day(due).isoformat()
+                extra.append((payer, paid, -round(amt, 2)))
+                if paid <= dates[-1]:
+                    changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",
+                                    "amount": -round(amt, 2), "account": db.account_label(by_id[payer]),
+                                    # what it's made of: charges already on the card (first statement), plus budgeted ones
+                                    "charged": round(info["new_charges"], 2) if first else 0.0})
             prev, close, first = close, next_after(close, card["closing_day"]), False
 
     by_day: dict[tuple, float] = defaultdict(float)
@@ -565,8 +575,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             total[i] += bal
     total = [round(v, 2) for v in total]
     i = min(range(len(total)), key=lambda k: total[k])
+    changes.sort(key=lambda c: (c["date"], c["amount"]))
     return {"total": total, "low": {"date": dates[i], "balance": total[i]}, "used": used, "skipped": skipped,
-            "monthly": round(sum(u["amount"] for u in used), 2)}
+            "monthly": round(sum(u["amount"] for u in used), 2), "changes": changes}
 
 
 # ------------------------------------------------------------------------------------------------ suggestions
