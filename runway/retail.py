@@ -919,7 +919,7 @@ def unmatched_count(conn, retailer: str | None = None) -> int:
 # ------------------------------------------------------------------------------------------------ for the app
 
 def for_transactions(conn, tx_ids: list[str]) -> dict[str, dict]:
-    """{tx_id: {order_id, retailer, order_number, items}} for transactions that are store charges."""
+    """{tx_id: {order_id, retailer, order_number, items}} for transactions that are store charges (or refunds)."""
     if not tx_ids:
         return {}
     out = {}
