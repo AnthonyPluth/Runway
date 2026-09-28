@@ -10,7 +10,16 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 RUN poetry install --only main --no-root --no-ansi
 
-# 2. The image itself: Python, that virtualenv and Runway, without Poetry.
+# 2. Build the web app (frontend/) into runway/static/next. It's plain files, so it's built once on the build machine
+#    whatever the image's architecture.
+FROM --platform=$BUILDPLATFORM node:22-slim AS web
+WORKDIR /web/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+# 3. The image itself: Python, that virtualenv and Runway, without Poetry.
 FROM python:3.14-slim
 
 LABEL org.opencontainers.image.source="https://github.com/AnthonyPluth/Runway" \
@@ -36,6 +45,7 @@ WORKDIR /app
 COPY --from=deps /app/.venv ./.venv
 COPY --chown=runway:runway run.py alembic.ini ./
 COPY --chown=runway:runway runway ./runway
+COPY --from=web --chown=runway:runway /web/runway/static/next ./runway/static/next
 COPY --chown=runway:runway extension ./extension
 
 USER runway
