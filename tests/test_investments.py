@@ -301,7 +301,8 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1)), {"fetched": [], "failed": []})
 
     def test_a_rate_limit_doesnt_mark_tickers_bad(self):
-        import io, urllib.error
+        import io
+        import urllib.error
         from unittest import mock
         asked = []
 
