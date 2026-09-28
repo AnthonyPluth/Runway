@@ -1560,7 +1560,9 @@ def api_logodev_status(conn, _q, _b):
 
 
 def api_logodev_fetch(conn, _q, _b):
-    """Fetch every merchant logo that's waiting now, in the background, instead of a batch at each sync."""
+    """Fetch every merchant logo that's waiting now, in the background, instead of a batch at each sync, and try again
+    the ones Logo.dev had none for."""
+    merchants.retry_unknown(conn)
     start_logo_backfill()
     return {"ok": True}
 

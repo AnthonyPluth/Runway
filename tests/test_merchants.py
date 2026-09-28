@@ -202,12 +202,17 @@ class MerchantTests(unittest.TestCase):
         db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
         merchants.site_logos(self.c, ["target.com", "walmart.com"])
         def refused(req):
+            self.asked.append(req.full_url)
             raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
         merchants.fetch_logos(self.c, opener=refused)
         st = merchants.status(self.c)
         self.assertIn("401", st["last_error"])
-        self.assertEqual((st["logodev"], st["unknown"], st["waiting"]), (0, 2, 0))
-        self.c.execute("UPDATE merchants SET logo_checked=NULL")
+        self.assertEqual(len(self.asked), 1)
+        # refused isn't "doesn't know": both are still waiting, and only one was asked before the round stopped
+        self.assertEqual((st["logodev"], st["unknown"], st["waiting"]), (0, 0, 2))
+        self.c.execute("UPDATE merchants SET logo_checked='2020-01-01' WHERE id='site:walmart.com'")
+        merchants.retry_unknown(self.c)   # Fetch them now: looked up again
+        self.assertEqual(merchants.status(self.c)["waiting"], 2)
         merchants.fetch_logos(self.c, opener=self.opener({self.logo_dev("target.com"): (b"png", "image/png")}))
         st = merchants.status(self.c)   # a 404 is "no such brand", not an error; a success clears the last one
         self.assertEqual((st["logodev"], st["unknown"]), (1, 1))
