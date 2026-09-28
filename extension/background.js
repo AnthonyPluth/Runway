@@ -332,7 +332,8 @@ async function targetJson(page, url, token) {
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
 
-const TARGET_LEARNED = 3;   // addresses kept per kind of order, learned from target.com's own order pages
+const TARGET_LEARNED = 3;
+const TARGET_DISCOVER_MS = 15000;   // how long to watch the orders page for its API key   // addresses kept per kind of order, learned from target.com's own order pages
 
 function targetUrl(tpl, api, order) {
   return tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(order));
@@ -380,8 +381,18 @@ async function importTarget(progress, Page) {
   const page = await Page.open(TARGET_ORDERS);
   try {
     if (/login|signin/i.test(new URL(page.url || TARGET_ORDERS).pathname)) throw await page.signIn("Target");
-    await sleep(3000);   // let the orders page make its own calls, so we can see how it calls the API
-    const api = await page.run("discover", TARGET_API);
+    // Let the orders page make its own calls, so we can see how it calls the API (it can take a while to start).
+    let api = {};
+    for (let waited = 0; waited < TARGET_DISCOVER_MS && !api.key; waited += 1000) {
+      await sleep(1000);
+      api = await page.run("discover", TARGET_API);
+      if (api.signedIn === false) break;
+    }
+    const { targetApi } = await store.get("targetApi");
+    if (!api.key && api.signedIn !== false && targetApi && targetApi.key) {   // the key from the last import that found it
+      api = { ...api, base: targetApi.base || TARGET_API, key: targetApi.key, from: "saved" };
+    }
+    if (api.key && api.from !== "saved") await store.set({ targetApi: { base: api.base, key: api.key } });
     if (!api.key) {
       if (api.signedIn === false) throw await page.signIn("Target");
       if (page.hidden) throw new HiddenUnavailable("no order API key in the hidden page");
