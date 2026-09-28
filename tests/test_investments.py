@@ -500,6 +500,30 @@ class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
         plaid.match_investment(self.c, "roth", "sf-roth")
         self.assertEqual(ids(), {"roth"})
 
+    def test_the_same_account_from_simplefin_and_plaid_is_listed_once(self):
+        # E*TRADE sends ••8933 through Plaid and "Individual Brokerage (8933)" through SimpleFIN, and neither was matched
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
+                       "VALUES ('et', 't', 'E*TRADE from Morgan Stanley', 'investments')")
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES ('et-8933', 'et', 'Individual Brokerage -8933', '8933', 120000)")
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES ('et-1111', 'et', 'Roth IRA', '1111', 30000)")
+        for id_, name in (("sf:et1", "Individual Brokerage (8933)"), ("sf:et2", "Rollover IRA (2222)")):
+            self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source, institution) VALUES (?, 'sf', ?, 1, 'simplefin', 'E*Trade')",
+                           (id_, name))
+        # "(8933)" at another firm is a different account
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source, institution) "
+                       "VALUES ('sf:rh', 'sf', 'Individual (8933)', 1, 'simplefin', 'Robinhood')")
+        listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"]}
+        self.assertNotIn("sf:et1", listed)                                   # the SimpleFIN copy isn't listed...
+        self.assertTrue(listed["et-8933"]["also_simplefin"])                 # ...the Plaid one says so
+        self.assertFalse(listed["et-1111"]["also_simplefin"])
+        self.assertIn("sf:et2", listed)                                      # no Plaid account with 2222
+        self.assertIn("sf:rh", listed)
+        dup = next(a for a in portfolio._accounts(self.c) if a["id"] == "sf:et1")
+        self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-8933", 1))   # ...and never counted
+        self.c.execute("UPDATE inv_accounts SET hidden=1 WHERE id='et-8933'")    # unticking the Plaid one: counted neither way
+        self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
+        self.assertNotIn("et-8933", portfolio._visible_ids(self.c))
+
     def test_a_simplefin_account_links_to_one_plaid_account(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)
         self.inv("roth", "Roth IRA", 4943.43)

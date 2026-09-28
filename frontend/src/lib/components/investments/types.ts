@@ -54,6 +54,8 @@ export interface InvAccount {
   institution_name: string | null;
   tracked: number;
   drift: number | null;
+  /** A Plaid account that SimpleFIN also sends (the SimpleFIN copy isn't listed or counted). */
+  also_simplefin?: boolean;
 }
 
 export interface Activity {
