@@ -1,12 +1,12 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
-  import AcctLabel from "$lib/components/AcctLabel.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, parseDate } from "$lib/format";
+  import { fmt, fmtDow } from "$lib/format";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
 
@@ -31,46 +31,41 @@
   }
 </script>
 
+<!-- Rows of a grouped list (the caller puts them in a Group). -->
 {#if !events.length}
-  <p class="py-6 text-center text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on the <a class="font-medium text-foreground underline underline-offset-4" href="#recurring">Recurring</a> tab.</p>
+  <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
 {:else}
-  <div class="flex flex-col">
-    {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
-      {@const d = parseDate(e.date)}
-      <div class="flex items-center gap-3.5 border-t py-3 first:border-t-0 first:pt-0">
-        <div class="flex w-10 shrink-0 flex-col items-center leading-tight">
-          <span class="text-xs uppercase text-muted-foreground">{d.toLocaleDateString("en-US", { month: "short" })}</span>
-          <b class="text-base font-semibold tabular-nums">{d.getDate()}</b>
-        </div>
-        <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} class="rounded-full" />
-        <div class="flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden">
-          <span class="flex flex-wrap items-center gap-1.5 text-sm font-medium">
-            {e.name}
-            {#if e.kind === "recurring"}<span class="text-muted-foreground" title="Recurring item" aria-label="Recurring item">↻</span>{/if}
-            {#if e.estimated}
-              <Badge title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
-            {/if}
-            {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and hasn't shown up yet`}>late</Badge>{/if}
-            {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
-          </span>
-          {#if accounts && e.account_id}<span class="flex min-w-0 text-xs text-muted-foreground max-sm:hidden"><AcctLabel id={e.account_id} name={e.account ?? ""} /></span>{/if}
-          <span class="text-xs text-muted-foreground tabular-nums">
-            {#if e.kind === "card"}Card payment · {:else if e.category || e.kind === "recurring"}{e.category || "Recurring"} · {/if}
-            <span class={e.balance_after < 0 ? "font-medium text-destructive" : ""}>balance&nbsp;{fmt(e.balance_after)}</span>
-          </span>
-        </div>
-        <div class={["flex shrink-0 flex-col items-end text-sm tabular-nums", e.amount > 0 && "font-semibold text-emerald-500"]}>
-          {#if e.key}
-            <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
-          {:else}{fmt(e.amount)}{/if}
-          {#if e.overridden}
-            <Button variant="link" size="sm" class="h-auto p-0" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
+  {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
+    <div class="cell">
+      <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
+          <span class="truncate">{e.name}</span>
+          {#if e.kind === "recurring"}<span class="text-xs text-muted-foreground" title="Recurring item" aria-label="Recurring item">↻</span>{/if}
+          {#if e.estimated}
+            <Badge variant="secondary" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
           {/if}
+          {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and hasn't shown up yet`}>late</Badge>{/if}
+          {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
+        </div>
+        <div class="truncate text-[13px] text-muted-foreground tabular-nums">
+          {fmtDow(e.date)}{#if accounts && e.account}{" · "}{e.account}{/if} ·
+          <span class={e.balance_after < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after)}</span>
         </div>
       </div>
-    {/each}
-  </div>
+      <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
+        {#if e.key}
+          <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
+        {:else}{fmt(e.amount)}{/if}
+        {#if e.overridden}
+          <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
+        {/if}
+      </div>
+    </div>
+  {/each}
   {#if events.length > shown.length}
-    <Button variant="outline" size="sm" class="mt-3" onclick={() => (all = true)}>Show all {events.length}</Button>
+    <button type="button" class="cell justify-between text-[15px] text-primary" onclick={() => (all = true)}>
+      Show all {events.length}<ChevronRight class="size-4 text-muted-foreground" aria-hidden="true" />
+    </button>
   {/if}
 {/if}
