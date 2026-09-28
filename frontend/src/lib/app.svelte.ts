@@ -65,11 +65,15 @@ export async function syncOnVisit(): Promise<void> {
 // If Runway can't be reached when the app opens (offline, or the server is restarting), say so and keep trying
 // every minute (and when you're back online) instead of leaving a blank page.
 let booted = false;
+const onBoot: (() => void)[] = [];
+/** Run `fn` once Runway has answered for the first time (straight away if it already has). */
+export function whenBooted(fn: () => void): void { if (booted) fn(); else onBoot.push(fn); }
 export async function boot(): Promise<void> {
   try { await refreshState(); app.bootError = ""; }
   catch (err) { console.error(err); app.bootError = (err as Error).message; return; }
   if (booted) return;
   booted = true;
+  onBoot.splice(0).forEach((fn) => fn());
   syncOnVisit();
 }
 window.addEventListener("online", () => { if (!booted) boot(); });

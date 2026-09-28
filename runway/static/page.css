@@ -1,0 +1,14 @@
+/* The few pages Runway's server draws itself (signing in, signed out, errors), in the web app's look. */
+@font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 0 16px; background: #0a0a0a; color: #fafafa; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  font-family: "Geist", ui-sans-serif, system-ui, sans-serif; }
+h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 8px; text-wrap: balance; }
+.card { background: #171717; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px; padding: 28px 24px; }
+.help { color: #a1a1a1; font-size: 14px; max-width: 42ch; }
+.btn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 8px; font-size: 14px; font-weight: 500;
+  text-decoration: none; }
+.btn.primary { background: #e5e5e5; color: #171717; }
+.btn.primary:hover { background: #d4d4d4; }
+:focus-visible { outline: 2px solid #737373; outline-offset: 2px; }

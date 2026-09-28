@@ -1,6 +1,5 @@
-// Push notifications on this device. They go through the service worker at /sw.js, which the Python server serves at
-// the site root, so its scope ("/") covers /next/ as well as the classic app: registering it again from here is the
-// same registration, and a subscription made in either app is the same one.
+// Push notifications on this device. They go through the service worker at /sw.js (registered when the app opens, see
+// main.ts); registering it again from here is the same registration.
 
 export const b64uToBytes = (t: string) =>
   Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (t.length % 4)) % 4)), (c) => c.charCodeAt(0));
