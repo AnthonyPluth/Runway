@@ -8,15 +8,15 @@
   } = $props();
 </script>
 
-<!-- The line under the tabs is an inset shadow, not a border: the current tab's underline sits on it without spilling
-     out of the strip, which (as it scrolls sideways on a phone) would otherwise show a vertical scrollbar. -->
-<nav aria-label={label} class={cn("mb-6 flex gap-1 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)]", className)}>
+<!-- A segmented control, as in iOS: the tabs share one rounded track and the current one is raised. It scrolls
+     sideways on a phone when there are more tabs than fit. -->
+<nav aria-label={label} class={cn("mb-6 flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-[10px] bg-card p-0.5 [scrollbar-width:none]", className)}>
   {#each tabs as t (t.id)}
     <a href={t.href} aria-current={t.id === current ? "page" : undefined}
-      class={cn("flex shrink-0 items-center gap-2 border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground",
-        t.id === current && "border-primary font-medium text-foreground")}>
+      class={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
+        t.id === current && "bg-muted text-foreground shadow-sm")}>
       {t.label}
-      {#if t.badge}<Badge class="tabular-nums">{t.badge}</Badge>{/if}
+      {#if t.badge}<Badge class="h-4 min-w-4 px-1 text-[10px] tabular-nums">{t.badge}</Badge>{/if}
     </a>
   {/each}
 </nav>

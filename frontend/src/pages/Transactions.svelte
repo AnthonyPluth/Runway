@@ -109,7 +109,7 @@
 </script>
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-2xl font-semibold tracking-tight md:text-3xl">
+  <h1 class="text-[34px] leading-tight font-bold tracking-tight">
     Transactions
     <span class="text-base font-normal text-muted-foreground tabular-nums">{list ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
   </h1>
@@ -137,14 +137,14 @@
   <div class="mb-4 flex flex-wrap items-center gap-2">
     <div class="relative w-full sm:w-72">
       <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <Input type="search" placeholder="Search merchant or description" aria-label="Search merchant or description" class="pl-8"
+      <Input type="search" placeholder="Search" aria-label="Search merchant or description" class="h-10 pl-8"
         value={f.q} oninput={(e) => search(e.currentTarget.value)} />
     </div>
-    <NativeSelect aria-label="Account" class="max-sm:flex-1" bind:value={f.account} onchange={load}>
+    <NativeSelect aria-label="Account" class="h-10 max-sm:flex-1" bind:value={f.account} onchange={load}>
       <option value="">All accounts</option>
       {#each accounts as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
     </NativeSelect>
-    <NativeSelect aria-label="Category" class="max-sm:flex-1" bind:value={f.category} onchange={load}>
+    <NativeSelect aria-label="Category" class="h-10 max-sm:flex-1" bind:value={f.category} onchange={load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
       {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}

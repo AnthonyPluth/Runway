@@ -68,7 +68,7 @@
 {:else if !d}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
-  <h1 class="mb-6 text-3xl font-semibold tracking-tight">Net worth</h1>
+  <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
 
   <div class="mb-6 grid gap-4 md:grid-cols-3">
     {#each [
