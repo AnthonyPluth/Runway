@@ -31,7 +31,6 @@ import urllib.request
 
 import jwt
 
-from . import db
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
 MAX_PENDING = 1000         # unfinished sign-ins kept at once

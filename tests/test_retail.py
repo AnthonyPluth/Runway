@@ -383,7 +383,8 @@ class ExtensionApiTests(unittest.TestCase):
         self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})
         self.assertEqual(self.req("POST", "/api/ext/ping", {}, ext)[0], 401)
         with urllib.request.urlopen(self.base + "/api/retail/extension.zip") as resp:   # to install it from Settings
-            import io, zipfile
+            import io
+            import zipfile
             self.assertIn("runway-orders/manifest.json", zipfile.ZipFile(io.BytesIO(resp.read())).namelist())
         code, st = self.req("GET", "/api/retail")
         self.assertEqual((code, st["token"], st["stores"]["target"]["orders"]), (200, False, 0))
