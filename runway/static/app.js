@@ -32,16 +32,24 @@ const relDay = (s, today) => {
   return fmtDate(s);
 };
 
+// Reads belong to the page that asked for them: moving to another page (or redrawing this one) cancels them, and a
+// cancelled read never answers, so a slow reply can't draw the old page over the new one. `keep` opts out.
+let pageLoads = new AbortController();
 async function api(path, opts = {}) {
   const init = { method: opts.method || "GET", headers: {} };
   if (init.method !== "GET") init.headers["X-Runway"] = "1";
   if (opts.body !== undefined) { init.headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
-  const res = await fetch(path, init);
+  const page = init.method === "GET" && !opts.keep ? pageLoads : null;
+  if (page) init.signal = page.signal;
+  let res;
+  try { res = await fetch(path, init); }
+  catch (err) { if (page?.signal.aborted) return new Promise(() => {}); throw err; }
   if (res.status === 401) {   // signed out (session expired): go sign in, then come back here
     location.href = "/auth/login?next=" + encodeURIComponent("/" + location.hash);
     throw new Error("Signing you in again…");
   }
   const data = await res.json().catch(() => ({}));
+  if (page?.signal.aborted) return new Promise(() => {});
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
@@ -92,7 +100,7 @@ function categoryOptions(selected, { blank = true, canHoldChildren = false, excl
 // ------------------------------------------------------------------------------------------ state / header
 let STATE = {};
 async function refreshState() {
-  STATE = await api("/api/state");
+  STATE = await api("/api/state", { keep: true });
   $$("#review-badge, .review-count").forEach((b) => { b.hidden = !STATE.review_count; b.textContent = STATE.review_count || ""; });
   showSyncStatus();
   const ver = $("#brand-ver");   // the running version, next to the name (hover for the full build)
@@ -120,10 +128,30 @@ function showSyncStatus() {
   } else { s.textContent = STATE.connected ? "Not synced yet" : "Bank not connected"; dot.classList.add(STATE.connected ? "busy" : "bad"); }
 }
 
+// Dragging sideways across a chart moves its readout; dragging up or down still scrolls the page.
+function chartTouch(hit, move) {
+  let start = null;
+  hit.addEventListener("touchstart", (e) => { start = e.touches[0]; }, { passive: true });
+  hit.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    if (start && Math.abs(t.clientY - start.clientY) > Math.abs(t.clientX - start.clientX)) return;
+    move(t.clientX);
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
+}
+
 // ------------------------------------------------------------------------------------------ router
+// True while you're typing or have an editor open, when redrawing the page would throw away what you've entered.
+const EDITORS = ".cost-row, .tracked-editor, .split-edit, .order-edit, .rec-picker, .rule-editor, .rm-detail";
+function editing() {
+  const f = document.activeElement;
+  return !!(f && ["INPUT", "TEXTAREA", "SELECT"].includes(f.tagName)) || !!document.querySelector(EDITORS);
+}
 const PAGES = { overview: renderOverview, budget: renderBudget, reports: renderReports, investments: renderInvestments, networth: renderNetWorth, review: renderReview, transactions: renderTransactions,
   recurring: renderRecurring, setup: renderSetup };
 async function route() {
+  pageLoads.abort(); pageLoads = new AbortController();
+  const loads = pageLoads;
   let [page, sub] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
   if (page === "settings") page = "setup";
   if (!PAGES[page]) page = "overview";
@@ -131,7 +159,7 @@ async function route() {
   $$("[data-page]").forEach((a) => a.classList.toggle("active", a.dataset.page === navPage));
   const on = $(`.nav a[data-page="${navPage}"]`);
   if (on && window.innerWidth <= 860) on.scrollIntoView({ block: "nearest", inline: "center" });
-  try { await PAGES[page]($("#app"), sub); } catch (err) { console.error(err); $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
+  try { await PAGES[page]($("#app"), sub); } catch (err) { console.error(err); if (loads === pageLoads) $("#app").innerHTML = `<div class="card">Something went wrong: ${esc(err.message)}</div>`; }
 }
 window.addEventListener("hashchange", route);
 // Charts are drawn to fit their box, so redraw the page when the window width changes enough to matter
@@ -140,10 +168,7 @@ let lastWidth = window.innerWidth, resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
-    if (Math.abs(window.innerWidth - lastWidth) < 60) return;
-    const f = document.activeElement;
-    if (f && (f.tagName === "INPUT" || f.tagName === "TEXTAREA" || f.tagName === "SELECT")) return;
-    if (document.querySelector(".cost-row")) return;   // an editor is open
+    if (Math.abs(window.innerWidth - lastWidth) < 60 || editing()) return;
     lastWidth = window.innerWidth;
     route();
   }, 300);
@@ -314,7 +339,7 @@ function cardsTable(cards) {
   return `<table id="cards-table"><tr><th>Card</th><th class="num">Statement</th><th class="num">Due</th>
       <th class="num" title="Average spending per statement over the last 3 statements; used to forecast future payments">Avg / stmt</th></tr>
     ${cards.map((c) => {
-      const soon = c.remaining > 0 && (parseDate(c.due_date) - parseDate(new Date().toISOString().slice(0, 10))) / 864e5 <= 7;
+      const soon = c.remaining > 0 && (parseDate(c.due_date) - parseDate(isoDay(new Date()))) / 864e5 <= 7;
       return `<tr><td><div class="card-name">${acctLabel(c.id, c.name)}</div><div class="cell-sub">owes ${fmt(c.owed_now)} now</div></td>
       <td class="num"><button class="ev-amt stmt-amt" data-key="${esc(c.statement_key)}" data-amount="${c.statement_balance}"
           title="Closed ${fmtDate(c.last_close)} · click to correct it">${fmt(c.statement_balance)}</button>
@@ -491,7 +516,7 @@ function drawChart(host, fc) {
     tip.style.top = Math.max(0, (cy / H) * r.height - 60) + "px";
   };
   hit.addEventListener("mousemove", (e) => move(e.clientX));
-  hit.addEventListener("touchmove", (e) => { move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
+  chartTouch(hit, move);
   hit.addEventListener("mouseleave", () => { hover.style.display = "none"; tip.hidden = true; });
 }
 
@@ -559,11 +584,14 @@ async function renderTxPage(el, mode) {
     $("#up-all", box)?.addEventListener("click", () => { upcomingAll = true; showUpcoming(); });
   };
 
+  let loadSeq = 0;
   const load = async () => {
+    const seq = ++loadSeq;
     showUpcoming();
     const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope, limit: "300" });
     if (review) qs.set("review", "1");
     const data = await api(`/api/transactions?${qs}`);
+    if (seq !== loadSeq) return;  // a newer search has been asked for meanwhile
     const box = $("#tx-list");
     if (!box || !$("#tx-count")) return;  // you've moved to another page meanwhile
     const filtered = f.q || f.account || f.category || f.month;
@@ -643,7 +671,7 @@ function txRow(t, review) {
     <td class="muted" style="white-space:nowrap">${fmtDate(t.posted)}${t.pending ? `<span class="tag">pending</span>` : ""}</td>
     <td><div class="merchant">${merchantIcon(t)}${esc(t.payee || t.description)}
         <button class="rec-btn ${linked ? "linked" : ""}" title="${linked ? `Recurring: ${esc(t.recurring_name)} (click to change)` : "Link to a recurring item"}">↻${linked ? `<span class="rec-name">${esc(t.recurring_name)}</span>` : ""}</button>
-        ${t.retail ? `<button class="tag order-tag" title="See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order">${orderLabel(t.retail)}</button>` : ""}</div>
+        ${t.retail ? `<button class="tag order-tag" title="See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order">${esc(orderLabel(t.retail))}</button>` : ""}</div>
       <div class="desc" title="${esc(t.description)}">${esc(t.description)}</div>
       <div class="desc show-sm">${acctLabel(t.account_id, t.account_name)}</div></td>
     <td class="muted hide-sm">${acctLabel(t.account_id, t.account_name)}</td>
@@ -986,7 +1014,7 @@ function relTime(iso) {
   if (s < 90) return "just now";
   if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
   if (s < 129600) return `${Math.round(s / 3600)} hours ago`;
-  return fmtDate(d.toISOString().slice(0, 10), { month: "short", day: "numeric", year: "numeric" });
+  return fmtDate(isoDay(d), { month: "short", day: "numeric", year: "numeric" });
 }
 
 // Link a transaction to a recurring item, start a new one from it, or mark it as not recurring.
@@ -2307,7 +2335,7 @@ function lineChart(host, xs, series, opts = {}) {
   };
   const hit = $(".hit", host);
   hit.addEventListener("mousemove", (e) => move(e.clientX));
-  hit.addEventListener("touchmove", (e) => { move(e.touches[0].clientX); e.preventDefault(); }, { passive: false });
+  chartTouch(hit, move);
   hit.addEventListener("mouseleave", () => { hover.style.display = "none"; tip.hidden = true; });
 }
 
@@ -3484,10 +3512,9 @@ async function syncOnVisit() {
       await refreshState();
       if (STATE.syncing) return;
       clearInterval(autoSyncWatch); autoSyncWatch = null;
-      if (STATE.last_sync_ok !== before && STATE.last_log?.ok) toast(`Synced · ${STATE.last_log.message}`);
-      const f = document.activeElement;
-      const busy = f && ["INPUT", "TEXTAREA", "SELECT"].includes(f.tagName) || document.querySelector(".cost-row, .tracked-editor");
-      if (!busy) route();
+      const synced = STATE.last_sync_ok !== before && STATE.last_log?.ok;
+      if (!editing()) { if (synced) toast(`Synced · ${STATE.last_log.message}`); route(); }
+      else if (synced) toast(`Synced · ${STATE.last_log.message}. Change page to see the new data.`);
     }, 3000);
   } catch (err) { console.error(err); }
 }
@@ -3507,9 +3534,23 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
   navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("Service worker:", err));
 }
 
-(async () => {
-  await refreshState();
+// If Runway can't be reached when the app opens (offline, or the server is restarting), say so and keep trying
+// every minute (and when you're back online) instead of leaving a blank page.
+let booted = false;
+async function boot() {
+  try { await refreshState(); }
+  catch (err) {
+    console.error(err);
+    $("#app").innerHTML = `<div class="card"><h3>Can't reach Runway</h3><p class="muted">${esc(err.message)}</p>
+      <button class="btn" id="boot-retry">Try again</button></div>`;
+    $("#boot-retry").addEventListener("click", boot);
+    return;
+  }
+  if (booted) return;
+  booted = true;
   if (location.pathname === "/plaid/oauth") resumePlaidOAuth(); else route();
   syncOnVisit();
-  setInterval(refreshState, 60_000);
-})();
+}
+window.addEventListener("online", () => { if (!booted) boot(); });
+setInterval(() => (booted ? refreshState().catch((err) => console.error(err)) : boot()), 60_000);
+boot();

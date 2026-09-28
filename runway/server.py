@@ -14,6 +14,8 @@ mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 import os
 import secrets
+import socket
+import sys
 import threading
 import time
 import traceback
@@ -197,9 +199,12 @@ def sync_on_visit() -> dict:
             and _older_than(db.get_setting(conn, "last_auto_sync_attempt"), minutes=VISIT_SYNC_MINUTES)
         has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
         invest = has_inv and _older_than(db.get_setting(conn, "last_inv_sync"), minutes=VISIT_SYNC_MINUTES)
-        if bank:
+        # Only a sync that starts counts as an attempt: one skipped for a running sync would otherwise put the next
+        # visit's sync off for VISIT_SYNC_MINUTES.
+        start = (bank or invest) and not _sync_lock.locked() and not _inv_lock.locked()
+        if start and bank:
             db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
-    if (bank or invest) and not _sync_lock.locked() and not _inv_lock.locked():
+    if start:
         threading.Thread(target=_sync_everything, args=(bank, invest), daemon=True).start()
         return {"started": True}
     return {"started": False}
@@ -544,11 +549,13 @@ def ext_start(conn, body):
 
 
 def ext_amazon_transactions(conn, body):
-    return retail.amazon_transactions(conn, str(body.get("html") or ""))
+    seen = body.get("seen")
+    return retail.amazon_transactions(conn, str(body.get("html") or ""), seen if isinstance(seen, dict) else None)
 
 
 def ext_amazon_order(conn, body):
-    return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""))
+    return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""),
+                               final=body.get("final", True) is not False)
 
 
 def ext_target_history(conn, body):
@@ -556,11 +563,30 @@ def ext_target_history(conn, body):
 
 
 def ext_target_order(conn, body):
-    return retail.target_order(conn, str(body.get("order_number") or ""), body.get("data"))
+    return retail.target_order(conn, str(body.get("order_number") or ""), body.get("data"),
+                               final=body.get("final", True) is not False)
+
+
+_retail_categorize_lock = threading.Lock()
+
+
+def _categorize_retail(retailer: str) -> None:
+    with _retail_categorize_lock:   # one at a time ("Import both" finishes Amazon, then Target)
+        try:
+            with db.session() as conn:
+                retail.categorize_and_apply(conn, retailer)
+        except Exception:
+            traceback.print_exc()
 
 
 def ext_finish(conn, body):
-    return retail.finish(conn, body.get("retailer"))
+    """Matches and answers straight away; categorizing the new items (the AI model can take a while, longer than
+    the browser lets the extension wait) carries on after the answer, once this request's writes are saved."""
+    retailer = body.get("retailer")
+    out = retail.finish(conn, retailer, complete=body.get("complete", True) is not False, categorize_now=False)
+    conn.commit()
+    threading.Thread(target=_categorize_retail, args=(retailer,), daemon=True).start()
+    return out
 
 
 def ext_carta_data(conn, body):
@@ -1154,6 +1180,7 @@ def api_connect(conn, _q, body):
         if token.startswith("http") and not token.startswith("https://"):
             raise ApiError("A SimpleFIN access URL must start with https://.")
         access_url = token if token.startswith("https://") else simplefin.claim_setup_token(token)
+        simplefin.check_address(access_url)
         simplefin.fetch_accounts(access_url, date.today() - timedelta(days=3))  # prove it works before saving
     except simplefin.SimpleFinError as e:
         raise ApiError(str(e), 502)
@@ -1547,6 +1574,8 @@ def _match(pattern: str, path: str):
 MAX_JSON_BODY = 1024 * 1024          # API requests are small; anything bigger is refused before it's read
 MAX_RESTORE_BODY = 200 * 1024 * 1024
 REQUEST_TIMEOUT = 60                 # seconds a client may stall while sending or receiving (slow-client protection)
+HEADER_DEADLINE = 30                 # seconds to send the request line and headers in all, however it's trickled in
+MIN_BODY_RATE = 16 * 1024            # bytes a second a request body must average, on top of REQUEST_TIMEOUT
 MAX_CONCURRENT_REQUESTS = 64
 
 # Plaid Link (Settings → Connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
@@ -1575,6 +1604,28 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "Runway"
     sys_version = ""                  # don't advertise the Python version
     timeout = REQUEST_TIMEOUT
+
+    def setup(self):
+        super().setup()
+        self._deadline(HEADER_DEADLINE)
+
+    def finish(self):
+        self._deadline(None)
+        super().finish()
+
+    def _deadline(self, seconds: float | None) -> None:
+        """REQUEST_TIMEOUT is per read, so a client sending a byte every few seconds would never hit it. Server hangs up
+        once this overall deadline passes (None: no deadline, while Runway itself is working)."""
+        set_deadline = getattr(self.server, "set_deadline", None)
+        if set_deadline:
+            set_deadline(self.connection, seconds)
+
+    def _read_body(self, n: int) -> bytes:
+        self._deadline(REQUEST_TIMEOUT + n / MIN_BODY_RATE)
+        try:
+            return self.rfile.read(n)
+        finally:
+            self._deadline(None)
 
     def log_message(self, fmt, *args):
         pass   # the standard per-request line includes query strings (sign-in codes); log_request writes our own
@@ -1709,6 +1760,7 @@ class Handler(BaseHTTPRequestHandler):
         super().send_response(code, message)
 
     def _dispatch(self, method: str) -> None:
+        self._deadline(None)   # the headers are in
         self._started, self._responded = time.monotonic(), False
         self._ext_call = False
         try:
@@ -1796,6 +1848,8 @@ class Handler(BaseHTTPRequestHandler):
             if not found:
                 return self._send(404, b"", "text/plain")
             data, ctype = found
+            if ctype not in merchants.TYPES:   # a backup can hold anything; only ever serve an image
+                return self._send(404, b"", "text/plain")
             etag = '"' + hashlib.sha256(data).hexdigest()[:20] + '"'
             if self.headers.get("If-None-Match") == etag:
                 self.send_response(304)
@@ -1809,6 +1863,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "private, max-age=604800")
             self.send_header("ETag", etag)
             self._security_headers()
+            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")   # opened directly, it's inert
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(data)
@@ -1849,13 +1904,30 @@ class Handler(BaseHTTPRequestHandler):
             if not n:
                 return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
             try:
-                data = backup.load(self.rfile.read(n))
-                with db.session() as conn:
-                    counts = backup.restore(conn, data)
-                with db.session() as conn:
-                    sfinvest.repair_stored(conn)
+                data = backup.load(self._read_body(n))
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
+            # No sync may write while the data is replaced: its rows would be mixed into the restored ones.
+            if not _sync_lock.acquire(blocking=False):
+                return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+            try:
+                if not _inv_lock.acquire(blocking=False):
+                    return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+                try:
+                    with db.session() as conn:
+                        counts = backup.restore(conn, data)
+                    with db.session() as conn:
+                        sfinvest.repair_stored(conn)
+                finally:
+                    _inv_lock.release()
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            except sqlalchemy.exc.OperationalError as e:
+                if "locked" in str(e):
+                    return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
+                return self._error(e)
+            finally:
+                _sync_lock.release()
             return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
@@ -1865,7 +1937,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if n:
                 try:
-                    body = json.loads(self.rfile.read(n).decode() or "{}")
+                    body = json.loads(self._read_body(n).decode() or "{}")
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     return self._json(400, {"error": "Bad JSON"})
                 if not isinstance(body, dict):
@@ -1920,7 +1992,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/connections", "Back to Settings"))
         try:
             with db.session() as conn:
-                if not q.get("mock"):
+                if q.get("mock"):
+                    # The mock environment has no sign-in to prove this came from Settings, so a link from another site
+                    # mustn't be able to start a sync.
+                    if (db.get_setting(conn, "carta_env") != "mock"
+                            or (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site"):
+                        return self._page(400, "Carta wasn't connected", "Connect Carta from Settings.",
+                                          ("/#setup/connections", "Back to Settings"))
+                else:
                     carta.finish_authorize(conn, q.get("code", ""), q.get("state", ""))
             with db.session() as conn:
                 carta.sync(conn)
@@ -1944,16 +2023,17 @@ class Handler(BaseHTTPRequestHandler):
         if n is None:
             return
         try:
-            body = json.loads(self.rfile.read(n).decode() or "{}") if n else {}
+            body = json.loads(self._read_body(n).decode() or "{}") if n else {}
         except (json.JSONDecodeError, UnicodeDecodeError):
             return self._json(400, {"error": "Bad JSON"})
         if not isinstance(body, dict):
             return self._json(400, {"error": "Bad JSON"})
         try:
             with db.session() as conn:
-                return self._json(200, fn(conn, body))
+                result = fn(conn, body)
+            return self._json(200, result)   # once it's saved, so the extension's next call sees it
         except retail.RetailError as e:
-            return self._json(400, {"error": str(e)})
+            return self._json(400, {"error": str(e), **({"code": e.code} if e.code else {})})
         except sqlalchemy.exc.OperationalError as e:
             if "locked" in str(e):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
@@ -2052,7 +2132,41 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, *a, **k):
         self._slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+        self._deadlines: dict = {}
+        self._deadlines_lock = threading.Lock()
+        self._closed = threading.Event()
         super().__init__(*a, **k)
+        threading.Thread(target=self._hang_up_late, daemon=True).start()
+
+    def set_deadline(self, sock, seconds: float | None) -> None:
+        with self._deadlines_lock:
+            if seconds is None:
+                self._deadlines.pop(sock, None)
+            else:
+                self._deadlines[sock] = time.monotonic() + seconds
+
+    def _hang_up_late(self) -> None:
+        """Close connections past their deadline (see Handler._deadline), so trickling clients can't hold every slot."""
+        while not self._closed.wait(0.5):
+            now = time.monotonic()
+            with self._deadlines_lock:
+                late = [sock for sock, t in self._deadlines.items() if t < now]
+                for sock in late:
+                    del self._deadlines[sock]
+            for sock in late:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)   # the handler's blocked read returns, and it finishes
+                except OSError:
+                    pass
+
+    def server_close(self):
+        self._closed.set()
+        super().server_close()
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], OSError):
+            return   # the client went away (or was hung up on): nothing worth a traceback
+        super().handle_error(request, client_address)
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(timeout=REQUEST_TIMEOUT):

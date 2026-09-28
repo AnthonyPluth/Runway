@@ -14,7 +14,6 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from . import db
 
 MAX_LOGO = 256 * 1024
 TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}   # never SVG: it can carry scripts

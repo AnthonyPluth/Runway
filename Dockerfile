@@ -5,7 +5,7 @@ FROM python:3.14-slim AS deps
 ENV PIP_NO_CACHE_DIR=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=true \
     POETRY_NO_INTERACTION=1
-RUN pip install "poetry>=2.0,<3.0"
+RUN pip install "poetry==2.5.1"
 WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 RUN poetry install --only main --no-root --no-ansi
@@ -43,6 +43,6 @@ VOLUME ["/data"]
 EXPOSE 8765
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=4)" || exit 1
+  CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/healthz' % os.environ.get('RUNWAY_PORT', '8765'), timeout=4)" || exit 1
 
 CMD ["python", "run.py"]

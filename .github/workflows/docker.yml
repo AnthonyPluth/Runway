@@ -6,7 +6,8 @@ name: Docker image
 #
 # Versions: each push bumps the patch number (v1.0.0 -> v1.0.1). Put "#minor" in a commit message (or start it with
 # "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
-# Pull requests (including Dependabot's) only run the tests.
+# Pull requests (including Dependabot's) only run the tests. Only main is ever released: a manual run from another
+# branch just runs the tests, and re-running an old build never moves :latest back to it.
 on:
   push:
     branches: [main]
@@ -16,7 +17,9 @@ on:
 
 concurrency:
   group: docker-image-${{ github.ref }}
-  cancel-in-progress: true   # a newer push replaces a build that's still running
+  # A newer push replaces a pull request's run that's still going. On main a release is never cut off halfway;
+  # the next run waits for it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -28,7 +31,11 @@ jobs:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
       matrix:
+        python: ["3.14"]       # what the image runs (see the Dockerfile)
         database: [sqlite, postgres]
+        include:
+          - python: "3.10"     # the oldest Python pyproject.toml supports
+            database: sqlite
     services:
       postgres:                # used by the postgres run; the sqlite run ignores it
         image: postgres:16
@@ -44,7 +51,7 @@ jobs:
       - uses: actions/setup-python@v7
         id: python
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
 
       # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh.
       - name: Cache Poetry
@@ -54,10 +61,10 @@ jobs:
           path: |
             ~/.local/pipx/venvs/poetry
             ~/.local/bin/poetry
-          key: poetry-${{ runner.os }}-py${{ steps.python.outputs.python-version }}
+          key: poetry-2.5.1-${{ runner.os }}-py${{ steps.python.outputs.python-version }}
       - name: Install Poetry
         if: steps.poetry-cache.outputs.cache-hit != 'true'
-        run: pipx install --python "${{ steps.python.outputs.python-path }}" "poetry>=2.0,<3.0"
+        run: pipx install --python "${{ steps.python.outputs.python-path }}" "poetry==2.5.1"
       - name: Cache dependencies
         uses: actions/cache@v6
         with:
@@ -70,13 +77,19 @@ jobs:
           DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://runway:runway@localhost:5432/runway' || '' }}
         run: poetry run python -m unittest discover -v tests
       - name: Check dependencies for known vulnerabilities
-        if: matrix.database == 'sqlite'
-        run: poetry run pip install --quiet pip-audit && poetry run pip-audit
+        if: matrix.database == 'sqlite' && matrix.python == '3.14'
+        run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
+      - name: Lint (Python with ruff, JavaScript for syntax errors)
+        if: matrix.database == 'sqlite' && matrix.python == '3.14'
+        run: |
+          pipx run "ruff==0.16.9" check .
+          find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
 
-  # Tag the release and build the image in one job, to save starting a second runner.
+  # Build, check and publish the image, then tag the release, in one job, to save starting a second runner.
+  # The tag and Release come last, so a failed or cancelled build never leaves a version with no image.
   image:
     needs: test
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # push the tag and create the release
@@ -89,13 +102,22 @@ jobs:
       - name: Work out the next version
         id: next
         run: |
+          # Only the newest commit on main moves :latest (and :1.2, :1); re-running an older build doesn't.
+          git fetch --quiet origin main
+          newest=$([ "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA" ] && echo true || echo false)
+          echo "newest=$newest" >> "$GITHUB_OUTPUT"
           # Re-running a build for a commit that's already tagged reuses its version.
           existing=$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
           if [ -n "$existing" ]; then
             echo "version=$existing" >> "$GITHUB_OUTPUT"; echo "new=false" >> "$GITHUB_OUTPUT"
             echo "Already tagged $existing"; exit 0
           fi
-          last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          if [ "$newest" != true ]; then
+            echo "::notice::$GITHUB_SHA isn't the newest commit on main any more, so it isn't released."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The last version released from this commit's own history.
+          last=$(git describe --tags --abbrev=0 --first-parent --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
           if [ -z "$last" ]; then
             next=v1.0.0
           else
@@ -109,49 +131,73 @@ jobs:
               next="v${major}.${minor}.$((patch + 1))"
             fi
           fi
+          # Never reuse a version that's already tagged elsewhere (say, by an older release from another branch).
+          while git rev-parse -q --verify "refs/tags/$next" >/dev/null; do
+            IFS=. read -r major minor patch <<< "${next#v}"; next="v${major}.${minor}.$((patch + 1))"
+          done
           echo "version=$next" >> "$GITHUB_OUTPUT"; echo "new=true" >> "$GITHUB_OUTPUT"
           echo "Next version: $next (last: ${last:-none})"
 
-      - name: Tag and publish the release
-        if: steps.next.outputs.new == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.next.outputs.version }}
-        run: |
-          git tag "$VERSION" "$GITHUB_SHA"
-          git push origin "$VERSION"
-          gh release create "$VERSION" --title "Runway $VERSION" --generate-notes --verify-tag
-
       - name: Image name (registry names must be lowercase)
+        if: steps.next.outputs.skip != 'true'
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/runway" >> "$GITHUB_ENV"
 
       - uses: docker/setup-qemu-action@v4
+        if: steps.next.outputs.skip != 'true'
       - uses: docker/setup-buildx-action@v4
+        if: steps.next.outputs.skip != 'true'
+
+      # Start the image and ask it /healthz before anything is published.
+      - name: Build for this runner
+        if: steps.next.outputs.skip != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: runway:smoke
+          build-args: |
+            VERSION=${{ steps.next.outputs.version }}
+          cache-from: type=gha
+      - name: Check the image starts
+        if: steps.next.outputs.skip != 'true'
+        run: |
+          docker run -d --name smoke -p 8765:8765 -e RUNWAY_ALLOW_NO_AUTH=1 -e RUNWAY_NO_SYNC=1 runway:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/healthz; then docker rm -f smoke; exit 0; fi
+            sleep 1
+          done
+          docker logs smoke; exit 1
 
       - uses: docker/login-action@v4
+        if: steps.next.outputs.skip != 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Image tags (latest, 1.2.3, v1.2.3, 1.2 and 1)
+        if: steps.next.outputs.skip != 'true'
         id: tags
         env:
           VERSION: ${{ steps.next.outputs.version }}
+          NEWEST: ${{ steps.next.outputs.newest }}
         run: |
           v="${VERSION#v}"
           IFS=. read -r major minor patch <<< "$v"
           {
             echo "list<<EOF"
-            echo "$IMAGE:latest"
             echo "$IMAGE:$v"
             echo "$IMAGE:v$v"
-            echo "$IMAGE:$major.$minor"
-            echo "$IMAGE:$major"
+            if [ "$NEWEST" = true ]; then
+              echo "$IMAGE:latest"
+              echo "$IMAGE:$major.$minor"
+              echo "$IMAGE:$major"
+            fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Build and push
+        if: steps.next.outputs.skip != 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -167,6 +213,23 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Tag and publish the release
+        if: steps.next.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.next.outputs.version }}
+        run: |
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --title "Runway $VERSION" --generate-notes --verify-tag
+
+  # A third-party action, so it runs on its own with only the permission it needs (no access to the repository).
+  cleanup:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write          # delete old versions from ghcr.io
+    steps:
       - name: Delete untagged leftovers (every released version stays pullable)
         uses: dataaxiom/ghcr-cleanup-action@v1
         with:
