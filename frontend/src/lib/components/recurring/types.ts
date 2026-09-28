@@ -30,6 +30,7 @@ export interface RecurringItem {
   matched_count: number;
   expected_amount?: number | null;
   next_date?: string | null;
+  last_matched?: MatchedTx | null;
   missed?: (Missed & { recurring_id: number })[];
 }
 
@@ -45,7 +46,7 @@ export interface Suggestion {
 }
 
 /** A matched transaction, as GET /api/transactions?recurring=… lists it. */
-export interface MatchedTx { id: string; posted: string; description: string; amount: number }
+export interface MatchedTx { id: string; posted: string; description: string; amount: number; category?: string | null }
 
 export const FREQ_OPTIONS: [string, string][] = [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"],
   ["semimonthly", "Twice a month (set days)"], ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"],
