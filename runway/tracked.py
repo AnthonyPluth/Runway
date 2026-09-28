@@ -118,9 +118,9 @@ def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> 
         if not ticker and not name:
             continue
         try:
-            shares = float(str(r.get("shares") or 0).replace(",", ""))
-            pct = float(str(r.get("pct") or 0).replace("%", ""))
-            val = float(str(r.get("value") or 0).replace(",", "").replace("$", ""))
+            shares = db.number(str(r.get("shares") or 0).replace(",", ""))
+            pct = db.number(str(r.get("pct") or 0).replace("%", ""))
+            val = db.number(str(r.get("value") or 0).replace(",", "").replace("$", ""))
         except ValueError:
             raise ValueError(f"Check the numbers for {ticker or name}")
         if shares < 0 or not 0 <= pct <= 100 or val < 0:
