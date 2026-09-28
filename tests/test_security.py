@@ -77,19 +77,19 @@ class SecretsTests(unittest.TestCase):
         self.assertEqual(secretbox.encrypt_stored(self.c), 0)              # nothing left to do
 
     def test_backups_carry_secrets_decrypted_and_restore_encrypted(self):
-        db.set_setting(self.c, "rentcast_api_key", "rc-key")
+        db.set_setting(self.c, "realie_api_key", "rl-key")
         self.c.execute("INSERT INTO plaid_items(item_id, access_token) VALUES ('i1', ?)", (secretbox.encrypt("access-1"),))
         data = backup.load(backup.dump(self.c))
         rows = data["tables"]["settings"]["rows"]
-        self.assertIn(["rentcast_api_key", "rc-key"], [r[:2] for r in rows])
+        self.assertIn(["realie_api_key", "rl-key"], [r[:2] for r in rows])
         self.assertIn("access-1", data["tables"]["plaid_items"]["rows"][0])
         other = os.path.join(self.tmp.name, "o.db")
         db.init(other)
         with db.session(other) as c2:
             backup.restore(c2, data)
         with db.session(other) as c2:
-            self.assertTrue(c2.execute("SELECT value FROM settings WHERE key='rentcast_api_key'").fetchone()[0].startswith("enc:v1:"))
-            self.assertEqual(db.get_setting(c2, "rentcast_api_key"), "rc-key")
+            self.assertTrue(c2.execute("SELECT value FROM settings WHERE key='realie_api_key'").fetchone()[0].startswith("enc:v1:"))
+            self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
 
     def test_key_rotation_and_a_wrong_key(self):
         db.set_setting(self.c, "openrouter_api_key", "sk-1")
