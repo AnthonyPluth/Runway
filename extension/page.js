@@ -32,6 +32,18 @@ function targetDiscover(fallbackBase) {
   return { base: fallbackBase, key: m ? m[1] : null, from: m ? "settings" : null, token, signedIn: !/login|signin/i.test(location.pathname) };
 }
 
+// The target.com data addresses this page called that mention an order (its order details page calling for its items).
+function targetCalls(order) {
+  const seen = performance.getEntriesByType("resource")
+    .filter((e) => e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest")
+    .map((e) => e.name)
+    .filter((u) => {
+      try { return /(^|\.)target\.com$/.test(new URL(u).hostname) && (u.includes(order) || u.includes(encodeURIComponent(order))); }
+      catch (_) { return false; }
+    });
+  return [...new Set(seen)];
+}
+
 // Carta: the data addresses the page has used, JSON embedded in the page, and links to other holdings pages.
 function cartaLook() {
   const same = (u) => { try { return /(^|\.)carta\.com$/.test(new URL(u, location.href).hostname); } catch (_) { return false; } };
@@ -51,5 +63,6 @@ const PAGE_COMMANDS = {
   fetch: [pageFetch, "ISOLATED"],
   go: [pageGo, "ISOLATED"],
   discover: [targetDiscover, "MAIN"],
+  calls: [targetCalls, "MAIN"],
   look: [cartaLook, "ISOLATED"],
 };
