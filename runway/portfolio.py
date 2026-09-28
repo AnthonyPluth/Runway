@@ -41,7 +41,12 @@ def asset_class(sec: dict) -> str:
 
 def _accounts(conn) -> list[dict]:
     """Investment accounts. One is hidden if you hid it here (inv_accounts.hidden) or hid the account it is in
-    Settings -> Accounts: SimpleFIN's 'sf:<account id>', or the account a Plaid one was matched to."""
+    Settings -> Accounts: SimpleFIN's 'sf:<account id>', or the account a Plaid one was matched to.
+
+    An account connected through both SimpleFIN and Plaid is one account: the Plaid one, which has the fuller data
+    (holdings, cost basis, activity), stands for it, and the SimpleFIN one is marked duplicate_of it and never counted
+    (the page leaves it out)."""
+    from . import plaid
     rows = db.rows(conn.execute(
         "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name, "
         "(SELECT COUNT(*) FROM manual_positions m WHERE m.account_id=a.id) AS tracked, "
@@ -50,10 +55,27 @@ def _accounts(conn) -> list[dict]:
         "LEFT JOIN plaid_items i ON i.item_id=a.item_id "
         "LEFT JOIN accounts ra ON ra.id = (CASE WHEN a.source='simplefin' THEN substr(a.id, 4) ELSE a.account_id END) "
         "ORDER BY institution_name, a.name"))
-    # A Plaid account matched to your SimpleFIN one is that account, with the fuller data: show it once.
-    covered = {"sf:" + a["account_id"] for a in rows if a["source"] == "plaid" and a["account_id"] and not a["hidden"]}
+    from_plaid = [a for a in rows if a["source"] == "plaid"]
+
+    def twin(sf: dict) -> dict | None:
+        """The Plaid account a SimpleFIN one also is: the one matched to it (Settings), else the only one at the same
+        institution whose last digits are in its name ("Individual Brokerage (8933)" is E*TRADE's ••8933)."""
+        matched = [p for p in from_plaid if p["account_id"] and p["account_id"] == sf["id"][3:]]
+        if matched:
+            return matched[0]
+        same = [p for p in from_plaid if p["mask"] and re.search(r"(?<!\d)" + re.escape(p["mask"]) + r"(?!\d)", sf["name"] or "")
+                and plaid._same_institution(sf["institution_name"], p["institution_name"])]
+        return same[0] if len(same) == 1 else None
+
+    also = set()
     for a in rows:
-        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] or a["id"] in covered else 0
+        t = twin(a) if a["source"] == "simplefin" else None
+        a["duplicate_of"] = t["id"] if t else None
+        if t:
+            also.add(t["id"])
+        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] or t else 0
+    for a in rows:
+        a["also_simplefin"] = a["id"] in also
     return rows
 
 
@@ -626,5 +648,5 @@ def overview(conn, period: str = "1Y", today: date | None = None) -> dict:
         "holdings": hold, "allocation": alloc, "income": inc,
         "history": {**hist, "benchmark": bench}, "performance": perf, "periods": periods,
         "xray": xray(conn, hold, alloc, inc, today), "fire": fire_defaults(conn, hist, today),
-        "accounts": _accounts(conn), "activity": activity(conn, 300),
+        "accounts": [a for a in _accounts(conn) if not a["duplicate_of"]], "activity": activity(conn, 300),
     }

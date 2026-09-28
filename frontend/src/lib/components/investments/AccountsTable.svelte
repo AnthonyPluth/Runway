@@ -10,13 +10,13 @@
   import type { InvAccount, SimplefinSeen } from "./types";
 
   // The investment accounts: untick one to leave it out of the page, and enter the funds of a SimpleFIN account
-  // that only sends a balance.
+  // that only sends a balance. An account connected through both Plaid and SimpleFIN is listed once, as its Plaid one.
   let { accounts, seen, onchanged }: { accounts: InvAccount[]; seen: SimplefinSeen[]; onchanged: () => void } = $props();
 
   const seenBy = $derived(Object.fromEntries(seen.map((x) => [x.id || "", x])));
   const sfSeen = (a: InvAccount) => seenBy[a.id.slice(3)];
   const via = (a: InvAccount) => {
-    if (a.source !== "simplefin") return `via Plaid${a.subtype ? ` · ${a.subtype}` : ""}`;
+    if (a.source !== "simplefin") return `via Plaid${a.subtype ? ` · ${a.subtype}` : ""}${a.also_simplefin ? " · also in SimpleFIN" : ""}`;
     const s = sfSeen(a);
     return `via SimpleFIN${s ? ` · ${s.positions ? `${s.positions} positions` : "balance only"}` : ""}`;
   };
@@ -67,21 +67,3 @@
     </tbody>
   </table>
 </div>
-{#if seen.length}
-  <details class="mt-3">
-    <summary class="cursor-pointer text-sm text-muted-foreground">What SimpleFIN sends for each account</summary>
-    <div class="overflow-x-auto">
-      <table class="mt-2 text-sm">
-        <tbody>
-          {#each seen as x, i (i)}
-            <tr class="border-t border-border [&>td]:py-1.5 [&>td]:pr-4">
-              <td>{x.org ?? ""} · {x.name}</td>
-              <td>{x.positions ? `${x.positions} positions` : "balance only, no positions"}</td>
-              <td class="text-muted-foreground">{x.fields.join(", ")}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
-  </details>
-{/if}
