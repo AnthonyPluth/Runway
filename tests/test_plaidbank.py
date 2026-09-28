@@ -365,6 +365,17 @@ class PlaidBankTests(unittest.TestCase):
         plaidbank.sync_item(self.c, "item-b", TODAY)
         self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id LIKE '%pl:i1'").fetchone())
 
+    def test_an_account_already_linked_cant_be_linked_again(self):
+        self.link()   # sf-csp is linked to p-csp
+        with self.assertRaises(ValueError):
+            plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
+        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-csp")
+        self.assertEqual(self.c.execute("SELECT ignored FROM plaid_accounts WHERE plaid_account_id='p-new'").fetchone()[0], 0)
+        plaidbank.match(self.c, "p-csp", "sf-csp", TODAY)   # the same link again is fine
+        plaidbank.match(self.c, "p-csp", "", TODAY)         # unlinked: free for another
+        plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
+        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-new")
+
     def test_one_plaid_account_is_one_of_your_accounts(self):
         self.link()
         with self.assertRaises(Exception):
