@@ -24,7 +24,9 @@ self.addEventListener("fetch", (event) => {
   event.respondWith((async () => {
     try {
       const res = await fetch(event.request);
-      if (res.ok && !res.redirected) (await caches.open(CACHE)).put(key, res.clone());
+      // Only the app's own page is kept as the page to open offline (not, say, a link straight to /app.js).
+      const page = event.request.mode !== "navigate" || (res.headers.get("Content-Type") || "").startsWith("text/html");
+      if (res.ok && !res.redirected && page) (await caches.open(CACHE)).put(key, res.clone());
       return res;
     } catch (err) {
       const cached = await caches.match(key);
@@ -48,7 +50,9 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const target = new URL(event.notification.data?.url || "/", location.origin).href;
+  let target = new URL(event.notification.data?.url || "/", location.origin);
+  if (target.origin !== location.origin) target = new URL("/", location.origin);   // a notification only opens Runway
+  target = target.href;
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const w of wins) {

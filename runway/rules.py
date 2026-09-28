@@ -94,10 +94,14 @@ def split_parts(amount: float, split: list[dict]) -> list[dict]:
     """A transaction's amount spread by percentages, in whole cents that add up exactly."""
     cents = round(abs(amount) * 100)
     sign = -1 if amount < 0 else 1
-    shares = [(p["category"], cents * float(p["percent"]) / 100) for p in split]
+    whole = sum(float(p["percent"]) for p in split) or 100.0   # shares of the parts' own total, in case it isn't quite 100
+    shares = [(p["category"], cents * float(p["percent"]) / whole) for p in split]
     parts = [[c, int(s), s - int(s)] for c, s in shares]
-    for p in sorted(parts, key=lambda p: -p[2])[:cents - sum(p[1] for p in parts)]:
+    left = cents - sum(p[1] for p in parts)
+    for p in sorted(parts, key=lambda p: -p[2])[:max(0, left)]:
         p[1] += 1
+    for p in sorted(parts, key=lambda p: -p[1])[:max(0, -left)]:   # never more than the whole
+        p[1] -= 1
     return [{"category": c, "amount": sign * n / 100} for c, n, _ in parts if n]
 
 
@@ -111,7 +115,11 @@ def apply_actions(conn, tx: dict, acts: dict) -> str | None:
     if acts.get("split"):
         parts = split_parts(tx["amount"], acts["split"])
         if len(parts) >= 2:
-            splits.set_splits(conn, tx["id"], parts)
+            try:
+                splits.set_splits(conn, tx["id"], parts)
+            except splits.SplitError:   # one transaction the rule can't split shouldn't stop the rest: ask about it
+                conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tx["id"],))
+                return None
             conn.execute("UPDATE transactions SET category=COALESCE(category, ?), category_source='rule', confidence=1 "
                          "WHERE id=?", (parts[0]["category"], tx["id"]))
             done = "split"
@@ -141,7 +149,7 @@ def clean(conn, body: dict) -> dict:
             r[k] = None
             continue
         try:
-            r[k] = round(abs(float(v)), 2)
+            r[k] = round(abs(db.number(v)), 2)
         except (TypeError, ValueError):
             raise RuleError("Amounts must be numbers")
     if r["amount_min"] is not None and r["amount_max"] is not None and r["amount_min"] > r["amount_max"]:
@@ -172,7 +180,7 @@ def clean(conn, body: dict) -> dict:
         for p in split:
             cat = (p or {}).get("category")
             try:
-                pct = round(float((p or {}).get("percent")), 2)
+                pct = round(db.number((p or {}).get("percent")), 2)
             except (TypeError, ValueError):
                 raise RuleError("Give every part a percentage")
             if not cat or not known(cat):
@@ -180,7 +188,7 @@ def clean(conn, body: dict) -> dict:
             if pct <= 0:
                 raise RuleError("Give every part a percentage")
             parts.append({"category": cat, "percent": pct})
-        if abs(sum(p["percent"] for p in parts) - 100) > 0.01:
+        if round(sum(p["percent"] for p in parts), 2) != 100:
             raise RuleError("The parts of a split must add up to 100%")
         r["split"] = json.dumps(parts)
         r["category"] = None   # a split decides the categories

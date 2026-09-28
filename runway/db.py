@@ -315,7 +315,8 @@ def _upgrade_legacy(sa_conn) -> None:
     for table in schema.metadata.sorted_tables:
         if table.name in baseline:
             for index in table.indexes:
-                index.create(sa_conn, checkfirst=True)
+                if all(c.name in baseline[table.name] for c in index.columns):   # later ones come with their migration
+                    index.create(sa_conn, checkfirst=True)
     if sa_conn.dialect.name == "postgresql":
         sa_conn.exec_driver_sql(schema.POSTGRES_INSTR)
 
@@ -348,6 +349,15 @@ def init(path: str | None = None) -> None:
 
 # Categories the app itself relies on; they can't be renamed or removed.
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
+
+
+def number(value) -> float:
+    """float(), for a number someone typed or sent: "nan" and "inf" are refused (float() takes them, and one saved
+    would spoil every sum it's in, or stop the sync that uses it)."""
+    n = float(value)
+    if n != n or n in (float("inf"), float("-inf")):
+        raise ValueError(f"{value!r} isn't a number")
+    return n
 
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import base64
+import http.client
+import ipaddress
 import json
 import re
+import socket
 import ssl
 import time
 import urllib.error
@@ -11,12 +14,13 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import sfinvest, splits
+from . import db, sfinvest, splits
 from .categorize import clean_payee
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
 BACKFILL_DAYS = 180      # history pulled on the first sync
 REFRESH_DAYS = 14        # window re-read on routine syncs (catches pending -> posted)
+STALE_PENDING_DAYS = 30  # a hold this much older than a routine sync's window that still hasn't posted is gone
 
 
 class SimpleFinError(Exception):
@@ -35,6 +39,48 @@ def _ssl_context() -> ssl.SSLContext:
 
 
 USER_AGENT = "Runway/0.1 (personal cash-flow app; +https://www.simplefin.org)"
+
+
+def _public_ip(address: str) -> bool:
+    return ipaddress.ip_address(address.split("%")[0]).is_global
+
+
+class _PublicHTTPSConnection(http.client.HTTPSConnection):
+    """An https connection that hangs up before saying anything if the address it reached isn't on the internet: the
+    name may have been checked a moment ago (check_address) and point somewhere else now (DNS rebinding), or the
+    address may come from a restored backup, which was never checked."""
+    def connect(self):
+        http.client.HTTPConnection.connect(self)   # just the TCP connection (and a proxy's tunnel, if one is set)
+        if not self._tunnel_host and not _public_ip(self.sock.getpeername()[0]):   # through a proxy, it decides
+            self.sock.close()
+            raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)
+
+
+class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+
+
+class _NoPlainHTTP(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        raise SimpleFinError("A SimpleFIN address must start with https://. Reconnect SimpleFIN in Settings.")
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """SimpleFIN answers where it's asked. A redirect would carry the access credentials (urllib keeps the
+    Authorization header) to wherever it points, so none is followed."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise SimpleFinError(f"SimpleFIN answered HTTP {code}, sending Runway to another address, which it doesn't follow.")
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(_PublicHTTPSHandler(context=_ssl_context()), _NoPlainHTTP(), _NoRedirects())
+
+
+def _open(req: urllib.request.Request, timeout: float):
+    """Every request to SimpleFIN: public https addresses only, no redirects."""
+    return _opener().open(req, timeout=timeout)
 
 
 def _describe_http_error(e: urllib.error.HTTPError) -> str:
@@ -57,8 +103,6 @@ def _describe_http_error(e: urllib.error.HTTPError) -> str:
 def check_address(url: str) -> None:
     """SimpleFIN addresses come from what you paste, and Runway fetches them and shows what comes back, so they must
     be on the internet, not this machine or your network (where other services would answer)."""
-    import ipaddress
-    import socket
     parts = urllib.parse.urlsplit(url)
     if parts.scheme != "https" or not parts.hostname:
         raise SimpleFinError("That doesn't look like a SimpleFIN address.")
@@ -67,8 +111,7 @@ def check_address(url: str) -> None:
     except (socket.gaierror, UnicodeError) as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: can't find {parts.hostname}.") from e
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if not ip.is_global:
+        if not _public_ip(info[4][0]):
             raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
 
 
@@ -85,7 +128,7 @@ def claim_setup_token(setup_token: str) -> str:
     req = urllib.request.Request(claim_url, data=b"", method="POST",
                                  headers={"Content-Length": "0", "User-Agent": USER_AGENT, "Accept": "*/*"})
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+        with _open(req, timeout=30) as resp:
             access_url = resp.read().decode("utf-8").strip()
     except urllib.error.HTTPError as e:
         detail = _describe_http_error(e)
@@ -97,6 +140,8 @@ def claim_setup_token(setup_token: str) -> str:
         raise SimpleFinError(f"Couldn't claim the SimpleFIN token ({detail}).") from e
     except urllib.error.URLError as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: {e.reason}") from e
+    except (OSError, http.client.HTTPException, ValueError) as e:   # a timeout or a dropped connection mid-reply
+        raise SimpleFinError(f"Couldn't reach SimpleFIN: {str(e) or type(e).__name__}") from e
     if not access_url.startswith("http"):
         raise SimpleFinError("SimpleFIN returned an unexpected response when claiming the token.")
     return access_url
@@ -127,7 +172,7 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
     url = f"{base}/accounts?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"Authorization": auth, "Accept": "application/json", "User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=60, context=_ssl_context()) as resp:
+        with _open(req, timeout=60) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = _describe_http_error(e)
@@ -136,6 +181,10 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
         raise SimpleFinError(f"SimpleFIN request failed ({detail}).") from e
     except urllib.error.URLError as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:   # a timeout or a dropped connection mid-reply
+        raise SimpleFinError(f"Couldn't reach SimpleFIN: {str(e) or type(e).__name__}") from e
+    except ValueError as e:   # not JSON: an error page, or a reply cut short
+        raise SimpleFinError("SimpleFIN sent back a reply Runway couldn't read.") from e
     return payload
 
 
@@ -223,6 +272,9 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             "DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted>=?",
             (acct_id, window_start.isoformat()),
         )
+        # Older than any window re-read: a hold that dropped off without posting would otherwise stay forever.
+        conn.execute("DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted<?",
+                     (acct_id, (window_start - timedelta(days=STALE_PENDING_DAYS - REFRESH_DAYS)).isoformat()))
 
         for tx in acct.get("transactions", []) or []:
             pending = 1 if tx.get("pending") else 0
@@ -231,12 +283,14 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
             payee = clean_payee(tx.get("payee") or desc)
             key = f"{acct_id}|{tx['id']}"
-            row = conn.execute("SELECT id, pending FROM transactions WHERE id=?", (key,)).fetchone()
+            row = conn.execute("SELECT id, pending, is_split FROM transactions WHERE id=?", (key,)).fetchone()
             if row:
                 conn.execute(
                     "UPDATE transactions SET posted=?, amount=?, description=?, pending=? WHERE id=?",
                     (posted, amount, desc, pending, key),
                 )
+                if row["is_split"]:
+                    splits.follow_amount(conn, key, amount)
             else:
                 if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
                     continue
@@ -261,22 +315,41 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     return new_ids
 
 
+def _backfill_state(conn) -> tuple[set, set]:
+    """SimpleFIN accounts ever seen, and those whose BACKFILL_DAYS of history were read in full."""
+    st = json.loads(db.get_setting(conn, "simplefin_backfill") or "{}")
+    return set(st.get("seen") or []), set(st.get("done") or [])
+
+
+def _save_backfill_state(conn, seen: set, done: set) -> None:
+    db.set_setting(conn, "simplefin_backfill", json.dumps({"seen": sorted(seen), "done": sorted(done)}))
+
+
 def sync(conn, access_url: str, today: date | None = None, fetch=fetch_accounts) -> dict:
-    """Pull recent data. First run backfills BACKFILL_DAYS in CHUNK_DAYS windows."""
+    """Pull recent data. Backfills BACKFILL_DAYS in CHUNK_DAYS windows until every account SimpleFIN has shown has had
+    its history read in full: on the first run, after a backfill that stopped part way, and for a bank added later."""
     today = today or date.today()
-    first_run = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
-    span = BACKFILL_DAYS if first_run else REFRESH_DAYS
+    seen, done = _backfill_state(conn)
+    backfill = not seen or bool(seen - done)
+    span = BACKFILL_DAYS if backfill else REFRESH_DAYS
     start = today - timedelta(days=span)
     new_ids: list[str] = []
     errors: list[str] = []
+    got: set = set()
     chunk_start = start
     while chunk_start <= today:
         chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS - 1), today)
         payload = fetch(access_url, chunk_start, chunk_end)
         errors.extend(str(e) for e in payload.get("errors", []) or [])
         new_ids.extend(store_payload(conn, payload, chunk_start))
+        got |= {str(a["id"]) for a in payload.get("accounts", []) or []}
+        seen |= got
+        _save_backfill_state(conn, seen, done)
         conn.commit()  # release the write lock before the next network call
         chunk_start = chunk_end + timedelta(days=1)
         if chunk_start <= today:
             time.sleep(0.5)
-    return {"new": new_ids, "errors": errors, "backfill": first_run}
+    if backfill:   # every window came back: those accounts' history is complete
+        done |= got
+        _save_backfill_state(conn, seen, done)
+    return {"new": new_ids, "errors": errors, "backfill": backfill}

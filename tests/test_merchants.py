@@ -157,8 +157,7 @@ class MerchantTests(unittest.TestCase):
     def test_redirects_only_to_the_same_sources(self):
         rules = merchants._SameRules()
         req = urllib.request.Request(self.logo_dev("target.com"))
-        with self.assertRaises(urllib.error.URLError):
-            rules.redirect_request(req, None, 302, "Found", {}, "https://evil.example.com/x.png")
+        self.assertIsNone(rules.redirect_request(req, None, 302, "Found", {}, "https://evil.example.com/x.png"))
         self.assertIsNotNone(rules.redirect_request(req, None, 302, "Found", {}, "https://img.logo.dev/walmart.com?token=x"))
 
 if __name__ == "__main__":

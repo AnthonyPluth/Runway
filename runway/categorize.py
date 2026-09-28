@@ -55,7 +55,12 @@ def clean_payee(raw: str | None) -> str:
 # ---------------------------------------------------------------------------------------------------------
 # Built-in heuristics that are safe without asking anyone.
 
-_CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit card|cardmember|autopay|epay|payment to .*card|amex|chase credit|citi autopay|discover e-payment|capital one", re.I)
+_CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit ?card|cardmember|payment to .*card|amex|chase credit|citi autopay|"
+                               r"discover e-payment|applecard|capital one\b.*\b(?:pmt|payment)", re.I)
+# "autopay" and "epay" are just as often a utility, insurer or loan: only a card payment when something says card.
+_AUTOPAY = re.compile(r"autopay|e-?pay", re.I)
+_CARD_WORDS = re.compile(r"card|visa|mastercard|amex|american express|discover|citi|chase|barclay|synchrony|capital one", re.I)
+_NOT_CARD = re.compile(r"auto fin|auto loan|mortgage|\bloan\b|lease|insurance", re.I)
 _CARD_PAYMENT_IN = re.compile(r"payment|autopay|thank you|pymt|pmt", re.I)
 _SWEEP = re.compile(r"core account|money market|spaxx|fdrxx|sweep", re.I)
 
@@ -69,7 +74,8 @@ def heuristic_category(tx: dict, account_kind: str) -> str | None:
         return "Ignore"
     if account_kind == "credit" and amt > 0 and _CARD_PAYMENT_IN.search(desc):
         return "Credit Card Payment"
-    if account_kind in ("checking", "savings") and amt < 0 and _CARD_PAYMENT_OUT.search(desc):
+    if account_kind in ("checking", "savings") and amt < 0 and not _NOT_CARD.search(desc) and (
+            _CARD_PAYMENT_OUT.search(desc) or (_AUTOPAY.search(desc) and _CARD_WORDS.search(desc))):
         return "Credit Card Payment"
     return None
 
@@ -258,14 +264,16 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
             rulesmod.apply_actions(conn, tx, {"rename": acts["rename"]})
         if acts["review"]:
             review_after.append(tx["id"])
-        cat = heuristic_category(tx, tx["kind"])
-        source = "auto"
-        if not cat and acts["split"]:
-            rulesmod.apply_actions(conn, tx, {"split": acts["split"]})
-            counts["rule"] += 1
-            continue
+        # Your rules come before the built-in guesses: a rule saying an "autopay" is Utilities wins.
+        if acts["split"]:
+            if rulesmod.apply_actions(conn, tx, {"split": acts["split"]}):
+                counts["rule"] += 1
+                continue
+            if abs(tx["amount"] or 0) >= 0.005:
+                review_after.append(tx["id"])   # the rule couldn't split it: categorize it as usual, and ask
+        cat, source = acts["category"], "rule"
         if not cat:
-            cat, source = acts["category"], "rule"
+            cat, source = heuristic_category(tx, tx["kind"]), "auto"
         if not cat and tx.get("payee"):
             cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
         if cat:
@@ -286,13 +294,19 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
             answers = ask_model(conn, groups, caller)
         except RuntimeError:  # error is recorded; these wait in Review
             answers = [(None, 0.0)] * len(groups)
+        # Categories that take money out of spending (transfers, card payments, Ignore): the model only ever
+        # suggests them. Its input includes text the other side of a payment writes (an ACH or Zelle memo), which
+        # could talk it into hiding a charge, so these always wait for you in Review.
+        hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
+        spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
         for group, (cat, conf) in zip(groups, answers):
             for t in group:
                 if cat is None:
                     conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
                     counts["review"] += 1
                     continue
-                review = 1 if conf < REVIEW_THRESHOLD else 0
+                review = 1 if (conf < REVIEW_THRESHOLD or cat in hides
+                               or (cat in spends_as_income and t["amount"] < 0)) else 0
                 conn.execute(
                     # Don't overwrite a choice you made while the model was thinking.
                     "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "
