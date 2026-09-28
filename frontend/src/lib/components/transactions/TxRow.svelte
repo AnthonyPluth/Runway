@@ -10,9 +10,11 @@
   import RecurringPicker from "./RecurringPicker.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { RecurringItem, Tx } from "./types";
+  import { openOrders } from "./expanded.svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
-  // One transaction: its category saves as soon as you pick it. Under the row open the split editor and the
-  // Amazon or Target order it paid for; ↻ links it to a recurring item.
+  // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
+  // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item.
   let { t, review, selected, recurring, onselect, onsave, onchanged }: {
     t: Tx; review: boolean; selected: boolean; recurring: RecurringItem[];
     onselect: (e: MouseEvent, checked: boolean) => void;
@@ -23,7 +25,9 @@
   let saving = $state(false);
   let picking = $state(false);
   let splitting = $state(false);
-  let showOrder = $state(false);
+  const showOrder = $derived(openOrders.has(t.id));
+  const store = $derived(t.retail?.retailer === "amazon" ? "Amazon" : t.retail?.retailer === "target" ? "Target" : "store");
+  function toggleOrder() { if (showOrder) openOrders.delete(t.id); else openOrders.add(t.id); }
 
   const suggestion = $derived(!!t.needs_review && !!t.category && t.category_source === "ai");
   const linked = $derived((t.recurring_id ?? 0) > 0);
@@ -68,9 +72,10 @@
         </button>
       {/if}
       {#if t.retail}
-        <button type="button" aria-expanded={showOrder} onclick={() => (showOrder = !showOrder)}
-          title={`See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order`}
-          class="cursor-pointer rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} onclick={toggleOrder}
+          title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
+          class="inline-flex cursor-pointer items-center gap-0.5 rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+          <ChevronRight class={cn("size-3.5 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
           {orderLabel(t.retail)}</button>
       {/if}
     </div>
@@ -104,5 +109,5 @@
   <tr><td colspan="6" class="px-3 pb-3"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></td></tr>
 {/if}
 {#if showOrder && t.retail}
-  <tr><td colspan="6" class="px-3 pb-3" data-editor><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></td></tr>
+  <tr id={`order-${t.id}`}><td colspan="6" class="px-3 pb-3 pl-11"><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></td></tr>
 {/if}
