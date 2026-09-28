@@ -28,6 +28,14 @@ function targetDiscover(fallbackBase) {
       if (key) return { base, key, from: "page", token };
     } catch (_) { /* keep looking */ }
   }
+  // Target's other APIs (post_orders and the like) take the same key.
+  for (const u of performance.getEntriesByType("resource").map((e) => e.name)) {
+    try {
+      const url = new URL(u);
+      const key = url.hostname === "api.target.com" && url.searchParams.get("key");
+      if (key) return { base: fallbackBase, key, from: "page", token };
+    } catch (_) { /* keep looking */ }
+  }
   const html = document.documentElement.innerHTML;
   const m = html.match(/"apiKey"\s*:\s*"([0-9a-f]{32,64})"/i) || html.match(/[?&]key=([0-9a-f]{32,64})/i);
   return { base: fallbackBase, key: m ? m[1] : null, from: m ? "settings" : null, token, signedIn: !/login|signin/i.test(location.pathname) };
