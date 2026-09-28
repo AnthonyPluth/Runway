@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&amp;logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/packaging-Poetry-60A5FA?logo=poetry&amp;logoColor=white" alt="Poetry">
   <img src="https://img.shields.io/badge/database-SQLite%20%7C%20Postgres-4cc38a" alt="SQLite or Postgres">
 </p>
@@ -144,7 +144,7 @@ plain Python with a handful of well-known libraries.
 
 ## Quick start
 
-You need Python 3.10 or newer and [Poetry](https://python-poetry.org/docs/#installation) 2
+You need Python 3.14 and [Poetry](https://python-poetry.org/docs/#installation) 2
 (`pipx install poetry`).
 
 ```bash
