@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/overview.png" alt="Runway's Overview page: a headline saying checking stays above $2,084 for the next 120 days, summary tiles, and a projected balance chart" width="900">
+  <img src="docs/screenshots/overview.png" alt="Runway's Overview page: a headline saying checking stays above $2,681 for the next 90 days, summary tiles, and a projected balance chart" width="900">
 </p>
 
 ---
@@ -102,6 +102,7 @@ plain Python with a handful of well-known libraries.
 
 ### Budgets and reports
 - Monthly budgets per category with pace markers; click any amount to jump to the transactions behind it.
+- **Rollover**, budget by budget: what's left at the end of a month is added to the next (going over isn't carried).
 - **This month** on the Overview: spending so far against the same point last month, the budgets closest to their
   limit, and the latest transactions.
 - A **cash-flow Sankey chart** showing where each month's money went.
@@ -141,13 +142,15 @@ plain Python with a handful of well-known libraries.
 
 ## Screenshots
 
-| Investments | Where money went |
+| Transactions | Budget |
 |---|---|
-| <img src="docs/screenshots/investments.png" alt="Investments page with value and return charts" width="440"> | <img src="docs/screenshots/reports.png" alt="Reports page with a cash-flow Sankey chart" width="440"> |
+| <img src="docs/screenshots/transactions.png" alt="Transactions grouped by day, each with its merchant, account, category emoji and amount" width="440"> | <img src="docs/screenshots/budget.png" alt="Budget page with a colored bar per category and one budget rolling over" width="440"> |
 
-<p align="center"><img src="docs/screenshots/phone.png" alt="Runway's Overview on a phone" width="260"></p>
+| Where money went | On a phone |
+|---|---|
+| <img src="docs/screenshots/reports.png" alt="Reports page with a cash-flow Sankey chart" width="440"> | <img src="docs/screenshots/phone.png" alt="Runway's Overview on a phone, with the tab bar along the bottom" width="200"> |
 
-<sub>Screenshots use demo data; every dollar amount is a placeholder like $12,345.67.</sub>
+<sub>Screenshots use Runway's made-up demo data (<code>python run.py demo</code>); none of it is anyone's real money.</sub>
 
 ## Quick start
 

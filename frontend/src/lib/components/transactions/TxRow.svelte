@@ -52,7 +52,7 @@
   }
 </script>
 
-<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 border-t px-3 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_15rem_7.5rem] md:px-4",
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 border-t px-3 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:px-4",
   selected ? "bg-primary/10" : "hover:bg-muted/40")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-1", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
@@ -99,7 +99,7 @@
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
-  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-start-1">
+  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-start-1 md:flex-nowrap">
     {#if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <Badge class="bg-primary/15 text-primary">split</Badge>
@@ -127,7 +127,7 @@
         onclick={() => save(t.category ?? "")}>✓ Keep</Button>
     {/if}
     {#if !split}
-      <Button variant="link" size="sm" class={cn("h-auto px-1 text-xs text-muted-foreground max-md:hidden", onHover)}
+      <Button variant="link" size="sm" class={cn("h-auto shrink-0 px-1 text-xs text-muted-foreground max-md:hidden", onHover)}
         title="Spread this across several categories" onclick={() => (splitting = true)}>Split</Button>
     {/if}
   </div>

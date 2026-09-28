@@ -234,6 +234,7 @@ budgets = Table(
     Column('category', Text, primary_key=True),
     Column('amount', Float, nullable=False, doc='monthly limit, positive'),
     Column('pay_with', Text, doc='account id this category is usually paid with'),
+    Column('rollover_from', Text, doc='YYYY-MM: from this month on, what\'s left over carries into the next month; NULL = off'),
 )
 
 overrides = Table(
