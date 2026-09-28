@@ -91,7 +91,7 @@ def create_from_transaction(conn, tx_id: str, frequency: str = "monthly") -> int
 
 def matched(conn, recurring_id: int, limit: int = 12) -> list[dict]:
     return db.rows(conn.execute(
-        "SELECT id, posted, amount, description, pending FROM transactions WHERE recurring_id=? ORDER BY posted DESC LIMIT ?",
+        "SELECT id, posted, amount, description, pending, category FROM transactions WHERE recurring_id=? ORDER BY posted DESC LIMIT ?",
         (recurring_id, limit),
     ))
 

@@ -10,6 +10,8 @@
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
+  import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
+  import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Alert from "$lib/components/ui/alert";
@@ -22,6 +24,8 @@
 
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
+  const setup = $derived(app.state?.setup);
+  const setupLeft = $derived(!!setup && !setup.dismissed && !(setup.bank && setup.primary && setup.recurring && setup.budgets));
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
@@ -57,14 +61,9 @@
 {/snippet}
 
 {#if !connected}
-  <Card.Root class="mx-auto mt-10 max-w-lg text-center">
-    <Card.Header>
-      <Card.Title>Connect your bank to get started</Card.Title>
-      <Card.Description>Link SimpleFIN or Plaid and Runway projects where your cash is headed.</Card.Description>
-    </Card.Header>
-    <Card.Content><Button href="/#setup/connections">Go to Settings</Button></Card.Content>
-  </Card.Root>
+  <SetupChecklist welcome />
 {:else}
+  {#if setupLeft}<SetupChecklist />{/if}
   {#await data}
     <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
   {:then fc}
@@ -114,16 +113,16 @@
       </div>
     </section>
 
-    <div class="mb-6 grid gap-4 md:grid-cols-3">
+    <div class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
       {#each [
         { label: lowBad ? "Goes negative" : "Lowest point", sub: low ? fmtDow(low.date) : "", value: low ? fmt(low.balance) : "—", alert: lowBad, low: true, tone: "" },
         { label: `In ${span(days)}`, sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`, value: fmt(end), alert: false, low: false, tone: end - cashNow >= 0 ? "text-emerald-500" : "text-destructive" },
         { label: "Owed on cards", sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}`, value: fmt(owed), alert: false, low: false, tone: "" },
       ] as t (t.label)}
-        <Card.Root class={cn("gap-2", t.alert && "border-destructive")}>
+        <Card.Root class={cn("gap-2 max-md:py-4 max-md:last:col-span-2 max-md:[&>[data-slot]]:px-4", t.alert && "border-destructive")}>
           <Card.Header>
             <Card.Description>{t.label}</Card.Description>
-            <Card.Title class={cn("text-2xl tabular-nums", t.alert && "text-destructive")}>{t.value}</Card.Title>
+            <Card.Title class={cn("text-xl tabular-nums md:text-2xl", t.alert && "text-destructive")}>{t.value}</Card.Title>
           </Card.Header>
           <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.tone)}>{t.sub}</Card.Content>
         </Card.Root>
@@ -161,6 +160,8 @@
       <Card.Root><Card.Header><Card.Title>Coming up</Card.Title></Card.Header><Card.Content><EventsList events={fc.events} /></Card.Content></Card.Root>
       <Card.Root><Card.Header><Card.Title>Credit cards</Card.Title></Card.Header><Card.Content><CardsTable cards={fc.cards} /></Card.Content></Card.Root>
     </div>
+
+    <ThisMonth />
   {:catch err}
     <Card.Root>
       <Card.Content>

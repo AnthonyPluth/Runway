@@ -12,6 +12,7 @@
   import { toast } from "svelte-sonner";
   import { tick, untrack } from "svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import CatIcon from "$lib/components/CatIcon.svelte";
   import RecIcon from "./RecIcon.svelte";
   import RecurringFields from "./RecurringFields.svelte";
   import { FREQ, needsDates, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
@@ -58,7 +59,7 @@
 
 <details class="group border-t first:border-t-0" bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
   <summary class="-mx-2 flex cursor-pointer list-none items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/50 group-open:bg-muted/40 [&::-webkit-details-marker]:hidden">
-    <RecIcon id={r.account_id} />
+    {#if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} class="rounded-full" />{:else}<RecIcon id={r.account_id} />{/if}
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 items-center gap-2 font-medium"><span class="truncate">{v.name || r.name}</span>{#if !active}<Badge variant="secondary">paused</Badge>{/if}</span>
       <span class="text-xs text-muted-foreground">

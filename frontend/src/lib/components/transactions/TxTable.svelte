@@ -5,17 +5,49 @@
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { fmt, plural } from "$lib/format";
+  import { fmt, fmtDate, plural } from "$lib/format";
+  import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import TxRow from "./TxRow.svelte";
   import type { RecurringItem, Tx } from "./types";
 
-  // The list, with checkboxes (shift-click for a range) to change many transactions together: a category, the
-  // merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll.
-  let { items, total, review, recurring, onsave, onchanged }: {
-    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[];
-    onsave: (t: Tx, category: string) => Promise<void>; onchanged: () => void;
+  // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
+  // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll.
+  // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
+  let { items, total, review, recurring, selecting = $bindable(false), onsave, onchanged, onmore }: {
+    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; selecting?: boolean;
+    onsave: (t: Tx, category: string) => Promise<void>; onchanged: () => void; onmore?: () => Promise<void>;
   } = $props();
+
+  // Days, newest first, each with what came in and went out that day.
+  const days = $derived.by(() => {
+    const out: { day: string; rows: { t: Tx; i: number }[]; net: number }[] = [];
+    items.forEach((t, i) => {
+      const day = t.posted.slice(0, 10);
+      if (out.at(-1)?.day !== day) out.push({ day, rows: [], net: 0 });
+      const d = out.at(-1)!;
+      d.rows.push({ t, i }); d.net += t.amount;
+    });
+    return out;
+  });
+  const thisYear = String(new Date().getFullYear());
+  const dayLabel = (d: string) => fmtDate(d, d.startsWith(thisYear) ? { weekday: "long", month: "short", day: "numeric" }
+    : { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+
+  // Load more when the end of the list comes into view (the button does the same by hand).
+  let more = $state(false);
+  let end = $state<HTMLElement>();
+  async function loadMore() {
+    if (more || !onmore || items.length >= total) return;
+    more = true;
+    try { await onmore(); } finally { more = false; }
+  }
+  $effect(() => {
+    if (!end || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((e) => { if (e.some((x) => x.isIntersecting)) loadMore(); }, { rootMargin: "600px" });
+    io.observe(end);
+    return () => io.disconnect();
+  });
 
   let picked = $state<Record<string, boolean>>({});
   let last: number | null = null;
@@ -60,32 +92,36 @@
   {/if}
 
   <Card.Root class="gap-0 overflow-hidden py-0">
-    <div class="overflow-x-auto">
-      <table class="w-full text-sm" data-tx-list>
-        <thead>
-          <tr class="text-left text-xs text-muted-foreground">
-            <th class="w-8 py-2.5 pl-3 pr-1 font-medium">
-              <input type="checkbox" class="size-4 cursor-pointer accent-primary align-middle" aria-label="Select all shown"
-                checked={ids.length > 0 && ids.length === items.length} indeterminate={ids.length > 0 && ids.length < items.length}
-                onchange={(e) => all(e.currentTarget.checked)} />
-            </th>
-            <th class="px-2 py-2.5 font-medium">Date</th>
-            <th class="px-2 py-2.5 font-medium">Merchant</th>
-            <th class="px-2 py-2.5 font-medium max-sm:hidden">Account</th>
-            <th class="px-2 py-2.5 text-right font-medium">Amount</th>
-            <th class="px-2 py-2.5 pr-3 font-medium">Category</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each items as t, i (t.id)}
-            <TxRow {t} {review} {recurring} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
-              onsave={(c) => onsave(t, c)} {onchanged} />
-          {/each}
-        </tbody>
-      </table>
+    <div class="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground md:px-4">
+      <label class={cn("flex items-center", !selecting && "max-md:hidden")}>
+        <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label="Select all shown"
+          checked={ids.length > 0 && ids.length === items.length} indeterminate={ids.length > 0 && ids.length < items.length}
+          onchange={(e) => all(e.currentTarget.checked)} />
+      </label>
+      <span class="tabular-nums">{items.length < total ? `${items.length} of ${total}` : plural(total, "transaction")}</span>
+      <button type="button" class="ml-auto cursor-pointer font-medium text-foreground md:hidden"
+        onclick={() => { selecting = !selecting; if (!selecting) all(false); }}>{selecting ? "Done" : "Select"}</button>
+    </div>
+    <div data-tx-list>
+      {#each days as d (d.day)}
+        <section aria-label={dayLabel(d.day)}>
+          <h3 class="sticky top-0 z-[1] flex items-center justify-between border-t bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur md:px-4">
+            <span class="uppercase tracking-wide">{dayLabel(d.day)}</span>
+            {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums">{fmt(d.net)}</span>{/if}
+          </h3>
+          <div role="list">
+            {#each d.rows as { t, i } (t.id)}
+              <TxRow {t} {review} {recurring} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
+                onsave={(c) => onsave(t, c)} {onchanged} />
+            {/each}
+          </div>
+        </section>
+      {/each}
     </div>
   </Card.Root>
   {#if total > items.length}
-    <p class="mt-2 text-sm text-muted-foreground">Showing {items.length} of {total}. Narrow the search to see more.</p>
+    <div bind:this={end} class="mt-3 flex justify-center">
+      <Button variant="outline" size="sm" disabled={more || !onmore} onclick={loadMore}>{more ? "Loading…" : `Show more (${total - items.length} left)`}</Button>
+    </div>
   {/if}
 </div>

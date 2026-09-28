@@ -44,8 +44,7 @@
   async function load() {
     const mine = ++seq;
     const now = { ...f };
-    const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope, limit: "300" });
-    if (review) qs.set("review", "1");
+    const qs = query(0);
     try {
       const data = await api<TxList>(`/api/transactions?${qs}`);
       if (mine !== seq) return;   // a newer search has been asked for meanwhile
@@ -53,6 +52,24 @@
     } catch (err) { if (mine === seq) listError = (err as Error).message; }
   }
   load();
+
+  const PAGE = 100;
+  function query(offset: number) {
+    const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope,
+      limit: String(PAGE), offset: String(offset) });
+    if (review) qs.set("review", "1");
+    return qs;
+  }
+  // The next page, added to the end (skipping any that shifted in since, e.g. after a sync).
+  async function more() {
+    if (!list) return;
+    const mine = seq, have = new Set(list.items.map((t) => t.id));
+    const data = await api<TxList>(`/api/transactions?${query(list.items.length)}`);
+    if (mine !== seq || !list) return;
+    list.items.push(...data.items.filter((t) => !have.has(t.id)));
+    list.total = data.total;
+  }
+  let selecting = $state(false);
 
   const filtered = $derived(!!(applied.q || applied.account || applied.category || applied.month));
 
@@ -79,6 +96,7 @@
         list.items = list.items.filter((x) => x.id !== t.id);
         if (!list.items.length) return load();
         if (count > 0) count--;
+        if (list.total > 0) list.total--;
       } else {
         t.category = category; t.needs_review = 0; t.category_source = "manual";
       }
@@ -129,7 +147,7 @@
     <NativeSelect aria-label="Category" class="max-sm:flex-1" bind:value={f.category} onchange={load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
-      {#each categories.list as c (c.name)}<option value={c.name}>{catLabel(c)}</option>{/each}
+      {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}
     </NativeSelect>
     {#if f.month}
       <span class="inline-flex items-center gap-1 rounded-full bg-primary/15 py-1 pr-1 pl-3 text-sm text-primary">
@@ -157,7 +175,7 @@
     </Card.Content></Card.Root>
   {:else}
     {#key loads}
-      <TxTable items={list.items} total={count} {review} {recurring} onsave={save} onchanged={load} />
+      <TxTable items={list.items} total={list.total} {review} {recurring} bind:selecting onsave={save} onchanged={load} onmore={more} />
     {/key}
   {/if}
 

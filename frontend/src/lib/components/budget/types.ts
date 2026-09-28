@@ -8,6 +8,7 @@ export interface BudgetCategory {
   depth: number;
   top: string;
   has_children: boolean;
+  icon?: string;
   budget: number | null;
   /** The account this budget's spending goes on (for the budget forecast); null means automatic. */
   pay_with: string | null;
