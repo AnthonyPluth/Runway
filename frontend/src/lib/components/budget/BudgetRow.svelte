@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { catLook } from "$lib/categories.svelte";
+  import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { fmt } from "$lib/format";
   import { cn } from "$lib/utils";
@@ -17,6 +19,7 @@
   const pct = $derived(c.budget != null && c.budget > 0 ? Math.max(0, c.spent / c.budget) : 0);
   const over = $derived(c.budget != null && c.spent > c.budget);
   const showPace = $derived(pace > 0 && pace < 1);
+  const color = $derived(catLook(c.name).color);
 
   // The category name and the spent amount both open Transactions showing exactly what adds up to that number.
   function open(e: MouseEvent) {
@@ -42,6 +45,7 @@
 
 <div class={cn("py-2", sub && "pl-5")}>
   <div class="flex min-h-9 flex-wrap items-center gap-x-2.5">
+    {#if !sub}<CatIcon name={c.name} size={28} class="rounded-full" />{/if}
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
     {#if budgets && c.budget != null && counts}
@@ -83,9 +87,10 @@
     </span>
   </div>
   {#if c.budget != null}
-    <div class="mt-0.5 flex items-center gap-3">
+    <div class={cn("mt-0.5 flex items-center gap-3", !sub && "sm:pl-[38px]")}>
       <div class={cn("relative min-w-28 flex-1 rounded-full bg-muted", sub ? "h-1.5 opacity-85" : "h-2")} role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
-        <div class={cn("h-full rounded-full", over ? "bg-destructive" : "bg-chart-1")} style:width={`${Math.min(100, pct * 100).toFixed(1)}%`}></div>
+        <div class={cn("h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
+          style:width={`${Math.min(100, pct * 100).toFixed(1)}%`}></div>
         {#if showPace}
           <div class="absolute -top-[3px] -bottom-[3px] w-0.5 rounded-sm bg-muted-foreground" style:left={`${(pace * 100).toFixed(1)}%`}
             title="Where you'd be at an even pace today"></div>

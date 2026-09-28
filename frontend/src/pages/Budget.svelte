@@ -150,7 +150,7 @@
             class="h-9 min-w-0 cursor-pointer rounded-md border border-transparent bg-transparent py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
             {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}
-              <option value={c.name}>{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
+              <option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
             {/each}
           </select>
           <span class="group/money relative ml-auto inline-flex items-center">

@@ -45,7 +45,7 @@
   {@render first?.()}
   {#each groups as g (g.label)}
     <optgroup label={g.label}>
-      {#each g.items as c (c.name)}<option value={c.name}>{catLabel(c)}</option>{/each}
+      {#each g.items as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}
     </optgroup>
   {/each}
 {/snippet}

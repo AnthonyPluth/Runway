@@ -10,6 +10,63 @@ class CategoryError(ValueError):
     pass
 
 
+# The colors a category can wear (the chart palette, validated for the dark surface, plus a teal and a gray).
+PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86"]
+BLUE, ORANGE, GREEN, AMBER, PINK, LEAF, VIOLET, CORAL, TEAL, GRAY = PALETTE
+
+# Default emoji and color for the built-in categories, and for common names people give their own.
+DEFAULT_LOOKS: dict[str, tuple[str, str]] = {
+    "groceries": ("🛒", LEAF), "restaurants": ("🍽️", ORANGE), "coffee & snacks": ("☕", AMBER),
+    "shopping": ("🛍️", PINK), "travel": ("✈️", TEAL), "public transit": ("🚆", TEAL), "rideshare & taxi": ("🚕", AMBER),
+    "auto & gas": ("⛽", CORAL), "parking & tolls": ("🅿️", BLUE), "utilities": ("💡", AMBER),
+    "subscriptions": ("🔁", VIOLET), "technology": ("💻", BLUE), "medical": ("🩺", CORAL), "pharmacy": ("💊", CORAL),
+    "home improvement": ("🔨", ORANGE), "mortgage": ("🏠", BLUE), "rent": ("🏠", BLUE), "loans": ("🏦", GRAY),
+    "taxes": ("🧾", GRAY), "entertainment": ("🎬", VIOLET), "extra-curriculars": ("🎨", PINK),
+    "gifts & donations": ("🎁", PINK), "fees & interest": ("💸", CORAL), "other": ("📦", GRAY),
+    "income": ("💰", GREEN), "paycheck": ("💰", GREEN), "refunds": ("↩️", GREEN), "credit card payment": ("💳", GRAY),
+    "transfer": ("🔄", GRAY), "ignore": ("🚫", GRAY),
+}
+# For names not listed above: the first word that appears in the name decides.
+KEYWORD_LOOKS: list[tuple[tuple[str, ...], tuple[str, str]]] = [
+    (("grocer", "food"), ("🛒", LEAF)), (("restaurant", "dining", "takeout", "fast food"), ("🍽️", ORANGE)),
+    (("coffee", "cafe", "snack"), ("☕", AMBER)), (("bar", "alcohol", "wine", "beer"), ("🍷", PINK)),
+    (("cloth", "apparel"), ("👕", PINK)), (("shop", "amazon"), ("🛍️", PINK)), (("pet", "vet"), ("🐾", ORANGE)),
+    (("child", "kid", "baby", "daycare"), ("🧸", PINK)), (("school", "education", "tuition", "book"), ("📚", BLUE)),
+    (("gym", "fitness", "sport"), ("🏋️", CORAL)), (("health", "doctor", "dental", "medic"), ("🩺", CORAL)),
+    (("insur",), ("🛡️", BLUE)), (("phone", "mobile", "internet", "cable"), ("📱", VIOLET)),
+    (("electric", "water", "gas bill", "utilit"), ("💡", AMBER)), (("car", "auto", "fuel", "gas"), ("⛽", CORAL)),
+    (("travel", "hotel", "flight", "vacation"), ("✈️", TEAL)), (("home", "house", "garden", "furnit"), ("🏡", ORANGE)),
+    (("beauty", "hair", "personal"), ("💅", PINK)), (("game", "hobby", "music", "movie", "stream"), ("🎮", VIOLET)),
+    (("gift", "donat", "charit"), ("🎁", PINK)), (("invest", "saving", "retire"), ("📈", GREEN)),
+    (("salary", "pay", "bonus", "interest", "dividend", "income"), ("💰", GREEN)), (("tax",), ("🧾", GRAY)),
+    (("fee", "bank"), ("💸", CORAL)), (("business", "work", "office"), ("💼", BLUE)),
+]
+
+
+def default_look(name: str, parent_color: str | None = None) -> tuple[str, str]:
+    """(emoji, color) for a category nobody has set one for. A subcategory wears its parent's color."""
+    key = (name or "").strip().lower()
+    look = DEFAULT_LOOKS.get(key)
+    if not look:
+        look = next((lk for words, lk in KEYWORD_LOOKS if any(w in key for w in words)), None)
+    if not look:   # something steady for this name: the same name always gets the same color
+        look = ("🏷️", PALETTE[sum(map(ord, key)) % (len(PALETTE) - 1)])
+    return look[0], parent_color or look[1]
+
+
+def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
+    """Set a category's emoji and color. An empty value goes back to the default."""
+    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+        raise CategoryError("Category not found")
+    icon = (icon or "").strip() or None
+    if icon and (len(icon) > 16 or any(ch.isalnum() and ch.isascii() for ch in icon)):
+        raise CategoryError("Pick an emoji for the icon")
+    color = (color or "").strip().lower() or None
+    if color and not (len(color) == 7 and color[0] == "#" and all(ch in "0123456789abcdef" for ch in color[1:])):
+        raise CategoryError("Pick a color")
+    conn.execute("UPDATE categories SET icon=?, color=? WHERE name=?", (icon, color, name))
+
+
 def _parents(conn) -> dict[str, str | None]:
     return {r["name"]: r["parent"] for r in conn.execute("SELECT name, parent FROM categories")}
 
@@ -37,7 +94,7 @@ def _subtree_height(parents: dict, name: str) -> int:
 
 def all_categories(conn) -> list[dict]:
     """Every category in tree order (each followed by its subcategories), with depth, path and top-level name."""
-    cats = db.rows(conn.execute("SELECT name, is_transfer, is_income, parent FROM categories"))
+    cats = db.rows(conn.execute("SELECT name, is_transfer, is_income, parent, icon, color FROM categories"))
     names = {c["name"] for c in cats}
     for c in cats:   # an orphan (parent deleted by hand) shows at the top level
         if c["parent"] and c["parent"] not in names:
@@ -58,6 +115,10 @@ def all_categories(conn) -> list[dict]:
             c["top"] = c["path"][0]
             c["protected"] = c["name"] in db.PROTECTED_CATEGORIES
             c["has_children"] = bool(kids.get(c["name"]))
+            c["custom_icon"], c["custom_color"] = c.pop("icon"), c.pop("color")
+            parent_color = next((o["color"] for o in reversed(out) if o["name"] == parent), None) if parent else None
+            icon, color = default_look(c["name"], parent_color)
+            c["icon"], c["color"] = c["custom_icon"] or icon, c["custom_color"] or color
             out.append(c)
             walk(c["name"], c["path"])
 

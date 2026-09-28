@@ -260,6 +260,7 @@ def api_state(conn, _q, _b):
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
         "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
+        "setup": setup_steps(conn),
     }
 
 
@@ -755,6 +756,14 @@ def api_category_move(conn, _q, body):
     return {"ok": True}
 
 
+def api_category_look(conn, _q, body):
+    try:
+        categories.set_look(conn, body.get("name") or "", body.get("icon"), body.get("color"))
+    except categories.CategoryError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
 def api_category_remove(conn, _q, body):
     try:
         n = categories.remove(conn, body.get("name") or "", body.get("move_to") or None)
@@ -998,6 +1007,22 @@ def api_budget(conn, q, _b):
     }
 
 
+def api_month_pace(conn, _q, _b):
+    return reports.month_pace(conn, date.today())
+
+
+def setup_steps(conn) -> dict:
+    """The getting-started checklist on the Overview: which steps are done, and whether it's been put away."""
+    checking = conn.execute("SELECT COUNT(*) FROM accounts WHERE hidden=0 AND kind='checking'").fetchone()[0]
+    return {
+        "bank": bank_configured(conn) and bool(conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone()),
+        "primary": bool(db.get_setting(conn, "primary_account")) or checking == 1,
+        "recurring": bool(conn.execute("SELECT 1 FROM recurring LIMIT 1").fetchone()),
+        "budgets": bool(conn.execute("SELECT 1 FROM budgets WHERE amount>0 LIMIT 1").fetchone()),
+        "dismissed": db.get_setting(conn, "setup_dismissed") == "1",
+    }
+
+
 def api_cashflow(conn, q, _b):
     """Where money came from and went in a month, for the Sankey report."""
     start, end = _month_range(q)
@@ -1214,6 +1239,8 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, "auto_ai_on_sync", "1" if body.get("auto_ai_on_sync") else "0")
     if "horizon_days" in body:
         db.set_setting(conn, "horizon_days", str(max(14, min(int(body["horizon_days"]), 365))))
+    if "setup_dismissed" in body:
+        db.set_setting(conn, "setup_dismissed", "1" if body.get("setup_dismissed") else None)
     return {"ok": True}
 
 
@@ -1571,7 +1598,9 @@ ROUTES = [
     ("POST", "/api/categories/rename", api_category_rename),
     ("POST", "/api/categories/remove", api_category_remove),
     ("POST", "/api/categories/move", api_category_move),
+    ("POST", "/api/categories/look", api_category_look),
     ("GET", "/api/cashflow", api_cashflow),
+    ("GET", "/api/month_pace", api_month_pace),
     ("GET", "/api/reports/spending", api_report_spending),
     ("GET", "/api/reports/income", api_report_income),
     ("GET", "/api/reports/merchants", api_report_merchants),

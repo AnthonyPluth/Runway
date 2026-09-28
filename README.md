@@ -96,10 +96,14 @@ plain Python with a handful of well-known libraries.
   asked); SimpleFIN transactions from the same merchant get the logo too. With a free Logo.dev publishable key
   (Settings), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names
   like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway.
-- Categories with one level of subcategories, a review queue for anything uncategorized, and search and filters.
+- Categories with one level of subcategories, each with an **emoji and a color** (sensible defaults, yours to change
+  in Settings), a review queue for anything uncategorized, and search and filters.
+- The transaction list is **grouped by day** with each day's total, and loads more as you scroll.
 
 ### Budgets and reports
 - Monthly budgets per category with pace markers; click any amount to jump to the transactions behind it.
+- **This month** on the Overview: spending so far against the same point last month, the budgets closest to their
+  limit, and the latest transactions.
 - A **cash-flow Sankey chart** showing where each month's money went.
 - **Spending over time** by category, merchant or account (6, 12 or 24 months), with each one's change from last
   month and from a year ago; **merchants** ranked by what you spent, each with its months and transactions; **income
@@ -128,7 +132,9 @@ plain Python with a handful of well-known libraries.
 ### Everyday
 - **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old.
 - **Autosave everywhere:** there are no Save buttons.
-- Dark interface that works on a phone as well as a desktop, and **installs as an app** on your iPhone's Home Screen.
+- **A setup checklist** for new users (connect a bank, pick your main account, add paychecks and bills, set budgets).
+- Dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and **installs
+  as an app** on your iPhone's Home Screen.
 - **Push notifications** on your phone or computer: a card payment coming up, the forecast getting low, a recurring
   payment that didn't show up, a large charge, or syncing that keeps failing. Each alert is sent once.
 - **Backups** as a single file, restorable into either database.
