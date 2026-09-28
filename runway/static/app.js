@@ -655,7 +655,8 @@ async function renderTxPage(el, mode) {
   load();
 }
 
-// The merchant's logo when Plaid has one (Runway serves it; nothing is fetched from elsewhere), else its initial.
+// The merchant's logo (from Plaid, or bundled with Runway for big names; Runway serves both, nothing is fetched
+// from elsewhere), else its initial.
 function merchantIcon(t) {
   const name = (t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "");
   return t.logo ? `<img class="m-logo" src="${esc(t.logo)}" alt="" loading="lazy" width="20" height="20">`

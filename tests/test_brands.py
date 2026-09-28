@@ -1,4 +1,4 @@
-"""Institution logos for accounts."""
+"""Institution logos for accounts, and bundled logos for big merchants."""
 import os
 import tempfile
 import unittest
@@ -31,6 +31,33 @@ class BrandTests(unittest.TestCase):
             got = brands.account_brands(c)
         self.assertEqual(got["a1"], {"logo": "citibank", "institution": "Citibank", "initial": "C"})
         self.assertEqual(got["a2"], {"logo": None, "institution": "Wealthfront", "initial": "W"})
+
+
+
+class MerchantLogoTests(unittest.TestCase):
+    FOLDER = os.path.join(os.path.dirname(brands.__file__), "static", "merchants")
+
+    def test_names(self):
+        cases = [(("Target", "TARGET T-1234 MINNEAPOLIS MN"), "target"), (("AMZN Mktp US*2K4", None), "amazon"),
+                 (("Amazon Prime Video", None), "amazon-prime-video"), (("Uber Eats", None), "uber-eats"),
+                 (("Uber", "UBER *TRIP"), "uber"), (("Walmart Supercenter", None), "walmart"),
+                 (("WAL-MART #1234", None), "walmart"), (("Starbucks Store 99", None), "starbucks"),
+                 (("Joe's Coffee", "SQ *JOES COFFEE"), None), (("Payroll", "ACME CORP DIRECT DEP"), None),
+                 (("POS Purchase", "COSTCO WHSE #0001"), "costco"),  # the description names it when the payee doesn't
+                 (("Delta Dental", None), None), (("Targeted Ads LLC", None), None), (("Ringling Bros", None), None)]
+        for (payee, desc), want in cases:
+            self.assertEqual(brands.merchant(payee, desc), want, payee)
+
+    def test_every_logo_is_bundled(self):
+        for _p, slug in brands.MERCHANT_PATTERNS:
+            self.assertTrue(os.path.exists(os.path.join(self.FOLDER, f"{slug}.svg")), slug)
+
+    def test_bundled_logos_are_inert(self):
+        for name in os.listdir(self.FOLDER):
+            if name.endswith(".svg"):
+                with open(os.path.join(self.FOLDER, name), encoding="utf-8") as f:
+                    svg = f.read().lower()
+                self.assertNotRegex(svg, r"<script|<foreignobject|\son[a-z]+\s*=|(href|src)\s*=\s*[\"']?\s*(https?:|//|javascript:)", name)
 
 
 if __name__ == "__main__":
