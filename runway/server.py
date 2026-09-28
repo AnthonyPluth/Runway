@@ -13,6 +13,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 import os
+import re
 import secrets
 import socket
 import sys
@@ -81,6 +82,11 @@ def run_sync() -> dict:
                     pb = plaidbank.sync_all(conn)
                     result["new"] += pb["new"]
                     result["errors"] += pb["errors"]
+                try:   # logos: Plaid's new ones, and big brands' (a nice-to-have; never fail the sync)
+                    merchants.note_sites(conn)
+                    merchants.fetch_logos(conn)
+                except Exception:
+                    traceback.print_exc()
                 counts = categorize.categorize(conn, result["new"])
                 recurring.auto_match(conn)
                 try:   # new card transactions may be Amazon or Target orders the extension already sent
@@ -249,6 +255,7 @@ def api_state(conn, _q, _b):
         "primary_account": db.get_setting(conn, "primary_account"),
         "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
         "rentcast_configured": rentcast.configured(conn),
+        "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
         "owners": owner_choices(conn),
@@ -399,6 +406,10 @@ def api_transactions(conn, q, _b):
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items if t["amount"] < 0])
     logos = merchants.for_transactions(conn, items)
+    if merchants.configured(conn):   # no logo from Plaid: Logo.dev's, by the merchant's website (a sync fetches it)
+        sites = merchants.sites_for(conn, [t for t in items if t["id"] not in logos])
+        have = merchants.site_logos(conn, sites.values())
+        logos.update({tid: merchants.SITE + s for tid, s in sites.items() if s in have})
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
@@ -1471,6 +1482,19 @@ def api_rentcast_settings(conn, _q, body):
     return {"ok": True, "configured": rentcast.configured(conn)}
 
 
+def api_logodev_settings(conn, _q, body):
+    """The Logo.dev publishable key, for merchant logos Plaid doesn't have."""
+    key = (body.get("token") or "").strip()
+    if body.get("clear"):
+        db.set_setting(conn, merchants.TOKEN_SETTING, None)
+    elif key:
+        if not re.fullmatch(r"pk_[A-Za-z0-9_-]{8,200}", key):
+            raise ApiError("That isn't a Logo.dev publishable key: it starts with pk_ (the secret sk_ key isn't needed).")
+        db.set_setting(conn, merchants.TOKEN_SETTING, key)
+        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ? AND logo IS NULL", (merchants.SITE + "%",))
+    return {"ok": True, "configured": merchants.configured(conn)}
+
+
 def api_tracked_get(conn, _q, _b, acct_id):
     from . import tracked
     st = conn.execute("SELECT * FROM manual_state WHERE account_id=?", (acct_id,)).fetchone()
@@ -1562,6 +1586,7 @@ ROUTES = [
     ("POST", "/api/assets/{id}/remove", api_asset_remove),
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
     ("POST", "/api/rentcast/settings", api_rentcast_settings),
+    ("POST", "/api/logodev/settings", api_logodev_settings),
     ("GET", "/api/investments/live", api_live_quotes),
     ("POST", "/api/investments/fire", api_fire_save),
     ("GET", "/api/tracked/{id}", api_tracked_get),
@@ -1946,24 +1971,29 @@ class Handler(BaseHTTPRequestHandler):
             # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
             # import): its rows would be mixed into the restored ones.
             held = []
+            for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
+                if not lock.acquire(blocking=False):
+                    for h in held:
+                        h.release()
+                    return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+                held.append(lock)
+            failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
             try:
-                for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
-                    if not lock.acquire(blocking=False):
-                        return self._json(409, {"error": "A sync is running. Restore once it has finished."})
-                    held.append(lock)
                 with db.session() as conn:
                     counts = backup.restore(conn, data)
                 with db.session() as conn:
                     sfinvest.repair_stored(conn)
-            except ValueError as e:
-                return self._json(400, {"error": str(e)})
-            except sqlalchemy.exc.OperationalError as e:
-                if "locked" in str(e):
-                    return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
-                return self._error(e)
+            except (ValueError, sqlalchemy.exc.OperationalError) as e:
+                failed = e
             finally:
                 for lock in held:
                     lock.release()
+            if isinstance(failed, ValueError):
+                return self._json(400, {"error": str(failed)})
+            if failed is not None:
+                if "locked" in str(failed):
+                    return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
+                return self._error(failed)
             return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
