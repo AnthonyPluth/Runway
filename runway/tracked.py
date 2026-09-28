@@ -3,7 +3,8 @@
 You enter what the account holds (shares per fund) and how new contributions are split (percent per fund).
 On every sync:
   1. each fund is valued at its closing price on the balance date (so price timing isn't mistaken for money moving);
-  2. if the account's balance is higher than the funds are worth by more than a little, that's a contribution:
+  2. if every priced fund has that day's close (the last market day on or before the balance date) and the
+     account's balance is higher than the funds are worth by more than a little, that's a contribution:
      it buys shares of each fund per your election at that day's price, and the new share counts are saved, so
      the same money is never counted twice;
   3. funds without a ticker (collective trusts and the like) share whatever the priced funds don't explain,
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from . import db
+from . import bankdays, db
 
 MIN_CONTRIBUTION = 5.0         # dollars
 MIN_CONTRIBUTION_SHARE = 0.003  # of the balance: below this, differences are treated as noise
@@ -28,12 +29,13 @@ def positions_for(conn, account_id: str) -> list[dict]:
         "WHERE m.account_id=? ORDER BY s.ticker, s.name", (account_id,)))
 
 
-def _price_on(conn, ticker: str | None, on: str) -> float | None:
+def _price_on(conn, ticker: str | None, on: str) -> tuple[float | None, str | None]:
+    """The close on or shortly before `on`, and its date."""
     if not ticker:
-        return None
-    r = conn.execute("SELECT close FROM prices WHERE ticker=? AND date<=? AND date>=? ORDER BY date DESC LIMIT 1",
+        return None, None
+    r = conn.execute("SELECT close, date FROM prices WHERE ticker=? AND date<=? AND date>=? ORDER BY date DESC LIMIT 1",
                      (ticker, on, (date.fromisoformat(on) - timedelta(days=7)).isoformat())).fetchone()
-    return r["close"] if r and r["close"] else None
+    return (r["close"], r["date"]) if r and r["close"] else (None, None)
 
 
 def value(conn, account_id: str, balance: float, balance_date: str, today: date) -> dict | None:
@@ -45,8 +47,12 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     on = min(balance_date or today.isoformat(), today.isoformat())
     priced, unpriced = [], []
     for r in rows:
-        px = _price_on(conn, r["ticker"], on)
-        (priced if px else unpriced).append({**r, "price": px})
+        px, px_date = _price_on(conn, r["ticker"], on)
+        (priced if px else unpriced).append({**r, "price": px, "price_date": px_date})
+    # A rise measured with an older close (prices not refreshed yet) is partly the market, not new money: only the
+    # balance day's close tells them apart. The sync values again once prices are in.
+    market_day = bankdays.previous_business_day(date.fromisoformat(on)).isoformat()
+    fresh = all(r["price_date"] >= market_day for r in priced)
 
     def total_priced():
         return sum(r["shares"] * r["price"] for r in priced)
@@ -60,7 +66,7 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     diff = gap - offset
     contributed = 0.0
     # Only with at least one priced fund can new money be told apart from market moves.
-    if priced and diff > max(MIN_CONTRIBUTION, MIN_CONTRIBUTION_SHARE * balance):
+    if priced and fresh and diff > max(MIN_CONTRIBUTION, MIN_CONTRIBUTION_SHARE * balance):
         # New money: buy per the contribution election (spread evenly if no election is set).
         weights = {r["security_id"]: (r["pct"] or 0) for r in rows}
         if sum(weights.values()) <= 0:

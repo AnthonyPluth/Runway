@@ -138,9 +138,15 @@ class ServerTests(unittest.TestCase):
             code, _, body = self.open("/api/restore", "POST", raw, headers)
         self.assertEqual(code, 409)
         self.assertIn("sync is running", json.loads(body)["error"])
-        with server._inv_lock:
-            self.assertEqual(self.open("/api/restore", "POST", raw, headers)[0], 409)
+        for lock in (server._inv_lock, server._retail_categorize_lock):
+            with lock:
+                self.assertEqual(self.open("/api/restore", "POST", raw, headers)[0], 409)
         self.assertFalse(server._sync_lock.locked())   # released after refusing
+        # Background work other tests started (an order import's categorizing) may still be finishing: wait for it,
+        # as someone restoring would, rather than race it.
+        for lock in (server._sync_lock, server._inv_lock, server._retail_categorize_lock):
+            self.assertTrue(lock.acquire(timeout=30))
+            lock.release()
         self.assertEqual(self.open("/api/restore", "POST", raw, headers)[0], 200)
 
     def test_only_image_logos_are_served(self):
