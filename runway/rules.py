@@ -141,7 +141,7 @@ def clean(conn, body: dict) -> dict:
             r[k] = None
             continue
         try:
-            r[k] = round(abs(float(v)), 2)
+            r[k] = round(abs(db.number(v)), 2)
         except (TypeError, ValueError):
             raise RuleError("Amounts must be numbers")
     if r["amount_min"] is not None and r["amount_max"] is not None and r["amount_min"] > r["amount_max"]:
@@ -172,7 +172,7 @@ def clean(conn, body: dict) -> dict:
         for p in split:
             cat = (p or {}).get("category")
             try:
-                pct = round(float((p or {}).get("percent")), 2)
+                pct = round(db.number((p or {}).get("percent")), 2)
             except (TypeError, ValueError):
                 raise RuleError("Give every part a percentage")
             if not cat or not known(cat):

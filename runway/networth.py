@@ -8,6 +8,7 @@ numbers are looked at, which builds the history chart going forward.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, timedelta
 
 from . import db, equity, forecast
@@ -115,6 +116,8 @@ def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None
     for key in ("url", "address", "notes"):
         if key in body:
             fields[key] = (body.get(key) or "").strip() or None
+    if fields.get("url") and not re.match(r"https?://", fields["url"], re.I):   # it's a link in the app: never javascript:
+        raise ValueError("The link must be a web address starting with https://")
     if "loan_account_id" in body:
         lid = body.get("loan_account_id") or None
         if lid and not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind='loan'", (lid,)).fetchone():
@@ -158,6 +161,6 @@ def remove_asset(conn, asset_id: int) -> None:
 
 def _num(v, label: str) -> float:
     try:
-        return float(str(v).replace(",", "").replace("$", "").replace("%", "").strip())
+        return db.number(str(v).replace(",", "").replace("$", "").replace("%", "").strip())
     except (TypeError, ValueError):
         raise ValueError(f"{label} must be a number")

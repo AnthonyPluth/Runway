@@ -81,7 +81,7 @@ def set_splits(conn, tx_id: str, parts: list[dict]) -> list[dict]:
             amount = round(float(p.get("amount")), 2)
         except (TypeError, ValueError):
             raise SplitError("Every part needs an amount")
-        if abs(amount) < CENT:
+        if not abs(amount) >= CENT or abs(amount) == float("inf"):   # also refuses "nan", which fails every comparison
             raise SplitError("Every part needs an amount")
         category = (p.get("category") or "").strip()
         if not category:
