@@ -11,7 +11,7 @@
   const configured = $derived(!!app.state?.logodev_configured);
 
   // Where logos stand: how many Runway has, how many are still to fetch, and why Logo.dev last failed.
-  interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; fetching: boolean }
+  interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; last_error_name: string | null; fetching: boolean }
   let st = $state<Status | null>(null);
   const loadStatus = () => api<Status>("/api/logodev/status").then((r) => (st = r)).catch(() => {});
   loadStatus();
@@ -55,9 +55,15 @@
         {#if !configured && !st.plaid}
           <p class="mt-1 text-muted-foreground">No logos yet: Plaid hasn't sent any, and there's no Logo.dev key. Add one above to get logos for most merchants.</p>
         {/if}
-        {#if st.last_error}<p class="mt-1 text-destructive">Logo.dev's last answer: {st.last_error}</p>{/if}
-        {#if st.waiting}
-          <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : "Fetch them now"}</Button>
+        {#if st.last_error}<p class="mt-1 text-destructive">Looking up by website: {st.last_error}</p>{/if}
+        {#if st.last_error_name}<p class="mt-1 text-destructive">Looking up by name: {st.last_error_name}</p>{/if}
+        {#if [st.last_error, st.last_error_name].some((e) => e && /40[13]/.test(e))}
+          <p class="mt-1 text-muted-foreground">Logo.dev refused the key. Check that it's the publishable one (<code>pk_…</code>), and in
+            Logo.dev's dashboard that it isn't limited to particular websites: Runway asks from its server, not from a web page.
+            {#if st.last_error_name && !st.last_error}Lookups by website work, so your plan may not include lookups by name.{/if}</p>
+        {/if}
+        {#if st.waiting || st.unknown}
+          <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : st.waiting ? "Fetch them now" : "Look them up again"}</Button>
         {/if}
       </div>
     {/if}
