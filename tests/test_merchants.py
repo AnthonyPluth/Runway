@@ -218,6 +218,51 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual((st["logodev"], st["unknown"]), (1, 1))
         self.assertIsNone(st["last_error"])
 
+    def test_best_match_is_clearly_the_merchant_or_nothing(self):
+        m = merchants.best_match
+        c = lambda *pairs: [{"name": n, "domain": d} for n, d in pairs]
+        self.assertEqual(m("Mackenthun's Fine Fo", c(("Fine Foods Co", "finefoods.com"), ("Mackenthun's Fine Foods", "mackenthuns.com")))["domain"], "mackenthuns.com")
+        self.assertEqual(m("Kwik Trip 1173", c(("Kwik Trip", "kwiktrip.com")))["domain"], "kwiktrip.com")
+        self.assertEqual(m("Target", c(("Target Corporation", "target.com")))["domain"], "target.com")
+        self.assertIsNone(m("Corner Coffee", c(("Corner Bakery Cafe", "cornerbakerycafe.com"))))
+        self.assertIsNone(m("Joe's Diner", c(("Joe & The Juice", "joejuice.com"))))
+        self.assertIsNone(m("AB", c(("AB InBev", "ab-inbev.com"))))
+
+    def test_brand_search_picks_a_clear_match(self):
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        db.set_setting(self.c, merchants.SECRET_SETTING, "sk_test123456")
+        merchants.brand_logos(self.c, [("kwik trip 1173", "Kwik Trip 1173"), ("corner coffee", "Corner Coffee")])
+        searched = []
+        def open_(req):
+            url = req.full_url
+            if url.startswith(merchants.SEARCH):
+                searched.append((url, req.get_header("Authorization")))
+                q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["q"][0]
+                body = b'[{"name": "Kwik Trip", "domain": "kwiktrip.com"}]' if "Kwik" in q else b'[{"name": "Corner Bakery Cafe", "domain": "cornerbakerycafe.com"}]'
+                return FakeResponse(body, "application/json")
+            if url.startswith(self.logo_dev("kwiktrip.com")):
+                return FakeResponse(PNG, "image/png")
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+        self.c.execute("UPDATE merchants SET logo='old', logo_type='image/png' WHERE id='brand:corner coffee'")   # a wrong one from before
+        self.assertEqual(merchants.fetch_logos(self.c, opener=open_), 1)
+        self.assertEqual({a for _, a in searched}, {"Bearer sk_test123456"})
+        rows = {r["id"]: r for r in self.c.execute("SELECT id, website, logo FROM merchants")}
+        self.assertEqual(rows["brand:kwik trip 1173"]["website"], "kwiktrip.com")
+        self.assertIsNone(rows["brand:corner coffee"]["logo"])   # no clear match: better no logo than someone else's
+
+    def test_you_choose_a_merchants_logo(self):
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        txs = [{"id": "t1", "payee": "Mackenthun's Fine Fo"}, {"id": "t2", "payee": "mackenthun's  fine fo"}, {"id": "t3", "payee": "Other"}]
+        merchants.choose(self.c, "Mackenthun's Fine Fo", "https://www.Mackenthuns.com/", opener=self.opener({self.logo_dev("mackenthuns.com"): (PNG, "image/png")}))
+        self.assertEqual(merchants.chosen_for(self.c, txs), {"t1": "site:mackenthuns.com", "t2": "site:mackenthuns.com"})
+        self.assertIsNotNone(merchants.logo(self.c, "site:mackenthuns.com"))
+        merchants.choose(self.c, "Mackenthun's Fine Fo", hidden=True)
+        self.assertEqual(merchants.chosen_for(self.c, txs), {"t1": None, "t2": None})
+        merchants.choose(self.c, "Mackenthun's Fine Fo")   # back to Runway's pick
+        self.assertEqual(merchants.chosen_for(self.c, txs), {})
+        with self.assertRaises(ValueError):
+            merchants.choose(self.c, "Other", "nowhere-logo.com", opener=self.opener({}))   # Logo.dev has none
+
     def test_redirects_only_to_the_same_sources(self):
         rules = merchants._SameRules()
         req = urllib.request.Request(self.logo_dev("target.com"))

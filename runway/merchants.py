@@ -16,6 +16,8 @@ merchants' websites and names, never what you bought or paid.
 from __future__ import annotations
 
 import base64
+import difflib
+import json
 import re
 import ssl
 import urllib.error
@@ -35,6 +37,8 @@ SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
 BRAND = "brand:"       # ... and by the merchant's name, when no website is known
 TOKEN_SETTING = "logodev_token"   # the Logo.dev publishable key (pk_...)
 LOGO_DEV = "https://img.logo.dev/"
+SECRET_SETTING = "logodev_secret"   # the Logo.dev secret key (sk_...), optional: Brand Search, for better name matches
+SEARCH = "https://api.logo.dev/search"
 _SITE_RX = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
 
 
@@ -71,6 +75,11 @@ def _logo_dev_url(url: str | None) -> bool:
 
 def configured(conn) -> bool:
     return bool(db.get_setting(conn, TOKEN_SETTING))
+
+
+def searchable(conn) -> bool:
+    """Brand Search can be used: there's a secret key (and a publishable one, to fetch what it finds)."""
+    return configured(conn) and bool(db.get_setting(conn, SECRET_SETTING))
 
 
 def key(name: str | None) -> str:
@@ -136,6 +145,69 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
     return data, ctype
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def search(conn, name: str, opener=None) -> list[dict] | None:
+    """Logo.dev's Brand Search for a merchant name: [{name, domain}], best first. None when the search failed (why is
+    in _why): a refused key, no connection, or an answer that isn't a list of brands."""
+    global _why
+    _why = ""
+    req = urllib.request.Request(f"{SEARCH}?{urllib.parse.urlencode({'q': name})}", headers={
+        "Authorization": f"Bearer {db.get_setting(conn, SECRET_SETTING)}", "Accept": "application/json", "User-Agent": "Runway"})
+    try:
+        resp = opener(req) if opener else urllib.request.build_opener(
+            urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirects()).open(req, timeout=8)
+        with resp:
+            data = json.loads(resp.read(512 * 1024))
+    except urllib.error.HTTPError as e:
+        _why = f"Brand Search: HTTP {e.code}" + (" (the secret key was refused, or your plan doesn't include it)" if e.code in (401, 402, 403) else "")
+        return None
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        _why = f"Brand Search: couldn't connect ({getattr(e, 'reason', e)})"
+        return None
+    items = data if isinstance(data, list) else (data.get("results") or data.get("data") or []) if isinstance(data, dict) else []
+    out = []
+    for it in items[:10]:
+        if isinstance(it, dict) and site(it.get("domain")):
+            out.append({"name": str(it.get("name") or ""), "domain": site(it.get("domain"))})
+    return out
+
+
+_FILLER = re.compile(r"\b(inc|llc|ltd|co|corp|corporation|company|the|store|stores|usa)\b")
+
+
+def _norm(s: str | None) -> str:
+    s = (s or "").lower().replace("&", " and ").replace("'", "").replace("’", "")
+    return " ".join(_FILLER.sub(" ", re.sub(r"[^a-z0-9 ]+", " ", s)).split())
+
+
+def best_match(name: str, candidates: list[dict]) -> dict | None:
+    """The candidate brand that is clearly this merchant, or None: better no logo than someone else's. A match is the
+    same name (or website) give or take spaces, punctuation and "Inc", a name the bank cut short ("Mackenthun's Fine
+    Fo" is "Mackenthun's Fine Foods"), a brand the merchant's name starts with ("Kwik Trip 1173"), or a close spelling."""
+    n = _norm(name)
+    squashed = n.replace(" ", "")
+    if len(squashed) < 3:
+        return None
+    best, score = None, 0.0
+    for c in candidates:
+        cn = _norm(c.get("name"))
+        dom = (c.get("domain") or "").split(".")[0].replace("-", "")
+        s = difflib.SequenceMatcher(None, n, cn).ratio() if cn else 0.0
+        if cn.replace(" ", "") == squashed or dom == squashed:
+            s = 1.0
+        elif cn and len(n) >= 6 and cn.startswith(n):
+            s = max(s, 0.9)
+        elif cn and len(cn) >= 5 and n.startswith(cn + " "):
+            s = max(s, 0.9)
+        if s > score:
+            best, score = c, s
+    return best if score >= 0.85 else None
+
+
 def _todo(conn, limit: int) -> list:
     """Logos to fetch: Plaid's that Runway doesn't have yet (or tried a month ago), and Logo.dev's (by website or name)
     that it doesn't have or last checked a month ago, when there's a Logo.dev key. Never tried ones first."""
@@ -163,12 +235,24 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
         if kind in refused:
             continue
         _why = ""   # (a merchant skipped below isn't a failed download)
+        wrong = False
         params = urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
         if m["id"].startswith(SITE):
             s = m["id"][len(SITE):]
             found = _download(f"{LOGO_DEV}{s}?{params}", opener) if site(s) == s else None
         elif m["id"].startswith(BRAND):
-            found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'] or '', safe='')}?{params}", opener) if m["name"] else None
+            found = None
+            if not m["name"]:
+                pass
+            elif searchable(conn):   # Brand Search, and only a clear match (better no logo than the wrong one)
+                cands = search(conn, m["name"], opener)
+                pick = best_match(m["name"], cands) if cands else None
+                wrong = cands is not None and not pick   # Brand Search answered, and nothing is clearly this merchant
+                if pick:
+                    conn.execute("UPDATE merchants SET website=? WHERE id=?", (pick["domain"], m["id"]))
+                    found = _download(f"{LOGO_DEV}{pick['domain']}?{params}", opener)
+            else:
+                found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'], safe='')}?{params}", opener)
         else:
             found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
         if kind:   # remember how Logo.dev last answered, for Settings
@@ -183,6 +267,8 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
             conn.execute("UPDATE merchants SET logo=?, logo_type=?, logo_checked=? WHERE id=?",
                          (base64.b64encode(data).decode(), ctype, now.isoformat(timespec="seconds"), m["id"]))
             got += 1
+        elif kind == "name" and wrong:   # the logo a plain name lookup found may be someone else's: drop it
+            conn.execute("UPDATE merchants SET logo=NULL, logo_type=NULL, logo_checked=? WHERE id=?", (now.isoformat(timespec="seconds"), m["id"]))
         else:
             # (a Logo.dev logo that couldn't be fetched again keeps the one Runway has)
             conn.execute("UPDATE merchants SET logo_checked=? WHERE id=?", (now.isoformat(timespec="seconds"), m["id"]))
@@ -343,9 +429,66 @@ def status(conn) -> dict:
         "waiting": len(_todo(conn, 100000)),
         "last_error": db.get_setting(conn, LAST_ERROR["site"]),
         "last_error_name": db.get_setting(conn, LAST_ERROR["name"]),
+        "searchable": searchable(conn),
     }
 
 
 def retry_unknown(conn) -> None:
     """Look up again the merchants Logo.dev had no logo for (their lookups may have failed, not found nothing)."""
     conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL", (SITE + "%", BRAND + "%"))
+
+
+# ---------------------------------------------------------------------------------------------- logos you choose
+
+def choice(conn, name: str | None) -> dict | None:
+    """The logo you chose for a merchant: {website, hidden}, or None (Runway picks)."""
+    r = conn.execute("SELECT website, hidden FROM merchant_logos WHERE key=?", (key(name),)).fetchone()
+    return {"website": r["website"], "hidden": bool(r["hidden"])} if r else None
+
+
+def choose(conn, name: str | None, website: str | None = None, hidden: bool = False, opener=None) -> None:
+    """Choose a merchant's logo, for every transaction from it: a website's logo (fetched from Logo.dev now), none
+    (hidden), or (neither) Runway's own pick again."""
+    k = key(name)
+    if not k:
+        raise ValueError("Which merchant?")
+    if not website and not hidden:
+        conn.execute("DELETE FROM merchant_logos WHERE key=?", (k,))
+        return
+    s = None
+    if website:
+        s = site(website)
+        if not s:
+            raise ValueError("That doesn't look like a website (e.g. target.com)")
+        if not configured(conn):
+            raise ValueError("Add a Logo.dev publishable key in Settings → Connections first")
+        mid = SITE + s
+        row = conn.execute("SELECT logo FROM merchants WHERE id=?", (mid,)).fetchone()
+        if not row or not row["logo"]:
+            params = urllib.parse.urlencode({"token": db.get_setting(conn, TOKEN_SETTING), "size": 64, "format": "png", "fallback": 404})
+            found = _download(f"{LOGO_DEV}{s}?{params}", opener)
+            if not found:
+                raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))
+            data, ctype = found
+            now = datetime.now().isoformat(timespec="seconds")
+            conn.execute("INSERT INTO merchants(id, logo_url, logo, logo_type, logo_checked) VALUES (?,?,?,?,?) "
+                         "ON CONFLICT(id) DO UPDATE SET logo=excluded.logo, logo_type=excluded.logo_type, logo_checked=excluded.logo_checked",
+                         (mid, LOGO_DEV + s, base64.b64encode(data).decode(), ctype, now))
+    conn.execute("INSERT INTO merchant_logos(key, website, hidden) VALUES (?,?,?) "
+                 "ON CONFLICT(key) DO UPDATE SET website=excluded.website, hidden=excluded.hidden", (k, s, int(bool(hidden))))
+
+
+def chosen_for(conn, txs: list[dict]) -> dict[str, str | None]:
+    """{transaction id: merchant id of the logo you chose, or None for no logo}, for transactions whose merchant has
+    a choice. Transactions not in it keep the logo Runway found."""
+    keys = sorted({key(t.get("payee")) for t in txs if t.get("payee")})
+    if not keys:
+        return {}
+    ph = ",".join("?" * len(keys))
+    rows = {r["key"]: r for r in conn.execute(f"SELECT key, website, hidden FROM merchant_logos WHERE key IN ({ph})", keys)}
+    out: dict[str, str | None] = {}
+    for t in txs:
+        r = rows.get(key(t.get("payee")))
+        if r:
+            out[t["id"]] = None if r["hidden"] or not r["website"] else SITE + r["website"]
+    return out
