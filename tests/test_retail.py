@@ -260,6 +260,38 @@ class TargetTests(Base):
         store = self.c.execute("SELECT channel, details FROM retail_orders WHERE order_number='5555-0123-4567-8901'").fetchone()
         self.assertEqual(tuple(store), ("store", 1))
 
+    # Trimmed from a real /post_orders/v1/{order} reply: one line picked up, one package cancelled (out of stock).
+    POST_ORDER = {
+        "order_number": "102000000000001", "order_date": "2024-09-08T20:13:34.000Z",
+        "payments": [{"amount": 4.65, "card_number": "0000", "payment_type": "TARGETDEBIT"}],
+        "summary": {"total_items": 2, "grand_total": 4.65, "total_product_price": 4.89, "total_taxes": 0.00},
+        "packages": [
+            {"grouping_metadata": {"status": "STAT_ORDER_PICKED_UP", "cancellation": {}},
+             "order_lines": [{"original_quantity": 1.0, "quantity": 1.0, "line_type": "GROCERY", "cancellation": {},
+                              "item": {"tcin": "81642044", "description":
+                                       "Garlic Parsley Mini Creamer Potatoes - 16oz - Good &#38; Gather&#8482;",
+                                       "original_unit_price": 4.89, "unit_price": 4.89, "list_price": 4.89,
+                                       "product_classification": {"product_type_name": "GROCERY"}}}]},
+            {"grouping_metadata": {"status": "STAT_CANCELED", "cancellation": {"cancel_reason_code": "X"}},
+             "order_lines": [{"original_quantity": 1.0, "quantity": 1.0,
+                              "cancellation": {"cancel_reason_code_description": "Out of stock at selected store"},
+                              "item": {"description": "Fresh Broccoli Florets - 12oz", "unit_price": 2.59}}]},
+        ],
+    }
+
+    def test_online_order_details_leave_out_cancelled_lines(self):
+        n = self.POST_ORDER["order_number"]
+        retail.target_history(self.c, {"orders": [{"order_number": n, "placed_date": "2024-09-08",
+                                                   "summary": {"grand_total": 4.65}}]}, "ONLINE")
+        self.assertEqual(retail._need(self.c, "target", [n]), [n])
+        self.assertEqual(retail.target_order(self.c, n, self.POST_ORDER), {"read": True})
+        items = self.c.execute("SELECT i.title, i.quantity, i.amount, i.department FROM retail_items i "
+                               "JOIN retail_orders o ON o.id=i.order_id WHERE o.order_number=?", (n,)).fetchall()
+        self.assertEqual([tuple(i) for i in items],
+                         [("Garlic Parsley Mini Creamer Potatoes - 16oz - Good & Gather\u2122", 1.0, 4.89, "GROCERY")])
+        order = self.c.execute("SELECT total, channel FROM retail_orders WHERE order_number=?", (n,)).fetchone()
+        self.assertEqual(tuple(order), (4.65, "online"))
+
     def test_target_order_with_nowhere_to_read_it(self):
         retail.target_history(self.c, self.HISTORY, "ONLINE")
         n = "5555-0123-4567-8901"
