@@ -51,7 +51,6 @@ class NotifyTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def titles(self):
-        import json
         return [decrypt(b, self.ua, b"0123456789abcdef")["title"] for _p, _h, b in PushService.received]
 
     def test_alerts_sent_once(self):

@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-from . import db, sfinvest, splits
+from . import sfinvest, splits
 from .categorize import clean_payee
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
