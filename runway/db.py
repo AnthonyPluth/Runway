@@ -13,7 +13,7 @@ import re
 import threading
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
 
