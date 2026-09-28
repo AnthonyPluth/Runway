@@ -28,6 +28,9 @@ class RouteTests(unittest.TestCase):
         os.environ["RUNWAY_DATA"] = cls.tmp.name
         db.init()
         today = date.today()
+        with db.session() as conn:   # on Postgres the database is shared with later tests, so note what's there already
+            cls.had_settings = {r["key"] for r in conn.execute("SELECT key FROM settings").fetchall()}
+            cls.had_snapshots = {r["date"] for r in conn.execute("SELECT date FROM networth_snapshots").fetchall()}
         with db.session() as conn:   # a little data, so the pages have something to add up
             conn.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES (?,?,?,?,?)",
                          ("chk", "Checking", "checking", 2500.0, today.isoformat()))
@@ -48,6 +51,15 @@ class RouteTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
+        with db.session() as conn:   # leave the database as it was found
+            conn.execute("DELETE FROM transactions WHERE account_id IN ('chk', 'card')")
+            conn.execute("DELETE FROM accounts WHERE id IN ('chk', 'card')")
+            for r in conn.execute("SELECT key FROM settings").fetchall():
+                if r["key"] not in cls.had_settings:
+                    conn.execute("DELETE FROM settings WHERE key=?", (r["key"],))
+            for r in conn.execute("SELECT date FROM networth_snapshots").fetchall():
+                if r["date"] not in cls.had_snapshots:
+                    conn.execute("DELETE FROM networth_snapshots WHERE date=?", (r["date"],))
         cls.tmp.cleanup()
         os.environ.pop("RUNWAY_DATA", None)
 
