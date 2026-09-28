@@ -499,8 +499,8 @@ function drawChart(host, fc) {
 // Both pages share one list: same filters, same columns. Changing a category saves immediately.
 let upcomingAll = false;
 const LIST_STATE = {
-  review: { q: "", account: "", category: "", month: "", scope: "", remember: true },
-  transactions: { q: "", account: "", category: "", month: "", scope: "", remember: false },
+  review: { q: "", account: "", category: "", month: "", scope: "" },
+  transactions: { q: "", account: "", category: "", month: "", scope: "" },
 };
 function renderReview(el) { return renderTxPage(el, "review"); }
 function renderTransactions(el) { return renderTxPage(el, "transactions"); }
@@ -526,8 +526,7 @@ async function renderTxPage(el, mode) {
         ${CATEGORIES.map((c) => `<option value="${esc(c.name)}" ${c.name === f.category ? "selected" : ""}>${esc(catLabel(c))}</option>`).join("")}</select>
       ${f.month ? `<span class="filter-chip">${esc(monthLabel(f.month))}${f.scope === "budget" ? " · accounts counted in Budget" : ""}
         <button class="chip-x" id="tx-month-clear" aria-label="Show all dates">✕</button></span>` : ""}
-      <label class="inline" title="When you pick a category, also save a rule so future transactions from this merchant get it automatically">
-        <input type="checkbox" id="tx-remember" ${f.remember ? "checked" : ""}> Remember for this merchant</label>
+
     </div>
     ${review ? "" : `<div id="tx-upcoming"></div>`}
     <div id="bulk-bar" class="bulk-bar" hidden></div>
@@ -594,9 +593,10 @@ async function renderTxPage(el, mode) {
     sel.disabled = true;
     try {
       const r = await api(`/api/transactions/${encodeURIComponent(tr.dataset.id)}/category`, {
-        method: "POST", body: { category, remember: f.remember },
+        method: "POST", body: { category },
       });
-      toast(r.also_updated ? `Saved · ${r.also_updated} more from this merchant updated too` : "Saved");
+      if (r.offer_rule) askRemember(tr.dataset.id, category, r.offer_rule, load);
+      else toast("Saved");
       refreshState();
       if (r.also_updated) return load();
       if (review) {
@@ -621,7 +621,6 @@ async function renderTxPage(el, mode) {
   $("#tx-account").addEventListener("change", (e) => { f.account = e.target.value; load(); });
   $("#tx-category").addEventListener("change", (e) => { f.category = e.target.value; load(); });
   $("#tx-month-clear")?.addEventListener("click", () => { f.month = ""; f.scope = ""; route(); });
-  $("#tx-remember").addEventListener("change", (e) => { f.remember = e.target.checked; });
   $("#ai-suggest")?.addEventListener("click", (e) => runAiSuggestions(e.currentTarget, f, load));
   $("#ai-log")?.addEventListener("toggle", (e) => { aiLogOpen = e.currentTarget.open; });
   loadAiLog();
@@ -708,6 +707,33 @@ function wireBulk(box, byId, reload) {
     draw();
   }));
   $("#tx-sel-all", box).addEventListener("change", (e) => { boxes.forEach((b) => { b.checked = e.target.checked; }); draw(); });
+}
+
+// After you pick a category: offer to use it for this merchant from now on (a rule), instead of a checkbox you have
+// to remember to tick. The category is already saved; ignoring the question leaves it at that.
+let rememberTimer;
+function askRemember(txId, category, offer, reload) {
+  const bar = $("#ask-remember");
+  bar.innerHTML = `<span>Saved. Always use <b>${esc(category)}</b> for <b>${esc(offer.merchant)}</b>?${offer.replaces
+      ? ` <span class="muted small">(instead of ${esc(offer.replaces)})</span>` : ""}</span>
+    <span class="ask-actions"><button class="btn primary ask-yes">Always</button><button class="btn ask-no">Just this once</button></span>`;
+  bar.hidden = false;
+  $("#toast").hidden = true;
+  const close = () => { bar.hidden = true; clearTimeout(rememberTimer); document.removeEventListener("keydown", esc_); };
+  const esc_ = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", esc_);
+  clearTimeout(rememberTimer);
+  rememberTimer = setTimeout(close, 12000);
+  $(".ask-no", bar).addEventListener("click", close);
+  $(".ask-yes", bar).addEventListener("click", async () => {
+    close();
+    try {
+      const r = await api(`/api/transactions/${encodeURIComponent(txId)}/category`, { method: "POST", body: { category, remember: true } });
+      toast(r.also_updated ? `From now on, ${offer.merchant} is ${category} · ${r.also_updated} more updated` : `From now on, ${offer.merchant} is ${category}`);
+      refreshState();
+      if (r.also_updated) reload();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 // Spread one transaction across categories: each part gets its own category and amount, and they must add up.
@@ -1019,7 +1045,7 @@ async function runAiSuggestions(btn, f, reload) {
   if (!groups.length) { panel.innerHTML = `<div class="card empty">Nothing waiting for a category.</div>`; return; }
   const answered = groups.filter((g) => g.category || g.new_category).length;
   panel.innerHTML = `<div class="card ai-card"><div class="card-head"><h2>AI suggestions · ${groups.length} merchant${groups.length === 1 ? "" : "s"}</h2>
-      <span class="small muted">Nothing changes until you apply</span></div>
+      <span class="small muted">Nothing changes until you apply; applying also saves a rule for the merchant</span></div>
     <p class="help">${answered === groups.length ? `The AI suggested a category for every merchant.`
       : answered ? `The AI suggested a category for ${answered} of ${groups.length}; pick the rest yourself.`
       : `The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5).`}</p>
@@ -1041,7 +1067,7 @@ async function runAiSuggestions(btn, f, reload) {
       if (!choice) { toast("Choose a category first", true); return; }
       btn.disabled = true;
       try {
-        const body = { tx_ids: g.tx_ids, remember: f.remember, direction: g.direction };
+        const body = { tx_ids: g.tx_ids, remember: true, direction: g.direction };
         if (choice === "__new__") body.new_category = g.new_category; else body.category = choice;
         const r = await api("/api/ai/apply", { method: "POST", body });
         if (r.created) await loadCategories();

@@ -201,6 +201,12 @@ label.inline { display: inline-flex; gap: 6px; align-items: center; font-size: 1
 #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface-2); color: var(--text-strong);
   border: 1px solid var(--surface-3); box-shadow: 0 10px 30px rgba(0,0,0,0.5); padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 10; max-width: 90vw; }
 #toast.error { background: #3a1d1b; border-color: #6b2e2a; color: #ffd9d5; }
+/* "Always use this category for the merchant?" after you pick one */
+#ask-remember { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center;
+  gap: 14px; flex-wrap: wrap; background: var(--surface-2); color: var(--text-strong); border: 1px solid var(--surface-3);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5); padding: 10px 12px 10px 16px; border-radius: 12px; font-size: 14px; max-width: min(640px, 92vw); }
+#ask-remember[hidden] { display: none; }
+#ask-remember .ask-actions { display: inline-flex; gap: 8px; margin-left: auto; }
 
 @media (max-width: 700px) { .hide-sm { display: none; } }
 
@@ -482,6 +488,7 @@ tbody.family:hover .pay-btn.unset, .pay-btn.unset:focus-visible { opacity: 1; }
   }
   .sidebar { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
   #toast { bottom: calc(24px + env(safe-area-inset-bottom)); }
+  #ask-remember { bottom: calc(24px + env(safe-area-inset-bottom)); }
 }
 @media (display-mode: standalone) { body { overscroll-behavior-y: none; } }
 .steps { margin: 8px 0 4px; padding-left: 22px; line-height: 1.7; }

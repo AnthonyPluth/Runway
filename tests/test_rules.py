@@ -129,6 +129,15 @@ class EditingTests(Base):
         # the split and the category-only rule had nothing left to do; the rename stays
         self.assertEqual(left, {"kroger": (None, "Kroger", None)})
 
+    def test_offer_to_remember(self):
+        tid = self.tx(-5, "SQ *BLUE BOTTLE 123")
+        offer = categorize.rule_offer(self.c, tid, "Coffee & Snacks")
+        self.assertEqual((offer["merchant"], offer["match"], offer["replaces"]), ("Blue Bottle", "blue bottle", None))
+        rules.remember(self.c, "blue bottle", "Coffee & Snacks")
+        self.assertIsNone(categorize.rule_offer(self.c, tid, "Coffee & Snacks"))          # the rule already says so
+        self.assertEqual(categorize.rule_offer(self.c, tid, "Restaurants")["replaces"], "Coffee & Snacks")
+        self.assertIsNone(categorize.rule_offer(self.c, self.tx(-5, "BP"), "Auto & Gas"))  # too short to make a rule
+
     def test_describe(self):
         rid = self.rule(match="venmo", match_mode="starts", amount_min=1000, amount_max=2500, direction="out",
                         account_id="chk", category="Mortgage")
