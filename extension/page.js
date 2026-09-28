@@ -1,0 +1,55 @@
+// What the extension does inside a store's page. Each function is self-contained: it's run in a store tab
+// (chrome.scripting) or, from frame.js, in the extension's own hidden frame of the store.
+
+function pageHtml() { return { url: location.href, html: document.documentElement.outerHTML }; }
+
+async function pageFetch(url, init) {
+  try {
+    const res = await fetch(url, { credentials: "include", ...init });
+    return { ok: res.ok, status: res.status, url: res.url, text: await res.text() };
+  } catch (e) {
+    return { ok: false, status: 0, url, text: "", error: String(e && e.message || e) };
+  }
+}
+
+function pageGo(url) { setTimeout(() => { location.href = url; }, 0); return true; }
+
+// Target's order API and its key, as target.com's own orders page called it (or as its page settings give it).
+function targetDiscover(fallbackBase) {
+  const seen = performance.getEntriesByType("resource").map((e) => e.name).filter((u) => u.includes("guest_order_aggregations"));
+  for (const u of seen) {
+    try {
+      const url = new URL(u);
+      const at = url.pathname.indexOf("/guest_order_aggregations/");
+      const base = url.origin + url.pathname.slice(0, at) + "/guest_order_aggregations/v1";
+      const key = url.searchParams.get("key");
+      if (key) return { base, key, from: "page" };
+    } catch (_) { /* keep looking */ }
+  }
+  const html = document.documentElement.innerHTML;
+  const m = html.match(/"apiKey"\s*:\s*"([0-9a-f]{32,64})"/i) || html.match(/[?&]key=([0-9a-f]{32,64})/i);
+  const token = (document.cookie.match(/(?:^|;\s*)accessToken=([^;]+)/) || [])[1] || null;
+  return { base: fallbackBase, key: m ? m[1] : null, from: m ? "settings" : null, token, signedIn: !/login|signin/i.test(location.pathname) };
+}
+
+// Carta: the data addresses the page has used, JSON embedded in the page, and links to other holdings pages.
+function cartaLook() {
+  const same = (u) => { try { return /(^|\.)carta\.com$/.test(new URL(u, location.href).hostname); } catch (_) { return false; } };
+  const used = performance.getEntriesByType("resource")
+    .filter((e) => (e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest") && same(e.name))
+    .map((e) => e.name);
+  const embedded = [...document.querySelectorAll('script[type="application/json"], script#__NEXT_DATA__')]
+    .map((s) => s.textContent).filter((t) => t && t.length < 3000000);
+  const links = [...document.querySelectorAll("a[href]")].map((a) => a.href).filter(same);
+  return { url: location.href, used: [...new Set(used)], embedded, links: [...new Set(links)],
+           signedOut: /\/(login|signin|accounts\/login)/i.test(location.pathname) };
+}
+
+// name -> [function, world it needs when run in a tab]
+const PAGE_COMMANDS = {
+  html: [pageHtml, "ISOLATED"],
+  fetch: [pageFetch, "ISOLATED"],
+  go: [pageGo, "ISOLATED"],
+  discover: [targetDiscover, "MAIN"],
+  look: [cartaLook, "ISOLATED"],
+};
