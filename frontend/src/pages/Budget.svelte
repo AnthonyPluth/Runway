@@ -68,14 +68,16 @@
     const unusedTops = families.filter((f) => !isBudgeted(f) && !(f.top.spent > 0.005));
     // Totals without double counting: a parent's budget covers its subcategories. What's left is each budget's own
     // remainder added up: one that's over doesn't eat into what another still has (its overage is counted apart).
-    let totBudget = 0, totSpent = 0, totLeft = 0, totOver = 0, overCount = 0;
+    // A budget that rolls over has what earlier months left on top of its own amount (`available`).
+    let totBudget = 0, totCarried = 0, totSpent = 0, totLeft = 0, totOver = 0, overCount = 0;
     for (const f of inBudget) for (const c of [f.top, ...f.kids]) if (countsToward(c)) {
-      totBudget += c.budget!; totSpent += c.spent;
-      totLeft += Math.max(0, c.budget! - c.spent);
-      if (c.spent - c.budget! > 0.005) { totOver += c.spent - c.budget!; overCount++; }
+      const avail = c.available ?? c.budget!;
+      totBudget += c.budget!; totCarried += c.carried ?? 0; totSpent += c.spent;
+      totLeft += Math.max(0, avail - c.spent);
+      if (c.spent - avail > 0.005) { totOver += c.spent - avail; overCount++; }
     }
     const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
-    return { inBudget, notBudget, unusedTops, countsToward, totBudget, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
+    return { inBudget, notBudget, unusedTops, countsToward, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
       pace: b.day / b.days_in_month };   // pace: the share of the month gone
   });
 </script>
@@ -112,7 +114,7 @@
   {@const over = v.totLeft < 0.005 && v.totOver > 0.005}
   <div class="mb-6 grid gap-4 md:grid-cols-3">
     {#each [
-      { label: "Budgeted", value: fmt0(v.totBudget), sub: "monthly · repeats every month", alert: false },
+      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `monthly · plus ${fmt0(v.totCarried)} rolled over` : "monthly · repeats every month", alert: false },
       { label: "Spent in budgeted categories", value: fmt0(v.totSpent), alert: over,
         sub: v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
           v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ") },

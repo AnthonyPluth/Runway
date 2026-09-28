@@ -14,6 +14,12 @@ export interface BudgetCategory {
   pay_with: string | null;
   /** The account it usually goes on, which "Automatic" uses. */
   usual_account: string | null;
+  /** YYYY-MM the budget has rolled over since (what's left each month adds to the next); null when it doesn't. */
+  rollover_from?: string | null;
+  /** Left over from earlier months and added to this one's budget. */
+  carried?: number;
+  /** The budget plus what was carried: what there is to spend this month. */
+  available?: number | null;
   spent: number;
   own_spent: number;
   left: number | null;
