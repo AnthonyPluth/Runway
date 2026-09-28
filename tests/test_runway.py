@@ -691,6 +691,16 @@ class SimpleFinStoreTests(Base):
         self.assertEqual(simplefin.store_payload(self.conn, p4, date(2026, 9, 1)), [])
         self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id='A1|p10'").fetchone()[0], "Rideshare & Taxi")
 
+    def test_a_hold_that_never_posts_is_cleared(self):
+        old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
+                             "description": "HOTEL HOLD", "pending": True}])
+        simplefin.store_payload(self.conn, old, date(2026, 8, 1))
+        # Weeks later the hold is gone from the bank; routine syncs only re-read the last 14 days.
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 8, 20))   # a sync on Sep 3
+        self.assertTrue(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())   # 24 days: could still post
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 9, 1))    # Sep 15: 36 days
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())
+
     def test_sync_chunks_backfill(self):
         calls = []
 

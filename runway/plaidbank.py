@@ -400,7 +400,8 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         if old:
             splits.carry_over(conn, old, key, amount)
     for r in removed:
-        conn.execute("DELETE FROM transactions WHERE id LIKE ?", (f"%|pl:{r['transaction_id']}",))
+        # By key in each account it could be in (a LIKE on the id would read the whole table for each one).
+        conn.execute("DELETE FROM transactions WHERE id IN (SELECT id || '|pl:' || ? FROM accounts)", (r["transaction_id"],))
     if not item["cursor"]:
         # The whole history was read again: a hold the bank dropped in the meantime won't be in `removed`, so any
         # pending row of this connection's that isn't in the reply is gone.

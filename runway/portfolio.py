@@ -50,8 +50,10 @@ def _accounts(conn) -> list[dict]:
         "LEFT JOIN plaid_items i ON i.item_id=a.item_id "
         "LEFT JOIN accounts ra ON ra.id = (CASE WHEN a.source='simplefin' THEN substr(a.id, 4) ELSE a.account_id END) "
         "ORDER BY institution_name, a.name"))
+    # A Plaid account matched to your SimpleFIN one is that account, with the fuller data: show it once.
+    covered = {"sf:" + a["account_id"] for a in rows if a["source"] == "plaid" and a["account_id"] and not a["hidden"]}
     for a in rows:
-        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] else 0
+        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] or a["id"] in covered else 0
     return rows
 
 

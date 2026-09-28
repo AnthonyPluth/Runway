@@ -300,6 +300,23 @@ class SyncTests(unittest.TestCase):
         # a second refresh within the day is skipped
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1)), {"fetched": [], "failed": []})
 
+    def test_a_rate_limit_doesnt_mark_tickers_bad(self):
+        import io, urllib.error
+        from unittest import mock
+        asked = []
+
+        def limited(t, *_a):
+            asked.append(t)
+            raise urllib.error.HTTPError("https://prices", 429, "Too Many Requests", {}, io.BytesIO(b""))
+        with mock.patch.object(prices, "fetch", side_effect=limited):
+            res = prices.refresh(self.c, ["VTI", "VXUS", "BND"], date(2026, 1, 1))
+        self.assertEqual((asked, res["failed"]), (["BND"], ["BND"]))   # stops at the first refusal
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM price_meta").fetchone()[0], 0)   # nothing held against them
+        with mock.patch.object(prices, "fetch", side_effect=TimeoutError("timed out")):
+            prices.refresh(self.c, ["VTI"], date(2026, 1, 1))
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM price_meta").fetchone()[0], 0)
+        self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1))["fetched"], ["VTI"])   # tried again next time
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -415,6 +432,15 @@ class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
         self.assertIsNone(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:new'").fetchone())
         with self.assertRaises(ValueError):
             plaid.match_investment(self.c, "529", "not-an-account")
+
+    def test_a_matched_simplefin_account_shows_once_on_investments(self):
+        self.sf("sf-roth", "Roth IRA", 4943.43)
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source) VALUES ('sf:sf-roth', 'sf', 'Roth IRA', 4943.43, 'simplefin')")
+        self.inv("roth", "Roth IRA", 4943.43)
+        ids = lambda: {a["id"] for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if not a["hidden"]}
+        self.assertEqual(ids(), {"sf:sf-roth", "roth"})                     # not matched yet: both
+        plaid.match_investment(self.c, "roth", "sf-roth")
+        self.assertEqual(ids(), {"roth"})
 
     def test_a_simplefin_account_links_to_one_plaid_account(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)
