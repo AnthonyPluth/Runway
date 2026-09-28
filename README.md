@@ -102,6 +102,7 @@ plain Python with a handful of well-known libraries.
 
 ### Budgets and reports
 - Monthly budgets per category with pace markers; click any amount to jump to the transactions behind it.
+- **Rollover**, budget by budget: what's left at the end of a month is added to the next (going over isn't carried).
 - **This month** on the Overview: spending so far against the same point last month, the budgets closest to their
   limit, and the latest transactions.
 - A **cash-flow Sankey chart** showing where each month's money went.

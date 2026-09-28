@@ -39,7 +39,7 @@
 {:then [pace, budget, latest]}
   {@const diff = pace.spent - pace.last_same_point}
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
-    .map((c) => ({ ...c, pct: c.spent / c.budget! })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
+    .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
   {@const c = chart(pace)}
   <h2 class="mt-8 mb-3 text-lg font-semibold tracking-tight">This month</h2>
   <div class="mb-6 grid gap-6 lg:grid-cols-5">
@@ -69,7 +69,7 @@
                   <button type="button" class="w-full cursor-pointer text-left" onclick={() => showTransactions({ category: b.name, month, scope: "budget" })}>
                     <span class="flex items-center gap-2 text-sm">
                       <CatIcon name={b.name} size={20} class="rounded-full" /><span class="truncate">{b.name}</span>
-                      <span class={cn("ml-auto tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{fmt0(b.spent)} of {fmt0(b.budget)}</span>
+                      <span class={cn("ml-auto tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{fmt0(b.spent)} of {fmt0(b.available ?? b.budget)}</span>
                     </span>
                     <span class="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted">
                       <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={`${Math.min(100, b.pct * 100)}%`}
