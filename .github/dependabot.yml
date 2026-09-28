@@ -34,6 +34,11 @@ updates:
     groups:
       web:
         update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 (the Go rewrite) isn't supported by svelte-check yet (peer range ^5 || ^6).
+      # Remove once svelte-check accepts typescript 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: web
 
