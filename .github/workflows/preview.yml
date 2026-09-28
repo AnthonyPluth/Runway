@@ -70,8 +70,10 @@ jobs:
           # Runway itself has no sign-in here (no provider to sign in with); nginx asks for this password instead.
           password=$(openssl rand -base64 18 | tr -d '/+=')
           secret_key=$(openssl rand -base64 32)
-          echo "::add-mask::$password"
+          echo "::add-mask::$password"; echo "::add-mask::$secret_key"
           echo "PASSWORD=$password" >> "$GITHUB_ENV"
+          trap 'echo "::error::Failed at line $LINENO"; docker logs runway || true; cat "$RUNNER_TEMP/nginx-error.log" cloudflared.log 2>/dev/null || true' ERR
+          set -x
           run_env=(-e RUNWAY_ALLOW_NO_AUTH=1 -e RUNWAY_NO_SYNC=1 -e "RUNWAY_PUBLIC_URL=$URL" -e "RUNWAY_SECRET_KEY=$secret_key")
           docker volume create runway-preview
           docker run --rm "${run_env[@]}" -v runway-preview:/data runway:preview python run.py demo
