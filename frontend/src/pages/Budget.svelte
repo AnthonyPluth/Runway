@@ -10,7 +10,7 @@
   import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { fmt, fmt0, monthLabel, thisMonth } from "$lib/format";
+  import { fmt, fmt0, monthLabel, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -66,11 +66,16 @@
     const inBudget = families.filter(isBudgeted);
     const notBudget = families.filter((f) => !isBudgeted(f) && f.top.spent > 0.005);
     const unusedTops = families.filter((f) => !isBudgeted(f) && !(f.top.spent > 0.005));
-    // Totals without double counting: a parent's budget covers its subcategories.
-    let totBudget = 0, totSpent = 0;
-    for (const f of inBudget) for (const c of [f.top, ...f.kids]) if (countsToward(c)) { totBudget += c.budget!; totSpent += c.spent; }
+    // Totals without double counting: a parent's budget covers its subcategories. What's left is each budget's own
+    // remainder added up: one that's over doesn't eat into what another still has (its overage is counted apart).
+    let totBudget = 0, totSpent = 0, totLeft = 0, totOver = 0, overCount = 0;
+    for (const f of inBudget) for (const c of [f.top, ...f.kids]) if (countsToward(c)) {
+      totBudget += c.budget!; totSpent += c.spent;
+      totLeft += Math.max(0, c.budget! - c.spent);
+      if (c.spent - c.budget! > 0.005) { totOver += c.spent - c.budget!; overCount++; }
+    }
     const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
-    return { inBudget, notBudget, unusedTops, countsToward, totBudget, totSpent, otherSpent: allSpent - totSpent,
+    return { inBudget, notBudget, unusedTops, countsToward, totBudget, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
       pace: b.day / b.days_in_month };   // pace: the share of the month gone
   });
 </script>
@@ -104,12 +109,13 @@
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
   {@const v = view}
-  {@const over = v.totSpent > v.totBudget && v.totBudget > 0}
+  {@const over = v.totLeft < 0.005 && v.totOver > 0.005}
   <div class="mb-6 grid gap-4 md:grid-cols-3">
     {#each [
       { label: "Budgeted", value: fmt0(v.totBudget), sub: "monthly · repeats every month", alert: false },
       { label: "Spent in budgeted categories", value: fmt0(v.totSpent), alert: over,
-        sub: v.totBudget > 0 ? (over ? `▲ ${fmt0(v.totSpent - v.totBudget)} over` : `${fmt0(v.totBudget - v.totSpent)} left`) : "Set a budget below" },
+        sub: v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
+          v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ") },
       { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized), alert: false,
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
     ] as t (t.label)}
