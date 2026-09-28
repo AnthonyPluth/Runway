@@ -890,10 +890,15 @@ async function renderOrder(box, orderId, changed) {
   });
 }
 
+function orderState(o) {
+  return `<span class="small order-state ${o.charges && o.matched === o.charges ? "muted" : "warn-text"}">${!o.details ? "items not read"
+    : !o.charges ? "no charge" : o.matched === o.charges ? "matched" : `${o.charges - o.matched} not matched`}</span>`;
+}
+
 async function renderRetailCard(box) {
   let r;
   try { r = await api("/api/retail"); } catch (err) { box.innerHTML = `<h2>Amazon and Target orders</h2><p class="muted">${esc(err.message)}</p>`; return; }
-  const storeLine = (k) => {
+  const storeLine = (k, r) => {
     const s = r.stores[k];
     if (!s.last && !s.orders) return `<div class="tidy-row retail-row"><span class="tidy-main"><b>${esc(s.name)}</b></span><span class="muted small">not imported yet</span></div>`;
     return `<div class="tidy-row retail-row"><span class="tidy-main"><b>${esc(s.name)}</b></span>
@@ -914,7 +919,7 @@ async function renderRetailCard(box) {
         <div id="rt-shown"></div></li>
       <li>Stay signed in to Amazon and Target in that browser, and use the extension's <b>Import</b> button.</li>
     </ol>
-    <div class="tidy-list">${storeLine("amazon")}${storeLine("target")}</div>
+    <div class="tidy-list" id="rt-stores">${storeLine("amazon", r)}${storeLine("target", r)}</div>
     <div class="form-row" style="margin-top:10px">
       ${STATE.has_api_key ? `<label class="inline"><input type="checkbox" id="rt-ai" ${r.ai ? "checked" : ""}> Categorize items with AI
         <span class="muted small">(only item names and prices are sent)</span></label>`
@@ -927,11 +932,20 @@ async function renderRetailCard(box) {
           <span class="muted small">${o.placed ? fmtDate(o.placed) : ""}</span>
           <span class="order-name">${esc(orderLabel(o))} <span class="muted small">${esc(o.order_number)}</span></span>
           <span class="num">${o.total != null ? fmt(o.total) : ""}</span>
-          <span class="small ${o.charges && o.matched === o.charges ? "muted" : "warn-text"}">${!o.details ? "items not read"
-            : !o.charges ? "no charge" : o.matched === o.charges ? "matched" : `${o.charges - o.matched} not matched`}</span></button>
+          ${orderState(o)}</button>
         <div class="order-box" hidden></div></div>`).join("")}</div></details>` : ""}`;
 
   const again = () => renderRetailCard(box);
+  // A match you make (or undo) in an open order: update the counts, leaving the order open.
+  const recount = async () => {
+    let n;
+    try { n = await api("/api/retail"); } catch (_) { return; }
+    $("#rt-stores", box).innerHTML = storeLine("amazon", n) + storeLine("target", n);
+    for (const o of n.recent) {
+      const state = $(`.order-open[data-id="${CSS.escape(o.id)}"] .order-state`, box);
+      if (state) state.outerHTML = orderState(o);
+    }
+  };
   $("#rt-new", box)?.addEventListener("click", async (e) => {
     if (r.token && !confirmInline(e.currentTarget, "Replace the key? The extension will need the new one")) return;
     try {
@@ -961,7 +975,7 @@ async function renderRetailCard(box) {
   $$(".order-open", box).forEach((b) => b.addEventListener("click", () => {
     const panel = b.nextElementSibling;
     panel.hidden = !panel.hidden;
-    if (!panel.hidden) { panel.innerHTML = "Loading…"; renderOrder(panel, b.dataset.id, null); }
+    if (!panel.hidden) { panel.innerHTML = "Loading…"; renderOrder(panel, b.dataset.id, recount); }
   }));
 }
 
