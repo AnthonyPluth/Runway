@@ -53,6 +53,21 @@ class MigrationTests(unittest.TestCase):
             self.assertGreater(conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 10)
         db.init(self.path)   # starting again changes nothing
 
+    def test_plaid_account_counted_twice_is_retired(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("DROP INDEX accounts_plaid_account")
+            c.exec_driver_sql("UPDATE alembic_version SET version_num='0011'")
+            c.exec_driver_sql("INSERT INTO accounts(id, name, plaid_account_id) VALUES ('sf', 'Freedom', 'p1'), "
+                              "('pl:p1', 'Freedom ••9999', 'p1'), ('pl:p2', 'Savings', 'p2')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            got = {r["id"]: (r["plaid_account_id"], r["hidden"]) for r in conn.execute("SELECT id, plaid_account_id, hidden FROM accounts")}
+        self.assertEqual(got, {"sf": ("p1", 0), "pl:p1": (None, 1), "pl:p2": ("p2", 0)})
+        self.assertEqual(drift(self.path), [])
+
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:

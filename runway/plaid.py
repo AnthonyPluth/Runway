@@ -3,6 +3,7 @@
 Bank and credit card connections (transactions, balances and card statements) are in plaidbank.py."""
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import os
@@ -74,6 +75,10 @@ def call(conn, path: str, body: dict) -> dict:
         raise PlaidError(f"Plaid: {msg}" + (f" ({code})" if code else ""), code) from e
     except urllib.error.URLError as e:
         raise PlaidError(f"Couldn't reach Plaid: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:   # a timeout or a dropped connection while reading the reply
+        raise PlaidError(f"Couldn't reach Plaid: {str(e) or type(e).__name__}") from e
+    except ValueError as e:   # not JSON: a proxy's error page, or a reply cut short
+        raise PlaidError("Plaid sent back a reply Runway couldn't read.") from e
 
 
 # ------------------------------------------------------------------------------------------------ linking
@@ -123,24 +128,34 @@ def redirect_uri(conn) -> str | None:
     return public + "/plaid/oauth" if public.startswith("https://") else None
 
 
-def exchange(conn, public_token: str, institution: dict | None = None) -> str:
+KIND_PRODUCTS = {"bank": ["transactions"], "cards": ["liabilities"], "investments": ["investments"]}
+
+
+def exchange(conn, public_token: str, institution: dict | None = None, kind: str | None = None) -> str:
+    """Swap Link's public token for the connection's access token, and save it straight away: from here on the
+    connection exists (and bills) at Plaid, so it must never be lost to a failure after this point. `kind` is what
+    was linked ("bank", "cards" or "investments"), used when Plaid can't say which products the connection has."""
     res = call(conn, "/item/public_token/exchange", {"public_token": public_token})
     item_id, token = res["item_id"], res["access_token"]
     institution = institution or {}
+    fallback = KIND_PRODUCTS.get(kind or "", ["investments"])
+    conn.execute(
+        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, error=NULL",
+        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
+         ",".join(fallback)),
+    )
+    conn.commit()
     try:   # which products this connection has (investments, or transactions and/or liabilities)
         info = call(conn, "/item/get", {"access_token": token}).get("item") or {}
         # Optional products (card statements) can show up only as consented until they're first used.
         prods = sorted(set(info.get("products") or []) | set(info.get("billed_products") or []) | set(info.get("consented_products") or []))
     except PlaidError:
         prods = []
-    prods = [p for p in prods if p in ("investments", "transactions", "liabilities")] or ["investments"]
-    conn.execute(
-        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
-        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, products=excluded.products, error=NULL",
-        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
-         ",".join(prods)),
-    )
-    conn.commit()
+    prods = [p for p in prods if p in ("investments", "transactions", "liabilities")]
+    if prods:
+        conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(prods), item_id))
+        conn.commit()
     return item_id
 
 
