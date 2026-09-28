@@ -59,7 +59,9 @@ only add orders.
 Runway reads the pages with the [amazon-orders](https://github.com/alexdlaird/amazon-orders) library's parsers for
 Amazon, and loosely (by field names) for Target, whose order API is undocumented. Target's replies are kept with each
 order, so if items are missing you can look at what Target sent (it's in the `retail_orders.raw` column) and Runway
-can be taught to read it. An order whose page can't be read is tried again on the next few imports, then left alone.
+can be taught to read it. When the addresses Runway knows for a Target order's items don't answer, the extension
+loads that order's own page on target.com, reads the addresses the page called for it, and remembers them for the
+next orders. An order whose page can't be read is tried again on the next few imports, then left alone.
 
 For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Connections ->
 Carta -> **Download what the extension read** shows why a grant was missed.

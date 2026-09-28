@@ -421,11 +421,14 @@ def target_order(conn, number: str, data) -> dict:
     number = str(number or "").strip()
     if not number:
         raise RetailError("Which order is this?")
+    oid = order_key("target", number)
+    if not data:   # the extension found nowhere to read it: counts as a try, and keeps what the history said
+        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
+        return {"read": False}
     found = _find_orders(data)
     o = next((x for x in found if str(_first(x, _NUMBER, ())) == number), None) or (data if isinstance(data, dict) else {})
     o = dict(o)
     o.setdefault("order_number", number)
-    oid = order_key("target", number)
     _, read = _target_order(conn, o, None)
     if not read:
         conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
