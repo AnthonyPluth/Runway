@@ -358,6 +358,13 @@ class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
         plaid.update_investment_accounts(self.c, "wf")                       # balances follow each sync
         self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='pl:a1'").fetchone()[0], 5100)
 
+    def test_hiding_its_account_in_settings_hides_it_on_investments(self):
+        self.inv("a1", "Individual", 5000)
+        plaid.update_investment_accounts(self.c, "wf")
+        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='pl:a1'")
+        acct = next(a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if a["id"] == "a1")
+        self.assertEqual((acct["hidden"], acct["hidden_in_accounts"]), (1, 1))
+
     def test_same_as_simplefin_when_the_balance_says_so_and_asks_otherwise(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)
         self.sf("sf-529", "529 Plan", 0.0)

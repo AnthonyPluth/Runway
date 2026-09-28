@@ -40,11 +40,19 @@ def asset_class(sec: dict) -> str:
 
 
 def _accounts(conn) -> list[dict]:
-    return db.rows(conn.execute(
+    """Investment accounts. One is hidden if you hid it here (inv_accounts.hidden) or hid the account it is in
+    Settings -> Accounts: SimpleFIN's 'sf:<account id>', or the account a Plaid one was matched to."""
+    rows = db.rows(conn.execute(
         "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name, "
         "(SELECT COUNT(*) FROM manual_positions m WHERE m.account_id=a.id) AS tracked, "
-        "(SELECT drift FROM manual_state ms WHERE ms.account_id=a.id) AS drift FROM inv_accounts a "
-        "LEFT JOIN plaid_items i ON i.item_id=a.item_id ORDER BY institution_name, a.name"))
+        "(SELECT drift FROM manual_state ms WHERE ms.account_id=a.id) AS drift, "
+        "COALESCE(ra.hidden, 0) AS hidden_in_accounts FROM inv_accounts a "
+        "LEFT JOIN plaid_items i ON i.item_id=a.item_id "
+        "LEFT JOIN accounts ra ON ra.id = (CASE WHEN a.source='simplefin' THEN substr(a.id, 4) ELSE a.account_id END) "
+        "ORDER BY institution_name, a.name"))
+    for a in rows:
+        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] else 0
+    return rows
 
 
 def _visible_ids(conn) -> list[str]:
