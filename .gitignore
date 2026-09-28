@@ -20,3 +20,7 @@ venv/
 # The new web app: its dependencies, and what it builds (the Docker image builds it)
 frontend/node_modules/
 runway/static/app/
+
+# test coverage data (CI turns it into docs/badges/coverage.svg)
+.coverage
+coverage.json
