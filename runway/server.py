@@ -2139,11 +2139,17 @@ class Handler(BaseHTTPRequestHandler):
     def _static(self, path: str) -> None:
         rel = "index.html" if path in ("", "/") else path.lstrip("/")
         full = os.path.realpath(os.path.join(STATIC, rel))
+        index = INDEX
+        if path == "/next" or path.startswith("/next/"):   # the new app (frontend/, built into static/next/)
+            index = NEXT_INDEX
+            if not os.path.isfile(index):
+                return self._page(404, "The new app isn't built", "Run npm run build in frontend/ (the Docker image does this for you).",
+                                  ("/", "Open Runway"))
         if os.path.commonpath([full, STATIC]) != STATIC or not os.path.isfile(full):
-            full = INDEX   # the app handles its own routes (#budget, /plaid/oauth, ...)
+            full = index   # the app handles its own routes (#budget, /plaid/oauth, ...)
         ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
         gz_ok = "gzip" in (self.headers.get("Accept-Encoding") or "")
-        if full == INDEX:
+        if full in (INDEX, NEXT_INDEX):
             # A fresh nonce per page, so only this page's own <script> tags may run (see content_security_policy).
             nonce = secrets.token_urlsafe(16)
             with open(full, "rb") as f:
@@ -2157,8 +2163,10 @@ class Handler(BaseHTTPRequestHandler):
             self._security_headers()
             self.end_headers()
             return
-        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once.
-        self._send_file(entry["data"], ctype, "no-cache", entry["etag"], gz_ok, None, entry.get("gz"))
+        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once. The new
+        # app's built files have their content's hash in their name, so they never change and can be kept for good.
+        cache = "public, max-age=31536000, immutable" if path.startswith("/next/assets/") else "no-cache"
+        self._send_file(entry["data"], ctype, cache, entry["etag"], gz_ok, None, entry.get("gz"))
 
     def _send_file(self, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
                    gz: bytes | None = None) -> None:
@@ -2195,6 +2203,7 @@ class Handler(BaseHTTPRequestHandler):
 
 STATIC = os.path.realpath(STATIC)
 INDEX = os.path.join(STATIC, "index.html")
+NEXT_INDEX = os.path.join(STATIC, "next", "index.html")
 _static_files: dict[str, dict] = {}
 _static_lock = threading.Lock()
 

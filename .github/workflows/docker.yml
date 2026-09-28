@@ -85,10 +85,28 @@ jobs:
           pipx run "ruff==0.16.9" check .
           find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
 
+  # The web app (frontend/): type-check it and make sure it builds.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type-check (svelte-check)
+        run: npm run check
+      - run: npm run build
+
   # Build, check and publish the image, then tag the release, in one job, to save starting a second runner.
   # The tag and Release come last, so a failed or cancelled build never leaves a version with no image.
   image:
-    needs: test
+    needs: [test, web]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
