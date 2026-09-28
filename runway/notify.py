@@ -41,7 +41,7 @@ def save_prefs(conn, body: dict) -> dict:
             p[k] = bool(v)
         else:
             try:
-                p[k] = max(0, float(v)) if k != "card_due_days" else max(0, min(14, int(v)))
+                p[k] = max(0, db.number(v)) if k != "card_due_days" else max(0, min(14, int(v)))
             except (TypeError, ValueError):
                 raise ValueError("Enter a number")
     db.set_setting(conn, "notify_prefs", json.dumps(p))
@@ -98,6 +98,9 @@ def send_all(conn, message: dict, only: str | None = None) -> dict:
     sent, failed = 0, []
     for s in subscriptions(conn):
         if only and s["endpoint"] != only:
+            continue
+        if not push_host_allowed(s["endpoint"]):   # from a restored backup, never checked when it was saved
+            unsubscribe(conn, s["endpoint"])
             continue
         try:
             webpush.send(s, message, vapid, subject(conn))

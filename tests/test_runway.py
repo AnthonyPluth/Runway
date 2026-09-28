@@ -6,6 +6,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -789,6 +790,10 @@ class SimpleFinHttpTests(unittest.TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             url = f"http://user:p%40ss@127.0.0.1:{srv.server_port}/simplefin"
+            # the mock bridge is plain http on this machine, which the real opener refuses (see test_hardening)
+            plain = mock.patch.object(simplefin, "_opener", lambda: urllib.request.build_opener(simplefin._NoRedirects()))
+            plain.start()
+            self.addCleanup(plain.stop)
             out = simplefin.fetch_accounts(url, date(2026, 9, 1), date(2026, 9, 23))
             self.assertEqual(out["accounts"], [])
             self.assertTrue(MockBridge.last_path.startswith("/simplefin/accounts?start-date="))

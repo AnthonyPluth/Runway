@@ -71,7 +71,7 @@ def dump(conn) -> bytes:
     return gzip.compress(json.dumps(export(conn), separators=(",", ":"), default=str).encode(), compresslevel=6)
 
 
-MAX_UNPACKED = 1024 * 1024 * 1024   # a real backup unpacks to far less; a crafted one could be many GB
+MAX_UNPACKED = 256 * 1024 * 1024   # a real backup unpacks to far less; a crafted one could be many GB (held in memory)
 
 
 def _gunzip(raw: bytes) -> bytes:
@@ -95,6 +95,8 @@ def load(raw: bytes) -> dict:
     except ValueError as e:
         raise ValueError("That file isn't a Runway backup.") from e
     if not isinstance(data, dict) or data.get("format") != FORMAT or not isinstance(data.get("tables"), dict):
+        raise ValueError("That file isn't a Runway backup.")
+    if not isinstance(data.get("version", 0), int):
         raise ValueError("That file isn't a Runway backup.")
     if data.get("version", 0) > VERSION:
         raise ValueError("That backup is from a newer version of Runway. Update Runway first.")
