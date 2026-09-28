@@ -7,6 +7,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -291,6 +292,19 @@ class TargetTests(Base):
                          [("Garlic Parsley Mini Creamer Potatoes - 16oz - Good & Gather\u2122", 1.0, 4.89, "GROCERY")])
         order = self.c.execute("SELECT total, channel FROM retail_orders WHERE order_number=?", (n,)).fetchone()
         self.assertEqual(tuple(order), (4.65, "online"))
+
+    def test_reads_back_to_orders_whose_items_are_still_to_come(self):
+        self.since.stop()
+        try:
+            db.set_setting(self.c, "retail_last_target", (datetime.now() - timedelta(days=1)).isoformat())
+            usual = retail.since(self.c, "target")
+            old = (date.fromisoformat(usual) - timedelta(days=60)).isoformat()
+            retail._save_order(self.c, "target", "912000000009", placed=old, total=5.0)   # listed, items never read
+            self.assertEqual(retail.since(self.c, "target"), old)
+            self.c.execute("UPDATE retail_orders SET attempts=? WHERE order_number='912000000009'", (retail.MAX_ATTEMPTS,))
+            self.assertEqual(retail.since(self.c, "target"), usual)                        # given up on: not again
+        finally:
+            self.since.start()
 
     def test_target_order_with_nowhere_to_read_it(self):
         retail.target_history(self.c, self.HISTORY, "ONLINE")
