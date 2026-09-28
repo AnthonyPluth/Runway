@@ -360,11 +360,12 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 
 ## Releases
 
-Every push to `main` runs the tests, then GitHub Actions:
+Every push to `main` runs the tests and, at the same time, builds the image for `linux/amd64` and `linux/arm64` with
+the next version baked in (and checks that it starts). Nothing is published until the tests pass; then GitHub Actions:
 
-1. tags the next version and publishes a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases) with notes;
-2. builds the image for `linux/amd64` and `linux/arm64` with that version baked in, and pushes it as
-   `ghcr.io/anthonypluth/runway` tagged `latest`, `1.2.3` (and `v1.2.3`), `1.2` and `1`;
+1. pushes the image (already built, so this is quick) as `ghcr.io/anthonypluth/runway` tagged `latest`, `1.2.3` (and
+   `v1.2.3`), `1.2` and `1`;
+2. tags the version and publishes a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases) with notes;
 3. deletes untagged leftovers. Every released version stays available, so you can pin one
    (`image: ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose.
 
