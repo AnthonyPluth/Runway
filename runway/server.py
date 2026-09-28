@@ -406,10 +406,13 @@ def api_transactions(conn, q, _b):
 
 def api_tx_category(conn, _q, body, tx_id):
     try:
-        n = categorize.set_category(conn, tx_id, body.get("category", ""), bool(body.get("remember")))
+        remember = bool(body.get("remember"))
+        n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
     except ValueError as e:
         raise ApiError(str(e))
-    return {"ok": True, "also_updated": n}
+    # Not remembered yet: the app asks whether to use this category for the merchant from now on.
+    offer = None if remember else categorize.rule_offer(conn, tx_id, body.get("category", ""))
+    return {"ok": True, "also_updated": n, "offer_rule": offer}
 
 
 def api_tx_split(conn, _q, body, tx_id):
