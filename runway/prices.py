@@ -4,6 +4,7 @@ Yahoo's closes are split-adjusted, so we also keep each ticker's split history t
 prices that were actually quoted on the day (needed to value the share counts you really held then)."""
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -85,7 +86,17 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
         try:
             rows, splits, info = fetch(t, start, date.today())
             ok = 1 if rows else 0
-        except (urllib.error.URLError, ValueError, OSError):
+        except urllib.error.HTTPError as e:
+            if e.code == 429 or e.code >= 500:   # the service, not the ticker: try it again next time
+                failed.append(t)
+                if e.code == 429:   # rate-limited: asking about the rest now only prolongs it
+                    break
+                continue
+            rows, splits, info, ok = [], [], {}, 0
+        except (urllib.error.URLError, OSError, http.client.HTTPException):   # no connection: nothing learned about it
+            failed.append(t)
+            continue
+        except ValueError:
             rows, splits, info, ok = [], [], {}, 0
         conn.executemany("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
                          "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", [(t, *r) for r in rows])
@@ -161,7 +172,7 @@ def _quote(ticker: str) -> dict | None:
             "type": m.get("instrumentType")}
 
 
-def quotes(tickers: list[str]) -> dict[str, dict]:
+def quotes(tickers: list[str], ttl: float = QUOTE_TTL) -> dict[str, dict]:
     """Latest price and previous close per ticker (Yahoo's quotes are real-time for most US stocks and ETFs;
     mutual funds only change once a day, after the close)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -170,7 +181,7 @@ def quotes(tickers: list[str]) -> dict[str, dict]:
     out, todo = {}, []
     for t in want:
         hit = _quote_cache.get(t)
-        if hit and now - hit[0] < QUOTE_TTL:
+        if hit and now - hit[0] < ttl:
             out[t] = hit[1]
         else:
             todo.append(t)
@@ -198,3 +209,36 @@ def market_state(q: dict | None, now: float | None = None) -> str:
     if not q or not q.get("open_start") or not q.get("open_end"):
         return "closed"
     return "open" if q["open_start"] <= now < q["open_end"] else "closed"
+
+
+# ------------------------------------------------------------------------------------------------ streaming
+
+STREAM_SECONDS = 5        # fastest re-quote while the market is open (slower with many tickers, to go easy on Yahoo)
+STREAM_LIFETIME = 600     # one stream lasts this long, then the browser reconnects (so no connection is held forever)
+CLOSED_RETRY = 300        # with the market closed the stream ends and the browser comes back after this many seconds
+
+
+def stream_interval(n_tickers: int) -> float:
+    return max(STREAM_SECONDS, n_tickers / 4)
+
+
+def quote_stream(tickers: list[str], lifetime: float = STREAM_LIFETIME, clock=time.monotonic, sleep=time.sleep):
+    """Prices as they move: first every quote, then only the tickers whose price or quote time changed. Yields a dict
+    ({"quotes", "market", "as_of"}) for news, or None when nothing moved (the caller sends a keep-alive). Ends after one
+    update when the market is closed, or when `lifetime` seconds have passed."""
+    want = sorted(set(tickers) | {BENCHMARK})
+    interval = stream_interval(len(want))
+    sent: dict[str, tuple] = {}
+    started = clock()
+    while True:
+        q = quotes(want, ttl=interval - 1)   # the shared cache means two open tabs don't double Yahoo's traffic
+        market = market_state(q.get(BENCHMARK))
+        changed = {t: v for t, v in q.items() if sent.get(t) != (v["price"], v.get("time"))}
+        if changed or not sent:
+            sent.update({t: (v["price"], v.get("time")) for t, v in changed.items()})
+            yield {"quotes": changed, "market": market, "as_of": datetime.now().isoformat(timespec="seconds")}
+        else:
+            yield None
+        if market != "open" or clock() - started >= lifetime:
+            return
+        sleep(interval)

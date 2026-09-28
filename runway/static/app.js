@@ -1854,6 +1854,21 @@ function drawSankey(host, cf, monthName) {
 
 // ------------------------------------------------------------------------------------------ investments
 let invLiveTimer = null;
+let invLiveSource = null;     // the open price stream (EventSource), while Investments is on screen
+let invLiveStart = null;      // (re)starts live prices for the Investments page on screen
+let invLiveFailures = 0;      // streams that failed before sending anything; after 3 we poll instead
+
+function stopLivePrices() {
+  clearTimeout(invLiveTimer); invLiveTimer = null;
+  if (invLiveSource) { invLiveSource.close(); invLiveSource = null; }
+}
+
+// Hidden tabs don't hold a stream open; it picks up again (with a fresh snapshot) when you come back.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { if (invLiveSource) { invLiveSource.close(); invLiveSource = null; } }
+  else if (invLiveStart && $("#inv-tiles") && location.hash.startsWith("#investments")) invLiveStart();
+});
+window.addEventListener("hashchange", () => { if (!location.hash.startsWith("#investments")) stopLivePrices(); });
 let invPeriod = "1Y", invAllocTab = "asset_class", invSort = { key: "value", dir: -1 }, invActivityLimit = 40, invActivityType = "";
 const pct = (x, digits = 1) => {
   if (x == null) return "—";
@@ -1982,7 +1997,7 @@ async function renderInvestments(el) {
 
   el.innerHTML = `<div class="card-head"><h1>Investments</h1>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <span class="live-ind small muted" id="live-ind" title="Stock and ETF prices refresh every 30 seconds while the market is open">Holdings updated ${esc(synced)}</span>
+        <span class="live-ind small muted" id="live-ind" title="Stock and ETF prices update as they move while the market is open">Holdings updated ${esc(synced)}</span>
         <div class="seg" id="inv-period">${["1M", "3M", "YTD", "1Y", "2Y"].map((p) => `<button data-p="${p}" class="${p === invPeriod ? "on" : ""}">${p}</button>`).join("")}</div></div></div>
     ${errors.map((i) => `<div class="warn critical"><span class="icon">!</span><span>${esc(i.institution_name || "A connection")} needs attention (${esc(i.error)}). <a href="#setup/connections">Reconnect in Settings</a></span></div>`).join("")}
     <div class="tiles tiles-4" id="inv-tiles">${invTiles(d, perf, beat)}</div>
@@ -2124,29 +2139,52 @@ async function renderInvestments(el) {
   });
   wireTiles();
 
-  // Live prices: poll while this page is open. Every ~30s when the market is open, every 5 minutes when it's closed.
-  clearTimeout(invLiveTimer);
+  // Live prices, streamed from the server while this page is open and visible: an update whenever a holding's price
+  // moves. With the market closed the server sends the latest prices and the browser checks back every few minutes.
+  // Browsers (or proxies) that can't stream fall back to asking every 30 seconds.
+  stopLivePrices();
+  const quotes = {};
+  const showLive = (live) => {
+    if (!$("#inv-tiles") || !location.hash.startsWith("#investments")) return stopLivePrices();   // left the page
+    Object.assign(quotes, live.quotes);
+    applyLiveQuotes(d, quotes, live.market);
+    $("#inv-tiles").innerHTML = invTiles(d, perf, beat); wireTiles();
+    if (!document.querySelector(".cost-row")) drawHoldings();   // don't close an open cost editor
+    const t = new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    $("#live-ind").innerHTML = live.market === "open"
+      ? `<i class="live-dot" aria-hidden="true"></i> Live prices · ${esc(t)}`
+      : `Market closed · latest prices as of ${esc(t)}`;
+    $("#live-ind").classList.toggle("is-live", live.market === "open");
+    $("#live-ind").title = live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : "";
+  };
   const liveTick = async () => {
     if (!$("#inv-tiles") || !location.hash.startsWith("#investments")) return;   // left the page
     let next = 30_000;
     if (!document.hidden) {
       try {
         const live = await api("/api/investments/live");
-        if (!$("#inv-tiles")) return;
-        applyLiveQuotes(d, live.quotes, live.market);
-        $("#inv-tiles").innerHTML = invTiles(d, perf, beat); wireTiles();
-        if (!document.querySelector(".cost-row")) drawHoldings();   // don't close an open cost editor
-        const t = new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
-        $("#live-ind").innerHTML = live.market === "open"
-          ? `<i class="live-dot" aria-hidden="true"></i> Live prices · ${esc(t)}`
-          : `Market closed · latest prices as of ${esc(t)}`;
-        $("#live-ind").classList.toggle("is-live", live.market === "open");
+        showLive(live);
         if (live.market !== "open") next = 300_000;
       } catch (err) { /* keep the last numbers; try again next time */ }
     }
     invLiveTimer = setTimeout(liveTick, next);
   };
-  liveTick();
+  invLiveStart = () => {
+    if (document.hidden || invLiveSource || invLiveTimer) return;
+    if (!window.EventSource || invLiveFailures >= 3) return liveTick();
+    const src = invLiveSource = new EventSource("/api/investments/stream");
+    let got = false;
+    src.addEventListener("quotes", (e) => { got = true; invLiveFailures = 0; showLive(JSON.parse(e.data)); });
+    // The server ends each stream on purpose (market closed, or after a while) and the browser reconnects on its own.
+    // A refused stream (signed out, a proxy in the way) or one that keeps failing before sending anything: poll instead.
+    src.onerror = () => {
+      if (src.readyState === EventSource.CLOSED) invLiveFailures = 3;
+      else if (got) return;
+      else invLiveFailures++;
+      if (invLiveFailures >= 3) { stopLivePrices(); invLiveStart(); }
+    };
+  };
+  invLiveStart();
 
   const drawAlloc = () => {
     const items = d.allocation[invAllocTab] || [];
@@ -2740,7 +2778,7 @@ function runPlaidLink(token, itemId, kind, receivedRedirectUri) {
           toast(kind === "investments" ? "Connected. Pulling holdings and activity…" : "Connected. Reading accounts and statements…");
           const r = itemId
             ? await api(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
-            : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution } });
+            : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution, kind } });
           toast(r.bank
             ? `Found ${r.accounts} account${r.accounts === 1 ? "" : "s"}` + (r.matched && r.matched.length ? ` · matched ${r.matched.join(", ")}` : "") +
               (r.statements ? ` · ${r.statements} card statement${r.statements === 1 ? "" : "s"}` : "")
@@ -2788,7 +2826,8 @@ function plaidBankAccounts(it, accounts) {
       <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
         <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
         ${p.account_id && p.account_id.startsWith("pl:") ? `<option value="${esc(p.account_id)}" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
-        ${mine.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
+        ${mine.filter((a) => !a.plaid_account_id || a.plaid_account_id === p.id)   // one Plaid account each
+          .map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
         <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't use</option></select></div>`;
   }).join("")}</div>`;
 }
@@ -2806,7 +2845,7 @@ function plaidInvestmentAccounts(it) {
       <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
         <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
         ${sel.startsWith("pl:") ? `<option value="new" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
-        ${cands.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)} (${esc(fmt(a.balance))})</option>`).join("")}
+        ${cands.filter((a) => !a.linked_to || a.linked_to === p.id).map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)} (${esc(fmt(a.balance))})</option>`).join("")}
         <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't count it</option></select></div>`;
   }).join("")}</div>`;
 }
