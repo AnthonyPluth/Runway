@@ -24,6 +24,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
       matrix:
         database: [sqlite, postgres]
@@ -40,10 +42,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
+        id: python
         with:
           python-version: "3.12"
+
+      # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh.
+      - name: Cache Poetry
+        id: poetry-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.local/pipx/venvs/poetry
+            ~/.local/bin/poetry
+          key: poetry-${{ runner.os }}-py${{ steps.python.outputs.python-version }}
       - name: Install Poetry
-        run: pipx install "poetry>=2.0,<3.0"
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+        run: pipx install --python "${{ steps.python.outputs.python-path }}" "poetry>=2.0,<3.0"
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ matrix.database }}-${{ hashFiles('poetry.lock') }}
       - name: Install dependencies
         run: poetry install --no-root --no-interaction
       - name: Run tests (${{ matrix.database }})
@@ -54,14 +73,14 @@ jobs:
         if: matrix.database == 'sqlite'
         run: poetry run pip install --quiet pip-audit && poetry run pip-audit
 
-  version:
+  # Tag the release and build the image in one job, to save starting a second runner.
+  image:
     needs: test
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write          # push the tag and create the release
-    outputs:
-      version: ${{ steps.next.outputs.version }}
+      packages: write          # publish to ghcr.io and delete old versions
     steps:
       - uses: actions/checkout@v7
         with:
@@ -103,15 +122,6 @@ jobs:
           git push origin "$VERSION"
           gh release create "$VERSION" --title "Runway $VERSION" --generate-notes --verify-tag
 
-  image:
-    needs: version
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write          # publish to ghcr.io and delete old versions
-    steps:
-      - uses: actions/checkout@v7
-
       - name: Image name (registry names must be lowercase)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/runway" >> "$GITHUB_ENV"
 
@@ -127,7 +137,7 @@ jobs:
       - name: Image tags (latest, 1.2.3, v1.2.3, 1.2 and 1)
         id: tags
         env:
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: ${{ steps.next.outputs.version }}
         run: |
           v="${VERSION#v}"
           IFS=. read -r major minor patch <<< "$v"
@@ -149,11 +159,11 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.list }}
           build-args: |
-            VERSION=${{ needs.version.outputs.version }}
+            VERSION=${{ steps.next.outputs.version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.version=${{ steps.next.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
