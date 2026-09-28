@@ -4,6 +4,7 @@
 
 Backups:  poetry run python run.py backup [file.json.gz]   save everything to a file
           poetry run python run.py restore file.json.gz    replace everything with a backup (asks first; --yes to skip)
+Sample:   poetry run python run.py demo                     fill an empty database with made-up data (for previews)
 """
 import argparse
 import os
@@ -20,7 +21,7 @@ if __name__ == "__main__":
                    help="address to listen on; 0.0.0.0 for other devices (needs OIDC sign-in, see DOCKER.md)")
     p.add_argument("--no-sync", action="store_true", default=os.environ.get("RUNWAY_NO_SYNC") == "1",
                    help="don't sync with SimpleFIN in the background")
-    p.add_argument("command", nargs="?", choices=["serve", "backup", "restore"], default="serve")
+    p.add_argument("command", nargs="?", choices=["serve", "backup", "restore", "demo"], default="serve")
     p.add_argument("file", nargs="?", help="backup file (for backup / restore)")
     p.add_argument("--yes", action="store_true", help="restore without asking")
     a = p.parse_args()
@@ -30,7 +31,11 @@ if __name__ == "__main__":
         from datetime import date
         from runway import backup, db
         db.init()
-        if a.command == "backup":
+        if a.command == "demo":
+            from runway import demo
+            with db.session() as conn:
+                print(f"Added sample data ({demo.seed(conn)} transactions) to {db.describe()}.")
+        elif a.command == "backup":
             out = a.file or f"runway-backup-{date.today().isoformat()}.json.gz"
             with db.session() as conn:
                 data = backup.dump(conn)
