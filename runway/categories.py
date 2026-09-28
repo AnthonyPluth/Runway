@@ -134,6 +134,8 @@ def rename(conn, old: str, new: str) -> None:
     conn.execute("UPDATE categories SET parent=? WHERE parent=?", (new, old))
     conn.execute("UPDATE transactions SET category=? WHERE category=?", (new, old))
     conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (new, old))
+    conn.execute("UPDATE retail_items SET category=? WHERE category=?", (new, old))   # order items, and what's remembered
+    conn.execute("UPDATE retail_item_memory SET category=? WHERE category=?", (new, old))
     rules.rename_category(conn, old, new)
     conn.execute("UPDATE budgets SET category=? WHERE category=?", (new, old))
 
@@ -152,6 +154,8 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
             raise CategoryError("Pick a different category to move things to")
         n = conn.execute("UPDATE transactions SET category=? WHERE category=?", (move_to, name)).rowcount
         n += conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (move_to, name)).rowcount
+        conn.execute("UPDATE retail_items SET category=? WHERE category=?", (move_to, name))
+        conn.execute("UPDATE retail_item_memory SET category=? WHERE category=?", (move_to, name))
         rules.rename_category(conn, name, move_to)
     else:
         n = conn.execute(
@@ -164,6 +168,9 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
             conn.execute("UPDATE transactions SET is_split=0, category=NULL, category_source=NULL, confidence=NULL, "
                          "needs_review=1 WHERE id=?", (tx_id,))
             n += 1
+        # order items go back to being decided (by the model, or the store's department) next time
+        conn.execute("UPDATE retail_items SET category=NULL, category_source=NULL, confidence=NULL WHERE category=?", (name,))
+        conn.execute("DELETE FROM retail_item_memory WHERE category=?", (name,))
         rules.forget_category(conn, name)
     conn.execute("DELETE FROM budgets WHERE category=?", (name,))
     conn.execute("DELETE FROM categories WHERE name=?", (name,))

@@ -5,6 +5,7 @@ function pageHtml() { return { url: location.href, html: document.documentElemen
 
 async function pageFetch(url, init) {
   try {
+    if (new URL(url, location.href).protocol !== "https:") throw new Error("not an https address");
     const res = await fetch(url, { credentials: "include", signal: AbortSignal.timeout(45000), ...init });
     return { ok: res.ok, status: res.status, url: res.url, text: await res.text() };
   } catch (e) {
@@ -12,7 +13,11 @@ async function pageFetch(url, init) {
   }
 }
 
-function pageGo(url) { setTimeout(() => { location.href = url; }, 0); return true; }
+function pageGo(url) {
+  if (new URL(url, location.href).protocol !== "https:") throw new Error("not an https address");   // never javascript:
+  setTimeout(() => { location.href = url; }, 0);
+  return true;
+}
 
 // Target's order API and its key, as target.com's own orders page called it (or as its page settings give it).
 function targetDiscover(fallbackBase) {

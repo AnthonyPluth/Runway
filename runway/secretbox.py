@@ -26,7 +26,7 @@ MIN_KEY_LENGTH = 32
 
 # settings rows that hold secrets (the rest of the settings table is ordinary preferences)
 SECRET_SETTINGS = {"simplefin_access_url", "plaid_secret", "openrouter_api_key", "rentcast_api_key", "logodev_token", "vapid_private_key",
-                   "carta_client_secret", "carta_access_token", "carta_refresh_token"}
+                   "carta_client_secret", "carta_access_token", "carta_refresh_token", "plaid_pending_link"}
 
 _lock = threading.Lock()
 _cache: dict[tuple, MultiFernet] = {}

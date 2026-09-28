@@ -95,10 +95,10 @@ def note(conn, t: dict) -> str | None:
 
 
 class _SameRules(urllib.request.HTTPRedirectHandler):
-    """Follow a redirect only to where Runway would fetch from anyway."""
+    """Logos come from plaid.com and img.logo.dev only; a redirect is followed only if it stays there."""
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not (_plaid_host(newurl) or _logo_dev_url(newurl)):
-            raise urllib.error.URLError("redirected elsewhere")
+            return None
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 

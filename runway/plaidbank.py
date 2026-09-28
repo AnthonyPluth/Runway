@@ -126,9 +126,18 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
     pa = conn.execute("SELECT * FROM plaid_accounts WHERE plaid_account_id=?", (plaid_account_id,)).fetchone()
     if not pa:
         raise ValueError("That Plaid account isn't here any more.")
+    if target == "pl:" + plaid_account_id:   # its own account, picked by name
+        target = "new"
+    if target not in ("new", "ignore", ""):
+        taken = conn.execute("SELECT display_name, name, plaid_account_id FROM accounts WHERE id=?", (target,)).fetchone()
+        if taken and taken["plaid_account_id"] and taken["plaid_account_id"] != plaid_account_id:
+            raise ValueError(f"{taken['display_name'] or taken['name']} is already linked to another Plaid account. "
+                             "Unlink it there first.")
     conn.execute("UPDATE accounts SET plaid_account_id=NULL, provider='simplefin' WHERE plaid_account_id=? AND id NOT LIKE 'pl:%'",
                  (plaid_account_id,))
     conn.execute("UPDATE plaid_accounts SET ignored=? WHERE plaid_account_id=?", (1 if target == "ignore" else 0, plaid_account_id))
+    if target != "new":
+        _retire_own_account(conn, plaid_account_id, target if target not in ("ignore", "") else None)
     if target in ("ignore", ""):
         return {"ok": True}
     if target == "new":
@@ -150,6 +159,31 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
         raise ValueError("Pick one of your accounts.")
     conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (plaid_account_id, target))
     return {"ok": True, "account_id": target}
+
+
+def _retire_own_account(conn, plaid_account_id: str, into: str | None) -> None:
+    """The Plaid account had been added as an account of its own ("pl:…") and is now matched to another of your
+    accounts, or not used: stop syncing it and hide it, so it isn't counted next to the account it really is. Its
+    history stays (hidden), and the categories you gave it go to the same transactions in `into` that have none."""
+    own = "pl:" + plaid_account_id
+    if not conn.execute("SELECT 1 FROM accounts WHERE id=? AND plaid_account_id=?", (own, plaid_account_id)).fetchone():
+        return
+    conn.execute("UPDATE accounts SET plaid_account_id=NULL, hidden=1 WHERE id=?", (own,))
+    if not into:
+        return
+    claimed: set = set()
+    for t in conn.execute("SELECT posted, amount, category, category_source FROM transactions WHERE account_id=? "
+                          "AND category IS NOT NULL ORDER BY posted", (own,)).fetchall():
+        d = date.fromisoformat(t["posted"])
+        for (tid,) in conn.execute(
+                "SELECT id FROM transactions WHERE account_id=? AND category IS NULL AND posted>=? AND posted<=? AND amount>? "
+                "AND amount<? ORDER BY posted", (into, (d - timedelta(days=OVERLAP_DAYS)).isoformat(),
+                                                (d + timedelta(days=OVERLAP_DAYS)).isoformat(), t["amount"] - 0.005, t["amount"] + 0.005)).fetchall():
+            if tid not in claimed:
+                claimed.add(tid)
+                conn.execute("UPDATE transactions SET category=?, category_source=?, needs_review=0 WHERE id=?",
+                             (t["category"], t["category_source"], tid))
+                break
 
 
 def set_provider(conn, account_id: str, provider: str, today: date | None = None) -> None:
@@ -200,17 +234,45 @@ def _set_balance(conn, account_id: str, pa) -> None:
                  (balance, pa["available"], date.today().isoformat(), account_id))
 
 
+STATEMENT_NOTES = ("PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY", "NO_LIABILITY_ACCOUNTS", "ADDITIONAL_CONSENT_REQUIRED",
+                   "INVALID_PRODUCT", "PRODUCTS_NOT_ENABLED", "INSTITUTION_NOT_SUPPORTED")
+
+
 def sync_item(conn, item_id: str, today: date | None = None) -> dict:
+    """Read the connection from Plaid first, then write it all in one short transaction: holding the database's write
+    lock across Plaid's replies would make everything else that writes wait (and fail with "Runway is busy").
+    A statement problem doesn't lose the transactions: they're saved, and the problem shows on the connection."""
     today = today or date.today()
     item = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     if not item:
         raise PlaidError("Connection not found")
+    conn.commit()   # nothing of ours open across the network calls
     try:
         res = call(conn, "/accounts/get", {"access_token": item["access_token"]})
     except PlaidError as e:
         conn.execute("UPDATE plaid_items SET error=? WHERE item_id=?", (e.code or str(e), item_id))
         conn.commit()
         raise
+    prods = products(item)
+    changes = None
+    if "transactions" in prods:
+        try:
+            changes = _fetch_changes(conn, item)
+        except PlaidError as e:
+            if e.code != "PRODUCT_NOT_READY":   # the first pull takes Plaid a little while; the next sync gets it
+                conn.execute("UPDATE plaid_items SET error=? WHERE item_id=?", (e.code or str(e), item_id))
+                conn.commit()
+                raise
+    # Card statements: ask whenever the connection has a card, even if Liabilities wasn't listed when it was linked
+    # (optional products don't always show up there). What happened is kept for Settings to explain.
+    has_card = any(a.get("type") == "credit" for a in res.get("accounts", []))
+    stmts, stmt_error = None, None
+    if "liabilities" in prods or has_card:
+        try:
+            stmts = call(conn, "/liabilities/get", {"access_token": item["access_token"]})
+        except PlaidError as e:
+            stmt_error = e
+
     if not item["institution_name"] and (res.get("item") or {}).get("institution_name"):
         conn.execute("UPDATE plaid_items SET institution_name=? WHERE item_id=?", (res["item"]["institution_name"], item_id))
     for a in res.get("accounts", []):
@@ -225,32 +287,25 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     matched = auto_match(conn, item_id)
     for acct in db.rows(conn.execute(
             "SELECT a.id, p.* FROM accounts a JOIN plaid_accounts p ON p.plaid_account_id=a.plaid_account_id "
-            "WHERE a.provider='plaid' AND p.item_id=?", (item_id,))):
+            "WHERE a.provider='plaid' AND p.ignored=0 AND p.item_id=?", (item_id,))):
         _set_balance(conn, acct["id"], acct)
     out = {"accounts": len(res.get("accounts", [])), "matched": matched, "new": [], "statements": 0}
-    prods = products(item)
-    if "transactions" in prods:
-        try:
-            out["new"] = sync_transactions(conn, item, today)
-        except PlaidError as e:
-            if e.code != "PRODUCT_NOT_READY":   # the first pull takes Plaid a little while; the next sync gets it
-                raise
-    # Card statements: ask whenever the connection has a card, even if Liabilities wasn't listed when it was linked
-    # (optional products don't always show up there). What happened is kept for Settings to explain.
-    has_card = conn.execute("SELECT 1 FROM plaid_accounts WHERE item_id=? AND type='credit'", (item_id,)).fetchone()
-    if "liabilities" in prods or has_card:
-        try:
-            out["statements"] = sync_statements(conn, item, today)
-            db.set_setting(conn, f"plaid_stmt_note:{item_id}", None)
-            if "liabilities" not in prods:
-                conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(sorted(prods | {"liabilities"})), item_id))
-        except PlaidError as e:
-            if e.code in ("PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY", "NO_LIABILITY_ACCOUNTS", "ADDITIONAL_CONSENT_REQUIRED",
-                          "INVALID_PRODUCT", "PRODUCTS_NOT_ENABLED", "INSTITUTION_NOT_SUPPORTED"):
-                db.set_setting(conn, f"plaid_stmt_note:{item_id}", e.code)
-            else:
-                raise
-    conn.execute("UPDATE plaid_items SET last_sync=?, error=NULL WHERE item_id=?", (_now(), item_id))
+    if changes is not None:
+        out["new"] = sync_transactions(conn, item, today, changes)
+    error = None
+    if stmts is not None:
+        out["statements"] = store_statements(conn, item, stmts)
+        db.set_setting(conn, f"plaid_stmt_note:{item_id}", None)
+        if "liabilities" not in prods:
+            conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(sorted(prods | {"liabilities"})), item_id))
+    elif stmt_error is not None:
+        if stmt_error.code in STATEMENT_NOTES:
+            db.set_setting(conn, f"plaid_stmt_note:{item_id}", stmt_error.code)
+        else:
+            error = stmt_error
+            out["error"] = f"card statements: {stmt_error}"
+    conn.execute("UPDATE plaid_items SET last_sync=?, error=? WHERE item_id=?",
+                 (_now(), (error.code or str(error)) if error else None, item_id))
     return out
 
 
@@ -291,10 +346,11 @@ def duplicate(conn, account_id: str, posted: str, amount: float, from_plaid: boo
     return False
 
 
-def sync_transactions(conn, item, today: date) -> list[str]:
-    added, modified, removed, cursor = _fetch_changes(conn, item)
+def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> list[str]:
+    added, modified, removed, cursor = changes or _fetch_changes(conn, item)
     accts = {r["plaid_account_id"]: dict(r) for r in conn.execute(
-        "SELECT id, plaid_account_id, provider_since FROM accounts WHERE provider='plaid' AND plaid_account_id IS NOT NULL")}
+        "SELECT a.id, a.plaid_account_id, a.provider_since FROM accounts a JOIN plaid_accounts p ON p.plaid_account_id=a.plaid_account_id "
+        "WHERE a.provider='plaid' AND p.ignored=0")}
     # Accounts that have history from SimpleFIN: take Plaid's only from when the account switched (a little before,
     # matched up), so that history isn't repeated.
     earlier = {aid for (aid,) in conn.execute(
@@ -313,9 +369,12 @@ def sync_transactions(conn, item, today: date) -> list[str]:
         payee = clean_payee(t.get("merchant_name") or t.get("name") or desc)
         pending = 1 if t.get("pending") else 0
         merchant = merchants.note(conn, t)
-        if conn.execute("SELECT 1 FROM transactions WHERE id=?", (key,)).fetchone():
+        known = conn.execute("SELECT is_split FROM transactions WHERE id=?", (key,)).fetchone()
+        if known:
             conn.execute("UPDATE transactions SET posted=?, amount=?, description=?, pending=?, merchant_id=COALESCE(?, merchant_id) "
                          "WHERE id=?", (posted, amount, desc, pending, merchant, key))
+            if known["is_split"]:
+                splits.follow_amount(conn, key, amount)
             continue
         since = acct["provider_since"]
         if aid in earlier and since:
@@ -344,14 +403,24 @@ def sync_transactions(conn, item, today: date) -> list[str]:
         if old:
             splits.carry_over(conn, old, key, amount)
     for r in removed:
-        conn.execute("DELETE FROM transactions WHERE id LIKE ?", (f"%|pl:{r['transaction_id']}",))
+        # By key in each account it could be in (a LIKE on the id would read the whole table for each one).
+        conn.execute("DELETE FROM transactions WHERE id IN (SELECT id || '|pl:' || ? FROM accounts)", (r["transaction_id"],))
+    if not item["cursor"]:
+        # The whole history was read again: a hold the bank dropped in the meantime won't be in `removed`, so any
+        # pending row of this connection's that isn't in the reply is gone.
+        seen = {t["transaction_id"] for t in added + modified}
+        for (tid,) in conn.execute(
+                "SELECT t.id FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN plaid_accounts p "
+                "ON p.plaid_account_id=a.plaid_account_id WHERE p.item_id=? AND t.pending=1 AND t.id LIKE ?",
+                (item["item_id"], "%|pl:%")).fetchall():
+            if tid.split("|pl:", 1)[1] not in seen:
+                conn.execute("DELETE FROM transactions WHERE id=?", (tid,))
     splits.prune(conn)
     conn.execute("UPDATE plaid_items SET cursor=? WHERE item_id=?", (cursor, item["item_id"]))
     return new_ids
 
 
-def sync_statements(conn, item, today: date) -> int:
-    res = call(conn, "/liabilities/get", {"access_token": item["access_token"]})
+def store_statements(conn, item, res: dict) -> int:
     n = 0
     for c in ((res.get("liabilities") or {}).get("credit") or []):
         conn.execute(
@@ -387,6 +456,8 @@ def sync_all(conn, today: date | None = None) -> dict:
             out["items"] += 1
             out["new"] += r["new"]
             conn.commit()
+            if r.get("error"):
+                out["errors"].append(f"{item['institution_name'] or 'Plaid'}: {r['error']}")
         except PlaidError as e:
             out["errors"].append(f"{item['institution_name'] or 'Plaid'}: {e}")
     return out
