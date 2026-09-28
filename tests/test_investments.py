@@ -301,6 +301,63 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1)), {"fetched": [], "failed": []})
 
 
+def q(price, t=1000, open_=True):
+    return {"price": price, "prev_close": 100.0, "time": t, "type": "EQUITY",
+            "open_start": 1 if open_ else None, "open_end": 2 ** 40 if open_ else None}
+
+
+class QuoteStreamTests(unittest.TestCase):
+    def run_stream(self, rounds, lifetime=60):
+        """quote_stream against a scripted list of quotes() answers, on a fake clock (5s per sleep)."""
+        clock = [0.0]
+        answers = iter(rounds)
+        with mock.patch.object(prices, "quotes", side_effect=lambda *_a, **_k: next(answers)):
+            return list(prices.quote_stream(["VTI", "AAPL"], lifetime=lifetime, clock=lambda: clock[0],
+                                            sleep=lambda s: clock.__setitem__(0, clock[0] + s)))
+
+    def test_sends_everything_then_only_what_moved(self):
+        out = self.run_stream([
+            {"SPY": q(500), "VTI": q(250), "AAPL": q(200)},
+            {"SPY": q(500), "VTI": q(250), "AAPL": q(200)},          # nothing moved: a keep-alive
+            {"SPY": q(500), "VTI": q(251, 1005), "AAPL": q(200)},
+        ] + [{"SPY": q(500)}] * 20, lifetime=10)
+        self.assertEqual(set(out[0]["quotes"]), {"SPY", "VTI", "AAPL"})
+        self.assertEqual(out[0]["market"], "open")
+        self.assertIsNone(out[1])
+        self.assertEqual(out[2]["quotes"], {"VTI": q(251, 1005)})
+        self.assertEqual(len(out), 3)                                 # stops after `lifetime` seconds
+
+    def test_closed_market_sends_one_update_and_ends(self):
+        out = self.run_stream([{"SPY": q(500, open_=False), "VTI": q(250, open_=False)}])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["market"], "closed")
+
+    def test_many_tickers_slow_down(self):
+        self.assertEqual(prices.stream_interval(3), prices.STREAM_SECONDS)
+        self.assertEqual(prices.stream_interval(80), 20)
+
+
+class QuoteStreamEndpointTests(unittest.TestCase):
+    def test_streams_server_sent_events(self):
+        from http.server import ThreadingHTTPServer
+        import urllib.request
+        from runway import server
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp}):
+            db.init()
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            try:
+                update = {"quotes": {"VTI": q(250)}, "market": "closed", "as_of": "2026-09-28T17:00:00"}
+                with mock.patch.object(prices, "quote_stream", return_value=iter([update])):
+                    resp = urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/api/investments/stream", timeout=10)
+                    self.assertEqual(resp.headers["Content-Type"], "text/event-stream")
+                    body = resp.read().decode()
+            finally:
+                httpd.shutdown(); httpd.server_close()
+        self.assertIn("event: quotes\ndata: " + json.dumps(update) + "\n\n", body)
+        self.assertTrue(body.rstrip().endswith(f"retry: {prices.CLOSED_RETRY * 1000}"))   # closed: come back later
+
+
 if __name__ == "__main__":
     unittest.main()
 
