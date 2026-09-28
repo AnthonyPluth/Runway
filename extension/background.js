@@ -332,8 +332,34 @@ async function targetJson(page, url, token) {
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
 
-const TARGET_LEARNED = 3;
-const TARGET_DISCOVER_MS = 15000;   // how long to watch the orders page for its API key   // addresses kept per kind of order, learned from target.com's own order pages
+const TARGET_LEARNED = 3;           // addresses kept per kind of order, learned from target.com's own order pages
+const TARGET_DISCOVER_MS = 15000;   // how long to watch the orders page for its API key
+
+// Target's API calls as the browser makes them (from our hidden frames or tabs alike): the most recent ones, newest last.
+// The page's own list of what it loaded fills up on a busy page like Target's, so the calls are watched here instead.
+const targetRequests = [];
+if (chrome.webRequest && chrome.webRequest.onBeforeRequest) {
+  chrome.webRequest.onBeforeRequest.addListener((d) => {
+    targetRequests.push(d.url);
+    if (targetRequests.length > 200) targetRequests.splice(0, targetRequests.length - 200);
+  }, { urls: ["https://api.target.com/*"] });
+}
+
+// The order API and its key, from the calls Target's pages made (its other APIs take the same key).
+function targetApiFromRequests() {
+  let other = null;
+  for (const u of [...targetRequests].reverse()) {
+    try {
+      const url = new URL(u);
+      const key = url.searchParams.get("key");
+      if (!key) continue;
+      const at = url.pathname.indexOf("/guest_order_aggregations/");
+      if (at >= 0) return { base: url.origin + url.pathname.slice(0, at) + "/guest_order_aggregations/v1", key, from: "requests" };
+      other = other || { base: TARGET_API, key, from: "requests" };
+    } catch (_) { /* keep looking */ }
+  }
+  return other;
+}
 
 function targetUrl(tpl, api, order) {
   return tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(order));
@@ -369,7 +395,8 @@ async function targetCallsFor(page, order) {
   let urls = [];
   for (let waited = 0; waited < 8000; waited += 1000) {
     await sleep(1000);
-    urls = await page.run("calls", order);
+    const seen = targetRequests.filter((u) => u.includes(order) || u.includes(encodeURIComponent(order)));
+    urls = [...new Set([...seen, ...await page.run("calls", order)])];
     if (urls.length && waited >= 2000) break;
   }
   return urls.slice(0, 8);
@@ -386,6 +413,7 @@ async function importTarget(progress, Page) {
     for (let waited = 0; waited < TARGET_DISCOVER_MS && !api.key; waited += 1000) {
       await sleep(1000);
       api = await page.run("discover", TARGET_API);
+      if (!api.key) api = { ...api, ...(targetApiFromRequests() || {}) };
       if (api.signedIn === false) break;
     }
     const { targetApi } = await store.get("targetApi");
@@ -396,7 +424,9 @@ async function importTarget(progress, Page) {
     if (!api.key) {
       if (api.signedIn === false) throw await page.signIn("Target");
       if (page.hidden) throw new HiddenUnavailable("no order API key in the hidden page");
-      throw new Error("Couldn't find how target.com reads your orders. Runway may need an update for Target's site.");
+      const paths = [...new Set(targetRequests.map((u) => { try { return new URL(u).pathname; } catch (_) { return ""; } }))].filter(Boolean);
+      throw new Error("Couldn't find how target.com reads your orders. Runway may need an update for Target's site. " +
+        (paths.length ? `(Target's page called: ${paths.slice(-4).join(", ")}, none with a key.)` : "(Target's page made no API calls that Runway could see.)"));
     }
     const need = [];
     try {
