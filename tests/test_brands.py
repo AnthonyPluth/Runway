@@ -1,4 +1,4 @@
-"""Institution logos for accounts, and bundled logos for big merchants."""
+"""Institution logos for accounts, and which big merchant a transaction is from."""
 import os
 import tempfile
 import unittest
@@ -35,29 +35,21 @@ class BrandTests(unittest.TestCase):
 
 
 class MerchantLogoTests(unittest.TestCase):
-    FOLDER = os.path.join(os.path.dirname(brands.__file__), "static", "merchants")
+    def test_every_website_is_one(self):
+        from runway import merchants
+        for _p, site in brands.MERCHANT_PATTERNS:
+            self.assertEqual(merchants.site(site), site)
 
     def test_names(self):
-        cases = [(("Target", "TARGET T-1234 MINNEAPOLIS MN"), "target"), (("AMZN Mktp US*2K4", None), "amazon"),
-                 (("Amazon Prime Video", None), "amazon-prime-video"), (("Uber Eats", None), "uber-eats"),
-                 (("Uber", "UBER *TRIP"), "uber"), (("Walmart Supercenter", None), "walmart"),
-                 (("WAL-MART #1234", None), "walmart"), (("Starbucks Store 99", None), "starbucks"),
+        cases = [(("Target", "TARGET T-1234 MINNEAPOLIS MN"), "target.com"), (("AMZN Mktp US*2K4", None), "amazon.com"),
+                 (("Amazon Prime Video", None), "primevideo.com"), (("Uber Eats", None), "ubereats.com"),
+                 (("Uber", "UBER *TRIP"), "uber.com"), (("Walmart Supercenter", None), "walmart.com"),
+                 (("WAL-MART #1234", None), "walmart.com"), (("Starbucks Store 99", None), "starbucks.com"),
                  (("Joe's Coffee", "SQ *JOES COFFEE"), None), (("Payroll", "ACME CORP DIRECT DEP"), None),
-                 (("POS Purchase", "COSTCO WHSE #0001"), "costco"),  # the description names it when the payee doesn't
+                 (("POS Purchase", "COSTCO WHSE #0001"), "costco.com"),  # the description names it when the payee doesn't
                  (("Delta Dental", None), None), (("Targeted Ads LLC", None), None), (("Ringling Bros", None), None)]
         for (payee, desc), want in cases:
             self.assertEqual(brands.merchant(payee, desc), want, payee)
-
-    def test_every_logo_is_bundled(self):
-        for _p, slug in brands.MERCHANT_PATTERNS:
-            self.assertTrue(os.path.exists(os.path.join(self.FOLDER, f"{slug}.svg")), slug)
-
-    def test_bundled_logos_are_inert(self):
-        for name in os.listdir(self.FOLDER):
-            if name.endswith(".svg"):
-                with open(os.path.join(self.FOLDER, name), encoding="utf-8") as f:
-                    svg = f.read().lower()
-                self.assertNotRegex(svg, r"<script|<foreignobject|\son[a-z]+\s*=|(href|src)\s*=\s*[\"']?\s*(https?:|//|javascript:)", name)
 
 
 if __name__ == "__main__":

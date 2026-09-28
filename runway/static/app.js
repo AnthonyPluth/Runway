@@ -555,7 +555,8 @@ async function renderTxPage(el, mode) {
     </div>
     ${review ? "" : `<div id="tx-upcoming"></div>`}
     <div id="bulk-bar" class="bulk-bar" hidden></div>
-    <div class="card scroll-x" id="tx-list"><div class="empty">Loading…</div></div>`;
+    <div class="card scroll-x" id="tx-list"><div class="empty">Loading…</div></div>
+    ${STATE.logodev_configured ? `<p class="small muted"><a href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></p>` : ""}`;
 
   // Upcoming (projected) items for the forecast account, filtered the same way as the list below.
   const upcoming = review ? null : api(`/api/overview?days=${STATE.horizon_days || 90}`).then((fc) => fc.events).catch(() => []);
@@ -655,8 +656,8 @@ async function renderTxPage(el, mode) {
   load();
 }
 
-// The merchant's logo (from Plaid, or bundled with Runway for big names; Runway serves both, nothing is fetched
-// from elsewhere), else its initial.
+// The merchant's logo (from Plaid, or Logo.dev; Runway fetches and serves both, so the browser never asks anyone
+// else), else its initial.
 function merchantIcon(t) {
   const name = (t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "");
   return t.logo ? `<img class="m-logo" src="${esc(t.logo)}" alt="" loading="lazy" width="20" height="20">`
@@ -3116,6 +3117,13 @@ async function renderSetup(el, sub) {
     <p class="help">A free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast key</a> keeps home values current (Runway stays within the 50 free lookups a month).</p>
     <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
 ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
+  </div>
+<div class="card"><h2>Merchant logos <span class="muted small">optional, via Logo.dev</span></h2>
+    <p class="help">Plaid has logos for many merchants. For the rest, a free <a href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
+      publishable key lets Runway fetch one by the merchant's website during each sync. Runway downloads and serves them itself, so
+      your browser never contacts Logo.dev, and Logo.dev only sees merchants' websites.</p>
+    <div class="form-row"><label>Publishable key<input id="ld-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.logodev_configured ? "•••••••• saved" : "pk_…"}"></label>
+${STATE.logodev_configured ? `<button class="btn link" id="ld-clear">Remove key</button>` : ""}</div>
   </div>` },
     notifications: { label: "Notifications", html: () => `<div id="notif-box"><div class="card empty">Loading…</div></div>` },
     backup: { label: "Backup", html: () => `<div class="card"><h2>Backup &amp; restore</h2>
@@ -3167,6 +3175,12 @@ ${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key
     await api("/api/rentcast/settings", { method: "POST", body: { api_key: $("#rc-key").value } }); toast("RentCast key saved"); await refreshState(); route();
   });
   $("#rc-clear")?.addEventListener("click", async () => { await api("/api/rentcast/settings", { method: "POST", body: { clear: true } }); await refreshState(); route(); });
+  onEdit([$("#ld-key")], async () => {
+    if (!$("#ld-key").value.trim()) return;
+    try { await api("/api/logodev/settings", { method: "POST", body: { token: $("#ld-key").value } }); toast("Logo.dev key saved: logos arrive with the next sync"); await refreshState(); route(); }
+    catch (err) { toast(err.message, true); }
+  });
+  $("#ld-clear")?.addEventListener("click", async () => { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); route(); });
   $("#primary-acct")?.addEventListener("change", async (e) => {
     try { await api("/api/settings", { method: "POST", body: { primary_account: e.target.value } }); toast("Primary account saved"); await refreshState(); }
     catch (err) { toast(err.message, true); }
