@@ -51,7 +51,7 @@
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
-            <CategorySelect ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
+            <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
               onchange={(v) => v && post(`/api/retail/items/${i.id}`, { category: v }, (r) => (r.orders > 1 ? `Saved · used in ${r.orders} orders` : "Saved"))} />
             <span class="text-xs text-muted-foreground">{i.category ? ITEM_SOURCES[i.category_source ?? ""] ?? "" : "uses the transaction's category"}</span>
           </div>
@@ -69,7 +69,7 @@
           {#if c.tx_id}
             <span>→ {c.payee || c.description || ""} {c.posted ? fmtDate(c.posted) : ""} <span class="text-muted-foreground">{c.account_name || ""}</span>
               {#if c.applied}<Badge variant="secondary">{c.applied === "split" ? "split by items" : "categorized by items"}</Badge>{/if}</span>
-            <span class="ml-auto flex gap-1">
+            <span class="ml-auto flex gap-4">
               {#if c.amount < 0 && !c.applied && o.items.length}
                 <Button variant="link" size="sm" class="h-auto p-0" title="Replace the category you set with the order's items"
                   onclick={() => post(charge(c.id, "apply"), undefined, "Split by items")}>Split by items</Button>

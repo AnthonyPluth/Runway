@@ -405,12 +405,10 @@ def api_transactions(conn, q, _b):
     )
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
-    orders = retail.for_transactions(conn, [t["id"] for t in items if t["amount"] < 0])
+    orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
     logos = merchants.for_transactions(conn, items)
-    if merchants.configured(conn):   # no logo from Plaid: Logo.dev's, by the merchant's website (a sync fetches it)
-        sites = merchants.sites_for(conn, [t for t in items if t["id"] not in logos])
-        have = merchants.site_logos(conn, sites.values())
-        logos.update({tid: merchants.SITE + s for tid, s in sites.items() if s in have})
+    # no logo from Plaid: Logo.dev's, by the merchant's website or name (a sync, or adding the key, fetches it)
+    logos.update(merchants.logo_dev_logos(conn, [t for t in items if t["id"] not in logos]))
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
@@ -1521,8 +1519,29 @@ def api_logodev_settings(conn, _q, body):
         if not re.fullmatch(r"pk_[A-Za-z0-9_-]{8,200}", key):
             raise ApiError("That isn't a Logo.dev publishable key: it starts with pk_ (the secret sk_ key isn't needed).")
         db.set_setting(conn, merchants.TOKEN_SETTING, key)
-        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ? AND logo IS NULL", (merchants.SITE + "%",))
+        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL",
+                     (merchants.SITE + "%", merchants.BRAND + "%"))
+        conn.commit()               # so the fetch below (on its own connection) sees the key
+        start_logo_backfill()
     return {"ok": True, "configured": merchants.configured(conn)}
+
+
+_logo_lock = threading.Lock()
+
+
+def start_logo_backfill() -> None:
+    """Fetch the past year's merchant logos now, in the background, rather than a few at each sync from here on."""
+    def run():
+        if not _logo_lock.acquire(blocking=False):   # one at a time
+            return
+        try:
+            with db.session() as conn:
+                merchants.backfill(conn)
+        except Exception:   # logos are a nice-to-have: syncs carry on where this stopped
+            traceback.print_exc()
+        finally:
+            _logo_lock.release()
+    threading.Thread(target=run, daemon=True).start()
 
 
 def api_tracked_get(conn, _q, _b, acct_id):

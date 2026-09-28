@@ -266,6 +266,25 @@ class SplitTests(Base):
         self.assertEqual(got, {retail.order_key("amazon", ORDER): "a", retail.order_key("amazon", other): "c"})
 
 
+class TransactionsListTests(Base):
+    def test_charges_and_refunds_carry_their_order(self):
+        from runway import server
+        oid = retail.order_key("amazon", "111-2222222-3333333")
+        self.c.execute("INSERT INTO retail_orders(id, retailer, order_number, details) VALUES (?, 'amazon', '111-2222222-3333333', 1)", (oid,))
+        self.c.execute("INSERT INTO retail_items(order_id, position, title, quantity, amount) VALUES (?, 0, 'Cable', 1, 12.99)", (oid,))
+        self.tx("buy", "2024-09-09", -12.99, "AMAZON MKTPL")
+        self.tx("back", "2024-09-20", 12.99, "AMAZON REFUND")
+        self.tx("other", "2024-09-10", -5.00, "COFFEE")
+        retail._save_charge(self.c, "c1", oid, "2024-09-09", -12.99, None)
+        retail._save_charge(self.c, "c2", oid, "2024-09-20", 12.99, None)
+        self.c.execute("UPDATE retail_charges SET tx_id='buy' WHERE id='c1'")
+        self.c.execute("UPDATE retail_charges SET tx_id='back' WHERE id='c2'")
+        by = {t["id"]: t["retail"] for t in server.api_transactions(self.c, {}, None)["items"]}
+        self.assertEqual((by["buy"]["order_id"], by["buy"]["items"], by["buy"]["retailer"]), (oid, 1, "amazon"))
+        self.assertEqual(by["back"]["order_id"], oid)          # a refund shows the order it came from, too
+        self.assertIsNone(by["other"])
+
+
 class AllocateTests(unittest.TestCase):
     def test_adds_up_exactly(self):
         items = [{"amount": 1, "category": "A"}, {"amount": 1, "category": "B"}, {"amount": 1, "category": "C"}]

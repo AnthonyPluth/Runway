@@ -99,7 +99,8 @@ export interface Overview {
   dates: string[];
   total: number[];
   low: { date: string; balance: number };
-  accounts: { id: string; name: string; kind: string; balance: number }[];
+  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on). */
+  accounts: { id: string; name: string; kind: string; balance: number; daily_spend?: number }[];
   events: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];
@@ -110,5 +111,12 @@ export interface Overview {
     total: number[];
     low: { date: string; balance: number };
     skipped: { category: string; reason: string }[];
+    /** What sticking to the budget takes out, day by day: each budget paid from a forecast account, and each card's
+     *  statement made of budgeted spending (charged: what's already on the card, in the first one). */
+    changes?: BudgetChange[];
   } | null;
+}
+
+export interface BudgetChange {
+  date: string; account_id: string; kind: "budget" | "card"; name: string; amount: number; category?: string; account?: string; charged?: number;
 }

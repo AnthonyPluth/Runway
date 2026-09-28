@@ -50,7 +50,7 @@
   <div class="flex flex-col gap-2">
     {#each parts as p, i (p.key)}
       <div class="flex flex-wrap items-center gap-2">
-        <CategorySelect bind:value={p.category} label={`Category of part ${i + 1}`} class="w-full sm:w-56" />
+        <CategorySelect short bind:value={p.category} label={`Category of part ${i + 1}`} class="w-full sm:w-56" />
         <Input type="number" step="0.01" min="0" inputmode="decimal" aria-label={`Amount of part ${i + 1}`} bind:value={p.amount}
           class="w-28 text-right tabular-nums" />
         <Input placeholder="Note (optional)" aria-label={`Note for part ${i + 1}`} bind:value={p.note} class="min-w-32 flex-1" />

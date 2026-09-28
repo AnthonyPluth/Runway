@@ -12,9 +12,11 @@
   import RecurringPicker from "./RecurringPicker.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { RecurringItem, Tx } from "./types";
+  import { openOrders } from "./expanded.svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
-  // One transaction: its category saves as soon as you pick it. Under the row open the split editor and the
-  // Amazon or Target order it paid for; ↻ links it to a recurring item. On a phone the category sits under the
+  // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
+  // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
   // merchant; on a wider screen it has a column of its own.
   let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
     t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
@@ -26,7 +28,9 @@
   let saving = $state(false);
   let picking = $state(false);
   let splitting = $state(false);
-  let showOrder = $state(false);
+  const showOrder = $derived(openOrders.has(t.id));
+  const store = $derived(t.retail?.retailer === "amazon" ? "Amazon" : t.retail?.retailer === "target" ? "Target" : "store");
+  function toggleOrder() { if (showOrder) openOrders.delete(t.id); else openOrders.add(t.id); }
 
   const suggestion = $derived(!!t.needs_review && !!t.category && t.category_source === "ai");
   const linked = $derived((t.recurring_id ?? 0) > 0);
@@ -81,9 +85,10 @@
         </button>
       {/if}
       {#if t.retail}
-        <button type="button" aria-expanded={showOrder} onclick={() => (showOrder = !showOrder)}
-          title={`See what was in this ${t.retail.retailer === "amazon" ? "Amazon" : "Target"} order`}
-          class="shrink-0 cursor-pointer rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} onclick={toggleOrder}
+          title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
+          class="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+          <ChevronRight class={cn("size-3.5 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
           {orderLabel(t.retail)}</button>
       {/if}
     </div>
@@ -134,6 +139,6 @@
     <div class="col-span-full pt-2"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></div>
   {/if}
   {#if showOrder && t.retail}
-    <div class="col-span-full pt-2" data-editor><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></div>
+    <div id={`order-${t.id}`} class="col-span-full pt-2 md:pl-[5.25rem]"><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></div>
   {/if}
 </div>

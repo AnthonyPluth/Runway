@@ -5,7 +5,9 @@ import sys
 import tempfile
 import unittest
 from datetime import date
+from unittest import mock
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,7 +115,46 @@ class MerchantTests(unittest.TestCase):
         self.assertIsNone(self.c.execute("SELECT 1 FROM merchants").fetchone())        # not without a key
         db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
         merchants.note_sites(self.c)
-        self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")), ["site:amazon.com", "site:starbucks.com"])
+        self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")),
+                         ["brand:corner shop", "site:amazon.com", "site:starbucks.com"])   # no website known: by name
+
+    def by_name(self, name, token="pk_test123456"):
+        return f"https://img.logo.dev/name/{urllib.parse.quote(name, safe='')}?token={token}&size=64&format=png&fallback=404"
+
+    def test_logo_dev_by_name_when_no_website_is_known(self):
+        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) "
+                           "VALUES (?, 'a', '2026-09-20', ?, ?, ?, ?)", [
+                               ("t1", -8, "BLUE BOTTLE #4", "Blue Bottle Coffee", "Coffee"),   # by name
+                               ("t2", -5, "CORNER SHOP", "Corner Shop", None),                  # asked, Logo.dev knows none
+                               ("t3", -500, "TO SAVINGS", "Ally Bank", "Transfer"),             # a transfer: never asked
+                               ("t4", 2.1, "INTEREST", "Interest Paid", None),                  # money in: never asked
+                               ("t5", -3, "MONTHLY FEE", "Monthly Service Fee", "Fees")])       # not a merchant
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+
+        def logos():
+            return {t["id"]: t["logo"] for t in server.api_transactions(self.c, {}, None)["items"]}
+        self.assertEqual(set(logos().values()), {None})                                        # noted, not fetched yet
+        self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")), ["brand:blue bottle coffee", "brand:corner shop"])
+        got = merchants.fetch_logos(self.c, opener=self.opener({self.by_name("Blue Bottle Coffee"): (PNG, "image/png")}))
+        self.assertEqual(got, 1)
+        self.assertIn(self.by_name("Corner Shop"), self.asked)                                  # asked, 404: no logo
+        self.assertEqual(logos(), {"t1": "/api/merchants/brand%3Ablue%20bottle%20coffee/logo", "t2": None, "t3": None,
+                                   "t4": None, "t5": None})
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({})), 0)            # a miss isn't asked again soon
+        self.assertEqual(len([u for u in self.asked if "Corner" in u]), 1)
+
+    def test_adding_a_key_fetches_the_past_year_at_once(self):
+        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
+        today = date.today().isoformat()
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee) VALUES (?, 'a', ?, -5, ?, ?)",
+                           [(f"t{i}", today, f"SHOP {i}", f"Shop Number {chr(65 + i)}") for i in range(7)])
+        db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
+        with mock.patch.object(merchants, "PER_SYNC", 3):                                     # more than one round's worth
+            got = merchants.backfill(self.c, opener=self.opener({self.by_name(f"Shop Number {chr(65 + i)}"): (PNG, "image/png")
+                                                                 for i in range(7)}))
+        self.assertEqual(got, 7)
+        self.assertFalse(merchants._todo(self.c, 1))
 
     def test_logo_dev_logos_are_checked_again_monthly(self):
         db.set_setting(self.c, merchants.TOKEN_SETTING, "pk_test123456")
@@ -129,6 +170,8 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG + b"new", "image/png"))
 
     def test_the_key_setting(self):
+        started = mock.patch.object(server, "start_logo_backfill").start()
+        self.addCleanup(mock.patch.stopall)
         with self.assertRaises(server.ApiError):
             server.api_logodev_settings(self.c, {}, {"token": "sk_secret_abcdefgh"})
         self.assertFalse(merchants.configured(self.c))
@@ -136,7 +179,8 @@ class MerchantTests(unittest.TestCase):
         self.c.execute("UPDATE merchants SET logo_checked='2099-01-01T00:00:00'")
         self.assertEqual(server.api_logodev_settings(self.c, {}, {"token": " pk_abcdefgh123 "})["configured"], True)
         self.assertEqual(db.get_setting(self.c, merchants.TOKEN_SETTING), "pk_abcdefgh123")
-        self.assertIsNone(self.c.execute("SELECT logo_checked FROM merchants").fetchone()[0])   # tried at the next sync
+        self.assertIsNone(self.c.execute("SELECT logo_checked FROM merchants").fetchone()[0])   # tried again
+        started.assert_called_once()                                                            # ...straight away
         self.assertEqual(server.api_logodev_settings(self.c, {}, {"clear": True})["configured"], False)
 
     def test_websites(self):
