@@ -2,7 +2,8 @@
 
 Everything counts the way Budget does: checking, savings and cards that aren't hidden; split transactions by their
 parts; card payments and transfers left out. Spending in a category is what went out less what came back (a refund
-lowers it), and money in is what the income categories received.
+lowers it, and so does anything in Refunds), and money in is what the income categories other than Refunds received.
+Money in that isn't categorized yet isn't counted as either: it's as likely a transfer as a paycheck.
 """
 from __future__ import annotations
 
@@ -43,8 +44,10 @@ class _Kinds:
 
     def kind(self, row) -> str | None:
         c = self.cats.get(row["category"])
-        if c is None:   # uncategorized: money out is spending, money in is income
-            return "spend" if row["amount"] < 0 else "income"
+        if c is None:   # uncategorized: money out is spending; money in could be anything, so it isn't counted
+            return "spend" if row["amount"] < 0 else None
+        if c["top"] == "Refunds":   # money back lowers spending rather than counting as income
+            return "spend"
         return "transfer" if c["is_transfer"] else "income" if c["is_income"] else "spend"
 
     def top(self, name: str | None) -> str:
