@@ -1,8 +1,9 @@
 """Carta: your equity (option grants, RSUs, shares) and each company's latest fair market value, through Carta's
 Portfolio API.
 
-Access: Carta's API is OAuth 2.0, and production access has to be granted by Carta (partners apply; Carta says its
-customers can ask for access to their own data). With a client id and secret from Carta's developer portal, you
+Access: Carta's API is OAuth 2.0. An app made in Carta's developer portal is a Playground app (Carta's test
+environment, dummy data, its own sign-in at login.playground.carta.team); reading your real account needs Carta to
+grant the app production access, with production credentials. With a client id and secret from Carta's developer portal, you
 connect once from Settings (you sign in at Carta and approve read access to your portfolio), and Runway keeps the
 token (encrypted) and refreshes it. Carta's mock environment serves sample data with any token, to try it out.
 
@@ -27,6 +28,10 @@ from . import db
 ENVS = {
     "production": {"api": "https://api.carta.com", "authorize": "https://login.app.carta.com/o/authorize/",
                    "token": "https://login.app.carta.com/o/access_token/"},
+    # Apps made in Carta's developer portal start here: Carta's Playground, with its own sign-in and dummy data. They
+    # work against production only once Carta grants the app production access.
+    "playground": {"api": "https://api.playground.carta.team", "authorize": "https://login.playground.carta.team/o/authorize/",
+                   "token": "https://login.playground.carta.team/o/access_token/"},
     "mock": {"api": "https://mock-api.carta.com", "authorize": None, "token": None},
 }
 SCOPES = "read_portfolio_info read_portfolio_securities"
@@ -50,7 +55,7 @@ def settings(conn) -> dict:
 def save_settings(conn, body: dict) -> None:
     env = body.get("env") or db.get_setting(conn, "carta_env") or "production"
     if env not in ENVS:
-        raise CartaError("Environment is production or mock")
+        raise CartaError("Environment is production, playground or mock")
     if env != (db.get_setting(conn, "carta_env") or "production"):
         disconnect(conn)
     db.set_setting(conn, "carta_env", env)
