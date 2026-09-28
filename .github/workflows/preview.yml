@@ -84,6 +84,7 @@ jobs:
           command -v nginx >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq nginx-light; }
           printf 'preview:%s\n' "$(openssl passwd -apr1 "$password")" > "$RUNNER_TEMP/htpasswd"
           cat > "$RUNNER_TEMP/nginx.conf" <<EOF
+          user $(id -un);   # the files below are in the runner's own folder
           worker_processes 1;
           pid $RUNNER_TEMP/nginx.pid;
           error_log $RUNNER_TEMP/nginx-error.log;
