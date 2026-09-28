@@ -382,9 +382,15 @@ class ExtensionApiTests(unittest.TestCase):
         self.assertEqual(self.req("POST", "/api/retail/token", headers=ext)[0], 403)
         self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})
         self.assertEqual(self.req("POST", "/api/ext/ping", {}, ext)[0], 401)
+        import io, zipfile
         with urllib.request.urlopen(self.base + "/api/retail/extension.zip") as resp:   # to install it from Settings
-            import io, zipfile
             self.assertIn("runway-orders/manifest.json", zipfile.ZipFile(io.BytesIO(resp.read())).namelist())
+        # A release numbers the extension like Runway itself.
+        with mock.patch.dict(os.environ, {"RUNWAY_VERSION": "v2.7.13"}), \
+                urllib.request.urlopen(self.base + "/api/retail/extension.zip") as resp:
+            manifest = json.loads(zipfile.ZipFile(io.BytesIO(resp.read())).read("runway-orders/manifest.json"))
+        self.assertEqual(manifest["version"], "2.7.13")
+        self.assertEqual(manifest["manifest_version"], 3)
         code, st = self.req("GET", "/api/retail")
         self.assertEqual((code, st["token"], st["stores"]["target"]["orders"]), (200, False, 0))
 

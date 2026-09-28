@@ -13,6 +13,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 import os
+import re
 import secrets
 import threading
 import time
@@ -588,8 +589,16 @@ MAX_EXT_BODY = 16 * 1024 * 1024      # one store page (Amazon's order pages are 
 EXTENSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
 
 
+def extension_version() -> str | None:
+    """Runway's release (v1.2.3) as an extension version (1.2.3), so the extension is numbered like the app it came
+    with. None for a development build, which keeps the version in manifest.json."""
+    m = re.fullmatch(r"v?(\d+\.\d+\.\d+)", os.environ.get("RUNWAY_VERSION") or "")
+    return m.group(1) if m else None
+
+
 def extension_zip() -> bytes | None:
-    """The browser extension (extension/ next to runway/), zipped into a folder to load unpacked."""
+    """The browser extension (extension/ next to runway/), zipped into a folder to load unpacked, with this Runway's
+    version in its manifest."""
     import io
     import zipfile
     if not os.path.isfile(os.path.join(EXTENSION_DIR, "manifest.json")):
@@ -602,7 +611,14 @@ def extension_zip() -> bytes | None:
                 if f.startswith("."):
                     continue
                 full = os.path.join(root, f)
-                z.write(full, os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR)))
+                name = os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR))
+                if full == os.path.join(EXTENSION_DIR, "manifest.json") and extension_version():
+                    with open(full, encoding="utf-8") as fh:
+                        manifest = json.load(fh)
+                    manifest["version"] = extension_version()
+                    z.writestr(name, json.dumps(manifest, indent=2) + "\n")
+                else:
+                    z.write(full, name)
     return buf.getvalue()
 
 
