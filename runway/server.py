@@ -1297,9 +1297,37 @@ def api_plaid_oauth_resume(conn, _q, _b):
     return {"link_token": p["token"], "kind": p.get("kind"), "item_id": p.get("item_id")}
 
 
+LINK_SYNC_WAIT = 120   # seconds a new connection waits for a running sync before its first one
+
+
+def _item_lock(conn, item_id: str) -> threading.Lock:
+    """The sync lock a connection's own sync must hold: the bank sync's, or the investment sync's."""
+    item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    return _sync_lock if item and plaidbank.is_bank_item(item) else _inv_lock
+
+
 def api_plaid_exchange(conn, _q, body):
+    kind = body.get("kind")
+    if kind not in plaid.KIND_PRODUCTS:   # what Link was opened for, if the page didn't say
+        try:
+            kind = json.loads(db.get_setting(conn, "plaid_pending_link") or "{}").get("kind")
+        except ValueError:
+            kind = None
     try:
-        item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {})
+        item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {}, kind)
+    except plaid.PlaidError as e:
+        raise ApiError(str(e), 502)
+    lock = _item_lock(conn, item_id)
+    if not lock.acquire(timeout=LINK_SYNC_WAIT):   # a sync reading the same connection at once would clash with it
+        raise ApiError("Connected. A sync is running, so this connection's accounts come in with the next one.", 409)
+    try:
+        return _sync_new_item(conn, item_id, body)
+    finally:
+        lock.release()
+
+
+def _sync_new_item(conn, item_id: str, body: dict) -> dict:
+    try:
         res = plaid.sync_item(conn, item_id)
         # The same login linked a second time: its accounts would count twice. Undo it (at Plaid too) and say so.
         if any(d["adds_nothing"] for d in plaid.duplicates(conn, item_id)):
@@ -1320,6 +1348,9 @@ def api_plaid_exchange(conn, _q, body):
 
 
 def api_plaid_item_sync(conn, _q, _b, item_id):
+    lock = _item_lock(conn, item_id)
+    if not lock.acquire(blocking=False):
+        raise ApiError("A sync is already running; try again once it's done.", 409)
     try:
         res = plaid.sync_item(conn, item_id)
         if "new" in res:   # a bank connection
@@ -1331,6 +1362,8 @@ def api_plaid_item_sync(conn, _q, _b, item_id):
         return {"ok": True, **res}
     except plaid.PlaidError as e:
         raise ApiError(str(e), 502)
+    finally:
+        lock.release()
 
 
 def api_plaid_item_remove(conn, _q, _b, item_id):
