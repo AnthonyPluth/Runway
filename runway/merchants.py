@@ -6,9 +6,12 @@ anyone else for anything (and the page's content policy stays "images from Runwa
 SimpleFIN show the logo too when their merchant has the same name as one Plaid knows.
 
 When Plaid has no logo, Runway asks Logo.dev for one by the merchant's website: the one Plaid gave, or for big names
-(brands.MERCHANT_PATTERNS) the one Runway knows. That needs a Logo.dev publishable key (Settings). Runway, never the
-browser, downloads each during a sync, keeps it as merchant "site:<website>", and checks it again every month so a
-brand's new logo shows up by itself. Logo.dev only ever learns merchants' websites, never what you bought or paid.
+(brands.MERCHANT_PATTERNS) the one Runway knows. Failing that (most SimpleFIN transactions: no website), it asks by
+the merchant's name, for spending only (not transfers, income or "Interest"), and keeps no logo when Logo.dev knows no
+such brand. That needs a Logo.dev publishable key (Settings). Runway, never the browser, downloads each (during a sync,
+and for the past year's merchants right after you add the key), keeps it as merchant "site:<website>" or
+"brand:<name>", and checks it again every month so a brand's new logo shows up by itself. Logo.dev only ever learns
+merchants' websites and names, never what you bought or paid.
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ RETRY_DAYS = 30        # a logo that couldn't be fetched is tried again after th
 PER_SYNC = 60          # logos fetched per sync at most
 REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in case it changed
 SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
+BRAND = "brand:"       # ... and by the merchant's name, when no website is known
 TOKEN_SETTING = "logodev_token"   # the Logo.dev publishable key (pk_...)
 LOGO_DEV = "https://img.logo.dev/"
 _SITE_RX = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
@@ -120,24 +124,33 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
     return data, ctype
 
 
+def _todo(conn, limit: int) -> list:
+    """Logos to fetch: Plaid's that Runway doesn't have yet (or tried a month ago), and Logo.dev's (by website or name)
+    that it doesn't have or last checked a month ago, when there's a Logo.dev key. Never tried ones first."""
+    retry_before = (datetime.now() - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
+    refresh_before = (datetime.now() - timedelta(days=REFRESH_DAYS)).isoformat(timespec="seconds")
+    return conn.execute("SELECT id, name, logo_url FROM merchants WHERE logo_url IS NOT NULL AND ("
+                        "(id NOT LIKE ? AND id NOT LIKE ? AND logo IS NULL AND (logo_checked IS NULL OR logo_checked < ?)) OR "
+                        "(? AND (id LIKE ? OR id LIKE ?) AND (logo_checked IS NULL OR logo_checked < ?))) "
+                        "ORDER BY logo_checked IS NOT NULL, id LIMIT ?",
+                        (SITE + "%", BRAND + "%", retry_before, configured(conn), SITE + "%", BRAND + "%", refresh_before,
+                         limit)).fetchall()
+
+
 def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     """Download logos Runway doesn't have yet (from Plaid), and Logo.dev logos it doesn't have or last checked a month
     ago (when there's a Logo.dev key). Returns how many it got."""
     now = datetime.now()
-    retry_before = (now - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
-    refresh_before = (now - timedelta(days=REFRESH_DAYS)).isoformat(timespec="seconds")
     token = db.get_setting(conn, TOKEN_SETTING)
-    todo = conn.execute("SELECT id, logo_url FROM merchants WHERE logo_url IS NOT NULL AND ("
-                        "(id NOT LIKE ? AND logo IS NULL AND (logo_checked IS NULL OR logo_checked < ?)) OR "
-                        "(? AND id LIKE ? AND (logo_checked IS NULL OR logo_checked < ?))) "
-                        "ORDER BY logo_checked IS NOT NULL, id LIMIT ?",
-                        (SITE + "%", retry_before, bool(token), SITE + "%", refresh_before, limit)).fetchall()
+    todo = _todo(conn, limit)
     got = 0
     for m in todo:
+        params = urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
         if m["id"].startswith(SITE):
             s = m["id"][len(SITE):]
-            url = f"{LOGO_DEV}{s}?" + urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
-            found = _download(url, opener) if site(s) == s else None
+            found = _download(f"{LOGO_DEV}{s}?{params}", opener) if site(s) == s else None
+        elif m["id"].startswith(BRAND):
+            found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'] or '', safe='')}?{params}", opener) if m["name"] else None
         else:
             found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
         if found:
@@ -180,16 +193,87 @@ def sites_for(conn, txs: list[dict]) -> dict[str, str]:
     return out
 
 
+# Payees that are money moving, not a merchant: never looked up by name (Logo.dev would find some brand for "Transfer").
+_NOT_A_MERCHANT = re.compile(r"\b(transfer|xfer|payment|pmt|autopay|deposit|withdrawal|interest|dividend|fee|atm|check|"
+                             r"cheque|payroll|salary|paycheck|refund|balance|ach|wire|zelle|cash)\b", re.I)
+
+
+def names_for(conn, txs: list[dict]) -> dict[str, tuple[str, str]]:
+    """{transaction id: (key, name)}: the merchant name to ask Logo.dev about, for spending whose merchant has no website
+    Runway knows. Not for transfers or income (by category), money in that isn't categorized, or payees like "Interest"."""
+    skip = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1 OR is_income=1")}
+    out = {}
+    for t in txs:
+        name = " ".join((t.get("payee") or "").split())
+        if (t.get("category") in skip or (t.get("category") is None and (t.get("amount") or 0) > 0)
+                or len(re.findall(r"[A-Za-z]", name)) < 3 or _NOT_A_MERCHANT.search(name)):
+            continue
+        out[t["id"]] = (key(name), name)
+    return out
+
+
+def brand_logos(conn, names) -> set[str]:
+    """The merchant names (of (key, name) pairs) Runway has a Logo.dev logo for, by key. Ones it has never asked about
+    are noted, for a sync (or the fetch after you add a key) to look up."""
+    names = dict(n for n in names if n[0])
+    if not names:
+        return set()
+    ids = [BRAND + k for k in names]
+    have: dict[str, bool] = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        ph = ",".join("?" * len(chunk))
+        have.update({r["id"]: r["logo"] is not None for r in conn.execute(f"SELECT id, logo FROM merchants WHERE id IN ({ph})", chunk)})
+    for k, name in names.items():
+        if BRAND + k not in have:
+            conn.execute("INSERT INTO merchants(id, name, logo_url) VALUES (?,?,?)",
+                         (BRAND + k, name, LOGO_DEV + "name/" + urllib.parse.quote(name, safe="")))
+    return {k for k in names if have.get(BRAND + k)}
+
+
+def logo_dev_logos(conn, txs: list[dict]) -> dict[str, str]:
+    """{transaction id: merchant id} for transactions without a Plaid logo: Logo.dev's logo by the merchant's website,
+    else by its name. Ones not fetched yet are noted (and get their logo once a sync has fetched it)."""
+    if not configured(conn):
+        return {}
+    sites = sites_for(conn, txs)
+    have = site_logos(conn, sites.values())
+    out = {tid: SITE + s for tid, s in sites.items() if s in have}
+    names = names_for(conn, [t for t in txs if t["id"] not in sites])
+    have = brand_logos(conn, names.values())
+    out.update({tid: BRAND + k for tid, (k, _) in names.items() if k in have})
+    return out
+
+
 def note_sites(conn, days: int = 400) -> None:
-    """Note the websites of the last year's merchants that have no Plaid logo, so a sync fetches their logos from
-    Logo.dev before anyone looks."""
+    """Note the last year's merchants that have no Plaid logo (by website, else by name), so a sync fetches their logos
+    from Logo.dev before anyone looks."""
     if not configured(conn):
         return
     since = (datetime.now() - timedelta(days=days)).date().isoformat()
-    rows = db.rows(conn.execute("SELECT DISTINCT merchant_id, payee, description FROM transactions WHERE posted>=?", (since,)))
-    plaid = {r["id"] for r in conn.execute("SELECT id FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ?", (SITE + "%",))}
-    txs = [{**r, "id": str(i)} for i, r in enumerate(rows) if r["merchant_id"] not in plaid]
-    site_logos(conn, sites_for(conn, txs).values())
+    rows = db.rows(conn.execute("SELECT DISTINCT merchant_id, payee, description, category, amount < 0 AS spend "
+                                "FROM transactions WHERE posted>=?", (since,)))
+    plaid = {r["id"] for r in conn.execute("SELECT id FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ? AND id NOT LIKE ?",
+                                           (SITE + "%", BRAND + "%"))}
+    txs = [{**r, "id": str(i), "amount": -1 if r["spend"] else 1} for i, r in enumerate(rows) if r["merchant_id"] not in plaid]
+    sites = sites_for(conn, txs)
+    site_logos(conn, sites.values())
+    brand_logos(conn, names_for(conn, [t for t in txs if t["id"] not in sites]).values())
+
+
+def backfill(conn, rounds: int = 40, opener=None) -> int:
+    """Right after a Logo.dev key is added: note the past year's merchants and fetch their logos in rounds of PER_SYNC,
+    saving after each so they show up as they arrive, until none are left (or `rounds` is used up; syncs carry on
+    from there). Returns how many it got."""
+    note_sites(conn)
+    conn.commit()
+    got = 0
+    for _ in range(rounds):
+        if not _todo(conn, 1):
+            break
+        got += fetch_logos(conn, opener=opener)
+        conn.commit()
+    return got
 
 
 def logo(conn, mid: str) -> tuple[bytes, str] | None:
@@ -200,8 +284,8 @@ def logo(conn, mid: str) -> tuple[bytes, str] | None:
 def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
     """{transaction id: merchant id with a logo}: by the merchant Plaid named, else by the merchant name ("Starbucks
     Store 99" is Starbucks: the longest known name it starts with, as whole words)."""
-    have = {r["id"]: key(r["name"]) for r in conn.execute("SELECT id, name FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ?",
-                                                          (SITE + "%",))}
+    have = {r["id"]: key(r["name"]) for r in conn.execute("SELECT id, name FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ? "
+                                                          "AND id NOT LIKE ?", (SITE + "%", BRAND + "%"))}
     if not have:
         return {}
     by_name: dict[str, str] = {}
