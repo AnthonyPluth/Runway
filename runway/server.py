@@ -1907,19 +1907,18 @@ class Handler(BaseHTTPRequestHandler):
                 data = backup.load(self._read_body(n))
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
-            # No sync may write while the data is replaced: its rows would be mixed into the restored ones.
-            if not _sync_lock.acquire(blocking=False):
-                return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+            # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
+            # import): its rows would be mixed into the restored ones.
+            held = []
             try:
-                if not _inv_lock.acquire(blocking=False):
-                    return self._json(409, {"error": "A sync is running. Restore once it has finished."})
-                try:
-                    with db.session() as conn:
-                        counts = backup.restore(conn, data)
-                    with db.session() as conn:
-                        sfinvest.repair_stored(conn)
-                finally:
-                    _inv_lock.release()
+                for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
+                    if not lock.acquire(blocking=False):
+                        return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+                    held.append(lock)
+                with db.session() as conn:
+                    counts = backup.restore(conn, data)
+                with db.session() as conn:
+                    sfinvest.repair_stored(conn)
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
             except sqlalchemy.exc.OperationalError as e:
@@ -1927,7 +1926,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(e)
             finally:
-                _sync_lock.release()
+                for lock in held:
+                    lock.release()
             return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
