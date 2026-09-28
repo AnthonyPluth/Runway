@@ -558,6 +558,15 @@ class CategoryTests(Base):
         with self.assertRaises(server.ApiError):
             server.api_budget_set(self.conn, {}, {"category": "Groceries", "rollover": True})   # no budget to roll over
 
+    def test_investment_accounts_stay_out_of_transactions(self):
+        self.acct("brk", "investment", 5000.0)
+        self.tx("brk", "2026-09-02", -250.0, "BUY VTI")
+        self.conn.execute("UPDATE transactions SET needs_review=1")
+        got = server.api_transactions(self.conn, {}, None)
+        self.assertEqual([t["description"] for t in got["items"]], ["CHIPOTLE"])
+        self.assertEqual(got["total"], 1)
+        self.assertEqual(server.api_state(self.conn, {}, None)["review_count"], 1)   # the card's, not the buy
+
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)
         self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))

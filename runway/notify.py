@@ -172,7 +172,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
             out.append({"key": f"big:{t['id']}", "title": f"{_fmt(t['amount'])} at {t['who']}",
                         "body": f"On {t['acct']}.", "url": "/#transactions"})
     if p["review"]:
-        n = conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0]
+        n = conn.execute(f"SELECT COUNT(*) FROM transactions WHERE needs_review=1 AND {db.NOT_INVESTMENT}").fetchone()[0]
         if n:
             out.append({"key": f"review:{today.isoformat()}", "title": f"{n} transaction{'s' if n != 1 else ''} to review",
                         "body": "They're waiting for a category.", "url": "/#review"})

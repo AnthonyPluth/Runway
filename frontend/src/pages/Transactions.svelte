@@ -146,7 +146,7 @@
     </div>
     <NativeSelect aria-label="Account" class="h-10 max-sm:flex-1" bind:value={f.account} onchange={load}>
       <option value="">All accounts</option>
-      {#each accounts as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
+      {#each accounts.filter((a) => a.kind !== "investment") as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
     </NativeSelect>
     <NativeSelect aria-label="Category" class="h-10 max-sm:flex-1" bind:value={f.category} onchange={load}>
       <option value="">All categories</option>

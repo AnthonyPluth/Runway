@@ -393,7 +393,8 @@ def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[d
     txs = db.rows(conn.execute(
         "SELECT t.*, a.kind, " + db.label_sql("a") + " AS account_name FROM transactions t "
         "JOIN accounts a ON a.id=t.account_id "
-        "WHERE (t.needs_review=1 OR t.category IS NULL) AND COALESCE(t.category_source, '') <> 'manual' ORDER BY t.posted DESC"
+        "WHERE (t.needs_review=1 OR t.category IS NULL) AND COALESCE(t.category_source, '') <> 'manual' "
+        "AND a.kind <> 'investment' ORDER BY t.posted DESC"
     ))
     groups = group_by_merchant(txs)
     groups.sort(key=lambda g: -len(g))
