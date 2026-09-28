@@ -26,6 +26,18 @@ export async function loadCategories(): Promise<Category[]> {
 }
 
 export const catLabel = (c: Category) => (c.path && c.path.length > 1 ? c.path.join(" > ") : c.name);
+
+/** A category's emoji and color. Unknown names (a category removed meanwhile) get a tag and gray. */
+export function catLook(name: string | null | undefined): { icon: string; color: string } {
+  const c = name ? categories.list.find((x) => x.name === name) : undefined;
+  return { icon: c?.icon || "🏷️", color: c?.color || "var(--cat-other)" };
+}
+/** The colors a category can wear (the server's categories.PALETTE). */
+export const CAT_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86"];
+/** Emoji offered when picking one (any emoji can be typed too). */
+export const CAT_EMOJI = ["🛒", "🍽️", "☕", "🍔", "🍷", "🛍️", "👕", "✈️", "🚆", "🚕", "⛽", "🅿️", "🚗", "💡", "📱", "🔁", "💻",
+  "🩺", "💊", "🏋️", "🔨", "🏠", "🏡", "🏦", "🧾", "🎬", "🎮", "🎨", "🎁", "💸", "📦", "💰", "↩️", "💳", "🔄", "🚫", "🐾",
+  "🧸", "📚", "🛡️", "💅", "💼", "📈", "🎓", "⚽", "🎵", "🌱", "🧹", "🍼", "🏷️"];
 export const catParentOf = (name: string | null | undefined) => categories.list.find((c) => c.name === name)?.parent || null;
 
 /** The categories as the pickers group them: Spending, Money in, Not spending. */

@@ -494,6 +494,27 @@ class CategoryTests(Base):
         self.conn.execute("INSERT INTO rules(match, category) VALUES ('chipotle', 'Restaurants')")
         self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Restaurants', 300)")
 
+    def test_looks(self):
+        categories.add(self.conn, "Fast food", parent="Restaurants")
+        categories.add(self.conn, "Zebra Rides")
+        by = {c["name"]: c for c in categories.all_categories(self.conn)}
+        self.assertEqual((by["Groceries"]["icon"], by["Groceries"]["custom_icon"]), ("🛒", None))
+        self.assertEqual(by["Fast food"]["color"], by["Restaurants"]["color"])   # a subcategory wears its parent's color
+        self.assertIn(by["Zebra Rides"]["color"], categories.PALETTE)            # an unknown name still gets one
+        categories.set_look(self.conn, "Restaurants", "🍔", "#1C9AA8")
+        by = {c["name"]: c for c in categories.all_categories(self.conn)}
+        self.assertEqual((by["Restaurants"]["icon"], by["Restaurants"]["color"]), ("🍔", "#1c9aa8"))
+        self.assertEqual(by["Fast food"]["color"], "#1c9aa8")
+        categories.rename(self.conn, "Restaurants", "Eating out")                 # the look goes with the name
+        self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], "🍔")
+        categories.set_look(self.conn, "Eating out", "", "")                      # back to the default
+        self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], None)
+        for icon, color in (("abc", None), (None, "red"), (None, "#12345g")):
+            with self.assertRaises(categories.CategoryError):
+                categories.set_look(self.conn, "Eating out", icon, color)
+        with self.assertRaises(categories.CategoryError):
+            categories.set_look(self.conn, "Nope", "🍔", None)
+
     def test_add_sub_rename_remove(self):
         categories.add(self.conn, "Fast food", parent="Restaurants")
         sub = self.conn.execute("SELECT * FROM categories WHERE name='Fast food'").fetchone()
