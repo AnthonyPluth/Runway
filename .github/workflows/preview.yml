@@ -118,6 +118,8 @@ jobs:
           curl -fsS -u "preview:$password" -H 'X-Runway: 1' "$URL/api/accounts" | grep -q demo-checking
 
       - name: Post the address
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           minutes="${{ github.event.inputs.minutes || '60' }}"
           case "$minutes" in ''|*[!0-9]*) minutes=60;; esac
@@ -130,7 +132,7 @@ jobs:
             "User \`preview\`, password \`$PASSWORD\`" \
             "" \
             "Sample data only (made-up accounts and transactions); nothing here is real, and bank sync is off." \
-            "Built from ${GITHUB_SHA::7}. Remove the \`preview\` label to stop it early.")
+            "Built from ${HEAD_SHA::7}. Remove the \`preview\` label to stop it early.")
           echo "$body" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$PR" ]; then gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"; fi
 
