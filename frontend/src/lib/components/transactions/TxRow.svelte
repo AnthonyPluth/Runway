@@ -52,8 +52,8 @@
   }
 </script>
 
-<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 border-t px-3 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:px-4",
-  selected ? "bg-primary/10" : "hover:bg-muted/40")}>
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:px-4",
+  selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-1", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
     <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label={`Select ${name}`} checked={selected}

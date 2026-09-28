@@ -70,7 +70,7 @@
     <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
   </summary>
   <div class="pt-3 pb-5 sm:pl-10">
-    {#each missed as m (m.key)}<MissedAlert {m} ondismiss={(k) => (missed = missed.filter((x) => x.key !== k))} />{/each}
+    {#if missed.length}<div class="group-list mb-3 bg-muted/60" style:--inset="3.75rem">{#each missed as m (m.key)}<MissedAlert {m} ondismiss={(k) => (missed = missed.filter((x) => x.key !== k))} />{/each}</div>{/if}
     <RecurringFields bind:v {accounts} {save} />
     <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
       <label class="relative flex cursor-pointer items-center gap-2 text-sm">

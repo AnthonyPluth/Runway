@@ -39,7 +39,7 @@
   const version = $derived(app.state?.version && app.state.version !== "dev" ? app.state.version : "");
 </script>
 
-<h1 class="mb-4 text-3xl font-semibold tracking-tight">Settings</h1>
+<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Settings</h1>
 <SubTabs label="Settings" current={section}
   tabs={SECTIONS.map((s) => ({ ...s, href: `#setup/${s.id}`, badge: s.id === "rules" ? ruleCount : undefined }))} />
 
