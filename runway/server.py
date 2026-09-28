@@ -524,6 +524,12 @@ TARGET_DETAIL_URLS = {
     "store": ["{base}/{order}/store_order_details?key={key}"],
     "online": ["{base}/{order}/orders?key={key}", "{base}/orders/{order}?key={key}"],
 }
+# The order's own page on target.com, for orders none of those addresses answer: the extension loads it, sees which
+# addresses it called for the order's items, reads them, and remembers them for the next orders.
+TARGET_ORDER_PAGES = {
+    "store": "https://www.target.com/orders/stores/{order}",
+    "online": "https://www.target.com/orders/{order}",
+}
 
 
 def ext_start(conn, body):
@@ -531,6 +537,7 @@ def ext_start(conn, body):
     if r not in retail.RETAILERS:
         raise retail.RetailError("Unknown store")
     return {"since": retail.since(conn, r), "detail_urls": TARGET_DETAIL_URLS if r == "target" else None,
+            "order_pages": TARGET_ORDER_PAGES if r == "target" else None,
             "version": os.environ.get("RUNWAY_VERSION") or "dev"}
 
 
