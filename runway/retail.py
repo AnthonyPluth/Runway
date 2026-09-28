@@ -169,6 +169,12 @@ def since(conn, retailer: str) -> str:
         start = datetime.fromisoformat(last).date() - timedelta(days=OVERLAP_DAYS)
     else:
         start = date.today() - timedelta(days=FIRST_IMPORT_DAYS)
+    # Back far enough for orders whose items are still to be read (an import that couldn't read them, say), so
+    # they're listed again and their details asked for.
+    r = conn.execute("SELECT MIN(placed) AS placed FROM retail_orders WHERE retailer=? AND COALESCE(details, 0)=0 "
+                     "AND COALESCE(attempts, 0) < ? AND placed IS NOT NULL", (retailer, MAX_ATTEMPTS)).fetchone()
+    if r and r["placed"] and r["placed"] < start.isoformat():
+        return r["placed"]
     return start.isoformat()
 
 
