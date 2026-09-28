@@ -313,9 +313,12 @@ def sync_transactions(conn, item, today: date) -> list[str]:
         payee = clean_payee(t.get("merchant_name") or t.get("name") or desc)
         pending = 1 if t.get("pending") else 0
         merchant = merchants.note(conn, t)
-        if conn.execute("SELECT 1 FROM transactions WHERE id=?", (key,)).fetchone():
+        known = conn.execute("SELECT is_split FROM transactions WHERE id=?", (key,)).fetchone()
+        if known:
             conn.execute("UPDATE transactions SET posted=?, amount=?, description=?, pending=?, merchant_id=COALESCE(?, merchant_id) "
                          "WHERE id=?", (posted, amount, desc, pending, merchant, key))
+            if known["is_split"]:
+                splits.follow_amount(conn, key, amount)
             continue
         since = acct["provider_since"]
         if aid in earlier and since:
