@@ -348,6 +348,10 @@ def init(path: str | None = None) -> None:
 
 
 # Categories the app itself relies on; they can't be renamed or removed.
+# Transactions in investment accounts (buys, sells, dividends) live on the Investments page, not in Transactions,
+# Review or the review count. A condition on transactions.account_id, for a WHERE clause.
+NOT_INVESTMENT = "account_id NOT IN (SELECT id FROM accounts WHERE kind='investment')"
+
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
 

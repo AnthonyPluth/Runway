@@ -248,7 +248,7 @@ def api_state(conn, _q, _b):
         "last_sync_ok": db.get_setting(conn, "last_sync_ok"),
         "last_log": dict(last_log) if last_log else None,
         "last_llm_error": db.get_setting(conn, "last_llm_error"),
-        "review_count": conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0],
+        "review_count": conn.execute(f"SELECT COUNT(*) FROM transactions WHERE needs_review=1 AND {db.NOT_INVESTMENT}").fetchone()[0],
         "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are
         "horizon_days": int(db.get_setting(conn, "horizon_days", "90") or 90),
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
@@ -366,7 +366,7 @@ def api_account_update(conn, _q, body, acct_id):
 
 
 def api_transactions(conn, q, _b):
-    where, args = ["1=1"], []
+    where, args = ["t." + db.NOT_INVESTMENT], []
     if q.get("review", ["0"])[0] == "1":
         where.append("t.needs_review=1")
     if q.get("recurring", [""])[0]:
