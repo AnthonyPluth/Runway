@@ -144,13 +144,14 @@ plain Python with a handful of well-known libraries.
 
 ## Quick start
 
-You need Python 3.14 and [Poetry](https://python-poetry.org/docs/#installation) 2
-(`pipx install poetry`).
+You need Python 3.14, [Poetry](https://python-poetry.org/docs/#installation) 2 (`pipx install poetry`) and Node 22
+(to build the web app once). Or skip all three and use Docker (see [Running on a server](#running-on-a-server)).
 
 ```bash
 git clone https://github.com/AnthonyPluth/Runway.git
 cd Runway
 poetry install --no-root     # the dependencies, into a virtualenv just for Runway
+(cd frontend && npm ci && npm run build)   # the web app, into runway/static/app (again after each update)
 poetry run python run.py
 ```
 
@@ -303,15 +304,15 @@ DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # t
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
-The web app is moving to Svelte 5 + TypeScript in `frontend/` (Tailwind CSS, components in the shadcn-svelte style on
-Bits UI, Lucide icons). Pages move over one at a time; until then the new app lives at `/next/` and links to the
-classic app for pages it doesn't have yet. It needs Node 22:
+The web app is Svelte 5 + TypeScript in `frontend/` (Tailwind CSS, components in the shadcn-svelte style on Bits UI,
+Lucide icons). Runway serves its build at `/`, so build it once before running Runway from a checkout. It needs
+Node 22:
 
 ```bash
 cd frontend && npm ci                 # its packages, into frontend/node_modules
-npm run dev                           # http://localhost:5173/next/ (reloads as you edit; start Runway on 8765 too)
+npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
-npm run build                         # into runway/static/next/, which Runway serves at /next/ (the Docker image does this)
+npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 
 Changing the database: edit `runway/schema.py`, then generate a migration and check it over:
@@ -340,8 +341,8 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
 | `runway/brands.py`, `runway/static/banks/` | Which institution each account belongs to, and their logos |
-| `frontend/` | The new web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components |
-| `runway/static/` | The classic web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
+| `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components |
+| `runway/static/` | Files Runway serves beside the app: the service worker (`sw.js`), manifest, fonts, icons, bank logos, and `page.css` for the sign-in pages |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
 | `data/` | Your database (not in Git) |

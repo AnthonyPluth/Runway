@@ -3,6 +3,9 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Geist, bundled with Runway (runway/static/fonts, SIL Open Font License). */
+@font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+
 /* shadcn-svelte's default theme (neutral). Runway uses the dark one (index.html sets class="dark"). */
 :root {
   --radius: 0.625rem;
@@ -68,6 +71,7 @@
 }
 
 @theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -107,7 +111,7 @@
   body { @apply bg-background text-foreground; }
 }
 
-/* Runway's chart colors, from the classic app. Categorical series in this order (validated for colorblind
+/* Runway's chart colors. Categorical series in this order (validated for colorblind
    separation and contrast on the dark card surface); "everything else" is always gray. */
 :root {
   --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;

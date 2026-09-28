@@ -1,7 +1,10 @@
 // Runway's service worker: shows push notifications, and keeps the app's shell around so it opens without a
 // connection (with the last-loaded page). Data always comes fresh from the server; nothing from /api is cached.
-const CACHE = "runway-shell-v2";
-const SHELL = ["/", "/app.css", "/app.js", "/logo.svg", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
+const CACHE = "runway-shell-v3";
+// The app's page and Runway's own files. The app's built files (/assets/…) are kept as the page loads them: their
+// names change with every build, so the list can't name them.
+const SHELL = ["/", "/logo.svg", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
+const isShell = (path) => SHELL.includes(path) || path.startsWith("/assets/");
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
@@ -20,11 +23,11 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
   const key = event.request.mode === "navigate" ? "/" : url.pathname;
-  if (event.request.mode !== "navigate" && !SHELL.includes(key)) return;
+  if (event.request.mode !== "navigate" && !isShell(key)) return;
   event.respondWith((async () => {
     try {
       const res = await fetch(event.request);
-      // Only the app's own page is kept as the page to open offline (not, say, a link straight to /app.js).
+      // Only the app's own page is kept as the page to open offline (not, say, a link straight to a script).
       const page = event.request.mode !== "navigate" || (res.headers.get("Content-Type") || "").startsWith("text/html");
       if (res.ok && !res.redirected && page) (await caches.open(CACHE)).put(key, res.clone());
       return res;

@@ -14,6 +14,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import backup, db, oidc, secretbox, server, simplefin  # noqa: E402
+from tests.test_web_app import built_app, serving  # noqa: E402
 
 
 class SafeNextTests(unittest.TestCase):
@@ -142,17 +143,20 @@ class HttpTests(unittest.TestCase):
         return code, json.loads(raw or b"{}")
 
     def test_security_headers_and_script_nonce(self):
-        code, h, page = self.open("/")
+        with tempfile.TemporaryDirectory() as static, serving(static):
+            built_app(static)
+            code, h, page = self.open("/")
+            second = self.open("/")[1]["Content-Security-Policy"]
         self.assertEqual(code, 200)
         csp = h["Content-Security-Policy"]
         nonce = re.search(r"'nonce-([^']+)'", csp).group(1)
-        self.assertIn(f'<script nonce="{nonce}" src="/app.js">'.encode(), page)
+        self.assertIn(f'<script nonce="{nonce}" type="module"'.encode(), page)
         for d in ("frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'"):
             self.assertIn(d, csp)
         self.assertEqual(h["X-Frame-Options"], "DENY")
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
         self.assertEqual(h["Server"].strip(), "Runway")                           # no Python version
-        self.assertNotEqual(nonce, re.search(r"'nonce-([^']+)'", self.open("/")[1]["Content-Security-Policy"]).group(1))
+        self.assertNotEqual(nonce, re.search(r"'nonce-([^']+)'", second).group(1))
         self.assertIn("frame-ancestors 'none'", self.open("/api/state")[1]["Content-Security-Policy"])
 
     def test_errors_dont_show_internals(self):
@@ -180,10 +184,10 @@ class HttpTests(unittest.TestCase):
     def test_static_files(self):
         code, h, body = self.open("/../server.py")
         self.assertNotIn(b"def serve", body)                                        # never outside static/
-        code, h, body = self.open("/app.js", headers={"Accept-Encoding": "gzip"})
+        code, h, body = self.open("/sw.js", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(h["Content-Encoding"], "gzip")
-        self.assertIn(b"use strict", gzip.decompress(body))
-        self.assertEqual(self.open("/app.js", headers={"If-None-Match": h["ETag"]})[0], 304)
+        self.assertIn(b"service worker", gzip.decompress(body))
+        self.assertEqual(self.open("/sw.js", headers={"If-None-Match": h["ETag"]})[0], 304)
         code, _, body = self.open("/healthz", "HEAD")
         self.assertEqual((code, body), (200, b""))
 

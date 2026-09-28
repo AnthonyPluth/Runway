@@ -853,9 +853,10 @@ class ServerTests(unittest.TestCase):
         code, st = self.req("GET", "/api/state")
         self.assertEqual(code, 200)
         self.assertFalse(st["connected"])
-        with urllib.request.urlopen(self.base + "/") as resp:
+        with urllib.request.urlopen(self.base + "/manifest.webmanifest") as resp:
             self.assertIn(b"Runway", resp.read())
-        with urllib.request.urlopen(self.base + "/app.js") as resp:
+            self.assertEqual(resp.headers["Content-Type"].split(";")[0], "application/manifest+json")
+        with urllib.request.urlopen(self.base + "/sw.js") as resp:
             self.assertEqual(resp.headers["Content-Type"].split(";")[0], "text/javascript")
 
     def test_csrf_header_required(self):
