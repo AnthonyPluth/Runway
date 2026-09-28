@@ -522,7 +522,9 @@ def api_retail_candidates(conn, _q, _b, charge_id):
 TARGET_DETAIL_URLS = {
     # {base} is Target's order API as the extension found it on target.com, {key} its API key, {order} the order.
     "store": ["{base}/{order}/store_order_details?key={key}"],
-    "online": ["{base}/{order}/orders?key={key}", "{base}/orders/{order}?key={key}"],
+    # An online order's details, as its page on target.com reads them (with its items in packages[].order_lines).
+    "online": ["https://api.target.com/post_orders/v1/{order}?key={key}", "https://api.target.com/post_orders/v1/{order}",
+               "{base}/{order}/orders?key={key}", "{base}/orders/{order}?key={key}"],
 }
 # The order's own page on target.com, for orders none of those addresses answer: the extension loads it, sees which
 # addresses it called for the order's items, reads them, and remembers them for the next orders.

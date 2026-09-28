@@ -16,6 +16,8 @@ function pageGo(url) { setTimeout(() => { location.href = url; }, 0); return tru
 
 // Target's order API and its key, as target.com's own orders page called it (or as its page settings give it).
 function targetDiscover(fallbackBase) {
+  // its sign-in token too, for its APIs that want it as a header rather than a cookie
+  const token = (document.cookie.match(/(?:^|;\s*)accessToken=([^;]+)/) || [])[1] || null;
   const seen = performance.getEntriesByType("resource").map((e) => e.name).filter((u) => u.includes("guest_order_aggregations"));
   for (const u of seen) {
     try {
@@ -23,12 +25,11 @@ function targetDiscover(fallbackBase) {
       const at = url.pathname.indexOf("/guest_order_aggregations/");
       const base = url.origin + url.pathname.slice(0, at) + "/guest_order_aggregations/v1";
       const key = url.searchParams.get("key");
-      if (key) return { base, key, from: "page" };
+      if (key) return { base, key, from: "page", token };
     } catch (_) { /* keep looking */ }
   }
   const html = document.documentElement.innerHTML;
   const m = html.match(/"apiKey"\s*:\s*"([0-9a-f]{32,64})"/i) || html.match(/[?&]key=([0-9a-f]{32,64})/i);
-  const token = (document.cookie.match(/(?:^|;\s*)accessToken=([^;]+)/) || [])[1] || null;
   return { base: fallbackBase, key: m ? m[1] : null, from: m ? "settings" : null, token, signedIn: !/login|signin/i.test(location.pathname) };
 }
 
