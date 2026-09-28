@@ -10,7 +10,7 @@ charge to its order and splits the transaction by what you bought ($84 at Target
   a saved card or your phone number at the register).
 
 - **Carta:** your stock options, RSUs and shares, and each company's latest share price, as carta.com shows them to
-  you. The extension opens Carta in a background tab, notes the data requests Carta's own pages make, reads the same
+  you. The extension loads Carta out of sight, notes the data requests Carta's own pages make, reads the same
   addresses again (reads only, carta.com only; never sign-out, exercise, accept or download links) and sends the
   replies to Runway, which finds your companies and grants in them. Click **Carta** in the extension; once an import
   has worked, the daily import includes it.
@@ -31,8 +31,18 @@ Chrome, Edge, Brave, Arc or any other Chromium browser:
 4. Stay signed in to amazon.com and target.com in that browser, and click the extension's toolbar button →
    **Import both**. The first import reads six months back; later ones pick up where the last left off.
 
-Tick **Import once a day** in the options to have it run by itself while the browser is open (it opens the stores in
-background tabs and closes them when done).
+Tick **Import once a day** in the options to have it run by itself while the browser is open.
+
+## Out of sight
+
+Each store is read in a hidden frame of its own site (in Chrome, inside the extension's offscreen document; in
+Firefox, inside the extension's background page), so no tab or window opens. For those frames only (requests from no
+tab), the extension drops the stores' "don't show me in a frame" headers, and it puts its small reader (`frame.js`)
+in them for the length of the import. It never runs in a store tab you have open yourself.
+
+If a store won't load in a hidden frame, or looks signed out there, that import is done in a background tab instead,
+as earlier versions did, and that store keeps to tabs for a week (or until the extension is updated). A tab comes to
+the front only when you need to sign in.
 
 It's written to load in Firefox 128 and later as well (`about:debugging` → **This Firefox** → **Load Temporary
 Add-on…**, pick `manifest.json`; Firefox forgets temporary add-ons when it restarts), but it has only been tried in

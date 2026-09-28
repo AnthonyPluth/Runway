@@ -2,12 +2,14 @@
   "manifest_version": 3,
   "name": "Runway: Amazon, Target and Carta",
   "short_name": "Runway",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Sends your Amazon and Target orders and your Carta equity to your own Runway.",
   "permissions": [
     "scripting",
     "storage",
-    "alarms"
+    "alarms",
+    "offscreen",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://www.amazon.com/*",
@@ -23,6 +25,7 @@
   "background": {
     "service_worker": "background.js",
     "scripts": [
+      "page.js",
       "background.js"
     ]
   },

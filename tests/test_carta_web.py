@@ -28,6 +28,43 @@ OTHER = {"results": [{"id": "r1", "label": "RSU-3", "type": "RSU", "quantity": 1
                       "company": {"name": "Beta Labs", "id": "b9", "fmvPerShare": 12.5}}]}
 
 
+# The shapes carta.com's portfolio pages actually load (September 2026), trimmed and with made-up names and numbers:
+# the securities replies give only the issuer's number, and the company's name is in the list of your companies.
+PK = 5550001
+WEB = [
+    {"url": f"https://app.carta.com/investors/individual/{PK}/portfolio/#embedded-0",
+     "data": {"corporation_pk": PK, "account-name": "Pat Doe's Portfolio", "user_first_name": "Pat"}},
+    {"url": f"https://app.carta.com/api/investors/portfolio/fund/{PK}/list/",
+     "data": {"count": 2, "results": {"companies": [
+         {"name": "Northwind Payments, Inc.", "corporation_id": 900, "landing_url": f"/investors/individual/{PK}/portfolio/900/"},
+         {"name": "Harbor Sails, Inc.", "corporation_id": 800}]}}},
+    {"url": f"https://app.carta.com/api/profiles/profile/{PK}/", "data": {"legal_name": "Pat Doe's Portfolio", "city": "Somewhere"}},
+    {"url": f"https://app.carta.com/api/investors/holdings/portfolio/{PK}/corporation/900/securities/",
+     "data": {"option_grants": {"holdings": [
+         {"id": 1901, "owner_id": PK, "issuer_id": 900, "label": "ES-452", "quantity": 20619, "unit_descriptor": "option",
+          "issue_ts_ms": 1732348800000, "expiration_ts_ms": 2047795200000, "is_canceled": False, "is_expired": False,
+          "is_vesting": True, "cumulative_vested_shares": 10739, "sub_type": "ISO", "status": "OUTSTANDING",
+          "exercised_quantity": 0, "exercise_price": {"currency": "USD", "amount": "3.50"}},
+         {"id": 1902, "owner_id": PK, "issuer_id": 900, "label": "ES-858", "quantity": 3002, "issue_ts_ms": 1769155200000,
+          "cumulative_vested_shares": 500, "sub_type": "ISO", "status": "OUTSTANDING", "exercised_quantity": 0,
+          "exercise_price": {"currency": "USD", "amount": "4.78"}}],
+         "aggregations": {"total_quantity": 23621, "vested_quantity": 11239}},
+         "rsus": {"holdings": [], "aggregations": {"total_quantity": 0}}}},
+    {"url": f"https://app.carta.com/api/issuers/v1/900/fair-market-value/portfolio/{PK}/",
+     "data": {"fair_market_value": {"value": {"currency": "USD", "amount": "4.78"}, "expires_at": None}}},
+    {"url": f"https://app.carta.com/api/investors/holdings/portfolio/{PK}/corporation/800/securities/",
+     "data": {"option_grants": {"holdings": [
+         {"id": 1801, "issuer_id": 800, "label": "ES-65", "quantity": 8000, "is_canceled": True, "is_expired": True,
+          "status": "CANCELED", "sub_type": "ISO", "cumulative_vested_shares": 3000, "exercised_quantity": 2000,
+          "exercise_price": {"currency": "USD", "amount": "0.50"}}]},
+      "certificates": {"holdings": [
+          {"id": 1802, "issuer_id": 800, "label": "CS-25", "quantity": 2000, "is_canceled": True, "status": "CANCELED",
+           "cumulative_vested_shares": 0, "price": {"currency": "USD", "amount": "0.50"}}]}}},
+    {"url": f"https://app.carta.com/api/issuers/v1/800/fair-market-value/portfolio/{PK}/",
+     "data": {"fair_market_value": {"value": None, "expires_at": None}}},
+]
+
+
 class ReadTests(unittest.TestCase):
     def test_finds_companies_and_grants(self):
         found = carta_web.read([{"url": "a", "data": HOLDINGS}, {"url": "b", "data": OTHER}])
@@ -43,6 +80,23 @@ class ReadTests(unittest.TestCase):
         self.assertEqual((cid, cs["kind"], cs["quantity"]), ("carta:42", "shares", 500.0))
         cid, rsu = grants["carta-web:rsu:r1"]
         self.assertEqual((cid, rsu["kind"], rsu["vest_months"], rsu["vest_every"]), ("carta:b9", "rsu", 48, 3))
+
+    def test_carta_web_app_shapes(self):
+        found = carta_web.read(WEB)
+        self.assertEqual([(c["id"], c["name"], c["price"]) for c in found["companies"]],
+                         [("carta:900", "Northwind Payments, Inc.", 4.78)])   # not the portfolio, nor a company with nothing left
+        grants = {g["id"]: (cid, g) for cid, g, _ in found["grants"]}
+        self.assertEqual(sorted(grants), ["carta-web:option:1901", "carta-web:option:1902"])   # canceled ones left out
+        cid, g = grants["carta-web:option:1901"]
+        self.assertEqual((cid, g["kind"], g["label"], g["quantity"], g["strike"], g["vested_reported"], g["exercised"]),
+                         ("carta:900", "iso", "ES-452", 20619.0, 3.5, 10739.0, 0.0))
+        self.assertEqual((g["granted_on"], g["expires_on"]), ("2024-11-23", "2034-11-22"))
+        self.assertEqual(found["gone"], ["carta-web:option:1801", "carta-web:shares:1802"])
+
+    def test_company_known_only_by_number(self):
+        found = carta_web.read([WEB[3]])
+        self.assertEqual([(c["id"], c["name"]) for c in found["companies"]], [("carta:900", "Carta company 900")])
+        self.assertEqual(len(found["grants"]), 2)
 
 
 class ImportTests(unittest.TestCase):
@@ -76,6 +130,27 @@ class ImportTests(unittest.TestCase):
         carta_web.finish(self.c)
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM equity_grants").fetchone()[0], 3)
         self.assertTrue(carta.settings(self.c)["web_last"])
+
+    def test_import_web_app_shapes(self):
+        carta_web.start(self.c)
+        follow = carta_web.ingest(self.c, WEB[0]["url"], WEB[0]["data"])["follow"]
+        self.assertEqual(follow, [f"https://app.carta.com/api/investors/portfolio/fund/{PK}/list/"])
+        follow = carta_web.ingest(self.c, WEB[1]["url"], WEB[1]["data"])["follow"]
+        self.assertIn(f"https://app.carta.com/api/investors/holdings/portfolio/{PK}/corporation/900/securities/", follow)
+        self.assertIn(f"https://app.carta.com/api/issuers/v1/800/fair-market-value/portfolio/{PK}/", follow)
+        for c in WEB[2:]:
+            carta_web.ingest(self.c, c["url"], c["data"])
+        self.assertEqual(carta_web.finish(self.c), {"companies": 1, "grants": 2, "pages": len(WEB)})
+        o = equity.overview(self.c, date(2026, 9, 28))
+        self.assertEqual([c["name"] for c in o["companies"]], ["Northwind Payments, Inc."])
+        # A grant canceled since the last import goes away.
+        self.c.execute("INSERT INTO equity_grants(id, company_id, kind, quantity, source) VALUES "
+                       "('carta-web:option:1801', 'carta:900', 'iso', 8000, 'carta')")
+        carta_web.start(self.c)
+        for c in WEB:
+            carta_web.ingest(self.c, c["url"], c["data"])
+        carta_web.finish(self.c)
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM equity_grants").fetchone()[0], 2)
 
     def test_nothing_found_says_so(self):
         carta_web.start(self.c)
