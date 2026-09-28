@@ -48,7 +48,9 @@ MAX_RAW = 200_000            # characters of a Target order's API reply kept for
 
 
 class RetailError(ValueError):
-    pass
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code   # "signin" or "robot": the store stopped answering, so the extension stops this import
 
 
 def order_key(retailer: str, number: str) -> str:
@@ -170,9 +172,11 @@ def since(conn, retailer: str) -> str:
     else:
         start = date.today() - timedelta(days=FIRST_IMPORT_DAYS)
     # Back far enough for orders whose items are still to be read (an import that couldn't read them, say), so
-    # they're listed again and their details asked for.
-    r = conn.execute("SELECT MIN(placed) AS placed FROM retail_orders WHERE retailer=? AND COALESCE(details, 0)=0 "
-                     "AND COALESCE(attempts, 0) < ? AND placed IS NOT NULL", (retailer, MAX_ATTEMPTS)).fetchone()
+    # they're listed again and their details asked for. An Amazon order only learns when it was placed from its
+    # details, so until then its first charge stands in.
+    r = conn.execute("SELECT MIN(COALESCE(o.placed, (SELECT MIN(c.date) FROM retail_charges c WHERE c.order_id=o.id))) "
+                     "AS placed FROM retail_orders o WHERE o.retailer=? AND COALESCE(o.details, 0)=0 "
+                     "AND COALESCE(o.attempts, 0) < ?", (retailer, MAX_ATTEMPTS)).fetchone()
     if r and r["placed"] and r["placed"] < start.isoformat():
         return r["placed"]
     return start.isoformat()
@@ -201,26 +205,42 @@ def _signed_out(html: str) -> bool:
     return bool(re.search(r"<form[^>]+name=['\"]signIn['\"]|ap/signin", html[:200_000])) and "apx-transaction" not in html
 
 
+def _amazon_blocked(html: str) -> RetailError | None:
+    """Amazon showed its sign-in or robot-check page instead of an order (its order pages link to sign-in anyway, so
+    only the sign-in form itself counts)."""
+    head = html[:200_000]
+    if re.search(r"/errors/validateCaptcha|captchacharacters|<title>[^<]*Robot Check", head, re.I):
+        return RetailError("Amazon asked to check you're not a robot. Open amazon.com in this browser, answer it, then "
+                           "import again.", "robot")
+    if re.search(r"<form[^>]+name=['\"]signIn['\"]|id=['\"]ap_email['\"]", head):
+        return RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.", "signin")
+    return None
+
+
 AMAZON_ORDER = re.compile(r"^(?:\d{3}|D\d{2})-\d{7}-\d{7}$")
 
 
-def amazon_transactions(conn, html: str) -> dict:
+def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
     """One page of Amazon's Payments → Transactions. Saves each charge and refund against its order.
 
     Returns what the extension should do next: `next_form` (post it back to the same page for the next page, or
-    None when this page reaches back past `since`) and `orders`, the order numbers whose details it should send."""
+    None when this page reaches back past `since`), `orders`, the order numbers whose details it should send, and
+    `seen`, which it sends back with the next page (so the same charge twice across two pages is still two charges)."""
     from amazonorders.exception import AmazonOrdersError
     from amazonorders.transactions import _parse_transactions_page
     from bs4 import BeautifulSoup
     if _signed_out(html):
-        raise RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.")
+        raise RetailError("Amazon asked to sign in. Sign in to Amazon in this browser, then try again.", "signin")
+    blocked = _amazon_blocked(html)
+    if blocked:
+        raise blocked
     cfg = _amazon_config()
     try:
         txs, next_form = _parse_transactions_page(BeautifulSoup(html, cfg.bs4_parser), cfg)
     except AmazonOrdersError as e:
         raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}")
     start = since(conn, "amazon")
-    seen: dict[tuple, int] = {}
+    seen = {str(k): int(v) for k, v in (seen or {}).items() if isinstance(v, int)}
     numbers, oldest = [], None
     for t in txs:
         day = _day(t.completed_date)
@@ -231,34 +251,45 @@ def amazon_transactions(conn, html: str) -> dict:
         if day < start:
             continue
         oid = _save_order(conn, "amazon", number)
-        k = (number, day, round(t.grand_total, 2))
+        k = f"{number}|{day}|{round(t.grand_total * 100)}"
         seen[k] = seen.get(k, 0) + 1   # the same amount twice on one day for one order: two charges
         pay = _payment(t.payment_method, t.payment_method_last_4)
         _save_charge(conn, f"amazon|{number}|{day}|{round(t.grand_total * 100)}|{seen[k]}", oid, day,
                      float(t.grand_total), pay)
         numbers.append(number)
     more = bool(next_form) and bool(oldest) and oldest >= start
-    return {"next_form": next_form if more else None, "orders": _need(conn, "amazon", numbers), "read": len(txs)}
+    return {"next_form": next_form if more else None, "orders": _need(conn, "amazon", numbers), "read": len(txs),
+            "seen": seen}
 
 
-def amazon_order(conn, number: str, html: str) -> dict:
-    """An Amazon order's details page: its items and totals."""
+def _tried(conn, oid: str, final: bool) -> dict:
+    """An order's details couldn't be read. Only the extension's last try at it in an import counts towards giving
+    up on it, so one import (reading an order more than one way) uses at most one of its tries."""
+    if final:
+        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
+    return {"read": False}
+
+
+def amazon_order(conn, number: str, html: str, final: bool = True) -> dict:
+    """An Amazon order's details page: its items and totals. A sign-in or robot-check page raises (with its code)
+    without using up one of the order's tries."""
     from amazonorders.exception import AmazonOrdersError
     from amazonorders.orders import AmazonOrders
     number = (number or "").strip()
     if not AMAZON_ORDER.match(number):
         raise RetailError("That isn't an Amazon order number")
+    blocked = _amazon_blocked(html)
+    if blocked:
+        raise blocked
     oid = _save_order(conn, "amazon", number)
     try:
         order = AmazonOrders.parse_order_details(html, _amazon_config(), order_number=number)
         items = [{"title": " ".join((i.title or "").split()) or "Item", "quantity": i.quantity or 1,
                   "amount": (i.price or 0) * (i.quantity or 1)} for i in order.items]
     except (AmazonOrdersError, AttributeError, TypeError, ValueError):
-        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
-        return {"read": False}
+        return _tried(conn, oid, final)
     if not items:
-        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
-        return {"read": False}
+        return _tried(conn, oid, final)
     pay = _payment(order.payment_method, order.payment_method_last_4)
     _save_order(conn, "amazon", number, channel="online", placed=_day(order.order_placed_date),
                 total=order.grand_total, subtotal=order.subtotal, tax=order.estimated_tax,
@@ -443,23 +474,25 @@ def target_history(conn, data, purchase_type: str | None = None) -> dict:
     return {"more": bool(orders) and not older, "orders": _need(conn, "target", numbers), "read": len(orders)}
 
 
-def target_order(conn, number: str, data) -> dict:
-    """The details of one Target order (online order or store receipt)."""
+def target_order(conn, number: str, data, final: bool = True) -> dict:
+    """The details of one Target order (online order or store receipt). `final` is the extension's last try at it
+    in this import, the only one that counts towards giving up on it."""
     number = str(number or "").strip()
     if not number:
         raise RetailError("Which order is this?")
     oid = order_key("target", number)
-    if not data:   # the extension found nowhere to read it: counts as a try, and keeps what the history said
-        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
-        return {"read": False}
-    found = _find_orders(data)
-    o = next((x for x in found if str(_first(x, _NUMBER, ())) == number), None) or (data if isinstance(data, dict) else {})
+    if not data:   # the extension found nowhere to read it: keeps what the history said
+        return _tried(conn, oid, final)
+    top = _first(data, _NUMBER, ()) if isinstance(data, dict) else None
+    if isinstance(data, dict) and str(top) == number:
+        o = data   # the reply is the order itself (its packages may name the order too: they aren't it)
+    else:
+        found = _find_orders(data)
+        o = next((x for x in found if str(_first(x, _NUMBER, ())) == number), None) or (data if isinstance(data, dict) else {})
     o = dict(o)
     o.setdefault("order_number", number)
     _, read = _target_order(conn, o, None)
-    if not read:
-        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
-    return {"read": read}
+    return {"read": True} if read else _tried(conn, oid, final)
 
 
 # ------------------------------------------------------------------------------------------------ categorizing items
@@ -610,20 +643,26 @@ def _unlink(conn, ch) -> None:
 
 
 def match(conn) -> int:
-    """Pair each store charge with its bank transaction. Returns how many new pairs were made."""
+    """Pair each store charge with its bank transaction. Returns how many new pairs were made.
+
+    Two orders' charges of the same amount a few days apart can each be either transaction, and the wrong pairing
+    would give each the other's items, so a transaction that charges of more than one order could be is left for
+    you to pick (the order's page lists it)."""
     # A transaction that's gone (a pending one that posted under a new id, say) frees its charge to match again.
     conn.execute("UPDATE retail_charges SET tx_id=NULL, match_source=NULL WHERE tx_id IS NOT NULL "
                  "AND tx_id NOT IN (SELECT id FROM transactions)")
     used = {r["tx_id"] for r in conn.execute("SELECT tx_id FROM retail_charges WHERE tx_id IS NOT NULL")}
     charges = db.rows(conn.execute(
-        "SELECT c.id, c.date, c.amount, c.not_tx, o.retailer FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id "
+        "SELECT c.id, c.order_id, c.date, c.amount, c.not_tx, o.retailer FROM retail_charges c "
+        "JOIN retail_orders o ON o.id=c.order_id "
         "WHERE c.tx_id IS NULL ORDER BY c.date, c.id"))
-    made = 0
+    options: dict[str, list[tuple[int, str]]] = {}   # charge -> [(score, tx id)], best first
+    wanted: dict[str, set[str]] = {}                  # tx id -> the orders whose charges could be it
     for ch in charges:
         d = date.fromisoformat(ch["date"])
         lo, hi = (d - timedelta(days=MATCH_BEFORE)).isoformat(), (d + timedelta(days=MATCH_AFTER)).isoformat()
         rejected = set(json.loads(ch["not_tx"] or "[]"))
-        best, best_gap = None, None
+        found = []
         for t in conn.execute("SELECT id, posted, payee, description FROM transactions WHERE amount BETWEEN ? AND ? "
                               "AND posted BETWEEN ? AND ?", (ch["amount"] - CENT, ch["amount"] + CENT, lo, hi)).fetchall():
             if t["id"] in used or t["id"] in rejected:
@@ -631,9 +670,15 @@ def match(conn) -> int:
             if not MERCHANT[ch["retailer"]].search(f"{t['payee'] or ''} {t['description'] or ''}"):
                 continue
             gap = (date.fromisoformat(t["posted"]) - d).days
-            score = gap if gap >= 0 else -gap * 2 + 1   # posting after the charge is usual; before, less so
-            if best_gap is None or score < best_gap:
-                best, best_gap = t["id"], score
+            found.append((gap if gap >= 0 else -gap * 2 + 1, t["id"]))   # posting after the charge is usual; before, less so
+            wanted.setdefault(t["id"], set()).add(ch["order_id"])
+        options[ch["id"]] = sorted(found)
+    made = 0
+    for ch in charges:
+        found = options[ch["id"]]
+        if any(len(wanted[t]) > 1 for _, t in found):
+            continue   # another order's charge could be the same transaction: yours to pick
+        best = next((t for _, t in found if t not in used), None)
         if best:
             conn.execute("UPDATE retail_charges SET tx_id=?, match_source='auto' WHERE id=?", (best, ch["id"]))
             used.add(best)
@@ -820,11 +865,26 @@ def match_and_apply(conn) -> dict:
     return out
 
 
-def finish(conn, retailer: str, caller=None) -> dict:
-    """The extension has sent everything: categorize the new items, then match and split."""
+def finish(conn, retailer: str, caller=None, complete: bool = True, categorize_now: bool = True) -> dict:
+    """The extension has sent everything: categorize the new items, then match and split.
+
+    `complete` is False when the extension couldn't read all of the store's history (the store stopped answering,
+    or there were more pages than it reads): then the last import's date stays where it was, so the next import
+    reads the same stretch again. With `categorize_now` False only the matching is done here, and
+    categorize_and_apply does the rest (the server runs it after answering, as the AI model can take a while)."""
     if retailer not in RETAILERS:
         raise RetailError("Unknown store")
-    db.set_setting(conn, f"retail_last_{retailer}", datetime.now().isoformat(timespec="seconds"))
+    if complete:
+        db.set_setting(conn, f"retail_last_{retailer}", datetime.now().isoformat(timespec="seconds"))
+    if not categorize_now:
+        out = match_and_apply(conn)
+        out["items"] = None
+        return _summarize(conn, retailer, out)
+    return categorize_and_apply(conn, retailer, caller)
+
+
+def categorize_and_apply(conn, retailer: str, caller=None) -> dict:
+    """Categorize new items, then match and split (and re-split what the new categories change)."""
     items = categorize_items(conn, caller=caller)
     out = match_and_apply(conn)
     # Items that just got a category change the split of transactions matched earlier, too.
@@ -834,6 +894,10 @@ def finish(conn, retailer: str, caller=None) -> dict:
         if r in ("split", "category"):
             out[r] += 1
     out["items"] = items
+    return _summarize(conn, retailer, out)
+
+
+def _summarize(conn, retailer: str, out: dict) -> dict:
     out["orders"] = conn.execute("SELECT COUNT(*) FROM retail_orders WHERE retailer=?", (retailer,)).fetchone()[0]
     out["unmatched"] = unmatched_count(conn, retailer)
     db.set_setting(conn, f"retail_summary_{retailer}", json.dumps(out))

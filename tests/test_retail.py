@@ -104,6 +104,48 @@ class AmazonPagesTests(Base):
             self.assertEqual(retail.amazon_order(self.c, ORDER, "<html>nothing here</html>"), {"read": False})
         self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [])   # given up on
 
+    def test_sign_in_and_robot_pages_dont_use_up_tries(self):
+        pages = {"signin": '<html><form name="signIn" method="post" action="https://www.amazon.com/ap/signin"></form></html>',
+                 "robot": '<html><title>Robot Check</title><form action="/errors/validateCaptcha">'
+                          '<input id="captchacharacters"></form></html>'}
+        for code, html in pages.items():
+            for _ in range(retail.MAX_ATTEMPTS + 1):
+                with self.assertRaises(retail.RetailError) as e:
+                    retail.amazon_order(self.c, ORDER, html)
+                self.assertEqual(e.exception.code, code)
+            with self.assertRaises(retail.RetailError):
+                retail.amazon_transactions(self.c, html)
+        retail._save_order(self.c, "amazon", ORDER)
+        self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [ORDER])   # still to be read
+        # An ordinary order page links to sign-in too: that isn't being signed out.
+        self.assertEqual(retail.amazon_order(self.c, ORDER, fixture(f"order-details-{ORDER}.html"))["read"], True)
+
+    def test_only_the_last_try_in_an_import_counts(self):
+        for _ in range(retail.MAX_ATTEMPTS + 2):
+            retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=False)
+        self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [ORDER])
+        retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=True)
+        self.assertEqual(self.c.execute("SELECT attempts FROM retail_orders").fetchone()[0], 1)
+
+    def test_same_charge_on_two_pages_is_two_charges(self):
+        r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
+        retail.amazon_transactions(self.c, fixture("transactions-page.html"), r["seen"])   # as if it were the next page
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM retail_charges").fetchone()[0], 4)
+
+    def test_reads_back_to_amazon_orders_whose_details_never_came(self):
+        self.since.stop()
+        try:
+            db.set_setting(self.c, "retail_last_amazon", (datetime.now() - timedelta(days=1)).isoformat())
+            usual = retail.since(self.c, "amazon")
+            old = (date.fromisoformat(usual) - timedelta(days=45)).isoformat()
+            oid = retail._save_order(self.c, "amazon", ORDER)   # from the transactions page: no placed date yet
+            retail._save_charge(self.c, f"amazon|{ORDER}|1", oid, old, -60.88, None)
+            self.assertEqual(retail.since(self.c, "amazon"), old)
+            self.c.execute("UPDATE retail_orders SET attempts=?", (retail.MAX_ATTEMPTS,))
+            self.assertEqual(retail.since(self.c, "amazon"), usual)
+        finally:
+            self.since.start()
+
 
 class SplitTests(Base):
     def test_order_splits_its_transaction_by_item(self):
@@ -207,6 +249,21 @@ class SplitTests(Base):
         self.tx("early", "2024-09-01", -60.88, "AMZN Mktp US")       # before the window
         retail.match(self.c)
         self.assertEqual(self.c.execute("SELECT tx_id FROM retail_charges").fetchone()["tx_id"], "near")
+
+    def test_two_orders_that_could_be_either_transaction_are_left_to_you(self):
+        other = "111-0000000-0000001"
+        self.amazon_order_with_charge(day="2024-09-09")
+        retail._save_order(self.c, "amazon", other)
+        retail._save_charge(self.c, f"amazon|{other}|x", retail.order_key("amazon", other), "2024-09-11", -60.88, None)
+        self.tx("a", "2024-09-11", -60.88, "AMZN Mktp US")
+        self.tx("b", "2024-09-12", -60.88, "AMZN Mktp US")
+        self.assertEqual(retail.match(self.c), 0)
+        # Far enough apart that each has its own: matched.
+        self.c.execute("UPDATE retail_charges SET date='2024-10-01' WHERE order_id=?", (retail.order_key("amazon", other),))
+        self.tx("c", "2024-10-02", -60.88, "AMZN Mktp US")
+        self.assertEqual(retail.match(self.c), 2)
+        got = {r["order_id"]: r["tx_id"] for r in self.c.execute("SELECT order_id, tx_id FROM retail_charges")}
+        self.assertEqual(got, {retail.order_key("amazon", ORDER): "a", retail.order_key("amazon", other): "c"})
 
 
 class AllocateTests(unittest.TestCase):
@@ -317,6 +374,26 @@ class TargetTests(Base):
         self.assertEqual(row["total"], 12.49)                                # what the history said is kept
         self.assertIn("STORE", row["raw"])
 
+    def test_target_order_counts_only_its_last_try_and_reads_the_order_not_a_package(self):
+        n = self.POST_ORDER["order_number"]
+        retail.target_history(self.c, {"orders": [{"order_number": n, "placed_date": "2024-09-08",
+                                                   "summary": {"grand_total": 4.65}}]}, "ONLINE")
+        for _ in range(retail.MAX_ATTEMPTS + 1):
+            self.assertEqual(retail.target_order(self.c, n, {"nothing": 1}, final=False), {"read": False})
+        self.assertEqual(retail._need(self.c, "target", [n]), [n])
+        # Packages that name the order too: the reply itself is the order.
+        reply = json.loads(json.dumps(self.POST_ORDER))
+        for p in reply["packages"]:
+            p["order_number"] = n
+        self.assertEqual(retail.target_order(self.c, n, reply), {"read": True})
+        self.assertEqual(self.c.execute("SELECT total FROM retail_orders WHERE order_number=?", (n,)).fetchone()[0], 4.65)
+
+    def test_an_import_that_stopped_early_reads_the_same_stretch_next_time(self):
+        retail.finish(self.c, "target", complete=False)
+        self.assertIsNone(db.get_setting(self.c, "retail_last_target"))
+        retail.finish(self.c, "target")
+        self.assertIsNotNone(db.get_setting(self.c, "retail_last_target"))
+
     def test_split_with_departments_when_theres_no_ai(self):
         retail.target_history(self.c, self.HISTORY, "ONLINE")
         self.tx("t1", "2024-09-04", -31.80, "TARGET 00012345 MINNEAPOLIS MN", "Shopping", "history")
@@ -387,6 +464,30 @@ class ExtensionApiTests(unittest.TestCase):
             self.assertIn("runway-orders/manifest.json", zipfile.ZipFile(io.BytesIO(resp.read())).namelist())
         code, st = self.req("GET", "/api/retail")
         self.assertEqual((code, st["token"], st["stores"]["target"]["orders"]), (200, False, 0))
+
+    def test_store_pages_that_stop_an_import(self):
+        _, r = self.req("POST", "/api/retail/token", headers={"X-Runway": "1"})
+        ext = {"Authorization": f"Bearer {r['token']}"}
+        robot = '<html><title>Robot Check</title><form action="/errors/validateCaptcha"></form></html>'
+        code, r = self.req("POST", "/api/ext/amazon/order", {"order_number": ORDER, "html": robot}, ext)
+        self.assertEqual((code, r["code"]), (400, "robot"))    # the extension stops, and the order keeps its tries
+        code, r = self.req("POST", "/api/ext/amazon/order", {"order_number": ORDER, "html": "<html></html>", "final": False}, ext)
+        self.assertEqual((code, r), (200, {"read": False}))
+        with db.session() as conn:
+            self.assertEqual(conn.execute("SELECT attempts FROM retail_orders WHERE id=?",
+                                          (retail.order_key("amazon", ORDER),)).fetchone()[0] or 0, 0)
+        # Stopped early: the last import's date stays put. Categorizing carries on after the answer.
+        with mock.patch.object(retail, "categorize_and_apply") as later:
+            code, r = self.req("POST", "/api/ext/finish", {"retailer": "amazon", "complete": False}, ext)
+            self.assertEqual(code, 200)
+            for _ in range(50):
+                if later.called:
+                    break
+                threading.Event().wait(0.05)
+            self.assertEqual(later.call_args[0][1], "amazon")
+        with db.session() as conn:
+            self.assertIsNone(db.get_setting(conn, "retail_last_amazon"))
+        self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})
 
 
 if __name__ == "__main__":
