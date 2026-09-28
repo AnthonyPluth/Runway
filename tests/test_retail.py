@@ -318,6 +318,8 @@ class ExtensionApiTests(unittest.TestCase):
         code, r = self.req("POST", "/api/ext/target/history", {"purchase_type": "STORE", "data": {"orders": []}}, ext)
         self.assertEqual((code, r["more"]), (200, False))
         self.assertEqual(self.req("POST", "/api/ext/finish", {"retailer": "target"}, ext)[0], 200)
+        # What's still unmatched now, for the extension's popup (matches you make in Runway count straight away).
+        self.assertEqual(self.req("POST", "/api/ext/status", {}, ext), (200, {"unmatched": {"amazon": 0, "target": 0}}))
         # The key only opens the extension's calls.
         self.assertEqual(self.req("POST", "/api/retail/token", headers=ext)[0], 403)
         self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})

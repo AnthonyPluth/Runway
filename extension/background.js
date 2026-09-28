@@ -470,7 +470,7 @@ async function run(which) {
         const progress = (message) => setStatus({ running: true, retailer, message });
         try {
           const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer], progress);
-          results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r) };
+          results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r), data: r };
         } catch (e) {
           results[retailer] = { ok: false, at: new Date().toISOString(), message: e.message || String(e) };
         }
@@ -486,7 +486,24 @@ async function run(which) {
   return running;
 }
 
+// When the popup opens: how many charges are still unmatched now, since you may have matched some in Runway yourself.
+async function refreshUnmatched() {
+  if (running) return;
+  const { unmatched } = await runway("/api/ext/status", {});
+  const { results = {} } = await store.get("results");
+  let changed = false;
+  for (const [retailer, n] of Object.entries(unmatched || {})) {
+    const r = results[retailer];
+    if (!r || !r.ok || !r.data || r.data.unmatched === n) continue;
+    r.data.unmatched = n;
+    r.message = summary(r.data);
+    changed = true;
+  }
+  if (changed) await store.set({ results });
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg && msg.type === "refresh") refreshUnmatched().catch(() => {}).finally(() => reply({ ok: true }));
   if (msg && msg.type === "import" && (msg.retailer === "all" || RETAILERS[msg.retailer])) {
     run(msg.retailer);
     reply({ started: true });
