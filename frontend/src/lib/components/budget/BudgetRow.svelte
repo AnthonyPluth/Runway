@@ -3,7 +3,8 @@
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { fmt } from "$lib/format";
+  import { fmt, monthShort } from "$lib/format";
+  import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
@@ -16,8 +17,10 @@
   } = $props();
 
   const acctName = (id: string | null) => (id ? payAccounts.find((x) => x.id === id)?.name : undefined);
-  const pct = $derived(c.budget != null && c.budget > 0 ? Math.max(0, c.spent / c.budget) : 0);
-  const over = $derived(c.budget != null && c.spent > c.budget);
+  const avail = $derived(c.available ?? c.budget);
+  const pct = $derived(avail != null && avail > 0 ? Math.max(0, c.spent / avail) : c.spent > 0 ? 1 : 0);
+  const over = $derived(avail != null && c.spent > avail);
+  const carried = $derived(c.carried ?? 0);
   const showPace = $derived(pace > 0 && pace < 1);
   const color = $derived(catLook(c.name).color);
 
@@ -25,6 +28,15 @@
   function open(e: MouseEvent) {
     e.preventDefault();
     showTransactions({ category: c.name, month, scope: "budget" });
+  }
+
+  // Rolling over: what's left at the end of a month adds to the next, starting this month.
+  async function setRollover(on: boolean) {
+    try {
+      await api("/api/budget", { method: "POST", body: { category: c.name, rollover: on } });
+      toast.success(on ? `${c.name} rolls over from this month on` : `${c.name} no longer rolls over`);
+    } catch (err) { toast.error((err as Error).message); }
+    onchanged();
   }
 
   // Which card a budget is paid with: out of the way until you want to change it.
@@ -73,6 +85,15 @@
         </button>
       {/if}
     {/if}
+    {#if budgets && c.budget != null && !sub}
+      <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
+        title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
+          : "Carry what's left at the end of each month into the next"}
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+          c.rollover_from ? "text-primary" : "text-muted-foreground opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 hover:text-foreground [@media(hover:none)]:opacity-100")}>
+        <Repeat class="size-3" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
+      </button>
+    {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} title="See the transactions behind this amount"
         class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{fmt(c.spent)}</a>
@@ -97,10 +118,13 @@
         {/if}
       </div>
       <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:min-w-28">
-        {#if over}<span class="font-semibold text-destructive">▲ {fmt(c.spent - c.budget!)} over</span>
-        {:else if showPace && c.spent > c.budget * pace * 1.1}<span class="text-muted-foreground">{fmt(c.left)} left · ahead of pace</span>
+        {#if over}<span class="font-semibold text-destructive">▲ {fmt(c.spent - avail!)} over</span>
+        {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{fmt(c.left)} left · ahead of pace</span>
         {:else}<span class="text-muted-foreground">{fmt(c.left)} left</span>{/if}
       </span>
     </div>
+    {#if carried > 0.005}
+      <p class={cn("mt-1 text-xs text-muted-foreground tabular-nums", !sub && "sm:pl-[38px]")}>{fmt(c.budget)} + {fmt(carried)} rolled over from earlier months</p>
+    {/if}
   {/if}
 </div>

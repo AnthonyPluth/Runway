@@ -539,6 +539,25 @@ class CategoryTests(Base):
         self.conn.execute("INSERT INTO rules(match, category) VALUES ('chipotle', 'Restaurants')")
         self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Restaurants', 300)")
 
+    def test_budget_rollover(self):
+        # Restaurants: $300 a month, rolling over from July. The setUp's $12 CHIPOTLE is on Sep 1.
+        categories.add(self.conn, "Fast food", parent="Restaurants")
+        self.conn.execute("UPDATE budgets SET rollover_from='2026-07' WHERE category='Restaurants'")
+        self.tx("cc", "2026-06-10", -50.0, "BEFORE", "Restaurants")        # before it rolled over: not counted
+        self.tx("cc", "2026-07-10", -200.0, "JULY", "Restaurants")         # $100 left
+        self.tx("cc", "2026-08-10", -350.0, "AUGUST", "Fast food")         # a subcategory counts: $50 of $400 left
+        cats = [c for c in categories.all_categories(self.conn) if not c["is_transfer"] and not c["is_income"]]
+        rows = {r["category"]: dict(r) for r in self.conn.execute("SELECT * FROM budgets")}
+        carry = lambda m: server.budget_carry(self.conn, cats, rows, date.fromisoformat(m))["Restaurants"]
+        self.assertEqual((carry("2026-07-01"), carry("2026-08-01"), carry("2026-09-01")), (0.0, 100.0, 50.0))
+        self.tx("cc", "2026-08-20", -500.0, "BIG NIGHT", "Restaurants")     # going over isn't carried
+        self.assertEqual(carry("2026-09-01"), 0.0)
+        self.assertEqual(carry("2026-10-01"), 288.0)                        # September: $300 - $12
+        server.api_budget_set(self.conn, {}, {"category": "Restaurants", "rollover": False})
+        self.assertIsNone(self.conn.execute("SELECT rollover_from FROM budgets").fetchone()[0])
+        with self.assertRaises(server.ApiError):
+            server.api_budget_set(self.conn, {}, {"category": "Groceries", "rollover": True})   # no budget to roll over
+
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)
         self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))
