@@ -549,11 +549,13 @@ def ext_start(conn, body):
 
 
 def ext_amazon_transactions(conn, body):
-    return retail.amazon_transactions(conn, str(body.get("html") or ""))
+    seen = body.get("seen")
+    return retail.amazon_transactions(conn, str(body.get("html") or ""), seen if isinstance(seen, dict) else None)
 
 
 def ext_amazon_order(conn, body):
-    return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""))
+    return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""),
+                               final=body.get("final", True) is not False)
 
 
 def ext_target_history(conn, body):
@@ -561,11 +563,30 @@ def ext_target_history(conn, body):
 
 
 def ext_target_order(conn, body):
-    return retail.target_order(conn, str(body.get("order_number") or ""), body.get("data"))
+    return retail.target_order(conn, str(body.get("order_number") or ""), body.get("data"),
+                               final=body.get("final", True) is not False)
+
+
+_retail_categorize_lock = threading.Lock()
+
+
+def _categorize_retail(retailer: str) -> None:
+    with _retail_categorize_lock:   # one at a time ("Import both" finishes Amazon, then Target)
+        try:
+            with db.session() as conn:
+                retail.categorize_and_apply(conn, retailer)
+        except Exception:
+            traceback.print_exc()
 
 
 def ext_finish(conn, body):
-    return retail.finish(conn, body.get("retailer"))
+    """Matches and answers straight away; categorizing the new items (the AI model can take a while, longer than
+    the browser lets the extension wait) carries on after the answer, once this request's writes are saved."""
+    retailer = body.get("retailer")
+    out = retail.finish(conn, retailer, complete=body.get("complete", True) is not False, categorize_now=False)
+    conn.commit()
+    threading.Thread(target=_categorize_retail, args=(retailer,), daemon=True).start()
+    return out
 
 
 def ext_carta_data(conn, body):
@@ -2011,9 +2032,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Bad JSON"})
         try:
             with db.session() as conn:
-                return self._json(200, fn(conn, body))
+                result = fn(conn, body)
+            return self._json(200, result)   # once it's saved, so the extension's next call sees it
         except retail.RetailError as e:
-            return self._json(400, {"error": str(e)})
+            return self._json(400, {"error": str(e), **({"code": e.code} if e.code else {})})
         except sqlalchemy.exc.OperationalError as e:
             if "locked" in str(e):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
