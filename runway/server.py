@@ -402,7 +402,11 @@ def api_transactions(conn, q, _b):
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
-        t["logo"] = f"/api/merchants/{urllib.parse.quote(logos[t['id']], safe='')}/logo" if t["id"] in logos else None
+        if t["id"] in logos:   # Plaid's logo for the merchant, else one bundled with Runway for big names
+            t["logo"] = f"/api/merchants/{urllib.parse.quote(logos[t['id']], safe='')}/logo"
+        else:
+            slug = brands.merchant(t["payee"], t["description"])
+            t["logo"] = f"/merchants/{slug}.svg" if slug else None
     total = conn.execute(
         f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
     ).fetchone()[0]

@@ -1,4 +1,4 @@
-"""Merchant logos: noted from Plaid, downloaded from Plaid only, served by Runway."""
+"""Merchant logos: noted from Plaid, downloaded from Plaid only, served by Runway; bundled ones for big names."""
 import io
 import os
 import sys
@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, merchants  # noqa: E402
+from runway import db, merchants, server  # noqa: E402
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
 
@@ -66,6 +66,20 @@ class MerchantTests(unittest.TestCase):
                {"id": "d", "merchant_id": None, "payee": "Blue Bottle Coffee 12"},   # starts with the name
                {"id": "e", "merchant_id": None, "payee": "Blue Bottles Inc"}]        # not as whole words
         self.assertEqual(merchants.for_transactions(self.c, txs), {"a": "ent-bb", "b": "ent-bb", "d": "ent-bb"})
+
+
+    def test_plaid_logo_first_then_a_bundled_one(self):
+        merchants.note(self.c, {"merchant_name": "Target", "merchant_entity_id": "ent-t", "logo_url": "https://plaid.com/t.png"})
+        merchants.fetch_logos(self.c, opener=self.opener({"https://plaid.com/t.png": (PNG, "image/png")}))
+        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, merchant_id) "
+                           "VALUES (?, 'a', '2026-09-20', -5, ?, ?, ?)", [
+                               ("t1", "TARGET 0001", "Target", "ent-t"),          # Plaid's logo
+                               ("t2", "WAL-MART #12", "Walmart", None),          # bundled
+                               ("t3", "SQ *JOES COFFEE", "Joe's Coffee", None)])  # neither: its initial
+        self.c.commit()
+        got = {t["id"]: t["logo"] for t in server.api_transactions(self.c, {}, None)["items"]}
+        self.assertEqual(got, {"t1": "/api/merchants/ent-t/logo", "t2": "/merchants/walmart.svg", "t3": None})
 
 
 if __name__ == "__main__":
