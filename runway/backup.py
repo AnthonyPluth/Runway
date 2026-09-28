@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import zlib
 from datetime import datetime
 
 from sqlalchemy import inspect
@@ -70,10 +71,28 @@ def dump(conn) -> bytes:
     return gzip.compress(json.dumps(export(conn), separators=(",", ":"), default=str).encode(), compresslevel=6)
 
 
+MAX_UNPACKED = 1024 * 1024 * 1024   # a real backup unpacks to far less; a crafted one could be many GB
+
+
+def _gunzip(raw: bytes) -> bytes:
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    out = d.decompress(raw, MAX_UNPACKED + 1)
+    if len(out) > MAX_UNPACKED:
+        raise ValueError("That backup is too large to restore.")
+    if not d.eof:
+        raise ValueError("That file isn't a Runway backup.")
+    return out
+
+
 def load(raw: bytes) -> dict:
     try:
-        data = json.loads(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
-    except (OSError, ValueError) as e:
+        if raw[:2] == b"\x1f\x8b":
+            raw = _gunzip(raw)
+    except zlib.error as e:
+        raise ValueError("That file isn't a Runway backup.") from e
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
         raise ValueError("That file isn't a Runway backup.") from e
     if not isinstance(data, dict) or data.get("format") != FORMAT or not isinstance(data.get("tables"), dict):
         raise ValueError("That file isn't a Runway backup.")

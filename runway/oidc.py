@@ -13,6 +13,10 @@ Configuration (environment variables):
   OIDC_ALLOWED_EMAILS  comma-separated; and/or
   OIDC_ALLOWED_GROUPS  comma-separated group names from the "groups" claim
   OIDC_ALLOW_ANY_USER  1 to let anyone the provider signs in use Runway (only for a provider you fully control)
+  OIDC_TRUST_UNVERIFIED_EMAIL
+                       1 to let OIDC_ALLOWED_EMAILS match an email the provider doesn't mark as verified (only for a
+                       provider where nobody can register or change their own email, e.g. Microsoft Entra ID, which
+                       doesn't send email_verified)
   OIDC_SCOPES          default "openid email profile" (add "groups" if your provider needs it for the claim)
   RUNWAY_SESSION_DAYS  default 14
 """
@@ -33,7 +37,7 @@ import jwt
 
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
-MAX_PENDING = 1000         # unfinished sign-ins kept at once
+MAX_PENDING = 10000        # unfinished sign-ins kept at once (a few MB at most)
 _discovery: dict = {}
 _jwks: dict = {}
 
@@ -58,6 +62,7 @@ def config() -> dict:
         "emails": split(e("OIDC_ALLOWED_EMAILS")),
         "groups": split(e("OIDC_ALLOWED_GROUPS")),
         "any_user": e("OIDC_ALLOW_ANY_USER") == "1",
+        "trust_unverified_email": e("OIDC_TRUST_UNVERIFIED_EMAIL") == "1",
         "session_days": int(e("RUNWAY_SESSION_DAYS") or 14),
         "secure_cookie": public.startswith("https://"),
     }
@@ -261,9 +266,14 @@ def authorize(info: dict) -> dict:
     if isinstance(groups, str):
         groups = [groups]
     groups = {str(g).strip().lower() for g in groups}
-    if info.get("email_verified") is False and email in c["emails"]:
-        raise OIDCError(f"The provider hasn't verified {email}, so Runway can't let it in.")
-    ok = c["any_user"] or (email and email in c["emails"]) or bool(groups & c["groups"])
+    # An email only counts for the allow-list if the provider says it checked it: where people can sign up or change
+    # their email themselves, anyone could otherwise claim yours. Some providers send "true" as a string.
+    verified = info.get("email_verified") is True or str(info.get("email_verified")).lower() == "true"
+    email_ok = bool(email) and email in c["emails"] and (verified or c["trust_unverified_email"])
+    ok = c["any_user"] or email_ok or bool(groups & c["groups"])
+    if not ok and email and email in c["emails"]:
+        raise OIDCError(f"The provider hasn't said {email} is verified, so Runway can't let it in. If your provider never "
+                        "sends email_verified and nobody can change their own email there, set OIDC_TRUST_UNVERIFIED_EMAIL=1.")
     if not ok:
         raise OIDCError(f"{email or info.get('sub')} isn't on Runway's allow-list (OIDC_ALLOWED_EMAILS / OIDC_ALLOWED_GROUPS).")
     return {"sub": str(info.get("sub")), "email": email or None,
@@ -339,10 +349,20 @@ def session_user(conn, token: str | None) -> dict | None:
     row = conn.execute("SELECT * FROM auth_sessions WHERE token_hash=?", (_hash(token),)).fetchone()
     if not row:
         return None
-    if row["expires"] < time.time():
+    if row["expires"] < time.time() or not still_allowed(row["email"]):
         conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (row["token_hash"],))
         return None
     return {"sub": row["sub"], "email": row["email"], "name": row["name"]}
+
+
+def still_allowed(email: str | None) -> bool:
+    """Whether a session may go on after the allow-list changed. With only OIDC_ALLOWED_EMAILS set, an email taken off
+    it ends that person's sessions at once. Groups aren't kept with a session, so with OIDC_ALLOWED_GROUPS set, someone
+    who got in may stay until their session ends (RUNWAY_SESSION_DAYS)."""
+    c = config()
+    if c["any_user"] or c["groups"]:
+        return True
+    return bool(email) and email.lower() in c["emails"]
 
 
 def logout(conn, token: str | None) -> str:
