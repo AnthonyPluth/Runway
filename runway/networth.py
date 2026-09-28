@@ -1,7 +1,7 @@
 """Net worth: every account plus things you own (home, vehicles) minus cards and loans.
 
 Account balances come from SimpleFIN. Homes, vehicles and other assets are entered by hand (a home can also be
-valued by RentCast, see rentcast.py). An asset can carry a yearly change (say -15% for a car) so its value drifts
+valued by Realie, see realie.py). An asset can carry a yearly change (say -15% for a car) so its value drifts
 between your updates, and can be linked to the loan against it to show equity. A snapshot is saved each day the
 numbers are looked at, which builds the history chart going forward.
 """

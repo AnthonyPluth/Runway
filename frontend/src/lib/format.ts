@@ -38,3 +38,27 @@ export function relDay(s: string, today: string): string {
 }
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** "2026-09" → "September 2026". */
+export function monthLabel(m: string): string {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+/** "2026-09" → "Sep" (or "Sep 2026"). */
+export function monthShort(m: string, withYear = false): string {
+  const [y, mo] = m.split("-").map(Number);
+  return new Date(y, mo - 1, 1).toLocaleDateString("en-US", withYear ? { month: "short", year: "numeric" } : { month: "short" });
+}
+/** This month as YYYY-MM. */
+export const thisMonth = () => isoDay().slice(0, 7);
+
+/** A server timestamp ("2026-09-28 17:54:18" in UTC, or ISO) as "just now", "5 minutes ago", "3 hours ago" or a date. */
+export function relTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 90) return "just now";
+  if (s < 5400) return `${Math.round(s / 60)} minutes ago`;
+  if (s < 129600) return `${Math.round(s / 3600)} hours ago`;
+  return fmtDate(isoDay(d), { month: "short", day: "numeric", year: "numeric" });
+}

@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, networth, prices, rentcast  # noqa: E402
+from runway import db, networth, prices, realie  # noqa: E402
 
 TODAY = date(2026, 9, 23)
 
@@ -66,61 +66,103 @@ class NetWorthTests(Base):
                 networth.save_asset(self.c, bad, today=TODAY)
 
 
-class MockRentCast(BaseHTTPRequestHandler):
+class MockRealie(BaseHTTPRequestHandler):
     calls = []
+    nested = False   # answer in Realie's newer nested shape
 
     def log_message(self, *a):
         pass
 
     def do_GET(self):
-        MockRentCast.calls.append((self.path, self.headers.get("X-Api-Key")))
+        MockRealie.calls.append((self.path, self.headers.get("Authorization")))
         q = parse_qs(urlparse(self.path).query)
-        if self.headers.get("X-Api-Key") != "rc-key":
+        addr = q["address"][0]
+        if self.headers.get("Authorization") != "rl-key":
             code, body = 401, {"message": "bad key"}
-        elif "Nowhere" in q["address"][0]:
+        elif "Nowhere" in addr:
             code, body = 404, {"message": "not found"}
-        else:
-            code, body = 200, {"price": 431000, "priceRangeLow": 400000, "priceRangeHigh": 462000, "comparables": []}
+        elif "No Estimate" in addr:
+            code, body = 200, {"property": {"modelValue": 0, "city": "SPRINGFIELD", "zipCode": "62701"}}
+        elif MockRealie.nested:
+            code, body = 200, {"property": {"realieValuation": {"ml": {"value": 445000}},
+                                            "propertyLocation": {"city": "SPRINGFIELD", "zipCode": "62701"}}}
+        else:   # the same street in two towns: the address's city and zip pick the right one
+            code, body = 200, {"property": [{"modelValue": 199000, "city": "CHICAGO", "zipCode": "60601"},
+                                            {"modelValue": 431000, "city": "SPRINGFIELD", "zipCode": "62701-1234"}]}
         b = json.dumps(body).encode()
         self.send_response(code); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
 
-class RentCastTests(Base):
+class RealieTests(Base):
     @classmethod
     def setUpClass(cls):
-        cls.srv = HTTPServer(("127.0.0.1", 0), MockRentCast)
+        cls.srv = HTTPServer(("127.0.0.1", 0), MockRealie)
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
-        os.environ["RUNWAY_RENTCAST_URL"] = f"http://127.0.0.1:{cls.srv.server_port}/v1"
+        os.environ["RUNWAY_REALIE_URL"] = f"http://127.0.0.1:{cls.srv.server_port}"
 
     @classmethod
     def tearDownClass(cls):
-        cls.srv.shutdown(); os.environ.pop("RUNWAY_RENTCAST_URL", None)
+        cls.srv.shutdown(); os.environ.pop("RUNWAY_REALIE_URL", None)
+
+    def setUp(self):
+        super().setUp()
+        MockRealie.nested = False
+
+    def test_split_address(self):
+        self.assertEqual(realie.split_address("1 Main St, Springfield, IL 62701"),
+                         {"street": "1 Main St", "city": "Springfield", "state": "IL", "zip": "62701"})
+        self.assertEqual(realie.split_address("1 Main St, Springfield IL"), {"street": "1 Main St", "city": "Springfield", "state": "IL", "zip": ""})
+        self.assertEqual(realie.split_address("1 Main St Apt 2, Springfield, il 62701-1234")["state"], "IL")
+        for bad in ("1 Main St", "1 Main St, Springfield"):
+            with self.assertRaises(realie.RealieError):
+                realie.split_address(bad)
 
     def test_lookup_refresh_and_limit(self):
         home = networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000,
                                             "address": "1 Main St, Springfield, IL 62701", "auto_update": True}, today=date(2026, 8, 1))
-        with self.assertRaises(rentcast.RentCastError):
-            rentcast.refresh_asset(self.c, home, TODAY)           # no key yet
-        db.set_setting(self.c, "rentcast_api_key", "rc-key")
-        est = rentcast.refresh_asset(self.c, home, TODAY)
-        self.assertEqual((est["value"], est["low"], est["high"]), (431000.0, 400000, 462000))
+        with self.assertRaises(realie.RealieError):
+            realie.refresh_asset(self.c, home, TODAY)           # no key yet
+        db.set_setting(self.c, "realie_api_key", "rl-key")
+        est = realie.refresh_asset(self.c, home, TODAY)
+        self.assertEqual((est["value"], est["low"], est["high"]), (431000.0, None, None))
         a = self.c.execute("SELECT value, source, last_lookup FROM assets WHERE id=?", (home,)).fetchone()
-        self.assertEqual(tuple(a), (431000.0, "rentcast", "2026-09-23"))
-        self.assertIn("address=1+Main+St", MockRentCast.calls[-1][0])
-        self.assertEqual(rentcast.used_this_month(self.c, TODAY), 1)
-        # monthly refresh: not due yet, then due after 30 days
-        self.assertEqual(rentcast.refresh_due(self.c, date(2026, 10, 1)), 0)
-        self.assertEqual(rentcast.refresh_due(self.c, date(2026, 10, 24)), 1)
-        # bad address and the free-plan cap
-        networth.save_asset(self.c, {"address": "Nowhere"}, home, today=TODAY)
-        with self.assertRaises(rentcast.RentCastError) as cm:
-            rentcast.refresh_asset(self.c, home, TODAY)
+        self.assertEqual(tuple(a), (431000.0, "realie", "2026-09-23"))
+        self.assertIn("address=1+Main+St&state=IL", MockRealie.calls[-1][0])
+        self.assertEqual(MockRealie.calls[-1][1], "rl-key")
+        self.assertEqual(realie.used_this_month(self.c, TODAY), 1)
+        # once a week per home, asked for or automatic: nothing more until 7 days later
+        n = len(MockRealie.calls)
+        with self.assertRaises(realie.RealieError) as cm:
+            realie.refresh_asset(self.c, home, date(2026, 9, 29))
+        self.assertIn("next lookup is Sep 30", str(cm.exception))
+        self.assertEqual(realie.refresh_due(self.c, date(2026, 9, 29)), 0)
+        self.assertEqual(len(MockRealie.calls), n)
+        # the newer nested reply, a week on
+        MockRealie.nested = True
+        self.assertEqual(realie.refresh_due(self.c, date(2026, 9, 30)), 1)
+        self.assertEqual(self.c.execute("SELECT value FROM assets WHERE id=?", (home,)).fetchone()[0], 445000.0)
+        # bad address, another town, no estimate, and the free-plan cap (lookups on later days)
+        TODAY2 = date(2026, 9, 30)
+        self.c.execute("UPDATE assets SET last_lookup=NULL WHERE id=?", (home,))
+        networth.save_asset(self.c, {"address": "Nowhere, Springfield, IL"}, home, today=TODAY)
+        with self.assertRaises(realie.RealieError) as cm:
+            realie.refresh_asset(self.c, home, TODAY2)
         self.assertIn("couldn't find", str(cm.exception))
-        db.set_setting(self.c, "rentcast_calls:2026-09", "50")
-        n = len(MockRentCast.calls)
-        with self.assertRaises(rentcast.RentCastError):
-            rentcast.refresh_asset(self.c, home, TODAY)
-        self.assertEqual(len(MockRentCast.calls), n)              # never called past the limit
+        MockRealie.nested = False
+        networth.save_asset(self.c, {"address": "1 Main St, Peoria, IL 61602"}, home, today=TODAY)
+        with self.assertRaises(realie.RealieError) as cm:
+            realie.refresh_asset(self.c, home, TODAY2)
+        self.assertIn("not in Peoria", str(cm.exception))
+        networth.save_asset(self.c, {"address": "1 No Estimate Rd, Springfield, IL 62701"}, home, today=TODAY)
+        with self.assertRaises(realie.RealieError) as cm:
+            realie.refresh_asset(self.c, home, TODAY2)
+        self.assertIn("doesn't have a value estimate", str(cm.exception))
+        db.set_setting(self.c, "realie_calls:2026-09", "25")
+        n = len(MockRealie.calls)
+        with self.assertRaises(realie.RealieError) as cm:
+            realie.refresh_asset(self.c, home, TODAY2)
+        self.assertIn("25 free Realie lookups", str(cm.exception))
+        self.assertEqual(len(MockRealie.calls), n)              # never called past the limit
 
 
 class QuoteTests(unittest.TestCase):
