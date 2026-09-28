@@ -11,7 +11,7 @@
   const configured = $derived(!!app.state?.logodev_configured);
 
   // Where logos stand: how many Runway has, how many are still to fetch, and why Logo.dev last failed.
-  interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; last_error_name: string | null; fetching: boolean }
+  interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; last_error_name: string | null; searchable: boolean; fetching: boolean }
   let st = $state<Status | null>(null);
   const loadStatus = () => api<Status>("/api/logodev/status").then((r) => (st = r)).catch(() => {});
   loadStatus();
@@ -25,6 +25,15 @@
     if (!f.value.trim()) return;
     await api("/api/logodev/settings", { method: "POST", body: { token: f.value } });
     toast.success("Logo.dev key saved: fetching logos for the past year now. They fill in over the next few minutes."); await refreshState(); reload();
+  }
+  async function saveSecret(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
+    if (!f.value.trim()) return;
+    await api("/api/logodev/settings", { method: "POST", body: { secret: f.value } });
+    toast.success("Secret key saved: looking merchants up again with Brand Search."); f.value = ""; loadStatus();
+  }
+  async function clearSecret() {
+    try { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); }
+    catch (err) { toast.error((err as Error).message); }
   }
   async function clearKey() {
     try { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); reload(); }
@@ -45,6 +54,16 @@
         <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
       {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
     </div>
+    {#if configured}
+      <div class={rowCls}>
+        <label class={`${fieldCls} w-full sm:w-72`}>Secret key <span class="font-normal text-muted-foreground">(optional)</span>
+          <input class={inputCls} type="password" autocomplete="off" placeholder={st?.searchable ? "•••••••• saved" : "sk_…"} use:autosave={saveSecret} /></label>
+        {#if st?.searchable}<Button variant="link" onclick={clearSecret}>Remove secret key</Button>{/if}
+      </div>
+      <p class={helpCls}>With the secret key, Runway finds merchants by name with Logo.dev's Brand Search and keeps a logo only when the
+        brand clearly is that merchant, so fewer logos are someone else's. Click any transaction's logo to choose a different one
+        for that merchant.</p>
+    {/if}
     {#if st}
       <div class="rounded-lg bg-muted/50 p-3 text-sm">
         <p class="tabular-nums">

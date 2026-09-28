@@ -409,6 +409,12 @@ def api_transactions(conn, q, _b):
     logos = merchants.for_transactions(conn, items)
     # no logo from Plaid: Logo.dev's, by the merchant's website or name (a sync, or adding the key, fetches it)
     logos.update(merchants.logo_dev_logos(conn, [t for t in items if t["id"] not in logos]))
+    chosen = merchants.chosen_for(conn, items)   # a logo you chose for the merchant wins (None: no logo)
+    for tid, mid in chosen.items():
+        if mid:
+            logos[tid] = mid
+        else:
+            logos.pop(tid, None)
     for t in items:
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
@@ -1555,6 +1561,29 @@ def api_realie_settings(conn, _q, body):
     return {"ok": True, "configured": realie.configured(conn)}
 
 
+def api_merchant_logo_options(conn, q, _b):
+    """For choosing a merchant's logo: what you chose, and the brands Logo.dev's Brand Search finds for its name."""
+    name = (q.get("name", [""])[0] or "").strip()
+    out = {"choice": merchants.choice(conn, name), "searchable": merchants.searchable(conn),
+           "configured": merchants.configured(conn), "candidates": [], "error": None}
+    if name and out["searchable"]:
+        found = merchants.search(conn, name)
+        if found is None:
+            out["error"] = merchants._why
+        else:
+            out["candidates"] = found[:6]
+    return out
+
+
+def api_merchant_logo(conn, _q, body):
+    """Choose the logo for every transaction from a merchant: a website's, none, or (neither) Runway's own pick."""
+    try:
+        merchants.choose(conn, body.get("name"), (body.get("website") or "").strip() or None, bool(body.get("hidden")))
+    except ValueError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
 def api_logodev_status(conn, _q, _b):
     return {**merchants.status(conn), "fetching": _logo_lock.locked()}
 
@@ -1569,6 +1598,20 @@ def api_logodev_fetch(conn, _q, _b):
 
 def api_logodev_settings(conn, _q, body):
     """The Logo.dev publishable key, for merchant logos Plaid doesn't have."""
+    secret = (body.get("secret") or "").strip()
+    if body.get("clear_secret"):
+        db.set_setting(conn, merchants.SECRET_SETTING, None)
+    elif secret:
+        if not re.fullmatch(r"sk_[A-Za-z0-9_-]{8,200}", secret):
+            raise ApiError("That isn't a Logo.dev secret key: it starts with sk_.")
+        db.set_setting(conn, merchants.SECRET_SETTING, secret)
+        # look up by name again, now with Brand Search: the ones without a logo, and ones whose logo came from the
+        # plain name lookup (which can be the wrong brand)
+        # (a logo stays until Brand Search answers: replaced by a clear match, or dropped when there's none)
+        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ?", (merchants.BRAND + "%",))
+        conn.commit()
+        start_logo_backfill()
+        return {"ok": True, "configured": merchants.configured(conn)}
     key = (body.get("token") or "").strip()
     if body.get("clear"):
         db.set_setting(conn, merchants.TOKEN_SETTING, None)
@@ -1696,6 +1739,8 @@ ROUTES = [
     ("POST", "/api/realie/settings", api_realie_settings),
     ("POST", "/api/logodev/settings", api_logodev_settings),
     ("GET", "/api/logodev/status", api_logodev_status),
+    ("GET", "/api/merchants/logo-options", api_merchant_logo_options),
+    ("POST", "/api/merchants/logo", api_merchant_logo),
     ("POST", "/api/logodev/fetch", api_logodev_fetch),
     ("GET", "/api/investments/live", api_live_quotes),
     ("POST", "/api/investments/fire", api_fire_save),
