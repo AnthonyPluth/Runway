@@ -81,6 +81,20 @@ class MatchingTests(Base):
         self.assertEqual((self.row(cash)["category"], self.row(cash)["needs_review"]), ("Transfer", 1))
 
 
+    def test_a_split_a_cent_over_100_percent_still_adds_up(self):
+        with self.assertRaisesRegex(rules.RuleError, "100%"):
+            self.rule(match="costco", split=[{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}])
+        # a rule saved before that check: its parts are shares of its own total, so they add up to the charge
+        parts = rules.split_parts(-250.0, [{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}])
+        self.assertEqual(round(sum(p["amount"] for p in parts), 2), -250.0)
+        import json
+        self.c.execute("INSERT INTO rules(match, split) VALUES ('costco', ?)",
+                       (json.dumps([{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}]),))
+        t = self.tx(-250, "COSTCO WHSE")
+        categorize.categorize(self.c, use_ai=False)
+        self.assertEqual(round(sum(p["amount"] for p in splits.get(self.c, t)), 2), -250.0)
+
+
 class EditingTests(Base):
     def test_checks(self):
         for bad, msg in [({"match": "x", "category": "Shopping"}, "two letters"),

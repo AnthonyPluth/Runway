@@ -10,15 +10,28 @@ from . import db
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
                      "semiannual": 12, "yearly": 12, "dates": 12}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
+# How far a payment's amount can be from the item's and still be linked to it automatically: a fixed bill barely
+# moves; one that varies (electricity) can swing more. Linking one Amazon charge to Prime shouldn't link every order.
+AMOUNT_TOLERANCE = {"fixed": 0.3}
+DEFAULT_TOLERANCE = 0.6
 
 
 def match_text(item: dict) -> str:
     return (item.get("match") or item.get("name") or "").strip().lower()
 
 
+def amount_range(item: dict) -> tuple[float, float] | None:
+    """The amounts (as positive dollars) a payment can have and still be linked to this item on its own."""
+    amount = abs(item.get("amount") or 0)
+    if amount < 0.005:
+        return None
+    tol = AMOUNT_TOLERANCE.get(item.get("amount_mode") or "fixed", DEFAULT_TOLERANCE)
+    return round(amount * (1 - tol), 2), round(amount * (1 + tol), 2)
+
+
 def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
-    """Link unlinked transactions to recurring items by merchant text, whatever the amount.
-    Money-in items only match money in, and money-out items only match money out.
+    """Link unlinked transactions to recurring items by merchant text, when the amount is close to the item's (see
+    amount_range). Money-in items only match money in, and money-out items only match money out.
     Transactions marked 'never match' (recurring_id = 0) and ones already linked are left alone."""
     q = "SELECT * FROM recurring WHERE active=1"
     args: list = []
@@ -32,10 +45,12 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
         if len(m) < 3:
             continue
         sign = ">" if item["amount"] > 0 else "<"
+        span = amount_range(item)
         cur = conn.execute(
             f"UPDATE transactions SET recurring_id=? WHERE recurring_id IS NULL AND account_id=? AND amount {sign} 0 "
-            "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)",
-            (item["id"], item["account_id"], m, m),
+            "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)"
+            + (" AND abs(amount) >= ? AND abs(amount) <= ?" if span else ""),
+            (item["id"], item["account_id"], m, m, *(span or ())),
         )
         linked += cur.rowcount
     return linked
