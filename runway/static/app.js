@@ -2595,6 +2595,8 @@ async function renderCartaCard(card) {
 
 // ------------------------------------------------------------------------------------------ net worth
 const ASSET_KIND_LABEL = { home: "Home / property", vehicle: "Vehicle", other: "Other" };
+// Where a home or asset value came from (older estimates still say RentCast, the provider Runway used before Realie).
+const valueSource = (s) => (s === "realie" ? "Realie estimate" : s === "rentcast" ? "RentCast estimate" : "Your estimate");
 const assetLookupLink = (a) => a.url && /^https?:\/\//i.test(a.url) ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
   : a.kind === "home" && a.address ? { href: `https://www.zillow.com/homes/${encodeURIComponent(a.address)}_rb/`, label: "Zillow" }
   : a.kind === "vehicle" ? { href: "https://www.kbb.com/whats-my-car-worth/", label: "KBB" } : null;
@@ -2607,7 +2609,7 @@ async function renderNetWorth(el) {
       <tr class="nw-group"><td><b>${esc(g.label)}</b></td><td class="num"><b>${fmt(g.total)}</b></td></tr>
       ${g.items.map((i) => `<tr class="sub-row"><td style="padding-left:24px">${i.type === "account" ? acctLabel(i.id, i.name) : esc(i.name)}
           <div class="desc">${i.type === "account" ? esc(i.org || "") : i.type === "equity" ? `Vested${i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}${i.source === "carta" ? " · from Carta" : ""}`
-            : `${i.source === "rentcast" ? "RentCast estimate" : "Your estimate"} · ${fmtDate(i.as_of)}`}${
+            : `${valueSource(i.source)} · ${fmtDate(i.as_of)}`}${
             i.equity != null ? ` · ${fmt(i.equity)} equity after ${esc(i.loan.name)}` : ""}</div></td>
         <td class="num">${fmt(i.value)}</td></tr>`).join("")}`).join("");
   const assetGroups = d.groups.filter((g) => g.side === "asset" && g.total > 0);
@@ -2663,8 +2665,8 @@ async function renderNetWorth(el) {
     });
     $(".a-refresh", card)?.addEventListener("click", async (e) => {
       const b = e.currentTarget; b.disabled = true; b.textContent = "Looking up…";
-      try { const r = await api(`/api/assets/${a.id}/refresh`, { method: "POST" }); toast(`RentCast estimate: ${fmt0(r.value)} (range ${fmt0(r.low)}–${fmt0(r.high)})`); renderNetWorth(el); }
-      catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Update from RentCast"; }
+      try { const r = await api(`/api/assets/${a.id}/refresh`, { method: "POST" }); toast(`Realie estimate: ${fmt0(r.value)}${r.low && r.high ? ` (range ${fmt0(r.low)}–${fmt0(r.high)})` : ""}`); renderNetWorth(el); }
+      catch (err) { toast(err.message, true); b.disabled = false; b.textContent = "Update from Realie"; }
     });
     $(".a-remove", card).addEventListener("click", async (e) => {
       if (!confirmInline(e.currentTarget, `Remove ${a.name}?`)) return;
@@ -2681,7 +2683,7 @@ function assetCard(a, d) {
   return `<div class="asset-card" data-id="${a.id}">
     <div class="asset-main">
       <div><div class="asset-name">${esc(a.name)} <span class="tag">${esc(ASSET_KIND_LABEL[a.kind] || a.kind)}</span></div>
-        <div class="small muted">${a.source === "rentcast" ? `RentCast estimate${a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}` : "Your estimate"}
+        <div class="small muted">${valueSource(a.source)}${a.source !== "manual" && a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}
           · set ${fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" })}${a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year since` : ""}
           ${stale ? ` · <span class="stale">worth a fresh look</span>` : ""}</div>
         ${a.address ? `<div class="small muted">${esc(a.address)}</div>` : ""}
@@ -2690,7 +2692,8 @@ function assetCard(a, d) {
     </div>
     <div class="asset-actions">
       <button class="btn a-update">Update value</button>
-      ${a.kind === "home" && d.rentcast.configured && a.address ? `<button class="btn a-refresh">Update from RentCast</button>` : ""}
+      ${a.kind === "home" && d.realie.configured && a.address ? (a.next_lookup ? `<span class="small muted">Next Realie lookup ${fmtDate(a.next_lookup)}</span>`
+        : `<button class="btn a-refresh" title="Runway looks each home up once a week at most">Update from Realie</button>`) : ""}
       ${link ? `<a class="btn link" href="${esc(link.href)}" target="_blank" rel="noopener">Check on ${esc(link.label)} ↗</a>` : ""}
       <button class="btn link a-edit">Edit details</button><button class="btn link a-remove">Remove</button>
     </div>
@@ -2710,7 +2713,7 @@ function openAssetForm(a, d, el) {
     </div>
     <div class="form-row af-home">
       <label style="flex:1">Address (street, city, state, zip)<input id="af-address" value="${esc(v.address || "")}" style="width:100%"></label>
-      <label class="inline"><input type="checkbox" id="af-auto" ${v.auto_update ? "checked" : ""} ${d.rentcast.configured ? "" : "disabled"}> Update from RentCast monthly</label>
+      <label class="inline"><input type="checkbox" id="af-auto" ${v.auto_update ? "checked" : ""} ${d.realie.configured ? "" : "disabled"}> Update from Realie weekly</label>
     </div>
     <div class="form-row">
       <label>Yearly change %<input id="af-yc" type="number" step="0.5" value="${v.yearly_change ?? ""}" placeholder="e.g. -15 for a car" style="width:150px"></label>
@@ -3152,10 +3155,10 @@ async function renderSetup(el, sub) {
     ${STATE.last_llm_error ? `<div class="warn critical" style="margin-top:10px"><span class="icon">!</span><span>Last AI error: ${esc(STATE.last_llm_error)}</span></div>` : ""}
   </div>
 <div class="card" id="carta-card"><h2>Carta</h2><div class="muted">Loading…</div></div>
-<div class="card"><h2>Home values <span class="muted small">optional, via RentCast</span></h2>
-    <p class="help">A free <a href="https://app.rentcast.io/app/api" target="_blank" rel="noopener">RentCast key</a> keeps home values current (Runway stays within the 50 free lookups a month).</p>
-    <div class="form-row"><label>RentCast API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.rentcast_configured ? "•••••••• saved" : "paste your key"}"></label>
-${STATE.rentcast_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
+<div class="card"><h2>Home values <span class="muted small">optional, via Realie</span></h2>
+    <p class="help">A free <a href="https://www.realie.ai/real-estate-data-api" target="_blank" rel="noopener">Realie key</a> keeps home values current. Runway looks each home up once a week at most and stays within the 25 free lookups a month.</p>
+    <div class="form-row"><label>Realie API key<input id="rc-key" type="password" style="width:280px" autocomplete="off" placeholder="${STATE.realie_configured ? "•••••••• saved" : "paste your key"}"></label>
+${STATE.realie_configured ? `<button class="btn link" id="rc-clear">Remove key</button>` : ""}</div>
   </div>
 <div class="card"><h2>Merchant logos <span class="muted small">optional, via Logo.dev</span></h2>
     <p class="help">Plaid has logos for many merchants. For the rest, a free <a href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
@@ -3211,9 +3214,9 @@ ${STATE.logodev_configured ? `<button class="btn link" id="ld-clear">Remove key<
   filterRules();
   onEdit([$("#rc-key")], async () => {
     if (!$("#rc-key").value.trim()) return;
-    await api("/api/rentcast/settings", { method: "POST", body: { api_key: $("#rc-key").value } }); toast("RentCast key saved"); await refreshState(); route();
+    await api("/api/realie/settings", { method: "POST", body: { api_key: $("#rc-key").value } }); toast("Realie key saved"); await refreshState(); route();
   });
-  $("#rc-clear")?.addEventListener("click", async () => { await api("/api/rentcast/settings", { method: "POST", body: { clear: true } }); await refreshState(); route(); });
+  $("#rc-clear")?.addEventListener("click", async () => { await api("/api/realie/settings", { method: "POST", body: { clear: true } }); await refreshState(); route(); });
   onEdit([$("#ld-key")], async () => {
     if (!$("#ld-key").value.trim()) return;
     try { await api("/api/logodev/settings", { method: "POST", body: { token: $("#ld-key").value } }); toast("Logo.dev key saved: logos arrive with the next sync"); await refreshState(); route(); }

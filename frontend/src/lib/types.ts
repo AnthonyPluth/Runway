@@ -20,7 +20,7 @@ export interface AppState {
   syncing?: boolean;
   primary_account?: string | null;
   auto_ai_on_sync?: boolean;
-  rentcast_configured?: boolean;
+  realie_configured?: boolean;
   logodev_configured?: boolean;
   database?: "sqlite" | "postgres";
   version?: string;
