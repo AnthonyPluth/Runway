@@ -958,7 +958,7 @@ def api_budget(conn, q, _b):
     start, end = _month_range(q)
     days = calendar.monthrange(start.year, start.month)[1]
     cats = [c for c in categories.all_categories(conn) if not c["is_transfer"] and not c["is_income"]]
-    income_cats = [r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")]
+    income_cats = [c["name"] for c in categories.all_categories(conn) if c["is_income"] and c["top"] != "Refunds"]
     totals = _month_totals(conn, start, end)
     budget_rows = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
     budgets = {k: r["amount"] for k, r in budget_rows.items()}
@@ -1001,15 +1001,13 @@ def api_cashflow(conn, q, _b):
         c = kind.get(name)
         if c and c["is_transfer"]:
             continue
-        if c and c["is_income"]:
+        if c and c["is_income"] and c["top"] != "Refunds":   # refunds lower spending, they aren't income
             top = c["top"]
             income[top] = income.get(top, 0.0) + total
             continue
-        if c is None:  # uncategorized: net money out counts as spending, net money in as income
+        if c is None:  # uncategorized: net money out counts as spending; net money in isn't counted as income
             if total < 0:
                 spending.setdefault("Uncategorized", {"value": 0.0, "children": {}})["value"] += -total
-            elif total > 0:
-                income["Uncategorized"] = income.get("Uncategorized", 0.0) + total
             continue
         top = c["top"]
         node = spending.setdefault(top, {"value": 0.0, "children": {}})
@@ -1299,9 +1297,37 @@ def api_plaid_oauth_resume(conn, _q, _b):
     return {"link_token": p["token"], "kind": p.get("kind"), "item_id": p.get("item_id")}
 
 
+LINK_SYNC_WAIT = 120   # seconds a new connection waits for a running sync before its first one
+
+
+def _item_lock(conn, item_id: str) -> threading.Lock:
+    """The sync lock a connection's own sync must hold: the bank sync's, or the investment sync's."""
+    item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    return _sync_lock if item and plaidbank.is_bank_item(item) else _inv_lock
+
+
 def api_plaid_exchange(conn, _q, body):
+    kind = body.get("kind")
+    if kind not in plaid.KIND_PRODUCTS:   # what Link was opened for, if the page didn't say
+        try:
+            kind = json.loads(db.get_setting(conn, "plaid_pending_link") or "{}").get("kind")
+        except ValueError:
+            kind = None
     try:
-        item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {})
+        item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {}, kind)
+    except plaid.PlaidError as e:
+        raise ApiError(str(e), 502)
+    lock = _item_lock(conn, item_id)
+    if not lock.acquire(timeout=LINK_SYNC_WAIT):   # a sync reading the same connection at once would clash with it
+        raise ApiError("Connected. A sync is running, so this connection's accounts come in with the next one.", 409)
+    try:
+        return _sync_new_item(conn, item_id, body)
+    finally:
+        lock.release()
+
+
+def _sync_new_item(conn, item_id: str, body: dict) -> dict:
+    try:
         res = plaid.sync_item(conn, item_id)
         # The same login linked a second time: its accounts would count twice. Undo it (at Plaid too) and say so.
         if any(d["adds_nothing"] for d in plaid.duplicates(conn, item_id)):
@@ -1322,6 +1348,9 @@ def api_plaid_exchange(conn, _q, body):
 
 
 def api_plaid_item_sync(conn, _q, _b, item_id):
+    lock = _item_lock(conn, item_id)
+    if not lock.acquire(blocking=False):
+        raise ApiError("A sync is already running; try again once it's done.", 409)
     try:
         res = plaid.sync_item(conn, item_id)
         if "new" in res:   # a bank connection
@@ -1333,6 +1362,8 @@ def api_plaid_item_sync(conn, _q, _b, item_id):
         return {"ok": True, **res}
     except plaid.PlaidError as e:
         raise ApiError(str(e), 502)
+    finally:
+        lock.release()
 
 
 def api_plaid_item_remove(conn, _q, _b, item_id):
@@ -1382,11 +1413,14 @@ def api_cost_basis(conn, _q, body):
     return {"ok": True}
 
 
+def live_tickers(conn) -> list[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT DISTINCT s.ticker FROM holdings h JOIN securities s ON s.id=h.security_id WHERE s.is_cash=0 AND s.ticker IS NOT NULL")]
+
+
 def api_live_quotes(conn, _q, _b):
     """Near real-time prices for everything held (plus the S&P 500 fund, which tells us if the market is open)."""
-    tickers = [r[0] for r in conn.execute(
-        "SELECT DISTINCT s.ticker FROM holdings h JOIN securities s ON s.id=h.security_id WHERE s.is_cash=0 AND s.ticker IS NOT NULL")]
-    q = prices.quotes(tickers + [prices.BENCHMARK])
+    q = prices.quotes(live_tickers(conn) + [prices.BENCHMARK])
     return {"quotes": q, "market": prices.market_state(q.get(prices.BENCHMARK)),
             "as_of": datetime.now().isoformat(timespec="seconds")}
 
@@ -1909,19 +1943,18 @@ class Handler(BaseHTTPRequestHandler):
                 data = backup.load(self._read_body(n))
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
-            # No sync may write while the data is replaced: its rows would be mixed into the restored ones.
-            if not _sync_lock.acquire(blocking=False):
-                return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+            # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
+            # import): its rows would be mixed into the restored ones.
+            held = []
             try:
-                if not _inv_lock.acquire(blocking=False):
-                    return self._json(409, {"error": "A sync is running. Restore once it has finished."})
-                try:
-                    with db.session() as conn:
-                        counts = backup.restore(conn, data)
-                    with db.session() as conn:
-                        sfinvest.repair_stored(conn)
-                finally:
-                    _inv_lock.release()
+                for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
+                    if not lock.acquire(blocking=False):
+                        return self._json(409, {"error": "A sync is running. Restore once it has finished."})
+                    held.append(lock)
+                with db.session() as conn:
+                    counts = backup.restore(conn, data)
+                with db.session() as conn:
+                    sfinvest.repair_stored(conn)
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
             except sqlalchemy.exc.OperationalError as e:
@@ -1929,7 +1962,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(e)
             finally:
-                _sync_lock.release()
+                for lock in held:
+                    lock.release()
             return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
@@ -1958,6 +1992,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, out)
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
+        if method == "GET" and url.path == "/api/investments/stream":
+            return self._quote_stream()
         if method == "POST" and url.path == "/api/sync/auto":
             return self._json(200, sync_on_visit())
         if method == "POST" and url.path == "/api/sync":
@@ -1986,6 +2022,35 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
+
+    def _quote_stream(self) -> None:
+        """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it
+        closed, one update and then the browser is told to come back in a few minutes."""
+        with db.session() as conn:
+            tickers = live_tickers(conn)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")   # a reverse proxy (nginx) would otherwise hold the events back
+        self._security_headers()
+        self.end_headers()
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        market = "closed"
+        try:
+            self.wfile.write(b"retry: 5000\n\n")
+            for update in prices.quote_stream(tickers):
+                if update is None:
+                    self.wfile.write(b": still here\n\n")
+                else:
+                    market = update["market"]
+                    self.wfile.write(b"event: quotes\ndata: " + json.dumps(update).encode() + b"\n\n")
+                self.wfile.flush()
+            if market != "open":
+                self.wfile.write(f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode())
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass   # the page was closed
 
     def _carta_callback(self, url) -> None:
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""

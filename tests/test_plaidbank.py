@@ -22,6 +22,9 @@ class MockBank(BaseHTTPRequestHandler):
     reject_redirect = False
     pages: list = []          # /transactions/sync responses, served in order
     calls: list = []
+    drop: set = set()         # paths whose connection is dropped without a reply
+    fail: dict = {}           # path -> (status, body): Plaid refuses
+    during_sync = None        # run while Plaid answers /transactions/sync
 
     def log_message(self, *a):
         pass
@@ -33,6 +36,13 @@ class MockBank(BaseHTTPRequestHandler):
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         MockBank.calls.append((self.path, req))
+        if self.path in MockBank.drop:
+            self.close_connection = True
+            return
+        if self.path in MockBank.fail:
+            return self.reply(*MockBank.fail[self.path])
+        if self.path == "/transactions/sync" and MockBank.during_sync:
+            MockBank.during_sync()
         if self.path == "/link/token/create":
             if req.get("redirect_uri") and MockBank.reject_redirect:
                 return self.reply(400, {"error_code": "INVALID_FIELD",
@@ -91,6 +101,7 @@ class PlaidBankTests(unittest.TestCase):
         self.c = db.connect(self.path)
         MockBank.products = ["transactions", "liabilities"]
         MockBank.pages, MockBank.calls, MockBank.reject_redirect = [], [], False
+        MockBank.drop, MockBank.fail, MockBank.during_sync = set(), {}, None
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         # What SimpleFIN already brought in: checking and a card, with some history.
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-chk', 'Chase Checking', 'checking', 2500)")
@@ -287,6 +298,146 @@ class PlaidBankTests(unittest.TestCase):
         a = self.c.execute("SELECT provider, plaid_account_id FROM accounts WHERE id='sf-chk'").fetchone()
         self.assertEqual((a["provider"], a["plaid_account_id"]), ("simplefin", None))
         self.assertFalse(self.c.execute("SELECT 1 FROM card_statements").fetchone())
+
+
+    def test_a_dropped_connection_or_timeout_is_a_plaid_error(self):
+        from unittest import mock
+        MockBank.drop = {"/accounts/get"}
+        with self.assertRaises(plaid.PlaidError):
+            plaid.call(self.c, "/accounts/get", {})
+        for exc in (TimeoutError("timed out"), ConnectionResetError()):
+            with mock.patch("urllib.request.urlopen", side_effect=exc), self.assertRaises(plaid.PlaidError):
+                plaid.call(self.c, "/accounts/get", {})
+
+    def test_a_link_is_never_lost_after_the_token_exchange(self):
+        # Plaid made the connection (and bills for it), then /item/get never answered: the token is still kept, and the
+        # connection is the kind you linked, so the bank sync picks it up.
+        MockBank.drop = {"/item/get"}
+        item_id = plaid.exchange(self.c, "public-1", {"name": "Chase"}, "bank")
+        item = self.c.execute("SELECT access_token, products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        self.assertTrue(item["access_token"])
+        self.assertEqual(item["products"], "transactions")
+        self.assertTrue(plaidbank.is_bank_item(item))
+        # With /item/get answering, its products win.
+        MockBank.drop = set()
+        plaid.exchange(self.c, "public-1", {"name": "Chase"}, "investments")
+        self.assertEqual(self.c.execute("SELECT products FROM plaid_items").fetchone()[0], "liabilities,transactions")
+
+    def test_one_failing_connection_doesnt_stop_the_others(self):
+        self.link()
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
+                       "VALUES ('item-a', 'access-a', 'Ally', 'transactions')")
+        MockBank.drop = {"/accounts/get"}
+        out = plaidbank.sync_all(self.c, TODAY)
+        self.assertEqual((out["items"], len(out["errors"])), (0, 2))
+        self.assertTrue(self.c.execute("SELECT error FROM plaid_items WHERE item_id='item-a'").fetchone()[0])
+
+    def test_matching_an_account_added_as_its_own_retires_the_copy(self):
+        self.link()
+        plaidbank.match(self.c, "p-new", "new", TODAY)
+        MockBank.pages = [{"added": [tx("f1", "p-new", "2026-09-20", 25.0, "BOOKS")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.c.execute("UPDATE transactions SET category='Shopping' WHERE id='pl:p-new|pl:f1'")
+        # It turns out to be a card SimpleFIN already has.
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-free', 'Freedom', 'credit', -50)")
+        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description) "
+                       "VALUES ('sf-free|1', 'sf-free', '2026-09-21', -25.0, 'BOOKS')")
+        plaidbank.match(self.c, "p-new", "sf-free", TODAY)
+        own = self.c.execute("SELECT hidden, plaid_account_id FROM accounts WHERE id='pl:p-new'").fetchone()
+        self.assertEqual((own["hidden"], own["plaid_account_id"]), (1, None))
+        self.assertEqual(self.c.execute("SELECT category FROM transactions WHERE id='sf-free|1'").fetchone()[0], "Shopping")
+        # Syncing no longer updates the copy.
+        MockBank.pages = [{"added": [tx("f2", "p-new", "2026-09-22", 5.0, "MORE BOOKS")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id LIKE '%pl:f2'").fetchone())
+        # Adding it as its own again brings the copy back.
+        plaidbank.match(self.c, "p-new", "new", TODAY)
+        own = self.c.execute("SELECT hidden, plaid_account_id FROM accounts WHERE id='pl:p-new'").fetchone()
+        self.assertEqual((own["hidden"], own["plaid_account_id"]), (0, "p-new"))
+        self.assertIsNone(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-free'").fetchone()[0])
+
+    def test_an_account_you_dont_use_isnt_synced(self):
+        self.link()
+        plaidbank.match(self.c, "p-new", "new", TODAY)
+        plaidbank.match(self.c, "p-new", "ignore", TODAY)
+        self.assertEqual(self.c.execute("SELECT hidden FROM accounts WHERE id='pl:p-new'").fetchone()[0], 1)
+        MockBank.pages = [{"added": [tx("i1", "p-new", "2026-09-22", 5.0, "IGNORED")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id LIKE '%pl:i1'").fetchone())
+
+    def test_an_account_already_linked_cant_be_linked_again(self):
+        self.link()   # sf-csp is linked to p-csp
+        with self.assertRaises(ValueError):
+            plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
+        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-csp")
+        self.assertEqual(self.c.execute("SELECT ignored FROM plaid_accounts WHERE plaid_account_id='p-new'").fetchone()[0], 0)
+        plaidbank.match(self.c, "p-csp", "sf-csp", TODAY)   # the same link again is fine
+        plaidbank.match(self.c, "p-csp", "", TODAY)         # unlinked: free for another
+        plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
+        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-new")
+
+    def test_one_plaid_account_is_one_of_your_accounts(self):
+        self.link()
+        with self.assertRaises(Exception):
+            self.c.execute("UPDATE accounts SET plaid_account_id='p-csp' WHERE id='sf-chk'")
+
+    def test_no_write_lock_is_held_while_plaid_answers(self):
+        if os.environ.get("DATABASE_URL"):
+            self.skipTest("SQLite's database-wide write lock")
+        import sqlite3
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        self.c.commit()
+        blocked = []
+
+        def write_elsewhere():   # what an edit in the app, or the extension, does meanwhile
+            other = sqlite3.connect(self.path, timeout=0.2)
+            try:
+                other.execute("UPDATE settings SET value=value WHERE key='plaid_client_id'")
+                other.commit()
+            except sqlite3.OperationalError as e:
+                blocked.append(str(e))
+            finally:
+                other.close()
+        MockBank.during_sync = write_elsewhere
+        MockBank.pages = [{"added": [tx("w1", "p-chk", "2026-09-23", 5.0, "SNACK")]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(blocked, [])
+
+    def test_a_statement_failure_keeps_the_new_transactions(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        MockBank.fail = {"/liabilities/get": (500, {"error_code": "INTERNAL_SERVER_ERROR", "error_message": "oops"})}
+        MockBank.pages = [{"added": [tx("s1", "p-chk", "2026-09-23", 7.0, "TACOS")]}]
+        out = plaidbank.sync_all(self.c, TODAY)
+        self.assertEqual(out["new"], ["sf-chk|pl:s1"])
+        self.assertEqual(len(out["errors"]), 1)
+        self.assertEqual(self.c.execute("SELECT error FROM plaid_items").fetchone()[0], "INTERNAL_SERVER_ERROR")
+        self.assertTrue(self.c.execute("SELECT 1 FROM transactions WHERE id='sf-chk|pl:s1'").fetchone())
+
+    def test_holds_dropped_while_reading_everything_again_are_removed(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        MockBank.pages = [{"added": [tx("h1", "p-chk", "2026-09-22", 60.0, "HOTEL HOLD", pending=True),
+                                     tx("h2", "p-chk", "2026-09-22", 9.0, "LUNCH", pending=True)]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        plaidbank._reread(self.c, "item-b")   # e.g. another account switched to Plaid
+        MockBank.pages = [{"added": [tx("h2", "p-chk", "2026-09-22", 9.0, "LUNCH", pending=True)]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        ids = {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE id LIKE '%|pl:%'")}
+        self.assertEqual(ids, {"sf-chk|pl:h2"})
+
+    def test_syncing_a_connection_waits_for_a_running_sync(self):
+        from runway import server
+        self.link()
+        self.assertTrue(server._sync_lock.acquire(blocking=False))
+        try:
+            with self.assertRaises(server.ApiError) as e:
+                server.api_plaid_item_sync(self.c, {}, {}, "item-b")
+            self.assertEqual(e.exception.status, 409)
+        finally:
+            server._sync_lock.release()
+        self.assertTrue(server.api_plaid_item_sync(self.c, {}, {}, "item-b")["ok"])
 
 
 if __name__ == "__main__":

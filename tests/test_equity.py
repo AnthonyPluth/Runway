@@ -172,6 +172,23 @@ class CartaTests(Base):
             carta.sync(self.c, opener=refuse)
         self.assertIn("refused", db.get_setting(self.c, "carta_last_error"))
 
+    def test_a_rotated_token_and_the_error_survive_a_failed_sync(self):
+        carta.save_settings(self.c, {"env": "production", "client_id": "cid", "client_secret": "sec"})
+        db.set_setting(self.c, "carta_access_token", "old")
+        db.set_setting(self.c, "carta_refresh_token", "rt-0")
+        db.set_setting(self.c, "carta_token_expires", str(int(time.time()) - 10))
+        self.c.commit()
+
+        def rotate_then_fail(req):   # a new refresh token, then Carta fails the portfolio read
+            if req.get_method() == "POST":
+                return io.BytesIO(json.dumps({"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600}).encode())
+            raise urllib.error.HTTPError(req.full_url, 500, "oops", {}, io.BytesIO(b"{}"))
+        with self.assertRaises(carta.CartaError):
+            carta.sync(self.c, opener=rotate_then_fail)
+        self.c.rollback()   # what the request's session does with an error
+        self.assertEqual(db.get_setting(self.c, "carta_refresh_token"), "rt-2")
+        self.assertIn("500", db.get_setting(self.c, "carta_last_error"))
+
     def test_playground_apps_sign_in_at_the_playground(self):
         api = FakeCarta()
         carta.save_settings(self.c, {"env": "playground", "client_id": "pg-cid", "client_secret": "pg-sec"})
