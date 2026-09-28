@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import re
 import secrets
@@ -355,6 +356,26 @@ def _find_lines(obj) -> list[dict]:
     return []
 
 
+def _cancelled(obj: dict) -> bool:
+    """A line or package Target cancelled (out of stock, say): nothing was charged for it."""
+    if obj.get("cancellation"):
+        return True
+    status = [(obj.get("grouping_metadata") or {}).get("status"), ((obj.get("fulfillment") or {}).get("status") or {}).get("key"),
+              obj.get("status")]
+    return any(isinstance(s, str) and "CANCEL" in s.upper() for s in status)
+
+
+def _target_lines(o: dict) -> list[dict]:
+    """An order's item lines. An online order's details split them into packages (one per shipment or pickup), each
+    with its own lines; lines and packages Target cancelled are left out, as the order's total leaves them out."""
+    packages = o.get("packages")
+    if isinstance(packages, list) and any(isinstance(p, dict) and _find_lines(p) for p in packages):
+        lines = [l for p in packages if isinstance(p, dict) and not _cancelled(p) for l in _find_lines(p)]
+    else:
+        lines = _find_lines(o)
+    return [l for l in lines if not _cancelled(l)]
+
+
 def _target_line(line: dict) -> dict | None:
     title = _first(line, _TITLE)
     if isinstance(title, dict):
@@ -372,7 +393,7 @@ def _target_line(line: dict) -> dict | None:
     if amount is None:
         return None
     dept = _deep(line, _DEPT)
-    return {"title": " ".join(title.split())[:300], "quantity": qty, "amount": abs(amount),
+    return {"title": " ".join(html.unescape(title).split())[:300], "quantity": qty, "amount": abs(amount),
             "department": dept if isinstance(dept, str) else None}
 
 
@@ -387,7 +408,7 @@ def _target_order(conn, o: dict, channel: str | None) -> tuple[str | None, bool]
     kind = str(o.get("order_purchase_type") or o.get("orderPurchaseType") or channel or "").upper()
     ch = ("store" if kind.startswith("STORE") or "store" in str(o.get("order_type", "")).lower()
           else "online" if kind else None)   # a details reply may not say; keep what the history said
-    lines = [x for x in (_target_line(l) for l in _find_lines(o)) if x]
+    lines = [x for x in (_target_line(l) for l in _target_lines(o)) if x]
     raw = json.dumps(o, separators=(",", ":"))[:MAX_RAW]
     oid = _save_order(conn, "target", number, channel=ch, placed=placed, total=abs(total) if total is not None else None,
                       subtotal=_money(_first(o, _SUBTOTAL)), tax=_money(_first(o, _TAX)), raw=raw,
