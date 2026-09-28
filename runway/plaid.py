@@ -223,8 +223,9 @@ def investment_candidates(conn, item_id: str) -> list[dict]:
     """Your investment accounts (from SimpleFIN) that a Plaid account at this institution could be."""
     item = conn.execute("SELECT institution_name FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     inst = item["institution_name"] if item else None
-    return [dict(a) for a in conn.execute(
-        "SELECT id, name, display_name, org, balance FROM accounts WHERE kind='investment' AND id NOT LIKE 'pl:%' ORDER BY name").fetchall()
+    return [dict(a) for a in conn.execute(   # linked_to: the Plaid account already linked to it, if any
+        "SELECT a.id, a.name, a.display_name, a.org, a.balance, (SELECT MIN(i.id) FROM inv_accounts i WHERE i.account_id=a.id) AS linked_to "
+        "FROM accounts a WHERE a.kind='investment' AND a.id NOT LIKE 'pl:%' ORDER BY a.name").fetchall()
         if _same_institution(a["org"] or a["name"], inst)]
 
 
@@ -245,8 +246,13 @@ def match_investment(conn, inv_id: str, target: str, today: date | None = None) 
         conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (own, inv_id))
         return {"ok": True, "account_id": own}
     if target and target != "ignore":
-        if not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind='investment' AND id NOT LIKE 'pl:%'", (target,)).fetchone():
+        acct = conn.execute("SELECT name, display_name FROM accounts WHERE id=? AND kind='investment' AND id NOT LIKE 'pl:%'",
+                            (target,)).fetchone()
+        if not acct:
             raise ValueError("Pick one of your investment accounts.")
+        if conn.execute("SELECT 1 FROM inv_accounts WHERE account_id=? AND id<>?", (target, inv_id)).fetchone():
+            raise ValueError(f"{acct['display_name'] or acct['name']} is already linked to another Plaid account. "
+                             "Unlink it there first.")
     conn.execute("DELETE FROM accounts WHERE id=?", (own,))   # it had its own account before: not any more
     conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (target or None, inv_id))
     return {"ok": True, "account_id": target or None}

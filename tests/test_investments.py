@@ -416,6 +416,21 @@ class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             plaid.match_investment(self.c, "529", "not-an-account")
 
+    def test_a_simplefin_account_links_to_one_plaid_account(self):
+        self.sf("sf-roth", "Roth IRA", 4943.43)
+        self.inv("roth", "Roth IRA", 4943.43)
+        self.inv("roth2", "Roth IRA", 4943.43)
+        plaid.match_investment(self.c, "roth", "sf-roth")
+        cands = {c["id"]: c["linked_to"] for c in plaid.investment_candidates(self.c, "wf")}
+        self.assertEqual(cands, {"sf-roth": "roth"})                         # the page offers it only to "roth"
+        with self.assertRaises(ValueError):
+            plaid.match_investment(self.c, "roth2", "sf-roth")
+        self.assertIsNone(self.acct("roth2"))
+        plaid.match_investment(self.c, "roth", "sf-roth")                    # choosing it again for the same one is fine
+        plaid.match_investment(self.c, "roth", "")                           # unlinked: free for another
+        plaid.match_investment(self.c, "roth2", "sf-roth")
+        self.assertEqual(self.acct("roth2"), "sf-roth")
+
     def test_removing_the_connection_removes_its_accounts(self):
         self.inv("a1", "Individual", 5000)
         plaid.update_investment_accounts(self.c, "wf")

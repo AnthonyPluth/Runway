@@ -2760,7 +2760,8 @@ function plaidBankAccounts(it, accounts) {
       <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
         <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
         ${p.account_id && p.account_id.startsWith("pl:") ? `<option value="${esc(p.account_id)}" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
-        ${mine.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
+        ${mine.filter((a) => !a.plaid_account_id || a.plaid_account_id === p.id)   // one Plaid account each
+          .map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)}</option>`).join("")}
         <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't use</option></select></div>`;
   }).join("")}</div>`;
 }
@@ -2778,7 +2779,7 @@ function plaidInvestmentAccounts(it) {
       <select class="pl-match ${sel && sel !== "ignore" ? "ghost" : ""}" aria-label="Which of your accounts this is">
         <option value="" ${sel === "" ? "selected" : ""}>Choose…</option>
         ${sel.startsWith("pl:") ? `<option value="new" selected>Its own account</option>` : `<option value="new">Add as a new account</option>`}
-        ${cands.map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)} (${esc(fmt(a.balance))})</option>`).join("")}
+        ${cands.filter((a) => !a.linked_to || a.linked_to === p.id).map((a) => `<option value="${esc(a.id)}" ${sel === a.id ? "selected" : ""}>Same as ${esc(a.display_name || a.name)} (${esc(fmt(a.balance))})</option>`).join("")}
         <option value="ignore" ${sel === "ignore" ? "selected" : ""}>Don't count it</option></select></div>`;
   }).join("")}</div>`;
 }

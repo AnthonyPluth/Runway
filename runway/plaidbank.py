@@ -128,6 +128,11 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
         raise ValueError("That Plaid account isn't here any more.")
     if target == "pl:" + plaid_account_id:   # its own account, picked by name
         target = "new"
+    if target not in ("new", "ignore", ""):
+        taken = conn.execute("SELECT display_name, name, plaid_account_id FROM accounts WHERE id=?", (target,)).fetchone()
+        if taken and taken["plaid_account_id"] and taken["plaid_account_id"] != plaid_account_id:
+            raise ValueError(f"{taken['display_name'] or taken['name']} is already linked to another Plaid account. "
+                             "Unlink it there first.")
     conn.execute("UPDATE accounts SET plaid_account_id=NULL, provider='simplefin' WHERE plaid_account_id=? AND id NOT LIKE 'pl:%'",
                  (plaid_account_id,))
     conn.execute("UPDATE plaid_accounts SET ignored=? WHERE plaid_account_id=?", (1 if target == "ignore" else 0, plaid_account_id))
