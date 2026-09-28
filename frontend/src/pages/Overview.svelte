@@ -10,6 +10,7 @@
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
+  import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
@@ -140,7 +141,7 @@
       {#if fc.budget}
         <div class="mb-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
           <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
-          <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's card, in place of estimated card statements.${budgetSkipped(fc.budget.skipped)}`}>
+          <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's account or card, in place of estimated card statements. A budget's recurring payments count toward it, so only the rest is spent on top of them.${budgetSkipped(fc.budget.skipped)}`}>
             <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
           </span>
         </div>
@@ -151,14 +152,7 @@
       {/if}
       <details class="mt-2">
         <summary class="cursor-pointer text-sm text-muted-foreground">Show as table</summary>
-        <table class="mt-2 w-full max-w-sm text-sm">
-          <thead><tr class="text-left text-xs text-muted-foreground"><th class="pb-1 font-medium">Date</th><th class="pb-1 text-right font-medium">Projected balance</th></tr></thead>
-          <tbody>
-            {#each fc.dates.filter((_, i) => i % 7 === 0) as d, k (d)}
-              <tr class="border-t border-border"><td class="py-1.5">{fmtDow(d)}</td><td class="py-1.5 text-right tabular-nums">{fmt(fc.total[k * 7])}</td></tr>
-            {/each}
-          </tbody>
-        </table>
+        <ForecastTable {fc} />
       </details>
       </Card.Content>
     </Card.Root>
