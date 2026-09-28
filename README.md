@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
+  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="docs/badges/coverage.svg" alt="Test coverage"></a>
   <img src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&amp;logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/packaging-Poetry-60A5FA?logo=poetry&amp;logoColor=white" alt="Poetry">
   <img src="https://img.shields.io/badge/database-SQLite%20%7C%20Postgres-4cc38a" alt="SQLite or Postgres">
@@ -301,6 +302,7 @@ poetry install --no-root                               # dependencies, into .ven
 poetry run python run.py --no-sync                     # run without touching your bank
 poetry run python -m unittest discover tests           # the test suite (SQLite)
 DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # the same tests against Postgres
+poetry run pip install coverage && poetry run coverage run -m unittest discover tests && poetry run coverage report   # how much they cover
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
