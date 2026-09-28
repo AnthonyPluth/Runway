@@ -31,11 +31,8 @@ jobs:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
       matrix:
-        python: ["3.14"]       # what the image runs (see the Dockerfile)
+        python: ["3.14"]       # the only Python Runway supports: what the image runs (see the Dockerfile)
         database: [sqlite, postgres]
-        include:
-          - python: "3.10"     # the oldest Python pyproject.toml supports
-            database: sqlite
     services:
       postgres:                # used by the postgres run; the sqlite run ignores it
         image: postgres:16
@@ -77,10 +74,10 @@ jobs:
           DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql://runway:runway@localhost:5432/runway' || '' }}
         run: poetry run python -m unittest discover -v tests
       - name: Check dependencies for known vulnerabilities
-        if: matrix.database == 'sqlite' && matrix.python == '3.14'
+        if: matrix.database == 'sqlite'
         run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
       - name: Lint (Python with ruff, JavaScript for syntax errors)
-        if: matrix.database == 'sqlite' && matrix.python == '3.14'
+        if: matrix.database == 'sqlite'
         run: |
           pipx run "ruff==0.16.9" check .
           find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
