@@ -10,6 +10,7 @@
   import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import Group from "$lib/components/ui/group/Group.svelte";
   import { fmt, fmt0, monthLabel, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -83,7 +84,7 @@
 </script>
 
 {#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number, counts: (c: BudgetCategory) => boolean)}
-  <div class="group/family border-b py-1 last:border-b-0">
+  <div class="group/family px-4 py-1.5">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
       <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} counts={counts(c)} {pace} payAccounts={bm.pay_accounts}
         onsave={saveBudget} onchanged={refresh} />
@@ -92,7 +93,7 @@
 {/snippet}
 
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight">Budget</h1>
+  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
   <div class="inline-flex h-9 items-center rounded-lg bg-muted p-[3px]">
     <Button variant="ghost" size="icon" class="size-8" aria-label="Previous month" onclick={() => shift(-1)}><ChevronLeft /></Button>
     <span class="min-w-36 rounded-md bg-background px-3 py-1 text-center text-sm font-medium shadow-sm dark:bg-input/30" aria-live="polite">{monthLabel(b?.month ?? month)}</span>
@@ -112,7 +113,7 @@
 {:else}
   {@const v = view}
   {@const over = v.totLeft < 0.005 && v.totOver > 0.005}
-  <div class="mb-6 grid gap-4 md:grid-cols-3">
+  <div class="mb-8 grid grid-cols-2 gap-3 md:grid-cols-3">
     {#each [
       { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `monthly · plus ${fmt0(v.totCarried)} rolled over` : "monthly · repeats every month", alert: false },
       { label: "Spent in budgeted categories", value: fmt0(v.totSpent), alert: over,
@@ -121,35 +122,28 @@
       { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized), alert: false,
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
     ] as t (t.label)}
-      <Card.Root class={cn("gap-2", t.alert && "border-destructive")}>
-        <Card.Header>
-          <Card.Description>{t.label}</Card.Description>
-          <Card.Title class={cn("text-2xl tabular-nums", t.alert && "text-destructive")}>{t.value}</Card.Title>
-        </Card.Header>
-        <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.alert && "text-destructive")}>{t.sub}</Card.Content>
-      </Card.Root>
+      <div class={cn("tile last:max-md:col-span-2", t.alert && "ring-1 ring-destructive")}>
+        <div class="text-[13px] text-muted-foreground">{t.label}</div>
+        <div class={cn("mt-0.5 text-[22px] font-semibold tabular-nums", t.alert && "text-destructive")}>{t.value}</div>
+        <div class={cn("text-[13px] text-muted-foreground tabular-nums", t.alert && "text-destructive")}>{t.sub}</div>
+      </div>
     {/each}
   </div>
 
-  <Card.Root class="mb-6">
-    <Card.Header><Card.Title><h2>Budgets</h2></Card.Title></Card.Header>
-    <Card.Content>
+  <Group title="Budgets" inset="3.4rem" class="mb-8">
       {#if v.inBudget.length}
         {#each v.inBudget as f (f.top.name)}{@render family(f, true, b, v.pace, v.countsToward)}{/each}
       {:else}
-        <p class="py-4 text-center text-sm text-muted-foreground">No budgets yet. Set one below.</p>
+        <p class="cell text-sm text-muted-foreground">No budgets yet. Set one below.</p>
       {/if}
-    </Card.Content>
-  </Card.Root>
+  </Group>
 
-  <Card.Root class="mb-4">
-    <Card.Header><Card.Title><h2>Not budgeted</h2></Card.Title></Card.Header>
-    <Card.Content>
+  <Group title="Not budgeted" inset="3.4rem" class="mb-4">
       {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace, v.countsToward)}{/each}
       {#if v.unusedTops.length}
-        <div class={cn("flex min-h-9 items-center gap-2.5 py-3", v.notBudget.length && "border-t")}>
+        <div class="flex min-h-12 items-center gap-2.5 px-2 py-2">
           <select bind:value={newCat} aria-label="Category to budget"
-            class="h-9 min-w-0 cursor-pointer rounded-md border border-transparent bg-transparent py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
+            class="h-9 min-w-0 cursor-pointer rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
             {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}
               <option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
@@ -162,8 +156,7 @@
           </span>
         </div>
       {/if}
-    </Card.Content>
-  </Card.Root>
+  </Group>
 
   {#if b.income}<p class="text-sm text-muted-foreground">Money in this month: {fmt(b.income)}</p>{/if}
 {/if}

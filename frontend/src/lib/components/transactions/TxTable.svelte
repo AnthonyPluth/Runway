@@ -2,7 +2,6 @@
   import { api } from "$lib/api";
   import { refreshState } from "$lib/app.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
-  import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { fmt, fmtDate, plural } from "$lib/format";
@@ -91,34 +90,33 @@
     </div>
   {/if}
 
-  <Card.Root class="gap-0 overflow-hidden py-0">
-    <div class="flex items-center gap-3 px-3 py-2 text-xs text-muted-foreground md:px-4">
-      <label class={cn("flex items-center", !selecting && "max-md:hidden")}>
-        <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label="Select all shown"
-          checked={ids.length > 0 && ids.length === items.length} indeterminate={ids.length > 0 && ids.length < items.length}
-          onchange={(e) => all(e.currentTarget.checked)} />
-      </label>
-      <span class="tabular-nums">{items.length < total ? `${items.length} of ${total}` : plural(total, "transaction")}</span>
-      <button type="button" class="ml-auto cursor-pointer font-medium text-foreground md:hidden"
-        onclick={() => { selecting = !selecting; if (!selecting) all(false); }}>{selecting ? "Done" : "Select"}</button>
-    </div>
-    <div data-tx-list>
-      {#each days as d (d.day)}
-        <section aria-label={dayLabel(d.day)}>
-          <h3 class="sticky top-0 z-[1] flex items-center justify-between border-t bg-muted/60 px-3 py-1.5 text-xs font-medium text-muted-foreground backdrop-blur md:px-4">
-            <span class="uppercase tracking-wide">{dayLabel(d.day)}</span>
-            {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums">{fmt(d.net)}</span>{/if}
-          </h3>
-          <div role="list">
-            {#each d.rows as { t, i } (t.id)}
-              <TxRow {t} {review} {recurring} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
-                onsave={(c) => onsave(t, c)} {onchanged} />
-            {/each}
-          </div>
-        </section>
-      {/each}
-    </div>
-  </Card.Root>
+  <div class="mb-2 flex items-center gap-3 px-4 text-[13px] text-muted-foreground">
+    <label class={cn("flex items-center", !selecting && "max-md:hidden")}>
+      <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label="Select all shown"
+        checked={ids.length > 0 && ids.length === items.length} indeterminate={ids.length > 0 && ids.length < items.length}
+        onchange={(e) => all(e.currentTarget.checked)} />
+    </label>
+    <span class="tabular-nums">{items.length < total ? `${items.length} of ${total}` : plural(total, "transaction")}</span>
+    <button type="button" class="ml-auto cursor-pointer text-[15px] text-primary md:hidden"
+      onclick={() => { selecting = !selecting; if (!selecting) all(false); }}>{selecting ? "Done" : "Select"}</button>
+  </div>
+  <!-- A grouped list per day, its heading staying in view while you scroll through that day. -->
+  <div data-tx-list class="flex flex-col gap-4">
+    {#each days as d (d.day)}
+      <section aria-label={dayLabel(d.day)}>
+        <h3 class="sticky top-0 z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur">
+          <span>{dayLabel(d.day)}</span>
+          {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case">{fmt(d.net)}</span>{/if}
+        </h3>
+        <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem]">
+          {#each d.rows as { t, i } (t.id)}
+            <TxRow {t} {review} {recurring} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
+              onsave={(c) => onsave(t, c)} {onchanged} />
+          {/each}
+        </div>
+      </section>
+    {/each}
+  </div>
   {#if total > items.length}
     <div bind:this={end} class="mt-3 flex justify-center">
       <Button variant="outline" size="sm" disabled={more || !onmore} onclick={loadMore}>{more ? "Loading…" : `Show more (${total - items.length} left)`}</Button>

@@ -18,6 +18,6 @@
   const tab = $derived(TABS.find((t) => t.id === sub) ?? TABS[0]);
 </script>
 
-<h1 class="mb-6 text-3xl font-semibold tracking-tight">Reports</h1>
+<h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
 <SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />
 <tab.view />
