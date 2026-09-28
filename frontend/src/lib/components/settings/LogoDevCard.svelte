@@ -10,6 +10,17 @@
   // Merchant logos through Logo.dev, for merchants Plaid has no logo for.
   const configured = $derived(!!app.state?.logodev_configured);
 
+  // Where logos stand: how many Runway has, how many are still to fetch, and why Logo.dev last failed.
+  interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; fetching: boolean }
+  let st = $state<Status | null>(null);
+  const loadStatus = () => api<Status>("/api/logodev/status").then((r) => (st = r)).catch(() => {});
+  loadStatus();
+  async function fetchNow() {
+    try { await api("/api/logodev/fetch", { method: "POST" }); toast.success("Fetching logos now. They fill in over the next few minutes."); }
+    catch (err) { toast.error((err as Error).message); }
+    setTimeout(loadStatus, 4000);
+  }
+
   async function saveKey(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     if (!f.value.trim()) return;
     await api("/api/logodev/settings", { method: "POST", body: { token: f.value } });
@@ -34,5 +45,21 @@
         <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
       {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
     </div>
+    {#if st}
+      <div class="rounded-lg bg-muted/50 p-3 text-sm">
+        <p class="tabular-nums">
+          <b class="font-medium">{st.plaid + st.logodev}</b> merchants have a logo ({st.plaid} from Plaid, {st.logodev} from Logo.dev)
+          {#if st.unknown} · {st.unknown} Logo.dev doesn't know{/if}
+          {#if st.waiting} · {st.waiting} waiting to be fetched{/if}
+        </p>
+        {#if !configured && !st.plaid}
+          <p class="mt-1 text-muted-foreground">No logos yet: Plaid hasn't sent any, and there's no Logo.dev key. Add one above to get logos for most merchants.</p>
+        {/if}
+        {#if st.last_error}<p class="mt-1 text-destructive">Logo.dev's last answer: {st.last_error}</p>{/if}
+        {#if st.waiting}
+          <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : "Fetch them now"}</Button>
+        {/if}
+      </div>
+    {/if}
   </Card.Content>
 </Card.Root>
