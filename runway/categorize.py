@@ -447,6 +447,23 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
     return cur.rowcount
 
 
+def rule_offer(conn, tx_id: str, category: str) -> dict | None:
+    """After you pick a category: whether to offer "always use it for this merchant" (no, if the merchant's name is too
+    short to make a rule from, or its plain rule already gives this category)."""
+    tx = conn.execute("SELECT payee, description FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    if not tx:
+        return None
+    key = rule_key(dict(tx))
+    if len(key) < 3:
+        return None
+    have = conn.execute("SELECT category FROM rules WHERE match=? AND COALESCE(match_mode, 'contains')='contains' "
+                        "AND amount_min IS NULL AND amount_max IS NULL AND direction IS NULL AND account_id IS NULL "
+                        "AND split IS NULL", (key,)).fetchone()
+    if have and have["category"] == category:
+        return None
+    return {"merchant": tx["payee"] or tx["description"], "match": key, "replaces": have["category"] if have else None}
+
+
 def accept_suggestion(conn, tx_id: str) -> None:
     conn.execute(
         "UPDATE transactions SET needs_review=0, category_source='manual', confidence=1 WHERE id=? AND category IS NOT NULL",
