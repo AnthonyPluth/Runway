@@ -273,12 +273,14 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
             payee = clean_payee(tx.get("payee") or desc)
             key = f"{acct_id}|{tx['id']}"
-            row = conn.execute("SELECT id, pending FROM transactions WHERE id=?", (key,)).fetchone()
+            row = conn.execute("SELECT id, pending, is_split FROM transactions WHERE id=?", (key,)).fetchone()
             if row:
                 conn.execute(
                     "UPDATE transactions SET posted=?, amount=?, description=?, pending=? WHERE id=?",
                     (posted, amount, desc, pending, key),
                 )
+                if row["is_split"]:
+                    splits.follow_amount(conn, key, amount)
             else:
                 if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
                     continue

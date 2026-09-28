@@ -132,9 +132,9 @@ def occurrences(item: dict, start: date, end: date) -> list[date]:
         if item.get("end_date") and nominal > _d(item["end_date"]):
             continue
         moved = bankdays.settles(nominal, money_in)
-        if start < moved <= end and moved not in out:
-            out.append(moved)
-    return out
+        if start < moved <= end:
+            out.append(moved)   # two dates can move to the same business day: that's still two payments
+    return sorted(out)
 
 
 # ------------------------------------------------------------------------------------------------ data
@@ -215,18 +215,47 @@ def bank_statement(conn, card: dict, today: date):
     return st
 
 
+def in_transit(conn, card: dict, last_close: date) -> float:
+    """Card payments that have left the paying account since the close but haven't reached the card yet. Only
+    counted when that account pays no other card, so a payment can't be mistaken for another card's."""
+    payer = card.get("pay_from")
+    if not payer or conn.execute("SELECT COUNT(*) FROM accounts WHERE kind='credit' AND hidden=0 AND pay_from=? AND id<>?",
+                                 (payer, card["id"])).fetchone()[0]:
+        return 0.0
+    sent = conn.execute("SELECT posted, amount FROM transactions WHERE account_id=? AND category='Credit Card Payment' "
+                        "AND amount<0 AND posted>? ORDER BY posted", (payer, last_close.isoformat())).fetchall()
+    if not sent:
+        return 0.0
+    # The card's payments, from a little before the close: one can reach the card before it leaves the bank.
+    unclaimed = db.rows(conn.execute(
+        "SELECT posted, amount FROM transactions WHERE account_id=? AND amount>0 AND posted>? AND category IN "
+        "(SELECT name FROM categories WHERE is_transfer=1) ORDER BY posted",
+        (card["id"], (last_close - timedelta(days=5)).isoformat())))
+    total = 0.0
+    for s in sent:
+        # The card's credit for it: the same amount, from a few days before to a couple of weeks after it left.
+        lo, hi = (_d(s["posted"]) - timedelta(days=5)).isoformat(), (_d(s["posted"]) + timedelta(days=14)).isoformat()
+        hit = next((c for c in unclaimed if abs(c["amount"] + s["amount"]) <= 0.005 and lo <= c["posted"][:10] <= hi), None)
+        if hit:
+            unclaimed.remove(hit)
+        else:
+            total += -s["amount"]
+    return total
+
+
 def card_cycle(conn, card: dict, today: date, bank) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
     last_close = _d(bank["last_statement_date"])
     txs = db.rows(conn.execute(
-        "SELECT posted, amount, category, pending FROM transactions WHERE account_id=? AND posted>?",
+        "SELECT posted, amount, category, pending FROM transactions WHERE account_id=? AND posted>? ORDER BY posted",
         (card["id"], last_close.isoformat()),
     ))
     reported = max(0.0, bank["last_statement_balance"] or 0.0)
     known = statement_override(conn, card["id"], last_close)
     statement = known if known is not None else reported   # a figure you entered wins over the bank's
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
+    paid += in_transit(conn, card, last_close)
     new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers))
     due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
         else next_after(last_close, card["due_day"])
@@ -282,13 +311,18 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1", (item["id"],)).fetchone()
         if cat_row:
             rec_cats.add(cat_row["category"])
-        for d in occurrences(item, today, end):
+        # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
+        # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
+        window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
+        first_tx = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (item["account_id"],)).fetchone()[0]
+        since = max(today - timedelta(days=window + 1), _d(first_tx) + timedelta(days=window) if first_tx else today)
+        for d in occurrences(item, min(since, today - timedelta(days=1)), end):
             if rec.already_happened(item, d, history, today):
                 continue  # this one already posted (possibly early), don't count it twice
-            events.append({"date": d.isoformat(), "account_id": item["account_id"], "name": item["name"],
+            events.append({"date": max(d, today).isoformat(), "account_id": item["account_id"], "name": item["name"],
                            "amount": amount, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
                            "recurring_id": item["id"], "key": f"rec:{item['id']}:{d.isoformat()}",
-                           "category": cat_row["category"] if cat_row else None})
+                           "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {})})
 
     for card in cards:
         label = db.account_label(card)
@@ -320,6 +354,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         prev_close = _d(info["last_close"])
         first = True
         avg = info["avg_monthly_spend"]
+        stale = False
         while True:
             due_k = next_after(close, card["due_day"])
             if due_k > end:
@@ -327,13 +362,22 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             if avg is not None:
                 est = max(info["new_charges"], avg) if first else avg
             else:
-                days_in_cycle = (close - (today if first else prev_close)).days
-                est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle
-            if est > 0.005:
-                events.append({"date": bankdays.next_business_day(due_k).isoformat(), "account_id": payer["id"], "name": f"{label} statement",
+                days_in_cycle = max(0, (close - max(today, prev_close)).days)
+                # The recent daily rate leaves out recurring charges on the card, so add the ones due this cycle.
+                upcoming = -sum(e["amount"] for e in events if e["account_id"] == card["id"] and e["kind"] == "recurring"
+                                and max(today, prev_close).isoformat() < e["date"] <= close.isoformat())
+                est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle + max(0.0, upcoming)
+            pays_k = bankdays.next_business_day(due_k)
+            if pays_k < today:
+                stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
+            elif est > 0.005:
+                events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
                                "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment"})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
+        if stale:
+            warnings.append(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
+                            "payment isn't in the forecast.")
 
     def listed(names):
         return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
@@ -358,6 +402,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     for e in events:
         if e.get("key") in overrides:
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
+    # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
+    events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
 
     series_by_acct: dict[str, list[float]] = {}
     rates: dict[str, float] = {}
@@ -369,7 +415,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         for e in events:
             if e["account_id"] == a["id"]:
                 by_day[e["date"]] = by_day.get(e["date"], 0.0) + e["amount"]
-        bal = a["balance"]
+        bal = a["balance"] + by_day.get(today.isoformat(), 0.0)   # anything due today that hasn't posted yet
         series = [round(bal, 2)]
         for i in range(1, horizon_days + 1):
             d = (today + timedelta(days=i)).isoformat()
@@ -397,7 +443,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i, acct = index[e["date"]], e["account_id"]
         k = (acct, e["date"])
         if k not in running:
-            running[k] = series_by_acct[acct][i - 1] - rates.get(acct, 0.0)
+            running[k] = by_id[acct]["balance"] if i == 0 else series_by_acct[acct][i - 1] - rates.get(acct, 0.0)
         running[k] += e["amount"]
         e["balance_after"] = round(running[k], 2)
         e["account"] = db.account_label(by_id[acct])
@@ -512,7 +558,7 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         by_day[(acct, d)] += v
     total = [0.0] * len(dates)
     for a in cash:
-        bal = a["balance"]
+        bal = a["balance"] + by_day.get((a["id"], dates[0]), 0.0)
         total[0] += bal
         for i in range(1, len(dates)):
             bal += by_day.get((a["id"], dates[i]), 0.0)
