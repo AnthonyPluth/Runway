@@ -1355,11 +1355,14 @@ def api_cost_basis(conn, _q, body):
     return {"ok": True}
 
 
+def live_tickers(conn) -> list[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT DISTINCT s.ticker FROM holdings h JOIN securities s ON s.id=h.security_id WHERE s.is_cash=0 AND s.ticker IS NOT NULL")]
+
+
 def api_live_quotes(conn, _q, _b):
     """Near real-time prices for everything held (plus the S&P 500 fund, which tells us if the market is open)."""
-    tickers = [r[0] for r in conn.execute(
-        "SELECT DISTINCT s.ticker FROM holdings h JOIN securities s ON s.id=h.security_id WHERE s.is_cash=0 AND s.ticker IS NOT NULL")]
-    q = prices.quotes(tickers + [prices.BENCHMARK])
+    q = prices.quotes(live_tickers(conn) + [prices.BENCHMARK])
     return {"quotes": q, "market": prices.market_state(q.get(prices.BENCHMARK)),
             "as_of": datetime.now().isoformat(timespec="seconds")}
 
@@ -1886,6 +1889,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, out)
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
+        if method == "GET" and url.path == "/api/investments/stream":
+            return self._quote_stream()
         if method == "POST" and url.path == "/api/sync/auto":
             return self._json(200, sync_on_visit())
         if method == "POST" and url.path == "/api/sync":
@@ -1914,6 +1919,35 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
+
+    def _quote_stream(self) -> None:
+        """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it
+        closed, one update and then the browser is told to come back in a few minutes."""
+        with db.session() as conn:
+            tickers = live_tickers(conn)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")   # a reverse proxy (nginx) would otherwise hold the events back
+        self._security_headers()
+        self.end_headers()
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        market = "closed"
+        try:
+            self.wfile.write(b"retry: 5000\n\n")
+            for update in prices.quote_stream(tickers):
+                if update is None:
+                    self.wfile.write(b": still here\n\n")
+                else:
+                    market = update["market"]
+                    self.wfile.write(b"event: quotes\ndata: " + json.dumps(update).encode() + b"\n\n")
+                self.wfile.flush()
+            if market != "open":
+                self.wfile.write(f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode())
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass   # the page was closed
 
     def _carta_callback(self, url) -> None:
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
