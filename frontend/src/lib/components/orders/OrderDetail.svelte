@@ -69,7 +69,7 @@
           {#if c.tx_id}
             <span>→ {c.payee || c.description || ""} {c.posted ? fmtDate(c.posted) : ""} <span class="text-muted-foreground">{c.account_name || ""}</span>
               {#if c.applied}<Badge variant="secondary">{c.applied === "split" ? "split by items" : "categorized by items"}</Badge>{/if}</span>
-            <span class="ml-auto flex gap-1">
+            <span class="ml-auto flex gap-4">
               {#if c.amount < 0 && !c.applied && o.items.length}
                 <Button variant="link" size="sm" class="h-auto p-0" title="Replace the category you set with the order's items"
                   onclick={() => post(charge(c.id, "apply"), undefined, "Split by items")}>Split by items</Button>

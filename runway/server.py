@@ -404,7 +404,7 @@ def api_transactions(conn, q, _b):
     )
     items = db.rows(conn.execute(sql, (*args, limit, offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
-    orders = retail.for_transactions(conn, [t["id"] for t in items if t["amount"] < 0])
+    orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
     logos = merchants.for_transactions(conn, items)
     if merchants.configured(conn):   # no logo from Plaid: Logo.dev's, by the merchant's website (a sync fetches it)
         sites = merchants.sites_for(conn, [t for t in items if t["id"] not in logos])
