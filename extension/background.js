@@ -321,13 +321,18 @@ async function importAmazon(progress, Page) {
 
 // ------------------------------------------------------------------------------------------------ Target
 
-async function targetJson(page, url, token) {
+// Target reads slower than the other stores, with a person's unevenness: it's quick to take a burst of reads for a bot.
+const targetPause = () => sleep(1500 + Math.random() * 2000);
+
+// A reply from Target's API as JSON (null if none). A refusal (401/403) means signed out when reading the order
+// history; for an order's details it may only mean that address isn't one this account can use, so it's null too.
+async function targetJson(page, url, token, { detail = false } = {}) {
   const headers = { Accept: "application/json" };
   let res = await page.run("fetch", url, { headers });
   if ((res.status === 401 || res.status === 403) && token) {
     res = await page.run("fetch", url, { headers: { ...headers, Authorization: `Bearer ${token}` } });
   }
-  if (res.status === 401 || res.status === 403) throw Object.assign(new Error("signin"), { signin: true });
+  if ((res.status === 401 || res.status === 403) && !detail) throw Object.assign(new Error("signin"), { signin: true });
   if (!res.ok) return null;
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
@@ -385,7 +390,7 @@ async function learnTargetDetail(kind, url, api, order) {
 
 // Reads one address for an order's details and sends it to Runway. True when Runway found the order's items in it.
 async function targetDetail(page, api, order, url) {
-  const data = await targetJson(page, url, api.token);
+  const data = await targetJson(page, url, api.token, { detail: true });
   if (!data) return false;
   return (await runway("/api/ext/target/order", { order_number: order, data })).read;
 }
@@ -440,7 +445,7 @@ async function importTarget(progress, Page) {
           const r = await runway("/api/ext/target/history", { purchase_type: type, page: n, data });
           r.orders.forEach((o) => need.push({ n: o, type }));
           if (!r.more) break;
-          await sleep(PAUSE_MS);
+          await targetPause();
         }
       }
       // Each order's items: first from the addresses Runway names (and any this browser learned from target.com
@@ -453,9 +458,10 @@ async function importTarget(progress, Page) {
         let read = false;
         for (const tpl of templates[order.type === "STORE" ? "store" : "online"]) {
           if (await targetDetail(page, api, order.n, targetUrl(tpl, api, order.n))) { read = true; break; }
+          await targetPause();
         }
         if (!read) unread.push(order);
-        await sleep(PAUSE_MS);
+        await targetPause();
       }
       i = 0;
       for (const { n, type } of unread) {
@@ -474,7 +480,7 @@ async function importTarget(progress, Page) {
           }
         }
         if (!read) await runway("/api/ext/target/order", { order_number: n, data: {} });   // counts as a try, so it's not reloaded forever
-        await sleep(PAUSE_MS);
+        await targetPause();
       }
     } catch (e) {
       if (e.signin) throw await page.signIn("Target");
