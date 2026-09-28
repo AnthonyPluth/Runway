@@ -6,6 +6,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
+  import MissedAlert from "$lib/components/MissedAlert.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
@@ -14,16 +15,14 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
-  import type { Missed, Overview } from "$lib/types";
+  import type { Overview } from "$lib/types";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
-  let dismissed = $state<string[]>([]);
 
   const load = (d: number) => api<Overview>(`/api/overview?days=${d}`);
   let data = $state<Promise<Overview>>(load(initial));
@@ -45,10 +44,6 @@
     }).join("; ") + ".";
   }
 
-  async function dismiss(m: Missed) {
-    try { await api("/api/recurring/dismiss", { method: "POST", body: { key: m.key } }); dismissed.push(m.key); toast.success("Dismissed"); }
-    catch (err) { toast.error((err as Error).message); }
-  }
 </script>
 
 {#snippet warn(text: string, href?: string, linkText?: string)}
@@ -85,16 +80,7 @@
     {@const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date)}
 
     {#each fc.warnings as w (w)}{@render warn(w, `/#setup/${/Plaid/.test(w) ? "connections" : "accounts"}`, "Settings")}{/each}
-    {#each (fc.missed ?? []).filter((m) => !dismissed.includes(m.key)) as m (m.key)}
-      <Alert.Root class="mb-3">
-        <TriangleAlert />
-        <Alert.Description><p>
-          <b>{m.name}</b>: {fmt(Math.abs(m.amount))} {m.amount > 0 ? "expected in" : "expected"} {fmtDate(m.date)} hasn't shown up in {m.account_name || "the account"}.
-          <a class="font-medium text-foreground underline underline-offset-4" href="/#transactions">Find it</a> ·
-          <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-4" onclick={() => dismiss(m)}>Dismiss</button>
-        </p></Alert.Description>
-      </Alert.Root>
-    {/each}
+    {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
     {#if !fc.accounts.length}{@render warn("No account to forecast yet. Choose your primary checking account in", "/#setup/accounts", "Settings.")}{/if}
 
     <section class="mb-8 flex flex-col justify-between gap-6 md:flex-row md:items-end md:gap-10">

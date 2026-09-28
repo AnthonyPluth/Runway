@@ -106,3 +106,24 @@
   * { @apply border-border outline-ring/50; }
   body { @apply bg-background text-foreground; }
 }
+
+/* Runway's chart colors, from the classic app. Categorical series in this order (validated for colorblind
+   separation and contrast on the dark card surface); "everything else" is always gray. */
+:root {
+  --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;
+  --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-8: #e66767; --cat-other: #6b6a66;
+  --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0; --nw-6: #9085e9;
+  --flow-in: #4cc38a; --flow-out: #5b9bf0;
+  --good: #4cc38a; --warning: #f0b84b; --low: #f08a4b;
+}
+
+/* The "Saved ✓" flash autosave puts on a field (see lib/autosave.ts). */
+@layer components {
+  .just-saved { position: relative; }
+  .just-saved::after {
+    content: "Saved ✓"; position: absolute; right: 0; top: -1.1rem; font-size: 11px; color: var(--good);
+    background: var(--card); padding: 0 4px; border-radius: 4px; animation: saved-fade 1.6s ease forwards; pointer-events: none;
+  }
+  @keyframes saved-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .just-saved::after { animation: none; } }
+}
