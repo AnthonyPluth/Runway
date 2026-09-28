@@ -12,7 +12,7 @@ RUN poetry install --only main --no-root --no-ansi
 
 # 2. Build the web app (frontend/) into runway/static/next. It's plain files, so it's built once on the build machine
 #    whatever the image's architecture.
-FROM --platform=$BUILDPLATFORM node:22-slim AS web
+FROM --platform=$BUILDPLATFORM node:26-slim AS web
 WORKDIR /web/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
