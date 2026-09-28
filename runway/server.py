@@ -932,7 +932,7 @@ def api_budget(conn, q, _b):
     start, end = _month_range(q)
     days = calendar.monthrange(start.year, start.month)[1]
     cats = [c for c in categories.all_categories(conn) if not c["is_transfer"] and not c["is_income"]]
-    income_cats = [r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")]
+    income_cats = [c["name"] for c in categories.all_categories(conn) if c["is_income"] and c["top"] != "Refunds"]
     totals = _month_totals(conn, start, end)
     budget_rows = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
     budgets = {k: r["amount"] for k, r in budget_rows.items()}
@@ -975,15 +975,13 @@ def api_cashflow(conn, q, _b):
         c = kind.get(name)
         if c and c["is_transfer"]:
             continue
-        if c and c["is_income"]:
+        if c and c["is_income"] and c["top"] != "Refunds":   # refunds lower spending, they aren't income
             top = c["top"]
             income[top] = income.get(top, 0.0) + total
             continue
-        if c is None:  # uncategorized: net money out counts as spending, net money in as income
+        if c is None:  # uncategorized: net money out counts as spending; net money in isn't counted as income
             if total < 0:
                 spending.setdefault("Uncategorized", {"value": 0.0, "children": {}})["value"] += -total
-            elif total > 0:
-                income["Uncategorized"] = income.get("Uncategorized", 0.0) + total
             continue
         top = c["top"]
         node = spending.setdefault(top, {"value": 0.0, "children": {}})

@@ -113,6 +113,9 @@ class DateTests(unittest.TestCase):
 class ForecastTests(Base):
     def setUp(self):
         super().setUp()
+        self.card_setup()
+
+    def card_setup(self):
         self.acct("chk", "checking", 5000.0, daily_spend=0)
         # Card owes 900 now (negative = owed). Its last statement: $800, closed Sep 10, due Oct 5.
         self.acct("cc", "credit", -900.0, pay_from="chk")
@@ -944,3 +947,192 @@ class OwnerTests(unittest.TestCase):
         self.assertEqual(oidc.first_name("Anthony Pluth", "a@x.com"), "Anthony")
         self.assertEqual(oidc.first_name(None, "sara.smith@x.com"), "Sara")
         self.assertEqual(oidc.first_name("sara@x.com", "sara@x.com", "Sara Jane"), "Sara")
+
+
+class ForecastEdgeTests(Base):
+    """Card payments at the edges of the chart, payments due today or a few days late, and payments in transit."""
+    card_setup = ForecastTests.card_setup
+
+    def setUp(self):
+        super().setUp()
+        self.card_setup()
+
+    def test_a_payment_pushed_past_the_last_day_is_left_off(self):
+        # Statement due Sep 5; later ones due Oct 5, Nov 5 and Dec 5, a Saturday, so paid Monday Dec 7: past the Dec 5 end.
+        self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")
+        today = date(2026, 9, 6)
+        fc = forecast.build(self.conn, today, 90)
+        self.assertEqual(fc["dates"][-1], "2026-12-05")
+        self.assertTrue(all(fc["dates"][0] <= e["date"] <= fc["dates"][-1] for e in fc["events"]))
+        self.assertNotIn("2026-12-07", [e["date"] for e in fc["events"]])
+
+    def test_an_old_statement_is_a_warning_not_a_crash(self):
+        self.stmt("cc", 800.0, "2026-06-10", "2026-07-05")   # the bank hasn't sent anything since June
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertTrue(all(e["date"] >= TODAY.isoformat() for e in fc["events"]))
+        self.assertTrue(any("hasn't sent the statement after Jun 10" in w for w in fc["warnings"]), fc["warnings"])
+
+    def test_a_payment_due_today_is_in_todays_balance(self):
+        today = date(2026, 10, 5)   # the $600 left on the September statement is due today
+        fc = forecast.build(self.conn, today, 30)
+        e = next(e for e in fc["events"] if e["kind"] == "card" and not e["estimated"])
+        self.assertEqual((e["date"], e["amount"], e["balance_after"]), ("2026-10-05", -600.0, 4400.0))
+        self.assertEqual(fc["total"][0], 4400.0)
+        self.assertAlmostEqual(fc["total"][-1], 5000 + sum(x["amount"] for x in fc["events"]), places=2)
+
+    def test_rent_due_today_or_a_few_days_late_stays_in(self):
+        for d in ("2026-07-01", "2026-08-01", "2026-09-01"):
+            self.tx("chk", d, -2000.0, "LANDLORD LLC", "Rent")
+        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match) "
+                          "VALUES ('Rent','chk',-2000,'monthly','2026-07-01','landlord')")
+        recurring.auto_match(self.conn)
+
+        def rent(today):
+            return [(e["date"], e.get("late_from")) for e in forecast.build(self.conn, today, 20)["events"] if e["name"] == "Rent"]
+        self.assertEqual(rent(date(2026, 10, 1)), [("2026-10-01", None)])                  # due today
+        self.assertEqual(rent(date(2026, 10, 3)), [("2026-10-03", "2026-10-01")])          # two days late: still coming
+        self.assertEqual(rent(date(2026, 10, 8)), [])                                      # past the window: missed instead
+        self.assertEqual([m["date"] for m in recurring.missed(self.conn, date(2026, 10, 8))], ["2026-10-01"])
+        self.tx("chk", "2026-10-02", -2000.0, "LANDLORD LLC", "Rent")                       # it came, a day late
+        recurring.auto_match(self.conn)
+        self.assertEqual(rent(date(2026, 10, 3)), [])
+
+    def test_a_card_payment_in_transit_counts_once(self):
+        # $600 left checking after the close, but hasn't reached the card yet
+        self.tx("chk", "2026-09-22", -600.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
+        info = self.cycle("cc")
+        self.assertEqual((info["paid_since_close"], info["remaining"]), (800.0, 0.0))
+        self.assertFalse(any(e["kind"] == "card" and not e["estimated"] for e in forecast.build(self.conn, TODAY, 30)["events"]))
+        # once it reaches the card, it's still the one payment
+        self.tx("cc", "2026-09-23", 600.0, "PAYMENT THANK YOU", "Credit Card Payment")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 800.0)
+        # one that reached the card just before the close (and so is in the statement) isn't counted again
+        self.conn.execute("UPDATE transactions SET posted='2026-09-09' WHERE description='PAYMENT THANK YOU' AND amount=600")
+        self.conn.execute("UPDATE transactions SET posted='2026-09-11' WHERE account_id='chk' AND amount=-600")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
+        self.conn.execute("UPDATE transactions SET posted='2026-09-23' WHERE description='PAYMENT THANK YOU' AND amount=600")
+        # an account that pays two cards can't tell whose it is, so it waits for the card
+        self.acct("cc2", "credit", -50.0, pay_from="chk")
+        self.conn.execute("DELETE FROM transactions WHERE id=(SELECT MAX(id) FROM transactions WHERE account_id='cc')")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
+
+    def test_recurring_card_charges_count_on_a_new_card(self):
+        before = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}
+        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) "
+                          "VALUES ('Streaming','cc',-15,'monthly','2026-09-30')")
+        after = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}
+        self.assertAlmostEqual(after["2026-11-05"], before["2026-11-05"] - 15, places=2)
+
+    def test_two_dates_on_the_same_business_day_are_two_payments(self):
+        item = {"frequency": "dates", "dates": "10-10, 10-11", "anchor_date": "2026-01-01", "amount": -100}
+        days = forecast.occurrences(item, date(2026, 10, 1), date(2026, 10, 31))
+        self.assertEqual(len(days), 2)
+        self.assertEqual(days[0], days[1])
+
+
+class CategorizeFixTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.acct("chk", "checking", 1000.0)
+
+    def test_autopay_needs_a_card(self):
+        cat = lambda d: categorize.heuristic_category({"description": d, "amount": -100}, "checking")
+        for bill in ("COMCAST XFINITY AUTOPAY", "STATE FARM AUTOPAY", "CITY WATER EPAY", "CAPITAL ONE AUTO FINANCE PMT",
+                     "CHASE MORTGAGE AUTOPAY"):
+            self.assertIsNone(cat(bill), bill)
+        for card in ("CHASE CREDIT CRD AUTOPAY", "CAPITAL ONE MOBILE PMT", "AMEX EPAYMENT ACH PMT", "DISCOVER E-PAYMENT",
+                     "CITI AUTOPAY PAYMENT", "BARCLAYCARD US AUTOPAY", "APPLECARD GSBANK PAYMENT"):
+            self.assertEqual(cat(card), "Credit Card Payment", card)
+
+    def test_your_rules_beat_the_built_in_guess(self):
+        from runway import rules
+        rules.save(self.conn, {"match": "chase credit", "category": "Transfer"})
+        self.tx("chk", "2026-09-10", -300.0, "CHASE CREDIT CRD AUTOPAY")
+        categorize.categorize(self.conn, use_ai=False)
+        row = self.conn.execute("SELECT category, category_source FROM transactions").fetchone()
+        self.assertEqual((row["category"], row["category_source"]), ("Transfer", "rule"))
+
+    def test_a_split_that_cant_be_made_goes_to_review_and_the_sync_goes_on(self):
+        import json
+        self.conn.execute("INSERT INTO rules(match, split) VALUES ('costco', ?)",
+                          (json.dumps([{"category": "Groceries", "percent": 60}, {"category": "Gone", "percent": 40}]),))
+        self.tx("chk", "2026-09-10", -250.0, "COSTCO WHSE")
+        self.tx("chk", "2026-09-11", -20.0, "COFFEE")
+        categorize.categorize(self.conn, use_ai=False)
+        row = self.conn.execute("SELECT is_split, needs_review FROM transactions WHERE description='COSTCO WHSE'").fetchone()
+        self.assertEqual((row["is_split"], row["needs_review"]), (0, 1))
+
+    def test_renaming_or_removing_a_category_follows_order_items(self):
+        self.conn.execute("INSERT INTO retail_orders(id, retailer, order_number) VALUES ('amazon:1','amazon','1')")
+        self.conn.execute("INSERT INTO retail_items(order_id, title, amount, category, category_source) "
+                          "VALUES ('amazon:1','Oats',5,'Groceries','manual')")
+        self.conn.execute("INSERT INTO retail_item_memory(key, category) VALUES ('oats','Groceries')")
+        categories.rename(self.conn, "Groceries", "Food")
+        self.assertEqual(self.conn.execute("SELECT category FROM retail_items").fetchone()[0], "Food")
+        self.assertEqual(self.conn.execute("SELECT category FROM retail_item_memory").fetchone()[0], "Food")
+        categories.remove(self.conn, "Food")
+        self.assertIsNone(self.conn.execute("SELECT category_source FROM retail_items").fetchone()[0])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM retail_item_memory").fetchone()[0], 0)
+
+
+class SplitAmountChangeTests(Base):
+    def setUp(self):
+        super().setUp()
+        self.acct("cc", "credit", -50.0)
+        self.tx("cc", "2026-09-10", -50.0, "BISTRO", "Restaurants")
+        self.tx_id = self.conn.execute("SELECT id FROM transactions").fetchone()[0]
+
+    def test_parts_follow_a_new_amount(self):
+        splits.set_splits(self.conn, self.tx_id, [{"amount": -30, "category": "Restaurants"}, {"amount": -20, "category": "Gifts & Donations"}])
+        self.conn.execute("UPDATE transactions SET amount=-60 WHERE id=?", (self.tx_id,))   # posted with the tip
+        splits.follow_amount(self.conn, self.tx_id, -60.0)
+        self.assertEqual([p["amount"] for p in splits.get(self.conn, self.tx_id)], [-36.0, -24.0])
+        self.assertEqual(self.conn.execute("SELECT needs_review FROM transactions").fetchone()[0], 1)
+
+    def test_odd_cents_still_add_up(self):
+        splits.set_splits(self.conn, self.tx_id, [{"amount": -16.67, "category": "Restaurants"},
+                                                  {"amount": -16.67, "category": "Groceries"},
+                                                  {"amount": -16.66, "category": "Shopping"}])
+        splits.follow_amount(self.conn, self.tx_id, -51.01)
+        self.assertEqual(round(sum(p["amount"] for p in splits.get(self.conn, self.tx_id)), 2), -51.01)
+
+    def test_simplefin_update_in_place_rescales(self):
+        def payload(amount):
+            return {"errors": [], "accounts": [{"org": {"name": "Bank"}, "id": "A1", "name": "Card", "currency": "USD",
+                                                "balance": amount, "balance-date": ts(TODAY), "transactions": [
+                                                    {"id": "t1", "posted": ts(date(2026, 9, 20)), "amount": amount, "description": "BISTRO"}]}]}
+        simplefin.store_payload(self.conn, payload("-50.00"), date(2026, 9, 1))
+        splits.set_splits(self.conn, "A1|t1", [{"amount": -30, "category": "Restaurants"}, {"amount": -20, "category": "Shopping"}])
+        simplefin.store_payload(self.conn, payload("-60.00"), date(2026, 9, 1))   # same id, posted with the tip
+        self.assertEqual([p["amount"] for p in splits.get(self.conn, "A1|t1")], [-36.0, -24.0])
+
+
+class ReportRefundTests(Base):
+    def test_refunds_lower_spending_and_uncategorized_money_in_isnt_income(self):
+        from runway import reports
+        self.acct("chk", "checking", 0.0)
+        self.tx("chk", "2026-09-01", 3000.0, "ACME PAYROLL", "Income")
+        self.tx("chk", "2026-09-05", -400.0, "STORE", "Shopping")
+        self.tx("chk", "2026-09-06", 100.0, "STORE REFUND", "Refunds")
+        self.tx("chk", "2026-09-07", 500.0, "ZELLE FROM SAM")                     # not categorized yet
+        m = reports.income_vs_spending(self.conn, "2026-09", 2)["months"][-1]
+        self.assertEqual((m["income"], m["spending"]), (3000.0, 300.0))
+        self.conn.commit()
+        cf = server.api_cashflow(self.conn, {"month": ["2026-09"]}, None)
+        self.assertEqual(cf["total_in"], 3000.0)
+
+
+class RecurringAmountTests(Base):
+    def test_linking_one_charge_doesnt_link_the_whole_merchant(self):
+        self.acct("cc", "credit", 0.0)
+        self.tx("cc", "2026-09-01", -14.99, "AMAZON PRIME")
+        for d, amt in (("2026-09-03", -86.40), ("2026-09-08", -5.29), ("2026-09-12", -212.00)):
+            self.tx("cc", d, amt, "AMAZON")
+        self.tx("cc", "2026-08-01", -14.99, "AMAZON")
+        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) VALUES ('Prime','cc',-14.99,'monthly','2026-08-01')")
+        rid = self.conn.execute("SELECT id FROM recurring").fetchone()[0]
+        recurring.link(self.conn, "cc|0", rid)   # learns "amazon prime"...
+        self.conn.execute("UPDATE recurring SET match='amazon' WHERE id=?", (rid,))   # ...or plain "amazon"
+        recurring.auto_match(self.conn, [rid])
+        linked = sorted(r[0] for r in self.conn.execute("SELECT amount FROM transactions WHERE recurring_id=?", (rid,)))
+        self.assertEqual(linked, [-14.99, -14.99])

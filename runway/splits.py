@@ -59,6 +59,28 @@ def carry_over(conn, old_id: str, new_id: str, amount: float) -> None:
         conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (old_id,))
 
 
+def follow_amount(conn, tx_id: str, amount: float) -> None:
+    """The bank changed a split transaction's amount in place (a tip added when it posted, say): the parts are
+    scaled to the new amount, in whole cents that add up exactly, and it goes to Review to check."""
+    parts = conn.execute("SELECT id, amount FROM tx_splits WHERE tx_id=? ORDER BY position, id", (tx_id,)).fetchall()
+    old = round(sum(p["amount"] for p in parts), 2)
+    if not parts or abs(old - round(amount, 2)) <= CENT:
+        return
+    if abs(old) < CENT or (old < 0) != (amount < 0):   # nothing to scale by: undo the split instead
+        clear(conn, tx_id)
+    else:
+        cents = round(amount * 100)
+        shares = [p["amount"] * 100 * amount / old for p in parts]
+        new = [int(x) for x in shares]   # toward zero; the cents left over go to the parts that lost the most
+        left = cents - sum(new)
+        step = 1 if left > 0 else -1
+        for i in sorted(range(len(parts)), key=lambda i: -abs(shares[i] - new[i]))[:abs(left)]:
+            new[i] += step
+        for p, n in zip(parts, new):
+            conn.execute("UPDATE tx_splits SET amount=? WHERE id=?", (n / 100, p["id"]))
+    conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tx_id,))
+
+
 def prune(conn) -> None:
     """Drop parts whose transaction is gone (the bank took it back, say)."""
     conn.execute("DELETE FROM tx_splits WHERE tx_id NOT IN (SELECT id FROM transactions)")

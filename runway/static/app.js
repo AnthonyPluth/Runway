@@ -301,7 +301,7 @@ function eventsTable(events) {
       e.balance_after < 0 ? `<span class="neg-bal">balance ${fmt(e.balance_after)}</span>` : `balance ${fmt(e.balance_after)}`].filter(Boolean).map(nw).join(" · ");
     return `<div class="ev-row">
       <div class="ev-date"><span>${d.toLocaleDateString("en-US", { month: "short" })}</span><b>${d.getDate()}</b></div>
-      <div class="ev-main"><span class="ev-name">${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</span>
+      <div class="ev-main"><span class="ev-name">${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag" title="${e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}">estimate</span>` : ""}${e.late_from ? `<span class="tag" title="Was due ${esc(e.late_from)} and hasn't shown up yet">late</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</span>
         <span class="ev-sub">${sub}</span></div>
       <div class="ev-amount">${e.key ? `<button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : "−"}${fmt(Math.abs(e.amount))}</button>` : fmt(e.amount)}
         ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}" title="Go back to the usual amount">reset</button>` : ""}</div>
@@ -548,7 +548,7 @@ async function renderTxPage(el, mode) {
       <table><tr><th>Date</th><th>Item</th><th class="hide-sm">Account</th><th class="num">Amount</th><th>Category</th><th class="num">Balance after</th></tr>
       ${shown.map((e) => `<tr>
         <td class="muted" style="white-space:nowrap">${fmtDow(e.date)}</td>
-        <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag">estimate</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
+        <td>${e.kind === "recurring" ? `<span class="rec-icon" title="Recurring item">↻</span>` : ""}${esc(e.name)}${e.estimated ? `<span class="tag">estimate</span>` : ""}${e.late_from ? `<span class="tag" title="Was due ${esc(e.late_from)} and hasn't shown up yet">late</span>` : ""}${e.overridden ? `<span class="tag edited" title="Usually ${fmt(e.original_amount)}">edited</span>` : ""}</td>
         <td class="muted hide-sm">${acctLabel(e.account_id, e.account)}</td>
         <td class="num"><button class="ev-amt ${e.amount > 0 ? "pos" : ""}" data-key="${esc(e.key)}" data-amount="${e.amount}" title="Change this amount for this date only">${e.amount > 0 ? "+" : ""}${fmt(e.amount)}</button>
           ${e.overridden ? `<button class="btn link ev-reset" data-key="${esc(e.key)}">reset</button>` : ""}</td>
