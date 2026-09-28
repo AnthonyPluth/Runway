@@ -78,6 +78,14 @@ merchants = Table(
     info={'doc': 'merchants Plaid knows, and their logos'},
 )
 
+merchant_logos = Table(
+    'merchant_logos', metadata,
+    Column('key', Text, primary_key=True, doc='the merchant name, as merchants.key() has it (lowercase, single spaces)'),
+    Column('website', Text, doc="the website whose logo (from Logo.dev) you picked; NULL with hidden=1: no logo"),
+    Column('hidden', Integer, server_default=text('0'), doc='1: show no logo for this merchant'),
+    info={'doc': 'logos you chose for a merchant, for every transaction from it'},
+)
+
 tx_splits = Table(
     'tx_splits', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),

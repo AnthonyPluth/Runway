@@ -10,6 +10,7 @@
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import RecurringPicker from "./RecurringPicker.svelte";
+  import LogoPicker from "./LogoPicker.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { RecurringItem, Tx } from "./types";
   import { openOrders } from "./expanded.svelte";
@@ -61,11 +62,13 @@
   </label>
 
   <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-1">
-    {#if t.logo}
-      <img class="size-9 rounded-full bg-white object-contain p-0.5" src={t.logo} alt="" loading="lazy" width="36" height="36" />
-    {:else}
-      <span class="flex size-9 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
-    {/if}
+    <LogoPicker name={t.payee || t.description || ""} {onchanged}>
+      {#if t.logo}
+        <img class="size-9 rounded-full bg-white object-contain p-0.5" src={t.logo} alt="" loading="lazy" width="36" height="36" />
+      {:else}
+        <span class="flex size-9 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
+      {/if}
+    </LogoPicker>
   </div>
 
   <div class="col-start-3 row-start-1 min-w-0 pr-3">
