@@ -1,16 +1,16 @@
 name: Preview
 
 # A live copy of Runway for a pull request, filled with made-up sample data (runway/demo.py), for about an hour.
-# Start it by adding the "preview" label to a pull request (or run this workflow by hand on a branch). A comment on
-# the pull request gives the address and a one-off password. Remove the label to stop it early; add it again for a
-# fresh one.
+# Start it by adding the "needs_preview" label to a pull request, at any time (or run this workflow by hand on a
+# branch). A comment on the pull request gives the address and a one-off password, and the label comes off again.
+# Adding it again builds a fresh preview from the pull request's latest commit, replacing the one that's up.
 #
 # How: the image is built and run on the Actions runner, behind nginx with a password, and reached through a
 # Cloudflare quick tunnel (a random https://<words>.trycloudflare.com address, no Cloudflare account). No secrets are
 # used: no bank access, no sign-in provider, no real data. Bank sync is off and its address points nowhere.
 on:
   pull_request:
-    types: [labeled, unlabeled]
+    types: [labeled]
   workflow_dispatch:
     inputs:
       minutes:
@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   preview:
-    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'preview' && github.event.action == 'labeled' && github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'needs_preview' && github.event.pull_request.head.repo.full_name == github.repository)
     # On the job, not the workflow, so adding some other label doesn't stop a preview that's up.
     concurrency:
       group: preview-${{ github.event.pull_request.number || github.ref }}
@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 135
     permissions:
       contents: read
-      pull-requests: write     # post the address, and take the label off when it ends
+      pull-requests: write     # post the address and take the label off
     env:
       CLOUDFLARED_VERSION: "2026.9.3"
       CLOUDFLARED_SHA256: 77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
@@ -132,9 +132,14 @@ jobs:
             "User \`preview\`, password \`$PASSWORD\`" \
             "" \
             "Sample data only (made-up accounts and transactions); nothing here is real, and bank sync is off." \
-            "Built from ${HEAD_SHA::7}. Remove the \`preview\` label to stop it early.")
+            "Built from ${HEAD_SHA::7}. Add \`needs_preview\` again for a fresh one.")
           echo "$body" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "$PR" ]; then gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"; fi
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"
+            # Done with the label, so adding it again later asks for a new preview. (Changes made with this token
+            # don't start workflows, so this doesn't trigger anything.)
+            gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label needs_preview || true
+          fi
 
       - name: Keep it up
         run: |
@@ -145,18 +150,10 @@ jobs:
             sleep 30
           done
 
-      - name: Take the label off
+      - name: Say it ended
         if: always() && env.PR != ''
         run: |
+          # If it failed before the label came off, take it off so adding it again retries.
+          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label needs_preview 2>/dev/null || true
           if [ -n "${URL:-}" ]; then gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "Preview at $URL has ended."; fi
-          gh pr edit "$PR" --repo "$GITHUB_REPOSITORY" --remove-label preview || true
 
-  # Removing the label: join the preview's group, which cancels it (its last step still says it ended).
-  stop:
-    if: github.event.action == 'unlabeled' && github.event.label.name == 'preview'
-    concurrency:
-      group: preview-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Stopped the preview for #${{ github.event.pull_request.number }}."
