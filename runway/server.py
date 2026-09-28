@@ -757,6 +757,14 @@ def api_category_move(conn, _q, body):
     return {"ok": True}
 
 
+def api_category_look(conn, _q, body):
+    try:
+        categories.set_look(conn, body.get("name") or "", body.get("icon"), body.get("color"))
+    except categories.CategoryError as e:
+        raise ApiError(str(e))
+    return {"ok": True}
+
+
 def api_category_remove(conn, _q, body):
     try:
         n = categories.remove(conn, body.get("name") or "", body.get("move_to") or None)
@@ -1552,6 +1560,7 @@ ROUTES = [
     ("POST", "/api/categories/rename", api_category_rename),
     ("POST", "/api/categories/remove", api_category_remove),
     ("POST", "/api/categories/move", api_category_move),
+    ("POST", "/api/categories/look", api_category_look),
     ("GET", "/api/cashflow", api_cashflow),
     ("GET", "/api/reports/spending", api_report_spending),
     ("GET", "/api/reports/income", api_report_income),

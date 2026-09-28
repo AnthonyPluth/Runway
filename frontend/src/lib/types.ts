@@ -37,6 +37,11 @@ export interface Category {
   path: string[];
   depth: number;
   top: string;
+  /** Its emoji and #rrggbb color: what you picked, or Runway's default for the name. */
+  icon?: string;
+  color?: string;
+  custom_icon?: string | null;
+  custom_color?: string | null;
   transactions?: number;
   [key: string]: unknown;
 }

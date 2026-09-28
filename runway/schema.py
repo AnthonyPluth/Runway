@@ -186,6 +186,8 @@ categories = Table(
     Column('is_transfer', Integer, server_default=text('0'), doc='excluded from spending (card payments, moves between own accounts)'),
     Column('is_income', Integer, server_default=text('0')),
     Column('parent', Text, doc='subcategories: name of the top-level category'),
+    Column('icon', Text, doc='an emoji you picked; NULL = the default for its name'),
+    Column('color', Text, doc='a #rrggbb color you picked; NULL = the default (a subcategory: its parent\'s)'),
 )
 
 rules = Table(
