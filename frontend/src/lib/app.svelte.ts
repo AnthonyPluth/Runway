@@ -15,10 +15,38 @@ export async function refreshState(): Promise<void> {
   app.state = await api<AppState>("/api/state", { keep: true });
 }
 
-/** Load the page's data again (after a change, or when a sync brings new data). */
+/** Load the page's data again (after a change, or when a sync brings new data). The page is drawn afresh, so this
+ *  also puts you back where you were on it (see keepScroll). */
 export function reload(): void {
+  const y = window.scrollY;
   newPage();
   app.version++;
+  keepScroll(y);
+}
+
+// Drawing a page afresh starts it at the top, and its data arrives a moment later, so the page grows back to its
+// length over a few frames. Keep scrolling back to where you were (or as near as the page allows) while it settles,
+// until you scroll or type yourself.
+let stopKeeping: (() => void) | null = null;
+export function keepScroll(y: number): void {
+  stopKeeping?.();
+  if (y <= 0) return;
+  let done = false;
+  const until = performance.now() + 2000;
+  const stop = () => {
+    done = true; stopKeeping = null;
+    for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) window.removeEventListener(ev, stop);
+  };
+  for (const ev of ["wheel", "touchstart", "keydown", "mousedown"]) window.addEventListener(ev, stop, { passive: true });
+  stopKeeping = stop;
+  const frame = () => {
+    if (done) return;
+    // as close as the page allows (it may have come back a little shorter, e.g. without the bar for selected rows)
+    const to = Math.min(y, document.documentElement.scrollHeight - window.innerHeight);
+    if (Math.abs(window.scrollY - to) > 1) window.scrollTo(0, to);
+    if (performance.now() < until) requestAnimationFrame(frame); else stop();
+  };
+  requestAnimationFrame(frame);
 }
 
 // ------------------------------------------------------------------------------------------ routing
