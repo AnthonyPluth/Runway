@@ -50,8 +50,8 @@
       d += `${started ? " L" : " M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
       started = true; prev = v;
     });
-    const first = s.values.findIndex((v) => v != null);
-    return { s, d, area: s.area && d ? `${d} L${x(n - 1)},${y(y0)} L${x(first)},${y(y0)} Z` : "" };
+    const first = s.values.findIndex((v) => v != null), last = s.values.findLastIndex((v) => v != null);
+    return { s, d, area: s.area && d ? `${d} L${x(last)},${y(y0)} L${x(first)},${y(y0)} Z` : "" };
   }));
 
   // Names at the line ends, nudged apart so they don't overlap (and slid back up if that pushed them off the bottom).

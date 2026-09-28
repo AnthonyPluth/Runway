@@ -50,6 +50,16 @@ class ReportTests(unittest.TestCase):
                        (tid, acct, day, amt, payee.upper(), payee, cat))
         return tid
 
+    def test_month_pace(self):
+        from datetime import date
+        p = reports.month_pace(self.c, date(2026, 9, 10))
+        self.assertEqual((p["month"], p["prev_month"], len(p["this"]), len(p["last"])), ("2026-09", "2026-08", 10, 31))
+        # Sep 1-10: groceries 120, fast food 12, restaurants 40 (the card payment and the hidden account don't count)
+        self.assertEqual(p["spent"], 172)
+        self.assertEqual((p["this"][4], p["this"][6]), (120, 132))
+        # August: 150 on the 5th, then a 20 refund on the 6th
+        self.assertEqual((p["last"][4], p["last_same_point"], p["last_total"]), (150, 130, 130))
+
     def test_spending_over_time(self):
         d = reports.spending_over_time(self.c, "2026-09", 3)
         self.assertEqual(d["months"], ["2026-07", "2026-08", "2026-09"])

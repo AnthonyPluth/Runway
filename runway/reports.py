@@ -232,3 +232,30 @@ def transactions(conn, start: str, end: str, category: str | None = None, mercha
         if len(out) >= limit:
             break
     return out
+
+
+def month_pace(conn, today: date) -> dict:
+    """Spending so far this month, day by day and added up, next to last month's, for the Overview.
+    `this` runs to today; `last` covers all of last month. Both count spending the way everything else here does."""
+    first = today.replace(day=1)
+    prev = first - relativedelta(months=1)
+    kinds = _Kinds(conn)
+    this_days, last_days = [0.0] * today.day, [0.0] * (first - prev).days
+    for r in _rows(conn, prev.isoformat(), (today + relativedelta(days=1)).isoformat()):
+        if kinds.kind(r) != "spend":
+            continue
+        d = date.fromisoformat(r["posted"][:10])
+        days = this_days if d >= first else last_days
+        days[d.day - 1] -= r["amount"]
+
+    def running(xs: list[float]) -> list[float]:
+        out, total = [], 0.0
+        for x in xs:
+            total += x
+            out.append(round(total, 2))
+        return out
+
+    this, last = running(this_days), running(last_days)
+    same_point = last[min(today.day, len(last)) - 1] if last else 0.0
+    return {"month": f"{first:%Y-%m}", "prev_month": f"{prev:%Y-%m}", "this": this, "last": last,
+            "spent": this[-1] if this else 0.0, "last_same_point": same_point, "last_total": last[-1] if last else 0.0}
