@@ -332,6 +332,48 @@ async function targetJson(page, url, token) {
   try { return JSON.parse(res.text); } catch (_) { return null; }
 }
 
+const TARGET_LEARNED = 3;   // addresses kept per kind of order, learned from target.com's own order pages
+
+function targetUrl(tpl, api, order) {
+  return tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(order));
+}
+
+// Where to read an order's items: what this browser learned from target.com's own pages first, then Runway's list.
+async function targetDetailTemplates(fromRunway) {
+  const { targetLearned = {} } = await store.get("targetLearned");
+  const out = {};
+  for (const kind of ["online", "store"]) out[kind] = [...new Set([...(targetLearned[kind] || []), ...((fromRunway || {})[kind] || [])])];
+  return out;
+}
+
+// An address target.com's order page used for this order, kept as a template ({order}, {key}) for the next ones.
+async function learnTargetDetail(kind, url, api, order) {
+  const tpl = url.split(encodeURIComponent(order)).join("{order}").split(order).join("{order}")
+    .replace(/([?&]key=)[^&]*/, "$1{key}");
+  if (!tpl.includes("{order}")) return;
+  const { targetLearned = {} } = await store.get("targetLearned");
+  const list = [tpl, ...(targetLearned[kind] || []).filter((t) => t !== tpl)].slice(0, TARGET_LEARNED);
+  await store.set({ targetLearned: { ...targetLearned, [kind]: list } });
+}
+
+// Reads one address for an order's details and sends it to Runway. True when Runway found the order's items in it.
+async function targetDetail(page, api, order, url) {
+  const data = await targetJson(page, url, api.token);
+  if (!data) return false;
+  return (await runway("/api/ext/target/order", { order_number: order, data })).read;
+}
+
+// The target.com addresses an order's page called for that order (waiting a little for it to make them).
+async function targetCallsFor(page, order) {
+  let urls = [];
+  for (let waited = 0; waited < 8000; waited += 1000) {
+    await sleep(1000);
+    urls = await page.run("calls", order);
+    if (urls.length && waited >= 2000) break;
+  }
+  return urls.slice(0, 8);
+}
+
 async function importTarget(progress, Page) {
   const start = await runway("/api/ext/start", { retailer: "target" });
   progress("Opening your Target orders…");
@@ -360,16 +402,37 @@ async function importTarget(progress, Page) {
           await sleep(PAUSE_MS);
         }
       }
+      // Each order's items: first from the addresses Runway names (and any this browser learned from target.com
+      // before), then, for orders those don't cover, by loading the order's own page and re-reading what it called.
+      const templates = await targetDetailTemplates(start.detail_urls);
+      const unread = [];
       let i = 0;
-      for (const { n, type } of need) {
-        progress(`Reading Target ${type === "STORE" ? "receipt" : "order"} ${++i} of ${need.length}…`);
-        for (const tpl of (start.detail_urls || {})[type === "STORE" ? "store" : "online"] || []) {
-          const url = tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(n));
-          const data = await targetJson(page, url, api.token);
-          if (!data) continue;
-          const r = await runway("/api/ext/target/order", { order_number: n, data });
-          if (r.read) break;
+      for (const order of need) {
+        progress(`Reading Target ${order.type === "STORE" ? "receipt" : "order"} ${++i} of ${need.length}…`);
+        let read = false;
+        for (const tpl of templates[order.type === "STORE" ? "store" : "online"]) {
+          if (await targetDetail(page, api, order.n, targetUrl(tpl, api, order.n))) { read = true; break; }
         }
+        if (!read) unread.push(order);
+        await sleep(PAUSE_MS);
+      }
+      i = 0;
+      for (const { n, type } of unread) {
+        const kind = type === "STORE" ? "store" : "online";
+        const tpl = (start.order_pages || {})[kind];
+        if (!tpl) continue;
+        progress(`Loading Target ${type === "STORE" ? "receipt" : "order"} ${++i} of ${unread.length}…`);
+        let read = false;
+        for (const learned of (await targetDetailTemplates(null))[kind]) {   // one learned from an earlier order here
+          if (!templates[kind].includes(learned) && await targetDetail(page, api, n, targetUrl(learned, api, n))) { read = true; break; }
+        }
+        if (!read) {
+          await page.navigate(tpl.replace("{order}", encodeURIComponent(n)));
+          for (const url of await targetCallsFor(page, n)) {
+            if (await targetDetail(page, api, n, url)) { read = true; await learnTargetDetail(kind, url, api, n); break; }
+          }
+        }
+        if (!read) await runway("/api/ext/target/order", { order_number: n, data: {} });   // counts as a try, so it's not reloaded forever
         await sleep(PAUSE_MS);
       }
     } catch (e) {

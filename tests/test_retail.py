@@ -260,6 +260,17 @@ class TargetTests(Base):
         store = self.c.execute("SELECT channel, details FROM retail_orders WHERE order_number='5555-0123-4567-8901'").fetchone()
         self.assertEqual(tuple(store), ("store", 1))
 
+    def test_target_order_with_nowhere_to_read_it(self):
+        retail.target_history(self.c, self.HISTORY, "ONLINE")
+        n = "5555-0123-4567-8901"
+        for _ in range(retail.MAX_ATTEMPTS):
+            self.assertEqual(retail._need(self.c, "target", [n]), [n])
+            self.assertEqual(retail.target_order(self.c, n, {}), {"read": False})
+        self.assertEqual(retail._need(self.c, "target", [n]), [])           # given up on
+        row = self.c.execute("SELECT total, raw FROM retail_orders WHERE order_number=?", (n,)).fetchone()
+        self.assertEqual(row["total"], 12.49)                                # what the history said is kept
+        self.assertIn("STORE", row["raw"])
+
     def test_split_with_departments_when_theres_no_ai(self):
         retail.target_history(self.c, self.HISTORY, "ONLINE")
         self.tx("t1", "2024-09-04", -31.80, "TARGET 00012345 MINNEAPOLIS MN", "Shopping", "history")
@@ -314,6 +325,7 @@ class ExtensionApiTests(unittest.TestCase):
         code, r = self.req("POST", "/api/ext/start", {"retailer": "target"}, ext)
         self.assertEqual(code, 200)
         self.assertIn("store", r["detail_urls"])
+        self.assertEqual(set(r["order_pages"]), {"store", "online"})   # where to find an order's items otherwise
         self.assertEqual(self.req("POST", "/api/ext/start", {"retailer": "walmart"}, ext)[0], 400)
         code, r = self.req("POST", "/api/ext/target/history", {"purchase_type": "STORE", "data": {"orders": []}}, ext)
         self.assertEqual((code, r["more"]), (200, False))
