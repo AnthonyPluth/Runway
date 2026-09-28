@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, refreshState } from "$lib/app.svelte";
+  import { app, keepScroll, refreshState } from "$lib/app.svelte";
   import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
@@ -44,19 +44,23 @@
   async function load() {
     const mine = ++seq;
     const now = { ...f };
-    const qs = query(0);
+    // After a change with the same filters, load as many as were showing, so the list (and where you are in it) stays.
+    const same = !!list && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === applied[k]);
+    const qs = query(0, same ? Math.min(1000, Math.max(PAGE, list!.items.length)) : PAGE);
     try {
       const data = await api<TxList>(`/api/transactions?${qs}`);
       if (mine !== seq) return;   // a newer search has been asked for meanwhile
+      const y = window.scrollY;
       applied = now; list = data; count = data.total; listError = ""; loads++;
+      if (same) keepScroll(y);   // the list is drawn afresh; stay where you were in it
     } catch (err) { if (mine === seq) listError = (err as Error).message; }
   }
+  const PAGE = 100;
   load();
 
-  const PAGE = 100;
-  function query(offset: number) {
+  function query(offset: number, limit = PAGE) {
     const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope,
-      limit: String(PAGE), offset: String(offset) });
+      limit: String(limit), offset: String(offset) });
     if (review) qs.set("review", "1");
     return qs;
   }
