@@ -315,7 +315,8 @@ def _upgrade_legacy(sa_conn) -> None:
     for table in schema.metadata.sorted_tables:
         if table.name in baseline:
             for index in table.indexes:
-                index.create(sa_conn, checkfirst=True)
+                if all(c.name in baseline[table.name] for c in index.columns):   # later ones come with their migration
+                    index.create(sa_conn, checkfirst=True)
     if sa_conn.dialect.name == "postgresql":
         sa_conn.exec_driver_sql(schema.POSTGRES_INSTR)
 

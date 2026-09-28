@@ -3,6 +3,7 @@
 Bank and credit card connections (transactions, balances and card statements) are in plaidbank.py."""
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import os
@@ -74,6 +75,10 @@ def call(conn, path: str, body: dict) -> dict:
         raise PlaidError(f"Plaid: {msg}" + (f" ({code})" if code else ""), code) from e
     except urllib.error.URLError as e:
         raise PlaidError(f"Couldn't reach Plaid: {e.reason}") from e
+    except (OSError, http.client.HTTPException) as e:   # a timeout or a dropped connection while reading the reply
+        raise PlaidError(f"Couldn't reach Plaid: {str(e) or type(e).__name__}") from e
+    except ValueError as e:   # not JSON: a proxy's error page, or a reply cut short
+        raise PlaidError("Plaid sent back a reply Runway couldn't read.") from e
 
 
 # ------------------------------------------------------------------------------------------------ linking
@@ -123,24 +128,34 @@ def redirect_uri(conn) -> str | None:
     return public + "/plaid/oauth" if public.startswith("https://") else None
 
 
-def exchange(conn, public_token: str, institution: dict | None = None) -> str:
+KIND_PRODUCTS = {"bank": ["transactions"], "cards": ["liabilities"], "investments": ["investments"]}
+
+
+def exchange(conn, public_token: str, institution: dict | None = None, kind: str | None = None) -> str:
+    """Swap Link's public token for the connection's access token, and save it straight away: from here on the
+    connection exists (and bills) at Plaid, so it must never be lost to a failure after this point. `kind` is what
+    was linked ("bank", "cards" or "investments"), used when Plaid can't say which products the connection has."""
     res = call(conn, "/item/public_token/exchange", {"public_token": public_token})
     item_id, token = res["item_id"], res["access_token"]
     institution = institution or {}
+    fallback = KIND_PRODUCTS.get(kind or "", ["investments"])
+    conn.execute(
+        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
+        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, error=NULL",
+        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
+         ",".join(fallback)),
+    )
+    conn.commit()
     try:   # which products this connection has (investments, or transactions and/or liabilities)
         info = call(conn, "/item/get", {"access_token": token}).get("item") or {}
         # Optional products (card statements) can show up only as consented until they're first used.
         prods = sorted(set(info.get("products") or []) | set(info.get("billed_products") or []) | set(info.get("consented_products") or []))
     except PlaidError:
         prods = []
-    prods = [p for p in prods if p in ("investments", "transactions", "liabilities")] or ["investments"]
-    conn.execute(
-        "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
-        "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, products=excluded.products, error=NULL",
-        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
-         ",".join(prods)),
-    )
-    conn.commit()
+    prods = [p for p in prods if p in ("investments", "transactions", "liabilities")]
+    if prods:
+        conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(prods), item_id))
+        conn.commit()
     return item_id
 
 
@@ -208,8 +223,9 @@ def investment_candidates(conn, item_id: str) -> list[dict]:
     """Your investment accounts (from SimpleFIN) that a Plaid account at this institution could be."""
     item = conn.execute("SELECT institution_name FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     inst = item["institution_name"] if item else None
-    return [dict(a) for a in conn.execute(
-        "SELECT id, name, display_name, org, balance FROM accounts WHERE kind='investment' AND id NOT LIKE 'pl:%' ORDER BY name").fetchall()
+    return [dict(a) for a in conn.execute(   # linked_to: the Plaid account already linked to it, if any
+        "SELECT a.id, a.name, a.display_name, a.org, a.balance, (SELECT MIN(i.id) FROM inv_accounts i WHERE i.account_id=a.id) AS linked_to "
+        "FROM accounts a WHERE a.kind='investment' AND a.id NOT LIKE 'pl:%' ORDER BY a.name").fetchall()
         if _same_institution(a["org"] or a["name"], inst)]
 
 
@@ -230,8 +246,13 @@ def match_investment(conn, inv_id: str, target: str, today: date | None = None) 
         conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (own, inv_id))
         return {"ok": True, "account_id": own}
     if target and target != "ignore":
-        if not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind='investment' AND id NOT LIKE 'pl:%'", (target,)).fetchone():
+        acct = conn.execute("SELECT name, display_name FROM accounts WHERE id=? AND kind='investment' AND id NOT LIKE 'pl:%'",
+                            (target,)).fetchone()
+        if not acct:
             raise ValueError("Pick one of your investment accounts.")
+        if conn.execute("SELECT 1 FROM inv_accounts WHERE account_id=? AND id<>?", (target, inv_id)).fetchone():
+            raise ValueError(f"{acct['display_name'] or acct['name']} is already linked to another Plaid account. "
+                             "Unlink it there first.")
     conn.execute("DELETE FROM accounts WHERE id=?", (own,))   # it had its own account before: not any more
     conn.execute("UPDATE inv_accounts SET account_id=? WHERE id=?", (target or None, inv_id))
     return {"ok": True, "account_id": target or None}

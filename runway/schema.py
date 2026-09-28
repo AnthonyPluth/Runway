@@ -561,6 +561,7 @@ Index('equity_grants_company', equity_grants.c.company_id)
 Index('retail_items_order', retail_items.c.order_id)
 Index('retail_charges_order', retail_charges.c.order_id)
 Index('retail_charges_tx', retail_charges.c.tx_id)
+Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a Plaid account is one of your accounts, never two
 
 # Tables whose integer id is assigned by the database.
 AUTO_ID = {t.name for t in metadata.tables.values() if 'id' in t.c and t.c.id.autoincrement is True}
