@@ -39,35 +39,36 @@
   --sidebar-border: oklch(0.922 0 0);
 }
 
+/* Dark, in the manner of Apple's own apps: true black behind, raised gray surfaces, blue for actions. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #1c1c1e;
+  --card-foreground: #ffffff;
+  --popover: #2c2c2e;
+  --popover-foreground: #ffffff;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #ffffff;
+  --muted: #2c2c2e;
+  --muted-foreground: #8e8e93;
+  --accent: #2c2c2e;
+  --accent-foreground: #ffffff;
+  --destructive: #ff453a;
+  --border: rgb(84 84 88 / 55%);
+  --input: rgb(118 118 128 / 28%);
+  --ring: #0a84ff;
+  --chart-1: #0a84ff;
+  --chart-2: #30d158;
+  --chart-3: #ff9f0a;
+  --chart-4: #bf5af2;
+  --chart-5: #ff375f;
+  --sidebar: #0c0c0d;
+  --sidebar-foreground: #ffffff;
+  --sidebar-accent: #1c1c1e;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(84 84 88 / 40%);
 }
 
 @theme inline {
@@ -117,9 +118,26 @@
   --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;
   --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-8: #e66767; --cat-other: #6b6a66;
   --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0; --nw-6: #9085e9;
-  --flow-in: #4cc38a; --flow-out: #5b9bf0;
-  --good: #4cc38a; --warning: #f0b84b; --low: #f08a4b;
+  --flow-in: #30d158; --flow-out: #0a84ff;
+  --good: #30d158; --warning: #f0b84b; --low: #f08a4b;
 }
+
+/* Grouped lists, as in iOS Settings: a rounded surface of rows split by inset hairlines. `.cell` is a row;
+   rows with an icon set --inset to where the hairline should start. */
+@layer components {
+  .group-list { background: var(--card); border-radius: 0.875rem; overflow: hidden; }
+  .group-list > * + * { position: relative; }
+  .group-list > * + *::before {
+    content: ""; position: absolute; top: 0; right: 0; left: var(--inset, 1rem); border-top: 0.5px solid var(--border); pointer-events: none;
+  }
+  .cell { display: flex; align-items: center; gap: 0.75rem; min-height: 3.25rem; padding: 0.625rem 1rem; }
+  button.cell, a.cell { width: 100%; text-align: left; cursor: pointer; transition: background-color 120ms; }
+  button.cell:hover, a.cell:hover { background: rgb(255 255 255 / 4%); }
+  button.cell:active, a.cell:active { background: rgb(255 255 255 / 8%); }
+  .tile { background: var(--card); border-radius: 0.875rem; padding: 0.75rem 1rem; }
+}
+/* Cards lose their outline: surfaces stand apart from the black by their own shade. */
+[data-slot="card"] { border-color: transparent; box-shadow: none; }
 
 /* The "Saved ✓" flash autosave puts on a field (see lib/autosave.ts). */
 @layer components {

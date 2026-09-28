@@ -5,7 +5,7 @@
   import type { BudgetMonth } from "$lib/components/budget/types";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import type { TxList } from "$lib/components/transactions/types";
-  import * as Card from "$lib/components/ui/card";
+  import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { fmt, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
@@ -35,77 +35,65 @@
 </script>
 
 {#await data}
-  <div class="mb-6 h-72 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-72 animate-pulse rounded-2xl bg-card"></div>
 {:then [pace, budget, latest]}
   {@const diff = pace.spent - pace.last_same_point}
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
     .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
   {@const c = chart(pace)}
-  <h2 class="mt-8 mb-3 text-lg font-semibold tracking-tight">This month</h2>
-  <div class="mb-6 grid gap-6 lg:grid-cols-5">
-    <Card.Root class="lg:col-span-3">
-      <Card.Header>
-        <Card.Description>Spent so far in {monthShort(pace.month)}</Card.Description>
-        <Card.Title class="text-2xl tabular-nums">{fmt(pace.spent)}</Card.Title>
-        <p class={cn("text-sm tabular-nums", Math.abs(diff) < 1 ? "text-muted-foreground" : diff > 0 ? "text-amber-500" : "text-emerald-500")}>
+  <div class="flex flex-col gap-6">
+    <Group title="This month">
+      <div class="px-4 pt-3 pb-2">
+        <div class="text-[13px] text-muted-foreground">Spent so far in {monthShort(pace.month)}</div>
+        <div class="text-[28px] font-semibold tracking-tight tabular-nums">{fmt(pace.spent)}</div>
+        <p class={cn("text-[13px] font-medium tabular-nums", Math.abs(diff) < 1 ? "text-muted-foreground" : diff > 0 ? "text-amber-400" : "text-emerald-400")}>
           {#if Math.abs(diff) < 1}About the same as this point in {monthShort(pace.prev_month)}
           {:else}{diff > 0 ? "▲" : "▼"} {fmt0(Math.abs(diff))} {diff > 0 ? "more" : "less"} than this point in {monthShort(pace.prev_month)}{/if}
-          <span class="text-muted-foreground"> · {monthShort(pace.prev_month)} total {fmt0(pace.last_total)}</span>
+          <span class="font-normal text-muted-foreground"> · {monthShort(pace.prev_month)} total {fmt0(pace.last_total)}</span>
         </p>
-      </Card.Header>
-      <Card.Content>
-        <LineChart xs={c.xs} series={c.series} labels zero height={240} fmtY={fmt0} fmtTip={fmt} table={false} />
-      </Card.Content>
-    </Card.Root>
+        <div class="mt-2"><LineChart xs={c.xs} series={c.series} labels zero height={180} fmtY={fmt0} fmtTip={fmt} table={false} /></div>
+      </div>
+    </Group>
 
-    <div class="flex flex-col gap-6 lg:col-span-2">
-      <Card.Root class="gap-3">
-        <Card.Header><Card.Title>Budgets</Card.Title><Card.Action><a href="#budget" class="text-sm text-muted-foreground hover:text-foreground">See all</a></Card.Action></Card.Header>
-        <Card.Content>
-          {#if budgets.length}
-            <ul class="flex flex-col gap-3">
-              {#each budgets as b (b.name)}
-                <li>
-                  <button type="button" class="w-full cursor-pointer text-left" onclick={() => showTransactions({ category: b.name, month, scope: "budget" })}>
-                    <span class="flex items-center gap-2 text-sm">
-                      <CatIcon name={b.name} size={20} class="rounded-full" /><span class="truncate">{b.name}</span>
-                      <span class={cn("ml-auto tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{fmt0(b.spent)} of {fmt0(b.available ?? b.budget)}</span>
-                    </span>
-                    <span class="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-muted">
-                      <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={`${Math.min(100, b.pct * 100)}%`}
-                        style:background={b.pct > 1 ? undefined : catLook(b.name).color}></span>
-                    </span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          {:else}
-            <p class="text-sm text-muted-foreground">No budgets yet. <a class="font-medium text-foreground underline underline-offset-4" href="#budget">Set one</a> to see how you're tracking.</p>
-          {/if}
-        </Card.Content>
-      </Card.Root>
+    <Group title="Budgets" inset="3.75rem">
+      {#snippet action()}<a href="#budget" class="text-[13px] text-primary">See all</a>{/snippet}
+      {#each budgets as b (b.name)}
+        <button type="button" class="cell" onclick={() => showTransactions({ category: b.name, month, scope: "budget" })}>
+          <CatIcon name={b.name} size={32} solid />
+          <span class="min-w-0 flex-1">
+            <span class="flex items-baseline justify-between gap-2 text-[15px]">
+              <span class="truncate">{b.name}</span>
+              <span class={cn("tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{Math.round(b.pct * 100)}%</span>
+            </span>
+            <span class="mt-1.5 block h-1 overflow-hidden rounded-full bg-muted">
+              <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={`${Math.min(100, b.pct * 100)}%`}
+                style:background={b.pct > 1 ? undefined : catLook(b.name).color}></span>
+            </span>
+            <span class="mt-1 block text-[13px] text-muted-foreground tabular-nums">
+              {b.pct > 1 ? `${fmt0(b.spent - (b.available ?? b.budget!))} over` : `${fmt0((b.available ?? b.budget!) - b.spent)} left`} of {fmt0(b.available ?? b.budget)}</span>
+          </span>
+        </button>
+      {:else}
+        <p class="cell text-sm text-muted-foreground">No budgets yet.&nbsp;<a class="font-medium text-primary" href="#budget">Set one</a>&nbsp;to see how you're tracking.</p>
+      {/each}
+    </Group>
 
-      <Card.Root class="gap-3">
-        <Card.Header><Card.Title>Latest transactions</Card.Title><Card.Action><a href="#transactions" class="text-sm text-muted-foreground hover:text-foreground">See all</a></Card.Action></Card.Header>
-        <Card.Content>
-          <ul class="flex flex-col">
-            {#each latest.items as t (t.id)}
-              <li class="flex items-center gap-3 border-t py-2 first:border-t-0 first:pt-0">
-                <CatIcon name={t.category} size={28} class="rounded-full" />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-sm font-medium">{t.payee || t.description}</span>
-                  <span class="block text-xs text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>
-                </span>
-                <span class={cn("text-sm tabular-nums", t.amount > 0 && "font-semibold text-emerald-500")}>{fmt(t.amount)}</span>
-              </li>
-            {:else}
-              <li class="text-sm text-muted-foreground">Nothing yet.</li>
-            {/each}
-          </ul>
-        </Card.Content>
-      </Card.Root>
-    </div>
+    <Group title="Recent" inset="3.75rem">
+      {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
+      {#each latest.items as t (t.id)}
+        <div class="cell">
+          <CatIcon name={t.category} size={32} solid />
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-[15px]">{t.payee || t.description}</span>
+            <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>
+          </span>
+          <span class={cn("text-[15px] tabular-nums", t.amount > 0 && "text-emerald-400")}>{fmt(t.amount)}</span>
+        </div>
+      {:else}
+        <p class="cell text-sm text-muted-foreground">Nothing yet.</p>
+      {/each}
+    </Group>
   </div>
 {:catch}
-  <!-- The forecast above is the main thing; if this part can't load, it just isn't shown. -->
+  <!-- The forecast is the main thing; if this part can't load, it just isn't shown. -->
 {/await}

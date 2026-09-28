@@ -5,8 +5,7 @@
 
 <script lang="ts">
   import EventsList from "$lib/components/overview/EventsList.svelte";
-  import { Badge } from "$lib/components/ui/badge";
-  import * as Card from "$lib/components/ui/card";
+  import Group from "$lib/components/ui/group/Group.svelte";
   import type { UpcomingEvent } from "./types";
 
   // Upcoming (projected) items for the forecast account, already filtered like the list below. Click an amount to
@@ -15,8 +14,5 @@
 </script>
 
 {#if events.length}
-  <Card.Root class="mb-6 gap-3 border-dashed">
-    <Card.Header><Card.Title class="flex items-center gap-2">Upcoming <Badge variant="secondary">projected</Badge></Card.Title></Card.Header>
-    <Card.Content><EventsList {events} limit={4} accounts bind:all={showAll} /></Card.Content>
-  </Card.Root>
+  <Group title="Upcoming · projected" inset="3.75rem" class="mb-6"><EventsList {events} limit={4} accounts bind:all={showAll} /></Group>
 {/if}
