@@ -190,12 +190,39 @@ class ForecastTests(Base):
         drop = b["total"][days.index("2026-10-14")] - b["total"][days.index("2026-10-15")]
         self.assertAlmostEqual(drop, 10.0 - sum(e["amount"] for e in fc["events"] if e["date"] == "2026-10-15"), places=2)
 
-    def test_budget_covered_by_a_recurring_item_is_left_out(self):
+    def grocery_box(self, link=True):
+        """A $100 grocery box from checking on the 1st of each month (Oct 1, Nov 1 in the forecast)."""
         self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES (7, 'Grocery box','chk',-100,'monthly','2026-09-01')")
-        self.conn.execute("UPDATE transactions SET recurring_id=7 WHERE category='Groceries'")
-        self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Groceries', 500)")
+        self.tx("chk", "2026-09-01", -100.0, "GROCERY BOX", "Groceries")
+        if link:
+            self.conn.execute("UPDATE transactions SET recurring_id=7 WHERE description='GROCERY BOX'")
+
+    def test_a_budget_counts_its_recurring_payments_once(self):
+        # $500 on Groceries from checking includes the $100 box: $400 a month more, not $500 on top of it
+        self.grocery_box()
+        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'chk')")
+        fc = forecast.build(self.conn, TODAY, 60)
+        box = [e for e in fc["events"] if e.get("recurring_id") == 7]
+        self.assertEqual([(e["date"], e["category"]) for e in box], [("2026-10-01", "Groceries"), ("2026-11-02", "Groceries")])
+        daily = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "budget"}
+        self.assertEqual(daily["2026-10-15"], round(400 / 31, 2))     # October: 500 - 100
+        self.assertEqual(daily["2026-11-15"], round(400 / 30, 2))     # November: its box is Nov 2 (the 1st is a Sunday)
+        # September: $300 spent (the $100 box and $200 at the grocer), $200 left over Sep 24-30
+        self.assertEqual(daily["2026-09-24"], round(200 / 7, 2))
+
+    def test_a_budget_its_recurring_payments_cover_adds_nothing(self):
+        self.grocery_box()
+        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 80, 'chk')")
         b = forecast.build(self.conn, TODAY, 60)["budget"]
-        self.assertEqual((b["used"], b["skipped"][0]["category"]), ([], "Groceries"))
+        self.assertEqual((b["used"], b["skipped"][0]), ([], {"category": "Groceries", "reason": "a recurring item already covers it"}))
+
+    def test_a_recurring_item_with_nothing_linked_yet_takes_its_category_from_what_it_matches(self):
+        self.grocery_box(link=False)
+        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'chk')")
+        fc = forecast.build(self.conn, TODAY, 60)
+        self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 7}, {"Groceries"})
+        daily = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "budget"}
+        self.assertEqual(daily["2026-10-15"], round(400 / 31, 2))     # counted once all the same
 
     def test_statement_you_entered_wins(self):
         key = self.cycle("cc")["statement_key"]

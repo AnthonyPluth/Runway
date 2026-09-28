@@ -300,7 +300,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     card_status: list[dict] = []
     unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
 
-    rec_cats: set[str] = set()
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
@@ -309,8 +308,13 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         cat_row = conn.execute(
             "SELECT category FROM transactions WHERE recurring_id=? AND category IS NOT NULL "
             "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1", (item["id"],)).fetchone()
-        if cat_row:
-            rec_cats.add(cat_row["category"])
+        if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
+            like = "%" + (item["match"] or item["name"] or "").lower().replace("%", "").replace("_", "") + "%"
+            cat_row = conn.execute(
+                "SELECT category FROM transactions WHERE account_id=? AND category IS NOT NULL AND length(?) > 4 "
+                "AND (lower(payee) LIKE ? OR lower(description) LIKE ?) "
+                "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1",
+                (item["account_id"], like, like, like)).fetchone()
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
         window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
@@ -432,7 +436,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i = min(range(len(series)), key=lambda k: series[k])
         return {"date": dates[i], "balance": series[i]}
 
-    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events, rec_cats)
+    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events)
 
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
@@ -498,10 +502,14 @@ def budget_plan(conn, today: date) -> list[dict]:
 
 
 def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash: list[dict], by_id: dict,
-                    card_status: list[dict], events: list[dict], rec_cats: set[str]) -> dict | None:
+                    card_status: list[dict], events: list[dict]) -> dict | None:
     """The forecast if you spend exactly your budgets: budgeted spending is charged day by day to each category's
     account; spending on cards is paid on each card's due date. Recurring items and statements that have already closed
-    stay as they are; estimated future statements are replaced by the budgeted charges."""
+    stay as they are; estimated future statements are replaced by the budgeted charges.
+
+    A budget includes its category's recurring payments: the ones the forecast already takes out of its accounts are
+    subtracted from it each month (this month: from what's left after what's been spent), so they aren't counted twice,
+    and only the rest is spread over the days. A budget they cover entirely adds nothing."""
     plan = budget_plan(conn, today)
     if not plan or not cash:
         return None
@@ -510,21 +518,34 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))   # account -> date -> amount
     used, skipped = [], []
     changes: list[dict] = []   # what this scenario takes out of the forecast's accounts, day by day (for the table)
+    # The recurring payments the forecast takes out of its accounts, by category and month (from today on).
+    recurring: dict[tuple[str, str], float] = defaultdict(float)
+    for e in events:
+        if e["kind"] == "recurring" and e["amount"] < 0 and e["account_id"] in cash_ids and e.get("category"):
+            recurring[(e["category"], e["date"][:7])] += -e["amount"]
+    this_month = today.isoformat()[:7]
     for p in plan:
-        if set(p["names"]) & rec_cats:
-            skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
-            continue
         acct = p["pay_with"] or p["usual"] or cash[0]["id"]
         if acct not in cash_ids and acct not in cards:
             skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
             continue
+        covered = lambda month: sum(recurring.get((n, month), 0.0) for n in p["names"])   # noqa: E731
+
+        def left(month: str) -> float:
+            """The month's budget not already covered by its recurring payments (this month: nor spent)."""
+            return max(0.0, p["amount"] - (p["spent"] if month == this_month else 0.0) - covered(month))
+        months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
+        if all(left(m) < 0.005 for m in months if m != this_month) and any(covered(m) for m in months):
+            skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
+            continue
         for i in range(1, horizon_days + 1):
             d = today + timedelta(days=i)
             dim = calendar.monthrange(d.year, d.month)[1]
-            if (d.year, d.month) == (today.year, today.month):   # this month: whatever's left, over the days left
-                per_day = max(0.0, p["amount"] - p["spent"]) / (dim - today.day)
+            month = d.isoformat()[:7]
+            if month == this_month:   # this month: whatever's left, over the days left
+                per_day = left(month) / (dim - today.day)
             else:
-                per_day = p["amount"] / dim
+                per_day = left(month) / dim
             spend[acct][d.isoformat()] += per_day
             if acct in cash_ids and per_day > 0.005:
                 changes.append({"date": d.isoformat(), "account_id": acct, "kind": "budget", "category": p["category"],
