@@ -94,6 +94,22 @@ const HIDDEN_RULE = 7101;
 const STORE_HOSTS = ["amazon.com", "target.com", "carta.com"];
 const STORE_MATCHES = ["https://www.amazon.com/*", "https://www.target.com/*", "https://*.carta.com/*"];
 
+// The only places a store page may be sent or fetch from, whatever an address came from (Runway's replies, a store's
+// own pages): a Runway that isn't yours, or someone pretending to be it, can't point the extension at another site
+// with your store sign-in, or at a javascript: address.
+function storeUrl(url) {
+  let u;
+  try { u = new URL(url); } catch (_) { u = null; }
+  const host = u && u.hostname;
+  if (!u || u.protocol !== "https:" || u.username || u.password ||
+      !(["www.amazon.com", "www.target.com", "api.target.com", "carta.com"].includes(host) || host.endsWith(".carta.com"))) {
+    throw new Error(`Runway won't read ${String(url).slice(0, 80)}: it isn't an Amazon, Target or Carta address.`);
+  }
+  return u.href;
+}
+// A page command that goes somewhere (fetch, go) is only ever sent to a store address.
+const checkedArgs = (cmd, args) => (cmd === "fetch" || cmd === "go" ? [storeUrl(args[0]), ...args.slice(1)] : args);
+
 class HiddenUnavailable extends Error {}
 
 function waitForLoad(tabId, timeoutMs = 45000) {
@@ -120,14 +136,14 @@ async function inPage(tabId, func, args = [], world = "ISOLATED") {
 // A background tab (not focused), closed afterwards unless you need to sign in there.
 class TabPage {
   static async open(url) {
-    const tab = await chrome.tabs.create({ url, active: false });
+    const tab = await chrome.tabs.create({ url: storeUrl(url), active: false });
     const loaded = await waitForLoad(tab.id).catch(async (e) => { await closeTab(tab.id); throw e; });
     return new TabPage(loaded);
   }
   constructor(tab) { this.tab = tab; this.hidden = false; this.keep = false; }
   get url() { return this.tab.url || ""; }
-  run(cmd, ...args) { const [func, world] = PAGE_COMMANDS[cmd]; return inPage(this.tab.id, func, args, world); }
-  async navigate(url) { await chrome.tabs.update(this.tab.id, { url }); this.tab = await waitForLoad(this.tab.id); }
+  run(cmd, ...args) { const [func, world] = PAGE_COMMANDS[cmd]; return inPage(this.tab.id, func, checkedArgs(cmd, args), world); }
+  async navigate(url) { await chrome.tabs.update(this.tab.id, { url: storeUrl(url) }); this.tab = await waitForLoad(this.tab.id); }
   async signIn(site, robot = false) {
     this.keep = true;
     await chrome.tabs.update(this.tab.id, { active: true });
@@ -169,12 +185,18 @@ const frames = new Map();   // frame name -> HiddenPage
 chrome.runtime.onConnect.addListener((port) => {
   const page = frames.get(port.name);
   if (!page || (port.sender && port.sender.id !== chrome.runtime.id)) { port.disconnect(); return; }
+  // Only the hidden frame itself, not a frame a store page makes inside it with the same name (frame.js refuses
+  // those too): the frame keeps its id as it loads one page after another.
+  const frameId = port.sender && port.sender.frameId;
+  if (page.frameId === undefined) page.frameId = frameId;
+  if (frameId !== page.frameId) { port.disconnect(); return; }
   page.attach(port);
 });
 
 // A store page in a hidden frame. frame.js in it answers over a port, a new one each time the frame loads a page.
 class HiddenPage {
   static async open(url) {
+    url = storeUrl(url);
     const page = new HiddenPage(`runway-hidden-${crypto.randomUUID()}`);
     frames.set(page.name, page);
     const ready = page.loaded();
@@ -213,6 +235,7 @@ class HiddenPage {
     });
   }
   async run(cmd, ...args) {
+    args = checkedArgs(cmd, args);
     for (let attempt = 0; ; attempt++) {
       if (!this.port) await this.loaded().catch(() => { throw new HiddenUnavailable("the hidden page stopped answering"); });
       const id = ++this.next;
@@ -228,6 +251,7 @@ class HiddenPage {
     }
   }
   async navigate(url) {
+    url = storeUrl(url);
     const ready = this.loaded();
     await this.run("go", url);
     await ready.catch(() => { throw new HiddenUnavailable(`${url} didn't load in a hidden frame`); });
@@ -371,7 +395,8 @@ const targetPause = () => sleep(1500 + Math.random() * 2000);
 async function targetJson(page, url, token, { detail = false } = {}) {
   const headers = { Accept: "application/json" };
   let res = await page.run("fetch", url, { headers });
-  if ((res.status === 401 || res.status === 403) && token) {
+  // Target's sign-in token only ever goes to Target's own API.
+  if ((res.status === 401 || res.status === 403) && token && new URL(url).hostname === "api.target.com") {
     res = await page.run("fetch", url, { headers: { ...headers, Authorization: `Bearer ${token}` } });
   }
   if ((res.status === 401 || res.status === 403) && !detail) throw Object.assign(new Error("signin"), { signin: true });
@@ -578,6 +603,7 @@ async function importCarta(progress, Page) {
   const readData = async (url) => {
     if (seen.has(url) || CARTA_NEVER.test(url) || sent >= start.max_follow) return;
     seen.add(url);
+    try { storeUrl(url); } catch (_) { return; }   // only Carta's own addresses
     const res = await page.run("fetch", url, { headers: { Accept: "application/json" } });
     if (!res.ok || !res.text || !/^\s*[[{]/.test(res.text)) return;
     let data;

@@ -294,13 +294,19 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
             answers = ask_model(conn, groups, caller)
         except RuntimeError:  # error is recorded; these wait in Review
             answers = [(None, 0.0)] * len(groups)
+        # Categories that take money out of spending (transfers, card payments, Ignore): the model only ever
+        # suggests them. Its input includes text the other side of a payment writes (an ACH or Zelle memo), which
+        # could talk it into hiding a charge, so these always wait for you in Review.
+        hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
+        spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
         for group, (cat, conf) in zip(groups, answers):
             for t in group:
                 if cat is None:
                     conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
                     counts["review"] += 1
                     continue
-                review = 1 if conf < REVIEW_THRESHOLD else 0
+                review = 1 if (conf < REVIEW_THRESHOLD or cat in hides
+                               or (cat in spends_as_income and t["amount"] < 0)) else 0
                 conn.execute(
                     # Don't overwrite a choice you made while the model was thinking.
                     "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "

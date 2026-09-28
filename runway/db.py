@@ -351,6 +351,15 @@ def init(path: str | None = None) -> None:
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
 
+def number(value) -> float:
+    """float(), for a number someone typed or sent: "nan" and "inf" are refused (float() takes them, and one saved
+    would spoil every sum it's in, or stop the sync that uses it)."""
+    n = float(value)
+    if n != n or n in (float("inf"), float("-inf")):
+        raise ValueError(f"{value!r} isn't a number")
+    return n
+
+
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
     row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
     value = row["value"] if row and row["value"] is not None else None

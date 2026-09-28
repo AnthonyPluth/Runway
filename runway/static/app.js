@@ -2593,7 +2593,7 @@ async function renderCartaCard(card) {
 
 // ------------------------------------------------------------------------------------------ net worth
 const ASSET_KIND_LABEL = { home: "Home / property", vehicle: "Vehicle", other: "Other" };
-const assetLookupLink = (a) => a.url ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
+const assetLookupLink = (a) => a.url && /^https?:\/\//i.test(a.url) ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
   : a.kind === "home" && a.address ? { href: `https://www.zillow.com/homes/${encodeURIComponent(a.address)}_rb/`, label: "Zillow" }
   : a.kind === "vehicle" ? { href: "https://www.kbb.com/whats-my-car-worth/", label: "KBB" } : null;
 

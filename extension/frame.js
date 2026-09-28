@@ -1,7 +1,9 @@
 // Runs only in the extension's own hidden frames (it names them "runway-hidden-…"), never in a store tab you have
 // open: it answers the extension's requests (page.js) with this page's own sign-in, as a tab would.
 (() => {
-  if (window.top === window || !/^runway-hidden-/.test(window.name) || window.__runwayFrame) return;
+  // The extension's frame sits right in its hidden page; a frame the store's page makes inside it (even one named
+  // the same) isn't it.
+  if (window.top === window || window.parent !== window.top || !/^runway-hidden-/.test(window.name) || window.__runwayFrame) return;
   window.__runwayFrame = true;
   const port = chrome.runtime.connect({ name: window.name });
   port.onMessage.addListener(async (msg) => {

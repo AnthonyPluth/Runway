@@ -35,6 +35,8 @@ import urllib.request
 
 import jwt
 
+from . import secretbox
+
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
 MAX_PENDING = 10000        # unfinished sign-ins kept at once (a few MB at most)
@@ -229,7 +231,7 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
     now = time.time()
     conn.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires, id_token) VALUES (?,?,?,?,?,?,?)",
                  (_hash(token), who["sub"], who["email"], who["name"], now, now + c["session_days"] * 86400,
-                  tokens.get("id_token")))
+                  secretbox.encrypt(tokens.get("id_token"))))   # it carries who you are: kept encrypted like the other secrets
     remember_user(conn, who["sub"], who["email"], who["name"], info.get("given_name"), now)
     return token, safe_next(row["next"])
 
@@ -370,7 +372,10 @@ def logout(conn, token: str | None) -> str:
     id_token = None
     if token:
         row = conn.execute("SELECT id_token FROM auth_sessions WHERE token_hash=?", (_hash(token),)).fetchone()
-        id_token = row["id_token"] if row else None
+        try:
+            id_token = secretbox.decrypt(row["id_token"]) if row else None
+        except secretbox.SecretError:
+            id_token = None   # only a hint for the provider's sign-out page
         conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (_hash(token),))
     conn.execute("DELETE FROM auth_sessions WHERE expires < ?", (time.time(),))
     c = config()

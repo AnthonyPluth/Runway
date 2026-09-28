@@ -56,13 +56,20 @@ def note(conn, t: dict) -> str | None:
     return mid
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Logos come from plaid.com only (see refresh); a redirect could point anywhere, so none is followed."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _download(url: str, opener=None) -> tuple[bytes, str] | None:
     req = urllib.request.Request(url, headers={"User-Agent": "Runway", "Accept": "image/png,image/*"})
     try:
         if opener:
             resp = opener(req)
         else:
-            resp = urllib.request.urlopen(req, timeout=8, context=ssl.create_default_context())
+            resp = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+                                               _NoRedirects()).open(req, timeout=8)
         with resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = resp.read(MAX_LOGO + 1)
