@@ -4,6 +4,7 @@ Yahoo's closes are split-adjusted, so we also keep each ticker's split history t
 prices that were actually quoted on the day (needed to value the share counts you really held then)."""
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import ssl
@@ -85,7 +86,17 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
         try:
             rows, splits, info = fetch(t, start, date.today())
             ok = 1 if rows else 0
-        except (urllib.error.URLError, ValueError, OSError):
+        except urllib.error.HTTPError as e:
+            if e.code == 429 or e.code >= 500:   # the service, not the ticker: try it again next time
+                failed.append(t)
+                if e.code == 429:   # rate-limited: asking about the rest now only prolongs it
+                    break
+                continue
+            rows, splits, info, ok = [], [], {}, 0
+        except (urllib.error.URLError, OSError, http.client.HTTPException):   # no connection: nothing learned about it
+            failed.append(t)
+            continue
+        except ValueError:
             rows, splits, info, ok = [], [], {}, 0
         conn.executemany("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
                          "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", [(t, *r) for r in rows])

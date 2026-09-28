@@ -694,6 +694,16 @@ class SimpleFinStoreTests(Base):
         self.assertEqual(simplefin.store_payload(self.conn, p4, date(2026, 9, 1)), [])
         self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id='A1|p10'").fetchone()[0], "Rideshare & Taxi")
 
+    def test_a_hold_that_never_posts_is_cleared(self):
+        old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
+                             "description": "HOTEL HOLD", "pending": True}])
+        simplefin.store_payload(self.conn, old, date(2026, 8, 1))
+        # Weeks later the hold is gone from the bank; routine syncs only re-read the last 14 days.
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 8, 20))   # a sync on Sep 3
+        self.assertTrue(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())   # 24 days: could still post
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 9, 1))    # Sep 15: 36 days
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())
+
     def test_sync_chunks_backfill(self):
         calls = []
 
@@ -713,6 +723,43 @@ class SimpleFinStoreTests(Base):
         r = simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
         self.assertFalse(r["backfill"])
         self.assertEqual(calls, [(TODAY - timedelta(days=simplefin.REFRESH_DAYS), TODAY)])
+
+    def test_backfill_that_stops_part_way_is_finished_later(self):
+        calls, fail = [], {"at": 2}
+
+        def fake_fetch(url, start, end):
+            calls.append((start, end))
+            if len(calls) == fail["at"]:
+                raise simplefin.SimpleFinError("Couldn't reach SimpleFIN: timed out")
+            return self.payload([{"id": f"t{len(calls)}", "posted": ts(start), "amount": "-1", "description": "X"}])
+
+        with self.assertRaises(simplefin.SimpleFinError):
+            simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        calls.clear(); fail["at"] = 0
+        r = simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertTrue(r["backfill"])   # the middle is read, not just the last 14 days
+        self.assertEqual(calls[0][0], TODAY - timedelta(days=simplefin.BACKFILL_DAYS))
+        calls.clear()
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+
+    def test_a_bank_added_later_gets_its_history(self):
+        accts = ["A1"]
+
+        def fake_fetch(url, start, end):
+            return {"accounts": [{"id": a, "name": a, "balance": "1", "currency": "USD", "transactions": []} for a in accts]}
+
+        simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+        accts.append("B2")
+        simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
+        self.assertTrue(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+        self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
+
+    def test_simplefin_timeout_is_a_simplefin_error(self):
+        from unittest import mock
+        for exc in (TimeoutError("timed out"), ConnectionResetError()):
+            with mock.patch("urllib.request.urlopen", side_effect=exc), self.assertRaises(simplefin.SimpleFinError):
+                simplefin.fetch_accounts("https://u:p@h/simplefin", TODAY)
 
     def test_kind_guess(self):
         self.assertEqual(simplefin.guess_kind("Venture X"), "credit")

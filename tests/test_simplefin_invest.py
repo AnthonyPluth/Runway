@@ -298,6 +298,24 @@ class TrackedHoldingsTests(Base):
         portfolio.history(self.c, TODAY, days=3)
         self.assertEqual(round(portfolio.overview(self.c, "1M", TODAY)["total"], 2), round(63.5 * 210 + 83 * 100, 2))
 
+    def test_a_rise_before_prices_refresh_isnt_a_contribution(self):
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 60, "pct": 70}, {"ticker": "VTSAX", "shares": 80, "pct": 30}])
+        self.sync(20000, "2026-09-22")
+        # The next day's balance is up $600 from the market alone, but only Tuesday's closes are here yet.
+        self.sync(20600, "2026-09-23")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 0)
+        # Prices come in: it's all market, and the share counts haven't moved.
+        self.price("FXAIX", "2026-09-23", 210.0)
+        self.price("VTSAX", "2026-09-23", 100.0)
+        h = self.sync(20600, "2026-09-23")
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM manual_contributions").fetchone()[0], 0)
+        self.assertAlmostEqual(h["man:FXAIX"]["quantity"], 60)
+        # A Saturday balance is valued at Friday's close, which counts as that day's.
+        self.price("FXAIX", "2026-09-25", 210.0)
+        self.price("VTSAX", "2026-09-25", 100.0)
+        self.sync(21600, "2026-09-26")
+        self.assertEqual(self.c.execute("SELECT amount FROM manual_contributions").fetchone()[0], 1000.0)
+
     def test_drift_and_funds_without_ticker(self):
         # A collective trust with no ticker: enter its value; it absorbs what the priced fund doesn't explain.
         self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 50, "pct": 50}, {"name": "Stable Value CIT", "value": 10000, "pct": 50}])
