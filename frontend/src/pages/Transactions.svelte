@@ -147,7 +147,7 @@
     <NativeSelect aria-label="Category" class="max-sm:flex-1" bind:value={f.category} onchange={load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
-      {#each categories.list as c (c.name)}<option value={c.name}>{catLabel(c)}</option>{/each}
+      {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}
     </NativeSelect>
     {#if f.month}
       <span class="inline-flex items-center gap-1 rounded-full bg-primary/15 py-1 pr-1 pl-3 text-sm text-primary">

@@ -112,16 +112,16 @@
       </div>
     </section>
 
-    <div class="mb-6 grid gap-4 md:grid-cols-3">
+    <div class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4">
       {#each [
         { label: lowBad ? "Goes negative" : "Lowest point", sub: low ? fmtDow(low.date) : "", value: low ? fmt(low.balance) : "—", alert: lowBad, low: true, tone: "" },
         { label: `In ${span(days)}`, sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`, value: fmt(end), alert: false, low: false, tone: end - cashNow >= 0 ? "text-emerald-500" : "text-destructive" },
         { label: "Owed on cards", sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}`, value: fmt(owed), alert: false, low: false, tone: "" },
       ] as t (t.label)}
-        <Card.Root class={cn("gap-2", t.alert && "border-destructive")}>
+        <Card.Root class={cn("gap-2 max-md:py-4 max-md:last:col-span-2 max-md:[&>[data-slot]]:px-4", t.alert && "border-destructive")}>
           <Card.Header>
             <Card.Description>{t.label}</Card.Description>
-            <Card.Title class={cn("text-2xl tabular-nums", t.alert && "text-destructive")}>{t.value}</Card.Title>
+            <Card.Title class={cn("text-xl tabular-nums md:text-2xl", t.alert && "text-destructive")}>{t.value}</Card.Title>
           </Card.Header>
           <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.tone)}>{t.sub}</Card.Content>
         </Card.Root>
