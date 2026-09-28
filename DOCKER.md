@@ -29,9 +29,10 @@ notes listing what changed. Every push bumps the last number; put `#minor` in a 
 `feat:`) to bump the middle one, or `#major` for the first. The running version is shown at the bottom of Settings,
 and on the image as the `org.opencontainers.image.version` label.
 
-To try a pull request before merging it, add the `preview` label to it. A comment on the pull request soon gives a
-temporary `https://….trycloudflare.com` address and a password; that copy of Runway holds made-up sample data only
-(`python run.py demo`), and it's taken down after an hour (`.github/workflows/preview.yml`).
+To try a pull request before merging it, add the `needs_preview` label to it. A comment on the pull request soon
+gives a temporary `https://….trycloudflare.com` address and a password, and the label comes off again (add it again
+for a fresh preview). That copy of Runway holds made-up sample data only (`python run.py demo`), and it's taken down
+after an hour (`.github/workflows/preview.yml`).
 
 The repository is private, so the image is too. On the server, log in once with a GitHub token that has the
 `read:packages` scope (github.com/settings/tokens):
