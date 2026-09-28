@@ -51,7 +51,7 @@
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
-            <CategorySelect ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
+            <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
               onchange={(v) => v && post(`/api/retail/items/${i.id}`, { category: v }, (r) => (r.orders > 1 ? `Saved · used in ${r.orders} orders` : "Saved"))} />
             <span class="text-xs text-muted-foreground">{i.category ? ITEM_SOURCES[i.category_source ?? ""] ?? "" : "uses the transaction's category"}</span>
           </div>
