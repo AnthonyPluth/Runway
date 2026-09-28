@@ -86,9 +86,9 @@ class NotifyTests(unittest.TestCase):
 
     def test_subscribe_checks_the_key(self):
         with self.assertRaises(ValueError):
-            notify.subscribe(self.c, {"endpoint": "https://push.example/1", "keys": {"p256dh": webpush.b64u(b"\x04" + bytes(64)), "auth": "x"}}, "d", None)
-        notify.subscribe(self.c, {"endpoint": "https://push.example/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
-        self.assertEqual(self.c.execute("SELECT device FROM push_subscriptions WHERE endpoint='https://push.example/1'").fetchone()[0], "iPhone · app")
+            notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": webpush.b64u(b"\x04" + bytes(64)), "auth": "x"}}, "d", None)
+        notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
+        self.assertEqual(self.c.execute("SELECT device FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[0], "iPhone · app")
 
 
 if __name__ == "__main__":
