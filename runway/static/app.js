@@ -2712,7 +2712,7 @@ function runPlaidLink(token, itemId, kind, receivedRedirectUri) {
           toast(kind === "investments" ? "Connected. Pulling holdings and activity…" : "Connected. Reading accounts and statements…");
           const r = itemId
             ? await api(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
-            : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution } });
+            : await api("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution, kind } });
           toast(r.bank
             ? `Found ${r.accounts} account${r.accounts === 1 ? "" : "s"}` + (r.matched && r.matched.length ? ` · matched ${r.matched.join(", ")}` : "") +
               (r.statements ? ` · ${r.statements} card statement${r.statements === 1 ? "" : "s"}` : "")
