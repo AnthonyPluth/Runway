@@ -82,7 +82,9 @@
       {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each latest.items as t (t.id)}
         <div class="cell">
-          <CatIcon name={t.category} size={32} solid />
+          {#if t.logo}
+            <img class="size-8 shrink-0 rounded-lg bg-white object-contain p-0.5" src={t.logo} alt="" loading="lazy" width="32" height="32" />
+          {:else}<CatIcon name={t.category} size={32} solid />{/if}
           <span class="min-w-0 flex-1">
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
             <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>

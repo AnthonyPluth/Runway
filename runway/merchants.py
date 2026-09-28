@@ -106,7 +106,13 @@ class _SameRules(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+LAST_ERROR = "logodev_last_error"   # setting: why the last Logo.dev download failed (not "no such brand"), for Settings
+_why = ""   # why the last _download returned nothing
+
+
 def _download(url: str, opener=None) -> tuple[bytes, str] | None:
+    global _why
+    _why = ""
     req = urllib.request.Request(url, headers={"User-Agent": "Runway", "Accept": "image/png,image/*"})
     try:
         if opener:
@@ -117,9 +123,14 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
         with resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = resp.read(MAX_LOGO + 1)
-    except (urllib.error.URLError, OSError, ValueError):
+    except urllib.error.HTTPError as e:
+        _why = "" if e.code == 404 else f"HTTP {e.code}" + (" (the key was refused)" if e.code in (401, 403) else "")
+        return None
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        _why = f"couldn't connect ({getattr(e, 'reason', e)})"
         return None
     if ctype not in TYPES or not data or len(data) > MAX_LOGO:
+        _why = f"got {ctype or 'something'} instead of an image"
         return None
     return data, ctype
 
@@ -153,6 +164,8 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
             found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'] or '', safe='')}?{params}", opener) if m["name"] else None
         else:
             found = _download(m["logo_url"], opener) if _plaid_host(m["logo_url"]) else None
+        if m["id"].startswith((SITE, BRAND)):   # remember how Logo.dev last answered, for Settings
+            db.set_setting(conn, LAST_ERROR, None if found or not _why else f"{now:%b %d %H:%M}: {_why}")
         if found:
             data, ctype = found
             conn.execute("UPDATE merchants SET logo=?, logo_type=?, logo_checked=? WHERE id=?",
@@ -303,3 +316,18 @@ def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
             if name:
                 out[t["id"]] = by_name[name]
     return out
+
+
+def status(conn) -> dict:
+    """How many merchants have a logo, from Plaid and from Logo.dev; how many Logo.dev doesn't know or are still to be
+    fetched; and why the last Logo.dev download failed, if it did. For Settings."""
+    def count(where: str, *args) -> int:
+        return conn.execute(f"SELECT COUNT(*) FROM merchants WHERE {where}", args).fetchone()[0]
+    ld = "(id LIKE ? OR id LIKE ?)"
+    return {
+        "plaid": count(f"logo IS NOT NULL AND NOT {ld}", SITE + "%", BRAND + "%"),
+        "logodev": count(f"logo IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
+        "unknown": count(f"logo IS NULL AND logo_checked IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
+        "waiting": len(_todo(conn, 100000)),
+        "last_error": db.get_setting(conn, LAST_ERROR),
+    }
