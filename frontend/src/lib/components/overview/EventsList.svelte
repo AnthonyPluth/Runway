@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { reload } from "$lib/app.svelte";
+  import { app, reload } from "$lib/app.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -36,8 +36,15 @@
   <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
 {:else}
   {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
+    {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
     <div class="cell">
-      <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
+      {#if e.logo}
+        <img class="size-8 shrink-0 rounded-lg bg-white object-contain p-0.5" src={e.logo} alt="" loading="lazy" width="32" height="32" />
+      {:else if bank?.logo}
+        <img class="size-8 shrink-0 rounded-lg bg-white object-contain p-1" src={`/banks/${bank.logo}.svg`} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
+      {:else}
+        <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
+      {/if}
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           <span class="truncate">{e.name}</span>
