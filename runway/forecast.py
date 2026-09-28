@@ -349,7 +349,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         if pays >= today and info["remaining"] > 0.005:
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -info["remaining"], "kind": "card", "estimated": False,
-                           "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment"})
+                           "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["remaining"] > 0.005:
             warnings.append(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.")
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle
@@ -377,7 +377,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             elif est > 0.005:
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
-                               "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment"})
+                               "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
             warnings.append(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
