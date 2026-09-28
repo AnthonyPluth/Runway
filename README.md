@@ -303,6 +303,17 @@ DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # t
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
+The web app is moving to Svelte 5 + TypeScript in `frontend/` (Tailwind CSS, components in the shadcn-svelte style on
+Bits UI, Lucide icons). Pages move over one at a time; until then the new app lives at `/next/` and links to the
+classic app for pages it doesn't have yet. It needs Node 22:
+
+```bash
+cd frontend && npm ci                 # its packages, into frontend/node_modules
+npm run dev                           # http://localhost:5173/next/ (reloads as you edit; start Runway on 8765 too)
+npm run check                         # type-check it (CI runs this)
+npm run build                         # into runway/static/next/, which Runway serves at /next/ (the Docker image does this)
+```
+
 Changing the database: edit `runway/schema.py`, then generate a migration and check it over:
 
 ```bash
@@ -328,8 +339,9 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
-| `runway/brands.py`, `runway/static/banks/` | Which institution each account belongs to, which big merchant a transaction is from, and the bank logos |
-| `runway/static/` | The web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
+| `runway/brands.py`, `runway/static/banks/` | Which institution each account belongs to, and their logos |
+| `frontend/` | The new web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components |
+| `runway/static/` | The classic web app: `index.html`, `app.js`, `app.css`, the service worker (`sw.js`), manifest, fonts and icons |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
 | `data/` | Your database (not in Git) |

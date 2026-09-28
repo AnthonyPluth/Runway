@@ -11,3 +11,5 @@ tests
 .github
 docs
 postgres
+frontend/node_modules
+runway/static/next
