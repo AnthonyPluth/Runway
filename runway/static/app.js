@@ -2276,7 +2276,8 @@ async function renderEquityCard(card, refresh) {
   card.innerHTML = `<div class="card-head"><h2>Equity</h2><span class="card-head-actions">
       ${c.connected ? `<button class="btn" id="eq-sync">Sync from Carta</button>` : ""}
       <button class="btn primary" id="eq-new">Add a company</button></span></div>
-    <p class="help">${c.connected ? `From Carta${c.last_sync ? `, last read ${esc(fmtDate(c.last_sync))}` : ""}. ` : `Stock options, RSUs and shares. Enter them here, or <a href="#setup/connections">connect Carta</a>. `}
+    <p class="help">${c.web_last || c.last_sync ? `From Carta, last read ${esc(fmtDate([c.web_last, c.last_sync].filter(Boolean).sort().at(-1)))}. ` : ""}Stock options, RSUs and shares: enter them here, or read them from Carta with
+      Runway's browser extension (<a href="#setup/connections">Settings → Connections</a>). 
       Only what has vested counts toward net worth, at each company's latest share price (its 409A value, for a private company).</p>
     ${c.last_error ? `<div class="warn critical"><span class="icon">!</span><span>Carta: ${esc(c.last_error)}</span></div>` : ""}
     ${d.companies.length ? `<div class="tiles tiles-inline">
@@ -2399,12 +2400,16 @@ async function renderCartaCard(card) {
   const c = d.carta;
   const redirect = `${location.origin}/carta/callback`;
   card.innerHTML = `<h2>Carta <span class="muted small">optional: stock options, RSUs and shares</span></h2>
-    <p class="help">Runway reads your equity with Carta's Portfolio API. Carta approves each app that uses it: create one in Carta's
-      developer portal (Carta says customers can ask for access to their own data), add <code>${esc(redirect)}</code> as its redirect URI,
-      and enter its client id and secret here. An app you just made in the portal is a <b>Playground</b> app: it signs in to
-      Carta's test environment with dummy data, and needs Carta to grant it production access before it can read your real
-      account. <b>Carta's sample data</b> works without any of that, to see how it looks.
-      You can also enter grants by hand on the Net worth page.</p>
+    <p class="help">Runway's browser extension reads your equity from carta.com with the sign-in in your browser (the same extension
+      as Amazon and Target, <a href="#setup/connections">set up above</a>): click <b>Carta</b> in the extension. It reads only
+      what Carta shows you, and sends it only to Runway.</p>
+    <p class="small">${c.web_last ? `Last read from Carta ${esc(fmtDate(c.web_last))}.` : "Not read from Carta yet."}
+      ${c.web_capture ? `<a href="/api/carta/capture" download>Download what the extension read</a> (to see why something's missing).` : ""}</p>
+    ${c.web_error ? `<div class="warn"><span class="icon">!</span><span>${esc(c.web_error)}</span></div>` : ""}
+    <details class="pl-keys" ${c.connected || c.client_id ? "open" : ""}><summary class="small">Carta's API instead (needs Carta to approve your app)</summary>
+    <p class="help">Carta's Portfolio API works only for apps Carta approves. An app made in Carta's developer portal is a
+      <b>Playground</b> app (Carta's test environment, dummy data) until Carta grants it production access. Register
+      <code>${esc(redirect)}</code> as its redirect URI. <b>Carta's sample data</b> works without any of that, to see how it looks.</p>
     <div class="form-row">
       <label>Environment<select id="ct-env"><option value="production" ${c.env === "production" ? "selected" : ""}>Carta (your real account)</option>
         <option value="playground" ${c.env === "playground" ? "selected" : ""}>Carta Playground (developer portal test app)</option>
@@ -2414,8 +2419,9 @@ async function renderCartaCard(card) {
     <div class="form-row">
       ${c.connected ? `<span>Connected${c.last_sync ? ` · last read ${esc(fmtDate(c.last_sync))}` : ""}</span>
         <button class="btn" id="ct-sync">Sync now</button><button class="btn link" id="ct-off">Disconnect</button>`
-        : `<button class="btn primary" id="ct-connect">Connect Carta</button>`}</div>
-    ${c.last_error ? `<div class="warn critical"><span class="icon">!</span><span>${esc(c.last_error)}</span></div>` : ""}`;
+        : `<button class="btn" id="ct-connect">Connect Carta's API</button>`}</div>
+    ${c.last_error ? `<div class="warn critical"><span class="icon">!</span><span>${esc(c.last_error)}</span></div>` : ""}
+    </details>`;
   const env = () => { $$(".ct-prod", card).forEach((el) => { el.hidden = $("#ct-env", card).value === "mock"; }); };
   env();
   const save = () => api("/api/carta/settings", { method: "POST", body: { env: $("#ct-env", card).value, client_id: $("#ct-id", card).value,

@@ -11,7 +11,8 @@ const TARGET_ORDERS = "https://www.target.com/orders";
 const TARGET_API = "https://api.target.com/guest_order_aggregations/v1";
 const MAX_PAGES = 60;
 const PAUSE_MS = 400;        // between order pages, to go at a person's pace rather than hammer the store
-const RETAILERS = { amazon: "Amazon", target: "Target" };
+const RETAILERS = { amazon: "Amazon", target: "Target", carta: "Carta" };
+const EVERYDAY = ["amazon", "target"];   // "Import both"; Carta has its own button (and joins the daily import once it's worked)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const store = chrome.storage.local;
@@ -224,11 +225,87 @@ async function importTarget(progress) {
   return runway("/api/ext/finish", { retailer: "target" });
 }
 
+// ------------------------------------------------------------------------------------------------ Carta
+//
+// Carta's pages load your holdings from Carta's own data addresses. The extension notes which ones a page used,
+// reads them again (reads only, on carta.com), and sends the replies to Runway, which finds the grants in them.
+
+const CARTA_MAX_PAGES = 12;
+const CARTA_PAGE = /portfolio|holding|securit|equity|grant|option|certificate|compan|issuer/i;
+const CARTA_NEVER = /logout|log-out|sign-?out|delete|remove|cancel|accept|exercise|consent|download|export|upload|\.pdf/i;
+
+// Runs in the Carta page: the data addresses it has used, JSON embedded in the page, and links to other holdings pages.
+function cartaLook() {
+  const same = (u) => { try { return /(^|\.)carta\.com$/.test(new URL(u, location.href).hostname); } catch (_) { return false; } };
+  const used = performance.getEntriesByType("resource")
+    .filter((e) => (e.initiatorType === "fetch" || e.initiatorType === "xmlhttprequest") && same(e.name))
+    .map((e) => e.name);
+  const embedded = [...document.querySelectorAll('script[type="application/json"], script#__NEXT_DATA__')]
+    .map((s) => s.textContent).filter((t) => t && t.length < 3000000);
+  const links = [...document.querySelectorAll("a[href]")].map((a) => a.href).filter(same);
+  return { url: location.href, used: [...new Set(used)], embedded, links: [...new Set(links)],
+           signedOut: /\/(login|signin|accounts\/login)/i.test(location.pathname) };
+}
+
+async function importCarta(progress) {
+  const start = await runway("/api/ext/carta/start", {});
+  progress("Opening Carta…");
+  const tab = await openTab(start.start_url);
+  let keepTab = false;
+  const seen = new Set(), queue = [], pagesVisited = new Set();
+  let sent = 0;
+  const readData = async (url) => {
+    if (seen.has(url) || CARTA_NEVER.test(url) || sent >= start.max_follow) return;
+    seen.add(url);
+    const res = await inPage(tab.id, pageFetch, [url, { headers: { Accept: "application/json" } }]);
+    if (!res.ok || !res.text || !/^\s*[[{]/.test(res.text)) return;
+    let data;
+    try { data = JSON.parse(res.text); } catch (_) { return; }
+    const r = await runway("/api/ext/carta/data", { url, data });
+    sent++;
+    (r.follow || []).forEach((u) => queue.push(u));
+  };
+  try {
+    await sleep(4000);   // Carta's pages load their data after they appear
+    let look = await inPage(tab.id, cartaLook);
+    if (look.signedOut) {
+      keepTab = true;
+      await chrome.tabs.update(tab.id, { active: true });
+      throw new Error("Sign in to Carta in the tab that just opened, then import again.");
+    }
+    const pages = [look.url];
+    for (let p = 0; p < pages.length && p < CARTA_MAX_PAGES; p++) {
+      if (p > 0) {
+        progress(`Reading Carta page ${p + 1}…`);
+        await navigate(tab.id, pages[p]);
+        await sleep(3500);
+        look = await inPage(tab.id, cartaLook);
+      }
+      pagesVisited.add(look.url);
+      for (const [i, text] of look.embedded.entries()) {
+        try { await runway("/api/ext/carta/data", { url: `${look.url}#embedded-${i}`, data: JSON.parse(text) }); sent++; } catch (_) { /* not JSON */ }
+      }
+      for (const u of look.used) { progress(`Reading Carta (${sent} replies so far)…`); await readData(u); }
+      while (queue.length) await readData(queue.shift());
+      for (const l of look.links) {
+        const clean = l.split("#")[0];
+        if (CARTA_PAGE.test(clean) && !CARTA_NEVER.test(clean) && !pagesVisited.has(clean) && !pages.includes(clean)) pages.push(clean);
+      }
+    }
+  } finally {
+    if (!keepTab) await closeTab(tab.id);
+  }
+  progress("Saving your equity in Runway…");
+  return runway("/api/ext/carta/finish", {});
+}
+
 // ------------------------------------------------------------------------------------------------ running
 
 let running = null;
 
 function summary(r) {
+  if (r.grants !== undefined) return r.grants ? `${r.companies} compan${r.companies === 1 ? "y" : "ies"} · ${r.grants} grant${r.grants === 1 ? "" : "s"}`
+    : `No grants found in ${r.pages} replies (see Runway's Settings)`;
   const bits = [`${r.orders} orders`];
   if (r.matched) bits.push(`${r.matched} newly matched`);
   if (r.split) bits.push(`${r.split} split`);
@@ -243,10 +320,11 @@ async function run(which) {
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);   // a long import outlives the idle timer
     const { results = {} } = await store.get("results");
     try {
-      for (const retailer of which === "all" ? Object.keys(RETAILERS) : [which]) {
+      const everyday = which === "daily" ? [...EVERYDAY, ...(results.carta?.ok ? ["carta"] : [])] : EVERYDAY;
+      for (const retailer of which === "all" || which === "daily" ? everyday : [which]) {
         const progress = (message) => setStatus({ running: true, retailer, message });
         try {
-          const r = retailer === "amazon" ? await importAmazon(progress) : await importTarget(progress);
+          const r = await { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer](progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r) };
         } catch (e) {
           results[retailer] = { ok: false, at: new Date().toISOString(), message: e.message || String(e) };
@@ -278,7 +356,7 @@ async function scheduleAuto() {
   await chrome.alarms.clear("daily");
   if (auto) chrome.alarms.create("daily", { delayInMinutes: 5, periodInMinutes: 24 * 60 });
 }
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "daily") run("all"); });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === "daily") run("daily"); });
 chrome.runtime.onInstalled.addListener((d) => {
   scheduleAuto();
   if (d.reason === "install") chrome.runtime.openOptionsPage();
