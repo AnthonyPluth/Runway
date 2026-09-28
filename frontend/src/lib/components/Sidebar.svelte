@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, route } from "$lib/app.svelte";
+  import { Badge } from "$lib/components/ui/badge";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import ChartColumn from "@lucide/svelte/icons/chart-column";
@@ -57,18 +58,18 @@
 
 {#snippet link(item: { page: string; label: string; icon: typeof House }, badge?: number)}
   <a href={`#${item.page}`} aria-current={current === item.page ? "page" : undefined}
-    class={cn("flex shrink-0 items-center gap-2.5 rounded-[10px] px-3 py-2 text-[14.5px] text-subtle-foreground transition-colors hover:bg-muted hover:text-foreground",
-      current === item.page && "bg-muted font-medium text-foreground-strong")}>
-    <item.icon class="size-[18px]" strokeWidth={1.8} aria-hidden="true" />
+    class={cn("flex h-8 shrink-0 items-center gap-2 rounded-md px-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+      current === item.page && "bg-sidebar-accent font-medium text-sidebar-accent-foreground")}>
+    <item.icon class="size-4" aria-hidden="true" />
     <span>{item.label}</span>
-    {#if badge}<span class="ml-auto rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular">{badge}</span>{/if}
+    {#if badge}<Badge class="ml-auto tabular-nums">{badge}</Badge>{/if}
   </a>
 {/snippet}
 
-<aside class="flex shrink-0 gap-1 overflow-x-auto border-border bg-sidebar p-2 max-md:border-b md:sticky md:top-0 md:h-dvh md:w-60 md:flex-col md:border-r md:p-4">
-  <a href="#overview" class="mb-4 hidden items-center gap-2.5 px-2 text-[17px] font-semibold text-foreground-strong md:flex">
-    <img src="/logo.svg" alt="" width="28" height="28" />Runway
-    {#if s?.version}<span class="text-xs font-normal text-faint-foreground" title={`Runway ${s.version}`}>{s.version}</span>{/if}
+<aside class="flex shrink-0 gap-1 overflow-x-auto border-border bg-sidebar p-2 max-md:border-b md:sticky md:top-0 md:h-dvh md:w-64 md:flex-col md:border-r md:p-3">
+  <a href="#overview" class="mb-4 hidden items-center gap-2.5 px-2 font-semibold md:flex">
+    <img src="/logo.svg" alt="" width="24" height="24" />Runway
+    {#if s?.version}<span class="text-xs font-normal text-muted-foreground" title={`Runway ${s.version}`}>{s.version}</span>{/if}
   </a>
   <nav class="flex gap-1 md:flex-col" aria-label="Main">
     {#each main as item (item.page)}{@render link(item, item.page === "transactions" ? s?.review_count : undefined)}{/each}
@@ -79,18 +80,18 @@
   {@render link({ page: "setup", label: "Settings", icon: Settings })}
   <div class="mt-2 hidden items-center gap-2.5 border-t border-border px-2 pt-3 md:flex">
     {#if user}
-      <div class="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-[#1c2a40] text-xs font-bold text-primary-ink">{initials}</div>
+      <div class="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">{initials}</div>
     {/if}
     <div class="flex min-w-0 flex-1 flex-col">
-      {#if user}<span class="truncate text-[13.5px] font-medium" title={user.email ?? ""}>{userName}</span>{/if}
+      {#if user}<span class="truncate text-sm font-medium" title={user.email ?? ""}>{userName}</span>{/if}
       <span class="flex items-center gap-1.5 text-xs text-muted-foreground" title={sync.title} role="status">
-        <span class={cn("size-1.5 rounded-full bg-good", sync.tone === "busy" && "animate-pulse bg-primary", sync.tone === "bad" && "bg-destructive")}></span>
+        <span class={cn("size-1.5 rounded-full bg-emerald-500", sync.tone === "busy" && "animate-pulse bg-muted-foreground", sync.tone === "bad" && "bg-destructive")}></span>
         {sync.text}
       </span>
     </div>
     {#if user}
       <a href="/auth/logout" onclick={signOut} title="Sign out" aria-label="Sign out" class="text-muted-foreground hover:text-foreground">
-        <LogOut class="size-4" strokeWidth={1.8} />
+        <LogOut class="size-4" />
       </a>
     {/if}
   </div>

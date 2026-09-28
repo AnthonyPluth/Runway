@@ -27,42 +27,42 @@
 </script>
 
 {#if !events.length}
-  <p class="py-6 text-center text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on the <a class="text-primary-ink" href="#recurring">Recurring</a> tab.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on the <a class="font-medium text-foreground underline underline-offset-4" href="#recurring">Recurring</a> tab.</p>
 {:else}
   <div class="flex flex-col">
     {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
       {@const d = parseDate(e.date)}
-      <div class="flex items-center gap-3.5 border-t border-line py-2.5 first:border-t-0 first:pt-0.5">
+      <div class="flex items-center gap-3.5 border-t py-3 first:border-t-0 first:pt-0">
         <div class="flex w-10 shrink-0 flex-col items-center leading-tight">
-          <span class="text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground">{d.toLocaleDateString("en-US", { month: "short" })}</span>
-          <b class="text-base font-semibold text-foreground-strong tabular">{d.getDate()}</b>
+          <span class="text-xs uppercase text-muted-foreground">{d.toLocaleDateString("en-US", { month: "short" })}</span>
+          <b class="text-base font-semibold tabular-nums">{d.getDate()}</b>
         </div>
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span class="flex flex-wrap items-center gap-1.5 text-[14.5px] font-medium">
+          <span class="flex flex-wrap items-center gap-1.5 text-sm font-medium">
             {#if e.kind === "recurring"}<span class="text-muted-foreground" title="Recurring item">↻</span>{/if}
             {e.name}
             {#if e.estimated}
               <Badge title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
             {/if}
-            {#if e.overridden}<Badge variant="primary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
+            {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
           </span>
-          <span class="text-[12.5px] text-muted-foreground tabular">
+          <span class="text-xs text-muted-foreground tabular-nums">
             {#if e.kind === "card"}Card payment · {:else if e.category || e.kind === "recurring"}{e.category || "Recurring"} · {/if}
             <span class={e.balance_after < 0 ? "font-medium text-destructive" : ""}>balance&nbsp;{fmt(e.balance_after)}</span>
           </span>
         </div>
-        <div class="flex shrink-0 flex-col items-end text-[14.5px] tabular">
+        <div class="flex shrink-0 flex-col items-end text-sm tabular-nums">
           {#if e.key}
             <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
           {:else}{fmt(e.amount)}{/if}
           {#if e.overridden}
-            <Button variant="link" size="xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
+            <Button variant="link" size="sm" class="h-auto p-0" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
           {/if}
         </div>
       </div>
     {/each}
   </div>
   {#if events.length > shown.length}
-    <Button variant="link" size="xs" class="mt-1.5" onclick={() => (all = true)}>Show all {events.length}</Button>
+    <Button variant="outline" size="sm" class="mt-3" onclick={() => (all = true)}>Show all {events.length}</Button>
   {/if}
 {/if}

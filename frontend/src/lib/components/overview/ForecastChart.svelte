@@ -52,6 +52,7 @@
     return first ? fc.dates.indexOf(first) : -1;
   });
   const lowIndex = $derived(fc.dates.indexOf(fc.low.date));
+  const lowColor = $derived(lowIndex >= 0 && series[lowIndex] < 0 ? "var(--destructive)" : "var(--foreground)");
 
   // Labels get a plate behind them so the line doesn't run through; the "ends at" note moves (or goes) when it
   // would sit on the low-point label.
@@ -113,31 +114,31 @@
   {#if !n}
     <p class="py-6 text-center text-sm text-muted-foreground">No cash accounts in the forecast yet.</p>
   {:else}
-    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full select-none text-[11.5px]" role="img"
+    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full select-none text-xs" role="img"
       aria-label={`Projected balance over the next ${n - 1} days`}>
       <defs>
         <linearGradient id="fc-area" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0" stop-color="var(--primary)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--primary)" stop-opacity="0" />
+          <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
         </linearGradient>
       </defs>
       {#each ticks as t (t)}
-        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--grid)" />
-        <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--faint-foreground)">{shortMoney(t)}</text>
+        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
+        <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
       {/each}
       {#each months as ml (ml.i)}
-        <text x={x(ml.i)} y={H - 8} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--faint-foreground)">{ml.label}</text>
+        <text x={x(ml.i)} y={H - 8} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{ml.label}</text>
       {/each}
       {#if y0 < 0 && y1 > 0}<line x1={m.left} x2={W - m.right} y1={y(0)} y2={y(0)} stroke="var(--destructive)" stroke-dasharray="3 3" opacity="0.6" />{/if}
       {#each fc.dates as d, i (d)}
-        {#if eventsByDate[d]}<line x1={x(i)} x2={x(i)} y1={m.top + ih} y2={m.top + ih + 5} stroke="var(--faint-foreground)" />{/if}
+        {#if eventsByDate[d]}<line x1={x(i)} x2={x(i)} y1={m.top + ih} y2={m.top + ih + 5} stroke="var(--muted-foreground)" />{/if}
       {/each}
       <path d={`M${path(series)} L${x(n - 1)},${y(y0)} L${x(0)},${y(y0)} Z`} fill="url(#fc-area)" />
-      {#if alt}<path d={`M${path(alt)}`} fill="none" stroke="var(--good)" stroke-width="1.6" stroke-dasharray="5 4" />{/if}
-      <path d={`M${path(series)}`} fill="none" stroke="var(--primary)" stroke-width="2.2" stroke-linejoin="round" />
+      {#if alt}<path d={`M${path(alt)}`} fill="none" stroke="var(--chart-2)" stroke-width="1.6" stroke-dasharray="5 4" />{/if}
+      <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
       {#if estIndex > 0}
         {@const ex = x(estIndex)}
         {@const right = ex < W - m.right - 150}
-        <line x1={ex} x2={ex} y1={m.top - 6} y2={m.top + ih} stroke="var(--faint-foreground)" stroke-dasharray="2 3" />
+        <line x1={ex} x2={ex} y1={m.top - 6} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="2 3" />
         <text x={ex + (right ? 6 : -6)} y={m.top - 10} text-anchor={right ? "start" : "end"} fill="var(--muted-foreground)">
           {right ? "Estimated new spending from here →" : "← Estimated new spending from here"}
         </text>
@@ -146,20 +147,20 @@
         {@const lx = x(lowIndex)}
         {@const ly = y(series[lowIndex])}
         {@const anchor = lx > W - 140 ? "end" : lx < m.left + 80 ? "start" : "middle"}
-        <circle cx={lx} cy={ly} r="5.5" fill="var(--low)" stroke="var(--card)" stroke-width="2" />
+        <circle cx={lx} cy={ly} r="5.5" fill={lowColor} stroke="var(--card)" stroke-width="2" />
         {#if lowBox}<rect x={lowBox.x - 7} y={lowBox.y - 4} width={lowBox.width + 14} height={lowBox.height + 8} rx="6" fill="var(--popover)" />{/if}
         <text bind:this={lowLabel} x={lx + (anchor === "start" ? 10 : anchor === "end" ? -10 : 0)} y={ly + (ly > m.top + ih - 30 ? -14 : 24)}
-          text-anchor={anchor} fill="var(--low)" font-weight="600">Low {fmt0(series[lowIndex])} · {fmtDate(fc.low.date)}</text>
+          text-anchor={anchor} fill={lowColor} font-weight="600">Low {fmt0(series[lowIndex])} · {fmtDate(fc.low.date)}</text>
       {/if}
       {#if showEnd}
         {#if endBox}<rect x={endBox.x - 6} y={endBox.y - 3} width={endBox.width + 12} height={endBox.height + 6} rx="5" fill="var(--card)" />{/if}
-        <text bind:this={endNote} x={x(n - 1)} y={endY} text-anchor="end" fill="var(--subtle-foreground)">
+        <text bind:this={endNote} x={x(n - 1)} y={endY} text-anchor="end" fill="var(--muted-foreground)">
           {fmt0(series[n - 1])} by {fmtDate(fc.dates[n - 1])}
         </text>
       {/if}
       {#if hover != null}
-        <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--faint-foreground)" />
-        <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--primary)" stroke="var(--card)" stroke-width="2" />
+        <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
+        <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2" />
       {/if}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
         onmousemove={(e) => move(e.clientX)} onmouseleave={() => (hover = null)}
@@ -169,10 +170,10 @@
       <div bind:this={tipEl} class="pointer-events-none absolute z-10 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
         style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>
         <div class="text-muted-foreground">{fmtDow(fc.dates[hover])}</div>
-        <div class="text-base font-semibold text-foreground-strong tabular">{fmt(series[hover])}</div>
-        {#if alt}<div class="flex justify-between gap-4 text-good"><span>If you stick to your budget</span><span class="tabular">{fmt(alt[hover])}</span></div>{/if}
+        <div class="text-base font-semibold tabular-nums">{fmt(series[hover])}</div>
+        {#if alt}<div class="flex justify-between gap-4 text-emerald-500"><span>If you stick to your budget</span><span class="tabular-nums">{fmt(alt[hover])}</span></div>{/if}
         {#each eventsByDate[fc.dates[hover]] ?? [] as ev, j (j)}
-          <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular">{fmt(ev.amount)}</span></div>
+          <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular-nums">{fmt(ev.amount)}</span></div>
         {/each}
       </div>
     {/if}

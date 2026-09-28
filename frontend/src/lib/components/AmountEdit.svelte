@@ -23,12 +23,12 @@
 
 {#if editing}
   <input type="number" step="0.01" min="0" aria-label={label} bind:value use:focus data-editor
-    class="h-8 w-[110px] rounded-md border border-ring bg-background px-2 text-right text-sm tabular outline-none ring-[3px] ring-ring/25"
+    class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
     onkeydown={(e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); }}
     onblur={() => finish(true)} />
 {:else}
   <button type="button" {title} onclick={start}
-    class={cn("cursor-pointer rounded-md px-1 py-0.5 tabular hover:bg-muted", signed && amount > 0 && "font-semibold text-good", className)}>
+    class={cn("cursor-pointer rounded-md px-1 py-0.5 tabular-nums hover:bg-muted", signed && amount > 0 && "font-semibold text-emerald-500", className)}>
     {signed ? (amount > 0 ? "+" : "−") + fmt(Math.abs(amount)) : fmt(amount)}
   </button>
 {/if}
