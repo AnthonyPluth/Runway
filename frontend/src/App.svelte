@@ -5,7 +5,6 @@
   import * as Card from "$lib/components/ui/card";
   import { Toaster } from "svelte-sonner";
   import type { Component } from "svelte";
-  import Classic from "./pages/Classic.svelte";
 
   // Every page in pages/ is picked up here by name: pages/NetWorth.svelte is #networth. A page gets the route it
   // was opened at (`page`, e.g. "review" for Transactions) and the part after the slash (`sub`).
@@ -14,11 +13,12 @@
   const PAGES: Record<string, Page> = {};
   for (const [file, mod] of Object.entries(modules)) {
     const name = file.slice("./pages/".length, -".svelte".length).toLowerCase();
-    if (name !== "classic") PAGES[name] = mod.default;
+    PAGES[name] = mod.default;
   }
   // Routes that open another page: Review is a tab of Transactions, and #setup is Settings.
   const ALIASES: Record<string, string> = { review: "transactions", setup: "settings" };
-  const pageFor = (p: string) => PAGES[ALIASES[p] ?? p];
+  // Anything else (an old bookmark, a typo) opens Overview.
+  const pageFor = (p: string) => PAGES[ALIASES[p] ?? p] ?? PAGES.overview;
 </script>
 
 <div class="flex min-h-dvh flex-col md:flex-row">
@@ -36,7 +36,7 @@
       {:else if app.state}
         {#key `${route.page}/${route.sub}/${app.version}`}
           {@const Page = pageFor(route.page)}
-          {#if Page}<Page page={route.page} sub={route.sub} />{:else}<Classic page={route.page} sub={route.sub} />{/if}
+          <Page page={route.page} sub={route.sub} />
         {/key}
       {/if}
     </div>
