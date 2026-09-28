@@ -1,6 +1,7 @@
 <script lang="ts" module>
   // Survives redraws (a sync, an edited amount), like the classic app.
   let horizon: number | null = null;
+  let comingAll = $state(false);   // Coming up's "Show all"
 </script>
 
 <script lang="ts">
@@ -156,7 +157,7 @@
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <Group title="Coming up" inset="3.75rem"><EventsList events={fc.events} limit={6} /></Group>
+        <Group title="Coming up" inset="3.75rem"><EventsList events={fc.events} limit={6} bind:all={comingAll} /></Group>
         <Group title="Credit cards"><CardsTable cards={fc.cards} /></Group>
       </div>
       <ThisMonth />
