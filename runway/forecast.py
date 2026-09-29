@@ -18,6 +18,7 @@ import itertools
 from collections import defaultdict
 import statistics
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
@@ -82,7 +83,7 @@ def parse_dates(text: str, freq: str) -> list[tuple[int, int]]:
     return sorted(set(out))
 
 
-def _monthly_rule(freq: int, interval: int, dtstart: datetime, day: int, **kw) -> rrule:
+def _monthly_rule(freq: Literal[0, 1], interval: int, dtstart: datetime, day: int, **kw) -> rrule:
     """A rule on `day` of the month that falls back to the last day in shorter months (the 31st -> Feb 28)."""
     if day > 28:
         return rrule(freq, interval=interval, dtstart=dtstart, bymonthday=(day, -1), bysetpos=1, **kw)
@@ -424,8 +425,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         bal = a["balance"] + by_day.get(today.isoformat(), 0.0)   # anything due today that hasn't posted yet
         series = [round(bal, 2)]
         for i in range(1, horizon_days + 1):
-            d = (today + timedelta(days=i)).isoformat()
-            bal += by_day.get(d, 0.0) - rate
+            when = (today + timedelta(days=i)).isoformat()
+            bal += by_day.get(when, 0.0) - rate
             series.append(round(bal, 2))
         series_by_acct[a["id"]] = series
 
@@ -589,8 +590,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     by_day: dict[tuple, float] = defaultdict(float)
     for e in base:
         by_day[(e["account_id"], e["date"])] += e["amount"]
-    for acct, d, v in extra:
-        by_day[(acct, d)] += v
+    for acct, when, v in extra:
+        by_day[(acct, when)] += v
     total = [0.0] * len(dates)
     for a in cash:
         bal = a["balance"] + by_day.get((a["id"], dates[0]), 0.0)

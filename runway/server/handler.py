@@ -59,7 +59,7 @@ def content_security_policy(nonce: str | None = None) -> str:
             f"script-src {scripts}; "
             "style-src 'self' 'unsafe-inline'; "     # inline style attributes (and Plaid Link) need this
             "img-src 'self' data:; font-src 'self'; "
-            f"connect-src 'self' {PLAID_API}{' ' + monitoring.browser_origin() if monitoring.browser_origin() else ''}; "
+            f"connect-src 'self' {PLAID_API}{' ' + origin if (origin := monitoring.browser_origin()) else ''}; "
             f"frame-src {PLAID_ORIGINS}; worker-src 'self'; manifest-src 'self'; "
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -346,18 +346,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             return
         if method == "GET" and url.path == "/api/retail/extension.zip":
-            data = extension_zip()
-            if data is None:
+            zipped = extension_zip()
+            if zipped is None:
                 return self._json(404, {"error": "The extension isn't included with this copy of Runway."})
             self.send_response(200)
             self.send_header("Content-Type", "application/zip")
             self.send_header("Content-Disposition", 'attachment; filename="runway-orders-extension.zip"')
-            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Length", str(len(zipped)))
             self.send_header("Cache-Control", "no-store")
             self._security_headers()
             self.end_headers()
             if self.command != "HEAD":
-                self.wfile.write(data)
+                self.wfile.write(zipped)
             return
         if method == "POST" and url.path == "/api/restore":
             n = self._body_length(MAX_RESTORE_BODY)
@@ -366,12 +366,12 @@ class Handler(BaseHTTPRequestHandler):
             if not n:
                 return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
             try:
-                data = backup.load(self._read_body(n))
+                restored = backup.load(self._read_body(n))
             except ValueError as e:
                 return self._json(400, {"error": str(e)})
             # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
             # import): its rows would be mixed into the restored ones.
-            held = []
+            held: list[threading.Lock] = []
             for lock in (_sync_lock, _inv_lock, _retail_categorize_lock):
                 if not lock.acquire(blocking=False):
                     for h in held:
@@ -381,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
             failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
             try:
                 with db.session() as conn:
-                    counts = backup.restore(conn, data)
+                    counts = backup.restore(conn, restored)
                 with db.session() as conn:
                     sfinvest.repair_stored(conn)
             except (ValueError, sqlalchemy.exc.OperationalError) as e:
@@ -395,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
                 if "locked" in str(failed):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(failed)
-            return self._json(200, {"ok": True, "created": data.get("created"), "source": data.get("source"),
+            return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
         body = {}
         if method in ("POST", "DELETE"):

@@ -98,6 +98,12 @@ jobs:
         if: matrix.database == 'sqlite'
         run: |
           pipx run "ruff==0.16.9" check .
+      # Type-check (settings in pyproject.toml). mypy runs in the Poetry environment so it sees Runway's dependencies.
+      - name: Type-check (Python with mypy)
+        if: matrix.database == 'sqlite'
+        run: |
+          poetry run pip install --quiet "mypy==2.3.1" "types-python-dateutil==2.9.0.20260807"
+          poetry run mypy
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and make sure it builds.

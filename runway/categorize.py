@@ -160,7 +160,7 @@ def parse_ai_reply(text: str, categories: list[str], allow_new: bool = False) ->
     if items is None:
         return {}
     lookup = {c.lower(): c for c in categories}
-    out: dict[int, tuple[str | None, float]] = {}
+    out: dict[int, tuple] = {}
     for it in items:
         try:
             i = int(it["i"])
@@ -207,7 +207,7 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
     )
     ctx = ssl.create_default_context()
     try:
-        import certifi  # type: ignore
+        import certifi
 
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply

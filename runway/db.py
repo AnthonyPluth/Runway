@@ -87,7 +87,7 @@ def engine_url(path: str | None = None) -> str:
 
 def describe() -> str:
     if using_postgres():
-        u = urlsplit(database_url())
+        u = urlsplit(database_url() or "")
         return f"Postgres {u.hostname or 'local'}{':' + str(u.port) if u.port else ''}/{u.path.lstrip('/')}"
     return db_path()
 

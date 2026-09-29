@@ -111,7 +111,7 @@ def check_config() -> list[str]:
 def _ctx() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     try:
-        import certifi  # type: ignore
+        import certifi
 
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
@@ -364,7 +364,7 @@ def still_allowed(email: str | None) -> bool:
     c = config()
     if c["any_user"] or c["groups"]:
         return True
-    return bool(email) and email.lower() in c["emails"]
+    return bool(email and email.lower() in c["emails"])
 
 
 def logout(conn, token: str | None) -> str:
