@@ -68,6 +68,34 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(got, {"sf": ("p1", 0), "pl:p1": (None, 1), "pl:p2": ("p2", 0)})
         self.assertEqual(drift(self.path), [])
 
+    def test_churning_data_survives_0019(self):
+        # Rates, cards, tasks and point values from before plans, benefits and portal-only rates came in.
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0018")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("portal_only", {r[1] for r in c.exec_driver_sql("PRAGMA table_info(churn_rates)")})
+            c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on, currency, annual_fee) "
+                              "VALUES (1, 'Alex', 'citi', 'AAdvantage Platinum', '2025-11-01', 'airline', 99)")
+            c.exec_driver_sql("INSERT INTO churn_rates(card_id, category, multiplier) VALUES (1, 'Travel', 2), (1, 'Gas', 2)")
+            c.exec_driver_sql("INSERT INTO churn_currencies(key, name, cents) VALUES ('hotel', 'Hotel points', 0.7)")
+            c.exec_driver_sql("INSERT INTO churn_tasks(card_id, due_on, action) VALUES (1, '2026-10-01', 'Call')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            rates = [tuple(r) for r in conn.execute("SELECT card_id, category, multiplier, portal_only FROM churn_rates "
+                                                    "ORDER BY category")]
+            self.assertEqual(rates, [(1, "Gas", 2.0, 0), (1, "Travel", 2.0, 0)])
+            card = conn.execute("SELECT currency, plan, plan_remind_days, hide_upcoming FROM churn_cards").fetchone()
+            self.assertEqual(tuple(card), ("airline", "undecided", 14, 0))
+            self.assertIsNone(conn.execute("SELECT snooze_until FROM churn_tasks").fetchone()[0])
+            # A portal rate beside the normal one in the same category is allowed now
+            conn.execute("INSERT INTO churn_rates(card_id, category, multiplier, portal_only) VALUES (1, 'Travel', 10, 1)")
+            conn.execute("INSERT INTO churn_benefits(card_id, name) VALUES (1, 'Lounge')")
+        db.init(self.path)   # starting again changes nothing
+
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:

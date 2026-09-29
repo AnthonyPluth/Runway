@@ -1,11 +1,12 @@
-"""Churning: cards and bank accounts you and your partner opened for their bonuses, what they earn, points values, balances and to-dos."""
+"""Churning: cards and bank accounts you and your partner opened for their bonuses, what they earn, points values,
+balances, to-dos, plans for each card and its benefits."""
 from __future__ import annotations
 
 from datetime import date
 
 from sqlalchemy import select
 
-from ... import bank_bonuses, churning, db
+from ... import bank_bonuses, churn_benefits, churning, db, notify
 from ...models import Category
 from ..common import ApiError
 from .state import owner_choices
@@ -26,11 +27,16 @@ def _id(value) -> int:
 
 
 def api_churning(conn, _q, _b):
-    return churning.overview(conn, date.today(), owner_choices(conn))
+    out = churning.overview(conn, date.today(), owner_choices(conn))
+    # Churning's push alerts, with whether each is on, so the page can offer their switches.
+    prefs = notify.prefs(conn)
+    out["alert_prefs"] = [{**a, "on": bool(prefs.get(a["key"]))} for a in churning.ALERT_PREFS]
+    return out
 
 
 def api_churning_best(conn, q, _b):
-    """Open cards ranked for a purchase in a category (optionally one person's, optionally for an amount)."""
+    """Open cards ranked for a purchase in a category (optionally one person's, optionally for an amount). `portal=1`:
+    you'll book through the issuer's portal, so portal-only rates count."""
     category = (q.get("category", [""])[0] or "").strip() or None
     if category and not conn.execute(select(Category.name).where(Category.name == category)).fetchone():
         raise ApiError("Pick a category")
@@ -43,7 +49,9 @@ def api_churning_best(conn, q, _b):
             raise ApiError("The amount must be a number") from None
         if amount < 0:
             raise ApiError("The amount can't be negative")
-    return {"category": category, "cards": churning.best(conn, date.today(), category, owner, amount)}
+    portal = (q.get("portal", [""])[0] or "").strip().lower() in ("1", "true", "on", "yes")
+    return {"category": category, "portal": portal,
+            "cards": churning.best(conn, date.today(), category, owner, amount, portal)}
 
 
 def api_churn_card_add(conn, _q, body):
@@ -60,7 +68,38 @@ def api_churn_card_remove(conn, _q, _b, card_id):
 
 
 def api_churn_rate(conn, _q, body, card_id):
-    _churn(churning.set_rate, conn, _id(card_id), str(body.get("category") or ""), body.get("multiplier"))
+    _churn(churning.set_rate, conn, _id(card_id), str(body.get("category") or ""), body.get("multiplier"),
+           body.get("portal_only"))
+    return {"ok": True}
+
+
+def api_churn_plan_done(conn, _q, body, card_id):
+    return _churn(churning.plan_done, conn, _id(card_id), date.today(), (body or {}).get("on"))
+
+
+def api_churn_plan_undo(conn, _q, _b, card_id):
+    return _churn(churning.plan_undo, conn, _id(card_id))
+
+
+def api_churn_benefit_add(conn, _q, body, card_id):
+    return {"id": _churn(churn_benefits.save, conn, body or {}, _id(card_id))}
+
+
+def api_churn_benefit_update(conn, _q, body, benefit_id):
+    return {"id": _churn(churn_benefits.save, conn, body or {}, None, _id(benefit_id))}
+
+
+def api_churn_benefit_remove(conn, _q, _b, benefit_id):
+    churn_benefits.remove(conn, _id(benefit_id))
+    return {"ok": True}
+
+
+def api_churn_benefit_use(conn, _q, body, benefit_id):
+    return {"id": _churn(churn_benefits.use, conn, _id(benefit_id), body or {}, date.today())}
+
+
+def api_churn_benefit_unuse(conn, _q, body, benefit_id):
+    _churn(churn_benefits.unuse, conn, _id(benefit_id), body or {}, date.today())
     return {"ok": True}
 
 
@@ -89,6 +128,10 @@ def api_churn_task_update(conn, _q, body, task_id):
 def api_churn_task_remove(conn, _q, _b, task_id):
     churning.remove_task(conn, _id(task_id))
     return {"ok": True}
+
+
+def api_churn_task_snooze(conn, _q, body, task_id):
+    return {"snooze_until": _churn(churning.snooze_task, conn, _id(task_id), body or {}, date.today())}
 
 
 
