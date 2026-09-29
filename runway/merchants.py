@@ -26,6 +26,7 @@ import urllib.request
 from datetime import datetime, timedelta
 
 from . import brands, db
+from . import settings_keys as sk
 
 
 MAX_LOGO = 256 * 1024
@@ -35,9 +36,7 @@ PER_SYNC = 60          # logos fetched per sync at most
 REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in case it changed
 SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
 BRAND = "brand:"       # ... and by the merchant's name, when no website is known
-TOKEN_SETTING = "logodev_token"   # the Logo.dev publishable key (pk_...)
 LOGO_DEV = "https://img.logo.dev/"
-SECRET_SETTING = "logodev_secret"   # the Logo.dev secret key (sk_...), optional: Brand Search, for better name matches
 SEARCH = "https://api.logo.dev/search"
 _SITE_RX = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
 
@@ -74,12 +73,12 @@ def _logo_dev_url(url: str | None) -> bool:
 
 
 def configured(conn) -> bool:
-    return bool(db.get_setting(conn, TOKEN_SETTING))
+    return bool(db.get_setting(conn, sk.LOGODEV_TOKEN))
 
 
 def searchable(conn) -> bool:
     """Brand Search can be used: there's a secret key (and a publishable one, to fetch what it finds)."""
-    return configured(conn) and bool(db.get_setting(conn, SECRET_SETTING))
+    return configured(conn) and bool(db.get_setting(conn, sk.LOGODEV_SECRET))
 
 
 def key(name: str | None) -> str:
@@ -116,7 +115,7 @@ class _SameRules(urllib.request.HTTPRedirectHandler):
 
 
 # Settings: why the last Logo.dev lookup by website, and by name, failed (not "no such brand"), for Settings.
-LAST_ERROR = {"site": "logodev_last_error", "name": "logodev_last_error_name"}
+LAST_ERROR = {"site": sk.LOGODEV_LAST_ERROR, "name": sk.LOGODEV_LAST_ERROR_NAME}
 _why = ""   # why the last _download returned nothing
 
 
@@ -156,7 +155,7 @@ def search(conn, name: str, opener=None) -> list[dict] | None:
     global _why
     _why = ""
     req = urllib.request.Request(f"{SEARCH}?{urllib.parse.urlencode({'q': name})}", headers={
-        "Authorization": f"Bearer {db.get_setting(conn, SECRET_SETTING)}", "Accept": "application/json", "User-Agent": "Runway"})
+        "Authorization": f"Bearer {db.get_setting(conn, sk.LOGODEV_SECRET)}", "Accept": "application/json", "User-Agent": "Runway"})
     try:
         resp = opener(req) if opener else urllib.request.build_opener(
             urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirects()).open(req, timeout=8)
@@ -224,7 +223,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     ago (when there's a Logo.dev key). Returns how many it got."""
     global _why
     now = datetime.now()
-    token = db.get_setting(conn, TOKEN_SETTING)
+    token = db.get_setting(conn, sk.LOGODEV_TOKEN)
     todo = _todo(conn, limit)
     got = 0
     refused: set[str] = set()   # kinds of Logo.dev lookup that failed this round: the rest of that kind wait for next time
@@ -463,7 +462,7 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
         mid = SITE + s
         row = conn.execute("SELECT logo FROM merchants WHERE id=?", (mid,)).fetchone()
         if not row or not row["logo"]:
-            params = urllib.parse.urlencode({"token": db.get_setting(conn, TOKEN_SETTING), "size": 64, "format": "png", "fallback": 404})
+            params = urllib.parse.urlencode({"token": db.get_setting(conn, sk.LOGODEV_TOKEN), "size": 64, "format": "png", "fallback": 404})
             found = _download(f"{LOGO_DEV}{s}?{params}", opener)
             if not found:
                 raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))

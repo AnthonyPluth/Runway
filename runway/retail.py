@@ -34,6 +34,7 @@ from datetime import date, datetime, timedelta
 from dateutil import parser as dateparser
 
 from . import categorize, db, splits
+from . import settings_keys as sk
 
 RETAILERS = ("amazon", "target")
 NAMES = {"amazon": "Amazon", "target": "Target"}
@@ -101,18 +102,18 @@ def item_key(title: str | None) -> str:
 def new_token(conn) -> str:
     """A new key for the browser extension (replacing any earlier one). Only a hash of it is kept."""
     token = "rwx_" + secrets.token_urlsafe(32)
-    db.set_setting(conn, "retail_token_hash", hashlib.sha256(token.encode()).hexdigest())
-    db.set_setting(conn, "retail_token_created", datetime.now().isoformat(timespec="seconds"))
+    db.set_setting(conn, sk.RETAIL_TOKEN_HASH, hashlib.sha256(token.encode()).hexdigest())
+    db.set_setting(conn, sk.RETAIL_TOKEN_CREATED, datetime.now().isoformat(timespec="seconds"))
     return token
 
 
 def remove_token(conn) -> None:
-    db.set_setting(conn, "retail_token_hash", None)
-    db.set_setting(conn, "retail_token_created", None)
+    db.set_setting(conn, sk.RETAIL_TOKEN_HASH, None)
+    db.set_setting(conn, sk.RETAIL_TOKEN_CREATED, None)
 
 
 def check_token(conn, authorization: str | None) -> bool:
-    want = db.get_setting(conn, "retail_token_hash")
+    want = db.get_setting(conn, sk.RETAIL_TOKEN_HASH)
     m = re.match(r"Bearer\s+(\S+)$", (authorization or "").strip())
     if not want or not m:
         return False
@@ -169,7 +170,7 @@ def _need(conn, retailer: str, numbers) -> list[str]:
 
 def since(conn, retailer: str) -> str:
     """The earliest date the extension should read back to this time."""
-    last = db.get_setting(conn, f"retail_last_{retailer}")
+    last = db.get_setting(conn, sk.retail_last(retailer))
     if last:
         start = datetime.fromisoformat(last).date() - timedelta(days=OVERLAP_DAYS)
     else:
@@ -566,9 +567,9 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
         else:
             left.append(it)
 
-    api_key = db.get_setting(conn, "openrouter_api_key")
-    if left and use_ai and api_key and (db.get_setting(conn, "retail_ai", "1") or "1") == "1":
-        model = db.get_setting(conn, "llm_model", categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    if left and use_ai and api_key and (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1":
+        model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
         cats = sorted(spend)
         subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
         examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
@@ -877,7 +878,7 @@ def finish(conn, retailer: str, caller=None, complete: bool = True, categorize_n
     if retailer not in RETAILERS:
         raise RetailError("Unknown store")
     if complete:
-        db.set_setting(conn, f"retail_last_{retailer}", datetime.now().isoformat(timespec="seconds"))
+        db.set_setting(conn, sk.retail_last(retailer), datetime.now().isoformat(timespec="seconds"))
     if not categorize_now:
         out = match_and_apply(conn)
         out["items"] = None
@@ -902,7 +903,7 @@ def categorize_and_apply(conn, retailer: str, caller=None) -> dict:
 def _summarize(conn, retailer: str, out: dict) -> dict:
     out["orders"] = conn.execute("SELECT COUNT(*) FROM retail_orders WHERE retailer=?", (retailer,)).fetchone()[0]
     out["unmatched"] = unmatched_count(conn, retailer)
-    db.set_setting(conn, f"retail_summary_{retailer}", json.dumps(out))
+    db.set_setting(conn, sk.retail_summary(retailer), json.dumps(out))
     return out
 
 
@@ -977,15 +978,15 @@ def candidates(conn, charge_id: str) -> list[dict]:
 
 
 def status(conn) -> dict:
-    out = {"token": bool(db.get_setting(conn, "retail_token_hash")), "token_created": db.get_setting(conn, "retail_token_created"),
-           "ai": (db.get_setting(conn, "retail_ai", "1") or "1") == "1", "stores": {}}
+    out = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
+           "ai": (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1", "stores": {}}
     for r in RETAILERS:
         counts = conn.execute(
             "SELECT COUNT(*) AS orders, SUM(CASE WHEN details=1 THEN 1 ELSE 0 END) AS read FROM retail_orders WHERE retailer=?",
             (r,)).fetchone()
         matched = conn.execute("SELECT COUNT(*) FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id "
                                "WHERE o.retailer=? AND c.tx_id IS NOT NULL", (r,)).fetchone()[0]
-        out["stores"][r] = {"name": NAMES[r], "last": db.get_setting(conn, f"retail_last_{r}"),
+        out["stores"][r] = {"name": NAMES[r], "last": db.get_setting(conn, sk.retail_last(r)),
                             "orders": counts["orders"] or 0, "read": counts["read"] or 0, "matched": matched,
                             "unmatched": unmatched_count(conn, r)}
     out["recent"] = db.rows(conn.execute(

@@ -10,6 +10,7 @@ import re
 from datetime import date, datetime, timedelta, UTC
 
 from . import db, plaidbank, secretbox
+from . import settings_keys as sk
 # Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
 from .plaidapi import HOSTS as HOSTS, PlaidError as PlaidError, base_url as base_url, call as call, configured as configured
 
@@ -58,7 +59,7 @@ def redirect_uri(conn) -> str | None:
     """Where banks that sign you in on their own site (OAuth: Chase, Capital One, ...) send you back to Runway.
     Needed on phones and in the installed app, where the bank can't open in a pop-up. It must be listed under
     Allowed redirect URIs in the Plaid Dashboard; without it, those banks only work from a computer's browser."""
-    explicit = db.get_setting(conn, "plaid_redirect_uri")
+    explicit = db.get_setting(conn, sk.PLAID_REDIRECT_URI)
     if explicit:
         return explicit
     public = (os.environ.get("RUNWAY_PUBLIC_URL") or "").rstrip("/")
@@ -79,7 +80,7 @@ def exchange(conn, public_token: str, institution: dict | None = None, kind: str
     conn.execute(
         "INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, env, products) VALUES (?,?,?,?,?,?) "
         "ON CONFLICT(item_id) DO UPDATE SET access_token=excluded.access_token, error=NULL",
-        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, "plaid_env", "production"),
+        (item_id, secretbox.encrypt(token), institution.get("institution_id"), institution.get("name"), db.get_setting(conn, sk.PLAID_ENV, "production"),
          ",".join(fallback)),
     )
     conn.commit()
@@ -352,10 +353,10 @@ def hide_simplefin_duplicates(conn, item_id: str) -> list[str]:
 
 def hide_all_duplicates(conn) -> list[str]:
     """Run the duplicate check for every Plaid connection, once (later changes are yours to make on the page)."""
-    if db.get_setting(conn, "dedupe_simplefin_v2"):
+    if db.get_setting(conn, sk.DEDUPE_SIMPLEFIN_V2):
         return []
     hidden = []
     for r in conn.execute("SELECT item_id FROM plaid_items WHERE COALESCE(products, 'investments') LIKE '%investments%'").fetchall():
         hidden += hide_simplefin_duplicates(conn, r["item_id"])
-    db.set_setting(conn, "dedupe_simplefin_v2", "1")
+    db.set_setting(conn, sk.DEDUPE_SIMPLEFIN_V2, "1")
     return hidden

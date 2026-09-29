@@ -15,6 +15,7 @@ import urllib.parse
 from datetime import date
 
 from . import carta, db
+from . import settings_keys as sk
 
 START_URL = "https://app.carta.com/"
 CARTA_HOSTS = re.compile(r"(^|\.)carta\.com$")
@@ -42,13 +43,13 @@ def carta_url(url: str) -> bool:
 
 
 def start(conn) -> dict:
-    db.set_setting(conn, "carta_web_capture", json.dumps([]))
+    db.set_setting(conn, sk.CARTA_WEB_CAPTURE, json.dumps([]))
     return {"start_url": START_URL, "max_follow": MAX_FOLLOW}
 
 
 def _capture(conn) -> list:
     try:
-        return json.loads(db.get_setting(conn, "carta_web_capture") or "[]")
+        return json.loads(db.get_setting(conn, sk.CARTA_WEB_CAPTURE) or "[]")
     except ValueError:
         return []
 
@@ -102,7 +103,7 @@ def ingest(conn, url: str, data) -> dict:
     blob = json.dumps(data)
     if size + len(blob) <= MAX_CAPTURE and not any(c["url"] == url for c in cap):
         cap.append({"url": url, "data": data})
-        db.set_setting(conn, "carta_web_capture", json.dumps(cap))
+        db.set_setting(conn, sk.CARTA_WEB_CAPTURE, json.dumps(cap))
     found: set = set()
     _links(data, found)
     _known(url, data, found)
@@ -219,7 +220,7 @@ def finish(conn) -> dict:
     """Save what was read: Carta's companies and grants replace the ones Carta sent before."""
     found = read(_capture(conn))
     if not found["grants"]:
-        db.set_setting(conn, "carta_web_last_error", "Runway didn't find any grants in what it read from Carta. Download what "
+        db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, "Runway didn't find any grants in what it read from Carta. Download what "
                                                       "it read (Settings -> Connections -> Carta) so the reading can be fixed.")
         return {"companies": 0, "grants": 0, "pages": len(_capture(conn))}
     today = date.today().isoformat()
@@ -236,6 +237,6 @@ def finish(conn) -> dict:
         carta._save_grant(conn, cid, g, raw)
     for gid in found["gone"]:   # canceled or expired since the last import
         conn.execute("DELETE FROM equity_grants WHERE id=? AND source='carta'", (gid,))
-    db.set_setting(conn, "carta_web_last", today)
-    db.set_setting(conn, "carta_web_last_error", None)
+    db.set_setting(conn, sk.CARTA_WEB_LAST, today)
+    db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, None)
     return {"companies": len(found["companies"]), "grants": len(found["grants"]), "pages": len(_capture(conn))}

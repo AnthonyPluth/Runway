@@ -12,8 +12,8 @@ import json
 from datetime import date
 
 from . import db, equity, forecast, networth
+from . import settings_keys as sk
 
-SETTING = "retirement_plan"
 MAX_ROWS = 20   # incomes, events or assets: plenty for one household, and a cap on what's stored
 
 # Numbers the plan keeps: (lowest, highest).
@@ -100,7 +100,7 @@ def clean(body: dict, today: date) -> dict:
 
 
 def saved(conn) -> dict | None:
-    raw = db.get_setting(conn, SETTING)
+    raw = db.get_setting(conn, sk.RETIREMENT_PLAN)
     if not raw:
         return None
     try:
@@ -113,10 +113,10 @@ def saved(conn) -> dict | None:
 def save(conn, body: dict | None, today: date | None = None) -> dict | None:
     """Keep the plan; None forgets it (back to Runway's own figures)."""
     if body is None:
-        db.set_setting(conn, SETTING, None)
+        db.set_setting(conn, sk.RETIREMENT_PLAN, None)
         return None
     plan = clean(body, today or date.today())
-    db.set_setting(conn, SETTING, json.dumps(plan, separators=(",", ":")))
+    db.set_setting(conn, sk.RETIREMENT_PLAN, json.dumps(plan, separators=(",", ":")))
     return plan
 
 
