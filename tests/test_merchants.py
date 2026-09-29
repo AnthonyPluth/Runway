@@ -1,7 +1,6 @@
 """Merchant logos: noted from Plaid, downloaded from Plaid (or the icon CDN for big names), served by Runway."""
 import io
 import os
-import sys
 import tempfile
 import unittest
 from datetime import date
@@ -9,8 +8,6 @@ from unittest import mock
 import urllib.error
 import urllib.parse
 import urllib.request
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, merchants, server
 

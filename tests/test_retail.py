@@ -1,7 +1,6 @@
 """Amazon and Target orders: reading what the browser extension sends, matching charges to transactions, and splitting."""
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -9,8 +8,6 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timedelta
 from unittest import mock
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, retail, splits
 

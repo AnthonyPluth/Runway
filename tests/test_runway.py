@@ -1,7 +1,6 @@
 import itertools
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,8 +9,6 @@ import urllib.request
 from unittest import mock
 from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits
 

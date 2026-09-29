@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -9,8 +8,6 @@ import http_ece
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, webpush as w
 

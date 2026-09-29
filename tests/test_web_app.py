@@ -1,15 +1,12 @@
 """The web app (frontend/, built into runway/static/app/) is Runway's page at /: signed in, under the content security
 policy, with a fresh script nonce on its page; its routes and the old /next/ address lead to it."""
 import os
-import sys
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from unittest import mock
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, server
 

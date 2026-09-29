@@ -2,7 +2,6 @@
 duplicates, and card statements from the bank in the forecast."""
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,8 +9,6 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import sqlalchemy.exc
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, forecast, plaid, plaidbank, simplefin
 
