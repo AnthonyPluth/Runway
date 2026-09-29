@@ -12,7 +12,7 @@ import zlib
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import inspect
+from sqlalchemy import column, delete, false, func, insert, inspect, select, table
 
 from . import db, schema, secretbox
 
@@ -27,6 +27,13 @@ def tables() -> list[str]:
 
 def table_columns(conn, table: str) -> list[str]:
     return [c["name"] for c in inspect(conn.sa).get_columns(table)]
+
+
+def _table(name: str, cols: list[str]):
+    """The table (schema.py's), for statements on these columns. The database is migrated to match schema.py, but a
+    column only the database has (one from long ago) still goes along, as with SQL naming it: then a bare table()."""
+    t = schema.metadata.tables[name]
+    return t if all(c in t.c for c in cols) else table(name, *(column(c) for c in cols))
 
 
 def _secret_columns(table: str, cols: list[str]):
@@ -56,7 +63,8 @@ def export(conn) -> dict:
            "source": "postgres" if db.using_postgres() else "sqlite", "tables": {}}
     for t in tables():
         cols = table_columns(conn, t)
-        rows = [list(r) for r in conn.execute(f"SELECT {', '.join(cols)} FROM {t}")]
+        src = _table(t, cols)
+        rows = [list(r) for r in conn.execute(select(*(src.c[c] for c in cols)))]
         out["tables"][t] = {"columns": cols, "rows": _convert(t, cols, rows, _decrypt_or_drop)}
     return out
 
@@ -109,7 +117,7 @@ def restore(conn, data: dict) -> dict:
     known = set(tables())
     counts = {}
     for t in tables():
-        conn.execute(f"DELETE FROM {t}")
+        conn.execute(delete(schema.metadata.tables[t]))
     for t, payload in data["tables"].items():
         if t not in known:
             continue   # a table this version doesn't have
@@ -118,9 +126,10 @@ def restore(conn, data: dict) -> dict:
         keep = [payload["columns"].index(c) for c in cols]
         rows = _convert(t, cols, [[r[i] for i in keep] for r in payload["rows"]], secretbox.encrypt)
         if rows and cols:
-            conn.executemany(f"INSERT INTO {t}({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", rows)
+            conn.execute(insert(_table(t, cols)), [dict(zip(cols, r, strict=True)) for r in rows])
         counts[t] = len(rows)
     if conn.postgres:   # auto-numbered ids continue after the restored ones
         for t in sorted(schema.AUTO_ID):
-            conn.execute(f"SELECT setval(pg_get_serial_sequence('{t}', 'id'), COALESCE((SELECT MAX(id) FROM {t}), 0) + 1, false)")
+            last = select(func.max(schema.metadata.tables[t].c.id)).scalar_subquery()
+            conn.execute(select(func.setval(func.pg_get_serial_sequence(t, "id"), func.coalesce(last, 0) + 1, false())))
     return counts

@@ -3,8 +3,11 @@ budgets and a home. Nothing here is real, and seeding refuses to touch a databas
 import random
 from datetime import date, timedelta
 
+from sqlalchemy import func, insert, select
+
 from . import db
 from . import settings_keys as sk
+from .models import Account, Asset, Budget, Recurring, SyncLog, Transaction
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -42,15 +45,15 @@ BUDGETS = [("Groceries", 600), ("Restaurants", 250), ("Coffee & Snacks", 60), ("
 
 def seed(conn, today: date | None = None) -> int:
     """Fill an empty database with sample data. Returns the number of transactions added."""
-    if conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]:
+    if conn.execute(select(func.count()).select_from(Account)).fetchone()[0]:
         raise SystemExit("This database already has accounts; sample data only goes into an empty one.")
     today = today or date.today()
     rnd = random.Random(42)   # the same sample every time
     for acct_id, name, org, kind, balance in ACCOUNTS:
-        conn.execute("INSERT INTO accounts(id, name, org, kind, balance, balance_date, provider, pay_from, in_forecast) "
-                     "VALUES (?,?,?,?,?,?,?,?,?)",
-                     (acct_id, name, org, kind, balance, today.isoformat(), "simplefin",
-                      "demo-checking" if kind == "credit" else None, 1 if kind in ("checking", "savings") else 0))
+        conn.execute(insert(Account).values(id=acct_id, name=name, org=org, kind=kind, balance=balance,
+                                            balance_date=today.isoformat(), provider="simplefin",
+                                            pay_from="demo-checking" if kind == "credit" else None,
+                                            in_forecast=1 if kind in ("checking", "savings") else 0))
 
     txs: list[tuple] = []
     start = today - timedelta(days=180)
@@ -62,8 +65,8 @@ def seed(conn, today: date | None = None) -> int:
     first_payday = start + timedelta(days=(4 - start.weekday()) % 7)   # Fridays
     for name, acct, amount, freq, dom, match, category in BILLS:
         anchor = first_payday if freq == "biweekly" else start.replace(day=dom)  # type: ignore[arg-type]  # monthly bills all have a day
-        conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match) VALUES (?,?,?,?,?,?)",
-                     (name, acct, amount, freq, anchor.isoformat(), match))
+        conn.execute(insert(Recurring).values(name=name, account_id=acct, amount=amount, frequency=freq,
+                                              anchor_date=anchor.isoformat(), match=match))
         day = anchor
         while day <= today:
             add(acct, day, amount * (1 + rnd.uniform(-0.08, 0.08) if category == "Utilities" else 1), match.title(), category)
@@ -83,13 +86,13 @@ def seed(conn, today: date | None = None) -> int:
             add("demo-checking", day, -500, "Transfer to Savings", "Transfer")
             add("demo-savings", day, 500, "Transfer from Checking", "Transfer")
 
-    conn.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source) "
-                     "VALUES (?,?,?,?,?,?,?,'rule')", txs)
-    conn.executemany("INSERT INTO budgets(category, amount, pay_with) VALUES (?,?,'demo-card')", BUDGETS)
-    conn.execute("INSERT INTO assets(name, kind, value, as_of, yearly_change, loan_account_id) VALUES (?,?,?,?,?,?)",
-                 ("Sample House", "home", 415000, today.isoformat(), 3, "demo-mortgage"))
+    cols = ("id", "account_id", "posted", "amount", "description", "payee", "category")
+    conn.execute(insert(Transaction), [{**dict(zip(cols, t, strict=True)), "category_source": "rule"} for t in txs])
+    conn.execute(insert(Budget), [{"category": c, "amount": a, "pay_with": "demo-card"} for c, a in BUDGETS])
+    conn.execute(insert(Asset).values(name="Sample House", kind="home", value=415000, as_of=today.isoformat(), yearly_change=3,
+                                      loan_account_id="demo-mortgage"))
     # The app shows its "connect your bank" screen until a bank is set up. This address never resolves (.invalid), so
     # a Sync in a preview just fails; nothing is ever fetched.
     db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, "https://demo:demo@sample-bank.invalid/simplefin")
-    conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, 'Sample data')")
+    conn.execute(insert(SyncLog).values(ok=1, message="Sample data"))
     return len(txs)

@@ -35,8 +35,10 @@ import urllib.parse
 import urllib.request
 
 import jwt
+from sqlalchemy import delete, func, insert, select
 
-from . import secretbox
+from . import db, secretbox
+from .models import AuthPending, AuthSession, User
 
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
@@ -157,14 +159,11 @@ def start_login(conn, next_path: str = "/") -> tuple[str, str]:
     state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     challenge = _b64e(hashlib.sha256(verifier.encode()).digest())
     next_path = safe_next(next_path)
-    conn.execute("DELETE FROM auth_pending WHERE created < ?", (time.time() - LOGIN_TTL,))
+    conn.execute(delete(AuthPending).where(AuthPending.created < time.time() - LOGIN_TTL))
     # Anyone can start a sign-in, so keep the table of unfinished ones bounded (the oldest go first).
-    conn.execute("DELETE FROM auth_pending WHERE state IN (SELECT state FROM auth_pending ORDER BY created DESC LIMIT -1 OFFSET ?)"
-                 if not conn.postgres else
-                 "DELETE FROM auth_pending WHERE state IN (SELECT state FROM auth_pending ORDER BY created DESC OFFSET ?)",
-                 (MAX_PENDING - 1,))
-    conn.execute("INSERT INTO auth_pending(state, nonce, verifier, next, created) VALUES (?,?,?,?,?)",
-                 (state, nonce, verifier, next_path, time.time()))
+    conn.execute(delete(AuthPending).where(AuthPending.state.in_(
+        select(AuthPending.state).order_by(AuthPending.created.desc()).offset(MAX_PENDING - 1))))
+    conn.execute(insert(AuthPending).values(state=state, nonce=nonce, verifier=verifier, next=next_path, created=time.time()))
     params = {"response_type": "code", "client_id": c["client_id"], "redirect_uri": c["redirect_uri"],
               "scope": c["scopes"], "state": state, "nonce": nonce,
               "code_challenge": challenge, "code_challenge_method": "S256"}
@@ -190,8 +189,8 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
         raise OIDCError("The sign-in response was missing its code. Please try again.")
     if not login_cookie or not secrets.compare_digest(login_cookie, state):
         raise OIDCError("This sign-in didn't start in this browser (or took too long). Please try again.")
-    row = conn.execute("SELECT * FROM auth_pending WHERE state=?", (state,)).fetchone()
-    conn.execute("DELETE FROM auth_pending WHERE state=?", (state,))
+    row = conn.execute(select(AuthPending).where(AuthPending.state == state)).fetchone()
+    conn.execute(delete(AuthPending).where(AuthPending.state == state))
     if not row or time.time() - row["created"] > LOGIN_TTL:
         raise OIDCError("That sign-in link has expired. Please try again.")
     conn.commit()   # nothing held while we talk to the provider
@@ -229,9 +228,10 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
     who = authorize(info)
     token = secrets.token_urlsafe(32)
     now = time.time()
-    conn.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires, id_token) VALUES (?,?,?,?,?,?,?)",
-                 (_hash(token), who["sub"], who["email"], who["name"], now, now + c["session_days"] * 86400,
-                  secretbox.encrypt(tokens.get("id_token"))))   # it carries who you are: kept encrypted like the other secrets
+    conn.execute(insert(AuthSession).values(
+        token_hash=_hash(token), sub=who["sub"], email=who["email"], name=who["name"], created=now,
+        expires=now + c["session_days"] * 86400,
+        id_token=secretbox.encrypt(tokens.get("id_token"))))   # it carries who you are: kept encrypted like the other secrets
     remember_user(conn, who["sub"], who["email"], who["name"], info.get("given_name"), now)
     return token, safe_next(row["next"])
 
@@ -249,15 +249,16 @@ def remember_user(conn, sub, email, name, given=None, when=None) -> None:
     """Keep a list of people who've signed in, so accounts can be assigned to them."""
     if not sub:
         return
-    conn.execute("INSERT INTO users(sub, email, name, first_name, last_seen) VALUES (?,?,?,?,?) ON CONFLICT(sub) DO UPDATE SET "
-                 "email=excluded.email, name=excluded.name, first_name=excluded.first_name, last_seen=excluded.last_seen",
-                 (sub, email, name, first_name(name, email, given), when or time.time()))
+    db.upsert(conn, User, {"sub": sub, "email": email, "name": name, "first_name": first_name(name, email, given),
+                           "last_seen": when or time.time()}, key=["sub"])
 
 
 def backfill_users(conn) -> None:
     """People signed in before the users list existed."""
-    for r in conn.execute("SELECT sub, email, name, MAX(created) AS t FROM auth_sessions WHERE sub IS NOT NULL GROUP BY sub, email, name").fetchall():
-        if not conn.execute("SELECT 1 FROM users WHERE sub=?", (r["sub"],)).fetchone():
+    s = AuthSession
+    for r in conn.execute(select(s.sub, s.email, s.name, func.max(s.created).label("t")).where(s.sub.is_not(None))
+                          .group_by(s.sub, s.email, s.name)).fetchall():
+        if not conn.execute(select(User.sub).where(User.sub == r["sub"])).fetchone():
             remember_user(conn, r["sub"], r["email"], r["name"], None, r["t"])
 
 
@@ -348,11 +349,11 @@ def verify_id_token(id_token: str, nonce: str, d: dict) -> dict:
 def session_user(conn, token: str | None) -> dict | None:
     if not token:
         return None
-    row = conn.execute("SELECT * FROM auth_sessions WHERE token_hash=?", (_hash(token),)).fetchone()
+    row = conn.execute(select(AuthSession).where(AuthSession.token_hash == _hash(token))).fetchone()
     if not row:
         return None
     if row["expires"] < time.time() or not still_allowed(row["email"]):
-        conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (row["token_hash"],))
+        conn.execute(delete(AuthSession).where(AuthSession.token_hash == row["token_hash"]))
         return None
     return {"sub": row["sub"], "email": row["email"], "name": row["name"]}
 
@@ -371,13 +372,13 @@ def logout(conn, token: str | None) -> str:
     """End the session; returns where to send the browser (the provider's sign-out page if it has one)."""
     id_token = None
     if token:
-        row = conn.execute("SELECT id_token FROM auth_sessions WHERE token_hash=?", (_hash(token),)).fetchone()
+        row = conn.execute(select(AuthSession.id_token).where(AuthSession.token_hash == _hash(token))).fetchone()
         try:
             id_token = secretbox.decrypt(row["id_token"]) if row else None
         except secretbox.SecretError:
             id_token = None   # only a hint for the provider's sign-out page
-        conn.execute("DELETE FROM auth_sessions WHERE token_hash=?", (_hash(token),))
-    conn.execute("DELETE FROM auth_sessions WHERE expires < ?", (time.time(),))
+        conn.execute(delete(AuthSession).where(AuthSession.token_hash == _hash(token)))
+    conn.execute(delete(AuthSession).where(AuthSession.expires < time.time()))
     c = config()
     try:
         end = discovery().get("end_session_endpoint")

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any
+
+from sqlalchemy import and_, func, or_, select, update
 
 from ... import categories, categorize, db, merchants, retail, splits
 from ... import settings_keys as sk
+from ...models import Account, AiLog, Category, Recurring, Transaction, TxSplit
 from ..common import ApiError, _month_range
 
 
@@ -24,45 +26,39 @@ def tx_logos(conn, items: list[dict]) -> dict[str, str]:
 
 
 def api_transactions(conn, q, _b):
-    where: list[str] = ["t." + db.NOT_INVESTMENT]
-    args: list[Any] = []
+    T = Transaction
+    where = [db.not_investment()]
     if q.get("review", ["0"])[0] == "1":
-        where.append("t.needs_review=1")
+        where.append(T.needs_review == 1)
     if q.get("recurring", [""])[0]:
-        where.append("t.recurring_id=?")
-        args.append(int(q["recurring"][0]))
+        where.append(T.recurring_id == int(q["recurring"][0]))
     if q.get("account", [""])[0]:
-        where.append("t.account_id=?")
-        args.append(q["account"][0])
+        where.append(T.account_id == q["account"][0])
     if q.get("category", [""])[0]:
         cat = q["category"][0]
         if cat == "__none__":
-            where.append("t.category IS NULL AND COALESCE(t.is_split, 0)=0")
+            where.append(and_(T.category.is_(None), func.coalesce(T.is_split, 0) == 0))
         else:
             family = [cat, *categories.descendants(conn, cat)]   # a category includes its subcategories
-            ph = ",".join("?" * len(family))
             # a split transaction counts under every category it's split into, not the one on the row
-            where.append(f"((COALESCE(t.is_split, 0)=0 AND t.category IN ({ph})) OR EXISTS "
-                         f"(SELECT 1 FROM tx_splits s WHERE s.tx_id=t.id AND s.category IN ({ph})))")
-            args.extend(family * 2)
+            where.append(or_(and_(func.coalesce(T.is_split, 0) == 0, T.category.in_(family)),
+                             select(TxSplit.id).where(TxSplit.tx_id == T.id, TxSplit.category.in_(family)).exists()))
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
-        where.append("t.posted>=? AND t.posted<?")
-        args += [start.isoformat(), end.isoformat()]
+        where += [T.posted >= start.isoformat(), T.posted < end.isoformat()]
     if q.get("scope", [""])[0] == "budget":   # the same accounts the Budget page counts
-        where.append("t.account_id IN (SELECT id FROM accounts WHERE hidden=0 AND kind IN ('checking','savings','credit'))")
+        where.append(T.account_id.in_(select(Account.id).where(Account.hidden == 0,
+                                                               Account.kind.in_(["checking", "savings", "credit"]))))
     if q.get("q", [""])[0]:
         like = f"%{q['q'][0].lower()}%"
-        where.append("(lower(t.payee) LIKE ? OR lower(t.description) LIKE ?)")
-        args += [like, like]
+        where.append(or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
     limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
     offset = max(0, int(q.get("offset", ["0"])[0]))
-    sql = (
-        "SELECT t.*, " + db.label_sql("a") + " AS account_name, a.kind AS account_kind, r.name AS recurring_name "
-        "FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN recurring r ON r.id=t.recurring_id "
-        f"WHERE {' AND '.join(where)} ORDER BY t.posted DESC, t.id LIMIT ? OFFSET ?"
-    )
-    items = db.rows(conn.execute(sql, (*args, limit, offset)))
+    items = db.rows(conn.execute(
+        select(T, db.account_label_expr().label("account_name"), Account.kind.label("account_kind"),
+               Recurring.name.label("recurring_name"))
+        .join(Account, Account.id == T.account_id).outerjoin(Recurring, Recurring.id == T.recurring_id)
+        .where(*where).order_by(T.posted.desc(), T.id).limit(limit).offset(offset)))
     parts = splits.of(conn, [t["id"] for t in items if t["is_split"]])
     orders = retail.for_transactions(conn, [t["id"] for t in items])   # the order a charge paid for, or a refund came from
     logos = tx_logos(conn, items)
@@ -70,9 +66,7 @@ def api_transactions(conn, q, _b):
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
         t["logo"] = logos.get(t["id"])
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM transactions t WHERE {' AND '.join(where)}", args
-    ).fetchone()[0]
+    total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
     return {"items": items, "total": total}
 
 
@@ -127,7 +121,7 @@ def api_ai_suggest(conn, _q, _b):
 
 
 def api_ai_log(conn, _q, _b):
-    return db.rows(conn.execute("SELECT * FROM ai_log ORDER BY id DESC LIMIT 25"))
+    return db.rows(conn.execute(select(AiLog).order_by(AiLog.id.desc()).limit(25)))
 
 
 def api_ai_apply(conn, _q, body):
@@ -137,12 +131,12 @@ def api_ai_apply(conn, _q, body):
     created = False
     if new:   # accept an AI-proposed category: create it (unless it exists by now), then use it
         name = " ".join(str(new.get("name") or "").split())
-        existing = conn.execute("SELECT name FROM categories WHERE lower(name)=lower(?)", (name,)).fetchone()
+        existing = conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(name))).fetchone()
         if existing:
             category = existing["name"]
         else:
             parent = new.get("parent") or None
-            if parent and not conn.execute("SELECT 1 FROM categories WHERE name=?", (parent,)).fetchone():
+            if parent and not conn.execute(select(Category.name).where(Category.name == parent)).fetchone():
                 parent = None
             try:
                 categories.add(conn, name, parent, is_income=(body.get("direction") == "in" and not parent))
@@ -164,12 +158,9 @@ def api_ai_apply(conn, _q, body):
 
 def api_recategorize(conn, _q, _b):
     """Send everything still uncategorized or awaiting review through rules (and the AI model, if set up) again."""
+    t = Transaction
+    not_manual = func.coalesce(t.category_source, "") != "manual"
     ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM transactions WHERE COALESCE(is_split, 0)=0 "
-        "AND (category IS NULL OR (needs_review=1 AND COALESCE(category_source, '') <> 'manual'))"
-    )]
-    conn.execute(
-        "UPDATE transactions SET category=NULL, category_source=NULL, confidence=NULL "
-        "WHERE needs_review=1 AND COALESCE(category_source, '') <> 'manual'"
-    )
+        select(t.id).where(func.coalesce(t.is_split, 0) == 0, or_(t.category.is_(None), and_(t.needs_review == 1, not_manual))))]
+    conn.execute(update(t).where(t.needs_review == 1, not_manual).values(category=None, category_source=None, confidence=None))
     return categorize.categorize(conn, ids)

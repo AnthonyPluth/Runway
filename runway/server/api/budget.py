@@ -5,17 +5,22 @@ import calendar
 from datetime import date
 
 from dateutil.relativedelta import relativedelta
+from sqlalchemy import delete, func, select, update
 
 from ... import categories, db, forecast, splits
+from ...models import Account, Budget, Category
 from ..common import ApiError, _month_range
 
 
 def _month_totals(conn, start: date, end: date) -> dict:
     """Net amount per category for the month, across checking, savings and cards (not loans or investments)."""
+    t = splits.parts()
     rows_ = conn.execute(
-        f"SELECT t.category AS category, SUM(t.amount) AS total FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id "
-        "WHERE t.posted>=? AND t.posted<? AND a.hidden=0 AND a.kind IN ('checking','savings','credit') GROUP BY t.category",
-        (start.isoformat(), end.isoformat()),
+        select(t.c.category.label("category"), func.sum(t.c.amount).label("total"))
+        .join(Account, Account.id == t.c.account_id)
+        .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), Account.hidden == 0,
+               Account.kind.in_(["checking", "savings", "credit"]))
+        .group_by(t.c.category)
     ).fetchall()
     return {r["category"]: r["total"] or 0.0 for r in rows_}
 
@@ -61,7 +66,7 @@ def api_budget(conn, q, _b):
     cats = [c for c in categories.all_categories(conn) if not c["is_transfer"] and not c["is_income"]]
     income_cats = [c["name"] for c in categories.all_categories(conn) if c["is_income"] and c["top"] != "Refunds"]
     totals = _month_totals(conn, start, end)
-    budget_rows = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
+    budget_rows = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
     budgets = {k: r["amount"] for k, r in budget_rows.items()}
     usual = {p["category"]: p["usual"] for p in forecast.budget_plan(conn, today)}
     own = {c["name"]: round(-totals.get(c["name"], 0.0), 2) for c in cats}
@@ -91,33 +96,35 @@ def api_budget(conn, q, _b):
         "uncategorized": round(-totals.get(None, 0.0), 2),
         # accounts a category can be paid with: cards and cash accounts
         "pay_accounts": [{"id": r["id"], "name": r["name"], "kind": r["kind"]} for r in conn.execute(
-            "SELECT id, COALESCE(display_name, name) AS name, kind FROM accounts WHERE hidden=0 "
-            "AND kind IN ('credit','checking','savings') ORDER BY kind='credit' DESC, COALESCE(display_name, name)")],
+            select(Account.id, func.coalesce(Account.display_name, Account.name).label("name"), Account.kind)
+            .where(Account.hidden == 0, Account.kind.in_(["credit", "checking", "savings"]))
+            .order_by((Account.kind == "credit").desc(), func.coalesce(Account.display_name, Account.name)))],
     }
 
 
 def api_budget_set(conn, _q, body):
     cat = body.get("category") or ""
-    if not conn.execute("SELECT 1 FROM categories WHERE name=? AND is_transfer=0 AND is_income=0", (cat,)).fetchone():
+    if not conn.execute(select(Category.name)
+                        .where(Category.name == cat, Category.is_transfer == 0, Category.is_income == 0)).fetchone():
         raise ApiError("Pick a spending category")
     if "rollover" in body and "amount" not in body:   # rolling over from this month on, or not
         start = f"{date.today():%Y-%m}" if body.get("rollover") else None
-        if not conn.execute("UPDATE budgets SET rollover_from=? WHERE category=?", (start, cat)).rowcount:
+        if not conn.execute(update(Budget).where(Budget.category == cat).values(rollover_from=start)).rowcount:
             raise ApiError("Set a budget for this category first")
         return {"ok": True}
     if "pay_with" in body and "amount" not in body:   # just choosing the card
         acct = body.get("pay_with") or None
-        if acct and not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct,)).fetchone():
+        if acct and not conn.execute(select(Account.id).where(Account.id == acct)).fetchone():
             raise ApiError("Account not found")
-        conn.execute("UPDATE budgets SET pay_with=? WHERE category=?", (acct, cat))
+        conn.execute(update(Budget).where(Budget.category == cat).values(pay_with=acct))
         return {"ok": True}
     amt = body.get("amount")
     if amt in (None, "", 0, "0"):
-        conn.execute("DELETE FROM budgets WHERE category=?", (cat,))
+        conn.execute(delete(Budget).where(Budget.category == cat))
         return {"ok": True}
     try:
         amt = abs(db.number(amt))
     except (TypeError, ValueError):
         raise ApiError("Enter an amount") from None
-    conn.execute("INSERT INTO budgets(category, amount) VALUES (?,?) ON CONFLICT(category) DO UPDATE SET amount=excluded.amount", (cat, amt))
+    db.upsert(conn, Budget, {"category": cat, "amount": amt}, key=["category"])
     return {"ok": True}

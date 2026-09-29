@@ -19,9 +19,12 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
+from sqlalchemy import case, func, literal_column, select
 
 from . import db, plaid, planner, prices, splits
 from . import settings_keys as sk
+from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
+                     ManualState, PlaidItem, Price, Security, Transaction)
 
 HISTORY_DAYS = 730
 # Cash moving in or out of the account from outside (not investment results).
@@ -48,14 +51,17 @@ def _accounts(conn) -> list[dict]:
     An account connected through both SimpleFIN and Plaid is one account: the Plaid one, which has the fuller data
     (holdings, cost basis, activity), stands for it, and the SimpleFIN one is marked duplicate_of it and never counted
     (the page leaves it out)."""
+    ia = InvAccount
+    institution = func.coalesce(PlaidItem.institution_name, ia.institution).label("institution_name")
     rows = db.rows(conn.execute(
-        "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name, "
-        "(SELECT COUNT(*) FROM manual_positions m WHERE m.account_id=a.id) AS tracked, "
-        "(SELECT drift FROM manual_state ms WHERE ms.account_id=a.id) AS drift, "
-        "COALESCE(ra.hidden, 0) AS hidden_in_accounts FROM inv_accounts a "
-        "LEFT JOIN plaid_items i ON i.item_id=a.item_id "
-        "LEFT JOIN accounts ra ON ra.id = (CASE WHEN a.source='simplefin' THEN substr(a.id, 4) ELSE a.account_id END) "
-        "ORDER BY institution_name, a.name"))
+        select(ia, institution,
+               select(func.count()).select_from(ManualPosition).where(ManualPosition.account_id == ia.id)
+               .scalar_subquery().label("tracked"),
+               select(ManualState.drift).where(ManualState.account_id == ia.id).scalar_subquery().label("drift"),
+               func.coalesce(Account.hidden, 0).label("hidden_in_accounts"))
+        .outerjoin(PlaidItem, PlaidItem.item_id == ia.item_id)
+        .outerjoin(Account, Account.id == case((ia.source == "simplefin", func.substr(ia.id, 4)), else_=ia.account_id))
+        .order_by(institution, ia.name)))
     from_plaid = [a for a in rows if a["source"] == "plaid"]
 
     def twin(sf: dict) -> dict | None:
@@ -90,12 +96,13 @@ def holdings(conn) -> list[dict]:
     ids = _visible_ids(conn)
     if not ids:
         return []
-    q = ",".join("?" * len(ids))
+    s = Security
     rows = db.rows(conn.execute(
-        f"SELECT h.*, s.ticker, s.name AS sec_name, s.type, s.subtype, s.is_cash, s.sector, s.industry, s.close_price, "
-        f"a.name AS account_name, a.id AS acct_id FROM holdings h JOIN securities s ON s.id=h.security_id "
-        f"JOIN inv_accounts a ON a.id=h.account_id WHERE h.account_id IN ({q})", ids))
-    manual = {(r["account_id"], r["security_id"]): (r["cost_basis"], r["per_share"]) for r in conn.execute("SELECT * FROM cost_overrides")}
+        select(Holding, s.ticker, s.name.label("sec_name"), s.type, s.subtype, s.is_cash, s.sector, s.industry, s.close_price,
+               InvAccount.name.label("account_name"), InvAccount.id.label("acct_id"))
+        .join(s, s.id == Holding.security_id).join(InvAccount, InvAccount.id == Holding.account_id)
+        .where(Holding.account_id.in_(ids))))
+    manual = {(r["account_id"], r["security_id"]): (r["cost_basis"], r["per_share"]) for r in conn.execute(select(CostOverride))}
     by_sec: dict[str, dict] = {}
     for r in rows:
         _add_lot(by_sec, r, manual)
@@ -163,7 +170,7 @@ def _finish_holding(conn, h: dict, total: float) -> dict:
 def _day_change(conn, h: dict) -> float | None:
     if h["is_cash"] or not prices.usable_ticker(h["ticker"]):
         return None
-    rows = conn.execute("SELECT close FROM prices WHERE ticker=? ORDER BY date DESC LIMIT 2", (h["ticker"],)).fetchall()
+    rows = conn.execute(select(Price.close).where(Price.ticker == h["ticker"]).order_by(Price.date.desc()).limit(2)).fetchall()
     if len(rows) < 2 or not rows[1]["close"]:
         return None
     return round(h["quantity"] * (rows[0]["close"] - rows[1]["close"]), 2)
@@ -184,7 +191,7 @@ def allocation(conn, hold: list[dict]) -> dict:
     for a in _accounts(conn):
         if a["id"] not in ids:
             continue
-        v = conn.execute("SELECT SUM(value) FROM holdings WHERE account_id=?", (a["id"],)).fetchone()[0]
+        v = conn.execute(select(func.sum(Holding.value)).where(Holding.account_id == a["id"])).fetchone()[0]
         by_account[f"{a['institution_name'] or ''} {a['name'] or ''}".strip()] += v if v is not None else (a["balance"] or 0)
     acct_total = sum(by_account.values()) or 1.0
     top = hold[:10]
@@ -217,11 +224,12 @@ def _sf_activity(conn, since: str | None = None, limit: int = 500) -> list[dict]
     if not accts:
         return []
     names = {a["id"][3:]: a["name"] for a in accts}
-    q = ",".join("?" * len(names))
+    t_ = Transaction
     out = []
     for t in db.rows(conn.execute(
-            f"SELECT id, account_id, posted, amount, description FROM transactions WHERE account_id IN ({q}) AND pending=0 "
-            f"AND posted>=? ORDER BY posted DESC LIMIT ?", (*names, since or "0000", limit))):
+            select(t_.id, t_.account_id, t_.posted, t_.amount, t_.description)
+            .where(t_.account_id.in_(list(names)), t_.pending == 0, t_.posted >= (since or "0000"))
+            .order_by(t_.posted.desc()).limit(limit))):
         ttype, sub = "cash", "other"
         for rx, ty, su in _SF_KINDS:
             if rx.search(t["description"] or ""):
@@ -237,11 +245,11 @@ def activity(conn, limit: int = 500) -> list[dict]:
     ids = _visible_ids(conn)
     if not ids:
         return []
-    q = ",".join("?" * len(ids))
+    t = InvTransaction
     rows = db.rows(conn.execute(
-        f"SELECT t.*, s.ticker, s.name AS sec_name, a.name AS account_name FROM inv_transactions t "
-        f"LEFT JOIN securities s ON s.id=t.security_id JOIN inv_accounts a ON a.id=t.account_id "
-        f"WHERE t.account_id IN ({q}) ORDER BY t.date DESC, t.id LIMIT ?", (*ids, limit)))
+        select(t, Security.ticker, Security.name.label("sec_name"), InvAccount.name.label("account_name"))
+        .outerjoin(Security, Security.id == t.security_id).join(InvAccount, InvAccount.id == t.account_id)
+        .where(t.account_id.in_(ids)).order_by(t.date.desc(), t.id).limit(limit)))
     rows += _sf_activity(conn, limit=limit)
     rows.sort(key=lambda t: (t["date"], t["id"]), reverse=True)
     return rows[:limit]
@@ -284,8 +292,7 @@ def _add_plaid_income(conn, since: str, inc: dict[str, float], fees: dict[str, f
     ids = _visible_ids(conn)
     if not ids:
         return
-    q = ",".join("?" * len(ids))
-    for t in db.rows(conn.execute(f"SELECT * FROM inv_transactions WHERE account_id IN ({q}) AND date>=?", (*ids, since))):
+    for t in db.rows(conn.execute(select(InvTransaction).where(InvTransaction.account_id.in_(ids), InvTransaction.date >= since))):
         k = t["date"][:7]
         if k not in inc:
             continue
@@ -337,7 +344,7 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
     start = _history_start(conn, ids, sf_ids, today, days)
     dates = [(start + timedelta(days=i)).isoformat() for i in range((today - start).days + 1)]
     n = len(dates)
-    secs = {r["id"]: r for r in db.rows(conn.execute("SELECT * FROM securities"))}
+    secs = {r["id"]: r for r in db.rows(conn.execute(select(Security)))}
     book = _PriceBook(conn, start)
     value = [0.0] * n
     flows = [0.0] * n
@@ -361,8 +368,7 @@ def _history_start(conn, ids: list[str], sf_ids: list[str], today: date, days: i
     start = today - timedelta(days=days)
     if not ids or sf_ids:
         return start
-    q = ",".join("?" * len(ids))
-    first_tx = conn.execute(f"SELECT MIN(date) FROM inv_transactions WHERE account_id IN ({q})", ids).fetchone()[0]
+    first_tx = conn.execute(select(func.min(InvTransaction.date)).where(InvTransaction.account_id.in_(ids))).fetchone()[0]
     if first_tx:
         start = max(start, date.fromisoformat(first_tx) - timedelta(days=1))
     return start
@@ -372,13 +378,13 @@ def _replay_account(conn, aid: str, dates: list[str], secs: dict, book: _PriceBo
     """One account's end-of-day value on each date, rebuilt from what it holds today by walking its activity backwards.
     Money it gained or lost from outside is added to `flows` along the way."""
     n = len(dates)
-    hold = db.rows(conn.execute("SELECT * FROM holdings WHERE account_id=?", (aid,)))
-    txs = db.rows(conn.execute("SELECT * FROM inv_transactions WHERE account_id=? AND date>? AND type<>'cancel' ORDER BY date",
-                               (aid, dates[0])))
+    hold = db.rows(conn.execute(select(Holding).where(Holding.account_id == aid)))
+    t = InvTransaction
+    txs = db.rows(conn.execute(select(t).where(t.account_id == aid, t.date > dates[0], t.type != "cancel").order_by(t.date)))
     cash_now = sum((h["value"] if h["value"] is not None else h["quantity"] or 0) for h in hold
                    if secs.get(h["security_id"], {}).get("is_cash"))
     if not hold:
-        bal = conn.execute("SELECT balance FROM inv_accounts WHERE id=?", (aid,)).fetchone()[0] or 0.0
+        bal = conn.execute(select(InvAccount.balance).where(InvAccount.id == aid)).fetchone()[0] or 0.0
         cash_now = bal  # balance-only account: treat as cash-like
     qty_now = {h["security_id"]: h["quantity"] or 0 for h in hold if not secs.get(h["security_id"], {}).get("is_cash")}
     cur_price = {h["security_id"]: h["price"] for h in hold}
@@ -503,10 +509,10 @@ def _add_snapshot_accounts(conn, sf_ids: list[str], dates: list[str], secs: dict
 
 def _snapshot_series(conn, aid: str, dates: list[str], secs: dict, book: _PriceBook) -> tuple[list[float], list[float], str | None]:
     """Daily value and external flows for an account we only have position snapshots for."""
-    rows = db.rows(conn.execute("SELECT * FROM holding_snapshots WHERE account_id=? ORDER BY date", (aid,)))
+    rows = db.rows(conn.execute(select(HoldingSnapshot).where(HoldingSnapshot.account_id == aid).order_by(HoldingSnapshot.date)))
     if not rows:  # nothing saved yet: treat today's holdings as the only snapshot
         rows = [{"date": dates[-1], "security_id": h["security_id"], "quantity": h["quantity"], "value": h["value"]}
-                for h in db.rows(conn.execute("SELECT * FROM holdings WHERE account_id=?", (aid,)))]
+                for h in db.rows(conn.execute(select(Holding).where(Holding.account_id == aid)))]
     snaps: dict[str, dict[str, tuple[float, float]]] = defaultdict(dict)
     for r in rows:
         snaps[r["date"]][r["security_id"]] = (r["quantity"] or 0.0, r["value"] or 0.0)
@@ -600,11 +606,15 @@ def monthly_spending(conn, today: date) -> float:
     """Average monthly spending from Runway's own transactions over the last 6 full months."""
     start = date(today.year, today.month, 1) - relativedelta(months=6)
     end = date(today.year, today.month, 1)
+    t = splits.parts()
+    # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
+    month = func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("m")
     rows = conn.execute(
-        f"SELECT substr(t.posted,1,7) AS m, SUM(t.amount) AS s FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id "
-        "JOIN categories c ON c.name=t.category WHERE c.is_transfer=0 AND c.is_income=0 AND a.hidden=0 "
-        "AND a.kind IN ('checking','savings','credit') AND t.posted>=? AND t.posted<? GROUP BY m",
-        (start.isoformat(), end.isoformat())).fetchall()
+        select(month, func.sum(t.c.amount).label("s")).select_from(t)
+        .join(Account, Account.id == t.c.account_id).join(Category, Category.name == t.c.category)
+        .where(Category.is_transfer == 0, Category.is_income == 0, Account.hidden == 0,
+               Account.kind.in_(["checking", "savings", "credit"]), t.c.posted >= start.isoformat(), t.c.posted < end.isoformat())
+        .group_by(month)).fetchall()
     months = [-(r["s"] or 0) for r in rows if (r["s"] or 0) < 0]
     return round(statistics.mean(months), 2) if months else 0.0
 
@@ -652,7 +662,7 @@ def _emergency_fund_rule(conn, today: date) -> dict | None:
     """How many months of spending the primary account covers; None without a primary account or any spending."""
     spend = monthly_spending(conn, today)
     primary = db.get_setting(conn, sk.PRIMARY_ACCOUNT)
-    row = conn.execute("SELECT balance FROM accounts WHERE id=?", (primary,)).fetchone() if primary else None
+    row = conn.execute(select(Account.balance).where(Account.id == primary)).fetchone() if primary else None
     if not (spend > 0 and row):
         return None
     months = (row["balance"] or 0) / spend
