@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, webpush as w  # noqa: E402
+from runway import db, webpush as w
 
 
 def receiver():
@@ -64,8 +64,8 @@ class WebPushTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_key_is_made_once_and_kept(self):
-        v1, pub1 = w.vapid_keys(self.c)
-        v2, pub2 = w.vapid_keys(self.c)
+        _v1, pub1 = w.vapid_keys(self.c)
+        _v2, pub2 = w.vapid_keys(self.c)
         self.assertEqual(pub1, pub2)
         self.assertEqual(len(w.unb64u(pub1)), 65)                # uncompressed P-256 point, as browsers expect
         self.assertTrue(w.valid_public_key(pub1))

@@ -163,4 +163,4 @@ def _num(v, label: str) -> float:
     try:
         return db.number(str(v).replace(",", "").replace("$", "").replace("%", "").strip())
     except (TypeError, ValueError):
-        raise ValueError(f"{label} must be a number")
+        raise ValueError(f"{label} must be a number") from None

@@ -110,7 +110,7 @@ def all_categories(conn) -> list[dict]:
         for c in sorted(group, key=key):
             if c["name"] in trail:
                 continue
-            c["path"] = trail + [c["name"]]
+            c["path"] = [*trail, c["name"]]
             c["depth"] = len(trail)
             c["top"] = c["path"][0]
             c["protected"] = c["name"] in db.PROTECTED_CATEGORIES
@@ -175,7 +175,7 @@ def move(conn, name: str, new_parent: str | None) -> None:
     conn.execute("UPDATE categories SET parent=? WHERE name=?", (new_parent, name))
     if new_parent:  # the moved branch takes on its new parent's kind (spending, money in, not spending)
         p = conn.execute("SELECT is_transfer, is_income FROM categories WHERE name=?", (new_parent,)).fetchone()
-        for c in [name] + descendants(conn, name):
+        for c in [name, *descendants(conn, name)]:
             conn.execute("UPDATE categories SET is_transfer=?, is_income=? WHERE name=?", (p["is_transfer"], p["is_income"], c))
 
 
