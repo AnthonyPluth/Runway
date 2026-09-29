@@ -10,7 +10,8 @@ For each person it works out:
 - What's coming up: annual fees (decide to keep, downgrade or close, unless you already have: PLANS), the plan you
   made for a card (downgrade the AAdvantage card before its fee, with a Done action), bonus spending deadlines,
   credits about to reset (runway/churn_benefits.py), your own to-dos, 5/24 fall-off days and bonuses becoming
-  available again. A card can be left out of all of it.
+  available again, and when you can apply for a card or bonus you planned (runway/churn_wishlist.py). A card can be
+  left out of all of it.
 - Spending toward a bonus: for a card linked to a Runway account, its purchases since it was opened, counted the way
   Reports counts spending (split transactions by their parts; card payments and transfers left out; refunds lower
   it). Otherwise, what you entered.
@@ -33,9 +34,9 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, func, insert, select, update
 
-from . import bank_bonuses, churn_benefits, db, reports, splits
+from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits
 from .models import (Account, Category, ChurnBalance, ChurnBankBonus, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask,
-                     User)
+                     ChurnScore, ChurnWish, User)
 
 # Each issuer's bonus rule, as commonly reported by the churning community (Doctor of Credit, r/churning data
 # points). They are not published policy, they change, and offers carry their own terms: the page shows them as a
@@ -582,9 +583,12 @@ def overview(conn, today: date, people: list[str] | None = None) -> dict:
     bank, bank_income = bank_bonuses.overview(conn, today)
     people = list(dict.fromkeys([*s["people"], *(b["owner"] for b in bank)]))
     five = {o: s["five24"].get(o) or five24([], o, today) for o in people}
-    soon = upcoming(s, today) + bank_bonuses.upcoming(bank, today, today + relativedelta(days=HORIZON_DAYS))
+    horizon = today + relativedelta(days=HORIZON_DAYS)
+    wishlist = churn_wishlist.evaluate(conn, s, bank, today)
+    soon = upcoming(s, today) + bank_bonuses.upcoming(bank, today, horizon) + churn_wishlist.upcoming(wishlist, today, horizon)
     soon.sort(key=lambda i: (i["date"], i["kind"] != "task", i["title"]))
     return {"today": s["today"], "people": people, "owners": people, "cards": s["cards"], "five24": five,
+            "wishlist": wishlist, "scores": churn_wishlist.scores(conn),
             "upcoming": soon, "rewards": rewards(s), "tasks": s["tasks"], "bank": bank, "bank_income": bank_income,
             "currencies": list(s["values"].values()), "currency_groups": currency_groups(s["values"]),
             "values_as_of": VALUES_AS_OF, "values_note": ESTIMATE_NOTE,
@@ -627,19 +631,26 @@ ALERT_PREFS = [
     {"key": "churn_bonus", "label": "A sign-up bonus deadline (card or bank) is within 14 days, with requirements left"},
     {"key": "churn_plan", "label": "It's time to downgrade, close or change a card, as you planned"},
     {"key": "churn_benefit", "label": "A card credit with money left is about to reset"},
+    {"key": "churn_apply", "label": "A card or bank bonus you planned has nothing in the way now, or its offer ends within 14 days"},
 ]
 
 
-def alerts(conn, today: date, fees: bool, bonuses: bool, plans: bool = False, benefits: bool = False) -> list[dict]:
+def alerts(conn, today: date, fees: bool, bonuses: bool, plans: bool = False, benefits: bool = False,
+           apply: bool = False) -> list[dict]:
     """Push alerts (runway/notify.py): an annual fee within 30 days you haven't decided about, a bonus deadline
-    within 14 days with spending left, a plan's reminder, a credit about to reset with money left. Nothing for a card
-    hidden from Upcoming. Keyed by card (or benefit) and date, so each is sent once."""
-    if not (fees or bonuses or plans or benefits):
+    within 14 days with spending left, a plan's reminder, a credit about to reset with money left, a planned card or
+    bonus you can apply for now (or whose offer ends soon). Nothing for a card hidden from Upcoming. Keyed by card
+    (or benefit, or plan) and date, so each is sent once."""
+    if not (fees or bonuses or plans or benefits or apply):
         return []
-    out = bank_bonuses.alerts(bank_bonuses.overview(conn, today)[0], today) if bonuses else []
+    bank = bank_bonuses.overview(conn, today)[0] if bonuses or apply else []
+    out = bank_bonuses.alerts(bank, today) if bonuses else []
+    s = state(conn, today)
+    if apply and conn.execute(select(ChurnWish.id).limit(1)).fetchone():
+        out += churn_wishlist.alerts(churn_wishlist.evaluate(conn, s, bank, today), today)
     if not conn.execute(select(ChurnCard.id).limit(1)).fetchone():
         return out
-    cards = state(conn, today)["cards"]
+    cards = s["cards"]
     for c in cards:
         if c.get("hide_upcoming"):
             continue
@@ -709,9 +720,9 @@ def _int(v, label: str, low: int, high: int) -> int | None:
 
 def known_owners(conn) -> list[str]:
     """Everyone a card or bonus could belong to: who signed in, the accounts' owners (a partner who never signs in
-    included), and whoever already has a card or a bank bonus here. Never "Joint"."""
+    included), and whoever already has a card, a bank bonus, a plan or a score here. Never "Joint"."""
     names = [r[0] for r in conn.execute(select(User.first_name).where(User.first_name.is_not(None)).order_by(User.last_seen))]
-    for col in (Account.owner, ChurnCard.owner, ChurnBankBonus.owner):
+    for col in (Account.owner, ChurnCard.owner, ChurnBankBonus.owner, ChurnWish.owner, ChurnScore.owner):
         names += [r[0] for r in conn.execute(select(col).distinct().where(col.is_not(None), col != "").order_by(col))]
     return [n for n in dict.fromkeys(names) if n and n.lower() != "joint"]
 

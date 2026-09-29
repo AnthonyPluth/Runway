@@ -668,6 +668,50 @@ churn_benefit_uses = Table(
     info={'doc': 'when a benefit was used, per period'},
 )
 
+churn_wishlist = Table(
+    'churn_wishlist', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('owner', Text, nullable=False, doc="whose it will be: a person's first name (as accounts.owner has it)"),
+    Column('kind', Text, server_default=text("'card'"), doc='card | bank_bonus'),
+    Column('issuer', Text, doc='a card: churning.ISSUERS key'),
+    Column('bank', Text, doc='a bank bonus: the bank'),
+    Column('product', Text, doc='a card: e.g. Sapphire Preferred; a bank bonus: the account, if you like'),
+    Column('family', Text, doc="cards whose bonuses count as one for the issuer's rules (NULL = the product)"),
+    Column('business', Integer, server_default=text('0')),
+    Column('annual_fee', Float, doc='expected'),
+    Column('bonus', Float, doc='the expected bonus: points or miles in its currency, or dollars'),
+    Column('currency', Text, doc='a card: what the bonus is paid in (churning.CURRENCIES or churn_currencies)'),
+    Column('bonus_spend', Float, doc='a card: spending needed for the bonus'),
+    Column('bonus_months', Integer, doc='a card: months to spend it'),
+    Column('account_type', Text, doc='a bank bonus: checking | savings | business'),
+    Column('requirements', Text, doc='a bank bonus: deposits, balance and the like, as the offer says'),
+    Column('repeat_months', Integer, doc="a bank bonus: the bank's rule, a bonus again this many months after the last"),
+    Column('once_per_lifetime', Integer, server_default=text('0'), doc="a bank bonus: 1 if the bank's rule is once per lifetime"),
+    Column('offer_expires_on', Text, doc='the offer ends on this day'),
+    Column('priority', Integer, doc='1 = the next one to get'),
+    Column('status', Text, server_default=text("'wanted'"), doc='wanted | ready (you mean to apply now) | applied | dropped'),
+    Column('wait_until', Text, doc='your own "not before" day'),
+    Column('min_score', Integer, doc='the credit score you want before applying'),
+    Column('assume_prior_planned', Integer, server_default=text('0'),
+           doc="1: count your earlier-priority planned cards as opened, for this one's 5/24"),
+    Column('notes', Text),
+    Column('applied_on', Text),
+    Column('applied_id', Integer, doc='what applying made: churn_cards.id or churn_bank_bonuses.id (by kind)'),
+    Column('created_at', Text, server_default=now_text()),
+    sqlite_autoincrement=True,
+    info={'doc': "cards and bank bonuses you want next, and what's in the way of applying"},
+)
+
+churn_scores = Table(
+    'churn_scores', metadata,
+    Column('owner', Text, nullable=False),
+    Column('as_of', Text, nullable=False, doc='YYYY-MM-DD'),
+    Column('score', Integer, nullable=False, doc='a credit score you looked up (Runway never fetches one)'),
+    Column('source', Text, doc='e.g. Experian FICO 8'),
+    PrimaryKeyConstraint('owner', 'as_of'),
+    info={'doc': 'credit scores you entered, per person and day'},
+)
+
 churn_bank_bonuses = Table(
     'churn_bank_bonuses', metadata,
     Column('id', Integer, primary_key=True, autoincrement=True),

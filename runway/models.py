@@ -644,6 +644,45 @@ class ChurnBenefitUse(Base):
     used_on: Mapped[str]
 
 
+class ChurnWish(Base):
+    __table__ = schema.churn_wishlist
+    id: Mapped[int]
+    owner: Mapped[str]
+    kind: Mapped[str | None]
+    issuer: Mapped[str | None]
+    bank: Mapped[str | None]
+    product: Mapped[str | None]
+    family: Mapped[str | None]
+    business: Mapped[int | None]
+    annual_fee: Mapped[float | None]
+    bonus: Mapped[float | None]
+    currency: Mapped[str | None]
+    bonus_spend: Mapped[float | None]
+    bonus_months: Mapped[int | None]
+    account_type: Mapped[str | None]
+    requirements: Mapped[str | None]
+    repeat_months: Mapped[int | None]
+    once_per_lifetime: Mapped[int | None]
+    offer_expires_on: Mapped[str | None]
+    priority: Mapped[int | None]
+    status: Mapped[str | None]
+    wait_until: Mapped[str | None]
+    min_score: Mapped[int | None]
+    assume_prior_planned: Mapped[int | None]
+    notes: Mapped[str | None]
+    applied_on: Mapped[str | None]
+    applied_id: Mapped[int | None]
+    created_at: Mapped[str | None]
+
+
+class ChurnScore(Base):
+    __table__ = schema.churn_scores
+    owner: Mapped[str]
+    as_of: Mapped[str]
+    score: Mapped[int]
+    source: Mapped[str | None]
+
+
 class ChurnBankBonus(Base):
     __table__ = schema.churn_bank_bonuses
     id: Mapped[int]
