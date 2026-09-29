@@ -35,6 +35,5 @@
   "runway/server/sync.py": 9,
   "runway/sfinvest.py": 26,
   "runway/simplefin.py": 12,
-  "runway/splits.py": 16,
   "runway/tracked.py": 12
 }
