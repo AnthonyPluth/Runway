@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from typing import Any
 
 from . import db, equity, forecast, networth
 from . import settings_keys as sk
@@ -71,7 +72,7 @@ def clean(body: dict, today: date) -> dict:
             "retire_age": _int(p.get("retire_age"), f"{who}'s retirement age", 30, 90),
             "savings": _num(p.get("savings") or 0, f"{who}'s yearly savings", 0, 1e8),
         })
-    plan = {
+    plan: dict[str, Any] = {
         "people": people,
         "plan_to_age": _int(body.get("plan_to_age"), "Plan until age", 60, 110),
         "spending": _num(body.get("spending"), "Spending in retirement", 0, 1e8),

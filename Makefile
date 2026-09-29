@@ -7,14 +7,18 @@ NPM ?= npm
 # the one on your PATH, else pipx's copy of the version CI pins.
 RUFF ?= $(shell if poetry run ruff --version >/dev/null 2>&1; then echo "poetry run ruff"; \
 	elif command -v ruff >/dev/null 2>&1; then echo ruff; else echo "pipx run ruff==0.16.9"; fi)
+# mypy has to see Runway's dependencies, so it runs in the Poetry environment; install it there once with
+# `poetry run pip install mypy types-python-dateutil` (CI pins the versions).
+MYPY ?= poetry run mypy
 
 .PHONY: check lint test fix frontend-check
 
 check: lint test frontend-check
 
-# Ruff for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
+# Ruff and mypy for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
 lint: frontend/node_modules
 	$(RUFF) check .
+	$(MYPY)
 	cd frontend && $(NPM) run lint
 
 test:

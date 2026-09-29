@@ -100,7 +100,7 @@ def set_splits(conn, tx_id: str, parts: list[dict]) -> list[dict]:
     clean = []
     for p in parts:
         try:
-            amount = round(float(p.get("amount")), 2)
+            amount = round(float(p.get("amount")), 2)  # type: ignore[arg-type]  # a missing amount raises TypeError, handled below
         except (TypeError, ValueError):
             raise SplitError("Every part needs an amount") from None
         if not abs(amount) >= CENT or abs(amount) == float("inf"):   # also refuses "nan", which fails every comparison

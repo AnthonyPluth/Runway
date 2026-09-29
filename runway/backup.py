@@ -10,6 +10,7 @@ import gzip
 import json
 import zlib
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import inspect
 
@@ -51,7 +52,7 @@ def _convert(table: str, cols: list[str], rows: list[list], fn) -> list[list]:
 
 def export(conn) -> dict:
     """Secrets are written decrypted, so the backup restores under any key (on another machine, say)."""
-    out = {"format": FORMAT, "version": VERSION, "created": datetime.now().isoformat(timespec="seconds"),
+    out: dict[str, Any] = {"format": FORMAT, "version": VERSION, "created": datetime.now().isoformat(timespec="seconds"),
            "source": "postgres" if db.using_postgres() else "sqlite", "tables": {}}
     for t in tables():
         cols = table_columns(conn, t)

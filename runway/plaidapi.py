@@ -26,7 +26,7 @@ class PlaidError(Exception):
 def _ctx() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     try:
-        import certifi  # type: ignore
+        import certifi
 
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply

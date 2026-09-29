@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import threading
+from typing import Any
 
 from ... import db, merchants, monitoring
 from ... import settings_keys as sk
@@ -12,7 +13,7 @@ from ..common import ApiError
 def api_merchant_logo_options(conn, q, _b):
     """For choosing a merchant's logo: what you chose, and the brands Logo.dev's Brand Search finds for its name."""
     name = (q.get("name", [""])[0] or "").strip()
-    out = {"choice": merchants.choice(conn, name), "searchable": merchants.searchable(conn),
+    out: dict[str, Any] = {"choice": merchants.choice(conn, name), "searchable": merchants.searchable(conn),
            "configured": merchants.configured(conn), "candidates": [], "error": None}
     if name and out["searchable"]:
         found = merchants.search(conn, name)

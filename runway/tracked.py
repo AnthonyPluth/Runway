@@ -15,6 +15,7 @@ On every sync:
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
 
 from . import bankdays, db
 
@@ -45,7 +46,8 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     if not rows:
         return None
     on = min(balance_date or today.isoformat(), today.isoformat())
-    priced, unpriced = [], []
+    priced: list[dict[str, Any]] = []
+    unpriced: list[dict[str, Any]] = []
     for r in rows:
         px, px_date = _price_on(conn, r["ticker"], on)
         (priced if px else unpriced).append({**r, "price": px, "price_date": px_date})
