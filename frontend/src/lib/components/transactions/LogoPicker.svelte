@@ -51,7 +51,7 @@
   onscroll={() => open && place()} onresize={() => open && place()} />
 
 <span class="relative block" bind:this={root}>
-  <button type="button" class="block cursor-pointer rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+  <button type="button" class="block cursor-pointer rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     title="Change this merchant's logo" aria-label={`Logo for ${name}`} aria-expanded={open} onclick={show}>
     {@render children()}
   </button>
