@@ -198,6 +198,41 @@ class SplitTests(Base):
         retail.set_item_category(self.c, item, "Shopping")
         self.assertEqual(self.parts("t1"), [("Groceries", -30.88), ("Shopping", -30.0)])
 
+    def test_what_apply_says_in_each_case(self):
+        self.assertEqual(retail.apply(self.c, "nope"), "unmatched")
+        self.amazon_order_with_charge()
+        self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US")                  # no category yet
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        retail.finish(self.c, "amazon", caller=AI)
+        charge = self.c.execute("SELECT id FROM retail_charges").fetchone()["id"]
+        t = self.row("t1")
+        self.assertEqual((t["category"], t["is_split"]), ("Groceries", 1))   # a split names its first part
+        self.assertEqual(retail.apply(self.c, charge), "same")               # nothing changed since
+        # Every item the same category now: the split goes and the transaction just takes it.
+        self.c.execute("UPDATE retail_items SET category='Shopping'")
+        self.assertEqual(retail.apply(self.c, charge), "category")
+        t = self.row("t1")
+        self.assertEqual((t["category"], t["category_source"], t["is_split"], self.parts("t1")), ("Shopping", "retail", 0, []))
+        self.assertEqual(json.loads(self.c.execute("SELECT applied FROM retail_charges").fetchone()[0]),
+                         {"parts": [], "category": "Shopping", "prev": {"category": None, "source": None}})
+        self.assertEqual(retail.apply(self.c, charge), "same")
+        self.c.execute("UPDATE retail_charges SET amount=5")                  # a refund keeps its category
+        self.assertEqual(retail.apply(self.c, charge), "same")
+        self.c.execute("DELETE FROM transactions")
+        self.assertEqual(retail.apply(self.c, charge), "unmatched")
+
+    def test_a_model_that_fails_leaves_items_to_their_departments(self):
+        oid = retail._save_order(self.c, "amazon", "113-0000000-0000000", details=1)
+        retail._save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0, "department": "Grocery & Gourmet Food"},
+                                         {"title": "Mystery", "amount": 5.0}])
+        db.set_setting(self.c, "openrouter_api_key", "k")
+
+        def broken(*_a):
+            raise RuntimeError("model is down")
+        self.assertEqual(retail.categorize_items(self.c, caller=broken), {"memory": 0, "ai": 0, "department": 1, "left": 1})
+        log = self.c.execute("SELECT purpose, ok, message FROM ai_log").fetchone()
+        self.assertEqual(tuple(log), ("orders", 0, "model is down"))
+
     def test_item_category_is_remembered_and_resplits(self):
         self.amazon_order_with_charge()
         self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US", "Shopping", "rule")
