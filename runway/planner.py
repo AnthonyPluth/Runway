@@ -28,14 +28,14 @@ def _num(v, label: str, low: float, high: float) -> float:
     try:
         n = db.number(v)
     except (TypeError, ValueError):
-        raise PlanError(f"{label} must be a number")
+        raise PlanError(f"{label} must be a number") from None
     if not low <= n <= high:
         raise PlanError(f"{label} is out of range")
     return n
 
 
 def _int(v, label: str, low: int, high: int) -> int:
-    return int(round(_num(v, label, low, high)))
+    return round(_num(v, label, low, high))
 
 
 def _text(v, fallback: str) -> str:
