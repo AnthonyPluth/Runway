@@ -99,6 +99,20 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
 - Stop: `docker compose down` (data stays in `./data`)
 - Back up: Settings → Backup → Download a backup (works for either database)
 
+## Error reports (optional)
+
+Set `SENTRY_DSN` (Sentry → your project → Settings → Client Keys) and Runway sends its errors to Sentry, from the
+server and from the web app, tagged with the version. Without it, nothing is sent anywhere.
+
+- A report has the error, its stack trace and the page or API path. It never has request bodies, cookies, headers,
+  query strings, the values of variables, or anything on screen; addresses with a password in them (SimpleFIN's) and
+  Plaid tokens are blanked.
+- `SENTRY_BROWSER_DSN` sends the web app's errors to a separate Sentry project; `RUNWAY_SENTRY_BROWSER=0` keeps the web
+  app from sending any. The browser only ever talks to the DSN's `https://` host (the page's Content-Security-Policy
+  allows that one address).
+- `SENTRY_ENVIRONMENT` (default `production`) and `SENTRY_TRACES_SAMPLE_RATE` (performance tracing, default `0`).
+- An error page's "reference" code is on the Sentry event as the `ref` tag, so a reference from the app finds its report.
+
 ## Notes
 
 - Installing Runway on an iPhone and push notifications both need `RUNWAY_PUBLIC_URL` to be `https://`. Notifications

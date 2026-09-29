@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, plaid, portfolio, prices  # noqa: E402
+from runway import db, plaid, planner, portfolio, prices  # noqa: E402
 
 TODAY = date(2026, 9, 23)
 
@@ -148,27 +148,50 @@ class FireTests(Base):
         super().setUp()
         self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','VTI',10,300,3000,2500)")
 
-    def fire(self):
-        return portfolio.overview(self.c, "1Y", TODAY)["fire"]
+    def plan(self):
+        return portfolio.overview(self.c, "1Y", TODAY)["plan"]
 
-    def test_saved_assumptions_win_and_can_be_reset(self):
-        computed = self.fire()["computed"]
-        portfolio.save_fire(self.c, {"annual_spending": 62000, "withdrawal_rate": 0.035})
-        f = self.fire()
-        self.assertEqual((f["annual_spending"], f["withdrawal_rate"]), (62000.0, 0.035))
-        self.assertEqual(f["saved"], ["annual_spending", "withdrawal_rate"])
-        self.assertEqual(f["expected_return"], computed["expected_return"])   # untouched ones stay Runway's
-        self.assertEqual(f["computed"], computed)
-        portfolio.save_fire(self.c, {"annual_spending": None, "withdrawal_rate": None})
-        back = self.fire()
-        self.assertEqual(back["saved"], [])
-        self.assertEqual(back["annual_spending"], computed["annual_spending"])
+    def test_plan_starts_from_runways_figures(self):
+        db.set_setting(self.c, "fire_annual_spending", "62000")   # changed on the old financial-independence card
+        p = self.plan()
+        self.assertTrue(p["is_default"])
+        self.assertEqual(p["plan"]["spending"], 62000.0)
+        self.assertEqual(p["plan"]["people"][0]["savings"], p["computed"]["yearly_savings"])
+        self.assertEqual(p["current"], portfolio.overview(self.c, "1Y", TODAY)["history"]["value"][-1])
 
-    def test_nonsense_assumptions_are_refused(self):
-        for bad in ({"withdrawal_rate": 4.0}, {"annual_spending": -1}, {"expected_return": "soon"}, {"nope": 1}):
-            with self.assertRaises(ValueError):
-                portfolio.save_fire(self.c, bad)
-        self.assertEqual(portfolio.fire_saved(self.c), {})
+    def test_a_saved_plan_is_kept_and_can_be_forgotten(self):
+        plan = {**self.plan()["plan"], "people": [
+            {"name": "Anthony", "birth_year": 1985, "retire_age": 60, "savings": 30000},
+            {"name": "Sam", "birth_year": 1987, "retire_age": 62, "savings": "12000"}],
+            "income": [{"name": "Social Security", "amount": 28000, "person": 1, "start_age": 67}],
+            "events": [{"name": "College", "year": TODAY.year + 12, "amount": -80000}]}
+        planner.save(self.c, plan, TODAY)
+        p = self.plan()
+        self.assertFalse(p["is_default"])
+        self.assertEqual([x["retire_age"] for x in p["plan"]["people"]], [60, 62])
+        self.assertEqual(p["plan"]["people"][1]["savings"], 12000.0)
+        self.assertEqual(p["plan"]["income"][0], {"name": "Social Security", "amount": 28000.0, "person": 1, "start_age": 67, "end_age": None})
+        planner.save(self.c, None)
+        self.assertTrue(self.plan()["is_default"])
+
+    def test_nonsense_plans_are_refused(self):
+        good = self.plan()["plan"]
+        for bad in ({**good, "people": []}, {**good, "people": good["people"] * 3}, {**good, "volatility": 3},
+                    {**good, "spending": "lots"}, {**good, "plan_to_age": 500},
+                    {**good, "income": [{"name": "SS", "amount": 1, "person": 1, "start_age": 67}]},   # no second person
+                    {**good, "events": [{"name": "x", "year": 1990, "amount": 5}]},
+                    {**good, "assets": [{"key": "account:chk", "sell_year": TODAY.year + 1}]},
+                    {**good, "events": [{}] * (planner.MAX_ROWS + 1)}):
+            with self.assertRaises(planner.PlanError):
+                planner.save(self.c, bad, TODAY)
+        self.assertIsNone(planner.saved(self.c))
+
+    def test_homes_and_equity_can_be_sold_into_the_plan(self):
+        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('mtg', 'Mortgage', 'loan', -200000)")
+        self.c.execute("INSERT INTO assets(name, kind, value, as_of, yearly_change, loan_account_id) "
+                       "VALUES ('House', 'home', 450000, ?, 3, 'mtg')", (TODAY.isoformat(),))
+        house = next(a for a in self.plan()["assets"] if a["name"] == "House")
+        self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
 
 
 # ---------------------------------------------------------------------------------------------- mock servers
