@@ -5,8 +5,11 @@ import re
 import threading
 from typing import Any
 
+from sqlalchemy import update
+
 from ... import db, merchants, monitoring
 from ... import settings_keys as sk
+from ...models import Merchant
 from ..common import ApiError
 
 
@@ -57,7 +60,7 @@ def api_logodev_settings(conn, _q, body):
         # look up by name again, now with Brand Search: the ones without a logo, and ones whose logo came from the
         # plain name lookup (which can be the wrong brand)
         # (a logo stays until Brand Search answers: replaced by a clear match, or dropped when there's none)
-        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ?", (merchants.BRAND + "%",))
+        conn.execute(update(Merchant).where(Merchant.id.like(merchants.BRAND + "%")).values(logo_checked=None))
         conn.commit()
         start_logo_backfill()
         return {"ok": True, "configured": merchants.configured(conn)}
@@ -68,8 +71,7 @@ def api_logodev_settings(conn, _q, body):
         if not re.fullmatch(r"pk_[A-Za-z0-9_-]{8,200}", key):
             raise ApiError("That isn't a Logo.dev publishable key: it starts with pk_ (the secret sk_ key isn't needed).")
         db.set_setting(conn, sk.LOGODEV_TOKEN, key)
-        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL",
-                     (merchants.SITE + "%", merchants.BRAND + "%"))
+        merchants.retry_unknown(conn)
         conn.commit()               # so the fetch below (on its own connection) sees the key
         start_logo_backfill()
     return {"ok": True, "configured": merchants.configured(conn)}

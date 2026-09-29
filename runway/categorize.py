@@ -9,9 +9,12 @@ import time
 import urllib.error
 import urllib.request
 
+from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_coerce, update
+
 from . import categories as catmod
 from . import settings_keys as sk
 from . import db, rules as rulesmod, splits
+from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
 DEFAULT_MODEL = "anthropic/claude-haiku-4.5"  # any OpenRouter model id works
@@ -92,7 +95,7 @@ def rule_key(tx: dict) -> str:
 # AI categorization (OpenRouter)
 
 def _category_names(conn) -> list[str]:
-    return [r["name"] for r in conn.execute("SELECT name FROM categories ORDER BY name")]
+    return conn.execute(select(Category.name).order_by(Category.name)).scalars()
 
 
 def _subcategory_hints(conn) -> list[str]:
@@ -250,43 +253,35 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         _categorize_with_ai(conn, leftover, caller, counts)
     else:
         for t in leftover:
-            conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (t["id"],))
+            conn.execute(update(Transaction).where(Transaction.id == t["id"]).values(needs_review=1))
             counts["review"] += 1
     for tid in review_after:   # a rule said to look at these, whatever category they got
-        conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tid,))
+        conn.execute(update(Transaction).where(Transaction.id == tid).values(needs_review=1))
     return counts
 
 
 def _to_categorize(conn, tx_ids: list[str] | None) -> list[dict]:
     """The given transactions (or every uncategorized one), leaving out split ones, with their account's kind."""
+    t = Transaction
+    q = select(t, Account.kind).join(Account, Account.id == t.account_id).where(func.coalesce(t.is_split, 0) == 0)
     if tx_ids is None:
-        return db.rows(conn.execute(
-            "SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
-            "WHERE t.category IS NULL AND COALESCE(t.is_split, 0)=0"
-        ))
+        return db.rows(conn.execute(q.where(t.category.is_(None))))
     todo = []
     for i in range(0, len(tx_ids), 500):
-        chunk = tx_ids[i : i + 500]
-        q = ",".join("?" * len(chunk))
-        todo += db.rows(conn.execute(
-            f"SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
-            f"WHERE t.id IN ({q}) AND COALESCE(t.is_split, 0)=0",
-            chunk,
-        ))
+        todo += db.rows(conn.execute(q.where(t.id.in_(tx_ids[i : i + 500]))))
     return todo
 
 
 def _merchant_history(conn) -> dict[tuple, str]:
     """What each merchant was settled as most recently (rules, your own picks, or confident AI answers), by
     lowercased merchant and whether money came in."""
-    return {
-        (r["k"], r["sign"]): r["category"]
-        for r in conn.execute(
-            "SELECT lower(payee) AS k, amount > 0 AS sign, category FROM transactions "
-            "WHERE needs_review=0 AND category IS NOT NULL AND category_source IN ('manual','rule','ai','history') "
-            "AND payee<>'' ORDER BY posted, id"
-        )
-    }
+    t = Transaction
+    # type_coerce: the comparison's value as the database gives it (0/1 on SQLite), as the SQL text did
+    q = (select(func.lower(t.payee).label("k"), type_coerce(t.amount > 0, Integer).label("sign"), t.category)
+         .where(t.needs_review == 0, t.category.is_not(None), t.category_source.in_(["manual", "rule", "ai", "history"]),
+                t.payee != "")
+         .order_by(t.posted, t.id))
+    return {(r["k"], r["sign"]): r["category"] for r in conn.execute(q)}
 
 
 def _categorize_locally(conn, tx: dict, rules: list[dict], history: dict[tuple, str], review_after: list[str]) -> str | None:
@@ -311,10 +306,8 @@ def _categorize_locally(conn, tx: dict, rules: list[dict], history: dict[tuple, 
         cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
     if not cat:
         return None
-    conn.execute(
-        "UPDATE transactions SET category=?, category_source=?, confidence=1, needs_review=0 WHERE id=?",
-        (cat, source, tx["id"]),
-    )
+    conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(
+        category=cat, category_source=source, confidence=1, needs_review=0))
     return source
 
 
@@ -329,22 +322,21 @@ def _categorize_with_ai(conn, leftover: list[dict], caller, counts: dict[str, in
     # Categories that take money out of spending (transfers, card payments, Ignore): the model only ever
     # suggests them. Its input includes text the other side of a payment writes (an ACH or Zelle memo), which
     # could talk it into hiding a charge, so these always wait for you in Review.
-    hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
-    spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
+    hides = set(conn.execute(select(Category.name).where(Category.is_transfer == 1)).scalars())
+    spends_as_income = set(conn.execute(select(Category.name).where(Category.is_income == 1)).scalars())
+    not_manual = func.coalesce(Transaction.category_source, "") != "manual"
     for group, (cat, conf) in zip(groups, answers, strict=True):
         for t in group:
             if cat is None:
-                conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
+                conn.execute(update(Transaction).where(Transaction.id == t["id"], not_manual).values(needs_review=1))
                 counts["review"] += 1
                 continue
             review = 1 if (conf < REVIEW_THRESHOLD or cat in hides
                            or (cat in spends_as_income and t["amount"] < 0)) else 0
             conn.execute(
                 # Don't overwrite a choice you made while the model was thinking.
-                "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "
-                "WHERE id=? AND COALESCE(category_source, '') <> 'manual'",
-                (cat, conf, review, t["id"]),
-            )
+                update(Transaction).where(Transaction.id == t["id"], not_manual)
+                .values(category=cat, category_source="ai", confidence=conf, needs_review=review))
             counts["review" if review else "ai"] += 1
     conn.commit()
 
@@ -358,9 +350,10 @@ def group_by_merchant(txs: list[dict]) -> list[list[dict]]:
 
 
 def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, message, reply):
-    conn.execute("INSERT INTO ai_log(purpose, model, merchants, answered, new_cats, ok, seconds, message, reply) VALUES (?,?,?,?,?,?,?,?,?)",
-                 (purpose, model, merchants, answered, new_cats, 1 if ok else 0, round(seconds, 1), message, (reply or "")[:1500]))
-    conn.execute("DELETE FROM ai_log WHERE id NOT IN (SELECT id FROM ai_log ORDER BY id DESC LIMIT 200)")
+    conn.execute(insert(AiLog).values(purpose=purpose, model=model, merchants=merchants, answered=answered, new_cats=new_cats,
+                                      ok=1 if ok else 0, seconds=round(seconds, 1), message=message, reply=(reply or "")[:1500]))
+    newest = select(AiLog.id).order_by(AiLog.id.desc()).limit(200).correlate(None)   # its own FROM ai_log, not the DELETE's
+    conn.execute(delete(AiLog).where(AiLog.id.not_in(newest)))
 
 
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:
@@ -374,8 +367,9 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
     categories = _category_names(conn)
     # The latest choice for each merchant (newest first), as examples for the model.
     examples, seen = [], set()
-    for r in conn.execute("SELECT payee, category FROM transactions WHERE category_source IN ('manual','rule') AND payee<>'' "
-                          "ORDER BY posted DESC LIMIT 5000"):
+    t = Transaction
+    for r in conn.execute(select(t.payee, t.category).where(t.category_source.in_(["manual", "rule"]), t.payee != "")
+                          .order_by(t.posted.desc()).limit(5000)):
         if r["payee"].lower() not in seen:
             seen.add(r["payee"].lower())
             examples.append({"payee": r["payee"], "category": r["category"]})
@@ -415,12 +409,13 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
 
 def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[dict]:
     """Suggestions for everything waiting in Review, one per merchant. Nothing is applied."""
+    t = Transaction
     txs = db.rows(conn.execute(
-        "SELECT t.*, a.kind, " + db.label_sql("a") + " AS account_name FROM transactions t "
-        "JOIN accounts a ON a.id=t.account_id "
-        "WHERE (t.needs_review=1 OR t.category IS NULL) AND COALESCE(t.category_source, '') <> 'manual' "
-        "AND a.kind <> 'investment' ORDER BY t.posted DESC"
-    ))
+        select(t, Account.kind, db.account_label_expr().label("account_name"))
+        .join(Account, Account.id == t.account_id)
+        .where(or_(t.needs_review == 1, t.category.is_(None)), func.coalesce(t.category_source, "") != "manual",
+               Account.kind != "investment")
+        .order_by(t.posted.desc())))
     groups = group_by_merchant(txs)
     groups.sort(key=lambda g: -len(g))
     groups = groups[:limit_groups]
@@ -446,29 +441,29 @@ def apply_to_group(conn, tx_ids: list[str], category: str, remember: bool) -> in
     """Apply a category you confirmed to a merchant's transactions. Returns how many were updated."""
     if not tx_ids:
         return 0
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone():
+    if not _known_category(conn, category):
         raise ValueError(f"Unknown category: {category}")
     set_category(conn, tx_ids[0], category, remember=remember)  # also saves the rule when remember=True
     for tid in tx_ids[1:]:
-        conn.execute(
-            "UPDATE transactions SET category=?, category_source='manual', confidence=1, needs_review=0 WHERE id=?",
-            (category, tid),
-        )
+        conn.execute(update(Transaction).where(Transaction.id == tid).values(
+            category=category, category_source="manual", confidence=1, needs_review=0))
     return len(tx_ids)
+
+
+def _known_category(conn, name: str) -> bool:
+    return conn.execute(select(Category.name).where(Category.name == name)).fetchone() is not None
 
 
 def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int:
     """Manually set a category. With remember=True, add a rule and apply it to matching unreviewed items.
     Returns how many other transactions the new rule updated."""
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone():
+    if not _known_category(conn, category):
         raise ValueError(f"Unknown category: {category}")
-    tx = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    t = Transaction
+    tx = conn.execute(select(t).where(t.id == tx_id)).fetchone()
     if not tx:
         raise ValueError("Transaction not found")
-    conn.execute(
-        "UPDATE transactions SET category=?, category_source='manual', confidence=1, needs_review=0 WHERE id=?",
-        (category, tx_id),
-    )
+    conn.execute(update(t).where(t.id == tx_id).values(category=category, category_source="manual", confidence=1, needs_review=0))
     if tx["is_split"]:   # one category for the whole thing means it isn't split any more
         splits.clear(conn, tx_id)
     if not remember:
@@ -478,37 +473,31 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
         return 0
     rulesmod.remember(conn, key, category)
     cur = conn.execute(
-        "UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 "
-        "WHERE id<>? AND COALESCE(category_source, '') <> 'manual' AND COALESCE(is_split, 0)=0 "
-        "AND (needs_review=1 OR category IS NULL) "
-        "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)",
-        (category, tx_id, key, key),
-    )
+        update(t).where(t.id != tx_id, func.coalesce(t.category_source, "") != "manual", func.coalesce(t.is_split, 0) == 0,
+                        or_(t.needs_review == 1, t.category.is_(None)),
+                        or_(db.instr(func.lower(t.payee), key) > 0, db.instr(func.lower(t.description), key) > 0))
+        .values(category=category, category_source="rule", confidence=1, needs_review=0))
     return cur.rowcount
 
 
 def rule_offer(conn, tx_id: str, category: str) -> dict | None:
     """After you pick a category: whether to offer "always use it for this merchant" (no, if the merchant's name is too
     short to make a rule from, or its plain rule already gives this category)."""
-    tx = conn.execute("SELECT payee, description FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    tx = conn.execute(select(Transaction.payee, Transaction.description).where(Transaction.id == tx_id)).fetchone()
     if not tx:
         return None
     key = rule_key(dict(tx))
     if len(key) < 3:
         return None
-    have = conn.execute("SELECT category FROM rules WHERE match=? AND COALESCE(match_mode, 'contains')='contains' "
-                        "AND amount_min IS NULL AND amount_max IS NULL AND direction IS NULL AND account_id IS NULL "
-                        "AND split IS NULL", (key,)).fetchone()
+    have = conn.execute(select(Rule.category).where(Rule.match == key, *rulesmod.plain())).fetchone()
     if have and have["category"] == category:
         return None
     return {"merchant": tx["payee"] or tx["description"], "match": key, "replaces": have["category"] if have else None}
 
 
 def accept_suggestion(conn, tx_id: str) -> None:
-    conn.execute(
-        "UPDATE transactions SET needs_review=0, category_source='manual', confidence=1 WHERE id=? AND category IS NOT NULL",
-        (tx_id,),
-    )
+    conn.execute(update(Transaction).where(Transaction.id == tx_id, Transaction.category.is_not(None))
+                 .values(needs_review=0, category_source="manual", confidence=1))
 
 
 MAX_BULK = 2000
@@ -523,24 +512,23 @@ def bulk_update(conn, tx_ids: list[str], category: str | None = None, payee: str
         raise ValueError("Select some transactions first")
     if len(ids) > MAX_BULK:
         raise ValueError(f"Change at most {MAX_BULK:,} transactions at once")
-    if category and not conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone():
+    if category and not _known_category(conn, category):
         raise ValueError(f"Unknown category: {category}")
     payee = " ".join((payee or "").split())[:80] or None
     if not (category or payee or reviewed):
         raise ValueError("Choose what to change")
     found = 0
+    t = Transaction
     for i in range(0, len(ids), 500):
-        chunk = ids[i:i + 500]
-        q = ",".join("?" * len(chunk))
-        found += conn.execute(f"SELECT COUNT(*) FROM transactions WHERE id IN ({q})", chunk).fetchone()[0]
+        chunk = t.id.in_(ids[i:i + 500])
+        found += conn.execute(select(func.count()).select_from(t).where(chunk)).scalar()
         if category:
-            for r in conn.execute(f"SELECT id FROM transactions WHERE id IN ({q}) AND is_split=1", chunk).fetchall():
-                splits.clear(conn, r["id"])
-            conn.execute(f"UPDATE transactions SET category=?, category_source='manual', confidence=1, needs_review=0 "
-                         f"WHERE id IN ({q})", (category, *chunk))
+            for tid in conn.execute(select(t.id).where(chunk, t.is_split == 1)).scalars():
+                splits.clear(conn, tid)
+            conn.execute(update(t).where(chunk).values(category=category, category_source="manual", confidence=1, needs_review=0))
         if payee:
-            conn.execute(f"UPDATE transactions SET payee=? WHERE id IN ({q})", (payee, *chunk))
+            conn.execute(update(t).where(chunk).values(payee=payee))
         if reviewed:
-            conn.execute(f"UPDATE transactions SET needs_review=0, category_source=CASE WHEN category IS NULL "
-                         f"THEN category_source ELSE 'manual' END WHERE id IN ({q})", chunk)
+            conn.execute(update(t).where(chunk).values(
+                needs_review=0, category_source=case((t.category.is_(None), t.category_source), else_="manual")))
     return found
