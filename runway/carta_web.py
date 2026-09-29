@@ -14,8 +14,11 @@ import re
 import urllib.parse
 from datetime import date
 
+from sqlalchemy import delete, insert, select, update
+
 from . import carta, db
 from . import settings_keys as sk
+from .models import EquityCompany, EquityGrant
 
 START_URL = "https://app.carta.com/"
 CARTA_HOSTS = re.compile(r"(^|\.)carta\.com$")
@@ -225,18 +228,21 @@ def finish(conn) -> dict:
         return {"companies": 0, "grants": 0, "pages": len(_capture(conn))}
     today = date.today().isoformat()
     for c in found["companies"]:
-        row = conn.execute("SELECT 1 FROM equity_companies WHERE id=?", (c["id"],)).fetchone()
+        row = conn.execute(select(EquityCompany.id).where(EquityCompany.id == c["id"])).fetchone()
         when = c["price_date"] or (today if c["price"] else None)
         if row:   # a company Carta gave no name for this time keeps the one it has
-            conn.execute("UPDATE equity_companies SET name=CASE WHEN ? THEN name ELSE ? END, share_price=COALESCE(?, share_price), "
-                         "price_as_of=COALESCE(?, price_as_of), source='carta' WHERE id=?", (bool(c.get("unnamed")), c["name"], c["price"], when, c["id"]))
+            ec = EquityCompany   # the CASE and COALESCEs, decided here: what Carta didn't send leaves the stored value
+            conn.execute(update(ec).where(ec.id == c["id"]).values(
+                name=ec.name if c.get("unnamed") else c["name"],
+                share_price=ec.share_price if c["price"] is None else c["price"],
+                price_as_of=ec.price_as_of if when is None else when, source="carta"))
         else:
-            conn.execute("INSERT INTO equity_companies(id, name, share_price, price_as_of, source) VALUES (?,?,?,?,?)",
-                         (c["id"], c["name"], c["price"], when, "carta"))
+            conn.execute(insert(EquityCompany).values(id=c["id"], name=c["name"], share_price=c["price"], price_as_of=when,
+                                                      source="carta"))
     for cid, g, raw in found["grants"]:
         carta._save_grant(conn, cid, g, raw)
     for gid in found["gone"]:   # canceled or expired since the last import
-        conn.execute("DELETE FROM equity_grants WHERE id=? AND source='carta'", (gid,))
+        conn.execute(delete(EquityGrant).where(EquityGrant.id == gid, EquityGrant.source == "carta"))
     db.set_setting(conn, sk.CARTA_WEB_LAST, today)
     db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, None)
     return {"companies": len(found["companies"]), "grants": len(found["grants"]), "pages": len(_capture(conn))}
