@@ -205,6 +205,15 @@ class Result:
     def __iter__(self):
         return iter(self.fetchall())
 
+    def scalar(self):
+        """The first column of the first row, or None if there are no rows (`SELECT COUNT(*) ...` -> the count)."""
+        row = self.fetchone()
+        return row[0] if row is not None else None
+
+    def scalars(self) -> list:
+        """The first column of every row."""
+        return [r[0] for r in self.fetchall()]
+
 
 def _outside_quotes(sql: str, fn) -> str:
     parts = re.split(r"('(?:[^']|'')*')", sql)

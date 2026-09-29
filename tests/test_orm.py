@@ -40,7 +40,9 @@ class SessionLayerTests(unittest.TestCase):
         self.assertEqual(self.c.execute(update(Rule).where(Rule.match == "coffee").values(category=None)).rowcount, 1)
         self.c.execute(insert(Rule), [])   # no rows: nothing inserted, not a row of defaults
         self.c.execute(insert(Rule), [{"match": "a"}, {"match": "b"}])
-        self.assertEqual(self.c.execute(select(func.count()).select_from(Rule)).fetchone()[0], 3)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(Rule)).scalar(), 3)
+        self.assertEqual(self.c.execute(select(Rule.match).order_by(Rule.id)).scalars(), ["coffee", "a", "b"])
+        self.assertIsNone(self.c.execute(select(Rule.match).where(Rule.id == -1)).scalar())
 
     def test_orm_and_legacy_sql_share_one_transaction(self):
         self.c.execute("INSERT INTO accounts(id, name) VALUES ('a', 'Checking')")   # legacy first: the Session joins
