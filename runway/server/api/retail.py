@@ -7,8 +7,11 @@ import os
 import threading
 import zipfile
 
+from sqlalchemy import select
+
 from ... import carta_web, db, monitoring, retail
 from ... import settings_keys as sk
+from ...models import RetailCharge
 from ..common import ApiError
 
 
@@ -36,7 +39,8 @@ def api_retail_match(conn, _q, _b):
     """Categorize items still waiting (with the AI, if set up), then match and split again."""
     items = retail.categorize_items(conn)
     out = retail.match_and_apply(conn)
-    for ch in conn.execute("SELECT id FROM retail_charges WHERE tx_id IS NOT NULL AND applied IS NOT NULL").fetchall():
+    for ch in conn.execute(select(RetailCharge.id).where(RetailCharge.tx_id.is_not(None),
+                                                         RetailCharge.applied.is_not(None))).fetchall():
         r = retail.apply(conn, ch["id"])
         if r in ("split", "category"):
             out[r] += 1
