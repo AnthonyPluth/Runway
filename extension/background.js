@@ -4,6 +4,7 @@
 // Each store is read in a hidden page of its own site (see "pages" below), so nothing opens while it works.
 
 if (typeof importScripts === "function") importScripts("page.js");   // Chrome; Firefox loads it from the manifest
+/* global PAGE_COMMANDS -- from page.js, loaded just above */
 
 const AMAZON = "https://www.amazon.com";
 const AMAZON_TRANSACTIONS = `${AMAZON}/cpe/yourpayments/transactions`;
@@ -73,7 +74,7 @@ async function runway(path, body) {
       signal: AbortSignal.timeout(RUNWAY_CALL_MS),
     });
   } catch (e) {
-    throw new Error(`Couldn't reach Runway at ${runwayUrl} (${e.message}).`);
+    throw new Error(`Couldn't reach Runway at ${runwayUrl} (${e.message}).`, { cause: e });
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || `Runway answered ${res.status}.`), { code: data.code });
@@ -181,9 +182,9 @@ const frameHost = typeof document !== "undefined" ? {
   async done() { await chrome.offscreen.closeDocument().catch(() => {}); },
 };
 
-const frames = new Map();   // frame name -> HiddenPage
+const hiddenPages = new Map();   // frame name -> HiddenPage
 chrome.runtime.onConnect.addListener((port) => {
-  const page = frames.get(port.name);
+  const page = hiddenPages.get(port.name);
   if (!page || (port.sender && port.sender.id !== chrome.runtime.id)) { port.disconnect(); return; }
   // Only the hidden frame itself, not a frame a store page makes inside it with the same name (frame.js refuses
   // those too): the frame keeps its id as it loads one page after another.
@@ -198,7 +199,7 @@ class HiddenPage {
   static async open(url) {
     url = storeUrl(url);
     const page = new HiddenPage(`runway-hidden-${crypto.randomUUID()}`);
-    frames.set(page.name, page);
+    hiddenPages.set(page.name, page);
     const ready = page.loaded();
     try {
       await frameHost.open(page.name, url);
@@ -217,7 +218,7 @@ class HiddenPage {
       const p = this.pending.get(m.id);
       if (!p) return;
       this.pending.delete(m.id);
-      m.error ? p.reject(new Error(m.error)) : p.resolve(m.result);
+      if (m.error) p.reject(new Error(m.error)); else p.resolve(m.result);
     });
     port.onDisconnect.addListener(() => {
       if (this.port !== port) return;
@@ -258,7 +259,7 @@ class HiddenPage {
   }
   async signIn() { return new HiddenUnavailable("looked signed out"); }   // perhaps only in a frame: a tab will tell
   async close() {
-    frames.delete(this.name);
+    hiddenPages.delete(this.name);
     try { if (this.port) this.port.disconnect(); } catch (_) { /* gone */ }
     await frameHost.close(this.name);
   }
