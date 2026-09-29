@@ -131,7 +131,9 @@ plain Python with a handful of well-known libraries.
   if Carta approves your app.
 
 ### Everyday
-- **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old.
+- **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old. Plaid, whose quota
+  is small, is asked once a day only: on the first sync after 7 AM (Runway's time zone, America/Chicago by default).
+  A connection's own Sync button in Settings still asks it straight away.
 - **Autosave everywhere:** there are no Save buttons.
 - **A setup checklist** for new users (connect a bank, pick your main account, add paychecks and bills, set budgets).
 - Dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and **installs
