@@ -1,0 +1,151 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Geist, bundled with Runway (runway/static/fonts, SIL Open Font License). */
+@font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+
+/* shadcn-svelte's default theme (neutral). Runway uses the dark one (index.html sets class="dark"). */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+}
+
+/* Dark, in the manner of Apple's own apps: true black behind, raised gray surfaces, blue for actions. */
+.dark {
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #1c1c1e;
+  --card-foreground: #ffffff;
+  --popover: #2c2c2e;
+  --popover-foreground: #ffffff;
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --secondary: #2c2c2e;
+  --secondary-foreground: #ffffff;
+  --muted: #2c2c2e;
+  --muted-foreground: #8e8e93;
+  --accent: #2c2c2e;
+  --accent-foreground: #ffffff;
+  --destructive: #ff453a;
+  --border: rgb(84 84 88 / 55%);
+  --input: rgb(118 118 128 / 28%);
+  --ring: #0a84ff;
+  --chart-1: #0a84ff;
+  --chart-2: #30d158;
+  --chart-3: #ff9f0a;
+  --chart-4: #bf5af2;
+  --chart-5: #ff375f;
+  --sidebar: #0c0c0d;
+  --sidebar-foreground: #ffffff;
+  --sidebar-accent: #1c1c1e;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(84 84 88 / 40%);
+}
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+}
+
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; }
+}
+
+/* Runway's chart colors. Categorical series in this order (validated for colorblind
+   separation and contrast on the dark card surface); "everything else" is always gray. */
+:root {
+  --cat-1: #3987e5; --cat-2: #d95926; --cat-3: #199e70; --cat-4: #c98500;
+  --cat-5: #d55181; --cat-6: #008300; --cat-7: #9085e9; --cat-8: #e66767; --cat-other: #6b6a66;
+  --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0; --nw-6: #9085e9;
+  --flow-in: #30d158; --flow-out: #0a84ff;
+  --good: #30d158; --warning: #f0b84b; --low: #f08a4b;
+}
+
+/* Grouped lists, as in iOS Settings: a rounded surface of rows split by inset hairlines. `.cell` is a row;
+   rows with an icon set --inset to where the hairline should start. */
+@layer components {
+  .group-list { background: var(--card); border-radius: 0.875rem; overflow: hidden; }
+  .group-list > * + * { position: relative; }
+  .group-list > * + *::before {
+    content: ""; position: absolute; top: 0; right: 0; left: var(--inset, 1rem); border-top: 0.5px solid var(--border); pointer-events: none;
+  }
+  .cell { display: flex; align-items: center; gap: 0.75rem; min-height: 3.25rem; padding: 0.625rem 1rem; }
+  button.cell, a.cell { width: 100%; text-align: left; cursor: pointer; transition: background-color 120ms; }
+  button.cell:hover, a.cell:hover { background: rgb(255 255 255 / 4%); }
+  button.cell:active, a.cell:active { background: rgb(255 255 255 / 8%); }
+  .tile { background: var(--card); border-radius: 0.875rem; padding: 0.75rem 1rem; }
+}
+/* Cards lose their outline: surfaces stand apart from the black by their own shade. */
+[data-slot="card"] { border-color: transparent; box-shadow: none; }
+
+/* The "Saved ✓" flash autosave puts on a field (see lib/autosave.ts). */
+@layer components {
+  .just-saved { position: relative; }
+  .just-saved::after {
+    content: "Saved ✓"; position: absolute; right: 0; top: -1.1rem; font-size: 11px; color: var(--good);
+    background: var(--card); padding: 0 4px; border-radius: 4px; animation: saved-fade 1.6s ease forwards; pointer-events: none;
+  }
+  @keyframes saved-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .just-saved::after { animation: none; } }
+}
