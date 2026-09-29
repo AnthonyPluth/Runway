@@ -105,6 +105,38 @@ class HistoryTests(Base):
         self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 0)
 
 
+class TransferHistoryTests(Base):
+    """Pins how history treats transfers, corporate actions, prices from trades alone, and balance-only accounts."""
+
+    def test_transfers_trades_and_a_balance_only_account(self):
+        self.c.execute("INSERT INTO securities(id, ticker, name, type, is_cash) VALUES ('NOPX','NOPX','No Price Inc','equity',0)")
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, type, subtype, balance) VALUES ('B','it1','Old 401k','investment','401k',2500)")
+        self.tx("d1", "2026-08-01", "cash", "deposit", -1000)
+        self.tx("x1", "2026-08-05", "transfer", "transfer", 0, "XYZ", 5)            # in-kind: 5 XYZ, priced from history
+        self.tx("n1", "2026-08-10", "buy", "buy", 400, "NOPX", 4, 100)             # no price history: valued at trades
+        self.tx("n2", "2026-09-01", "sell", "sell", -220, "NOPX", -2, 110)
+        self.tx("w1", "2026-09-05", "transfer", "transfer", 150)                    # cash sent out
+        self.tx("s1", "2026-09-10", "transfer", "spin off", 0, "XYZ", 1)            # corporate action: shares, no flow
+        self.tx("f1", "2026-09-30", "cash", "deposit", -50)                         # after today: ignored
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','XYZ',6,50,300)")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','NOPX',2,110,220)")
+        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',670,1,670)")
+        self.price("XYZ", "2026-08-01", 40)
+        self.price("XYZ", "2026-09-01", 45)
+        self.price("XYZ", "2026-09-22", 50)
+        h = portfolio.history(self.c, TODAY, days=60)
+        got = {d: (h["value"][i], h["flows"][i], h["invested"][i], h["twr"][i]) for i, d in enumerate(h["dates"])}
+        self.assertEqual(got["2026-07-31"], (2500.0, 0.0, 2500.0, 0.0))            # the 401k's balance, held flat
+        self.assertEqual(got["2026-08-01"], (3500.0, 1000.0, 3500.0, 0.0))
+        self.assertEqual(got["2026-08-05"], (3700.0, 200.0, 3700.0, 0.0))          # 5 x $40 moved in counts as added
+        self.assertEqual(got["2026-08-10"], (3700.0, 0.0, 3700.0, 0.0))
+        self.assertEqual(got["2026-09-01"], (3765.0, 0.0, 3700.0, 0.017568))
+        self.assertEqual(got["2026-09-05"], (3615.0, -150.0, 3550.0, 0.017568))
+        self.assertEqual(got["2026-09-10"], (3660.0, 0.0, 3550.0, 0.030234))
+        self.assertEqual(got["2026-09-23"], (3690.0, 0.0, 3550.0, 0.038679))
+        self.assertEqual((h["dates"][0], h["missing_prices"], h["estimated_before"]), ("2026-07-31", ["NOPX"], None))
+
+
 class SplitTests(Base):
     def test_split_does_not_jump(self):
         # 10 XYZ at $200, 2-for-1 split on Jul 1, now 20 at $100. Yahoo's closes are split-adjusted (100 throughout).

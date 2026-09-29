@@ -105,6 +105,32 @@ class EditingTests(Base):
         # An amount alone is enough of a condition.
         self.assertEqual(rules.clean(self.c, {"amount_min": 5000, "review": True})["review"], 1)
 
+    def test_every_check_and_what_a_clean_rule_looks_like(self):
+        for bad, msg in [({"match": "shop", "match_mode": "regex", "category": "Shopping"}, "Pick how the text should match"),
+                         ({"match": "shop", "amount_min": "lots", "category": "Shopping"}, "Amounts must be numbers"),
+                         ({"match": "shop", "direction": "sideways", "category": "Shopping"}, "Direction is money out or money in"),
+                         ({"match": "shop", "account_id": "nope", "category": "Shopping"}, "Unknown account"),
+                         ({"match": "shop", "split": [{"category": "Groceries", "percent": 100}]}, "at least two parts"),
+                         ({"match": "shop", "split": "Groceries"}, "at least two parts"),
+                         ({"match": "shop", "split": [{"category": "Groceries", "percent": "x"}, {"category": "Shopping", "percent": 50}]}, "a percentage"),
+                         ({"match": "shop", "split": [{"category": "Nope", "percent": 50}, {"category": "Shopping", "percent": 50}]}, "a category"),
+                         ({"match": "shop", "split": [None, {"category": "Shopping", "percent": 50}]}, "a percentage"),
+                         ({"match": "shop", "split": [{"category": "Groceries", "percent": 0}, {"category": "Shopping", "percent": 100}]}, "a percentage")]:
+            with self.assertRaisesRegex(rules.RuleError, msg):
+                rules.clean(self.c, bad)
+        self.assertEqual(rules.clean(self.c, {
+            "match": "  Venmo   RENT ", "match_mode": "starts", "amount_min": "-1000.504", "amount_max": "", "direction": "out",
+            "account_id": "chk", "category": "Shopping", "rename": "  Landlord   Co  ", "review": "yes"}), {
+            "match": "venmo rent", "match_mode": "starts", "amount_min": 1000.5, "amount_max": None, "direction": "out",
+            "account_id": "chk", "category": "Shopping", "rename": "Landlord Co", "review": 1, "split": None})
+        # A split decides the categories, so a category given alongside it is dropped.
+        split = rules.clean(self.c, {"match": "costco", "category": "Groceries",
+                                     "split": [{"category": "Groceries", "percent": "60"}, {"category": "Shopping", "percent": 40}]})
+        self.assertEqual((split["category"], split["split"]),
+                         (None, '[{"category": "Groceries", "percent": 60.0}, {"category": "Shopping", "percent": 40.0}]'))
+        self.assertEqual(rules.clean(self.c, {"direction": "in", "rename": "x" * 100})["rename"], "x" * 80)
+        self.assertIsNone(rules.clean(self.c, {"account_id": "chk", "amount_max": 5, "review": 1, "split": []})["split"])
+
     def test_preview_and_apply_leave_your_choices(self):
         mine = self.tx(-12, "CHIPOTLE 0123", category="Groceries", source="manual")
         other = self.tx(-14, "CHIPOTLE 0456", category="Shopping", source="ai")

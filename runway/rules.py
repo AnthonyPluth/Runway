@@ -139,20 +139,44 @@ def apply_actions(conn, tx: dict, acts: dict) -> str | None:
 
 def clean(conn, body: dict) -> dict:
     """A rule from the app, checked. Raises RuleError with something to tell the person."""
+    r = _clean_conditions(conn, body)
+    r["category"] = body.get("category") or None
+    if r["category"] and not _known_category(conn, r["category"]):
+        raise RuleError(f"Unknown category: {r['category']}")
+    r["rename"] = " ".join(str(body.get("rename") or "").split())[:80] or None
+    r["review"] = 1 if body.get("review") else 0
+    split = body.get("split") or None
+    r["split"] = _clean_split(conn, split) if split else None
+    if r["split"]:
+        r["category"] = None   # a split decides the categories
+    if not (r["category"] or r["rename"] or r["review"] or r["split"]):
+        raise RuleError("Choose what the rule should do")
+    return r
+
+
+def _known_category(conn, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone() is not None
+
+
+def _clean_amount(v) -> float | None:
+    """A dollar limit, whichever way the money goes; None when it's left empty."""
+    if v in (None, ""):
+        return None
+    try:
+        return round(abs(db.number(v)), 2)
+    except (TypeError, ValueError):
+        raise RuleError("Amounts must be numbers") from None
+
+
+def _clean_conditions(conn, body: dict) -> dict:
+    """The rule's conditions (text, amounts, direction, account), checked; at least one is needed."""
     r: dict = {}
     r["match"] = " ".join(str(body.get("match") or "").lower().split())
     r["match_mode"] = body.get("match_mode") or "contains"
     if r["match_mode"] not in MODES:
         raise RuleError("Pick how the text should match")
-    for k in ("amount_min", "amount_max"):
-        v = body.get(k)
-        if v in (None, ""):
-            r[k] = None
-            continue
-        try:
-            r[k] = round(abs(db.number(v)), 2)
-        except (TypeError, ValueError):
-            raise RuleError("Amounts must be numbers") from None
+    r["amount_min"] = _clean_amount(body.get("amount_min"))
+    r["amount_max"] = _clean_amount(body.get("amount_max"))
     if r["amount_min"] is not None and r["amount_max"] is not None and r["amount_min"] > r["amount_max"]:
         raise RuleError("The smallest amount is bigger than the largest")
     r["direction"] = body.get("direction") or None
@@ -165,39 +189,29 @@ def clean(conn, body: dict) -> dict:
         raise RuleError("Give the rule some text to look for, or another condition")
     if r["match"] and len(r["match"]) < 2:
         raise RuleError("Use at least two letters of text")
-
-    def known(cat):
-        return conn.execute("SELECT 1 FROM categories WHERE name=?", (cat,)).fetchone()
-    r["category"] = body.get("category") or None
-    if r["category"] and not known(r["category"]):
-        raise RuleError(f"Unknown category: {r['category']}")
-    r["rename"] = " ".join(str(body.get("rename") or "").split())[:80] or None
-    r["review"] = 1 if body.get("review") else 0
-    split = body.get("split") or None
-    if split:
-        if not isinstance(split, list) or len(split) < 2:
-            raise RuleError("A split needs at least two parts")
-        parts = []
-        for p in split:
-            cat = (p or {}).get("category")
-            try:
-                pct = round(db.number((p or {}).get("percent")), 2)
-            except (TypeError, ValueError):
-                raise RuleError("Give every part a percentage") from None
-            if not cat or not known(cat):
-                raise RuleError("Give every part a category")
-            if pct <= 0:
-                raise RuleError("Give every part a percentage")
-            parts.append({"category": cat, "percent": pct})
-        if round(sum(p["percent"] for p in parts), 2) != 100:
-            raise RuleError("The parts of a split must add up to 100%")
-        r["split"] = json.dumps(parts)
-        r["category"] = None   # a split decides the categories
-    else:
-        r["split"] = None
-    if not (r["category"] or r["rename"] or r["review"] or r["split"]):
-        raise RuleError("Choose what the rule should do")
     return r
+
+
+def _clean_split(conn, split) -> str:
+    """A split's parts, checked: two or more, each a known category and a positive percentage, adding up to 100%.
+    Returned as the JSON the rules table keeps."""
+    if not isinstance(split, list) or len(split) < 2:
+        raise RuleError("A split needs at least two parts")
+    parts = []
+    for p in split:
+        cat = (p or {}).get("category")
+        try:
+            pct = round(db.number((p or {}).get("percent")), 2)
+        except (TypeError, ValueError):
+            raise RuleError("Give every part a percentage") from None
+        if not cat or not _known_category(conn, cat):
+            raise RuleError("Give every part a category")
+        if pct <= 0:
+            raise RuleError("Give every part a percentage")
+        parts.append({"category": cat, "percent": pct})
+    if round(sum(p["percent"] for p in parts), 2) != 100:
+        raise RuleError("The parts of a split must add up to 100%")
+    return json.dumps(parts)
 
 
 def save(conn, body: dict, rule_id: int | None = None) -> int:
