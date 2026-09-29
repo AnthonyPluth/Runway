@@ -97,6 +97,7 @@ LOGODEV_TOKEN = "logodev_token"     # the publishable key (pk_...)
 LOGODEV_SECRET = "logodev_secret"   # the secret key (sk_...), optional: Brand Search, for better name matches
 LOGODEV_LAST_ERROR = "logodev_last_error"            # why the last lookup by website failed
 LOGODEV_LAST_ERROR_NAME = "logodev_last_error_name"  # ... and by name
+LOGODEV_THEME = "logodev_theme"     # the theme (merchants.THEME) the stored Logo.dev logos were fetched for
 
 # Retailer order import
 RETAIL_TOKEN_HASH = "retail_token_hash"
