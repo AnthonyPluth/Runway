@@ -6,8 +6,8 @@ import unittest
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db
-from runway.models import Account, Asset, AssetValue, Rule, Setting
+from runway import db, splits
+from runway.models import Account, Asset, AssetValue, Rule, Setting, Transaction
 
 
 class SessionLayerTests(unittest.TestCase):
@@ -104,6 +104,23 @@ class SessionLayerTests(unittest.TestCase):
                          key=["asset_id", "date"])
         self.assertEqual(db.get_setting(self.c, "k"), "3x")
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM asset_values").fetchone()[0], 1)
+
+    def test_shared_fragments_match_their_sql(self):
+        self.c.executemany("INSERT INTO accounts(id, name, kind) VALUES (?,?,?)", [("a", "Checking", "checking"),
+                                                                                   ("i", "Brokerage", "investment")])
+        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, category, is_split) VALUES (?,?,?,?,?,?)", [
+            ("t1", "a", "2024-01-01", -100, "Shopping", 1), ("t2", "a", "2024-01-02", -5, "Coffee & Snacks", 0),
+            ("t3", "i", "2024-01-03", -7, None, None)])
+        self.c.executemany("INSERT INTO tx_splits(tx_id, amount, category) VALUES (?,?,?)",
+                           [("t1", -60, "Groceries"), ("t1", -40, "Shopping")])
+        p = splits.parts()
+        new = sorted(map(tuple, self.c.execute(select(p).where(db.not_investment(p.c.account_id)))))
+        old = sorted(map(tuple, self.c.execute(f"SELECT * FROM {splits.PARTS} t WHERE {db.NOT_INVESTMENT}")))
+        self.assertEqual(new, old)
+        self.assertEqual(len(new), 3)
+        self.assertEqual(list(self.c.execute(select(p)).fetchone().keys()),
+                         list(self.c.execute(f"SELECT * FROM {splits.PARTS} t").fetchone().keys()))
+        self.assertEqual({r[0] for r in self.c.execute(select(Transaction.id).where(db.not_investment()))}, {"t1", "t2"})
 
     def test_instr_and_account_label_expr(self):
         self.assertEqual(self.c.execute(select(db.instr("hello", "ll"), db.instr("hello", "%"))).fetchone()[:], (3, 0))
