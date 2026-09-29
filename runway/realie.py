@@ -42,7 +42,7 @@ def _ctx() -> ssl.SSLContext:
         import certifi  # type: ignore
 
         ctx.load_verify_locations(certifi.where())
-    except Exception:
+    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     return ctx
 

@@ -12,10 +12,14 @@ import os
 import re
 import threading
 from contextlib import contextmanager
+from urllib.parse import urlsplit
 
-from sqlalchemy import create_engine, event, inspect
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import MetaData, Table, create_engine, event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import NullPool
+from sqlalchemy.schema import CreateColumn
 
 from . import schema, secretbox
 from . import settings_keys as sk
@@ -83,7 +87,6 @@ def engine_url(path: str | None = None) -> str:
 
 def describe() -> str:
     if using_postgres():
-        from urllib.parse import urlsplit
         u = urlsplit(database_url())
         return f"Postgres {u.hostname or 'local'}{':' + str(u.port) if u.port else ''}/{u.path.lstrip('/')}"
     return db_path()
@@ -117,7 +120,7 @@ def _sqlite_engine(url: str) -> Engine:
 
 
 def _postgres_engine(url: str, path: str | None) -> Engine:
-    from psycopg.adapt import Dumper
+    from psycopg.adapt import Dumper   # the Postgres driver: only loaded when DATABASE_URL is set
 
     class Untyped(Dumper):
         """Send values as "unknown" so Postgres fits them to the column, as SQLite's loose typing would
@@ -129,7 +132,8 @@ def _postgres_engine(url: str, path: str | None) -> Engine:
                 return b"1" if obj else b"0"
             return str(obj).encode()
 
-    test_schema = None if path is None else "t_" + hashlib.sha1(path.encode()).hexdigest()[:12]
+    # Only a short, stable name for a test's schema, not a secret; changing the hash would orphan existing test schemas.
+    test_schema = None if path is None else "t_" + hashlib.sha1(path.encode(), usedforsecurity=False).hexdigest()[:12]
     # Tests make an engine per database; they don't keep connections open, so they don't run Postgres out of them.
     eng = (create_engine(url, poolclass=NullPool) if test_schema
            else create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=60))   # up to 64 requests plus syncs at once
@@ -276,7 +280,6 @@ def session(path: str | None = None):
 # ------------------------------------------------------------------------------------------------ schema
 
 def alembic_config(connection=None):
-    from alembic.config import Config
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cfg = Config(os.path.join(root, "alembic.ini")) if os.path.exists(os.path.join(root, "alembic.ini")) else Config()
     cfg.set_main_option("script_location", os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
@@ -286,7 +289,6 @@ def alembic_config(connection=None):
 
 def _baseline_columns() -> dict[str, set[str]]:
     """The tables and columns as of the baseline migration (later migrations add the rest)."""
-    from alembic import command
     with create_engine("sqlite://").begin() as c:
         command.upgrade(alembic_config(c), BASELINE)
         insp = inspect(c)
@@ -296,7 +298,6 @@ def _baseline_columns() -> dict[str, set[str]]:
 def _upgrade_legacy(sa_conn) -> None:
     """Databases made before Runway used migrations: add the columns that were added over time, so they match
     the baseline migration, which is then recorded as done (and later migrations run as usual)."""
-    from sqlalchemy.schema import CreateColumn
     baseline = _baseline_columns()
     insp = inspect(sa_conn)
     have = set(insp.get_table_names())
@@ -304,7 +305,6 @@ def _upgrade_legacy(sa_conn) -> None:
         if table.name not in baseline:
             continue
         if table.name not in have:   # the table as it was then; later migrations add to it
-            from sqlalchemy import MetaData, Table
             Table(table.name, MetaData(), *[c._copy() for c in table.columns if c.name in baseline[table.name]],
                   sqlite_autoincrement=table.kwargs.get("sqlite_autoincrement", False)).create(sa_conn)
             continue
@@ -324,7 +324,6 @@ def _upgrade_legacy(sa_conn) -> None:
 
 def migrate(path: str | None = None) -> None:
     """Bring the database's schema up to date."""
-    from alembic import command
     with engine(path).begin() as sa_conn:
         tables = set(inspect(sa_conn).get_table_names())
         cfg = alembic_config(sa_conn)
