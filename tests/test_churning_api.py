@@ -102,7 +102,8 @@ class ChurningApiTests(unittest.TestCase):
         self.assertIn("Travel", [c["name"] for c in out["categories"]])
         self.assertNotIn("Transfer", [c["name"] for c in out["categories"]])
         self.assertEqual(out["base_marker"], "*")
-        self.assertEqual([a["key"] for a in out["alert_prefs"]], ["churn_fee", "churn_bonus", "churn_plan", "churn_benefit"])
+        self.assertEqual([a["key"] for a in out["alert_prefs"]], ["churn_fee", "churn_bonus", "churn_plan", "churn_benefit",
+                                                               "churn_apply"])
         self.assertTrue(all(a["on"] and a["label"] for a in out["alert_prefs"]))
         self.assertIn("lounge", [p["key"] for p in out["benefit_presets"]])
         self.assertIn("airline", [g["kind"] for g in out["currency_groups"]])
@@ -152,6 +153,31 @@ class ChurningApiTests(unittest.TestCase):
         self.assertNotIn("task", [u["kind"] for u in api.api_churning(self.c, {}, {})["upcoming"]])
         with self.assertRaisesRegex(ApiError, "date"):
             api.api_churn_task_snooze(self.c, {}, {"until": "soon"}, str(t))
+
+    def test_wishlist_and_scores(self):
+        w = api.api_churn_wish_add(self.c, {}, {"owner": "Alex", "issuer": "chase", "product": "Sapphire Preferred",
+                                               "min_score": 760, "bonus": 75000, "currency": "ur"})["id"]
+        api.api_churn_score(self.c, {}, {"owner": "Alex", "score": 720, "source": "Experian FICO 8"})
+        out = api.api_churning(self.c, {}, {})
+        item = out["wishlist"][0]
+        self.assertEqual((item["id"], item["ready"], item["blockers"][0]["kind"]), (w, False, "score"))
+        self.assertEqual((out["scores"]["Alex"]["score"], out["scores"]["Alex"]["source"]), (720, "Experian FICO 8"))
+        api.api_churn_wish_update(self.c, {}, {"min_score": ""}, str(w))
+        self.assertTrue(api.api_churning(self.c, {}, {})["wishlist"][0]["ready"])
+        r = api.api_churn_wish_applied(self.c, {}, {}, str(w))
+        self.assertEqual(r["kind"], "card")
+        self.assertIn(r["id"], [c["id"] for c in api.api_churning(self.c, {}, {})["cards"]])
+        with self.assertRaisesRegex(ApiError, "already"):
+            api.api_churn_wish_applied(self.c, {}, {}, str(w))
+        with self.assertRaisesRegex(ApiError, "Pick the bank"):
+            api.api_churn_wish_add(self.c, {}, {"owner": "Alex", "product": "X"})
+        with self.assertRaisesRegex(ApiError, "credit score"):
+            api.api_churn_score(self.c, {}, {"owner": "Alex", "score": "great"})
+        with self.assertRaises(ApiError) as e:
+            api.api_churn_wish_update(self.c, {}, {}, "nope")
+        self.assertEqual(e.exception.status, 404)
+        api.api_churn_wish_remove(self.c, {}, {}, str(w))
+        self.assertEqual(api.api_churning(self.c, {}, {})["wishlist"], [])
 
     def test_bank_bonuses(self):
         opened = (TODAY - timedelta(days=10)).isoformat()

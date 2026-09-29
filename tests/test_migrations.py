@@ -94,6 +94,8 @@ class MigrationTests(unittest.TestCase):
             # A portal rate beside the normal one in the same category is allowed now
             conn.execute("INSERT INTO churn_rates(card_id, category, multiplier, portal_only) VALUES (1, 'Travel', 10, 1)")
             conn.execute("INSERT INTO churn_benefits(card_id, name) VALUES (1, 'Lounge')")
+            conn.execute("INSERT INTO churn_wishlist(owner, product, issuer) VALUES ('Alex', 'Gold', 'amex')")
+            conn.execute("INSERT INTO churn_scores(owner, as_of, score) VALUES ('Alex', '2026-09-01', 720)")
         db.init(self.path)   # starting again changes nothing
 
     def test_connection_wrapper(self):
