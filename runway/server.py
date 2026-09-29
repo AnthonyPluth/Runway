@@ -6,6 +6,7 @@ import contextlib
 import gzip
 import hashlib
 import html
+import io
 import ipaddress
 from http.cookies import SimpleCookie
 import json
@@ -21,13 +22,14 @@ import sys
 import threading
 import time
 import urllib.parse
+import zipfile
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sqlalchemy.exc
 from dateutil.relativedelta import relativedelta
 
-from . import oidc, sfinvest
+from . import backup, oidc, secretbox, sfinvest, tracked
 from . import monitoring, networth, notify, planner, realie, webpush
 from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
@@ -105,13 +107,17 @@ def run_sync() -> dict:
                 except Exception:
                     monitoring.report()
                 if conn.execute("SELECT 1 FROM inv_accounts WHERE source='simplefin'").fetchone():
-                    with contextlib.suppress(Exception):   # prices are a nice-to-have; never fail the bank sync over them
+                    try:
                         refresh_prices(conn)
+                    except Exception:  # prices are a nice-to-have; never fail the bank sync over them
+                        monitoring.report()   # per-ticker network failures are handled inside; this is a real bug
                 msg = f"{len(result['new'])} new transactions"
                 if result["errors"]:
                     msg += " · bank messages: " + "; ".join(result["errors"])[:500]
-                with contextlib.suppress(Exception):
+                try:   # home values: weekly and optional; Realie's own errors stop it quietly, so anything else is a bug
                     realie.refresh_due(conn)
+                except Exception:
+                    monitoring.report()
                 networth.summary(conn)   # record today's net worth
                 conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, ?)", (msg,))
                 db.set_setting(conn, "last_sync_ok", datetime.now().isoformat(timespec="seconds"))
@@ -696,8 +702,6 @@ EXTENSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
 
 def extension_zip() -> bytes | None:
     """The browser extension (extension/ next to runway/), zipped into a folder to load unpacked."""
-    import io
-    import zipfile
     if not os.path.isfile(os.path.join(EXTENSION_DIR, "manifest.json")):
         return None
     buf = io.BytesIO()
@@ -1707,14 +1711,12 @@ def start_logo_backfill() -> None:
 
 
 def api_tracked_get(conn, _q, _b, acct_id):
-    from . import tracked
     st = conn.execute("SELECT * FROM manual_state WHERE account_id=?", (acct_id,)).fetchone()
     return {"positions": tracked.positions_for(conn, acct_id), "state": dict(st) if st else None,
             "contributions": db.rows(conn.execute("SELECT date, amount FROM manual_contributions WHERE account_id=? ORDER BY date DESC LIMIT 12", (acct_id,)))}
 
 
 def api_tracked_save(conn, _q, body, acct_id):
-    from . import tracked
     try:
         tracked.save(conn, acct_id, body.get("rows") or [])
     except ValueError as e:
@@ -2106,7 +2108,6 @@ class Handler(BaseHTTPRequestHandler):
         if method != "GET" and self.headers.get("X-Runway") != "1":
             return self._json(403, {"error": "forbidden"})
         if method == "GET" and url.path == "/api/backup":
-            from . import backup
             with db.session() as conn:
                 data = backup.dump(conn)
             self.send_response(200)
@@ -2175,7 +2176,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             return
         if method == "POST" and url.path == "/api/restore":
-            from . import backup
             n = self._body_length(MAX_RESTORE_BODY)
             if n is None:
                 return
@@ -2539,7 +2539,6 @@ def host_allowed(host_header: str) -> bool:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> None:
-    from . import secretbox
     monitoring.init()   # error reports to Sentry, when SENTRY_DSN is set
     problems = secretbox.check_config()
     if problems:
