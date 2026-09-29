@@ -63,10 +63,12 @@
 
   <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-1">
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
+      <!-- The logo as its brand draws it, no circle; the white behind it shows only through a transparent logo, whose
+           dark mark would vanish on the dark page. -->
       {#if t.logo}
-        <img class="size-9 rounded-full bg-white object-contain p-0.5" src={t.logo} alt="" loading="lazy" width="36" height="36" />
+        <img class="size-9 rounded-lg object-contain dark:bg-white" src={t.logo} alt="" loading="lazy" width="36" height="36" />
       {:else}
-        <span class="flex size-9 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
+        <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
       {/if}
     </LogoPicker>
   </div>
