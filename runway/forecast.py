@@ -22,11 +22,13 @@ from typing import Literal
 
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
+from sqlalchemy import func, or_, select
 
 from . import bankdays, db, plaidbank, splits
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
+from .models import Account, Budget, Category, Override, PlaidAccount, Recurring, Transaction
 
 SPEND_WINDOW_DAYS = 90
 AVG_CYCLES = 3           # statement cycles averaged to estimate a card's future statements
@@ -144,7 +146,7 @@ def occurrences(item: dict, start: date, end: date) -> list[date]:
 # ------------------------------------------------------------------------------------------------ data
 
 def _transfer_categories(conn) -> set[str]:
-    return {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
+    return {r["name"] for r in conn.execute(select(Category.name).where(Category.is_transfer == 1))}
 
 
 def owed(account: dict, balance: float | None = None) -> float:
@@ -156,10 +158,11 @@ def daily_spend_rate(conn, account_id: str, today: date, exclude_matches: list[s
     """Average everyday outflow per day over the last SPEND_WINDOW_DAYS (or the history available)."""
     transfers = _transfer_categories(conn)
     since = today - timedelta(days=SPEND_WINDOW_DAYS)
+    T = Transaction
     txs = db.rows(conn.execute(
-        "SELECT posted, amount, payee, description, category FROM transactions "
-        "WHERE account_id=? AND posted>? AND posted<=? AND pending=0 AND COALESCE(recurring_id, 0)=0",
-        (account_id, since.isoformat(), today.isoformat()),
+        select(T.posted, T.amount, T.payee, T.description, T.category)
+        .where(T.account_id == account_id, T.posted > since.isoformat(), T.posted <= today.isoformat(), T.pending == 0,
+               func.coalesce(T.recurring_id, 0) == 0)
     ))
     if not txs:
         return 0.0
@@ -184,15 +187,16 @@ def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
     """Average spending per statement cycle over the last AVG_CYCLES closed cycles (only cycles fully covered by
     the transaction history). Charges minus refunds; payments and transfers don't count."""
     transfers = _transfer_categories(conn)
-    first = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (card["id"],)).fetchone()[0]
+    first = conn.execute(select(func.min(Transaction.posted)).where(Transaction.account_id == card["id"])).fetchone()[0]
     cycles = []
     end = last_close
     for _ in range(AVG_CYCLES):
         start = add_months(end, -1, card["closing_day"])
         if not first or _d(first) > start + timedelta(days=3):   # history doesn't reach back this far
             break
-        txs = conn.execute("SELECT amount, category FROM transactions WHERE account_id=? AND posted>? AND posted<=? AND pending=0",
-                           (card["id"], start.isoformat(), end.isoformat())).fetchall()
+        txs = conn.execute(select(Transaction.amount, Transaction.category)
+                           .where(Transaction.account_id == card["id"], Transaction.posted > start.isoformat(),
+                                  Transaction.posted <= end.isoformat(), Transaction.pending == 0)).fetchall()
         spent = -sum(t["amount"] for t in txs if t["category"] not in transfers)
         cycles.append({"start": start.isoformat(), "end": end.isoformat(), "spent": round(max(0.0, spent), 2)})
         end = start
@@ -201,7 +205,7 @@ def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
 
 
 def statement_override(conn, card_id: str, close: date) -> float | None:
-    r = conn.execute("SELECT amount FROM overrides WHERE key=?", (f"stmt:{card_id}:{close.isoformat()}",)).fetchone()
+    r = conn.execute(select(Override.amount).where(Override.key == f"stmt:{card_id}:{close.isoformat()}")).fetchone()
     return abs(r["amount"]) if r else None
 
 
@@ -222,18 +226,21 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     """Card payments that have left the paying account since the close but haven't reached the card yet. Only
     counted when that account pays no other card, so a payment can't be mistaken for another card's."""
     payer = card.get("pay_from")
-    if not payer or conn.execute("SELECT COUNT(*) FROM accounts WHERE kind='credit' AND hidden=0 AND pay_from=? AND id<>?",
-                                 (payer, card["id"])).fetchone()[0]:
+    if not payer or conn.execute(
+            select(func.count()).select_from(Account)
+            .where(Account.kind == "credit", Account.hidden == 0, Account.pay_from == payer, Account.id != card["id"])).fetchone()[0]:
         return 0.0
-    sent = conn.execute("SELECT posted, amount FROM transactions WHERE account_id=? AND category='Credit Card Payment' "
-                        "AND amount<0 AND posted>? ORDER BY posted", (payer, last_close.isoformat())).fetchall()
+    T = Transaction
+    sent = conn.execute(select(T.posted, T.amount)
+                        .where(T.account_id == payer, T.category == "Credit Card Payment", T.amount < 0,
+                               T.posted > last_close.isoformat()).order_by(T.posted)).fetchall()
     if not sent:
         return 0.0
     # The card's payments, from a little before the close: one can reach the card before it leaves the bank.
     unclaimed = db.rows(conn.execute(
-        "SELECT posted, amount FROM transactions WHERE account_id=? AND amount>0 AND posted>? AND category IN "
-        "(SELECT name FROM categories WHERE is_transfer=1) ORDER BY posted",
-        (card["id"], (last_close - timedelta(days=5)).isoformat())))
+        select(T.posted, T.amount)
+        .where(T.account_id == card["id"], T.amount > 0, T.posted > (last_close - timedelta(days=5)).isoformat(),
+               T.category.in_(select(Category.name).where(Category.is_transfer == 1))).order_by(T.posted)))
     total = 0.0
     for s in sent:
         # The card's credit for it: the same amount, from a few days before to a couple of weeks after it left.
@@ -250,9 +257,10 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
     last_close = _d(bank["last_statement_date"])
+    T = Transaction
     txs = db.rows(conn.execute(
-        "SELECT posted, amount, category, pending FROM transactions WHERE account_id=? AND posted>? ORDER BY posted",
-        (card["id"], last_close.isoformat()),
+        select(T.posted, T.amount, T.category, T.pending)
+        .where(T.account_id == card["id"], T.posted > last_close.isoformat()).order_by(T.posted)
     ))
     reported = max(0.0, bank["last_statement_balance"] or 0.0)
     known = statement_override(conn, card["id"], last_close)
@@ -285,7 +293,7 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
 def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     today = today or date.today()
     end = today + timedelta(days=horizon_days)
-    accounts = db.rows(conn.execute("SELECT * FROM accounts WHERE hidden=0 ORDER BY name"))
+    accounts = db.rows(conn.execute(select(Account).where(Account.hidden == 0).order_by(Account.name)))
     by_id = {a["id"]: a for a in accounts}
     cash_like = [a for a in accounts if a["kind"] in ("checking", "savings")]
     primary = by_id.get(db.get_setting(conn, sk.PRIMARY_ACCOUNT) or "")
@@ -296,7 +304,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     else:
         cash = [a for a in cash_like if a["in_forecast"]]
     cards = [a for a in accounts if a["kind"] == "credit"]
-    recurring = db.rows(conn.execute("SELECT * FROM recurring WHERE active=1"))
+    recurring = db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))
+    T = Transaction
+    most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
 
     events: list[dict] = []
     warnings: list[str] = []
@@ -309,19 +319,18 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         history = rec.matched(conn, item["id"])
         amount = rec.expected_amount(item, history)
         cat_row = conn.execute(
-            "SELECT category FROM transactions WHERE recurring_id=? AND category IS NOT NULL "
-            "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1", (item["id"],)).fetchone()
+            select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
+            .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
             like = "%" + (item["match"] or item["name"] or "").lower().replace("%", "").replace("_", "") + "%"
             cat_row = conn.execute(
-                "SELECT category FROM transactions WHERE account_id=? AND category IS NOT NULL AND length(?) > 4 "
-                "AND (lower(payee) LIKE ? OR lower(description) LIKE ?) "
-                "GROUP BY category ORDER BY COUNT(*) DESC, MAX(posted) DESC LIMIT 1",
-                (item["account_id"], like, like, like)).fetchone()
+                select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None), func.length(like) > 4,
+                                         or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
+                .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
         window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
-        first_tx = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (item["account_id"],)).fetchone()[0]
+        first_tx = conn.execute(select(func.min(T.posted)).where(T.account_id == item["account_id"])).fetchone()[0]
         since = max(today - timedelta(days=window + 1), _d(first_tx) + timedelta(days=window) if first_tx else today)
         for d in occurrences(item, min(since, today - timedelta(days=1)), end):
             if rec.already_happened(item, d, history, today):
@@ -392,8 +401,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     no_statement = [c["name"] for c in unlinked if c["linked"]]
     if not_linked:
         waiting = conn.execute(
-            "SELECT COUNT(*) FROM plaid_accounts p WHERE p.type='credit' AND p.ignored=0 AND p.plaid_account_id NOT IN "
-            "(SELECT plaid_account_id FROM accounts WHERE plaid_account_id IS NOT NULL)").fetchone()[0]
+            select(func.count()).select_from(PlaidAccount)
+            .where(PlaidAccount.type == "credit", PlaidAccount.ignored == 0, PlaidAccount.plaid_account_id.not_in(
+                select(Account.plaid_account_id).where(Account.plaid_account_id.is_not(None))))).fetchone()[0]
         one = len(not_linked) == 1
         warnings.append(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
                         f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
@@ -405,7 +415,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                         "in the forecast. It usually arrives with the next sync.")
 
     # One-off edits you've made to specific upcoming items.
-    overrides = {r["key"]: r["amount"] for r in conn.execute("SELECT key, amount FROM overrides")}
+    overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
     for e in events:
         if e.get("key") in overrides:
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
@@ -482,7 +492,8 @@ def budget_plan(conn, today: date) -> list[dict]:
     account it's paid with: the one you chose, else the account used most for it over the last 90 days."""
     cats = catmod.all_categories(conn)
     by_name = {c["name"]: c for c in cats}
-    budgets = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}
+    budgets = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
+    p = splits.parts()
     month_start = today.replace(day=1).isoformat()
     since = (today - timedelta(days=90)).isoformat()
     out = []
@@ -491,13 +502,14 @@ def budget_plan(conn, today: date) -> list[dict]:
         if not c or c["is_transfer"] or c["is_income"] or any(p in budgets for p in c["path"][:-1]):
             continue
         names = [name] + [k["name"] for k in cats if name in k["path"][:-1]]
-        q = ",".join("?" * len(names))
-        base = (f"FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id WHERE t.category IN ({q}) AND a.hidden=0 "
-                "AND a.kind IN ('checking','savings','credit')")
-        spent = -(conn.execute(f"SELECT COALESCE(SUM(t.amount), 0) {base} AND t.posted>=? AND t.posted<=?",
-                               (*names, month_start, today.isoformat())).fetchone()[0] or 0.0)
-        usual = conn.execute(f"SELECT t.account_id, SUM(-t.amount) AS s {base} AND t.posted>? AND t.amount<0 "
-                             "GROUP BY t.account_id ORDER BY s DESC LIMIT 1", (*names, since)).fetchone()
+        base = (p.c.category.in_(names), Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))
+        spent = -(conn.execute(
+            select(func.coalesce(func.sum(p.c.amount), 0)).select_from(p).join(Account, Account.id == p.c.account_id)
+            .where(*base, p.c.posted >= month_start, p.c.posted <= today.isoformat())).fetchone()[0] or 0.0)
+        s = func.sum(-p.c.amount).label("s")
+        usual = conn.execute(
+            select(p.c.account_id, s).join(Account, Account.id == p.c.account_id)
+            .where(*base, p.c.posted > since, p.c.amount < 0).group_by(p.c.account_id).order_by(s.desc()).limit(1)).fetchone()
         out.append({"category": name, "amount": b["amount"], "names": names, "spent": round(max(0.0, spent), 2),
                     "pay_with": b.get("pay_with"), "usual": usual["account_id"] if usual else None})
     return out
@@ -612,12 +624,12 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     """Payees on cash accounts that show up on a regular schedule with similar amounts."""
     today = today or date.today()
     transfers = _transfer_categories(conn)
-    known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute("SELECT * FROM recurring")]
+    known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute(select(Recurring))]
+    T = Transaction
     txs = db.rows(conn.execute(
-        "SELECT t.account_id, t.posted, t.amount, t.payee, t.category FROM transactions t "
-        "JOIN accounts a ON a.id=t.account_id "
-        "WHERE a.kind IN ('checking','savings') AND t.pending=0 AND COALESCE(t.recurring_id, 0)=0 AND t.posted>?",
-        ((today - timedelta(days=lookback_days)).isoformat(),),
+        select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)
+        .where(Account.kind.in_(["checking", "savings"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
+               T.posted > (today - timedelta(days=lookback_days)).isoformat())
     ))
     groups: dict[tuple, list[dict]] = {}
     for t in txs:
