@@ -207,7 +207,10 @@ jobs:
           else
             log=$(git log --format='%s%n%b' "$last"..HEAD)
             IFS=. read -r major minor patch <<< "${last#v}"
-            if grep -qE '#major|BREAKING CHANGE' <<< "$log"; then
+            # Pull request titles say what a change is (they're in each merge commit's message): "feat: ..." is a
+            # new feature (a minor version), "fix: ..." or anything else a patch, and a "!" before the colon
+            # ("feat!: ...") something that breaks an existing setup (a major version).
+            if grep -qE '#major|BREAKING CHANGE|^[a-z]+(\(.*\))?!:' <<< "$log"; then
               next="v$((major + 1)).0.0"
             elif grep -qE '#minor|^feat(\(.*\))?:' <<< "$log"; then
               next="v${major}.$((minor + 1)).0"
