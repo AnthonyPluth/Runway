@@ -132,10 +132,11 @@ plain Python with a handful of well-known libraries.
   if Carta approves your app.
 
 ### Everyday
-- **Automatic sync** once a day, and whenever you open Runway if the data is more than an hour old. Plaid, whose quota
-  is small, is asked once a day only: on the first sync after 7 AM (Runway's time zone, America/Chicago by default).
-  At 6:30 AM Runway asks Plaid to fetch from the banks (Plaid's Transactions Refresh add-on), so the 7 AM sync is
-  current. A connection's own Sync button in Settings still asks Plaid straight away.
+- **Automatic sync** once a day, at 7 AM (Runway's time zone, America/Chicago by default): SimpleFIN and Plaid
+  together, late enough for overnight ACH. Opening Runway only catches up a day's sync that was missed (Runway was
+  off at 7, say). At 6:30 AM Runway asks Plaid to fetch from the banks (Plaid's Transactions Refresh add-on), so the
+  7 AM sync is current. The Sync button still syncs SimpleFIN whenever you press it; Plaid, whose quota is small, is
+  asked once a day only, except by a connection's own Sync button in Settings.
 - **Autosave everywhere:** there are no Save buttons.
 - **A setup checklist** for new users (connect a bank, pick your main account, add paychecks and bills, set budgets).
 - Dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and **installs
