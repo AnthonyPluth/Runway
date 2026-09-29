@@ -1,7 +1,10 @@
 """Category management: add, rename, move and remove, with one level of subcategories (Parent > Sub)."""
 from __future__ import annotations
 
+from sqlalchemy import delete, func, insert, select, update
+
 from . import db, rules
+from .models import Budget, Category, RetailItem, RetailItemMemory, Transaction, TxSplit
 
 MAX_DEPTH = 2   # levels including the top one: Food > Restaurants
 
@@ -56,7 +59,7 @@ def default_look(name: str, parent_color: str | None = None) -> tuple[str, str]:
 
 def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
     """Set a category's emoji and color. An empty value goes back to the default."""
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+    if not _exists(conn, name):
         raise CategoryError("Category not found")
     icon = (icon or "").strip() or None
     if icon and (len(icon) > 16 or any(ch.isalnum() and ch.isascii() for ch in icon)):
@@ -64,11 +67,15 @@ def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
     color = (color or "").strip().lower() or None
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in "0123456789abcdef" for ch in color[1:])):
         raise CategoryError("Pick a color")
-    conn.execute("UPDATE categories SET icon=?, color=? WHERE name=?", (icon, color, name))
+    conn.execute(update(Category).where(Category.name == name).values(icon=icon, color=color))
+
+
+def _exists(conn, name: str) -> bool:
+    return conn.execute(select(Category.name).where(Category.name == name)).fetchone() is not None
 
 
 def _parents(conn) -> dict[str, str | None]:
-    return {r["name"]: r["parent"] for r in conn.execute("SELECT name, parent FROM categories")}
+    return {r["name"]: r["parent"] for r in conn.execute(select(Category.name, Category.parent))}
 
 
 def path(conn_or_parents, name: str | None) -> list[str]:
@@ -94,7 +101,8 @@ def _subtree_height(parents: dict, name: str) -> int:
 
 def all_categories(conn) -> list[dict]:
     """Every category in tree order (each followed by its subcategories), with depth, path and top-level name."""
-    cats = db.rows(conn.execute("SELECT name, is_transfer, is_income, parent, icon, color FROM categories"))
+    cats = db.rows(conn.execute(select(Category.name, Category.is_transfer, Category.is_income, Category.parent,
+                                       Category.icon, Category.color)))
     names = {c["name"] for c in cats}
     for c in cats:   # an orphan (parent deleted by hand) shows at the top level
         if c["parent"] and c["parent"] not in names:
@@ -140,19 +148,17 @@ def add(conn, name: str, parent: str | None = None, is_transfer: bool = False, i
         raise CategoryError("Give the category a name")
     if len(name) > 60:
         raise CategoryError("That name is too long")
-    if conn.execute("SELECT 1 FROM categories WHERE lower(name)=lower(?)", (name,)).fetchone():
+    if conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(name))).fetchone():
         raise CategoryError(f"There's already a category called {name}")
     if parent:
-        p = conn.execute("SELECT * FROM categories WHERE name=?", (parent,)).fetchone()
+        p = conn.execute(select(Category).where(Category.name == parent)).fetchone()
         if not p:
             raise CategoryError("Parent category not found")
         if len(path(conn, parent)) >= MAX_DEPTH:
             raise CategoryError("Subcategories can't have subcategories of their own")
         is_transfer, is_income = bool(p["is_transfer"]), bool(p["is_income"])  # a subcategory is the same kind as its parent
-    conn.execute(
-        "INSERT INTO categories(name, is_transfer, is_income, parent) VALUES (?,?,?,?)",
-        (name, int(is_transfer), int(is_income), parent or None),
-    )
+    conn.execute(insert(Category).values(name=name, is_transfer=int(is_transfer), is_income=int(is_income),
+                                         parent=parent or None))
 
 
 def move(conn, name: str, new_parent: str | None) -> None:
@@ -172,33 +178,38 @@ def move(conn, name: str, new_parent: str | None) -> None:
             raise CategoryError("A category can't go inside itself or one of its own subcategories")
         if len(path(parents, new_parent)) + _subtree_height(parents, name) > MAX_DEPTH:
             raise CategoryError("A subcategory can't go under another subcategory, and a category with subcategories can't become one")
-    conn.execute("UPDATE categories SET parent=? WHERE name=?", (new_parent, name))
+    conn.execute(update(Category).where(Category.name == name).values(parent=new_parent))
     if new_parent:  # the moved branch takes on its new parent's kind (spending, money in, not spending)
-        p = conn.execute("SELECT is_transfer, is_income FROM categories WHERE name=?", (new_parent,)).fetchone()
-        for c in [name, *descendants(conn, name)]:
-            conn.execute("UPDATE categories SET is_transfer=?, is_income=? WHERE name=?", (p["is_transfer"], p["is_income"], c))
+        p = conn.execute(select(Category.is_transfer, Category.is_income).where(Category.name == new_parent)).fetchone()
+        conn.execute(update(Category).where(Category.name.in_([name, *descendants(conn, name)]))
+                     .values(is_transfer=p["is_transfer"], is_income=p["is_income"]))
 
 
 def rename(conn, old: str, new: str) -> None:
     new = (new or "").strip()
     if old in db.PROTECTED_CATEGORIES:
         raise CategoryError(f"{old} is used by Runway itself and can't be renamed")
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (old,)).fetchone():
+    if not _exists(conn, old):
         raise CategoryError("Category not found")
     if not new:
         raise CategoryError("Give the category a name")
     if new == old:
         return
-    if conn.execute("SELECT 1 FROM categories WHERE lower(name)=lower(?) AND name<>?", (new, old)).fetchone():
+    if conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(new), Category.name != old)).fetchone():
         raise CategoryError(f"There's already a category called {new}")
-    conn.execute("UPDATE categories SET name=? WHERE name=?", (new, old))
-    conn.execute("UPDATE categories SET parent=? WHERE parent=?", (new, old))
-    conn.execute("UPDATE transactions SET category=? WHERE category=?", (new, old))
-    conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (new, old))
-    conn.execute("UPDATE retail_items SET category=? WHERE category=?", (new, old))   # order items, and what's remembered
-    conn.execute("UPDATE retail_item_memory SET category=? WHERE category=?", (new, old))
+    conn.execute(update(Category).where(Category.name == old).values(name=new))
+    conn.execute(update(Category).where(Category.parent == old).values(parent=new))
+    _recategorize(conn, Transaction, old, new)
+    _recategorize(conn, TxSplit, old, new)
+    _recategorize(conn, RetailItem, old, new)   # order items, and what's remembered
+    _recategorize(conn, RetailItemMemory, old, new)
     rules.rename_category(conn, old, new)
-    conn.execute("UPDATE budgets SET category=? WHERE category=?", (new, old))
+    _recategorize(conn, Budget, old, new)
+
+
+def _recategorize(conn, model, old: str, new: str) -> int:
+    """Move a table's rows from one category to another; returns how many."""
+    return conn.execute(update(model).where(model.category == old).values(category=new)).rowcount
 
 
 def remove(conn, name: str, move_to: str | None = None) -> int:
@@ -206,35 +217,35 @@ def remove(conn, name: str, move_to: str | None = None) -> int:
     go back to Review uncategorized and its rules are deleted. Returns how many transactions moved."""
     if name in db.PROTECTED_CATEGORIES:
         raise CategoryError(f"{name} is used by Runway itself and can't be removed")
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone():
+    if not _exists(conn, name):
         raise CategoryError("Category not found")
-    if conn.execute("SELECT 1 FROM categories WHERE parent=?", (name,)).fetchone():
+    if conn.execute(select(Category.name).where(Category.parent == name)).fetchone():
         raise CategoryError(f"Remove or move the subcategories of {name} first")
     if move_to:
-        if move_to == name or not conn.execute("SELECT 1 FROM categories WHERE name=?", (move_to,)).fetchone():
+        if move_to == name or not _exists(conn, move_to):
             raise CategoryError("Pick a different category to move things to")
-        n = conn.execute("UPDATE transactions SET category=? WHERE category=?", (move_to, name)).rowcount
-        n += conn.execute("UPDATE tx_splits SET category=? WHERE category=?", (move_to, name)).rowcount
-        conn.execute("UPDATE retail_items SET category=? WHERE category=?", (move_to, name))
-        conn.execute("UPDATE retail_item_memory SET category=? WHERE category=?", (move_to, name))
+        n = _recategorize(conn, Transaction, name, move_to)
+        n += _recategorize(conn, TxSplit, name, move_to)
+        _recategorize(conn, RetailItem, name, move_to)
+        _recategorize(conn, RetailItemMemory, name, move_to)
         rules.rename_category(conn, name, move_to)
     else:
-        n = conn.execute(
-            "UPDATE transactions SET category=NULL, category_source=NULL, confidence=NULL, needs_review=1 WHERE category=?",
-            (name,),
-        ).rowcount
+        t = Transaction
+        n = conn.execute(update(t).where(t.category == name).values(
+            category=None, category_source=None, confidence=None, needs_review=1)).rowcount
         # parts of a split lose their category too, and the transaction goes back to Review
-        for tx_id in [r["tx_id"] for r in conn.execute("SELECT DISTINCT tx_id FROM tx_splits WHERE category=?", (name,))]:
-            conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (tx_id,))
-            conn.execute("UPDATE transactions SET is_split=0, category=NULL, category_source=NULL, confidence=NULL, "
-                         "needs_review=1 WHERE id=?", (tx_id,))
+        for tx_id in conn.execute(select(TxSplit.tx_id).where(TxSplit.category == name).distinct()).scalars():
+            conn.execute(delete(TxSplit).where(TxSplit.tx_id == tx_id))
+            conn.execute(update(t).where(t.id == tx_id).values(
+                is_split=0, category=None, category_source=None, confidence=None, needs_review=1))
             n += 1
         # order items go back to being decided (by the model, or the store's department) next time
-        conn.execute("UPDATE retail_items SET category=NULL, category_source=NULL, confidence=NULL WHERE category=?", (name,))
-        conn.execute("DELETE FROM retail_item_memory WHERE category=?", (name,))
+        conn.execute(update(RetailItem).where(RetailItem.category == name).values(
+            category=None, category_source=None, confidence=None))
+        conn.execute(delete(RetailItemMemory).where(RetailItemMemory.category == name))
         rules.forget_category(conn, name)
-    conn.execute("DELETE FROM budgets WHERE category=?", (name,))
-    conn.execute("DELETE FROM categories WHERE name=?", (name,))
+    conn.execute(delete(Budget).where(Budget.category == name))
+    conn.execute(delete(Category).where(Category.name == name))
     return n
 
 
@@ -246,6 +257,6 @@ def flatten(conn) -> int:
     for name in list(parents):
         p = path(parents, name)
         if len(p) > MAX_DEPTH:
-            conn.execute("UPDATE categories SET parent=? WHERE name=?", (p[MAX_DEPTH - 2], name))
+            conn.execute(update(Category).where(Category.name == name).values(parent=p[MAX_DEPTH - 2]))
             moved += 1
     return moved
