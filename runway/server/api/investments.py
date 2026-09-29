@@ -5,7 +5,8 @@ from datetime import datetime
 
 from sqlalchemy import delete, select
 
-from ... import db, planner, portfolio, prices, sfinvest, tracked
+from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked
+from ... import settings_keys as sk
 from ...models import CostOverride, Holding, ManualContribution, ManualState, Security
 from ..common import ApiError
 from ..sync import refresh_prices
@@ -56,6 +57,29 @@ def api_live_quotes(conn, _q, _b):
     q = prices.quotes([*live_tickers(conn), prices.BENCHMARK])
     return {"quotes": q, "market": prices.market_state(q.get(prices.BENCHMARK)),
             "as_of": datetime.now().isoformat(timespec="seconds")}
+
+
+def api_finnhub_status(conn, _q, _b):
+    """For Settings: whether a key is saved, and whether the live connection is up (it only runs while prices are
+    being streamed) or why it last wasn't."""
+    return {"configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY)), **finnhub.feed.status()}
+
+
+def api_finnhub_settings(conn, _q, body):
+    """Save (after one quote proves it works) or remove the Finnhub key that makes live prices real-time trades."""
+    key = str(body.get("api_key") or "").strip()
+    if body.get("clear"):
+        db.set_setting(conn, sk.FINNHUB_API_KEY, None)
+    elif key:
+        try:
+            finnhub.check_key(key)
+        except finnhub.FinnhubError as e:
+            raise ApiError(str(e)) from e
+        db.set_setting(conn, sk.FINNHUB_API_KEY, key)
+    else:
+        raise ApiError("Paste your Finnhub API key.")
+    finnhub.feed.reset()   # a new key reconnects; no key closes the connection
+    return {"ok": True, "configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY))}
 
 
 def api_tracked_get(conn, _q, _b, acct_id):

@@ -1,6 +1,7 @@
 <script lang="ts">
   import AiCard from "./AiCard.svelte";
   import CartaCard from "./CartaCard.svelte";
+  import FinnhubCard from "./FinnhubCard.svelte";
   import LogoDevCard from "./LogoDevCard.svelte";
   import PlaidCard from "./PlaidCard.svelte";
   import HomeValuesCard from "./HomeValuesCard.svelte";
@@ -18,4 +19,5 @@
 <AiCard />
 <CartaCard />
 <HomeValuesCard />
+<FinnhubCard />
 <LogoDevCard />
