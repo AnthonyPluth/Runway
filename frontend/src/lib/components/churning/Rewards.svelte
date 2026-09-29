@@ -9,8 +9,9 @@
   import { points } from "./churning";
   import type { Churning } from "./types";
 
-  // Points: what each person's linked cards earned this year (estimated), bonuses earned this year, balances you
-  // enter, and what they're worth. Point values are yours to set; they feed every estimate on the page.
+  // Points: what each person's linked cards earned this year (estimated, in points), bonuses earned this year, and the
+  // balances you enter. Points get spent, so what they're worth comes only from the balance you enter, at the value
+  // you set for that currency (which also feeds the best-card estimates); the year's earnings are never counted.
   let { d, people, onchanged }: { d: Churning; people: string[]; onchanged: () => void } = $props();
   let values = $state(false);
   let newName = $state(""), newCents = $state("");
@@ -73,7 +74,7 @@
         <div class="min-w-0">
           <div class="mb-1 flex items-baseline justify-between">
             <h3 class="font-semibold">{person}</h3>
-            <span class="text-sm text-muted-foreground tabular-nums">{fmt0((r?.value ?? 0) + (r?.balance_value ?? 0))}</span>
+            <span class="text-sm text-muted-foreground tabular-nums" title="What the balances you entered are worth">{fmt0(r?.balance_value ?? 0)}</span>
           </div>
           {#if r?.currencies.length}
             <table class="w-full text-sm">
@@ -86,10 +87,10 @@
                     <td class="pr-2">{row.name}</td>
                     <td class="text-right tabular-nums" title={row.bonuses ? `${points(row.earned)} from spending, ${points(row.bonuses)} from bonuses` : undefined}>{row.earned + row.bonuses ? `~${points(row.earned + row.bonuses)}` : "—"}</td>
                     <td class="text-right">
-                      <input type="number" min="0" step="100" value={row.balance ?? ""} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
+                      <input type="number" min="0" step="1" value={row.balance ?? ""} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
                         use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
                     </td>
-                    <td class="text-right tabular-nums">{fmt0(row.value + (row.balance_value ?? 0))}</td>
+                    <td class="text-right tabular-nums">{row.balance_value == null ? "—" : fmt0(row.balance_value)}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -102,7 +103,7 @@
               {#each d.currencies.filter((c) => !r?.currencies.some((x) => x.currency === c.key)) as c (c.key)}<option value={c.key}>{c.name}</option>{/each}
             </select>
             {#if addFor[person]}
-              <input type="number" min="0" step="100" placeholder="points" aria-label="Balance"
+              <input type="number" min="0" step="1" placeholder="points" aria-label="Balance"
                 use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm" />
             {/if}
           </div>
