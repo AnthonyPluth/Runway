@@ -12,9 +12,9 @@ from .api.categories import (
     api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
 )
 from .api.churning import (
-    api_churn_balance, api_churn_card_add, api_churn_card_remove, api_churn_card_update, api_churn_currency,
-    api_churn_currency_remove, api_churn_rate, api_churn_task_add, api_churn_task_remove, api_churn_task_update,
-    api_churning, api_churning_best
+    api_bank_bonus_add, api_bank_bonus_remove, api_bank_bonus_update, api_churn_balance, api_churn_card_add,
+    api_churn_card_remove, api_churn_card_update, api_churn_currency, api_churn_currency_remove, api_churn_rate,
+    api_churn_task_add, api_churn_task_remove, api_churn_task_update, api_churning, api_churning_best
 )
 from .api.connections import (
     api_connect, api_inv_account, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
@@ -154,6 +154,9 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/churning/tasks", api_churn_task_add),
     ("POST", "/api/churning/tasks/{id}", api_churn_task_update),
     ("POST", "/api/churning/tasks/{id}/remove", api_churn_task_remove),
+    ("POST", "/api/churning/bank", api_bank_bonus_add),
+    ("POST", "/api/churning/bank/{id}", api_bank_bonus_update),
+    ("POST", "/api/churning/bank/{id}/remove", api_bank_bonus_remove),
     ("POST", "/api/carta/settings", api_carta_settings),
     ("POST", "/api/carta/connect", api_carta_connect),
     ("POST", "/api/carta/sync", api_carta_sync),

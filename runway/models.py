@@ -604,6 +604,41 @@ class ChurnTask(Base):
     done: Mapped[int | None]
 
 
+class ChurnBankBonus(Base):
+    __table__ = schema.churn_bank_bonuses
+    id: Mapped[int]
+    owner: Mapped[str]
+    bank: Mapped[str]
+    account_type: Mapped[str | None]
+    account_id: Mapped[str | None]
+    opened_on: Mapped[str]
+    bonus: Mapped[float]
+    dd_total: Mapped[float | None]
+    dd_count: Mapped[int | None]
+    debit_count: Mapped[int | None]
+    min_balance: Mapped[float | None]
+    hold_until: Mapped[str | None]
+    other_reqs: Mapped[str | None]
+    deadline_days: Mapped[int | None]
+    deadline: Mapped[str | None]
+    post_days: Mapped[int | None]
+    manual_dd: Mapped[float | None]
+    manual_debits: Mapped[int | None]
+    status: Mapped[str | None]
+    received_on: Mapped[str | None]
+    received_amount: Mapped[float | None]
+    closed_on: Mapped[str | None]
+    monthly_fee: Mapped[float | None]
+    fee_waiver: Mapped[str | None]
+    early_close_fee: Mapped[float | None]
+    keep_open_days: Mapped[int | None]
+    repeat_months: Mapped[int | None]
+    once_per_lifetime: Mapped[int | None]
+    eligible_on: Mapped[str | None]
+    notes: Mapped[str | None]
+    created_at: Mapped[str | None]
+
+
 class Setting(Base):
     __table__ = schema.settings
     key: Mapped[str]

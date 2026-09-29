@@ -91,6 +91,26 @@ class ChurningApiTests(unittest.TestCase):
         with self.assertRaisesRegex(ApiError, "card"):
             api.api_churn_task_add(self.c, {}, {"due_on": "2026-01-01", "action": "x"})
 
+    def test_bank_bonuses(self):
+        opened = (TODAY - timedelta(days=10)).isoformat()
+        bid = api.api_bank_bonus_add(self.c, {}, {"owner": "Sam", "bank": "Chase", "opened_on": opened, "bonus": 300,
+                                                  "account_id": "demo-checking", "dd_total": 500})["id"]
+        out = api.api_churning(self.c, {}, {})
+        self.assertEqual(out["people"], ["Alex", "Sam"])
+        b = out["bank"][0]
+        self.assertEqual((b["bank"], b["progress"]["source"]), ("Chase", "account"))
+        self.assertIn("bank_due", [u["kind"] for u in out["upcoming"]])
+        api.api_bank_bonus_update(self.c, {}, {"received_on": TODAY.isoformat(), "received_amount": 300}, str(bid))
+        out = api.api_churning(self.c, {}, {})
+        self.assertEqual(out["bank"][0]["state"], "received")
+        self.assertEqual(out["bank_income"], {"Sam": {str(TODAY.year): 300.0}})
+        with self.assertRaisesRegex(ApiError, "checking or savings"):
+            api.api_bank_bonus_update(self.c, {}, {"account_id": "demo-card"}, str(bid))
+        with self.assertRaises(ApiError):
+            api.api_bank_bonus_add(self.c, {}, {"owner": "Sam", "bank": "", "opened_on": opened, "bonus": 1})
+        api.api_bank_bonus_remove(self.c, {}, {}, str(bid))
+        self.assertEqual(api.api_churning(self.c, {}, {})["bank"], [])
+
     def test_currencies_balances_and_tasks(self):
         key = api.api_churn_currency(self.c, {}, {"name": "Bilt", "cents": 1.7})["key"]
         api.api_churn_currency(self.c, {}, {"key": "mr", "cents": 2})
