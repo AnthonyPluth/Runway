@@ -548,6 +548,115 @@ price_meta = Table(
     Column('long_name', Text),
 )
 
+churn_cards = Table(
+    'churn_cards', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('owner', Text, nullable=False, doc="whose card it is: a person's first name (as accounts.owner has it)"),
+    Column('issuer', Text, nullable=False, doc='chase | amex | citi | capital_one | bank_of_america | barclays | us_bank | '
+                                               'wells_fargo | discover | other (churning.ISSUERS)'),
+    Column('product', Text, nullable=False, doc='e.g. Sapphire Preferred'),
+    Column('family', Text, doc="cards whose bonuses count as one for the issuer's rules (e.g. Sapphire); NULL = the product"),
+    Column('account_id', Text, doc='the Runway account it is (accounts.id), to count its spending'),
+    Column('opened_on', Text, nullable=False, doc='YYYY-MM-DD'),
+    Column('closed_on', Text, doc='closed, or changed to another product, on this day'),
+    Column('status', Text, server_default=text("'open'"), doc='open | closed | product_changed'),
+    Column('changed_from', Integer, doc='a product change of this card (churn_cards.id): the same account, so not a new one for 5/24'),
+    Column('authorized_user', Integer, server_default=text('0'), doc="1: you're an authorized user on someone else's card"),
+    Column('business', Integer, server_default=text('0'), doc="1: a business card (most don't count toward 5/24)"),
+    Column('annual_fee', Float, server_default=text('0')),
+    Column('fee_month', Integer, doc='the month the annual fee posts (1-12); NULL = the month it was opened'),
+    Column('currency', Text, server_default=text("'cash'"),
+           doc='what it earns, and its bonus is paid in (a key of churning.CURRENCIES or churn_currencies)'),
+    Column('base_rate', Float, server_default=text('1'), doc='points per dollar on everything without a rate of its own'),
+    Column('earn_note', Text, doc='e.g. "5x rotating quarterly categories"'),
+    Column('bonus', Float, doc='the sign-up bonus, in its currency (points, miles or dollars)'),
+    Column('bonus_spend', Float, doc='spending needed for the bonus'),
+    Column('bonus_months', Integer, server_default=text('3'), doc='months after opening to spend it'),
+    Column('bonus_deadline', Text, doc='the day the spending is due, if not opened_on + bonus_months'),
+    Column('bonus_earned_on', Text, doc='the day the bonus posted'),
+    Column('manual_spend', Float, doc='spending so far toward the bonus, for a card not linked to an account'),
+    Column('eligible_on', Text, doc="you know better: the day its bonus can be earned again (overrides the issuer's rule)"),
+    Column('notes', Text),
+    Column('created_at', Text, server_default=now_text()),
+    sqlite_autoincrement=True,
+    info={'doc': 'credit cards you and your partner opened for their sign-up bonuses and rewards'},
+)
+
+churn_rates = Table(
+    'churn_rates', metadata,
+    Column('card_id', Integer, nullable=False),
+    Column('category', Text, nullable=False, doc='a category (its subcategories earn the same unless they have their own)'),
+    Column('multiplier', Float, nullable=False, doc='points per dollar'),
+    PrimaryKeyConstraint('card_id', 'category'),
+    info={'doc': 'what a card earns in a category, instead of its base rate'},
+)
+
+churn_currencies = Table(
+    'churn_currencies', metadata,
+    Column('key', Text, primary_key=True),
+    Column('name', Text, nullable=False),
+    Column('cents', Float, nullable=False, doc='what one point is worth to you, in cents'),
+    info={'doc': "points values you set, and currencies you added (the rest are churning.CURRENCIES' defaults)"},
+)
+
+churn_balances = Table(
+    'churn_balances', metadata,
+    Column('owner', Text, nullable=False),
+    Column('currency', Text, nullable=False),
+    Column('points', Float, nullable=False),
+    Column('as_of', Text),
+    PrimaryKeyConstraint('owner', 'currency'),
+    info={'doc': 'points balances you entered, per person and currency'},
+)
+
+churn_tasks = Table(
+    'churn_tasks', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('card_id', Integer, nullable=False),
+    Column('due_on', Text, nullable=False),
+    Column('action', Text, nullable=False, doc='e.g. close, downgrade to Freedom, call retention'),
+    Column('done', Integer, server_default=text('0')),
+    sqlite_autoincrement=True,
+    info={'doc': 'things to do about a card, and when'},
+)
+
+churn_bank_bonuses = Table(
+    'churn_bank_bonuses', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('owner', Text, nullable=False, doc="whose account it is: a person's first name (as accounts.owner has it)"),
+    Column('bank', Text, nullable=False),
+    Column('account_type', Text, server_default=text("'checking'"), doc='checking | savings | business'),
+    Column('account_id', Text, doc='the Runway account it is (accounts.id), to follow its deposits and balance'),
+    Column('opened_on', Text, nullable=False, doc='YYYY-MM-DD'),
+    Column('bonus', Float, nullable=False, doc='the bonus, in dollars'),
+    Column('dd_total', Float, doc='direct deposits needed, in total'),
+    Column('dd_count', Integer, doc='direct deposits needed, how many'),
+    Column('debit_count', Integer, doc='debit card purchases needed'),
+    Column('min_balance', Float, doc='balance to keep'),
+    Column('hold_until', Text, doc='... until this day'),
+    Column('other_reqs', Text, doc='anything else the offer asks for'),
+    Column('deadline_days', Integer, server_default=text('90'), doc='days after opening to meet the requirements'),
+    Column('deadline', Text, doc='the day the requirements are due, if not opened_on + deadline_days'),
+    Column('post_days', Integer, server_default=text('60'), doc='the bonus posts within this many days of the deadline'),
+    Column('manual_dd', Float, doc='direct deposits so far, for an account not linked'),
+    Column('manual_debits', Integer, doc='debit purchases so far, for an account not linked'),
+    Column('status', Text, server_default=text("'open'"), doc='open | pending (requirements met) | received | closed'),
+    Column('received_on', Text),
+    Column('received_amount', Float, doc='what actually posted (NULL = the bonus)'),
+    Column('closed_on', Text),
+    Column('monthly_fee', Float, server_default=text('0')),
+    Column('fee_waiver', Text, doc='how the monthly fee is waived'),
+    Column('early_close_fee', Float, doc='charged (or the bonus clawed back) if closed too soon'),
+    Column('keep_open_days', Integer, doc='days to keep it open to avoid that'),
+    Column('repeat_months', Integer, doc="the bank's rule: a bonus again this many months after the last one"),
+    Column('once_per_lifetime', Integer, server_default=text('0'), doc="1: the bank's rule is once per lifetime"),
+    Column('eligible_on', Text, doc='you know better: the day the bonus can be earned again'),
+    Column('notes', Text),
+    Column('created_at', Text, server_default=now_text()),
+    sqlite_autoincrement=True,
+    info={'doc': 'checking and savings account sign-up bonuses'},
+)
+
 settings = Table(
     'settings', metadata,
     Column('key', Text, primary_key=True),
@@ -572,6 +681,7 @@ Index('equity_grants_company', equity_grants.c.company_id)
 Index('retail_items_order', retail_items.c.order_id)
 Index('retail_charges_order', retail_charges.c.order_id)
 Index('retail_charges_tx', retail_charges.c.tx_id)
+Index('churn_tasks_card', churn_tasks.c.card_id)
 Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a Plaid account is one of your accounts, never two
 
 # Tables whose integer id is assigned by the database.
