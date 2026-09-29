@@ -20,7 +20,6 @@
   "runway/secretbox.py": 4,
   "runway/server/api/accounts.py": 4,
   "runway/server/api/budget.py": 9,
-  "runway/server/api/categories.py": 3,
   "runway/server/api/connections.py": 8,
   "runway/server/api/investments.py": 7,
   "runway/server/api/merchants.py": 2,
