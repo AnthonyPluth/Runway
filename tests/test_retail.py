@@ -317,6 +317,76 @@ class TransactionsListTests(Base):
         self.assertIsNone(by["other"])
 
 
+class AppViewsTests(Base):
+    """What the Orders page and Settings read: an order's details, the charges a transaction might be, the summary."""
+
+    def setUp(self):
+        super().setUp()
+        self.c.execute("UPDATE accounts SET display_name='My Card', owner='Sara' WHERE id='card'")
+        self.amazon_order_with_charge()
+        self.tx("t1", "2024-09-11", -60.88, "AMAZON MKTPL*ZX81J2", "Shopping", "rule")
+        self.tx("t2", "2024-09-12", -60.88, "SHELL OIL")
+        self.tx("t3", "2024-09-20", -9.99, "AMZN Mktp US")
+        self.tx("t4", "2024-09-25", 4.0, "AMZN refund")
+        self.oid = retail.order_key("amazon", ORDER)
+        retail._save_charge(self.c, "ref", self.oid, "2024-09-24", 4.0, None)
+        retail.target_history(self.c, {"orders": [{"order_number": "5555", "placed_date": "2024-09-05",
+                                                   "summary": {"grand_total": 12.49}}]}, "STORE")
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        retail.finish(self.c, "amazon", caller=AI)
+
+    def test_order_detail(self):
+        o = retail.order_detail(self.c, self.oid)
+        self.assertEqual(list(o), ["id", "retailer", "order_number", "channel", "placed", "total", "subtotal", "tax", "shipping",
+                                   "payment", "details", "items", "charges", "url"])
+        self.assertEqual(o["items"][2], {"id": 3, "title": "The Crucible: A Play in Four Acts", "quantity": 1.0, "amount": 9.98,
+                                         "department": None, "category": "Entertainment", "category_source": "ai",
+                                         "confidence": 0.9})
+        self.assertEqual(o["charges"], [
+            {"id": f"amazon|{ORDER}|x", "date": "2024-09-09", "amount": -60.88, "payment": None, "tx_id": "t1",
+             "match_source": "auto", "posted": "2024-09-11", "payee": "AMAZON MKTPL*ZX81J2", "description": "AMAZON MKTPL*ZX81J2",
+             "account_name": "My Card (Sara)", "applied": "split"},
+            {"id": "ref", "date": "2024-09-24", "amount": 4.0, "payment": None, "tx_id": "t4", "match_source": "auto",
+             "posted": "2024-09-25", "payee": "AMZN refund", "description": "AMZN refund", "account_name": "My Card (Sara)",
+             "applied": None}])
+        t = retail.order_detail(self.c, retail.order_key("target", "5555"))
+        self.assertEqual((t["items"], t["details"], t["url"]), ([], 0, "https://www.target.com/orders"))
+        self.assertEqual(t["charges"][0]["account_name"], None)   # not matched: nothing joined
+        with self.assertRaises(retail.RetailError):
+            retail.order_detail(self.c, "amazon:nope")
+
+    def test_candidates(self):
+        got = retail.candidates(self.c, f"amazon|{ORDER}|x")
+        self.assertEqual([r["id"] for r in got], ["t1", "t2", "t3"])   # same amount first, then the store's by date
+        self.assertEqual(got[0], {"id": "t1", "posted": "2024-09-11", "amount": -60.88, "payee": "AMAZON MKTPL*ZX81J2",
+                                  "description": "AMAZON MKTPL*ZX81J2", "account_name": "My Card (Sara)"})
+        with self.assertRaises(retail.RetailError):
+            retail.candidates(self.c, "nope")
+
+    def test_for_transactions(self):
+        want = {"order_id": self.oid, "charge_id": f"amazon|{ORDER}|x", "retailer": "amazon", "order_number": ORDER,
+                "channel": "online", "items": 4}
+        self.assertEqual(retail.for_transactions(self.c, ["t1", "t2", "t4"]), {"t1": want, "t4": {**want, "charge_id": "ref"}})
+        self.assertEqual(retail.for_transactions(self.c, []), {})
+
+    def test_status_and_unmatched(self):
+        st = retail.status(self.c)
+        self.assertEqual(st["stores"]["target"], {"name": "Target", "last": None, "orders": 1, "read": 0, "matched": 0,
+                                                  "unmatched": 0})
+        self.assertEqual({k: v for k, v in st["stores"]["amazon"].items() if k != "last"},
+                         {"name": "Amazon", "orders": 1, "read": 1, "matched": 2, "unmatched": 0})
+        self.assertEqual(st["recent"], [
+            {"id": self.oid, "retailer": "amazon", "order_number": ORDER, "channel": "online", "placed": "2024-09-08",
+             "total": 60.88, "details": 1, "items": 4, "charges": 1, "matched": 1},
+            {"id": "target:5555", "retailer": "target", "order_number": "5555", "channel": "store", "placed": "2024-09-05",
+             "total": 12.49, "details": 0, "items": 0, "charges": 1, "matched": 0}])
+        recent = (date.today() - timedelta(days=20)).isoformat()
+        retail._save_charge(self.c, "target|7777", retail._save_order(self.c, "target", "7777"), recent, -5.0, None)
+        self.assertEqual([retail.unmatched_count(self.c), retail.unmatched_count(self.c, "target"),
+                          retail.unmatched_count(self.c, "amazon")], [1, 1, 0])
+        self.assertEqual(retail.status(self.c)["recent"][0]["id"], "target:7777")   # no date yet: first
+
+
 class AllocateTests(unittest.TestCase):
     def test_adds_up_exactly(self):
         items = [{"amount": 1, "category": "A"}, {"amount": 1, "category": "B"}, {"amount": 1, "category": "C"}]
