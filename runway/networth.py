@@ -11,7 +11,10 @@ import json
 import re
 from datetime import date, timedelta
 
+from sqlalchemy import delete, insert, select, update
+
 from . import db, equity, forecast
+from .models import Account, Asset, AssetValue, NetworthSnapshot
 
 ASSET_KINDS = {"home": "Real estate", "vehicle": "Vehicles", "other": "Other assets"}
 
@@ -28,17 +31,22 @@ def current_value(a: dict, today: date) -> float:
 
 def assets(conn, today: date | None = None) -> list[dict]:
     today = today or date.today()
-    out = db.rows(conn.execute("SELECT * FROM assets ORDER BY kind, name"))
+    out = db.rows(conn.execute(select(Asset).order_by(Asset.kind, Asset.name)))
+    history: dict[int, list[dict]] = {}   # every asset's values in one query, not one per asset
+    for v in conn.execute(select(AssetValue.asset_id, AssetValue.date, AssetValue.value, AssetValue.source)
+                          .order_by(AssetValue.asset_id, AssetValue.date)):
+        history.setdefault(v["asset_id"], []).append({"date": v["date"], "value": v["value"], "source": v["source"]})
     for a in out:
         a["current_value"] = current_value(a, today)
-        a["history"] = db.rows(conn.execute("SELECT date, value, source FROM asset_values WHERE asset_id=? ORDER BY date", (a["id"],)))
+        a["history"] = history.get(a["id"], [])
     return out
 
 
 def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
-        "SELECT a.id, " + db.label_sql("a") + " AS name, a.org, a.kind, a.balance, a.balance_date, a.owed_positive, a.owner FROM accounts a WHERE a.hidden=0"))
+        select(Account.id, db.account_label_expr(Account).label("name"), Account.org, Account.kind, Account.balance,
+               Account.balance_date, Account.owed_positive, Account.owner).where(Account.hidden == 0)))
     groups = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
@@ -77,11 +85,10 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     total_liab = round(sum(g["total"] for g in groups.values() if g["side"] == "liability"), 2)
     net = round(total_assets - total_liab, 2)
     if save:
-        conn.execute(
-            "INSERT INTO networth_snapshots(date, assets, liabilities, net, detail) VALUES (?,?,?,?,?) ON CONFLICT(date) DO UPDATE SET "
-            "assets=excluded.assets, liabilities=excluded.liabilities, net=excluded.net, detail=excluded.detail",
-            (today.isoformat(), total_assets, total_liab, net, json.dumps({k: g["total"] for k, g in groups.items()})))
-    hist = db.rows(conn.execute("SELECT date, assets, liabilities, net, detail FROM networth_snapshots ORDER BY date"))
+        db.upsert(conn, NetworthSnapshot, {"date": today.isoformat(), "assets": total_assets, "liabilities": total_liab,
+                                           "net": net, "detail": json.dumps({k: g["total"] for k, g in groups.items()})},
+                  key=["date"])
+    hist = db.rows(conn.execute(select(NetworthSnapshot).order_by(NetworthSnapshot.date)))
     for h in hist:
         h["detail"] = json.loads(h["detail"] or "{}")
 
@@ -120,7 +127,7 @@ def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None
         raise ValueError("The link must be a web address starting with https://")
     if "loan_account_id" in body:
         lid = body.get("loan_account_id") or None
-        if lid and not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind='loan'", (lid,)).fetchone():
+        if lid and not conn.execute(select(Account.id).where(Account.id == lid, Account.kind == "loan")).fetchone():
             raise ValueError("Pick one of your loan accounts")
         fields["loan_account_id"] = lid
     if "yearly_change" in body:
@@ -134,29 +141,28 @@ def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None
         if new_value < 0:
             raise ValueError("Value can't be negative")
     if asset_id is None:
-        cur = conn.execute("INSERT INTO assets(name, kind, value, as_of, source) VALUES (?,?,?,?,?)",
-                           (fields.pop("name"), fields.pop("kind"), new_value, today.isoformat(), body.get("source") or "manual"))
+        cur = conn.execute(insert(Asset).values(name=fields.pop("name"), kind=fields.pop("kind"), value=new_value,
+                                                as_of=today.isoformat(), source=body.get("source") or "manual"))
         asset_id = cur.lastrowid
-    elif not conn.execute("SELECT 1 FROM assets WHERE id=?", (asset_id,)).fetchone():
+    elif not conn.execute(select(Asset.id).where(Asset.id == asset_id)).fetchone():
         raise ValueError("Not found")
     if fields:
-        conn.execute(f"UPDATE assets SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), asset_id))
+        conn.execute(update(Asset).where(Asset.id == asset_id).values(**fields))
     if new_value is not None:
         set_value(conn, asset_id, new_value, body.get("source") or "manual", today)
     return asset_id
 
 
 def set_value(conn, asset_id: int, value: float, source: str, today: date, low=None, high=None) -> None:
-    conn.execute("UPDATE assets SET value=?, as_of=?, source=?, low=?, high=? WHERE id=?",
-                 (round(value, 2), today.isoformat(), source, low, high, asset_id))
-    conn.execute("INSERT INTO asset_values(asset_id, date, value, source) VALUES (?,?,?,?) "
-                 "ON CONFLICT(asset_id, date) DO UPDATE SET value=excluded.value, source=excluded.source",
-                 (asset_id, today.isoformat(), round(value, 2), source))
+    conn.execute(update(Asset).where(Asset.id == asset_id)
+                 .values(value=round(value, 2), as_of=today.isoformat(), source=source, low=low, high=high))
+    db.upsert(conn, AssetValue, {"asset_id": asset_id, "date": today.isoformat(), "value": round(value, 2), "source": source},
+              key=["asset_id", "date"])
 
 
 def remove_asset(conn, asset_id: int) -> None:
-    conn.execute("DELETE FROM asset_values WHERE asset_id=?", (asset_id,))
-    conn.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+    conn.execute(delete(AssetValue).where(AssetValue.asset_id == asset_id))
+    conn.execute(delete(Asset).where(Asset.id == asset_id))
 
 
 def _num(v, label: str) -> float:
