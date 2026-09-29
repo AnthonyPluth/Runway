@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { gainCls, niceTicks, pct, qty, signed } from "./numbers";
 
 describe("pct", () => {
-  it("signs returns with a real minus", () => {
+  it("signs gains and puts losses in parentheses", () => {
     expect(pct(0.042)).toBe("+4.2%");
-    expect(pct(-0.01)).toBe("−1.0%");
+    expect(pct(-0.01)).toBe("(1.0%)");
     expect(pct(0.1234, 2)).toBe("+12.34%");
   });
   it("never shows −0.0%", () => {
@@ -19,19 +19,20 @@ describe("pct", () => {
 });
 
 describe("signed", () => {
-  it("writes gains and losses as money with a sign", () => {
+  it("writes gains with a sign and losses in parentheses", () => {
     expect(signed(1234)).toBe("+$1,234.00");
-    expect(signed(-12)).toBe("−$12.00");
-    expect(signed(0)).toBe("+$0.00");
+    expect(signed(-12)).toBe("($12.00)");
+    expect(signed(0)).toBe("$0.00");
+    expect(signed(-0.001)).toBe("$0.00");   // what rounds to nothing isn't a loss
     expect(signed(null)).toBe("—");
   });
 });
 
 describe("gainCls", () => {
-  it("colors only gains", () => {
+  it("colors gains green and losses red", () => {
     expect(gainCls(5)).toBe("text-emerald-500");
     expect(gainCls(0)).toBe("");
-    expect(gainCls(-5)).toBe("");
+    expect(gainCls(-5)).toBe("text-red-500");
     expect(gainCls(null)).toBe("");
   });
 });
