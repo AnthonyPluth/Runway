@@ -43,7 +43,7 @@ def save_prefs(conn, body: dict) -> dict:
             try:
                 p[k] = max(0, db.number(v)) if k != "card_due_days" else max(0, min(14, int(v)))
             except (TypeError, ValueError):
-                raise ValueError("Enter a number")
+                raise ValueError("Enter a number") from None
     db.set_setting(conn, "notify_prefs", json.dumps(p))
     return p
 

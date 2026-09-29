@@ -14,6 +14,7 @@ cycles (for the cycle in progress, at least what's already been charged), and fl
 from __future__ import annotations
 
 import calendar
+import itertools
 from collections import defaultdict
 import statistics
 from datetime import date, datetime, timedelta
@@ -523,18 +524,21 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         if e["kind"] == "recurring" and e["amount"] < 0 and e["account_id"] in cash_ids and e.get("category"):
             recurring[(e["category"], e["date"][:7])] += -e["amount"]
     this_month = today.isoformat()[:7]
+
+    def covered(p: dict, month: str) -> float:
+        return sum(recurring.get((n, month), 0.0) for n in p["names"])
+
+    def left(p: dict, month: str) -> float:
+        """The month's budget not already covered by its recurring payments (this month: nor spent)."""
+        return max(0.0, p["amount"] - (p["spent"] if month == this_month else 0.0) - covered(p, month))
+
     for p in plan:
         acct = p["pay_with"] or p["usual"] or cash[0]["id"]
         if acct not in cash_ids and acct not in cards:
             skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
             continue
-        covered = lambda month: sum(recurring.get((n, month), 0.0) for n in p["names"])   # noqa: E731
-
-        def left(month: str) -> float:
-            """The month's budget not already covered by its recurring payments (this month: nor spent)."""
-            return max(0.0, p["amount"] - (p["spent"] if month == this_month else 0.0) - covered(month))
         months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
-        if all(left(m) < 0.005 for m in months if m != this_month) and any(covered(m) for m in months):
+        if all(left(p, m) < 0.005 for m in months if m != this_month) and any(covered(p, m) for m in months):
             skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
             continue
         for i in range(1, horizon_days + 1):
@@ -542,9 +546,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             dim = calendar.monthrange(d.year, d.month)[1]
             month = d.isoformat()[:7]
             if month == this_month:   # this month: whatever's left, over the days left
-                per_day = left(month) / (dim - today.day)
+                per_day = left(p, month) / (dim - today.day)
             else:
-                per_day = left(month) / dim
+                per_day = left(p, month) / dim
             spend[acct][d.isoformat()] += per_day
             if acct in cash_ids and per_day > 0.005:
                 changes.append({"date": d.isoformat(), "account_id": acct, "kind": "budget", "category": p["category"],
@@ -629,7 +633,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
             continue
         items.sort(key=lambda t: t["posted"])
         ds = [_d(t["posted"]) for t in items]
-        gaps = [(b - a).days for a, b in zip(ds, ds[1:]) if (b - a).days > 0]
+        gaps = [(b - a).days for a, b in itertools.pairwise(ds) if (b - a).days > 0]
         if not gaps:
             continue
         gap = statistics.median(gaps)

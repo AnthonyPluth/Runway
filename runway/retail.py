@@ -240,7 +240,7 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
     try:
         txs, next_form = _parse_transactions_page(BeautifulSoup(html, cfg.bs4_parser), cfg)
     except AmazonOrdersError as e:
-        raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}")
+        raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}") from e
     start = since(conn, "amazon")
     seen = {str(k): int(v) for k, v in (seen or {}).items() if isinstance(v, int)}
     numbers, oldest = [], None

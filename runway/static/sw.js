@@ -40,8 +40,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let msg = {};
-  try { msg = event.data ? event.data.json() : {}; } catch (e) { msg = { body: event.data && event.data.text() }; }
+  let msg;
+  try { msg = event.data ? event.data.json() : {}; } catch { msg = { body: event.data && event.data.text() }; }
   event.waitUntil(self.registration.showNotification(msg.title || "Runway", {
     body: msg.body || "",
     icon: "/icon-192.png",

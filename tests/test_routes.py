@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, server  # noqa: E402
+from runway import db, server
 
 # Routes that would reach out to another service even with an empty request; they're covered by their own tests.
 NETWORK = {"/api/push/test", "/api/investments/live", "/api/assets/{id}/refresh", "/api/carta/sync"}
