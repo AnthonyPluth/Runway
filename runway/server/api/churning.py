@@ -6,7 +6,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from ... import bank_bonuses, churn_benefits, churning, db, notify
+from ... import bank_bonuses, churn_benefits, churn_wishlist, churning, db, notify
 from ...models import Category
 from ..common import ApiError
 from .state import owner_choices
@@ -133,6 +133,28 @@ def api_churn_task_remove(conn, _q, _b, task_id):
 def api_churn_task_snooze(conn, _q, body, task_id):
     return {"snooze_until": _churn(churning.snooze_task, conn, _id(task_id), body or {}, date.today())}
 
+
+
+def api_churn_wish_add(conn, _q, body):
+    return {"id": _churn(churn_wishlist.save, conn, body or {})}
+
+
+def api_churn_wish_update(conn, _q, body, wish_id):
+    return {"id": _churn(churn_wishlist.save, conn, body or {}, _id(wish_id))}
+
+
+def api_churn_wish_remove(conn, _q, _b, wish_id):
+    churn_wishlist.remove(conn, _id(wish_id))
+    return {"ok": True}
+
+
+def api_churn_wish_applied(conn, _q, body, wish_id):
+    return _churn(churn_wishlist.applied, conn, _id(wish_id), body or {}, date.today())
+
+
+def api_churn_score(conn, _q, body):
+    _churn(churn_wishlist.set_score, conn, body or {}, date.today())
+    return {"ok": True}
 
 
 def api_bank_bonus_add(conn, _q, body):
