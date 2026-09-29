@@ -34,6 +34,7 @@ MAX_LOGO = 256 * 1024
 TYPES = {"image/png", "image/jpeg", "image/webp", "image/gif"}   # never SVG: it can carry scripts
 RETRY_DAYS = 30        # a logo that couldn't be fetched is tried again after this long
 PER_SYNC = 60          # logos fetched per sync at most
+THEME = "dark"         # Logo.dev's version for dark backgrounds: the app is dark and shows logos with nothing behind them
 REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in case it changed
 SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
 BRAND = "brand:"       # ... and by the merchant's name, when no website is known
@@ -219,12 +220,21 @@ def _todo(conn, limit: int) -> list:
                          limit)).fetchall()
 
 
+def _params(token: str | None) -> str:
+    return urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "theme": THEME, "fallback": 404})
+
+
 def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     """Download logos Runway doesn't have yet (from Plaid), and Logo.dev logos it doesn't have or last checked a month
     ago (when there's a Logo.dev key). Returns how many it got."""
     global _why
     now = datetime.now()
     token = db.get_setting(conn, sk.LOGODEV_TOKEN)
+    if db.get_setting(conn, sk.LOGODEV_THEME) != THEME:
+        # Logos fetched for another theme (or before there was one) are fetched again, a batch per sync; one that
+        # can't be keeps the logo Runway has.
+        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ? OR id LIKE ?", (SITE + "%", BRAND + "%"))
+        db.set_setting(conn, sk.LOGODEV_THEME, THEME)
     todo = _todo(conn, limit)
     got = 0
     refused: set[str] = set()   # kinds of Logo.dev lookup that failed this round: the rest of that kind wait for next time
@@ -234,7 +244,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
             continue
         _why = ""   # (a merchant skipped below isn't a failed download)
         wrong = False
-        params = urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "fallback": 404})
+        params = _params(token)
         if m["id"].startswith(SITE):
             s = m["id"][len(SITE):]
             found = _download(f"{LOGO_DEV}{s}?{params}", opener) if site(s) == s else None
@@ -463,7 +473,7 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
         mid = SITE + s
         row = conn.execute("SELECT logo FROM merchants WHERE id=?", (mid,)).fetchone()
         if not row or not row["logo"]:
-            params = urllib.parse.urlencode({"token": db.get_setting(conn, sk.LOGODEV_TOKEN), "size": 64, "format": "png", "fallback": 404})
+            params = _params(db.get_setting(conn, sk.LOGODEV_TOKEN))
             found = _download(f"{LOGO_DEV}{s}?{params}", opener)
             if not found:
                 raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))
