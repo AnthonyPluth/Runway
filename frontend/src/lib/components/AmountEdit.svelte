@@ -8,14 +8,15 @@
   } = $props();
 
   let editing = $state(false);
-  let value = $state("");
+  // A number input bound to `value` reads as null (not "") once it has been emptied.
+  let value = $state<string | number | null>("");
   let done = false;
 
   function start() { value = Math.abs(amount).toFixed(2); done = false; editing = true; }
   async function finish(keep: boolean) {
     if (done) return;
     done = true;
-    if (keep && value !== "" && Number(value) !== Math.abs(amount)) await save(Math.abs(Number(value)));
+    if (keep && value != null && value !== "" && Number(value) !== Math.abs(amount)) await save(Math.abs(Number(value)));
     editing = false;
   }
   function focus(el: HTMLInputElement) { el.focus(); el.select(); }
