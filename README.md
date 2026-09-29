@@ -327,6 +327,7 @@ Node 22:
 cd frontend && npm ci                 # its packages, into frontend/node_modules
 npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
+npm test                              # unit tests for its pure logic, with Vitest (CI runs these too)
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 
