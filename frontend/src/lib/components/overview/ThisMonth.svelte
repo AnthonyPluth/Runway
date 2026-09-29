@@ -83,7 +83,7 @@
       {#each latest.items as t (t.id)}
         <div class="cell">
           {#if t.logo}
-            <img class="size-8 shrink-0 rounded-lg object-contain dark:bg-white" src={t.logo} alt="" loading="lazy" width="32" height="32" />
+            <img class="size-8 shrink-0 rounded-lg object-contain" src={t.logo} alt="" loading="lazy" width="32" height="32" />
           {:else}<CatIcon name={t.category} size={32} solid />{/if}
           <span class="min-w-0 flex-1">
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
