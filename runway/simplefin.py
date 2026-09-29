@@ -15,6 +15,7 @@ import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
 from . import db, sfinvest, splits
+from . import settings_keys as sk
 from .categorize import clean_payee
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
@@ -317,12 +318,12 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
 
 def _backfill_state(conn) -> tuple[set, set]:
     """SimpleFIN accounts ever seen, and those whose BACKFILL_DAYS of history were read in full."""
-    st = json.loads(db.get_setting(conn, "simplefin_backfill") or "{}")
+    st = json.loads(db.get_setting(conn, sk.SIMPLEFIN_BACKFILL) or "{}")
     return set(st.get("seen") or []), set(st.get("done") or [])
 
 
 def _save_backfill_state(conn, seen: set, done: set) -> None:
-    db.set_setting(conn, "simplefin_backfill", json.dumps({"seen": sorted(seen), "done": sorted(done)}))
+    db.set_setting(conn, sk.SIMPLEFIN_BACKFILL, json.dumps({"seen": sorted(seen), "done": sorted(done)}))
 
 
 def sync(conn, access_url: str, today: date | None = None, fetch=fetch_accounts) -> dict:

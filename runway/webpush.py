@@ -14,6 +14,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from pywebpush import WebPushException, webpush
 
+from . import settings_keys as sk
+
 
 def b64u(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -36,11 +38,11 @@ def vapid_keys(conn) -> tuple[py_vapid.Vapid02, str]:
     """This server's VAPID key (made once and kept in the database, as 32 raw bytes in hex).
     Returns (key, public key as base64url for the browser's applicationServerKey)."""
     from . import db
-    raw = db.get_setting(conn, "vapid_private_key")
+    raw = db.get_setting(conn, sk.VAPID_PRIVATE_KEY)
     if not raw:
         key = ec.generate_private_key(ec.SECP256R1())
         raw = format(key.private_numbers().private_value, "064x")
-        db.set_setting(conn, "vapid_private_key", raw)
+        db.set_setting(conn, sk.VAPID_PRIVATE_KEY, raw)
     vapid = py_vapid.Vapid02.from_raw(b64u(bytes.fromhex(raw)).encode())
     public = vapid.public_key.public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
     return vapid, b64u(public)

@@ -16,6 +16,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 
 from . import db, merchants, splits
+from . import settings_keys as sk
 from .categorize import clean_payee
 from .plaid import PlaidError, call
 
@@ -295,12 +296,12 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     error = None
     if stmts is not None:
         out["statements"] = store_statements(conn, item, stmts)
-        db.set_setting(conn, f"plaid_stmt_note:{item_id}", None)
+        db.set_setting(conn, sk.plaid_stmt_note(item_id), None)
         if "liabilities" not in prods:
             conn.execute("UPDATE plaid_items SET products=? WHERE item_id=?", (",".join(sorted(prods | {"liabilities"})), item_id))
     elif stmt_error is not None:
         if stmt_error.code in STATEMENT_NOTES:
-            db.set_setting(conn, f"plaid_stmt_note:{item_id}", stmt_error.code)
+            db.set_setting(conn, sk.plaid_stmt_note(item_id), stmt_error.code)
         else:
             error = stmt_error
             out["error"] = f"card statements: {stmt_error}"
