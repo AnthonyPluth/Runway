@@ -403,7 +403,8 @@ the next version baked in (and checks that it starts). Nothing is published unti
 Versions follow `vMAJOR.MINOR.PATCH`, decided by what's been merged since the last release. Pull request titles
 start with a type (they end up in each merge commit's message): `feat: …` bumps the minor version, `fix: …` (or
 anything else) the patch, and a `!` before the colon (`feat!: …`, `fix!: …`) the major version, for a change that
-breaks an existing setup. `#minor`, `#major` or `BREAKING CHANGE` anywhere in a commit message still work too.
+breaks an existing setup. `#minor` or `#major` at the end of a line, or a line starting with `BREAKING CHANGE:`,
+work too. (A message that only mentions them mid-sentence doesn't count.)
 The running version is shown at the bottom of **Settings**.
 
 [Dependabot](.github/dependabot.yml) opens weekly pull requests to keep the GitHub Actions and the Python base image
