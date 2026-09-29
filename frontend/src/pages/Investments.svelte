@@ -152,8 +152,8 @@
       {#if d!.cost_missing} · <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d!.cost_missing} holding{d!.cost_missing === 1 ? "" : "s"} ({fmt0(d!.cost_missing_value)}) need a cost basis</a>{/if}
     {/snippet}
     {@render tile("Total gain", d.unrealized_gain == null ? "—" : signed(d.unrealized_gain), gainSub, gainCls(d.unrealized_gain))}
-    {#snippet returnSub()}S&amp;P 500 {pct(perf.benchmark_return)}{beat == null ? "" : beat >= 0 ? ` · ahead by ${pct(beat).slice(1)}` : ` · behind by ${pct(beat).slice(1)}`}{/snippet}
-    {@render tile(`Return · ${inv.period}`, pct(perf.return), returnSub)}
+    {#snippet returnSub()}S&amp;P 500 {pct(perf.benchmark_return)}{beat == null ? "" : beat >= 0 ? ` · ahead by ${pct(beat).slice(1)}` : ` · behind by ${pct(-beat).slice(1)}`}{/snippet}
+    {@render tile(`Return · ${inv.period}`, pct(perf.return), returnSub, gainCls(perf.return))}
   </div>
 
   <Card.Root class="mb-6">
@@ -175,9 +175,9 @@
           <thead><tr class="text-xs text-muted-foreground"><th class="pb-1 text-left font-medium">Period</th>
             {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-3 text-right font-medium">{p}</th>{/each}</tr></thead>
           <tbody class="tabular-nums [&_td]:py-1.5 [&_td:not(:first-child)]:pl-3 [&_td]:whitespace-nowrap">
-            <tr class="border-t border-border"><td>Your return</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right">{pct(p.return)}</td>{/each}</tr>
+            <tr class="border-t border-border"><td>Your return</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right", gainCls(p.return))}>{pct(p.return)}</td>{/each}</tr>
             <tr class="border-t border-border"><td>S&amp;P 500</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right text-muted-foreground">{pct(p.benchmark_return)}</td>{/each}</tr>
-            <tr class="border-t border-border"><td class="whitespace-nowrap">Gain after deposits</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right text-muted-foreground">{signed(p.gain)}</td>{/each}</tr>
+            <tr class="border-t border-border"><td class="whitespace-nowrap">Gain after deposits</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right text-muted-foreground", gainCls(p.gain))}>{signed(p.gain)}</td>{/each}</tr>
           </tbody>
         </table>
       </div>
@@ -281,7 +281,7 @@
                   <td class="text-muted-foreground max-[700px]:hidden">{t.account_name}</td>
                   <td class="text-right tabular-nums">{t.quantity ? t.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }) : ""}</td>
                   <td class="text-right text-muted-foreground tabular-nums">{t.price ? fmt(t.price) : ""}</td>
-                  <td class={cn("text-right whitespace-nowrap tabular-nums", (t.amount ?? 0) < 0 && "text-emerald-500")}>{t.amount ? signed(-t.amount) : ""}</td>
+                  <td class={cn("text-right whitespace-nowrap tabular-nums", gainCls(-(t.amount ?? 0)))}>{t.amount ? signed(-t.amount) : ""}</td>
                 </tr>
               {/each}
             </tbody>
