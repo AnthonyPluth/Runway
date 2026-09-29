@@ -569,36 +569,7 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
 
     api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
     if left and use_ai and api_key and (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1":
-        model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
-        cats = sorted(spend)
-        subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
-        examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
-            "SELECT title, category FROM retail_items WHERE category_source='manual' ORDER BY id DESC LIMIT 40")]
-        names = " and ".join(sorted({NAMES.get(it["retailer"], it["retailer"]) for it in left}))
-        conn.commit()   # don't hold the database while the model thinks
-        for start in range(0, len(left), AI_BATCH):
-            batch = left[start:start + AI_BATCH]
-            payload = [{"i": i, "item": it["title"][:200], "price": round(it["amount"] or 0, 2),
-                        **({"department": it["department"]} if it["department"] else {})} for i, it in enumerate(batch)]
-            began, reply = time.time(), None
-            try:
-                reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload))
-                answers = categorize.parse_ai_reply(reply, cats)
-                answered = sum(1 for a in answers.values() if a[0])
-                categorize._log(conn, "orders", model, len(batch), answered, 0, True, time.time() - began,
-                                f"Categorized {answered} of {len(batch)} items from {names} orders", reply)
-            except Exception as e:   # recorded in the AI log; these fall back below
-                categorize._log(conn, "orders", model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
-                conn.commit()
-                break
-            for i, it in enumerate(batch):
-                cat, conf = answers.get(i, (None, 0.0))
-                if cat:
-                    conn.execute("UPDATE retail_items SET category=?, category_source='ai', confidence=? "
-                                 "WHERE id=? AND category_source IS NULL", (cat, conf, it["id"]))
-                    counts["ai"] += 1
-                    it["done"] = True
-            conn.commit()
+        counts["ai"] += _items_with_ai(conn, left, caller, api_key, spend)
     for it in left:
         if it.get("done"):
             continue
@@ -610,6 +581,44 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
         else:
             counts["left"] += 1
     return counts
+
+
+def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]) -> int:
+    """Ask the model about items, AI_BATCH at a time, and save its answers. Items it answered are marked done.
+    Stops at the first failed request (recorded in the AI log); what's left falls back to departments. Returns how
+    many items it categorized."""
+    model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    cats = sorted(spend)
+    subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
+    examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
+        "SELECT title, category FROM retail_items WHERE category_source='manual' ORDER BY id DESC LIMIT 40")]
+    names = " and ".join(sorted({NAMES.get(it["retailer"], it["retailer"]) for it in left}))
+    conn.commit()   # don't hold the database while the model thinks
+    done = 0
+    for start in range(0, len(left), AI_BATCH):
+        batch = left[start:start + AI_BATCH]
+        payload = [{"i": i, "item": it["title"][:200], "price": round(it["amount"] or 0, 2),
+                    **({"department": it["department"]} if it["department"] else {})} for i, it in enumerate(batch)]
+        began, reply = time.time(), None
+        try:
+            reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload))
+            answers = categorize.parse_ai_reply(reply, cats)
+            answered = sum(1 for a in answers.values() if a[0])
+            categorize._log(conn, "orders", model, len(batch), answered, 0, True, time.time() - began,
+                            f"Categorized {answered} of {len(batch)} items from {names} orders", reply)
+        except Exception as e:   # recorded in the AI log; these fall back to departments
+            categorize._log(conn, "orders", model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
+            conn.commit()
+            break
+        for i, it in enumerate(batch):
+            cat, conf = answers.get(i, (None, 0.0))
+            if cat:
+                conn.execute("UPDATE retail_items SET category=?, category_source='ai', confidence=? "
+                             "WHERE id=? AND category_source IS NULL", (cat, conf, it["id"]))
+                done += 1
+                it["done"] = True
+        conn.commit()
+    return done
 
 
 def set_item_category(conn, item_id: int, category: str, remember: bool = True) -> dict:
@@ -767,6 +776,29 @@ def _is_ours(conn, tx_id: str, applied: dict | None) -> bool:
     return now == [(p["category"], round(p["amount"], 2)) for p in applied["parts"]]
 
 
+def _yours(tx, ours: bool, force: bool) -> str | None:
+    """Why the transaction is yours to leave alone ("user-split" or "manual"), unless you asked to redo it."""
+    if force:
+        return None
+    if tx["is_split"] and not ours:
+        return "user-split"
+    if not tx["is_split"] and tx["category_source"] == "manual":
+        return "manual"
+    return None
+
+
+def _set_one_category(conn, tx, category: str) -> str:
+    """Every item came out the same category: undo any split and give the transaction that category. Returns
+    "same" when it already had it (from Runway or you) and "category" otherwise."""
+    if tx["is_split"]:
+        splits.clear(conn, tx["id"])
+    if tx["category"] == category and tx["category_source"] in ("retail", "manual") and not tx["is_split"]:
+        return "same"
+    conn.execute("UPDATE transactions SET category=?, category_source='retail', confidence=1, needs_review=0 "
+                 "WHERE id=?", (category, tx["id"]))
+    return "category"
+
+
 def apply(conn, charge_id: str, force: bool = False) -> str:
     """Categorize or split a charge's transaction by its order's items. Returns what happened:
     split | category | same | no-items | waiting | unmatched | manual | user-split."""
@@ -787,24 +819,16 @@ def apply(conn, charge_id: str, force: bool = False) -> str:
         return "waiting"   # nothing has decided any item yet: leave the transaction as it is until something does
     applied = json.loads(ch["applied"]) if ch["applied"] else None
     ours = _is_ours(conn, tx["id"], applied)
-    if tx["is_split"] and not ours and not force:
-        return "user-split"
-    if not tx["is_split"] and tx["category_source"] == "manual" and not force:
-        return "manual"
+    yours = _yours(tx, ours, force)
+    if yours:
+        return yours
     prev = (applied or {}).get("prev") or {"category": tx["category"], "source": tx["category_source"]}
     fallback = _fallback_category(conn, {"category": prev["category"]})
     parts = allocate(tx["amount"], items, fallback, order["total"] if order else None)
     if not parts:
         return "no-items"
     if len(parts) == 1:
-        if tx["is_split"]:
-            splits.clear(conn, tx["id"])
-        if tx["category"] == parts[0]["category"] and tx["category_source"] in ("retail", "manual") and not tx["is_split"]:
-            result = "same"
-        else:
-            conn.execute("UPDATE transactions SET category=?, category_source='retail', confidence=1, needs_review=0 "
-                         "WHERE id=?", (parts[0]["category"], tx["id"]))
-            result = "category"
+        result = _set_one_category(conn, tx, parts[0]["category"])
         parts_saved = []
     else:
         if ours and [(p["category"], p["amount"]) for p in applied["parts"]] == [(p["category"], p["amount"]) for p in parts]:
