@@ -32,7 +32,7 @@ describe("gainCls", () => {
   it("colors gains green and losses red", () => {
     expect(gainCls(5)).toBe("text-emerald-500");
     expect(gainCls(0)).toBe("");
-    expect(gainCls(-5)).toBe("text-red-500");
+    expect(gainCls(-5)).toBe("text-[var(--loss)]");
     expect(gainCls(null)).toBe("");
   });
 });
