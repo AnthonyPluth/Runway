@@ -145,7 +145,15 @@ plain Python with a handful of well-known libraries.
 - Dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and **installs
   as an app** on your iPhone's Home Screen.
 - **Push notifications** on your phone or computer: a card payment coming up, the forecast getting low, a recurring
-  payment that didn't show up, a large charge, or syncing that keeps failing. Each alert is sent once.
+  payment that didn't show up, a large charge, syncing that keeps failing, or (Churning) an annual fee or a sign-up
+  bonus deadline coming up. Each alert is sent once.
+- **Churning:** credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. 5/24 per
+  person (authorized-user, business and product-changed cards left out) with the day each card stops counting;
+  annual fees coming up (keep, downgrade or close?); bonus spending and direct deposits followed from linked
+  accounts; when a bonus can be earned again, by each bank's commonly reported rule (a rule of thumb, overridable);
+  safe-to-close days and fee-waiver reminders for bank accounts; your own to-dos; the best card for a purchase by
+  category; estimated points and what they're worth at values you set; and bank bonus money per year (usually
+  reported as interest).
 - **Backups** as a single file, restorable into either database.
 
 ## Screenshots
@@ -277,6 +285,10 @@ were added are upgraded in place.
 - **Investment history:** rebuilt from activity where Plaid provides it, the way Ghostfolio does; otherwise from the
   position snapshots Runway saves on every sync. Changes in positions between snapshots count as money added or
   withdrawn, not as gains, and returns are time-weighted.
+- **Churning:** spending toward a card's bonus is counted the way Reports counts spending (split transactions by their
+  parts, transfers and card payments left out, refunds lowering it). A bank bonus's direct deposits are deposits
+  categorized as income, or that look like payroll. The banks' bonus rules live in `runway/churning.py` as data, and
+  every estimate says it is one.
 - **Stack:** Python with a handful of well-known libraries: [SQLAlchemy](https://www.sqlalchemy.org) and
   [Alembic](https://alembic.sqlalchemy.org) for SQLite/Postgres and migrations (psycopg 3 for Postgres),
   [PyJWT](https://pyjwt.readthedocs.io) for sign-in tokens, [pywebpush](https://github.com/web-push-libs/pywebpush)
