@@ -49,7 +49,7 @@ def _from_passphrase_v1(text: str) -> bytes:
 
 
 def _data_dir() -> str:
-    from . import db
+    from . import db   # db imports this module
     return db.data_dir()
 
 

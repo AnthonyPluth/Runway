@@ -21,7 +21,8 @@ from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 
-from . import bankdays, db, splits
+from . import bankdays, db, plaidbank, splits
+from . import categories as catmod
 from . import recurring as rec
 
 SPEND_WINDOW_DAYS = 90
@@ -204,7 +205,6 @@ def statement_override(conn, card_id: str, close: date) -> float | None:
 def bank_statement(conn, card: dict, today: date):
     """The card's latest statement from its issuer (Plaid Liabilities). The card's billing cycle follows it:
     card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
-    from . import plaidbank
     st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
     if not st:
         return None
@@ -477,7 +477,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 def budget_plan(conn, today: date) -> list[dict]:
     """Each budget that counts (a parent's budget covers its subcategories), with what's been spent this month and the
     account it's paid with: the one you chose, else the account used most for it over the last 90 days."""
-    from . import categories as catmod
     cats = catmod.all_categories(conn)
     by_name = {c["name"]: c for c in cats}
     budgets = {r["category"]: r for r in db.rows(conn.execute("SELECT * FROM budgets"))}

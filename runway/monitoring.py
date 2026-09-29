@@ -77,7 +77,7 @@ def init() -> bool:
     dsn = (os.environ.get("SENTRY_DSN") or "").strip()
     if not dsn:
         return False
-    import sentry_sdk
+    import sentry_sdk   # loaded only when reporting is on, so it costs nothing otherwise
     try:
         rate = min(1.0, max(0.0, float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE") or 0)))
     except ValueError:
@@ -106,7 +106,7 @@ def report(e: BaseException | None = None, **tags) -> None:
         traceback.print_exception(type(e), e, e.__traceback__)
     if not _enabled:
         return
-    import sentry_sdk
+    import sentry_sdk   # loaded only when reporting is on (see init)
     with sentry_sdk.new_scope() as scope:
         for k, v in tags.items():
             scope.set_tag(k, v)

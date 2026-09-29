@@ -209,7 +209,7 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
         import certifi  # type: ignore
 
         ctx.load_verify_locations(certifi.where())
-    except Exception:
+    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     try:
         with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
