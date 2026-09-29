@@ -23,6 +23,7 @@ export interface AppState {
   primary_account?: string | null;
   auto_ai_on_sync?: boolean;
   realie_configured?: boolean;
+  finnhub_configured?: boolean;
   logodev_configured?: boolean;
   database?: "sqlite" | "postgres";
   version?: string;
