@@ -74,7 +74,7 @@ class MerchantTests(unittest.TestCase):
 
 
     def logo_dev(self, site, token="pk_test123456"):
-        return f"https://img.logo.dev/{site}?token={token}&size=64&format=png&fallback=404"
+        return f"https://img.logo.dev/{site}?token={token}&size=64&format=png&theme=dark&fallback=404"
 
     def test_plaid_logo_first_then_logo_dev_by_website(self):
         merchants.note(self.c, {"merchant_name": "Target", "merchant_entity_id": "ent-t", "logo_url": "https://plaid.com/t.png"})
@@ -117,7 +117,7 @@ class MerchantTests(unittest.TestCase):
                          ["brand:corner shop", "site:amazon.com", "site:starbucks.com"])   # no website known: by name
 
     def by_name(self, name, token="pk_test123456"):
-        return f"https://img.logo.dev/name/{urllib.parse.quote(name, safe='')}?token={token}&size=64&format=png&fallback=404"
+        return f"https://img.logo.dev/name/{urllib.parse.quote(name, safe='')}?token={token}&size=64&format=png&theme=dark&fallback=404"
 
     def test_logo_dev_by_name_when_no_website_is_known(self):
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")
@@ -166,6 +166,16 @@ class MerchantTests(unittest.TestCase):
         self.c.execute("UPDATE merchants SET logo_checked='2026-01-01T00:00:00'")
         self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG + b"new", "image/png")})), 1)
         self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG + b"new", "image/png"))
+
+    def test_logos_fetched_for_another_theme_are_fetched_again(self):
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        url = self.logo_dev("target.com")
+        merchants.site_logos(self.c, ["target.com"])
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG, "image/png")})), 1)
+        db.set_setting(self.c, sk.LOGODEV_THEME, None)   # as stored before Runway asked for dark-background logos
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG + b"dark", "image/png")})), 1)
+        self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG + b"dark", "image/png"))
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url: (PNG, "image/png")})), 0)   # once only
 
     def test_the_key_setting(self):
         started = mock.patch.object(server.api.merchants, "start_logo_backfill").start()
