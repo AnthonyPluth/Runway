@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime, timedelta, UTC
+from typing import Any
 
 from . import brands, db, merchants, splits
 from . import settings_keys as sk
@@ -49,7 +50,7 @@ def runway_kind(pa) -> str | None:
     return None   # investment accounts come through the investments connection
 
 
-def _compatible(kind: str, runway: str) -> bool:
+def _compatible(kind: str | None, runway: str) -> bool:
     return kind == runway or (kind in ("checking", "savings") and runway in ("checking", "savings"))
 
 
@@ -356,7 +357,8 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
     earlier = {aid for (aid,) in conn.execute(
         "SELECT DISTINCT account_id FROM transactions WHERE id NOT LIKE ? AND account_id IN (SELECT id FROM accounts WHERE provider='plaid')",
         ("%|pl:%",)).fetchall()}
-    new_ids, claimed = [], set()
+    new_ids: list[str] = []
+    claimed: set[str] = set()
     for t in added + modified:
         acct = accts.get(t.get("account_id"))
         if not acct:
@@ -447,7 +449,7 @@ def statement(conn, card_id: str, today: date):
 
 
 def sync_all(conn, today: date | None = None) -> dict:
-    out = {"items": 0, "new": [], "errors": []}
+    out: dict[str, Any] = {"items": 0, "new": [], "errors": []}
     for item in conn.execute("SELECT * FROM plaid_items").fetchall():
         if not is_bank_item(item):
             continue

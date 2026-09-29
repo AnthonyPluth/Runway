@@ -31,7 +31,7 @@ class SimpleFinError(Exception):
 def _ssl_context() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     try:  # python.org builds on macOS ship without system certs; use certifi when present
-        import certifi  # type: ignore
+        import certifi
 
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
@@ -52,15 +52,16 @@ class _PublicHTTPSConnection(http.client.HTTPSConnection):
     address may come from a restored backup, which was never checked."""
     def connect(self):
         http.client.HTTPConnection.connect(self)   # just the TCP connection (and a proxy's tunnel, if one is set)
-        if not self._tunnel_host and not _public_ip(self.sock.getpeername()[0]):   # through a proxy, it decides
+        # _tunnel_host and _context are http.client/urllib internals (not in their type stubs).
+        if not self._tunnel_host and not _public_ip(self.sock.getpeername()[0]):  # type: ignore[attr-defined]  # through a proxy, it decides
             self.sock.close()
             raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
-        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self._tunnel_host or self.host)  # type: ignore[attr-defined]
 
 
 class _PublicHTTPSHandler(urllib.request.HTTPSHandler):
     def https_open(self, req):
-        return self.do_open(_PublicHTTPSConnection, req, context=self._context)
+        return self.do_open(_PublicHTTPSConnection, req, context=self._context)  # type: ignore[attr-defined]  # urllib internal
 
 
 class _NoPlainHTTP(urllib.request.HTTPHandler):
@@ -112,7 +113,7 @@ def check_address(url: str) -> None:
     except (socket.gaierror, UnicodeError) as e:
         raise SimpleFinError(f"Couldn't reach SimpleFIN: can't find {parts.hostname}.") from e
     for info in infos:
-        if not _public_ip(info[4][0]):
+        if not _public_ip(str(info[4][0])):   # an IPv4 or IPv6 address (the port is info[4][1])
             raise SimpleFinError("That SimpleFIN address points at a private network address, which Runway won't contact.")
 
 

@@ -14,7 +14,7 @@ down_revision = '0006'
 branch_labels = None
 depends_on = None
 
-NEW = [
+NEW: list[sa.Column] = [
     sa.Column('match_mode', sa.Text(), server_default=sa.text("'contains'"), nullable=True),
     sa.Column('amount_min', sa.Float(), nullable=True),
     sa.Column('amount_max', sa.Float(), nullable=True),
@@ -30,7 +30,8 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == 'postgresql':
         for uc in sa.inspect(bind).get_unique_constraints('rules'):
-            op.drop_constraint(uc['name'], 'rules', type_='unique')
+            if uc['name']:   # Postgres always names them; the check is for the type checker
+                op.drop_constraint(uc['name'], 'rules', type_='unique')
         op.alter_column('rules', 'category', existing_type=sa.Text(), nullable=True)
         for col in NEW:
             op.add_column('rules', col)

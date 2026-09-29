@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, UTC
+from typing import TypeGuard
 
 
 BENCHMARK = "SPY"   # S&P 500
@@ -23,7 +24,7 @@ STALE_HOURS = 20
 def _ctx() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     try:
-        import certifi  # type: ignore
+        import certifi
 
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
@@ -31,8 +32,8 @@ def _ctx() -> ssl.SSLContext:
     return ctx
 
 
-def usable_ticker(t: str | None) -> bool:
-    return bool(t) and ":" not in t and " " not in t and len(t) <= 12  # skips Plaid cash tickers like "CUR:USD"
+def usable_ticker(t: str | None) -> TypeGuard[str]:
+    return t is not None and t != "" and ":" not in t and " " not in t and len(t) <= 12  # skips Plaid cash tickers like "CUR:USD"
 
 
 def fetch(ticker: str, start: date, end: date) -> tuple[list[tuple[str, float, float]], list[tuple[str, float]], dict]:
@@ -74,7 +75,8 @@ def fetch(ticker: str, start: date, end: date) -> tuple[list[tuple[str, float, f
 
 def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
     """Fetch any tickers whose history is missing or stale. Commits between requests."""
-    done, failed = [], []
+    done: list[str] = []
+    failed: list[str] = []
     now = datetime.now()
     for t in sorted(set(x for x in tickers if usable_ticker(x))):
         meta = conn.execute("SELECT * FROM price_meta WHERE ticker=?", (t,)).fetchone()

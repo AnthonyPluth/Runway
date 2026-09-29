@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
@@ -51,7 +52,7 @@ def api_cashflow(conn, q, _b):
         kids.sort(key=lambda k: -k["value"])
         spend_list.append({"name": name, "value": round(node["value"], 2), "children": kids})
     spend_list.sort(key=lambda n: -n["value"])
-    inc_list = sorted(({"name": k, "value": round(v, 2)} for k, v in income.items() if v > 0.005), key=lambda n: -n["value"])
+    inc_list: list[dict[str, Any]] = sorted(({"name": k, "value": round(v, 2)} for k, v in income.items() if v > 0.005), key=lambda n: -n["value"])
     total_in = round(sum(n["value"] for n in inc_list), 2)
     total_out = round(sum(n["value"] for n in spend_list), 2)
     return {"month": f"{start:%Y-%m}", "income": inc_list, "spending": spend_list,
@@ -81,7 +82,7 @@ def _months(q) -> int:
     return max(2, min(int(q.get("months", ["12"])[0]), 36))
 
 
-def _span(q):
+def _span(q) -> tuple[str, str]:
     """start (inclusive) and end (exclusive) days; this month by default."""
     first = date.today().replace(day=1)
     return _day(q, "start", first), _day(q, "end", first + relativedelta(months=1))

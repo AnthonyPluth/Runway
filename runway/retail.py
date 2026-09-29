@@ -30,6 +30,7 @@ import secrets
 import tempfile
 import time
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from dateutil import parser as dateparser
 
@@ -244,7 +245,8 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
         raise RetailError(f"Runway couldn't read Amazon's transactions page: {e}") from e
     start = since(conn, "amazon")
     seen = {str(k): int(v) for k, v in (seen or {}).items() if isinstance(v, int)}
-    numbers, oldest = [], None
+    numbers: list[str] = []
+    oldest: str | None = None
     for t in txs:
         day = _day(t.completed_date)
         oldest = min(oldest or day, day) if day else oldest
@@ -260,7 +262,7 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
         _save_charge(conn, f"amazon|{number}|{day}|{round(t.grand_total * 100)}|{seen[k]}", oid, day,
                      float(t.grand_total), pay)
         numbers.append(number)
-    more = bool(next_form) and bool(oldest) and oldest >= start
+    more = bool(next_form and oldest and oldest >= start)
     return {"next_form": next_form if more else None, "orders": _need(conn, "amazon", numbers), "read": len(txs),
             "seen": seen}
 
@@ -491,7 +493,8 @@ def target_order(conn, number: str, data, final: bool = True) -> dict:
         o = data   # the reply is the order itself (its packages may name the order too: they aren't it)
     else:
         found = _find_orders(data)
-        o = next((x for x in found if str(_first(x, _NUMBER, ())) == number), None) or (data if isinstance(data, dict) else {})
+        match = next((x for x in found if str(_first(x, _NUMBER, ())) == number), None)
+        o = match or (data if isinstance(data, dict) else {})
     o = dict(o)
     o.setdefault("order_number", number)
     _, read = _target_order(conn, o, None)
@@ -831,7 +834,7 @@ def apply(conn, charge_id: str, force: bool = False) -> str:
         result = _set_one_category(conn, tx, parts[0]["category"])
         parts_saved = []
     else:
-        if ours and [(p["category"], p["amount"]) for p in applied["parts"]] == [(p["category"], p["amount"]) for p in parts]:
+        if ours and applied and [(p["category"], p["amount"]) for p in applied["parts"]] == [(p["category"], p["amount"]) for p in parts]:
             return "same"
         splits.set_splits(conn, tx["id"], parts)
         if not tx["category"]:
@@ -1002,7 +1005,7 @@ def candidates(conn, charge_id: str) -> list[dict]:
 
 
 def status(conn) -> dict:
-    out = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
+    out: dict[str, Any] = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
            "ai": (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1", "stores": {}}
     for r in RETAILERS:
         counts = conn.execute(
