@@ -19,7 +19,7 @@ from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
 
-from . import db, prices, splits
+from . import db, planner, prices, splits
 
 HISTORY_DAYS = 730
 # Cash moving in or out of the account from outside (not investment results).
@@ -570,14 +570,12 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
     return rules
 
 
-# The assumptions behind the financial-independence projection. Runway works out the first two from your own
-# spending and saving; change any of them and your figure is kept (in settings) until you reset it.
-FIRE_FIELDS = {"annual_spending": (0.0, 1e9), "yearly_savings": (0.0, 1e9),
-               "expected_return": (-0.5, 0.5), "withdrawal_rate": (0.001, 0.5)}
+# The old financial-independence card kept the figures you changed as settings; a new retirement plan starts from them.
+FIRE_FIELDS = ("annual_spending", "yearly_savings", "expected_return")
 
 
 def fire_saved(conn) -> dict:
-    """The assumptions you've changed by hand."""
+    """The figures you'd changed on the old financial-independence card."""
     out = {}
     for field in FIRE_FIELDS:
         value = db.get_setting(conn, f"fire_{field}")
@@ -589,36 +587,16 @@ def fire_saved(conn) -> dict:
     return out
 
 
-def save_fire(conn, values: dict) -> dict:
-    """Keep the assumptions you typed. A field set to None goes back to Runway's own figure."""
-    for field, value in values.items():
-        if field not in FIRE_FIELDS:
-            raise ValueError(f"Unknown assumption: {field}")
-        if value is None:
-            db.set_setting(conn, f"fire_{field}", None)
-            continue
-        low, high = FIRE_FIELDS[field]
-        try:
-            number = float(value)
-        except (TypeError, ValueError):
-            raise ValueError(f"{field.replace('_', ' ').capitalize()} must be a number")
-        if not low <= number <= high:
-            raise ValueError(f"{field.replace('_', ' ').capitalize()} is out of range")
-        db.set_setting(conn, f"fire_{field}", repr(round(number, 6)))
-    return fire_saved(conn)
-
-
-def fire_defaults(conn, hist: dict, today: date) -> dict:
+def plan_figures(conn, hist: dict, today: date) -> dict:
+    """What the retirement plan starts from: a year's spending and saving from your own accounts, and a return."""
     spend = monthly_spending(conn, today)
     flows = hist.get("flows") or []
     dates = hist.get("dates") or []
     cutoff = (today - timedelta(days=365)).isoformat()
     yearly_savings = sum(f for d, f in zip(dates, flows) if d > cutoff)
     computed = {"annual_spending": round(spend * 12, 2), "yearly_savings": round(max(0.0, yearly_savings), 2),
-                "withdrawal_rate": 0.04, "expected_return": 0.05}
-    saved = fire_saved(conn)
-    return {**computed, **saved, "current": hist["value"][-1] if hist.get("value") else 0.0,
-            "computed": computed, "saved": sorted(saved)}
+                "expected_return": 0.05}
+    return {**computed, **fire_saved(conn)}
 
 
 # ------------------------------------------------------------------------------------------------ everything for the page
@@ -647,6 +625,7 @@ def overview(conn, period: str = "1Y", today: date | None = None) -> dict:
         "cost_missing": len(cost_missing), "cost_missing_value": round(sum(h["value"] for h in cost_missing), 2),
         "holdings": hold, "allocation": alloc, "income": inc,
         "history": {**hist, "benchmark": bench}, "performance": perf, "periods": periods,
-        "xray": xray(conn, hold, alloc, inc, today), "fire": fire_defaults(conn, hist, today),
+        "xray": xray(conn, hold, alloc, inc, today),
+        "plan": planner.overview(conn, hist["value"][-1] if hist.get("value") else 0.0, plan_figures(conn, hist, today), today),
         "accounts": [a for a in _accounts(conn) if not a["duplicate_of"]], "activity": activity(conn, 300),
     }

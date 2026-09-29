@@ -2,10 +2,10 @@
   import { api } from "$lib/api";
   import AccountsTable from "$lib/components/investments/AccountsTable.svelte";
   import BarChart from "$lib/components/investments/BarChart.svelte";
-  import FireCard from "$lib/components/investments/FireCard.svelte";
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
+  import RetirementPlanner from "$lib/components/investments/RetirementPlanner.svelte";
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
@@ -236,19 +236,21 @@
     </Card.Root>
   </div>
 
-  <div class="mb-6 grid gap-6 lg:grid-cols-2">
-    <Card.Root>
-      <Card.Header>
-        <Card.Title>Dividends &amp; interest</Card.Title>
-        <Card.Description>{fmt(d.income.income_12m)} in the last 12 months · fees {fmt(d.income.fees_12m)}</Card.Description>
-      </Card.Header>
-      <Card.Content><BarChart labels={incomeLabels} values={d.income.income} fmtTip={fmt} /></Card.Content>
-    </Card.Root>
-    <Card.Root>
-      <Card.Header><Card.Title>Financial independence</Card.Title></Card.Header>
-      <Card.Content><FireCard fire={d.fire} /></Card.Content>
-    </Card.Root>
-  </div>
+  <Card.Root class="mb-6">
+    <Card.Header>
+      <Card.Title>Dividends &amp; interest</Card.Title>
+      <Card.Description>{fmt(d.income.income_12m)} in the last 12 months · fees {fmt(d.income.fees_12m)}</Card.Description>
+    </Card.Header>
+    <Card.Content><BarChart labels={incomeLabels} values={d.income.income} fmtTip={fmt} /></Card.Content>
+  </Card.Root>
+
+  <Card.Root class="mb-6">
+    <Card.Header>
+      <Card.Title>Retirement planner</Card.Title>
+      <Card.Description>What retirement looks like for you: your plan run through 1,000 possible markets, in today's dollars.</Card.Description>
+    </Card.Header>
+    <Card.Content><RetirementPlanner data={d.plan} /></Card.Content>
+  </Card.Root>
 
   <Card.Root class="mb-6">
     <Card.Header>

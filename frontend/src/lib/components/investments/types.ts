@@ -86,16 +86,31 @@ export interface Performance {
 export interface AllocItem { name: string; value: number; share: number }
 export type AllocKey = "asset_class" | "account" | "sector" | "holding";
 
-export interface FireFigures {
-  annual_spending: number;
-  yearly_savings: number;
-  expected_return: number;
-  withdrawal_rate: number;
+/** The retirement plan, in today's dollars (runway/planner.py keeps it; planner.ts projects it). */
+export interface PlanPerson { name: string; birth_year: number; retire_age: number; savings: number }
+export interface PlanIncome { name: string; amount: number; person: number; start_age: number; end_age: number | null }
+export interface PlanEvent { name: string; year: number; amount: number }
+export interface Plan {
+  people: PlanPerson[];
+  plan_to_age: number;
+  spending: number;
+  return_before: number;
+  return_after: number;
+  volatility: number;
+  inflation: number;
+  income: PlanIncome[];
+  events: PlanEvent[];
+  assets: { key: string; sell_year: number }[];
 }
-export interface Fire extends FireFigures {
+/** A home, vehicle or company equity from Net worth that can be sold into the plan. */
+export interface PlanAsset { key: string; name: string; kind: string; value: number; yearly_change: number; owed: number }
+export interface PlanData {
+  plan: Plan;
+  is_default: boolean;
   current: number;
-  computed: FireFigures;
-  saved: string[];
+  computed: { annual_spending: number; yearly_savings: number; expected_return: number };
+  assets: PlanAsset[];
+  year: number;
 }
 
 export interface XrayRule { name: string; ok: boolean; info?: boolean; detail: string }
@@ -126,7 +141,7 @@ export interface Investments {
   performance: Performance;
   periods: Record<string, Performance>;
   xray: XrayRule[];
-  fire: Fire;
+  plan: PlanData;
   accounts: InvAccount[];
   activity: Activity[];
 }
