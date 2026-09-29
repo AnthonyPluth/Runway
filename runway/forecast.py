@@ -22,6 +22,7 @@ from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 
 from . import bankdays, db, splits
+from . import settings_keys as sk
 from . import recurring as rec
 
 SPEND_WINDOW_DAYS = 90
@@ -285,7 +286,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     accounts = db.rows(conn.execute("SELECT * FROM accounts WHERE hidden=0 ORDER BY name"))
     by_id = {a["id"]: a for a in accounts}
     cash_like = [a for a in accounts if a["kind"] in ("checking", "savings")]
-    primary = by_id.get(db.get_setting(conn, "primary_account") or "")
+    primary = by_id.get(db.get_setting(conn, sk.PRIMARY_ACCOUNT) or "")
     if primary and primary["kind"] in ("checking", "savings"):
         cash = [primary]
     elif len([a for a in cash_like if a["kind"] == "checking"]) == 1:

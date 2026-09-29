@@ -20,13 +20,14 @@ import threading
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
+from . import settings_keys
+
 PREFIX = "enc:v1:"
 KEY_FILE = "secret.key"
 MIN_KEY_LENGTH = 32
 
 # settings rows that hold secrets (the rest of the settings table is ordinary preferences)
-SECRET_SETTINGS = {"simplefin_access_url", "plaid_secret", "openrouter_api_key", "realie_api_key", "logodev_token", "logodev_secret", "vapid_private_key",
-                   "carta_client_secret", "carta_access_token", "carta_refresh_token", "plaid_pending_link"}
+SECRET_SETTINGS = settings_keys.SECRETS
 
 _lock = threading.Lock()
 _cache: dict[tuple, MultiFernet] = {}

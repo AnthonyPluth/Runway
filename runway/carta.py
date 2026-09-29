@@ -24,6 +24,7 @@ import urllib.request
 from datetime import date
 
 from . import db
+from . import settings_keys as sk
 
 ENVS = {
     "production": {"api": "https://api.carta.com", "authorize": "https://login.app.carta.com/o/authorize/",
@@ -45,31 +46,31 @@ class CartaError(Exception):
 
 
 def settings(conn) -> dict:
-    return {"env": db.get_setting(conn, "carta_env") or "production", "client_id": db.get_setting(conn, "carta_client_id"),
-            "has_secret": bool(db.get_setting(conn, "carta_client_secret")),
-            "connected": bool(db.get_setting(conn, "carta_access_token")) or (db.get_setting(conn, "carta_env") == "mock"
-                                                                                and bool(db.get_setting(conn, "carta_mock_on"))),
-            "last_sync": db.get_setting(conn, "carta_last_sync"), "last_error": db.get_setting(conn, "carta_last_error"),
+    return {"env": db.get_setting(conn, sk.CARTA_ENV) or "production", "client_id": db.get_setting(conn, sk.CARTA_CLIENT_ID),
+            "has_secret": bool(db.get_setting(conn, sk.CARTA_CLIENT_SECRET)),
+            "connected": bool(db.get_setting(conn, sk.CARTA_ACCESS_TOKEN)) or (db.get_setting(conn, sk.CARTA_ENV) == "mock"
+                                                                               and bool(db.get_setting(conn, sk.CARTA_MOCK_ON))),
+            "last_sync": db.get_setting(conn, sk.CARTA_LAST_SYNC), "last_error": db.get_setting(conn, sk.CARTA_LAST_ERROR),
             # through the browser extension
-            "web_last": db.get_setting(conn, "carta_web_last"), "web_error": db.get_setting(conn, "carta_web_last_error"),
-            "web_capture": bool(db.get_setting(conn, "carta_web_capture") not in (None, "[]"))}
+            "web_last": db.get_setting(conn, sk.CARTA_WEB_LAST), "web_error": db.get_setting(conn, sk.CARTA_WEB_LAST_ERROR),
+            "web_capture": bool(db.get_setting(conn, sk.CARTA_WEB_CAPTURE) not in (None, "[]"))}
 
 
 def save_settings(conn, body: dict) -> None:
-    env = body.get("env") or db.get_setting(conn, "carta_env") or "production"
+    env = body.get("env") or db.get_setting(conn, sk.CARTA_ENV) or "production"
     if env not in ENVS:
         raise CartaError("Environment is production, playground or mock")
-    if env != (db.get_setting(conn, "carta_env") or "production"):
+    if env != (db.get_setting(conn, sk.CARTA_ENV) or "production"):
         disconnect(conn)
-    db.set_setting(conn, "carta_env", env)
+    db.set_setting(conn, sk.CARTA_ENV, env)
     if "client_id" in body:
-        db.set_setting(conn, "carta_client_id", (body.get("client_id") or "").strip() or None)
+        db.set_setting(conn, sk.CARTA_CLIENT_ID, (body.get("client_id") or "").strip() or None)
     if body.get("client_secret"):
-        db.set_setting(conn, "carta_client_secret", body["client_secret"].strip())
+        db.set_setting(conn, sk.CARTA_CLIENT_SECRET, body["client_secret"].strip())
 
 
 def disconnect(conn) -> None:
-    for k in ("carta_access_token", "carta_refresh_token", "carta_token_expires", "carta_mock_on", "carta_oauth_state"):
+    for k in (sk.CARTA_ACCESS_TOKEN, sk.CARTA_REFRESH_TOKEN, sk.CARTA_TOKEN_EXPIRES, sk.CARTA_MOCK_ON, sk.CARTA_OAUTH_STATE):
         db.set_setting(conn, k, None)
 
 
@@ -79,14 +80,14 @@ def authorize_url(conn, redirect_uri: str) -> str:
     """Where to send you to approve Runway at Carta. The mock environment needs no approval."""
     env = settings(conn)["env"]
     if env == "mock":
-        db.set_setting(conn, "carta_mock_on", "1")
+        db.set_setting(conn, sk.CARTA_MOCK_ON, "1")
         return redirect_uri + "?mock=1"
-    client_id = db.get_setting(conn, "carta_client_id")
-    if not client_id or not db.get_setting(conn, "carta_client_secret"):
+    client_id = db.get_setting(conn, sk.CARTA_CLIENT_ID)
+    if not client_id or not db.get_setting(conn, sk.CARTA_CLIENT_SECRET):
         raise CartaError("Enter the client id and secret from Carta's developer portal first.")
     state = secrets.token_urlsafe(24)
-    db.set_setting(conn, "carta_oauth_state", f"{state} {int(time.time())}")
-    db.set_setting(conn, "carta_redirect_uri", redirect_uri)   # the token request must repeat it exactly
+    db.set_setting(conn, sk.CARTA_OAUTH_STATE, f"{state} {int(time.time())}")
+    db.set_setting(conn, sk.CARTA_REDIRECT_URI, redirect_uri)   # the token request must repeat it exactly
     return ENVS[env]["authorize"] + "?" + urllib.parse.urlencode(
         {"response_type": "code", "client_id": client_id, "redirect_uri": redirect_uri, "scope": SCOPES, "state": state})
 
@@ -110,21 +111,21 @@ def _post_form(url: str, data: dict, client_id: str, secret: str, opener=None) -
 def _store_token(conn, tok: dict) -> None:
     if not tok.get("access_token"):
         raise CartaError("Carta didn't send an access token")
-    db.set_setting(conn, "carta_access_token", tok["access_token"])
+    db.set_setting(conn, sk.CARTA_ACCESS_TOKEN, tok["access_token"])
     if tok.get("refresh_token"):
-        db.set_setting(conn, "carta_refresh_token", tok["refresh_token"])
-    db.set_setting(conn, "carta_token_expires", str(int(time.time()) + int(tok.get("expires_in") or 3600)))
+        db.set_setting(conn, sk.CARTA_REFRESH_TOKEN, tok["refresh_token"])
+    db.set_setting(conn, sk.CARTA_TOKEN_EXPIRES, str(int(time.time()) + int(tok.get("expires_in") or 3600)))
 
 
 def finish_authorize(conn, code: str, state: str, opener=None) -> None:
-    saved = (db.get_setting(conn, "carta_oauth_state") or "").split(" ")
-    redirect_uri = db.get_setting(conn, "carta_redirect_uri") or ""
-    db.set_setting(conn, "carta_oauth_state", None)
+    saved = (db.get_setting(conn, sk.CARTA_OAUTH_STATE) or "").split(" ")
+    redirect_uri = db.get_setting(conn, sk.CARTA_REDIRECT_URI) or ""
+    db.set_setting(conn, sk.CARTA_OAUTH_STATE, None)
     if len(saved) != 2 or not secrets.compare_digest(saved[0], state or "") or time.time() - int(saved[1]) > 900:
         raise CartaError("That Carta sign-in expired or didn't start here. Connect again from Settings.")
     env = ENVS[settings(conn)["env"]]
     tok = _post_form(env["token"], {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
-                     db.get_setting(conn, "carta_client_id"), db.get_setting(conn, "carta_client_secret"), opener)
+                     db.get_setting(conn, sk.CARTA_CLIENT_ID), db.get_setting(conn, sk.CARTA_CLIENT_SECRET), opener)
     _store_token(conn, tok)
 
 
@@ -132,15 +133,15 @@ def _token(conn, opener=None) -> str:
     env = settings(conn)["env"]
     if env == "mock":
         return "mock-token"   # the mock API takes any token
-    tok = db.get_setting(conn, "carta_access_token")
+    tok = db.get_setting(conn, sk.CARTA_ACCESS_TOKEN)
     if not tok:
         raise CartaError("Connect Carta in Settings first.")
-    if int(db.get_setting(conn, "carta_token_expires") or 0) - 60 < time.time() and db.get_setting(conn, "carta_refresh_token"):
+    if int(db.get_setting(conn, sk.CARTA_TOKEN_EXPIRES) or 0) - 60 < time.time() and db.get_setting(conn, sk.CARTA_REFRESH_TOKEN):
         _store_token(conn, _post_form(ENVS[env]["token"], {"grant_type": "refresh_token",
-                                                            "refresh_token": db.get_setting(conn, "carta_refresh_token")},
-                                      db.get_setting(conn, "carta_client_id"), db.get_setting(conn, "carta_client_secret"), opener))
+                                                            "refresh_token": db.get_setting(conn, sk.CARTA_REFRESH_TOKEN)},
+                                      db.get_setting(conn, sk.CARTA_CLIENT_ID), db.get_setting(conn, sk.CARTA_CLIENT_SECRET), opener))
         conn.commit()   # Carta may have rotated the refresh token: keep the new one even if the sync then fails
-        tok = db.get_setting(conn, "carta_access_token")
+        tok = db.get_setting(conn, sk.CARTA_ACCESS_TOKEN)
     return tok
 
 
@@ -323,11 +324,11 @@ def sync(conn, opener=None) -> dict:
                         if g:
                             _save_grant(conn, cid, g, item)
                             out["grants"] += 1
-        db.set_setting(conn, "carta_last_sync", date.today().isoformat())
-        db.set_setting(conn, "carta_last_error", None)
+        db.set_setting(conn, sk.CARTA_LAST_SYNC, date.today().isoformat())
+        db.set_setting(conn, sk.CARTA_LAST_ERROR, None)
     except CartaError as e:
         conn.rollback()   # none of a half-read sync, but the error is kept (the caller's session rolls back too)
-        db.set_setting(conn, "carta_last_error", str(e)[:300])
+        db.set_setting(conn, sk.CARTA_LAST_ERROR, str(e)[:300])
         conn.commit()
         raise
     return out

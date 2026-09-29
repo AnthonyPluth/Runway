@@ -4,6 +4,7 @@ import random
 from datetime import date, timedelta
 
 from . import db
+from . import settings_keys as sk
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -89,6 +90,6 @@ def seed(conn, today: date | None = None) -> int:
                  ("Sample House", "home", 415000, today.isoformat(), 3, "demo-mortgage"))
     # The app shows its "connect your bank" screen until a bank is set up. This address never resolves (.invalid), so
     # a Sync in a preview just fails; nothing is ever fetched.
-    db.set_setting(conn, "simplefin_access_url", "https://demo:demo@sample-bank.invalid/simplefin")
+    db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, "https://demo:demo@sample-bank.invalid/simplefin")
     conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, 'Sample data')")
     return len(txs)

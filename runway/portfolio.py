@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 
 from . import db, planner, prices, splits
+from . import settings_keys as sk
 
 HISTORY_DAYS = 730
 # Cash moving in or out of the account from outside (not investment results).
@@ -557,7 +558,7 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
                   "detail": f"${inc['fees_12m']:,.0f} in the last 12 months ({fee_ratio:.2%} of the portfolio)"
                             + ("" if fee_ratio <= 0.005 else "; worth checking what they're for.")})
     spend = monthly_spending(conn, today)
-    primary = db.get_setting(conn, "primary_account")
+    primary = db.get_setting(conn, sk.PRIMARY_ACCOUNT)
     row = conn.execute("SELECT balance FROM accounts WHERE id=?", (primary,)).fetchone() if primary else None
     if spend > 0 and row:
         months = (row["balance"] or 0) / spend
@@ -578,7 +579,7 @@ def fire_saved(conn) -> dict:
     """The figures you'd changed on the old financial-independence card."""
     out = {}
     for field in FIRE_FIELDS:
-        value = db.get_setting(conn, f"fire_{field}")
+        value = db.get_setting(conn, sk.fire(field))
         if value not in (None, ""):
             try:
                 out[field] = float(value)
