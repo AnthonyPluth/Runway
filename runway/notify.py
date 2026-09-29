@@ -12,6 +12,7 @@ import urllib.parse
 from datetime import date, timedelta
 
 from . import db, forecast, recurring, webpush
+from . import settings_keys as sk
 
 DEFAULTS = {
     "card_due": True, "card_due_days": 3,           # a card payment is due within N days
@@ -26,7 +27,7 @@ LOW_BALANCE_DAYS = 30
 
 def prefs(conn) -> dict:
     try:
-        saved = json.loads(db.get_setting(conn, "notify_prefs") or "{}")
+        saved = json.loads(db.get_setting(conn, sk.NOTIFY_PREFS) or "{}")
     except ValueError:
         saved = {}
     return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
@@ -44,7 +45,7 @@ def save_prefs(conn, body: dict) -> dict:
                 p[k] = max(0, db.number(v)) if k != "card_due_days" else max(0, min(14, int(v)))
             except (TypeError, ValueError):
                 raise ValueError("Enter a number") from None
-    db.set_setting(conn, "notify_prefs", json.dumps(p))
+    db.set_setting(conn, sk.NOTIFY_PREFS, json.dumps(p))
     return p
 
 
@@ -176,10 +177,10 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
             out.append({"key": f"review:{today.isoformat()}", "title": f"{n} transaction{'s' if n != 1 else ''} to review",
                         "body": "They're waiting for a category.", "url": "/#review"})
     if p["sync_failed"]:
-        last_ok = db.get_setting(conn, "last_sync_ok")
+        last_ok = db.get_setting(conn, sk.LAST_SYNC_OK)
         log = conn.execute("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
         stale = not last_ok or (date.today() - date.fromisoformat(last_ok[:10])).days >= 1
-        if log and not log["ok"] and stale and db.get_setting(conn, "simplefin_access_url"):
+        if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
                         "body": (log["message"] or "The last sync failed.")[:160], "url": "/#setup/connections"})
     return out

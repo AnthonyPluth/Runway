@@ -12,6 +12,7 @@ import urllib.error
 import urllib.request
 
 from . import db, secretbox
+from . import settings_keys as sk
 
 HOSTS = {"sandbox": "https://sandbox.plaid.com", "production": "https://production.plaid.com"}
 
@@ -34,18 +35,18 @@ def _ctx() -> ssl.SSLContext:
 
 
 def configured(conn) -> bool:
-    return bool(db.get_setting(conn, "plaid_client_id") and db.get_setting(conn, "plaid_secret"))
+    return bool(db.get_setting(conn, sk.PLAID_CLIENT_ID) and db.get_setting(conn, sk.PLAID_SECRET))
 
 
 def base_url(conn) -> str:
     override = os.environ.get("RUNWAY_PLAID_URL")
     if override:
         return override.rstrip("/")
-    return HOSTS.get(db.get_setting(conn, "plaid_env", "production") or "production", HOSTS["production"])
+    return HOSTS.get(db.get_setting(conn, sk.PLAID_ENV, "production") or "production", HOSTS["production"])
 
 
 def call(conn, path: str, body: dict) -> dict:
-    client_id, secret = db.get_setting(conn, "plaid_client_id"), db.get_setting(conn, "plaid_secret")
+    client_id, secret = db.get_setting(conn, sk.PLAID_CLIENT_ID), db.get_setting(conn, sk.PLAID_SECRET)
     if not client_id or not secret:
         raise PlaidError("Add your Plaid client ID and secret in Settings first.")
     if body.get("access_token"):   # stored encrypted (runway/secretbox.py); decrypted only to send to Plaid

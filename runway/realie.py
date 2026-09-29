@@ -20,6 +20,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from . import db, networth
+from . import settings_keys as sk
 
 REFRESH_DAYS = 7   # at most one lookup per home per week, whether automatic or asked for
 
@@ -47,12 +48,12 @@ def _ctx() -> ssl.SSLContext:
 
 
 def configured(conn) -> bool:
-    return bool(db.get_setting(conn, "realie_api_key"))
+    return bool(db.get_setting(conn, sk.REALIE_API_KEY))
 
 
 def used_this_month(conn, today: date | None = None) -> int:
     today = today or date.today()
-    return int(db.get_setting(conn, f"realie_calls:{today:%Y-%m}") or 0)
+    return int(db.get_setting(conn, sk.realie_calls(today)) or 0)
 
 
 _STATE_ZIP = re.compile(r"\b([A-Za-z]{2})\.?(?:\s+(\d{5})(?:-\d{4})?)?\s*$")
@@ -92,7 +93,7 @@ def _matches(r: dict, want: dict) -> bool:
 
 def value_estimate(conn, address: str, today: date | None = None) -> dict:
     today = today or date.today()
-    key = db.get_setting(conn, "realie_api_key")
+    key = db.get_setting(conn, sk.REALIE_API_KEY)
     if not key:
         raise RealieError("Add a Realie API key in Settings first.")
     if not (address or "").strip():
@@ -104,7 +105,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
     base = os.environ.get("RUNWAY_REALIE_URL", "https://app.realie.ai").rstrip("/")
     url = f"{base}/api/public/property/address/?{urllib.parse.urlencode({'address': want['street'], 'state': want['state']})}"
     req = urllib.request.Request(url, headers={"Authorization": key, "Accept": "application/json", "User-Agent": "Runway/0.1"})
-    db.set_setting(conn, f"realie_calls:{today:%Y-%m}", str(used_this_month(conn, today) + 1))
+    db.set_setting(conn, sk.realie_calls(today), str(used_this_month(conn, today) + 1))
     conn.commit()
     try:
         with urllib.request.urlopen(req, timeout=30, context=_ctx()) as resp:

@@ -30,6 +30,7 @@ import sqlalchemy.exc
 from dateutil.relativedelta import relativedelta
 
 from . import backup, oidc, secretbox, sfinvest, tracked
+from . import settings_keys as sk
 from . import monitoring, networth, notify, planner, realie, webpush
 from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
@@ -73,7 +74,7 @@ def plaid_banks(conn) -> bool:
 
 def bank_configured(conn) -> bool:
     """Whether there's anything to sync bank accounts from: SimpleFIN, or a Plaid bank or card connection."""
-    return bool(db.get_setting(conn, "simplefin_access_url")) or plaid_banks(conn)
+    return bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)) or plaid_banks(conn)
 
 
 def run_sync() -> dict:
@@ -82,13 +83,13 @@ def run_sync() -> dict:
     try:
         try:
             with db.session() as conn:
-                access_url = db.get_setting(conn, "simplefin_access_url")
+                access_url = db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)
                 has_plaid = plaid_banks(conn)
                 if not access_url and not has_plaid:
                     raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
-                use_plaid = has_plaid and plaid_due(db.get_setting(conn, "last_plaid_bank_sync"))
+                use_plaid = has_plaid and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
                 if use_plaid:   # counted when asked, so a failing Plaid isn't asked again until tomorrow
-                    db.set_setting(conn, "last_plaid_bank_sync", datetime.now().isoformat(timespec="seconds"))
+                    db.set_setting(conn, sk.LAST_PLAID_BANK_SYNC, datetime.now().isoformat(timespec="seconds"))
                     conn.commit()
                 result = simplefin.sync(conn, access_url) if access_url else {"new": [], "errors": []}
                 if use_plaid:   # accounts set to Plaid, and card statements
@@ -120,7 +121,7 @@ def run_sync() -> dict:
                     monitoring.report()
                 networth.summary(conn)   # record today's net worth
                 conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, ?)", (msg,))
-                db.set_setting(conn, "last_sync_ok", datetime.now().isoformat(timespec="seconds"))
+                db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
                 return {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
         except ApiError:
             raise
@@ -150,14 +151,14 @@ def run_investment_sync() -> dict:
         with db.session() as conn:
             out = {"items": 0, "errors": [], "prices": {}}
             if plaid.configured(conn) and conn.execute("SELECT 1 FROM plaid_items").fetchone() \
-                    and plaid_due(db.get_setting(conn, "last_plaid_inv_sync")):
-                db.set_setting(conn, "last_plaid_inv_sync", datetime.now().isoformat(timespec="seconds"))
+                    and plaid_due(db.get_setting(conn, sk.LAST_PLAID_INV_SYNC)):
+                db.set_setting(conn, sk.LAST_PLAID_INV_SYNC, datetime.now().isoformat(timespec="seconds"))
                 conn.commit()
                 out = plaid.sync_all(conn)
             if not conn.execute("SELECT 1 FROM inv_accounts").fetchone():
                 return out
             out["prices"] = refresh_prices(conn)
-            db.set_setting(conn, "last_inv_sync", datetime.now().isoformat(timespec="seconds"))
+            db.set_setting(conn, sk.LAST_INV_SYNC, datetime.now().isoformat(timespec="seconds"))
             return out
     finally:
         _inv_lock.release()
@@ -212,9 +213,9 @@ def refresh_plaid() -> None:
     """Tell Plaid to fetch from the banks ahead of the daily sync. A problem is logged and never stops the sync."""
     try:
         with db.session() as conn:
-            if not plaid_banks(conn) or not plaid_refresh_due(db.get_setting(conn, "last_plaid_refresh")):
+            if not plaid_banks(conn) or not plaid_refresh_due(db.get_setting(conn, sk.LAST_PLAID_REFRESH)):
                 return
-            db.set_setting(conn, "last_plaid_refresh", datetime.now().isoformat(timespec="seconds"))
+            db.set_setting(conn, sk.LAST_PLAID_REFRESH, datetime.now().isoformat(timespec="seconds"))
             conn.commit()
             for e in plaidbank.refresh_all(conn):
                 print(f"Plaid refresh: {e}", file=sys.stderr)
@@ -247,17 +248,17 @@ def sync_on_visit() -> dict:
         return {"started": False}
     with db.session() as conn:
         # Plaid alone has nothing new until its daily sync is due: a bank sync would only ask SimpleFIN.
-        configured = bool(db.get_setting(conn, "simplefin_access_url")) or (
-            plaid_banks(conn) and plaid_due(db.get_setting(conn, "last_plaid_bank_sync")))
-        bank = configured and _older_than(db.get_setting(conn, "last_sync_ok"), minutes=VISIT_SYNC_MINUTES) \
-            and _older_than(db.get_setting(conn, "last_auto_sync_attempt"), minutes=VISIT_SYNC_MINUTES)
+        configured = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)) or (
+            plaid_banks(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC)))
+        bank = configured and _older_than(db.get_setting(conn, sk.LAST_SYNC_OK), minutes=VISIT_SYNC_MINUTES) \
+            and _older_than(db.get_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT), minutes=VISIT_SYNC_MINUTES)
         has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
-        invest = has_inv and _older_than(db.get_setting(conn, "last_inv_sync"), minutes=VISIT_SYNC_MINUTES)
+        invest = has_inv and _older_than(db.get_setting(conn, sk.LAST_INV_SYNC), minutes=VISIT_SYNC_MINUTES)
         # Only a sync that starts counts as an attempt: one skipped for a running sync would otherwise put the next
         # visit's sync off for VISIT_SYNC_MINUTES.
         start = (bank or invest) and not _sync_lock.locked() and not _inv_lock.locked()
         if start and bank:
-            db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
+            db.set_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT, datetime.now().isoformat(timespec="seconds"))
     if start:
         threading.Thread(target=_sync_everything, args=(bank, invest), daemon=True).start()
         return {"started": True}
@@ -270,18 +271,18 @@ def background_sync() -> None:
         try:
             with db.session() as conn:
                 configured = bank_configured(conn)
-                last = db.get_setting(conn, "last_sync_ok")
-                last_try = db.get_setting(conn, "last_auto_sync_attempt")
-                last_inv = db.get_setting(conn, "last_inv_sync")
-                plaid_bank = plaid_banks(conn) and plaid_due(db.get_setting(conn, "last_plaid_bank_sync"))
-                plaid_inv = plaid.configured(conn) and plaid_due(db.get_setting(conn, "last_plaid_inv_sync")) and any(
+                last = db.get_setting(conn, sk.LAST_SYNC_OK)
+                last_try = db.get_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT)
+                last_inv = db.get_setting(conn, sk.LAST_INV_SYNC)
+                plaid_bank = plaid_banks(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
+                plaid_inv = plaid.configured(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_INV_SYNC)) and any(
                     "investments" in (r["products"] or "investments") for r in conn.execute("SELECT products FROM plaid_items"))
             # Don't hammer SimpleFIN after failures: at most one automatic attempt every 3 hours. Plaid's daily sync
             # goes ahead regardless: it's asked at most once a day anyway.
             bank = configured and ((daily_due(last) and _older_than(last_try, hours=3)) or plaid_bank)
             if bank:
                 with db.session() as conn:
-                    db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
+                    db.set_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT, datetime.now().isoformat(timespec="seconds"))
             _sync_everything(bank, daily_due(last_inv) or plaid_inv)
         except Exception:
             monitoring.report()
@@ -295,18 +296,18 @@ def api_state(conn, _q, _b):
     return {
         "connected": bank_configured(conn),
         "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
-        "simplefin": bool(db.get_setting(conn, "simplefin_access_url")),
-        "has_api_key": bool(db.get_setting(conn, "openrouter_api_key")),
-        "llm_model": db.get_setting(conn, "llm_model") or categorize.DEFAULT_MODEL,
-        "last_sync_ok": db.get_setting(conn, "last_sync_ok"),
+        "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
+        "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
+        "llm_model": db.get_setting(conn, sk.LLM_MODEL) or categorize.DEFAULT_MODEL,
+        "last_sync_ok": db.get_setting(conn, sk.LAST_SYNC_OK),
         "last_log": dict(last_log) if last_log else None,
-        "last_llm_error": db.get_setting(conn, "last_llm_error"),
+        "last_llm_error": db.get_setting(conn, sk.LAST_LLM_ERROR),
         "review_count": conn.execute(f"SELECT COUNT(*) FROM transactions WHERE needs_review=1 AND {db.NOT_INVESTMENT}").fetchone()[0],
         "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are
-        "horizon_days": int(db.get_setting(conn, "horizon_days", "90") or 90),
+        "horizon_days": int(db.get_setting(conn, sk.HORIZON_DAYS, "90") or 90),
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
-        "primary_account": db.get_setting(conn, "primary_account"),
-        "auto_ai_on_sync": (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1",
+        "primary_account": db.get_setting(conn, sk.PRIMARY_ACCOUNT),
+        "auto_ai_on_sync": (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1",
         "realie_configured": realie.configured(conn),
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
@@ -366,7 +367,7 @@ def api_push_test(conn, _q, body):
 
 
 def api_overview(conn, q, _b):
-    horizon = int(q.get("days", [db.get_setting(conn, "horizon_days", "90") or 90])[0])
+    horizon = int(q.get("days", [db.get_setting(conn, sk.HORIZON_DAYS, "90") or 90])[0])
     horizon = max(14, min(horizon, 365))
     fc = forecast.build(conn, date.today(), horizon)
     fc["missed"] = recurring.missed(conn)
@@ -399,7 +400,7 @@ def api_accounts(conn, _q, _b):
         a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
                             "transactions": "transactions" in (it["products"] or ""),
                             "closed": it["last_statement_date"], "due": it["next_due_date"],
-                            "statement_note": db.get_setting(conn, f"plaid_stmt_note:{it['item_id']}")} if it else None)
+                            "statement_note": db.get_setting(conn, sk.plaid_stmt_note(it['item_id']))} if it else None)
     return accts
 
 
@@ -554,7 +555,7 @@ def api_retail_token_remove(conn, _q, _b):
 
 def api_retail_settings(conn, _q, body):
     if "ai" in body:
-        db.set_setting(conn, "retail_ai", "1" if body.get("ai") else "0")
+        db.set_setting(conn, sk.RETAIL_AI, "1" if body.get("ai") else "0")
     return {"ok": True}
 
 
@@ -1130,10 +1131,10 @@ def setup_steps(conn) -> dict:
     checking = conn.execute("SELECT COUNT(*) FROM accounts WHERE hidden=0 AND kind='checking'").fetchone()[0]
     return {
         "bank": bank_configured(conn) and bool(conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone()),
-        "primary": bool(db.get_setting(conn, "primary_account")) or checking == 1,
+        "primary": bool(db.get_setting(conn, sk.PRIMARY_ACCOUNT)) or checking == 1,
         "recurring": bool(conn.execute("SELECT 1 FROM recurring LIMIT 1").fetchone()),
         "budgets": bool(conn.execute("SELECT 1 FROM budgets WHERE amount>0 LIMIT 1").fetchone()),
-        "dismissed": db.get_setting(conn, "setup_dismissed") == "1",
+        "dismissed": db.get_setting(conn, sk.SETUP_DISMISSED) == "1",
     }
 
 
@@ -1265,7 +1266,7 @@ def api_budget_set(conn, _q, body):
 
 
 def api_ai_suggest(conn, _q, _b):
-    if not db.get_setting(conn, "openrouter_api_key"):
+    if not db.get_setting(conn, sk.OPENROUTER_API_KEY):
         raise ApiError("Add an OpenRouter API key in Settings first.")
     try:
         return categorize.suggest_for_review(conn)
@@ -1335,29 +1336,29 @@ def api_connect(conn, _q, body):
         simplefin.fetch_accounts(access_url, date.today() - timedelta(days=3))  # prove it works before saving
     except simplefin.SimpleFinError as e:
         raise ApiError(str(e), 502) from e
-    db.set_setting(conn, "simplefin_access_url", access_url)
+    db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, access_url)
     return {"ok": True}
 
 
 def api_settings(conn, _q, body):
     if "openrouter_api_key" in body:
         key = (body.get("openrouter_api_key") or "").strip()
-        db.set_setting(conn, "openrouter_api_key", key or None)
-        db.set_setting(conn, "last_llm_error", None)
+        db.set_setting(conn, sk.OPENROUTER_API_KEY, key or None)
+        db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "llm_model" in body:
-        db.set_setting(conn, "llm_model", (body.get("llm_model") or "").strip() or None)
-        db.set_setting(conn, "last_llm_error", None)
+        db.set_setting(conn, sk.LLM_MODEL, (body.get("llm_model") or "").strip() or None)
+        db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "primary_account" in body:
         acct = body.get("primary_account") or None
         if acct and not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind IN ('checking','savings')", (acct,)).fetchone():
             raise ApiError("Pick a checking or savings account")
-        db.set_setting(conn, "primary_account", acct)
+        db.set_setting(conn, sk.PRIMARY_ACCOUNT, acct)
     if "auto_ai_on_sync" in body:
-        db.set_setting(conn, "auto_ai_on_sync", "1" if body.get("auto_ai_on_sync") else "0")
+        db.set_setting(conn, sk.AUTO_AI_ON_SYNC, "1" if body.get("auto_ai_on_sync") else "0")
     if "horizon_days" in body:
-        db.set_setting(conn, "horizon_days", str(max(14, min(int(body["horizon_days"]), 365))))
+        db.set_setting(conn, sk.HORIZON_DAYS, str(max(14, min(int(body["horizon_days"]), 365))))
     if "setup_dismissed" in body:
-        db.set_setting(conn, "setup_dismissed", "1" if body.get("setup_dismissed") else None)
+        db.set_setting(conn, sk.SETUP_DISMISSED, "1" if body.get("setup_dismissed") else None)
     return {"ok": True}
 
 
@@ -1393,27 +1394,27 @@ def api_plaid_status(conn, _q, _b):
                 "SELECT id, name, official_name, subtype, mask, balance, hidden, account_id FROM inv_accounts WHERE item_id=? ORDER BY name",
                 (it["item_id"],)))
             it["candidates"] = plaid.investment_candidates(conn, it["item_id"])   # what each account could be
-    return {"configured": plaid.configured(conn), "env": db.get_setting(conn, "plaid_env", "production"),
-            "client_id": db.get_setting(conn, "plaid_client_id") or "", "items": items,
+    return {"configured": plaid.configured(conn), "env": db.get_setting(conn, sk.PLAID_ENV, "production"),
+            "client_id": db.get_setting(conn, sk.PLAID_CLIENT_ID) or "", "items": items,
             "redirect_uri": plaid.redirect_uri(conn),
-            "last_inv_sync": db.get_setting(conn, "last_inv_sync"), "syncing": _inv_lock.locked(),
+            "last_inv_sync": db.get_setting(conn, sk.LAST_INV_SYNC), "syncing": _inv_lock.locked(),
             "inv_accounts": conn.execute("SELECT COUNT(*) FROM inv_accounts").fetchone()[0],
-            "simplefin_connected": bool(db.get_setting(conn, "simplefin_access_url")),
-            "simplefin_last_sync": db.get_setting(conn, "last_sync_ok"),
-            "simplefin_seen": list(json.loads(db.get_setting(conn, "simplefin_holdings_seen") or "{}").values())}
+            "simplefin_connected": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
+            "simplefin_last_sync": db.get_setting(conn, sk.LAST_SYNC_OK),
+            "simplefin_seen": list(json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}").values())}
 
 
 def api_plaid_settings(conn, _q, body):
     if "env" in body:
         if body["env"] not in plaid.HOSTS:
             raise ApiError("Environment must be sandbox or production")
-        db.set_setting(conn, "plaid_env", body["env"])
+        db.set_setting(conn, sk.PLAID_ENV, body["env"])
     if body.get("client_id") is not None:
-        db.set_setting(conn, "plaid_client_id", body["client_id"].strip() or None)
+        db.set_setting(conn, sk.PLAID_CLIENT_ID, body["client_id"].strip() or None)
     if body.get("secret"):
-        db.set_setting(conn, "plaid_secret", body["secret"].strip())
+        db.set_setting(conn, sk.PLAID_SECRET, body["secret"].strip())
     if "redirect_uri" in body:
-        db.set_setting(conn, "plaid_redirect_uri", (body.get("redirect_uri") or "").strip() or None)
+        db.set_setting(conn, sk.PLAID_REDIRECT_URI, (body.get("redirect_uri") or "").strip() or None)
     return {"ok": True}
 
 
@@ -1434,7 +1435,7 @@ def api_plaid_link_token(conn, _q, body):
             raise ApiError(str(e), 502) from e
     # Kept so Link can pick up where it left off when a bank sends you back to /plaid/oauth (possibly in another
     # browser, like Safari from the installed app). Link tokens expire after 4 hours.
-    db.set_setting(conn, "plaid_pending_link", json.dumps({"token": token, "kind": kind, "item_id": body.get("item_id") or None,
+    db.set_setting(conn, sk.PLAID_PENDING_LINK, json.dumps({"token": token, "kind": kind, "item_id": body.get("item_id") or None,
                                                           "at": time.time()}))
     return {"link_token": token, "kind": kind}
 
@@ -1442,7 +1443,7 @@ def api_plaid_link_token(conn, _q, body):
 def api_plaid_oauth_resume(conn, _q, _b):
     """The Link session to continue after the bank's sign-in page sends you back."""
     try:
-        p = json.loads(db.get_setting(conn, "plaid_pending_link") or "{}")
+        p = json.loads(db.get_setting(conn, sk.PLAID_PENDING_LINK) or "{}")
     except ValueError:
         p = {}
     if not p.get("token") or time.time() - p.get("at", 0) > 4 * 3600:
@@ -1463,7 +1464,7 @@ def api_plaid_exchange(conn, _q, body):
     kind = body.get("kind")
     if kind not in plaid.KIND_PRODUCTS:   # what Link was opened for, if the page didn't say
         try:
-            kind = json.loads(db.get_setting(conn, "plaid_pending_link") or "{}").get("kind")
+            kind = json.loads(db.get_setting(conn, sk.PLAID_PENDING_LINK) or "{}").get("kind")
         except ValueError:
             kind = None
     try:
@@ -1621,9 +1622,9 @@ def api_asset_refresh(conn, _q, _b, asset_id):
 def api_realie_settings(conn, _q, body):
     key = (body.get("api_key") or "").strip()
     if body.get("clear"):
-        db.set_setting(conn, "realie_api_key", None)
+        db.set_setting(conn, sk.REALIE_API_KEY, None)
     elif key:
-        db.set_setting(conn, "realie_api_key", key)
+        db.set_setting(conn, sk.REALIE_API_KEY, key)
     return {"ok": True, "configured": realie.configured(conn)}
 
 
@@ -1666,11 +1667,11 @@ def api_logodev_settings(conn, _q, body):
     """The Logo.dev publishable key, for merchant logos Plaid doesn't have."""
     secret = (body.get("secret") or "").strip()
     if body.get("clear_secret"):
-        db.set_setting(conn, merchants.SECRET_SETTING, None)
+        db.set_setting(conn, sk.LOGODEV_SECRET, None)
     elif secret:
         if not re.fullmatch(r"sk_[A-Za-z0-9_-]{8,200}", secret):
             raise ApiError("That isn't a Logo.dev secret key: it starts with sk_.")
-        db.set_setting(conn, merchants.SECRET_SETTING, secret)
+        db.set_setting(conn, sk.LOGODEV_SECRET, secret)
         # look up by name again, now with Brand Search: the ones without a logo, and ones whose logo came from the
         # plain name lookup (which can be the wrong brand)
         # (a logo stays until Brand Search answers: replaced by a clear match, or dropped when there's none)
@@ -1680,11 +1681,11 @@ def api_logodev_settings(conn, _q, body):
         return {"ok": True, "configured": merchants.configured(conn)}
     key = (body.get("token") or "").strip()
     if body.get("clear"):
-        db.set_setting(conn, merchants.TOKEN_SETTING, None)
+        db.set_setting(conn, sk.LOGODEV_TOKEN, None)
     elif key:
         if not re.fullmatch(r"pk_[A-Za-z0-9_-]{8,200}", key):
             raise ApiError("That isn't a Logo.dev publishable key: it starts with pk_ (the secret sk_ key isn't needed).")
-        db.set_setting(conn, merchants.TOKEN_SETTING, key)
+        db.set_setting(conn, sk.LOGODEV_TOKEN, key)
         conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL",
                      (merchants.SITE + "%", merchants.BRAND + "%"))
         conn.commit()               # so the fetch below (on its own connection) sees the key
@@ -2150,7 +2151,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and url.path == "/api/carta/capture":
             # What the extension last read from Carta, to see why something wasn't picked up.
             with db.session() as conn:
-                data = (db.get_setting(conn, "carta_web_capture") or "[]").encode()
+                data = (db.get_setting(conn, sk.CARTA_WEB_CAPTURE) or "[]").encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Disposition", 'attachment; filename="runway-carta-read.json"')
@@ -2231,7 +2232,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 bank = None
                 with db.session() as conn:
-                    has_sf = bool(db.get_setting(conn, "simplefin_access_url"))
+                    has_sf = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL))
                 if has_sf:  # positions from SimpleFIN arrive with the regular bank sync
                     bank = run_sync()
                 out = run_investment_sync()
@@ -2309,7 +2310,7 @@ class Handler(BaseHTTPRequestHandler):
                 if q.get("mock"):
                     # The mock environment has no sign-in to prove this came from Settings, so a link from another site
                     # mustn't be able to start a sync.
-                    if (db.get_setting(conn, "carta_env") != "mock"
+                    if (db.get_setting(conn, sk.CARTA_ENV) != "mock"
                             or (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site"):
                         return self._page(400, "Carta wasn't connected", "Connect Carta from Settings.",
                                           ("/#setup/connections", "Back to Settings"))

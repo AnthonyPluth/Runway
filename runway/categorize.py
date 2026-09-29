@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 
 from . import categories as catmod
+from . import settings_keys as sk
 from . import db, rules as rulesmod, splits
 
 REVIEW_THRESHOLD = 0.85
@@ -285,8 +286,8 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         else:
             leftover.append(tx)
 
-    api_key = db.get_setting(conn, "openrouter_api_key")
-    auto_ai = (db.get_setting(conn, "auto_ai_on_sync", "1") or "1") == "1"
+    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    auto_ai = (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1"
     if leftover and use_ai and auto_ai and api_key:
         groups = group_by_merchant(leftover)
         conn.commit()  # don't hold the database while waiting on the model
@@ -341,11 +342,11 @@ def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, messa
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:
     """Ask the model for one category per group. Doesn't write anything except the last error message.
     Call with no write transaction open: requests can take a while."""
-    api_key = db.get_setting(conn, "openrouter_api_key")
+    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
     empty = (None, 0.0, None) if allow_new else (None, 0.0)
     if not api_key or not groups:
         return [empty] * len(groups)
-    model = db.get_setting(conn, "llm_model", DEFAULT_MODEL) or DEFAULT_MODEL
+    model = db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
     categories = _category_names(conn)
     # The latest choice for each merchant (newest first), as examples for the model.
     examples, seen = [], set()
@@ -372,14 +373,14 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
                                  f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
             results = parse_ai_reply(reply, categories, allow_new)
-            db.set_setting(conn, "last_llm_error", None)
+            db.set_setting(conn, sk.LAST_LLM_ERROR, None)
             answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
             new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
             _log(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
                  f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
                  reply)
         except Exception as e:  # network or API error
-            db.set_setting(conn, "last_llm_error", str(e)[:300])
+            db.set_setting(conn, sk.LAST_LLM_ERROR, str(e)[:300])
             _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
             conn.commit()
             raise RuntimeError(f"The AI request failed: {e}") from e

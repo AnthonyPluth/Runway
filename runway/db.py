@@ -22,6 +22,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateColumn
 
 from . import schema, secretbox
+from . import settings_keys as sk
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
@@ -336,9 +337,9 @@ def init(path: str | None = None) -> None:
     migrate(path)
     with session(path) as conn:
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.
-        if not conn.execute("SELECT 1 FROM settings WHERE key='migrated_daily_spend_off'").fetchone():
+        if not get_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF):
             conn.execute("UPDATE accounts SET daily_spend=0")
-            conn.execute("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
+            set_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF, "1")
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
         if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
             conn.executemany(

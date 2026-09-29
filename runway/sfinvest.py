@@ -11,6 +11,7 @@ import re
 from datetime import date, timedelta
 
 from . import db, tracked
+from . import settings_keys as sk
 
 CASH_WORDS = re.compile(r"money market|cash|sweep|core position|deposit|fdic|treasury fund", re.I)
 MONEY_MARKET = re.compile(r"^[A-Z]{3}XX$")          # SPAXX, FDRXX, VMFXX, SWVXX...
@@ -79,7 +80,7 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
         kind = "investment"
     iid = inv_id(acct_id)
     # Keep what SimpleFIN sent so positions can be re-checked once fresh prices arrive.
-    db.set_setting(conn, f"sf_raw:{acct_id}", json.dumps({"acct": {k: acct.get(k) for k in ("name", "currency", "holdings")},
+    db.set_setting(conn, sk.sf_raw(acct_id), json.dumps({"acct": {k: acct.get(k) for k in ("name", "currency", "holdings")},
                                                           "org": org, "balance": balance}))
     if kind != "investment":
         # No longer treated as an investment account: drop what we stored before.
@@ -87,9 +88,9 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
             for table in ("holdings", "holding_snapshots", "inv_snapshots", "inv_transactions"):
                 conn.execute(f"DELETE FROM {table} WHERE account_id=?", (iid,))
             conn.execute("DELETE FROM inv_accounts WHERE id=?", (iid,))
-            seen = json.loads(db.get_setting(conn, "simplefin_holdings_seen") or "{}")
+            seen = json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}")
             seen.pop(acct_id, None)
-            db.set_setting(conn, "simplefin_holdings_seen", json.dumps(seen))
+            db.set_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps(seen))
         return False
 
     name = acct.get("name") or acct_id
@@ -178,18 +179,18 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
     conn.execute("INSERT INTO inv_snapshots(date, account_id, value) VALUES (?,?,?) ON CONFLICT(date, account_id) DO UPDATE SET value=excluded.value", (today.isoformat(), iid, balance))
 
     # What SimpleFIN actually sent, so Setup can show it (field names and counts only).
-    seen = json.loads(db.get_setting(conn, "simplefin_holdings_seen") or "{}")
+    seen = json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}")
     fields = sorted({k for h in raw for k in h}) if raw else []
     seen[acct_id] = {"id": acct_id, "name": name, "org": org, "positions": len(raw), "fields": fields, "at": today.isoformat()}
-    db.set_setting(conn, "simplefin_holdings_seen", json.dumps(seen))
+    db.set_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps(seen))
     return True
 
 
 def recapture_all(conn, today: date | None = None) -> int:
     """Re-run capture for every SimpleFIN account from what it last sent (after prices refresh)."""
     n = 0
-    for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE 'sf_raw:%'").fetchall():
-        acct_id = key[len("sf_raw:"):]
+    for key, value in conn.execute("SELECT key, value FROM settings WHERE key LIKE ?", (sk.SF_RAW_PREFIX + "%",)).fetchall():
+        acct_id = key[len(sk.SF_RAW_PREFIX):]
         if not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct_id,)).fetchone():
             continue
         d = json.loads(value)
@@ -205,7 +206,7 @@ def repair_stored(conn, today: date | None = None) -> int:
     n = 0
     for a in conn.execute("SELECT * FROM inv_accounts WHERE source='simplefin'").fetchall():
         acct_id = a["id"][3:]
-        if conn.execute("SELECT 1 FROM settings WHERE key=?", (f"sf_raw:{acct_id}",)).fetchone():
+        if conn.execute("SELECT 1 FROM settings WHERE key=?", (sk.sf_raw(acct_id),)).fetchone():
             continue
         if not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct_id,)).fetchone():
             continue
