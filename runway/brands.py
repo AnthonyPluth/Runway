@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import re
 
+from sqlalchemy import select
+
+from .models import Account, PlaidAccount, PlaidItem
+
 # (pattern, logo): checked in order against the lowercased institution and account names.
 PATTERNS = [
     (r"\bchase\b|sapphire|\bcs[pr]\b|freedom (flex|unlimited)|\bjpmorgan", "chase"),
@@ -52,9 +56,9 @@ def account_brands(conn) -> dict[str, dict]:
     """{account_id: {"logo": slug or None, "initial": "C", "institution": "Chase"}} for every account."""
     out = {}
     rows = conn.execute(
-        "SELECT a.id, a.name, a.display_name, a.org, i.institution_name FROM accounts a "
-        "LEFT JOIN plaid_accounts p ON p.plaid_account_id=a.plaid_account_id "
-        "LEFT JOIN plaid_items i ON i.item_id=p.item_id").fetchall()
+        select(Account.id, Account.name, Account.display_name, Account.org, PlaidItem.institution_name)
+        .outerjoin(PlaidAccount, PlaidAccount.plaid_account_id == Account.plaid_account_id)
+        .outerjoin(PlaidItem, PlaidItem.item_id == PlaidAccount.item_id)).fetchall()
     for r in rows:
         inst = r["institution_name"] or r["org"]
         logo = brand(r["institution_name"], r["org"], r["display_name"], r["name"])

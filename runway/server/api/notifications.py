@@ -1,7 +1,10 @@
 """Push notifications: the devices subscribed, what they hear about, and a test message."""
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from ... import db, notify, webpush
+from ...models import NotifyLog
 from ..common import ApiError, _current
 
 
@@ -10,7 +13,7 @@ def api_push(conn, _q, _b):
     return {"public_key": pub, "prefs": notify.prefs(conn),
             "devices": [{"endpoint": s["endpoint"], "device": s["device"], "created": s["created"], "last_ok": s["last_ok"],
                          "last_error": s["last_error"]} for s in notify.subscriptions(conn)],
-            "recent": db.rows(conn.execute("SELECT title, sent FROM notify_log ORDER BY sent DESC LIMIT 8"))}
+            "recent": db.rows(conn.execute(select(NotifyLog.title, NotifyLog.sent).order_by(NotifyLog.sent.desc()).limit(8)))}
 
 
 def api_push_subscribe(conn, _q, body):

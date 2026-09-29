@@ -7,8 +7,11 @@ import threading
 import time
 from datetime import date, datetime, timedelta
 
+from sqlalchemy import insert, or_, select
+
 from .. import categorize, db, merchants, monitoring, networth, notify, plaid, plaidbank, portfolio, prices, realie, recurring, retail, sfinvest, simplefin
 from .. import settings_keys as sk
+from ..models import Holding, InvAccount, InvTransaction, ManualPosition, PlaidItem, Security, SyncLog
 from .common import ApiError
 
 DAILY_SYNC_HOUR = 7          # banks and cards (SimpleFIN and Plaid) sync once a day, on the first check after this hour
@@ -26,7 +29,7 @@ AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync o
 
 
 def plaid_banks(conn) -> bool:
-    return plaid.configured(conn) and any(plaidbank.is_bank_item(r) for r in conn.execute("SELECT products FROM plaid_items").fetchall())
+    return plaid.configured(conn) and any(plaidbank.is_bank_item(r) for r in conn.execute(select(PlaidItem.products)).fetchall())
 
 
 def bank_configured(conn) -> bool:
@@ -64,7 +67,7 @@ def run_sync() -> dict:
                     retail.match_and_apply(conn)
                 except Exception:
                     monitoring.report()
-                if conn.execute("SELECT 1 FROM inv_accounts WHERE source='simplefin'").fetchone():
+                if conn.execute(select(InvAccount.id).where(InvAccount.source == "simplefin")).fetchone():
                     try:
                         refresh_prices(conn)
                     except Exception:  # prices are a nice-to-have; never fail the bank sync over them
@@ -77,7 +80,7 @@ def run_sync() -> dict:
                 except Exception:
                     monitoring.report()
                 networth.summary(conn)   # record today's net worth
-                conn.execute("INSERT INTO sync_log(ok, message) VALUES (1, ?)", (msg,))
+                conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
                 return {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
         except ApiError:
@@ -97,7 +100,7 @@ def _record_failed_sync(message: str) -> None:
     """Written in a session of its own: the sync's session rolled back, and the failure must still show (the
     sidebar's "Last sync failed", and the can't-sync notification)."""
     with db.session() as conn:
-        conn.execute("INSERT INTO sync_log(ok, message) VALUES (0, ?)", (message,))
+        conn.execute(insert(SyncLog).values(ok=0, message=message))
 
 
 def run_investment_sync() -> dict:
@@ -107,12 +110,12 @@ def run_investment_sync() -> dict:
     try:
         with db.session() as conn:
             out = {"items": 0, "errors": [], "prices": {}}
-            if plaid.configured(conn) and conn.execute("SELECT 1 FROM plaid_items").fetchone() \
+            if plaid.configured(conn) and conn.execute(select(PlaidItem.item_id).limit(1)).fetchone() \
                     and plaid_due(db.get_setting(conn, sk.LAST_PLAID_INV_SYNC)):
                 db.set_setting(conn, sk.LAST_PLAID_INV_SYNC, datetime.now().isoformat(timespec="seconds"))
                 conn.commit()
                 out = plaid.sync_all(conn)
-            if not conn.execute("SELECT 1 FROM inv_accounts").fetchone():
+            if not conn.execute(select(InvAccount.id).limit(1)).fetchone():
                 return out
             out["prices"] = refresh_prices(conn)
             db.set_setting(conn, sk.LAST_INV_SYNC, datetime.now().isoformat(timespec="seconds"))
@@ -122,10 +125,11 @@ def run_investment_sync() -> dict:
 
 
 def refresh_prices(conn) -> dict:
+    s = Security
     tickers = [r["ticker"] for r in conn.execute(
-        "SELECT DISTINCT s.ticker FROM securities s WHERE s.is_cash=0 AND s.ticker IS NOT NULL AND "
-        "(s.id IN (SELECT security_id FROM holdings) OR s.id IN (SELECT security_id FROM inv_transactions) "
-        "OR s.id IN (SELECT security_id FROM manual_positions))")]
+        select(s.ticker).distinct().where(s.is_cash == 0, s.ticker.is_not(None),
+                                          or_(s.id.in_(select(Holding.security_id)), s.id.in_(select(InvTransaction.security_id)),
+                                              s.id.in_(select(ManualPosition.security_id)))))]
     tickers.append(prices.BENCHMARK)
     out = prices.refresh(conn, tickers, date.today() - timedelta(days=portfolio.HISTORY_DAYS + 10))
     sfinvest.recapture_all(conn)   # re-check reported position values against the fresh prices
@@ -210,7 +214,7 @@ def sync_on_visit() -> dict:
         # hours, as in background_sync, so a failing bank isn't asked on every visit).
         bank = bank_configured(conn) and daily_due(db.get_setting(conn, sk.LAST_SYNC_OK)) \
             and _older_than(db.get_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT), hours=3)
-        has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
+        has_inv = bool(conn.execute(select(InvAccount.id).limit(1)).fetchone())
         invest = has_inv and _older_than(db.get_setting(conn, sk.LAST_INV_SYNC), minutes=VISIT_SYNC_MINUTES)
         # Only a sync that starts counts as an attempt: one skipped for a running sync would otherwise put the next
         # visit's catch-up off for 3 hours.
@@ -234,7 +238,7 @@ def background_sync() -> None:
                 last_inv = db.get_setting(conn, sk.LAST_INV_SYNC)
                 plaid_bank = plaid_banks(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
                 plaid_inv = plaid.configured(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_INV_SYNC)) and any(
-                    "investments" in (r["products"] or "investments") for r in conn.execute("SELECT products FROM plaid_items"))
+                    "investments" in (r["products"] or "investments") for r in conn.execute(select(PlaidItem.products)))
             # Don't hammer the banks after failures: at most one automatic attempt every 3 hours. Plaid's daily sync
             # goes ahead regardless: it's asked at most once a day anyway.
             bank = configured and ((daily_due(last) and _older_than(last_try, hours=3)) or plaid_bank)

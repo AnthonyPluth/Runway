@@ -1,8 +1,11 @@
 """Accounts: the list, and the changes you make to one (its name, type, owner, provider)."""
 from __future__ import annotations
 
+from sqlalchemy import func, select, update
+
 from ... import db, plaidbank
 from ... import settings_keys as sk
+from ...models import Account, CardStatement, PlaidAccount, PlaidItem
 from ..common import ApiError
 
 
@@ -14,11 +17,13 @@ KINDS = {"checking", "savings", "credit", "loan", "investment"}
 
 
 def api_accounts(conn, _q, _b):
-    accts = db.rows(conn.execute("SELECT * FROM accounts ORDER BY hidden, kind, COALESCE(display_name, name)"))
+    accts = db.rows(conn.execute(
+        select(Account).order_by(Account.hidden, Account.kind, func.coalesce(Account.display_name, Account.name))))
+    p, s = PlaidAccount, CardStatement
     items = {r["plaid_account_id"]: r for r in db.rows(conn.execute(
-        "SELECT p.plaid_account_id, p.mask, p.item_id, i.products, i.institution_name, s.last_statement_date, s.next_due_date "
-        "FROM plaid_accounts p JOIN plaid_items i ON i.item_id=p.item_id "
-        "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id"))}
+        select(p.plaid_account_id, p.mask, p.item_id, PlaidItem.products, PlaidItem.institution_name, s.last_statement_date,
+               s.next_due_date)
+        .join(PlaidItem, PlaidItem.item_id == p.item_id).outerjoin(s, s.plaid_account_id == p.plaid_account_id)))}
     for a in accts:   # which providers this account can use, and (cards) its latest statement dates
         it = items.get(a.get("plaid_account_id") or "")
         a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
@@ -29,9 +34,9 @@ def api_accounts(conn, _q, _b):
 
 
 def api_account_update(conn, _q, body, acct_id):
-    if not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct_id,)).fetchone():
+    if not conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone():
         raise ApiError("Account not found", 404)
-    sets, vals = [], []
+    sets = {}
     for k, v in body.items():
         if k not in ACCOUNT_FIELDS:
             continue
@@ -43,10 +48,9 @@ def api_account_update(conn, _q, body, acct_id):
             v = str(v).strip()
         if k == "kind" and v not in KINDS:
             raise ApiError("Unknown account type")
-        sets.append(f"{k}=?")
-        vals.append(v)
+        sets[k] = v   # only ACCOUNT_FIELDS' columns
     if sets:
-        conn.execute(f"UPDATE accounts SET {', '.join(sets)} WHERE id=?", (*vals, acct_id))
+        conn.execute(update(Account).where(Account.id == acct_id).values(**sets))
     if body.get("provider"):
         try:
             plaidbank.set_provider(conn, acct_id, body["provider"])

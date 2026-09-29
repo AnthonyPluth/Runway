@@ -18,7 +18,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import delete, func, insert, select, update
+
 from . import db, splits
+from .models import Account, Category, Rule, Transaction
 
 MODES = ("contains", "exact", "starts")
 DIRECTIONS = ("out", "in")
@@ -39,7 +42,7 @@ def _specificity(r: dict) -> tuple:
 def load(conn) -> list[dict]:
     """Every rule, most specific first, with its split parsed."""
     out = []
-    for r in db.rows(conn.execute("SELECT * FROM rules")):
+    for r in db.rows(conn.execute(select(Rule))):
         r["match"] = (r["match"] or "").lower()
         r["split"] = json.loads(r["split"]) if r.get("split") else None
         out.append(r)
@@ -110,7 +113,7 @@ def apply_actions(conn, tx: dict, acts: dict) -> str | None:
     """Carry out a rule's actions on one transaction (a row as a dict). Returns what it did to the category:
     'category', 'split' or None. The caller decides whether the transaction may be changed."""
     if acts.get("rename") and acts["rename"] != tx.get("payee"):
-        conn.execute("UPDATE transactions SET payee=? WHERE id=?", (acts["rename"], tx["id"]))
+        conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(payee=acts["rename"]))
         tx["payee"] = acts["rename"]
     done = None
     if acts.get("split"):
@@ -119,19 +122,19 @@ def apply_actions(conn, tx: dict, acts: dict) -> str | None:
             try:
                 splits.set_splits(conn, tx["id"], parts)
             except splits.SplitError:   # one transaction the rule can't split shouldn't stop the rest: ask about it
-                conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tx["id"],))
+                conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(needs_review=1))
                 return None
-            conn.execute("UPDATE transactions SET category=COALESCE(category, ?), category_source='rule', confidence=1 "
-                         "WHERE id=?", (parts[0]["category"], tx["id"]))
+            conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(
+                category=func.coalesce(Transaction.category, parts[0]["category"]), category_source="rule", confidence=1))
             done = "split"
         elif parts:
             acts = {**acts, "category": parts[0]["category"]}
     if acts.get("category") and done is None:
-        conn.execute("UPDATE transactions SET category=?, category_source='rule', confidence=1, needs_review=0 WHERE id=?",
-                     (acts["category"], tx["id"]))
+        conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(
+            category=acts["category"], category_source="rule", confidence=1, needs_review=0))
         done = "category"
     if acts.get("review"):
-        conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tx["id"],))
+        conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(needs_review=1))
     return done
 
 
@@ -155,7 +158,7 @@ def clean(conn, body: dict) -> dict:
 
 
 def _known_category(conn, name: str) -> bool:
-    return conn.execute("SELECT 1 FROM categories WHERE name=?", (name,)).fetchone() is not None
+    return conn.execute(select(Category.name).where(Category.name == name)).fetchone() is not None
 
 
 def _clean_amount(v) -> float | None:
@@ -183,7 +186,7 @@ def _clean_conditions(conn, body: dict) -> dict:
     if r["direction"] not in (None, *DIRECTIONS):
         raise RuleError("Direction is money out or money in")
     r["account_id"] = body.get("account_id") or None
-    if r["account_id"] and not conn.execute("SELECT 1 FROM accounts WHERE id=?", (r["account_id"],)).fetchone():
+    if r["account_id"] and not conn.execute(select(Account.id).where(Account.id == r["account_id"])).fetchone():
         raise RuleError("Unknown account")
     if not r["match"] and not any(r[k] is not None for k in ("amount_min", "amount_max", "direction", "account_id")):
         raise RuleError("Give the rule some text to look for, or another condition")
@@ -217,30 +220,35 @@ def _clean_split(conn, split) -> str:
 def save(conn, body: dict, rule_id: int | None = None) -> int:
     r = clean(conn, body)
     if rule_id is None:
-        cols = list(r)
-        cur = conn.execute(f"INSERT INTO rules({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", list(r.values()))
-        return cur.lastrowid
-    if not conn.execute("SELECT 1 FROM rules WHERE id=?", (rule_id,)).fetchone():
+        return conn.execute(insert(Rule).values(**r)).lastrowid
+    if not conn.execute(select(Rule.id).where(Rule.id == rule_id)).fetchone():
         raise RuleError("Rule not found")
-    conn.execute(f"UPDATE rules SET {', '.join(f'{k}=?' for k in r)} WHERE id=?", (*r.values(), rule_id))
+    conn.execute(update(Rule).where(Rule.id == rule_id).values(**r))
     return rule_id
 
 
 def remember(conn, match: str, category: str) -> None:
     """"Remember for this merchant": a plain text -> category rule (updating the one for that text, if there is one)."""
-    row = conn.execute("SELECT id FROM rules WHERE match=? AND COALESCE(match_mode, 'contains')='contains' AND amount_min IS NULL "
-                       "AND amount_max IS NULL AND direction IS NULL AND account_id IS NULL AND split IS NULL", (match,)).fetchone()
+    row = conn.execute(select(Rule.id).where(Rule.match == match, *plain())).fetchone()
     if row:
-        conn.execute("UPDATE rules SET category=? WHERE id=?", (category, row["id"]))
+        conn.execute(update(Rule).where(Rule.id == row["id"]).values(category=category))
     else:
-        conn.execute("INSERT INTO rules(match, category) VALUES (?,?)", (match, category))
+        conn.execute(insert(Rule).values(match=match, category=category))
+
+
+def plain() -> list:
+    """Conditions for a plain "text contains -> category" rule (the kind "remember for this merchant" makes): contains
+    mode, and no amounts, direction, account or split. For `.where(Rule.match == text, *rules.plain())`."""
+    return [func.coalesce(Rule.match_mode, "contains") == "contains", Rule.amount_min.is_(None), Rule.amount_max.is_(None),
+            Rule.direction.is_(None), Rule.account_id.is_(None), Rule.split.is_(None)]
 
 
 def _candidates(conn) -> list[dict]:
+    t = Transaction
     return db.rows(conn.execute(
-        "SELECT t.id, t.account_id, t.posted, t.amount, t.payee, t.description, t.category, t.category_source, "
-        "t.is_split, t.needs_review, " + db.label_sql("a") + " AS account_name "
-        "FROM transactions t JOIN accounts a ON a.id=t.account_id ORDER BY t.posted DESC, t.id"))
+        select(t.id, t.account_id, t.posted, t.amount, t.payee, t.description, t.category, t.category_source,
+               t.is_split, t.needs_review, db.account_label_expr().label("account_name"))
+        .join(Account, Account.id == t.account_id).order_by(t.posted.desc(), t.id)))
 
 
 def _changes(tx: dict, r: dict) -> bool:
@@ -309,20 +317,25 @@ def describe(r: dict, accounts: dict[str, str] | None = None) -> str:
 # ------------------------------------------------------------------------------------------------ categories
 
 def rename_category(conn, old: str, new: str) -> None:
-    conn.execute("UPDATE rules SET category=? WHERE category=?", (new, old))
-    for r in conn.execute("SELECT id, split FROM rules WHERE split IS NOT NULL").fetchall():
+    conn.execute(update(Rule).where(Rule.category == old).values(category=new))
+    for r in _split_rules(conn):
         parts = json.loads(r["split"])
         if any(p["category"] == old for p in parts):
             for p in parts:
                 if p["category"] == old:
                     p["category"] = new
-            conn.execute("UPDATE rules SET split=? WHERE id=?", (json.dumps(parts), r["id"]))
+            conn.execute(update(Rule).where(Rule.id == r["id"]).values(split=json.dumps(parts)))
 
 
 def forget_category(conn, name: str) -> None:
     """A category is gone (without a replacement): rules stop setting it, and rules left with nothing to do go."""
-    conn.execute("UPDATE rules SET category=NULL WHERE category=?", (name,))
-    for r in conn.execute("SELECT id, split FROM rules WHERE split IS NOT NULL").fetchall():
+    conn.execute(update(Rule).where(Rule.category == name).values(category=None))
+    for r in _split_rules(conn):
         if any(p["category"] == name for p in json.loads(r["split"])):
-            conn.execute("UPDATE rules SET split=NULL WHERE id=?", (r["id"],))
-    conn.execute("DELETE FROM rules WHERE category IS NULL AND split IS NULL AND rename IS NULL AND COALESCE(review, 0)=0")
+            conn.execute(update(Rule).where(Rule.id == r["id"]).values(split=None))
+    conn.execute(delete(Rule).where(Rule.category.is_(None), Rule.split.is_(None), Rule.rename.is_(None),
+                                    func.coalesce(Rule.review, 0) == 0))
+
+
+def _split_rules(conn) -> list:
+    return conn.execute(select(Rule.id, Rule.split).where(Rule.split.is_not(None))).fetchall()

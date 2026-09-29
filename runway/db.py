@@ -1,9 +1,10 @@
 """Runway's database: SQLite (a file in RUNWAY_DATA) by default, or Postgres when DATABASE_URL is set.
 
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/schema.py) up to date: migrations run
-when Runway starts. The rest of Runway writes plain SQL with `?` placeholders against the small Connection
-wrapper here, which works the same on either database (rows read by name or position, `lastrowid`, ...).
-Queries stick to SQL both databases understand (`ON CONFLICT`, `COALESCE`, ...); `instr()` is added to Postgres.
+when Runway starts. The rest of Runway queries through the small Connection wrapper here, which works the same on
+either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
+models in runway/models.py (docs/orm.md), through its ORM Session (`conn.orm`), or, in code not yet converted, with
+plain SQL with `?` placeholders that sticks to what both databases understand (`instr()` is added to Postgres).
 """
 from __future__ import annotations
 
@@ -16,13 +17,20 @@ from urllib.parse import urlsplit
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import MetaData, Table, create_engine, event, inspect
+from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, insert, inspect, select, update
+from sqlalchemy.dialects import postgresql as pg_dialect
+from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import InvalidRequestError
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateColumn
+from sqlalchemy.sql.expression import FunctionElement
 
 from . import schema, secretbox
 from . import settings_keys as sk
+from .models import Account, Category, Setting, Transaction
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
@@ -197,6 +205,15 @@ class Result:
     def __iter__(self):
         return iter(self.fetchall())
 
+    def scalar(self):
+        """The first column of the first row, or None if there are no rows (`SELECT COUNT(*) ...` -> the count)."""
+        row = self.fetchone()
+        return row[0] if row is not None else None
+
+    def scalars(self) -> list:
+        """The first column of every row."""
+        return [r[0] for r in self.fetchall()]
+
 
 def _outside_quotes(sql: str, fn) -> str:
     parts = re.split(r"('(?:[^']|'')*')", sql)
@@ -223,14 +240,72 @@ def _postgres_sql(sql: str, has_params: bool) -> tuple[str, bool]:
 
 
 class Connection:
-    """A database connection (and its open transaction) that takes SQL with `?` placeholders."""
+    """A database connection and its open transaction: one per request or sync, never shared between threads.
+
+    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see docs/orm.md),
+    or, in code not yet converted, SQL text with `?` placeholders. `orm` is an ORM Session on this same connection
+    and transaction, for loading and changing model objects. Either way, `commit()` commits everything so far (and is
+    what code calls before a slow network request, so the write lock isn't held through it); `rollback()` undoes it.
+    """
 
     def __init__(self, sa_conn):
         self.sa = sa_conn
         self.postgres = sa_conn.dialect.name == "postgresql"
+        self._orm: Session | None = None
 
-    def execute(self, sql: str, params=()) -> Result:
-        params = tuple(params) if params is not None else ()
+    @property
+    def orm(self) -> Session:
+        """An ORM Session sharing this connection and its transaction, made on first use.
+
+        If the connection is already in a transaction, the Session joins it ("rollback_only": its commit() doesn't
+        commit the connection's transaction; a rollback does roll it back); otherwise it begins the transaction itself.
+        Either way, only Connection.commit()/rollback() should end it: they flush the Session and commit or roll back
+        both together. Objects stay readable after a commit (expire_on_commit=False)."""
+        if self._orm is None:
+            self._orm = Session(bind=self.sa, join_transaction_mode="rollback_only", expire_on_commit=False,
+                                autoflush=True)
+        return self._orm
+
+    def _before(self) -> None:
+        # SQL run here doesn't go through the Session: write out its pending changes first, so the SQL sees them.
+        if self._orm is not None:
+            self._orm.flush()
+
+    def _after_write(self) -> None:
+        # ... and objects the Session already loaded may be out of date after an UPDATE or DELETE run here.
+        if self._orm is not None and self._orm.identity_map:
+            self._orm.expire_all()
+
+    def execute(self, sql, params=None) -> Result:
+        """Run a statement. `sql` is a SQLAlchemy statement (params: a dict, or a list of dicts for many rows), or
+        legacy SQL text with `?` placeholders (params: a sequence)."""
+        if not isinstance(sql, str):
+            return self._execute_statement(sql, params)
+        self._before()
+        try:
+            return self._execute_text(sql, tuple(params) if params is not None else ())
+        finally:
+            if self._orm is not None and sql.lstrip()[:6].upper() != "SELECT":
+                self._after_write()
+
+    def _execute_statement(self, stmt, params) -> Result:
+        if isinstance(params, list) and not params:   # no rows: nothing to do (not one row of defaults)
+            return Result(rows=[])
+        self._before()
+        res = self.sa.execute(stmt, params) if params is not None else self.sa.execute(stmt)
+        lastrowid = None
+        ctx = getattr(res, "context", None)
+        if ctx is not None and ctx.isinsert and not ctx.executemany:
+            try:
+                pk = res.inserted_primary_key
+                lastrowid = pk[0] if pk is not None and len(pk) == 1 else None
+            except InvalidRequestError:   # e.g. an INSERT ... SELECT: there's no one new row
+                lastrowid = None
+        if getattr(stmt, "is_dml", False):
+            self._after_write()
+        return Result(res, lastrowid)
+
+    def _execute_text(self, sql: str, params: tuple) -> Result:
         if not self.postgres:
             res = self.sa.exec_driver_sql(sql, params)
             return Result(res, res.lastrowid if res.lastrowid else None)
@@ -248,15 +323,24 @@ class Connection:
         if not seq:
             return
         q = _postgres_sql(sql, True)[0].replace(" RETURNING id", "") if self.postgres else sql
+        self._before()
         self.sa.exec_driver_sql(q, seq)
+        self._after_write()
 
     def commit(self) -> None:
-        self.sa.commit()
+        if self._orm is not None:
+            self._orm.commit()   # flushes; commits the transaction if the Session began it, else leaves that to us
+        self.sa.commit()         # nothing to do if the Session just committed it
 
     def rollback(self) -> None:
+        if self._orm is not None:
+            self._orm.rollback()
         self.sa.rollback()
 
     def close(self) -> None:
+        if self._orm is not None:
+            self._orm.close()
+            self._orm = None
         self.sa.close()
 
 
@@ -275,6 +359,75 @@ def session(path: str | None = None):
         raise
     finally:
         conn.close()
+
+
+# ------------------------------------------------------------------------------------------------ SQL helpers
+# Portable pieces for SQLAlchemy statements (docs/orm.md): each works the same on SQLite and Postgres.
+
+def dialect_insert(conn: Connection, entity):
+    """An INSERT for this connection's database that can take .on_conflict_do_update()/.on_conflict_do_nothing()
+    (SQLite and Postgres both have ON CONFLICT, but SQLAlchemy builds it with each one's own insert())."""
+    return (pg_dialect if conn.postgres else sqlite_dialect).insert(entity)
+
+
+def upsert(conn: Connection, entity, values: dict | list[dict], key: list[str], update=None) -> Result:
+    """INSERT ... ON CONFLICT(key) DO UPDATE SET col=excluded.col, for one row (a dict of column name -> value) or
+    many (a list of dicts, all with the same keys).
+
+    `update` picks what a conflict changes: None = every column given except the key; a list of column names; or a
+    function taking the would-be row (`excluded`) and returning {column name: expression}, for anything else
+    (`lambda ex: {"value": func.coalesce(ex.value, Asset.value)}`). Nothing to update means ON CONFLICT DO NOTHING."""
+    many = isinstance(values, list)
+    if many and not values:
+        return Result(rows=[])
+    stmt = dialect_insert(conn, entity)
+    if not many:
+        stmt = stmt.values(values)
+    cols = values[0] if many else values
+    if callable(update):
+        set_ = update(stmt.excluded)
+    else:
+        set_ = {c: stmt.excluded[c] for c in (update if update is not None else [c for c in cols if c not in key])}
+    stmt = stmt.on_conflict_do_update(index_elements=key, set_=set_) if set_ else stmt.on_conflict_do_nothing(index_elements=key)
+    return conn.execute(stmt, values if many else None)
+
+
+def insert_ignore(conn: Connection, entity, values: dict | list[dict], key: list[str] | None = None) -> Result:
+    """INSERT ... ON CONFLICT DO NOTHING: rows already there (by `key`, or by any unique constraint) are left alone."""
+    many = isinstance(values, list)
+    if many and not values:
+        return Result(rows=[])
+    stmt = dialect_insert(conn, entity)
+    if not many:
+        stmt = stmt.values(values)
+    return conn.execute(stmt.on_conflict_do_nothing(index_elements=key), values if many else None)
+
+
+class instr(FunctionElement):
+    """SQLite's instr(haystack, needle): where needle first appears in haystack, from 1; 0 if it doesn't.
+    (Postgres calls it strpos.) Case-sensitive, and without LIKE's wildcards, so safe for any text."""
+    type = Integer()
+    inherit_cache = True
+    name = "instr"
+
+
+@compiles(instr)
+def _instr(element, compiler, **kw):
+    return f"instr({compiler.process(element.clauses, **kw)})"
+
+
+@compiles(instr, "postgresql")
+def _instr_postgres(element, compiler, **kw):
+    return f"strpos({compiler.process(element.clauses, **kw)})"
+
+
+def account_label_expr(a=None):
+    """account_label as a SQLAlchemy expression, for `a` (models.Account, or an aliased(Account)); label it yourself:
+    `select(Account.id, db.account_label_expr().label("name"))`."""
+    a = Account if a is None else a
+    name = func.coalesce(a.display_name, a.name)
+    return name + case((and_(a.owner.is_not(None), a.owner != "", instr(func.lower(name), func.lower(a.owner)) == 0),
+                        " (" + a.owner + ")"), else_="")
 
 
 # ------------------------------------------------------------------------------------------------ schema
@@ -338,19 +491,25 @@ def init(path: str | None = None) -> None:
     with session(path) as conn:
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.
         if not get_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF):
-            conn.execute("UPDATE accounts SET daily_spend=0")
+            conn.execute(update(Account).values(daily_spend=0))
             set_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF, "1")
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
-        if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
-            conn.executemany(
-                "INSERT INTO categories(name, is_transfer, is_income) VALUES (?,?,?)", DEFAULT_CATEGORIES
-            )
+        if conn.execute(select(func.count()).select_from(Category)).fetchone()[0] == 0:
+            conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])
 
 
 # Categories the app itself relies on; they can't be renamed or removed.
 # Transactions in investment accounts (buys, sells, dividends) live on the Investments page, not in Transactions,
 # Review or the review count. A condition on transactions.account_id, for a WHERE clause.
 NOT_INVESTMENT = "account_id NOT IN (SELECT id FROM accounts WHERE kind='investment')"
+
+
+def not_investment(account_id=None):
+    """NOT_INVESTMENT for SQLAlchemy statements: `.where(db.not_investment())` (or pass the account id column, e.g.
+    a subquery's `p.c.account_id`; the default is Transaction.account_id)."""
+    col = Transaction.account_id if account_id is None else account_id
+    return col.not_in(select(Account.id).where(Account.kind == "investment"))
+
 
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
@@ -365,7 +524,7 @@ def number(value) -> float:
 
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
-    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    row = conn.execute(select(Setting.value).where(Setting.key == key)).fetchone()
     value = row["value"] if row and row["value"] is not None else None
     if value is not None and key in secretbox.SECRET_SETTINGS:
         try:
@@ -379,10 +538,7 @@ def get_setting(conn, key: str, default: str | None = None) -> str | None:
 def set_setting(conn, key: str, value: str | None) -> None:
     if value is not None and key in secretbox.SECRET_SETTINGS:
         value = secretbox.encrypt(value)   # secrets are stored encrypted (runway/secretbox.py)
-    conn.execute(
-        "INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, value),
-    )
+    upsert(conn, Setting, {"key": key, "value": value}, key=["key"])
 
 
 def account_label(a) -> str:
@@ -401,4 +557,12 @@ def label_sql(alias: str = "a") -> str:
 
 
 def rows(cur) -> list[dict]:
+    """Every row of a result as a dict (column name -> value), from Connection.execute() or a Session's execute()."""
+    if hasattr(cur, "mappings"):   # a SQLAlchemy Result (conn.orm.execute(...))
+        return [dict(m) for m in cur.mappings()]
     return [dict(r) for r in cur.fetchall()]
+
+
+def as_dict(obj) -> dict:
+    """A model object's columns as a dict, in the table's order: what `SELECT *` gave as a row."""
+    return {a.key: getattr(obj, a.key) for a in inspect(obj).mapper.column_attrs}
