@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  bankLeft, bankOrder, bonusLabel, cardOrder, daysUntil, eligibilityText, feesDue, five24Line, mine, points, spendProgress,
+  KIND_LABEL, bankLeft, bankOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
+  eligibilityText, feesDue, five24Line, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
+  scoreProgress, spendProgress, splitWishes, valueSource, wishName,
 } from "./churning";
-import type { BankBonus, ChurnCard, Eligibility, Five24 } from "./types";
+import type { BankBonus, Benefit, ChurnCard, Currency, Eligibility, Five24, Wish } from "./types";
 
 const TODAY = "2026-09-29";
 // Dates come with non-breaking spaces (so they never wrap); compare them as plain text.
@@ -61,5 +63,76 @@ describe("churning helpers", () => {
     expect(bankLeft(b)).toEqual(["$600 more direct deposits", "1 more deposit", "$500 more to reach the minimum balance"]);
     const done = { ...b, id: 2, state: "received" } as BankBonus;
     expect([done, b].sort(bankOrder).map((x) => x.id)).toEqual([1, 2]);
+  });
+});
+
+describe("churning 2 helpers", () => {
+  it("labels every kind of Upcoming item", () => {
+    for (const k of ["plan", "benefit", "apply", "offer_ends"] as const) expect(KIND_LABEL[k]).toBeTruthy();
+  });
+
+  it("words a card's plan and its benefits", () => {
+    const c = (x: Partial<ChurnCard>) => ({ plan: "undecided", plan_target: null, plan_due: null, plan_done_on: null, ...x }) as ChurnCard;
+    expect(planLine(c({}))).toBe("");
+    expect(planLine(c({ plan: "keep" }))).toBe("Keeping it");
+    expect(sp(planLine(c({ plan: "downgrade", plan_target: "Freedom", plan_due: "2026-10-20" })))).toBe("Downgrade to Freedom by Oct 20");
+    expect(sp(planLine(c({ plan: "close", plan_done_on: "2026-09-01" })))).toBe("Done Sep 1, 2026");
+    expect(benefitSummary({ benefits: [], benefits_value: 0, net_fee: 95 })).toBe("");
+    const two = [{}, {}] as Benefit[];
+    expect(benefitSummary({ benefits: two, benefits_value: 650, net_fee: -100 })).toBe("Benefits $650/yr · net fee −$100");
+    expect(benefitSummary({ benefits: two, benefits_value: 300, net_fee: 250 })).toBe("Benefits $300/yr · net fee $250");
+  });
+
+  it("marks portal-only rates and builds the rates a form sends", () => {
+    expect(ratesText([{ category: "Travel", multiplier: 5 }, { category: "Hotels", multiplier: 10, portal_only: true }], "Capital One Travel"))
+      .toBe("5x Travel, 10x Hotels (via Capital One Travel)");
+    expect(ratesText([{ category: "Hotels", multiplier: 10, portal_only: true }])).toBe("10x Hotels (portal)");
+    expect(ratesPayload("2", [{ category: "Hotels", multiplier: "10", portal_only: true }])).toEqual([
+      { category: "*", multiplier: 2, portal_only: false }, { category: "Hotels", multiplier: 10, portal_only: true }]);
+    expect(ratesPayload("", [{ category: "", multiplier: "", portal_only: false }])).toEqual([{ category: "", multiplier: null, portal_only: false }]);
+  });
+
+  it("offers the owners, the current one even if it's no longer a person, and Joint only when asked", () => {
+    expect(ownerChoices(["Alex", "Sam"], "Alex")).toEqual(["Alex", "Sam"]);
+    expect(ownerChoices(["Alex"], "Pat")).toEqual(["Alex", "Pat"]);
+    expect(ownerChoices(["Alex", "Joint"], "Joint")).toEqual(["Alex"]);
+    expect(ownerChoices(["Alex"], "Joint", true)).toEqual(["Alex", "Joint"]);
+  });
+
+  it("groups currencies and says where each value came from", () => {
+    const cur = (key: string, over: Partial<Currency> = {}) => ({ key, name: key, kind: "bank", overridden: false, custom: false, as_of: null, ...over }) as Currency;
+    const d = { currencies: [cur("ur"), cur("aa", { kind: "airline" }), cur("mine", { custom: true }), cur("ua", { kind: "airline" })],
+      currency_groups: [{ kind: "bank", label: "Bank points", keys: ["ur"] }, { kind: "airline", label: "Airlines", keys: ["aa", "ua"] }, { kind: "hotel", label: "Hotels", keys: ["gone"] }] };
+    const g = currencyGroups(d as never);
+    expect(g.map((x) => [x.label, x.currencies.map((c) => c.key)])).toEqual([["Bank points", ["ur"]], ["Airlines", ["aa", "ua"]], ["Other", ["mine"]]]);
+    expect(sp(valueSource(cur("ur"), "2026-06-15"))).toBe("estimate (as of Jun 2026)");
+    expect(valueSource(cur("ur", { overridden: true }), "2026-06-15")).toBe("your value");
+    expect(valueSource(cur("mine", { custom: true }), "2026-06-15")).toBe("your currency");
+  });
+
+  it("describes a benefit's period and whether it can be marked used", () => {
+    const b = (x: Partial<Benefit>) => ({ kind: "credit", period: "annual", amount: 300, used: 0, remaining: 300, used_count: 0, period_end: "2026-12-31", ...x }) as Benefit;
+    expect(sp(benefitState(b({})))).toBe("$0 of $300 used · resets Dec 31");
+    expect(sp(benefitState(b({ used: 300, remaining: 0 })))).toBe("All $300 used · resets Dec 31");
+    expect(benefitState(b({ kind: "access", amount: null, period_end: null }))).toBe("Not used this period");
+    expect(benefitState(b({ kind: "access", amount: null, period_end: null, used_count: 2 }))).toBe("Used 2 times this period");
+    expect(canUse(b({}))).toBe(true);
+    expect(canUse(b({ used: 300, remaining: 0 }))).toBe(false);
+    expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(false);
+  });
+
+  it("shows a score against what a planned item wants, and reorders a person's list", () => {
+    const w = (id: number, owner: string, priority: number, over: Partial<Wish> = {}) => ({ id, owner, priority, status: "wanted", kind: "card", min_score: null, ...over }) as Wish;
+    const scores = { Alex: { owner: "Alex", score: 705, as_of: "2026-09-01", source: null, history: [] } };
+    expect(scoreProgress(w(1, "Alex", 1, { min_score: 740 }), scores)).toBe("705 of 740 wanted");
+    expect(scoreProgress(w(1, "Sam", 1, { min_score: 740 }), scores)).toBe("740 wanted · no score entered");
+    expect(scoreProgress(w(1, "Alex", 1), scores)).toBeNull();
+    const open = [w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2), w(4, "Alex", 3)];
+    expect(reorder(open, 3, -1)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 2 }]);
+    expect(reorder(open, 1, -1)).toEqual([]);
+    expect(reorder(open, 4, 1)).toEqual([]);
+    expect(splitWishes([w(1, "A", 1), w(2, "A", 2, { status: "applied" }), w(3, "A", 3, { status: "dropped" }), w(4, "A", 4, { status: "ready" })]).open.map((x) => x.id)).toEqual([1, 4]);
+    expect(wishName({ kind: "bank_bonus", bank: "Chase", product: "Total Checking" })).toBe("Chase Total Checking");
+    expect(wishName({ kind: "card", bank: null, product: "Sapphire" })).toBe("Sapphire");
   });
 });

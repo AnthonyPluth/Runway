@@ -1,6 +1,9 @@
 // How the Churning page words and filters what the server worked out (runway/churning.py, runway/bank_bonuses.py).
 import { fmt0, fmtDate, parseDate } from "$lib/format";
-import type { BankBonus, ChurnCard, Eligibility, Five24, UpcomingItem } from "./types";
+import type {
+  BankBonus, Benefit, Blocker, ChurnCard, ChurnRate, Churning, CreditScore, Currency, CurrencyGroup, Eligibility, Five24, Plan,
+  UpcomingItem, Wish,
+} from "./types";
 
 export const BOTH = "";   // the person switcher's "everyone" value
 
@@ -89,7 +92,122 @@ export function bankLeft(b: BankBonus): string[] {
 
 /** The Upcoming list's label for each kind of item. */
 export const KIND_LABEL: Record<UpcomingItem["kind"], string> = {
-  task: "To-do", fee: "Annual fee", bonus: "Bonus spending", five24: "5/24", eligible: "Bonus again",
-  bank_due: "Bank bonus", bank_hold: "Balance hold", bank_post: "Bonus posting", bank_close: "Safe to close",
-  bank_fee: "Monthly fee", bank_eligible: "Bonus again",
+  task: "To-do", fee: "Annual fee", plan: "Your plan", bonus: "Bonus spending", benefit: "Card credit", five24: "5/24",
+  eligible: "Bonus again", apply: "Apply", offer_ends: "Offer ends", bank_due: "Bank bonus", bank_hold: "Balance hold",
+  bank_post: "Bonus posting", bank_close: "Safe to close", bank_fee: "Monthly fee", bank_eligible: "Bonus again",
 };
+
+export const PLAN_LABEL: Record<Plan, string> = {
+  undecided: "Undecided", keep: "Keep it", downgrade: "Downgrade", close: "Close it", product_change: "Product change",
+};
+/** Plans that mean doing something to the card, so they have a day and a reminder. */
+export const PLAN_ACTS: Plan[] = ["downgrade", "close", "product_change"];
+
+/** A card's plan in a few words for its row: "Keeping it", "Downgrade to Freedom by Oct 20", "Done Oct 3". */
+export function planLine(c: ChurnCard): string {
+  if (c.plan_done_on) return `Done ${fullDate(c.plan_done_on)}`;
+  const by = c.plan_due ? ` by ${fmtDate(c.plan_due)}` : "";
+  switch (c.plan) {
+    case "keep": return "Keeping it";
+    case "downgrade": return `Downgrade${c.plan_target ? ` to ${c.plan_target}` : ""}${by}`;
+    case "product_change": return `Product change${c.plan_target ? ` to ${c.plan_target}` : ""}${by}`;
+    case "close": return `Close it${by}`;
+    default: return "";
+  }
+}
+
+/** "Benefits $650/yr · net fee −$100" on a card's row; empty when it has no benefits. */
+export function benefitSummary(c: Pick<ChurnCard, "benefits" | "benefits_value" | "net_fee">): string {
+  if (!c.benefits.length) return "";
+  const net = c.net_fee < 0 ? `−${fmt0(-c.net_fee)}` : fmt0(c.net_fee);
+  return `Benefits ${fmt0(c.benefits_value)}/yr · net fee ${net}`;
+}
+
+/** Earning rates as text, with the portal-only ones marked: "5x Travel (via Capital One Travel), 2x Dining". */
+export function ratesText(rates: ChurnRate[], portalName?: string | null): string {
+  return rates.map((r) => `${r.multiplier}x ${r.category}${r.portal_only ? ` (${portalName ? `via ${portalName}` : "portal"})` : ""}`).join(", ");
+}
+
+export interface RateRow { category: string; multiplier: string; portal_only: boolean }
+
+/** The `rates` a form sends: the base rate first (as the "*" marker), then each row. A row without a category or a
+ * multiplier goes as it is, and the server's message names the problem. */
+export function ratesPayload(base: string, rows: RateRow[], marker = "*"): { category: string; multiplier: number | null; portal_only: boolean }[] {
+  const out = rows.map((r) => ({ category: r.category, multiplier: r.multiplier === "" ? null : Number(r.multiplier), portal_only: r.portal_only }));
+  return base === "" ? out : [{ category: marker, multiplier: Number(base), portal_only: false }, ...out];
+}
+
+/** The choices for whose it is: the people, plus whoever it's already set to (an old name isn't lost), and "Joint"
+ * where that makes sense (an account, not a card). */
+export function ownerChoices(owners: string[], current: string | null | undefined, joint = false): string[] {
+  const names = owners.filter((n) => n !== "Joint");
+  if (current && current !== "Joint" && !names.includes(current)) names.push(current);
+  return joint ? [...names, "Joint"] : names;
+}
+
+/** Currencies in the groups the server sent (bank points, airlines, hotels, cash); any it left out go last, under
+ * "Other". */
+export function currencyGroups(d: Pick<Churning, "currencies" | "currency_groups">): { kind: CurrencyGroup["kind"]; label: string; currencies: Currency[] }[] {
+  const byKey = new Map(d.currencies.map((c) => [c.key, c]));
+  const seen = new Set<string>();
+  const out = d.currency_groups.map((g) => ({
+    kind: g.kind, label: g.label,
+    currencies: g.keys.flatMap((k) => { const c = byKey.get(k); if (!c || seen.has(k)) return []; seen.add(k); return [c]; }),
+  })).filter((g) => g.currencies.length);
+  const rest = d.currencies.filter((c) => !seen.has(c.key));
+  return rest.length ? [...out, { kind: "other" as const, label: "Other", currencies: rest }] : out;
+}
+
+/** Where a point value came from: "your value", or "estimate (as of Jun 2026)". */
+export function valueSource(c: Currency, valuesAsOf: string): string {
+  if (c.custom) return "your currency";
+  if (c.overridden) return "your value";
+  const day = c.as_of || valuesAsOf;
+  return day ? `estimate (as of ${fmtDate(day, { month: "short", year: "numeric" })})` : "estimate";
+}
+
+/** A benefit's current period in words: "$150 of $300 used · resets Dec 31", "Not used this period". */
+export function benefitState(b: Benefit): string {
+  const resets = b.period_end ? ` · ${b.period === "one_time" ? "expires" : "resets"} ${fmtDate(b.period_end)}` : "";
+  if (b.kind === "credit" && b.amount != null) {
+    return (b.remaining ?? 0) <= 0.005 ? `All ${fmt0(b.amount)} used${resets}` : `${fmt0(b.used ?? 0)} of ${fmt0(b.amount)} used${resets}`;
+  }
+  return b.used_count ? `Used ${b.used_count > 1 ? `${b.used_count} times` : "once"} this period${resets}` : `Not used this period${resets}`;
+}
+
+/** Whether a benefit has something left to mark used this period: a credit with money left, or one not used yet. */
+export const canUse = (b: Benefit) => (b.kind === "credit" && b.amount != null ? (b.remaining ?? 0) > 0.005 : b.used_count === 0);
+
+export const BLOCKER_LABEL: Record<Blocker["kind"], string> = {
+  five24: "5/24", bonus_rule: "Bonus rule", held: "Still open", wait: "Waiting", score: "Credit score", offer: "Offer",
+};
+
+/** "705 of 740 wanted": a person's latest score against what a planned item wants; null when it wants none. */
+export function scoreProgress(w: Pick<Wish, "owner" | "min_score">, scores: Record<string, CreditScore>): string | null {
+  if (!w.min_score) return null;
+  const s = scores[w.owner];
+  return s ? `${s.score} of ${w.min_score} wanted` : `${w.min_score} wanted · no score entered`;
+}
+
+/** A planned item's name: the card, or the bank and its account. */
+export const wishName = (w: Pick<Wish, "kind" | "product" | "bank">) =>
+  w.kind === "card" ? (w.product ?? "") : [w.bank, w.product].filter(Boolean).join(" ");
+
+/** Planned items still in play (wanted or ready) apart from the ones applied for or dropped. */
+export const splitWishes = (wishes: Wish[]) => ({
+  open: wishes.filter((w) => w.status === "wanted" || w.status === "ready"),
+  closed: wishes.filter((w) => w.status === "applied" || w.status === "dropped"),
+});
+
+/** Move a planned item up or down among its person's open items; returns the priorities to save (only the ones that
+ * change), numbering them 1, 2, 3… in the new order. */
+export function reorder(open: Wish[], id: number, dir: -1 | 1): { id: number; priority: number }[] {
+  const w = open.find((x) => x.id === id);
+  if (!w) return [];
+  const list = open.filter((x) => x.owner === w.owner);
+  const from = list.findIndex((x) => x.id === id), to = from + dir;
+  if (to < 0 || to >= list.length) return [];
+  const next = [...list];
+  [next[from], next[to]] = [next[to], next[from]];
+  return next.flatMap((x, i) => (x.priority === i + 1 ? [] : [{ id: x.id, priority: i + 1 }]));
+}
