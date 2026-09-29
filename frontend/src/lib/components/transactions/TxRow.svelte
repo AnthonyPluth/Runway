@@ -1,0 +1,149 @@
+<script lang="ts">
+  import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import CategorySelect from "$lib/components/CategorySelect.svelte";
+  import CatIcon from "$lib/components/CatIcon.svelte";
+  import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
+  import { orderLabel } from "$lib/components/orders/retail";
+  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
+  import { fmt } from "$lib/format";
+  import { cn } from "$lib/utils";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import RecurringPicker from "./RecurringPicker.svelte";
+  import LogoPicker from "./LogoPicker.svelte";
+  import SplitEditor from "./SplitEditor.svelte";
+  import type { RecurringItem, Tx } from "./types";
+  import { openOrders } from "./expanded.svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+
+  // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
+  // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
+  // merchant; on a wider screen it has a column of its own.
+  let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
+    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
+    onselect: (e: MouseEvent, checked: boolean) => void;
+    onsave: (category: string) => Promise<void>;
+    onchanged: () => void;
+  } = $props();
+
+  let saving = $state(false);
+  let picking = $state(false);
+  let splitting = $state(false);
+  const showOrder = $derived(openOrders.has(t.id));
+  const store = $derived(t.retail?.retailer === "amazon" ? "Amazon" : t.retail?.retailer === "target" ? "Target" : "store");
+  function toggleOrder() { if (showOrder) openOrders.delete(t.id); else openOrders.add(t.id); }
+
+  const suggestion = $derived(!!t.needs_review && !!t.category && t.category_source === "ai");
+  const linked = $derived((t.recurring_id ?? 0) > 0);
+  const split = $derived(!!t.is_split && !!t.splits?.length);
+  const name = $derived(t.payee || t.description || "");
+  // The bank's own text, only when it says more than the merchant name does.
+  const detail = $derived.by(() => {
+    const d = (t.description ?? "").trim(), squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    return d && squash(d) !== squash(name) ? d : "";
+  });
+  const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
+  // Shown on hover (and always on touch screens, and while focused).
+  const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
+
+  async function save(category: string) {
+    if (!category) return;
+    saving = true;
+    try { await onsave(category); } finally { saving = false; }
+  }
+</script>
+
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:px-4",
+  selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
+  <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-1", !selecting && "max-md:hidden",
+    !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
+    <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label={`Select ${name}`} checked={selected}
+      onclick={(e) => onselect(e, e.currentTarget.checked)} />
+  </label>
+
+  <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-1">
+    <LogoPicker name={t.payee || t.description || ""} {onchanged}>
+      <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
+           so a dark mark doesn't vanish on the dark page). -->
+      {#if t.logo}
+        <img class="size-9 rounded-lg object-contain" src={t.logo} alt="" loading="lazy" width="36" height="36" />
+      {:else}
+        <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
+      {/if}
+    </LogoPicker>
+  </div>
+
+  <div class="col-start-3 row-start-1 min-w-0 pr-3">
+    <div class="flex min-w-0 items-center gap-1.5">
+      <span class="truncate font-medium">{name}</span>
+      {#if t.pending}<Badge variant="secondary" class="shrink-0">pending</Badge>{/if}
+      {#if !review && t.needs_review}<Badge variant="outline" class="shrink-0 border-amber-500/50 text-amber-500">review</Badge>{/if}
+      {#if picking}
+        <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
+      {:else}
+        <button type="button" onclick={() => (picking = true)}
+          title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
+          aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
+          class={cn("shrink-0 cursor-pointer rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
+            linked ? "bg-primary/15 font-semibold text-primary" : onHover)}>
+          ↻{#if linked}<span class="ml-1 text-xs font-normal max-sm:hidden">{t.recurring_name}</span>{/if}
+        </button>
+      {/if}
+      {#if t.retail}
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} onclick={toggleOrder}
+          title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
+          class="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+          <ChevronRight class={cn("size-3.5 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
+          {orderLabel(t.retail)}</button>
+      {/if}
+    </div>
+    <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-md:hidden">
+      <AcctLabel id={t.account_id} name={t.account_name ?? ""} />
+      {#if detail}<span aria-hidden="true">·</span><span class="truncate" title={detail}>{detail}</span>{/if}
+    </div>
+  </div>
+
+  <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
+  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-start-1 md:flex-nowrap">
+    {#if split}
+      <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
+        <Badge class="bg-primary/15 text-primary">split</Badge>
+        <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
+          {#each t.splits ?? [] as s, i (i)}
+            <span class="inline-flex items-center gap-1" title={s.note || undefined}><CatIcon name={s.category} size={16} />{s.category} {fmt(Math.abs(s.amount))}</span>
+          {/each}
+        </span>
+      </button>
+    {:else}
+      <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
+      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors",
+        t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
+        saving && "opacity-60")}>
+        {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
+        <span class="truncate">{t.category || "Choose category"}</span>
+        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
+        <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
+          class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />
+      </span>
+    {/if}
+    {#if suggestion}
+      <Badge class="bg-primary/15 text-primary" title="AI suggestion confidence">{Math.round((t.confidence || 0) * 100)}%</Badge>
+      <Button variant="link" size="sm" class="h-auto px-1" title="Keep the suggested category" disabled={saving}
+        onclick={() => save(t.category ?? "")}>✓ Keep</Button>
+    {/if}
+    {#if !split}
+      <Button variant="link" size="sm" class={cn("h-auto shrink-0 px-1 text-xs text-muted-foreground max-md:hidden", onHover)}
+        title="Spread this across several categories" onclick={() => (splitting = true)}>Split</Button>
+    {/if}
+  </div>
+
+  <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-1",
+    t.amount > 0 ? "font-semibold text-emerald-500" : "font-medium")}>{fmt(t.amount)}</div>
+
+  {#if splitting}
+    <div class="col-span-full pt-2"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></div>
+  {/if}
+  {#if showOrder && t.retail}
+    <div id={`order-${t.id}`} class="col-span-full pt-2 md:pl-[5.25rem]"><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></div>
+  {/if}
+</div>

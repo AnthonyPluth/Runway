@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Runway orders: options</title><link rel="stylesheet" href="ui.css">
+<style>main { max-width: 520px; margin: 32px auto; }</style></head>
+<body><main>
+  <h1><img src="icons/icon-32.png" alt="">Runway orders</h1>
+  <p>This extension reads your Amazon and Target orders with the sign-in already in this browser, and sends them only to
+    your Runway, which matches them to your card transactions and splits each one by what you bought.</p>
+  <label>Runway address<input type="url" id="url" placeholder="https://runway.example.com or http://192.168.1.20:8765" spellcheck="false"></label>
+  <label>Key <span class="muted">(Runway → Settings → Connections → Amazon and Target)</span>
+    <input type="password" id="token" placeholder="rwx_…" autocomplete="off" spellcheck="false"></label>
+  <label class="inline"><input type="checkbox" id="auto"> Import once a day while this browser is open</label>
+  <div class="row"><button class="primary" id="save">Save and test</button></div>
+  <p id="result" class="muted"></p>
+</main><script src="options.js"></script></body></html>
