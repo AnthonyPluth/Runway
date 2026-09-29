@@ -14,9 +14,10 @@ import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import EventsList from "./EventsList.svelte";
 
-const ev = (extra: Partial<ForecastEvent> = {}): ForecastEvent => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
+type Ev = ForecastEvent & { late_from?: string | null };
+const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
 // `events` is also a Testing Library mount option, so props go under `props`.
-const show = (events: ForecastEvent[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, ...extra } });
+const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, ...extra } });
 
 beforeEach(() => {
   app.state = null;
