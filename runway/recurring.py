@@ -4,7 +4,10 @@ from __future__ import annotations
 import statistics
 from datetime import date, timedelta
 
+from sqlalchemy import func, insert, or_, select, update
+
 from . import db
+from .models import Account, Recurring, RecurringDismissed, Transaction
 
 # How far a real payment can land from its expected date and still count as that occurrence.
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
@@ -33,67 +36,72 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
     """Link unlinked transactions to recurring items by merchant text, when the amount is close to the item's (see
     amount_range). Money-in items only match money in, and money-out items only match money out.
     Transactions marked 'never match' (recurring_id = 0) and ones already linked are left alone."""
-    q = "SELECT * FROM recurring WHERE active=1"
-    args: list = []
+    q = select(Recurring).where(Recurring.active == 1)
     if recurring_ids:
-        q += f" AND id IN ({','.join('?' * len(recurring_ids))})"
-        args = list(recurring_ids)
-    items = sorted(db.rows(conn.execute(q, args)), key=lambda r: -len(match_text(r)))  # most specific first
+        q = q.where(Recurring.id.in_(list(recurring_ids)))
+    items = sorted(db.rows(conn.execute(q)), key=lambda r: -len(match_text(r)))  # most specific first
     linked = 0
+    t = Transaction
     for item in items:
         m = match_text(item)
         if len(m) < 3:
             continue
-        sign = ">" if item["amount"] > 0 else "<"
         span = amount_range(item)
-        cur = conn.execute(
-            f"UPDATE transactions SET recurring_id=? WHERE recurring_id IS NULL AND account_id=? AND amount {sign} 0 "
-            "AND (instr(lower(payee), ?) > 0 OR instr(lower(description), ?) > 0)"
-            + (" AND abs(amount) >= ? AND abs(amount) <= ?" if span else ""),
-            (item["id"], item["account_id"], m, m, *(span or ())),
-        )
-        linked += cur.rowcount
+        where = [t.recurring_id.is_(None), t.account_id == item["account_id"], t.amount > 0 if item["amount"] > 0 else t.amount < 0,
+                 or_(db.instr(func.lower(t.payee), m) > 0, db.instr(func.lower(t.description), m) > 0)]
+        if span:
+            where += [func.abs(t.amount) >= span[0], func.abs(t.amount) <= span[1]]
+        linked += conn.execute(update(t).where(*where).values(recurring_id=item["id"])).rowcount
     return linked
 
 
 def link(conn, tx_id: str, recurring_id: int | None) -> None:
     """Link a transaction to a recurring item (None = mark as not recurring). The item learns the merchant
     text from the transaction if it doesn't have one, so future payments match on their own."""
-    tx = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    tx = _transaction(conn, tx_id)
     if not tx:
         raise ValueError("Transaction not found")
     if recurring_id is None:
-        conn.execute("UPDATE transactions SET recurring_id=0 WHERE id=?", (tx_id,))
+        conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=0))
         return
-    item = conn.execute("SELECT * FROM recurring WHERE id=?", (recurring_id,)).fetchone()
+    item = conn.execute(select(Recurring).where(Recurring.id == recurring_id)).fetchone()
     if not item:
         raise ValueError("Recurring item not found")
-    conn.execute("UPDATE transactions SET recurring_id=? WHERE id=?", (recurring_id, tx_id))
+    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=recurring_id))
     if not item["match"] and (tx["payee"] or tx["description"]):
-        conn.execute("UPDATE recurring SET match=? WHERE id=?", ((tx["payee"] or tx["description"]).lower(), recurring_id))
+        conn.execute(update(Recurring).where(Recurring.id == recurring_id)
+                     .values(match=(tx["payee"] or tx["description"]).lower()))
         auto_match(conn, [recurring_id])
 
 
+def _transaction(conn, tx_id: str):
+    return conn.execute(select(Transaction).where(Transaction.id == tx_id)).fetchone()
+
+
 def create_from_transaction(conn, tx_id: str, frequency: str = "monthly") -> int:
-    tx = conn.execute("SELECT * FROM transactions WHERE id=?", (tx_id,)).fetchone()
+    tx = _transaction(conn, tx_id)
     if not tx:
         raise ValueError("Transaction not found")
     name = tx["payee"] or tx["description"] or "Recurring item"
-    cur = conn.execute(
-        "INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match, amount_mode) VALUES (?,?,?,?,?,?,?)",
-        (name, tx["account_id"], tx["amount"], frequency, tx["posted"], name.lower(), "fixed"),
-    )
-    rid = cur.lastrowid
-    conn.execute("UPDATE transactions SET recurring_id=? WHERE id=?", (rid, tx_id))
+    rid = conn.execute(insert(Recurring).values(
+        name=name, account_id=tx["account_id"], amount=tx["amount"], frequency=frequency, anchor_date=tx["posted"],
+        match=name.lower(), amount_mode="fixed")).lastrowid
+    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=rid))
     auto_match(conn, [rid])
     return rid
 
 
 def matched(conn, recurring_id: int, limit: int = 12) -> list[dict]:
+    t = Transaction
     return db.rows(conn.execute(
-        "SELECT id, posted, amount, description, pending, category FROM transactions WHERE recurring_id=? ORDER BY posted DESC LIMIT ?",
-        (recurring_id, limit),
-    ))
+        select(t.id, t.posted, t.amount, t.description, t.pending, t.category)
+        .where(t.recurring_id == recurring_id).order_by(t.posted.desc()).limit(limit)))
+
+
+def with_account_name():
+    """Every recurring item's columns plus its account's name (account_name; None if the account is gone)."""
+    return (select(Recurring, db.account_label_expr().label("account_name"))
+            .outerjoin(Account, Account.id == Recurring.account_id))
 
 
 def expected_amount(item: dict, history: list[dict]) -> float:
@@ -129,19 +137,18 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     from . import forecast   # forecast imports this module
 
     today = today or date.today()
-    dismissed = {r["key"] for r in conn.execute("SELECT key FROM recurring_dismissed")}
+    dismissed = set(conn.execute(select(RecurringDismissed.key)).scalars())
     out = []
-    for item in db.rows(conn.execute(
-            "SELECT r.*, " + db.label_sql("a") + " AS account_name FROM recurring r "
-            "LEFT JOIN accounts a ON a.id=r.account_id WHERE r.active=1")):
+    t = Transaction
+    for item in db.rows(conn.execute(with_account_name().where(Recurring.active == 1))):
         window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
-        first_tx = conn.execute("SELECT MIN(posted) FROM transactions WHERE account_id=?", (item["account_id"],)).fetchone()[0]
+        first_tx = conn.execute(select(func.min(t.posted)).where(t.account_id == item["account_id"])).scalar()
         if not first_tx:
             continue
         start = max(today - timedelta(days=lookback), date.fromisoformat(item["anchor_date"]) - timedelta(days=1),
                     date.fromisoformat(first_tx) + timedelta(days=window))
-        hist = [t["posted"] for t in conn.execute(
-            "SELECT posted FROM transactions WHERE recurring_id=? AND posted>=?", (item["id"], (start - timedelta(days=40)).isoformat()))]
+        hist = conn.execute(select(t.posted).where(t.recurring_id == item["id"],
+                                                   t.posted >= (start - timedelta(days=40)).isoformat())).scalars()
         for occ in forecast.occurrences(item, start, today - timedelta(days=window + 1)):
             key = f"rec:{item['id']}:{occ.isoformat()}"
             if key in dismissed:
@@ -157,4 +164,4 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
 
 
 def dismiss(conn, key: str) -> None:
-    conn.execute("INSERT INTO recurring_dismissed(key) VALUES (?) ON CONFLICT(key) DO NOTHING", (key,))
+    db.insert_ignore(conn, RecurringDismissed, {"key": key}, key=["key"])
