@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 
+import sqlalchemy as sa
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
@@ -75,7 +76,7 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0018")
         with db.engine(self.path).begin() as c:
-            self.assertNotIn("portal_only", {r[1] for r in c.exec_driver_sql("PRAGMA table_info(churn_rates)")})
+            self.assertNotIn("portal_only", {col["name"] for col in sa.inspect(c).get_columns("churn_rates")})
             c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on, currency, annual_fee) "
                               "VALUES (1, 'Alex', 'citi', 'AAdvantage Platinum', '2025-11-01', 'airline', 99)")
             c.exec_driver_sql("INSERT INTO churn_rates(card_id, category, multiplier) VALUES (1, 'Travel', 2), (1, 'Gas', 2)")
