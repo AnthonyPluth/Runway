@@ -299,7 +299,7 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
         # could talk it into hiding a charge, so these always wait for you in Review.
         hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
         spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
-        for group, (cat, conf) in zip(groups, answers):
+        for group, (cat, conf) in zip(groups, answers, strict=True):
             for t in group:
                 if cat is None:
                     conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
@@ -402,7 +402,7 @@ def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[d
     conn.commit()
     answers = ask_model(conn, groups, caller, allow_new=True, purpose="review")
     out = []
-    for g, (cat, conf, proposal) in zip(groups, answers):
+    for g, (cat, conf, proposal) in zip(groups, answers, strict=True):
         out.append({
             "merchant": g[0]["payee"] or g[0]["description"],
             "direction": "in" if g[0]["amount"] > 0 else "out",
