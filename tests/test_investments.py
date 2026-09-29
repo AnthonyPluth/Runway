@@ -370,6 +370,23 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM price_meta").fetchone()[0], 0)
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1))["fetched"], ["VTI"])   # tried again next time
 
+    def test_a_ticker_that_stops_answering_keeps_what_was_known(self):
+        from unittest import mock
+        good = ([("2026-09-21", 10.0, 9.5), ("2026-09-22", 11.0, 10.5)], [("2026-03-02", 2.0)], {"type": "ETF", "name": "Fund"})
+        with mock.patch.object(prices, "fetch", return_value=good):
+            prices.refresh(self.c, ["ABC"], date(2026, 1, 1))
+        again = ([("2026-09-22", 12.0, 11.5)], [("2026-03-02", 2.0)], {"type": None, "name": None})
+        with mock.patch.object(prices, "fetch", return_value=again):   # new closes replace old ones; no name this time
+            prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)
+        meta = dict(self.c.execute("SELECT ok, splits, instrument_type, long_name FROM price_meta WHERE ticker='ABC'").fetchone())
+        self.assertEqual(meta, {"ok": 1, "splits": "[[\"2026-03-02\", 2.0]]", "instrument_type": "ETF", "long_name": ""})
+        with mock.patch.object(prices, "fetch", return_value=([], [], {})):   # nothing back: splits and type are kept
+            self.assertEqual(prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)["failed"], ["ABC"])
+        meta = dict(self.c.execute("SELECT ok, splits, instrument_type, long_name FROM price_meta WHERE ticker='ABC'").fetchone())
+        self.assertEqual(meta, {"ok": 0, "splits": "[[\"2026-03-02\", 2.0]]", "instrument_type": "ETF", "long_name": ""})
+        rows = [tuple(r) for r in self.c.execute("SELECT date, close, adjclose FROM prices WHERE ticker='ABC' ORDER BY date")]
+        self.assertEqual(rows, [("2026-09-21", 10.0, 9.5), ("2026-09-22", 12.0, 11.5)])
+
 
 def q(price, t=1000, open_=True):
     return {"price": price, "prev_close": 100.0, "time": t, "type": "EQUITY",
