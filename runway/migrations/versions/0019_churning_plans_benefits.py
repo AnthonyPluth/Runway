@@ -17,16 +17,18 @@ down_revision = '0018'
 branch_labels = None
 depends_on = None
 
-CARD_COLUMNS: list[sa.Column] = [
-    sa.Column('portal_name', sa.Text()),
-    sa.Column('plan', sa.Text(), server_default=sa.text("'undecided'")),
-    sa.Column('plan_target', sa.Text()),
-    sa.Column('plan_date', sa.Text()),
-    sa.Column('plan_remind_days', sa.Integer(), server_default=sa.text('14')),
-    sa.Column('plan_done_on', sa.Text()),
-    sa.Column('plan_new_id', sa.Integer()),
-    sa.Column('hide_upcoming', sa.Integer(), server_default=sa.text('0')),
-]
+def card_columns() -> list[sa.Column]:
+    """The columns churn_cards gains (new objects each time: a column belongs to one table)."""
+    return [
+        sa.Column('portal_name', sa.Text()),
+        sa.Column('plan', sa.Text(), server_default=sa.text("'undecided'")),
+        sa.Column('plan_target', sa.Text()),
+        sa.Column('plan_date', sa.Text()),
+        sa.Column('plan_remind_days', sa.Integer(), server_default=sa.text('14')),
+        sa.Column('plan_done_on', sa.Text()),
+        sa.Column('plan_new_id', sa.Integer()),
+        sa.Column('hide_upcoming', sa.Integer(), server_default=sa.text('0')),
+    ]
 
 
 def _columns(table: str) -> set[str]:
@@ -36,9 +38,9 @@ def _columns(table: str) -> set[str]:
 def upgrade() -> None:
     bind = op.get_bind()
     have = _columns('churn_cards')
-    for col in CARD_COLUMNS:
+    for col in card_columns():
         if col.name not in have:
-            op.add_column('churn_cards', col.copy())
+            op.add_column('churn_cards', col)
     if 'kind' not in _columns('churn_currencies'):
         op.add_column('churn_currencies', sa.Column('kind', sa.Text()))
     if 'snooze_until' not in _columns('churn_tasks'):
@@ -55,8 +57,7 @@ def upgrade() -> None:
             old = sa.Table('churn_rates', sa.MetaData(),
                            sa.Column('card_id', sa.Integer(), nullable=False),
                            sa.Column('category', sa.Text(), nullable=False),
-                           sa.Column('multiplier', sa.Float(), nullable=False),
-                           sa.PrimaryKeyConstraint('card_id', 'category'))
+                           sa.Column('multiplier', sa.Float(), nullable=False))   # its key: set below
             with op.batch_alter_table('churn_rates', recreate='always', copy_from=old) as b:
                 b.add_column(sa.Column('portal_only', sa.Integer(), nullable=False, server_default=sa.text('0')))
                 b.create_primary_key('pk_churn_rates', ['card_id', 'category', 'portal_only'])
@@ -112,8 +113,7 @@ def downgrade() -> None:
                        sa.Column('card_id', sa.Integer(), nullable=False),
                        sa.Column('category', sa.Text(), nullable=False),
                        sa.Column('multiplier', sa.Float(), nullable=False),
-                       sa.Column('portal_only', sa.Integer(), nullable=False, server_default=sa.text('0')),
-                       sa.PrimaryKeyConstraint('card_id', 'category', 'portal_only'))
+                       sa.Column('portal_only', sa.Integer(), nullable=False, server_default=sa.text('0')))
         with op.batch_alter_table('churn_rates', recreate='always', copy_from=old) as b:
             b.drop_column('portal_only')
             b.create_primary_key('pk_churn_rates', ['card_id', 'category'])
@@ -122,5 +122,5 @@ def downgrade() -> None:
     with op.batch_alter_table('churn_currencies') as b:
         b.drop_column('kind')
     with op.batch_alter_table('churn_cards') as b:
-        for col in CARD_COLUMNS:
+        for col in card_columns():
             b.drop_column(col.name)
