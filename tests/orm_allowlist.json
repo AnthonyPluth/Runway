@@ -33,6 +33,5 @@
   "runway/server/api/transactions.py": 7,
   "runway/server/handler.py": 1,
   "runway/server/sync.py": 9,
-  "runway/splits.py": 16,
-  "runway/tracked.py": 12
+  "runway/splits.py": 16
 }
