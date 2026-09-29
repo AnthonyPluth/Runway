@@ -319,7 +319,7 @@ poetry run pip install coverage && poetry run coverage run -m unittest discover 
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
-`make check` runs everything CI does before you push: ruff, the Python tests, and the web app's type-check and build
+`make check` runs everything CI does before you push: ruff, the Python tests, and the web app's type-check, ESLint and build
 (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every commit (ruff, trailing
 whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and
 run `pre-commit install` once.
@@ -332,6 +332,7 @@ Node 22:
 cd frontend && npm ci                 # its packages, into frontend/node_modules
 npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
+npm run lint                          # ESLint over it, the browser extension and the service worker (CI runs this)
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 

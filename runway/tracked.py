@@ -122,7 +122,7 @@ def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> 
             pct = db.number(str(r.get("pct") or 0).replace("%", ""))
             val = db.number(str(r.get("value") or 0).replace(",", "").replace("$", ""))
         except ValueError:
-            raise ValueError(f"Check the numbers for {ticker or name}")
+            raise ValueError(f"Check the numbers for {ticker or name}") from None
         if shares < 0 or not 0 <= pct <= 100 or val < 0:
             raise ValueError(f"Check the numbers for {ticker or name}")
         if not ticker and not val:
