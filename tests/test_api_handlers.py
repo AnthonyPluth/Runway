@@ -24,9 +24,15 @@ class HandlerTests(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"RUNWAY_DATA": self.tmp.name})
         env.start()
         self.addCleanup(env.stop)
-        path = os.path.join(self.tmp.name, "runway.db")   # db.session() (the syncs) opens the same one
+        path = os.path.join(self.tmp.name, "runway.db")
         db.init(path)
         self.c = db.connect(path)
+        # The syncs open their own db.session(). Point it at this test's database: on SQLite RUNWAY_DATA already does,
+        # but on Postgres each test's schema is named after its path, and a session without one would find no tables.
+        opened = db.session
+        patch = mock.patch.object(db, "session", lambda p=None: opened(p or path))
+        patch.start()
+        self.addCleanup(patch.stop)
         demo.seed(self.c, TODAY)
 
     def tearDown(self):
@@ -307,6 +313,7 @@ class HandlerTests(unittest.TestCase):
             rp.assert_called_once()
         log = self.one("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1")
         self.assertEqual(tuple(log), (1, "0 new transactions · bank messages: Bank note"))
+
 
 if __name__ == "__main__":
     unittest.main()
