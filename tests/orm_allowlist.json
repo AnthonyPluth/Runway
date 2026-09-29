@@ -23,7 +23,6 @@
   "runway/server/api/investments.py": 7,
   "runway/server/api/merchants.py": 2,
   "runway/server/api/notifications.py": 1,
-  "runway/server/api/recurring.py": 11,
   "runway/server/api/retail.py": 1,
   "runway/server/api/state.py": 13,
   "runway/server/api/transactions.py": 7,
