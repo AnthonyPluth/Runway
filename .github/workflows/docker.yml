@@ -94,13 +94,13 @@ jobs:
       - name: Check dependencies for known vulnerabilities
         if: matrix.database == 'sqlite'
         run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
-      - name: Lint (Python with ruff, JavaScript for syntax errors)
+      - name: Lint (Python with ruff)
         if: matrix.database == 'sqlite'
         run: |
           pipx run "ruff==0.16.9" check .
-          find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
 
-  # The web app (frontend/): type-check it, run its unit tests and make sure it builds.
+  # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
+  # coverage, and make sure it builds.
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -116,6 +116,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Type-check (svelte-check)
         run: npm run check
+      - name: Lint (ESLint, also over extension/ and runway/static/)
+        run: npm run lint
       - name: Unit tests (Vitest), measuring coverage
         run: npm run coverage
       - name: Keep the frontend coverage report
@@ -127,7 +129,8 @@ jobs:
       - run: npm run build
 
   # The README's coverage badges (docs/badges/coverage.svg for the backend, coverage-frontend.svg for the web app):
-  # redrawn from the tests' coverage on main, and committed only when a whole-number percentage changes. The repository is private, so no badge service could read the number.
+  # redrawn from the tests' coverage on main, and committed only when a whole-number percentage changes. The
+  # repository is private, so no badge service could read the numbers.
   # A push made with GITHUB_TOKEN doesn't start another run, so this never loops or cuts a release of its own.
   coverage-badge:
     needs: [test, web]

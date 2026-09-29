@@ -9,8 +9,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, notify, webpush  # noqa: E402
-from tests.test_webpush import PushService, decrypt, receiver  # noqa: E402
+from runway import db, notify, webpush
+from tests.test_webpush import PushService, decrypt, receiver
 
 TODAY = date(2026, 9, 23)
 

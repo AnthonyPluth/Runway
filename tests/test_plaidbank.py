@@ -9,9 +9,11 @@ import unittest
 from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import sqlalchemy.exc
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, forecast, plaid, plaidbank, simplefin  # noqa: E402
+from runway import db, forecast, plaid, plaidbank, simplefin
 
 TODAY = date(2026, 9, 23)
 
@@ -388,7 +390,7 @@ class PlaidBankTests(unittest.TestCase):
 
     def test_one_plaid_account_is_one_of_your_accounts(self):
         self.link()
-        with self.assertRaises(Exception):
+        with self.assertRaises(sqlalchemy.exc.IntegrityError):   # the unique index, on either database
             self.c.execute("UPDATE accounts SET plaid_account_id='p-csp' WHERE id='sf-chk'")
 
     def test_no_write_lock_is_held_while_plaid_answers(self):

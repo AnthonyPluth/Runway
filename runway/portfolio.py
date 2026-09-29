@@ -12,6 +12,7 @@ held the same positions; `estimated_before` marks where that stops.
 from __future__ import annotations
 
 import bisect
+import contextlib
 import re
 import statistics
 from collections import defaultdict
@@ -423,7 +424,7 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
             "missing_prices": sorted(book.missing), "estimated_before": estimated_before}
 
 
-def _snapshot_series(conn, aid: str, dates: list[str], secs: dict, book: "_PriceBook") -> tuple[list[float], list[float], str | None]:
+def _snapshot_series(conn, aid: str, dates: list[str], secs: dict, book: _PriceBook) -> tuple[list[float], list[float], str | None]:
     """Daily value and external flows for an account we only have position snapshots for."""
     rows = db.rows(conn.execute("SELECT * FROM holding_snapshots WHERE account_id=? ORDER BY date", (aid,)))
     if not rows:  # nothing saved yet: treat today's holdings as the only snapshot
@@ -580,10 +581,8 @@ def fire_saved(conn) -> dict:
     for field in FIRE_FIELDS:
         value = db.get_setting(conn, f"fire_{field}")
         if value not in (None, ""):
-            try:
+            with contextlib.suppress(ValueError):
                 out[field] = float(value)
-            except ValueError:
-                pass
     return out
 
 
@@ -593,7 +592,7 @@ def plan_figures(conn, hist: dict, today: date) -> dict:
     flows = hist.get("flows") or []
     dates = hist.get("dates") or []
     cutoff = (today - timedelta(days=365)).isoformat()
-    yearly_savings = sum(f for d, f in zip(dates, flows) if d > cutoff)
+    yearly_savings = sum(f for d, f in zip(dates, flows, strict=True) if d > cutoff)
     computed = {"annual_spending": round(spend * 12, 2), "yearly_savings": round(max(0.0, yearly_savings), 2),
                 "expected_return": 0.05}
     return {**computed, **fire_saved(conn)}

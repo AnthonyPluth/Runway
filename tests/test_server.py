@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, oidc, server  # noqa: E402
+from runway import db, oidc, server
 
 # A throwaway 2048-bit RSA key used only by these tests to sign fake ID tokens.
 N = 0xf0e468c25263ab5b85ed863374cc64adae8284623519e21e7cbf01e2554656a58f8f69140ff8e701322655b598044841a7839a25b81c3737ee8141ee25ba7e6a46706540e49f61b7a321ad1e53d9bf44770558691d32aafb0edb49104ad0e9cc29074e856c22d864d285dbad96d228fb509f00b7d065ba0188d8c511efaee63001347fbe9939df1497b5efaf2e0d54626c6d1b3152397d3737b0e35141e1e58da75badd4f9897236e4d4c9b35ec9a0037c19152f1f7dc2cea916100588f76fd5ad4668da24e037339e9d34ab75ba37b91037a62ba7800df275f48651e231f021d7eb1c48006b016c1daff8d6d40a7446a8209b9666a85e5c04b999c38b3003a1
@@ -75,7 +75,7 @@ class Provider(BaseHTTPRequestHandler):
                   "name": "Anthony", "nonce": grant["nonce"], "iat": now, "exp": now + 300, "groups": grant.get("groups", [])}
         tok = sign(claims)
         if grant.get("tamper"):
-            h, b, s = tok.split(".")
+            h, _b, s = tok.split(".")
             claims["email"] = "attacker@example.com"
             tok = f"{h}.{b64(json.dumps(claims).encode())}.{s}"
         self.reply({"access_token": "at", "token_type": "Bearer", "id_token": tok})
@@ -106,7 +106,7 @@ class OIDCTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.idp.shutdown()
-        for k in list(cls.env) + ["RUNWAY_PUBLIC_URL"]:
+        for k in [*cls.env, "RUNWAY_PUBLIC_URL"]:
             os.environ.pop(k, None)
         cls.tmp.cleanup()
 
@@ -171,7 +171,7 @@ class OIDCTests(unittest.TestCase):
         self.assertEqual(self.req("/api/state", session)[0], 401)
 
     def test_group_membership_is_enough(self):
-        status, loc, ck, _ = self.sign_in(email="partner@example.com", groups=["Finance"])
+        status, _loc, ck, _ = self.sign_in(email="partner@example.com", groups=["Finance"])
         self.assertEqual(status, 302)
         self.assertIn("runway_session", ck)
 
@@ -186,7 +186,7 @@ class OIDCTests(unittest.TestCase):
             self.assertNotIn("runway_session", {k: v for k, v in ck.items() if v})
 
     def test_login_state_cannot_be_replayed(self):
-        status, loc, ck, _ = self.req("/auth/login")
+        _status, loc, ck, _ = self.req("/auth/login")
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query))
         Provider.issued["c1"] = {"nonce": q["nonce"], "challenge": q["code_challenge"], "email": "me@example.com"}
         self.assertEqual(self.req(f"/auth/callback?code=c1&state={q['state']}", {"runway_login": ck["runway_login"]})[0], 302)
