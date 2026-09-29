@@ -3,7 +3,7 @@
 Databases made before then get any missing columns added and are marked as being at this revision (db.migrate).
 
 Revision ID: 0001
-Revises: 
+Revises:
 Create Date: 2026-09-25 14:01:40.310024
 """
 from alembic import op

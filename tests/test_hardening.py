@@ -6,7 +6,6 @@ import gzip
 import json
 import os
 import socket
-import sys
 import tempfile
 import threading
 import time
@@ -16,7 +15,6 @@ import urllib.request
 from datetime import date
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cryptography.fernet import Fernet
 

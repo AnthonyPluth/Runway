@@ -2,7 +2,6 @@ import base64
 import hashlib
 import json
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -11,8 +10,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, oidc, server
 

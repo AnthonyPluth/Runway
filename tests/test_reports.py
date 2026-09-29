@@ -1,10 +1,7 @@
 """Reports: spending over time, merchants, income against spending, and the breakdown."""
 import os
-import sys
 import tempfile
 import unittest
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import categories, db, reports, splits
 

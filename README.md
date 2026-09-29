@@ -320,6 +320,11 @@ poetry run pip install coverage && poetry run coverage run -m unittest discover 
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
+`make check` runs everything CI does before you push: ruff, the Python tests, and the web app's type-check, ESLint,
+tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every
+commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install
+[pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+
 The web app is Svelte 5 + TypeScript in `frontend/` (Tailwind CSS, components in the shadcn-svelte style on Bits UI,
 Lucide icons). Runway serves its build at `/`, so build it once before running Runway from a checkout. It needs
 Node 22:

@@ -2,15 +2,12 @@
 import io
 import json
 import os
-import sys
 import tempfile
 import time
 import unittest
 import urllib.error
 import urllib.parse
 from datetime import date
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import carta, db, equity, networth
 

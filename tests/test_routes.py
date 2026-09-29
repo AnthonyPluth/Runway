@@ -5,15 +5,12 @@ what it's sent (and a route that talks to Plaid or another service answers 502 w
 means a handler crashed on input it should have checked."""
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import db, server
 

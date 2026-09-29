@@ -3,15 +3,12 @@ import gzip
 import json
 import os
 import re
-import sys
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from unittest import mock
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from runway import backup, db, oidc, secretbox, server, simplefin
 from tests.test_web_app import built_app, serving
