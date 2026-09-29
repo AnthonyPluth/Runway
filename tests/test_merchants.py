@@ -76,7 +76,7 @@ class MerchantTests(unittest.TestCase):
     def logo_dev(self, site, token="pk_test123456"):
         return f"https://img.logo.dev/{site}?token={token}&size=64&format=png&theme=dark&fallback=404"
 
-    def test_plaid_logo_first_then_logo_dev_by_website(self):
+    def test_logo_dev_first_then_plaid(self):
         merchants.note(self.c, {"merchant_name": "Target", "merchant_entity_id": "ent-t", "logo_url": "https://plaid.com/t.png"})
         merchants.note(self.c, {"merchant_name": "Joe's Coffee", "merchant_entity_id": "ent-j", "website": "www.JoesCoffee.com"})
         merchants.fetch_logos(self.c, opener=self.opener({"https://plaid.com/t.png": (PNG, "image/png")}))
@@ -102,6 +102,10 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(logos(), {**want, "t2": "/api/merchants/site%3Awalmart.com/logo",
                                    "t3": "/api/merchants/site%3Ajoescoffee.com/logo"})
         self.assertEqual(merchants.logo(self.c, "site:walmart.com"), (PNG, "image/png"))
+        # Once Logo.dev has Target too, its dark-background logo takes the place of Plaid's (opaque, dark on white).
+        self.c.execute("UPDATE merchants SET logo_checked=NULL WHERE id='site:target.com'")
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({self.logo_dev("target.com"): (PNG, "image/png")})), 1)
+        self.assertEqual(logos()["t1"], "/api/merchants/site%3Atarget.com/logo")
 
     def test_a_sync_notes_the_websites_it_has_seen(self):
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Card', 'credit')")

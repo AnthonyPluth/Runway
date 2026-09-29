@@ -360,8 +360,8 @@ def brand_logos(conn, names) -> set[str]:
 
 
 def logo_dev_logos(conn, txs: list[dict]) -> dict[str, str]:
-    """{transaction id: merchant id} for transactions without a Plaid logo: Logo.dev's logo by the merchant's website,
-    else by its name. Ones not fetched yet are noted (and get their logo once a sync has fetched it)."""
+    """{transaction id: merchant id}: Logo.dev's logo by the merchant's website, else by its name. Ones not fetched yet
+    are noted (and get their logo once a sync has fetched it); until then a Plaid logo, if there is one, stands in."""
     if not configured(conn):
         return {}
     sites = sites_for(conn, txs)
@@ -374,16 +374,15 @@ def logo_dev_logos(conn, txs: list[dict]) -> dict[str, str]:
 
 
 def note_sites(conn, days: int = 400) -> None:
-    """Note the last year's merchants that have no Plaid logo (by website, else by name), so a sync fetches their logos
-    from Logo.dev before anyone looks."""
+    """Note the last year's merchants (by website, else by name), so a sync fetches their logos from Logo.dev before
+    anyone looks. Merchants with a Plaid logo too: Logo.dev's dark-background one is shown in its place."""
     if not configured(conn):
         return
     since = (datetime.now() - timedelta(days=days)).date().isoformat()
     t = Transaction
     rows = db.rows(conn.execute(select(t.merchant_id, t.payee, t.description, t.category, (t.amount < 0).label("spend"))
                                 .distinct().where(t.posted >= since)))
-    plaid = {r["id"] for r in conn.execute(select(Merchant.id).where(Merchant.logo.is_not(None), ~_logo_dev()))}
-    txs = [{**r, "id": str(i), "amount": -1 if r["spend"] else 1} for i, r in enumerate(rows) if r["merchant_id"] not in plaid]
+    txs = [{**r, "id": str(i), "amount": -1 if r["spend"] else 1} for i, r in enumerate(rows)]
     sites = sites_for(conn, txs)
     site_logos(conn, sites.values())
     brand_logos(conn, names_for(conn, [t for t in txs if t["id"] not in sites]).values())
