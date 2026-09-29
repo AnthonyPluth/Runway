@@ -17,10 +17,14 @@ import calendar
 import secrets
 from datetime import date
 
+from sqlalchemy import delete, func, select
+
 from . import db
+from .models import EquityCompany, EquityGrant
 
 KINDS = {"iso": "ISO options", "nso": "NSO options", "rsu": "RSUs", "rsa": "Restricted stock", "shares": "Shares"}
 OPTIONS = {"iso", "nso"}
+GRANT_COLUMNS = [c for c in EquityGrant.__table__.c if c.key != "raw"]   # a grant, less what Carta sent
 
 
 class EquityError(ValueError):
@@ -110,12 +114,13 @@ def schedule(g: dict, until: date | None = None) -> list[tuple[str, float]]:
 def overview(conn, today: date | None = None) -> dict:
     """Every company and grant with what it's worth today, and the totals."""
     today = today or date.today()
-    companies = db.rows(conn.execute("SELECT id, name, share_price, price_as_of, in_networth, source, updated "
-                                     "FROM equity_companies ORDER BY name"))
-    grants = db.rows(conn.execute("SELECT * FROM equity_grants ORDER BY COALESCE(granted_on, vest_start), id"))
+    companies = db.rows(conn.execute(
+        select(EquityCompany.id, EquityCompany.name, EquityCompany.share_price, EquityCompany.price_as_of,
+               EquityCompany.in_networth, EquityCompany.source, EquityCompany.updated).order_by(EquityCompany.name)))
+    grants = db.rows(conn.execute(
+        select(*GRANT_COLUMNS).order_by(func.coalesce(EquityGrant.granted_on, EquityGrant.vest_start), EquityGrant.id)))
     by_company: dict[str, list] = {}
     for g in grants:
-        g.pop("raw", None)
         by_company.setdefault(g["company_id"], []).append(g)
     totals = {"vested_value": 0.0, "unvested_value": 0.0, "in_networth": 0.0}
     for c in companies:
@@ -186,19 +191,19 @@ def save_company(conn, body: dict, cid: str | None = None) -> str:
         fields["in_networth"] = 1 if body.get("in_networth") else 0
     if cid is None:
         cid = "m" + secrets.token_hex(4)
-        cols = ["id", *fields]
-        conn.execute(f"INSERT INTO equity_companies({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", (cid, *fields.values()))
+        conn.orm.add(EquityCompany(id=cid, **fields))   # written at the next query or the commit
         return cid
-    if not conn.execute("SELECT 1 FROM equity_companies WHERE id=?", (cid,)).fetchone():
+    company = conn.orm.get(EquityCompany, cid)
+    if company is None:
         raise EquityError("Company not found")
-    if fields:
-        conn.execute(f"UPDATE equity_companies SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), cid))
+    for k, v in fields.items():
+        setattr(company, k, v)
     return cid
 
 
 def remove_company(conn, cid: str) -> None:
-    conn.execute("DELETE FROM equity_grants WHERE company_id=?", (cid,))
-    conn.execute("DELETE FROM equity_companies WHERE id=?", (cid,))
+    conn.execute(delete(EquityGrant).where(EquityGrant.company_id == cid))
+    conn.execute(delete(EquityCompany).where(EquityCompany.id == cid))
 
 
 def clean_grant(body: dict) -> dict:
@@ -230,19 +235,21 @@ def clean_grant(body: dict) -> dict:
 
 
 def save_grant(conn, company_id: str, body: dict, gid: str | None = None) -> str:
-    if not conn.execute("SELECT 1 FROM equity_companies WHERE id=?", (company_id,)).fetchone():
+    if not conn.execute(select(EquityCompany.id).where(EquityCompany.id == company_id)).fetchone():
         raise EquityError("Company not found")
     g = clean_grant(body)
     if gid is None:
         gid = "g" + secrets.token_hex(5)
-        cols = ["id", "company_id", *g]
-        conn.execute(f"INSERT INTO equity_grants({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", (gid, company_id, *g.values()))
+        conn.orm.add(EquityGrant(id=gid, company_id=company_id, **g))
         return gid
-    if not conn.execute("SELECT 1 FROM equity_grants WHERE id=?", (gid,)).fetchone():
+    grant = conn.orm.get(EquityGrant, gid)
+    if grant is None:
         raise EquityError("Grant not found")
-    conn.execute(f"UPDATE equity_grants SET {', '.join(f'{k}=?' for k in g)}, vested_reported=NULL WHERE id=?", (*g.values(), gid))
+    for k, v in g.items():
+        setattr(grant, k, v)
+    grant.vested_reported = None   # you changed it: the schedule counts now, not what Carta last said
     return gid
 
 
 def remove_grant(conn, gid: str) -> None:
-    conn.execute("DELETE FROM equity_grants WHERE id=?", (gid,))
+    conn.execute(delete(EquityGrant).where(EquityGrant.id == gid))

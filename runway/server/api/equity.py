@@ -4,7 +4,10 @@ from __future__ import annotations
 import os
 import urllib.parse
 
+from sqlalchemy import select
+
 from ... import carta, equity
+from ...models import EquityGrant
 from ..common import ApiError, host_allowed
 
 
@@ -48,7 +51,7 @@ def api_equity_grant_add(conn, _q, body, cid):
 
 
 def api_equity_grant_update(conn, _q, body, gid):
-    row = conn.execute("SELECT company_id FROM equity_grants WHERE id=?", (gid,)).fetchone()
+    row = conn.execute(select(EquityGrant.company_id).where(EquityGrant.id == gid)).fetchone()
     if not row:
         raise ApiError("Grant not found", 404)
     return {"id": _equity(equity.save_grant, conn, row["company_id"], body, gid)}
