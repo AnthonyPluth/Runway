@@ -448,9 +448,13 @@ def overview(conn, today: date, people: list[str] | None = None) -> dict:
             "upcoming": soon, "rewards": rewards(s), "tasks": s["tasks"], "bank": bank, "bank_income": bank_income,
             "currencies": list(s["values"].values()),
             "issuers": [{"key": k, "name": v["name"], "rule": v["rule"]} for k, v in ISSUERS.items()],
-            "accounts": db.rows(conn.execute(
-                select(Account.id, db.account_label_expr().label("name"), Account.owner)
-                .where(Account.kind == "credit").order_by(Account.hidden, db.account_label_expr())))}
+            "accounts": _accounts(conn, ["credit"]), "bank_accounts": _accounts(conn, ["checking", "savings"])}
+
+
+def _accounts(conn, kinds: list[str]) -> list[dict]:
+    """Runway accounts of these kinds, to link a card or a bank bonus to (hidden ones last)."""
+    return db.rows(conn.execute(select(Account.id, db.account_label_expr().label("name"), Account.owner)
+                                .where(Account.kind.in_(kinds)).order_by(Account.hidden, db.account_label_expr())))
 
 
 def best(conn, today: date, category: str | None, owner: str | None = None, amount: float | None = None) -> list[dict]:

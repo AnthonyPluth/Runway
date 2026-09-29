@@ -5,6 +5,7 @@ import type { AppState } from "./types";
 import { toast } from "svelte-sonner";
 import ChartColumn from "@lucide/svelte/icons/chart-column";
 import ChartPie from "@lucide/svelte/icons/chart-pie";
+import CreditCard from "@lucide/svelte/icons/credit-card";
 import House from "@lucide/svelte/icons/house";
 import Landmark from "@lucide/svelte/icons/landmark";
 import List from "@lucide/svelte/icons/list";
@@ -23,6 +24,7 @@ export const MAIN_NAV: NavItem[] = [
 export const MONEY_NAV: NavItem[] = [
   { page: "investments", label: "Investments", icon: TrendingUp },
   { page: "networth", label: "Net worth", icon: Landmark },
+  { page: "churning", label: "Churning", icon: CreditCard },
 ];
 
 /** The page to show as current: Review is a tab of Transactions. */
