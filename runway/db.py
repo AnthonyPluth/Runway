@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, inspect
+from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, insert, inspect, select, update
 from sqlalchemy.dialects import postgresql as pg_dialect
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import Engine
@@ -30,6 +30,7 @@ from sqlalchemy.sql.expression import FunctionElement
 
 from . import schema, secretbox
 from . import settings_keys as sk
+from .models import Account, Category, Setting
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
@@ -414,9 +415,7 @@ def _instr_postgres(element, compiler, **kw):
 def account_label_expr(a=None):
     """account_label as a SQLAlchemy expression, for `a` (models.Account, or an aliased(Account)); label it yourself:
     `select(Account.id, db.account_label_expr().label("name"))`."""
-    if a is None:
-        from .models import Account
-        a = Account
+    a = Account if a is None else a
     name = func.coalesce(a.display_name, a.name)
     return name + case((and_(a.owner.is_not(None), a.owner != "", instr(func.lower(name), func.lower(a.owner)) == 0),
                         " (" + a.owner + ")"), else_="")
@@ -483,13 +482,11 @@ def init(path: str | None = None) -> None:
     with session(path) as conn:
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.
         if not get_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF):
-            conn.execute("UPDATE accounts SET daily_spend=0")
+            conn.execute(update(Account).values(daily_spend=0))
             set_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF, "1")
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
-        if conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0] == 0:
-            conn.executemany(
-                "INSERT INTO categories(name, is_transfer, is_income) VALUES (?,?,?)", DEFAULT_CATEGORIES
-            )
+        if conn.execute(select(func.count()).select_from(Category)).fetchone()[0] == 0:
+            conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])
 
 
 # Categories the app itself relies on; they can't be renamed or removed.
@@ -510,7 +507,7 @@ def number(value) -> float:
 
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
-    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    row = conn.execute(select(Setting.value).where(Setting.key == key)).fetchone()
     value = row["value"] if row and row["value"] is not None else None
     if value is not None and key in secretbox.SECRET_SETTINGS:
         try:
@@ -524,10 +521,7 @@ def get_setting(conn, key: str, default: str | None = None) -> str | None:
 def set_setting(conn, key: str, value: str | None) -> None:
     if value is not None and key in secretbox.SECRET_SETTINGS:
         value = secretbox.encrypt(value)   # secrets are stored encrypted (runway/secretbox.py)
-    conn.execute(
-        "INSERT INTO settings(key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        (key, value),
-    )
+    upsert(conn, Setting, {"key": key, "value": value}, key=["key"])
 
 
 def account_label(a) -> str:
