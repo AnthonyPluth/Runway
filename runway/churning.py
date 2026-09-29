@@ -683,8 +683,10 @@ def save_task(conn, body: dict, task_id: int | None = None) -> int:
         fields["done"] = 1 if body.get("done") in (True, 1, "1", "true", "on") else 0
     if new:
         return int(conn.execute(insert(ChurnTask).values(**fields)).lastrowid)
-    if not conn.execute(update(ChurnTask).where(ChurnTask.id == task_id).values(**fields)).rowcount:
+    if not conn.execute(select(ChurnTask.id).where(ChurnTask.id == task_id)).fetchone():
         raise ChurnError("To-do not found")
+    if fields:
+        conn.execute(update(ChurnTask).where(ChurnTask.id == task_id).values(**fields))
     return int(task_id)  # type: ignore[arg-type]
 
 
