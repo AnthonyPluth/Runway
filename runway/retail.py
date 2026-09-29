@@ -33,9 +33,11 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from dateutil import parser as dateparser
+from sqlalchemy import case, delete, func, insert, select, update
 
 from . import categorize, db, splits
 from . import settings_keys as sk
+from .models import Account, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 
 RETAILERS = ("amazon", "target")
 NAMES = {"amazon": "Amazon", "target": "Target"}
@@ -126,44 +128,40 @@ def check_token(conn, authorization: str | None) -> bool:
 def _save_order(conn, retailer: str, number: str, **fields) -> str:
     oid = order_key(retailer, number)
     fields = {k: v for k, v in fields.items() if v is not None}
-    if conn.execute("SELECT 1 FROM retail_orders WHERE id=?", (oid,)).fetchone():
+    if conn.execute(select(RetailOrder.id).where(RetailOrder.id == oid)).fetchone():
         if fields:
-            sets = ", ".join(f"{k}=?" for k in fields)
-            conn.execute(f"UPDATE retail_orders SET {sets}, updated=? WHERE id=?",
-                         (*fields.values(), datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), oid))
+            conn.execute(update(RetailOrder).where(RetailOrder.id == oid)
+                         .values(**fields, updated=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
     else:
-        cols = ["id", "retailer", "order_number", *fields]
-        conn.execute(f"INSERT INTO retail_orders({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                     (oid, retailer, number, *fields.values()))
+        conn.execute(insert(RetailOrder).values(id=oid, retailer=retailer, order_number=number, **fields))
     return oid
 
 
 def _save_items(conn, oid: str, items: list[dict]) -> None:
     """Replace an order's items, keeping the category of any item you had already set by hand."""
+    i = RetailItem
     kept = {item_key(r["title"]): (r["category"], r["category_source"], r["confidence"])
-            for r in conn.execute("SELECT title, category, category_source, confidence FROM retail_items "
-                                  "WHERE order_id=? AND category_source IS NOT NULL", (oid,))}
-    conn.execute("DELETE FROM retail_items WHERE order_id=?", (oid,))
-    for i, it in enumerate(items):
+            for r in conn.execute(select(i.title, i.category, i.category_source, i.confidence)
+                                  .where(i.order_id == oid, i.category_source.is_not(None)))}
+    conn.execute(delete(RetailItem).where(RetailItem.order_id == oid))
+    for n, it in enumerate(items):
         cat, src, conf = kept.get(item_key(it["title"]), (None, None, None))
-        conn.execute("INSERT INTO retail_items(order_id, position, title, quantity, amount, department, category, "
-                     "category_source, confidence) VALUES (?,?,?,?,?,?,?,?,?)",
-                     (oid, i, it["title"], it.get("quantity") or 1, round(it["amount"], 2), it.get("department"),
-                      cat, src, conf))
+        conn.execute(insert(RetailItem).values(order_id=oid, position=n, title=it["title"], quantity=it.get("quantity") or 1,
+                                               amount=round(it["amount"], 2), department=it.get("department"),
+                                               category=cat, category_source=src, confidence=conf))
 
 
 def _save_charge(conn, cid: str, oid: str, day: str, amount: float, payment: str | None) -> None:
-    conn.execute(
-        "INSERT INTO retail_charges(id, order_id, date, amount, payment) VALUES (?,?,?,?,?) "
-        "ON CONFLICT(id) DO UPDATE SET date=excluded.date, amount=excluded.amount, payment=excluded.payment",
-        (cid, oid, day, round(amount, 2), payment))
+    db.upsert(conn, RetailCharge, {"id": cid, "order_id": oid, "date": day, "amount": round(amount, 2), "payment": payment},
+              key=["id"], update=["date", "amount", "payment"])
 
 
 def _need(conn, retailer: str, numbers) -> list[str]:
     """Which of these orders still need their details read."""
     out = []
     for n in dict.fromkeys(numbers):
-        r = conn.execute("SELECT details, attempts FROM retail_orders WHERE id=?", (order_key(retailer, n),)).fetchone()
+        r = conn.execute(select(RetailOrder.details, RetailOrder.attempts)
+                         .where(RetailOrder.id == order_key(retailer, n))).fetchone()
         if r and not r["details"] and (r["attempts"] or 0) < MAX_ATTEMPTS:
             out.append(n)
     return out
@@ -179,9 +177,11 @@ def since(conn, retailer: str) -> str:
     # Back far enough for orders whose items are still to be read (an import that couldn't read them, say), so
     # they're listed again and their details asked for. An Amazon order only learns when it was placed from its
     # details, so until then its first charge stands in.
-    r = conn.execute("SELECT MIN(COALESCE(o.placed, (SELECT MIN(c.date) FROM retail_charges c WHERE c.order_id=o.id))) "
-                     "AS placed FROM retail_orders o WHERE o.retailer=? AND COALESCE(o.details, 0)=0 "
-                     "AND COALESCE(o.attempts, 0) < ?", (retailer, MAX_ATTEMPTS)).fetchone()
+    o = RetailOrder
+    first_charge = select(func.min(RetailCharge.date)).where(RetailCharge.order_id == o.id).scalar_subquery()
+    r = conn.execute(select(func.min(func.coalesce(o.placed, first_charge)).label("placed"))
+                     .where(o.retailer == retailer, func.coalesce(o.details, 0) == 0,
+                            func.coalesce(o.attempts, 0) < MAX_ATTEMPTS)).fetchone()
     if r and r["placed"] and r["placed"] < start.isoformat():
         return r["placed"]
     return start.isoformat()
@@ -271,7 +271,8 @@ def _tried(conn, oid: str, final: bool) -> dict:
     """An order's details couldn't be read. Only the extension's last try at it in an import counts towards giving
     up on it, so one import (reading an order more than one way) uses at most one of its tries."""
     if final:
-        conn.execute("UPDATE retail_orders SET attempts=COALESCE(attempts, 0)+1 WHERE id=?", (oid,))
+        conn.execute(update(RetailOrder).where(RetailOrder.id == oid)
+                     .values(attempts=func.coalesce(RetailOrder.attempts, 0) + 1))
     return {"read": False}
 
 
@@ -554,18 +555,19 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
     category."""
     caller = caller or categorize.call_llm
     counts = {"memory": 0, "ai": 0, "department": 0, "left": 0}
-    memory = {r["key"]: r["category"] for r in conn.execute("SELECT key, category FROM retail_item_memory")}
-    have = {r["name"] for r in conn.execute("SELECT name FROM categories")}
-    spend = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=0 AND is_income=0")}
+    memory = {r["key"]: r["category"] for r in conn.execute(select(RetailItemMemory.key, RetailItemMemory.category))}
+    have = {r["name"] for r in conn.execute(select(Category.name))}
+    spend = {r["name"] for r in conn.execute(select(Category.name).where(Category.is_transfer == 0, Category.is_income == 0))}
+    i, o = RetailItem, RetailOrder
     todo = db.rows(conn.execute(
-        "SELECT i.id, i.title, i.amount, i.department, o.retailer FROM retail_items i "
-        "JOIN retail_orders o ON o.id=i.order_id WHERE i.category_source IS NULL ORDER BY i.id"))
+        select(i.id, i.title, i.amount, i.department, o.retailer).join(o, o.id == i.order_id)
+        .where(i.category_source.is_(None)).order_by(i.id)))
     left = []
     for it in todo:
         cat = memory.get(item_key(it["title"]))
         if cat in have:
-            conn.execute("UPDATE retail_items SET category=?, category_source='memory', confidence=1 WHERE id=?",
-                         (cat, it["id"]))
+            conn.execute(update(RetailItem).where(RetailItem.id == it["id"])
+                         .values(category=cat, category_source="memory", confidence=1))
             counts["memory"] += 1
         else:
             left.append(it)
@@ -578,8 +580,8 @@ def categorize_items(conn, use_ai: bool = True, caller=None) -> dict:
             continue
         cat = _department_category(it["department"], have)
         if cat:
-            conn.execute("UPDATE retail_items SET category=?, category_source='department', confidence=0.6 WHERE id=?",
-                         (cat, it["id"]))
+            conn.execute(update(RetailItem).where(RetailItem.id == it["id"])
+                         .values(category=cat, category_source="department", confidence=0.6))
             counts["department"] += 1
         else:
             counts["left"] += 1
@@ -594,7 +596,8 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
     cats = sorted(spend)
     subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
     examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
-        "SELECT title, category FROM retail_items WHERE category_source='manual' ORDER BY id DESC LIMIT 40")]
+        select(RetailItem.title, RetailItem.category).where(RetailItem.category_source == "manual")
+        .order_by(RetailItem.id.desc()).limit(40))]
     names = " and ".join(sorted({NAMES.get(it["retailer"], it["retailer"]) for it in left}))
     conn.commit()   # don't hold the database while the model thinks
     done = 0
@@ -616,8 +619,8 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
         for i, it in enumerate(batch):
             cat, conf = answers.get(i, (None, 0.0))
             if cat:
-                conn.execute("UPDATE retail_items SET category=?, category_source='ai', confidence=? "
-                             "WHERE id=? AND category_source IS NULL", (cat, conf, it["id"]))
+                conn.execute(update(RetailItem).where(RetailItem.id == it["id"], RetailItem.category_source.is_(None))
+                             .values(category=cat, category_source="ai", confidence=conf))
                 done += 1
                 it["done"] = True
         conn.commit()
@@ -627,26 +630,25 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
 def set_item_category(conn, item_id: int, category: str, remember: bool = True) -> dict:
     """You picked a category for an item: remember it for the same item in other orders, and re-split the
     transactions it's in."""
-    if not conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone():
+    if not conn.execute(select(Category.name).where(Category.name == category)).fetchone():
         raise RetailError(f"Unknown category: {category}")
-    it = conn.execute("SELECT id, order_id, title FROM retail_items WHERE id=?", (item_id,)).fetchone()
+    i = RetailItem
+    it = conn.execute(select(i.id, i.order_id, i.title).where(i.id == item_id)).fetchone()
     if not it:
         raise RetailError("Item not found")
-    conn.execute("UPDATE retail_items SET category=?, category_source='manual', confidence=1 WHERE id=?", (category, item_id))
+    conn.execute(update(i).where(i.id == item_id).values(category=category, category_source="manual", confidence=1))
     orders = {it["order_id"]}
     if remember and item_key(it["title"]):
         key = item_key(it["title"])
-        conn.execute("INSERT INTO retail_item_memory(key, category) VALUES (?,?) "
-                     "ON CONFLICT(key) DO UPDATE SET category=excluded.category", (key, category))
-        for r in conn.execute("SELECT id, order_id, title FROM retail_items WHERE id<>? AND "
-                              "COALESCE(category_source, '') <> 'manual'", (item_id,)).fetchall():
+        db.upsert(conn, RetailItemMemory, {"key": key, "category": category}, key=["key"])
+        for r in conn.execute(select(i.id, i.order_id, i.title)
+                              .where(i.id != item_id, func.coalesce(i.category_source, "") != "manual")).fetchall():
             if item_key(r["title"]) == key:
-                conn.execute("UPDATE retail_items SET category=?, category_source='memory', confidence=1 WHERE id=?",
-                             (category, r["id"]))
+                conn.execute(update(i).where(i.id == r["id"]).values(category=category, category_source="memory", confidence=1))
                 orders.add(r["order_id"])
-    q = ",".join("?" * len(orders))
     redone = 0
-    for ch in conn.execute(f"SELECT id FROM retail_charges WHERE order_id IN ({q}) AND tx_id IS NOT NULL", list(orders)).fetchall():
+    for ch in conn.execute(select(RetailCharge.id).where(RetailCharge.order_id.in_(list(orders)),
+                                                         RetailCharge.tx_id.is_not(None))).fetchall():
         redone += apply(conn, ch["id"]) in ("split", "category")
     return {"orders": len(orders), "resplit": redone}
 
@@ -654,7 +656,7 @@ def set_item_category(conn, item_id: int, category: str, remember: bool = True) 
 # ------------------------------------------------------------------------------------------------ matching
 
 def _unlink(conn, ch) -> None:
-    conn.execute("UPDATE retail_charges SET tx_id=NULL, match_source=NULL WHERE id=?", (ch["id"],))
+    conn.execute(update(RetailCharge).where(RetailCharge.id == ch["id"]).values(tx_id=None, match_source=None))
 
 
 def match(conn) -> int:
@@ -664,13 +666,12 @@ def match(conn) -> int:
     would give each the other's items, so a transaction that charges of more than one order could be is left for
     you to pick (the order's page lists it)."""
     # A transaction that's gone (a pending one that posted under a new id, say) frees its charge to match again.
-    conn.execute("UPDATE retail_charges SET tx_id=NULL, match_source=NULL WHERE tx_id IS NOT NULL "
-                 "AND tx_id NOT IN (SELECT id FROM transactions)")
-    used = {r["tx_id"] for r in conn.execute("SELECT tx_id FROM retail_charges WHERE tx_id IS NOT NULL")}
+    c, o, t = RetailCharge, RetailOrder, Transaction
+    conn.execute(update(c).where(c.tx_id.is_not(None), c.tx_id.not_in(select(t.id))).values(tx_id=None, match_source=None))
+    used = {r["tx_id"] for r in conn.execute(select(c.tx_id).where(c.tx_id.is_not(None)))}
     charges = db.rows(conn.execute(
-        "SELECT c.id, c.order_id, c.date, c.amount, c.not_tx, o.retailer FROM retail_charges c "
-        "JOIN retail_orders o ON o.id=c.order_id "
-        "WHERE c.tx_id IS NULL ORDER BY c.date, c.id"))
+        select(c.id, c.order_id, c.date, c.amount, c.not_tx, o.retailer).join(o, o.id == c.order_id)
+        .where(c.tx_id.is_(None)).order_by(c.date, c.id)))
     options: dict[str, list[tuple[int, str]]] = {}   # charge -> [(score, tx id)], best first
     wanted: dict[str, set[str]] = {}                  # tx id -> the orders whose charges could be it
     for ch in charges:
@@ -678,15 +679,16 @@ def match(conn) -> int:
         lo, hi = (d - timedelta(days=MATCH_BEFORE)).isoformat(), (d + timedelta(days=MATCH_AFTER)).isoformat()
         rejected = set(json.loads(ch["not_tx"] or "[]"))
         found = []
-        for t in conn.execute("SELECT id, posted, payee, description FROM transactions WHERE amount BETWEEN ? AND ? "
-                              "AND posted BETWEEN ? AND ?", (ch["amount"] - CENT, ch["amount"] + CENT, lo, hi)).fetchall():
-            if t["id"] in used or t["id"] in rejected:
+        for tx in conn.execute(select(t.id, t.posted, t.payee, t.description)
+                               .where(t.amount.between(ch["amount"] - CENT, ch["amount"] + CENT),
+                                      t.posted.between(lo, hi))).fetchall():
+            if tx["id"] in used or tx["id"] in rejected:
                 continue
-            if not MERCHANT[ch["retailer"]].search(f"{t['payee'] or ''} {t['description'] or ''}"):
+            if not MERCHANT[ch["retailer"]].search(f"{tx['payee'] or ''} {tx['description'] or ''}"):
                 continue
-            gap = (date.fromisoformat(t["posted"]) - d).days
-            found.append((gap if gap >= 0 else -gap * 2 + 1, t["id"]))   # posting after the charge is usual; before, less so
-            wanted.setdefault(t["id"], set()).add(ch["order_id"])
+            gap = (date.fromisoformat(tx["posted"]) - d).days
+            found.append((gap if gap >= 0 else -gap * 2 + 1, tx["id"]))   # posting after the charge is usual; before, less so
+            wanted.setdefault(tx["id"], set()).add(ch["order_id"])
         options[ch["id"]] = sorted(found)
     made = 0
     for ch in charges:
@@ -695,7 +697,7 @@ def match(conn) -> int:
             continue   # another order's charge could be the same transaction: yours to pick
         best = next((t for _, t in found if t not in used), None)
         if best:
-            conn.execute("UPDATE retail_charges SET tx_id=?, match_source='auto' WHERE id=?", (best, ch["id"]))
+            conn.execute(update(c).where(c.id == ch["id"]).values(tx_id=best, match_source="auto"))
             used.add(best)
             made += 1
     return made
@@ -706,10 +708,10 @@ def match(conn) -> int:
 def _fallback_category(conn, tx) -> str | None:
     """For items nothing categorized: the transaction's own category if it's spending, else Shopping."""
     if tx["category"]:
-        r = conn.execute("SELECT is_transfer, is_income FROM categories WHERE name=?", (tx["category"],)).fetchone()
+        r = conn.execute(select(Category.is_transfer, Category.is_income).where(Category.name == tx["category"])).fetchone()
         if r and not r["is_transfer"] and not r["is_income"]:
             return tx["category"]
-    if conn.execute("SELECT 1 FROM categories WHERE name='Shopping'").fetchone():
+    if conn.execute(select(Category.name).where(Category.name == "Shopping")).fetchone():
         return "Shopping"
     return tx["category"]
 
@@ -797,25 +799,26 @@ def _set_one_category(conn, tx, category: str) -> str:
         splits.clear(conn, tx["id"])
     if tx["category"] == category and tx["category_source"] in ("retail", "manual") and not tx["is_split"]:
         return "same"
-    conn.execute("UPDATE transactions SET category=?, category_source='retail', confidence=1, needs_review=0 "
-                 "WHERE id=?", (category, tx["id"]))
+    conn.execute(update(Transaction).where(Transaction.id == tx["id"])
+                 .values(category=category, category_source="retail", confidence=1, needs_review=0))
     return "category"
 
 
 def apply(conn, charge_id: str, force: bool = False) -> str:
     """Categorize or split a charge's transaction by its order's items. Returns what happened:
     split | category | same | no-items | waiting | unmatched | manual | user-split."""
-    ch = conn.execute("SELECT * FROM retail_charges WHERE id=?", (charge_id,)).fetchone()
+    ch = conn.execute(select(RetailCharge).where(RetailCharge.id == charge_id)).fetchone()
     if not ch or not ch["tx_id"]:
         return "unmatched"
-    tx = conn.execute("SELECT * FROM transactions WHERE id=?", (ch["tx_id"],)).fetchone()
+    tx = conn.execute(select(Transaction).where(Transaction.id == ch["tx_id"])).fetchone()
     if not tx:
         return "unmatched"
     if ch["amount"] > 0:
         return "same"   # refunds keep their category
-    order = conn.execute("SELECT * FROM retail_orders WHERE id=?", (ch["order_id"],)).fetchone()
-    items = db.rows(conn.execute("SELECT title, amount, category FROM retail_items WHERE order_id=? ORDER BY position, id",
-                                 (ch["order_id"],)))
+    order = conn.execute(select(RetailOrder.total).where(RetailOrder.id == ch["order_id"])).fetchone()
+    i = RetailItem
+    items = db.rows(conn.execute(select(i.title, i.amount, i.category).where(i.order_id == ch["order_id"])
+                                 .order_by(i.position, i.id)))
     if not items:
         return "no-items"
     if not any(i["category"] for i in items):
@@ -838,49 +841,48 @@ def apply(conn, charge_id: str, force: bool = False) -> str:
             return "same"
         splits.set_splits(conn, tx["id"], parts)
         if not tx["category"]:
-            conn.execute("UPDATE transactions SET category=? WHERE id=?", (parts[0]["category"], tx["id"]))
+            conn.execute(update(Transaction).where(Transaction.id == tx["id"]).values(category=parts[0]["category"]))
         result, parts_saved = "split", parts
-    conn.execute("UPDATE retail_charges SET applied=? WHERE id=?",
-                 (json.dumps({"parts": parts_saved, "category": parts[0]["category"] if not parts_saved else None,
-                              "prev": prev}), ch["id"]))
+    conn.execute(update(RetailCharge).where(RetailCharge.id == ch["id"]).values(
+        applied=json.dumps({"parts": parts_saved, "category": parts[0]["category"] if not parts_saved else None, "prev": prev})))
     return result
 
 
 def unlink(conn, charge_id: str) -> None:
     """This charge isn't that transaction: undo what Runway did to it and don't pair them again."""
-    ch = conn.execute("SELECT * FROM retail_charges WHERE id=?", (charge_id,)).fetchone()
+    ch = conn.execute(select(RetailCharge).where(RetailCharge.id == charge_id)).fetchone()
     if not ch or not ch["tx_id"]:
         return
     applied = json.loads(ch["applied"]) if ch["applied"] else None
-    tx = conn.execute("SELECT * FROM transactions WHERE id=?", (ch["tx_id"],)).fetchone()
+    tx = conn.execute(select(Transaction).where(Transaction.id == ch["tx_id"])).fetchone()
     if tx and applied:
         ours = _is_ours(conn, tx["id"], applied)
         if ours:
             splits.clear(conn, tx["id"])
         if tx["category_source"] == "retail" or ours:
             prev = applied.get("prev") or {}
-            conn.execute("UPDATE transactions SET category=?, category_source=? WHERE id=?",
-                         (prev.get("category"), prev.get("source"), tx["id"]))
+            conn.execute(update(Transaction).where(Transaction.id == tx["id"])
+                         .values(category=prev.get("category"), category_source=prev.get("source")))
     rejected = set(json.loads(ch["not_tx"] or "[]")) | {ch["tx_id"]}
-    conn.execute("UPDATE retail_charges SET tx_id=NULL, match_source=NULL, applied=NULL, not_tx=? WHERE id=?",
-                 (json.dumps(sorted(rejected)), ch["id"]))
+    conn.execute(update(RetailCharge).where(RetailCharge.id == ch["id"])
+                 .values(tx_id=None, match_source=None, applied=None, not_tx=json.dumps(sorted(rejected))))
 
 
 def link(conn, charge_id: str, tx_id: str) -> str:
     """You said which transaction a charge is."""
-    ch = conn.execute("SELECT * FROM retail_charges WHERE id=?", (charge_id,)).fetchone()
+    ch = conn.execute(select(RetailCharge).where(RetailCharge.id == charge_id)).fetchone()
     if not ch:
         raise RetailError("Charge not found")
-    if not conn.execute("SELECT 1 FROM transactions WHERE id=?", (tx_id,)).fetchone():
+    if not conn.execute(select(Transaction.id).where(Transaction.id == tx_id)).fetchone():
         raise RetailError("Transaction not found")
-    other = conn.execute("SELECT id FROM retail_charges WHERE tx_id=? AND id<>?", (tx_id, charge_id)).fetchone()
+    other = conn.execute(select(RetailCharge.id).where(RetailCharge.tx_id == tx_id, RetailCharge.id != charge_id)).fetchone()
     if other:
         unlink(conn, other["id"])
     if ch["tx_id"] and ch["tx_id"] != tx_id:
         unlink(conn, charge_id)
     rejected = set(json.loads(ch["not_tx"] or "[]")) - {tx_id}
-    conn.execute("UPDATE retail_charges SET tx_id=?, match_source='manual', not_tx=? WHERE id=?",
-                 (tx_id, json.dumps(sorted(rejected)), charge_id))
+    conn.execute(update(RetailCharge).where(RetailCharge.id == charge_id)
+                 .values(tx_id=tx_id, match_source="manual", not_tx=json.dumps(sorted(rejected))))
     return apply(conn, charge_id, force=True)
 
 
@@ -888,7 +890,8 @@ def match_and_apply(conn) -> dict:
     """Pair any new charges with transactions, and split what can be split (after a bank sync, say). No AI calls."""
     made = match(conn)
     out = {"matched": made, "split": 0, "category": 0}
-    for ch in conn.execute("SELECT id FROM retail_charges WHERE tx_id IS NOT NULL AND applied IS NULL").fetchall():
+    for ch in conn.execute(select(RetailCharge.id).where(RetailCharge.tx_id.is_not(None),
+                                                         RetailCharge.applied.is_(None))).fetchall():
         r = apply(conn, ch["id"])
         if r in out:
             out[r] += 1
@@ -918,8 +921,9 @@ def categorize_and_apply(conn, retailer: str, caller=None) -> dict:
     items = categorize_items(conn, caller=caller)
     out = match_and_apply(conn)
     # Items that just got a category change the split of transactions matched earlier, too.
-    for ch in conn.execute("SELECT c.id FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id "
-                           "WHERE c.tx_id IS NOT NULL AND c.applied IS NOT NULL AND o.retailer=?", (retailer,)).fetchall():
+    c, o = RetailCharge, RetailOrder
+    for ch in conn.execute(select(c.id).join(o, o.id == c.order_id)
+                           .where(c.tx_id.is_not(None), c.applied.is_not(None), o.retailer == retailer)).fetchall():
         r = apply(conn, ch["id"])
         if r in ("split", "category"):
             out[r] += 1
@@ -928,7 +932,7 @@ def categorize_and_apply(conn, retailer: str, caller=None) -> dict:
 
 
 def _summarize(conn, retailer: str, out: dict) -> dict:
-    out["orders"] = conn.execute("SELECT COUNT(*) FROM retail_orders WHERE retailer=?", (retailer,)).fetchone()[0]
+    out["orders"] = conn.execute(select(func.count()).select_from(RetailOrder).where(RetailOrder.retailer == retailer)).scalar()
     out["unmatched"] = unmatched_count(conn, retailer)
     db.set_setting(conn, sk.retail_summary(retailer), json.dumps(out))
     return out
@@ -937,46 +941,55 @@ def _summarize(conn, retailer: str, out: dict) -> dict:
 def unmatched_count(conn, retailer: str | None = None) -> int:
     """Charges from the last few months with no transaction (their card may not be in Runway)."""
     cutoff = (date.today() - timedelta(days=FIRST_IMPORT_DAYS)).isoformat()
-    q = ("SELECT COUNT(*) FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id "
-         "WHERE c.tx_id IS NULL AND c.amount < 0 AND c.date >= ? AND c.date <= ?")
-    args = [cutoff, (date.today() - timedelta(days=MATCH_AFTER)).isoformat()]
+    c, o = RetailCharge, RetailOrder
+    q = (select(func.count()).select_from(c).join(o, o.id == c.order_id)
+         .where(c.tx_id.is_(None), c.amount < 0, c.date >= cutoff,
+                c.date <= (date.today() - timedelta(days=MATCH_AFTER)).isoformat()))
     if retailer:
-        q += " AND o.retailer=?"
-        args.append(retailer)
-    return conn.execute(q, args).fetchone()[0]
+        q = q.where(o.retailer == retailer)
+    return conn.execute(q).scalar()
 
 
 # ------------------------------------------------------------------------------------------------ for the app
+
+def _item_count():
+    """How many items an order has, for a query on retail_orders: (SELECT COUNT(*) FROM retail_items ...)."""
+    return (select(func.count()).select_from(RetailItem).where(RetailItem.order_id == RetailOrder.id)
+            .scalar_subquery())
+
 
 def for_transactions(conn, tx_ids: list[str]) -> dict[str, dict]:
     """{tx_id: {order_id, retailer, order_number, items}} for transactions that are store charges (or refunds)."""
     if not tx_ids:
         return {}
+    c, o = RetailCharge, RetailOrder
     out = {}
     for i in range(0, len(tx_ids), 500):
         chunk = tx_ids[i:i + 500]
-        q = ",".join("?" * len(chunk))
         for r in conn.execute(
-                f"SELECT c.tx_id, c.id AS charge_id, o.id, o.retailer, o.order_number, o.channel, "
-                f"(SELECT COUNT(*) FROM retail_items i WHERE i.order_id=o.id) AS items "
-                f"FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id WHERE c.tx_id IN ({q})", chunk):
+                select(c.tx_id, c.id.label("charge_id"), o.id, o.retailer, o.order_number, o.channel,
+                       _item_count().label("items"))
+                .join(o, o.id == c.order_id).where(c.tx_id.in_(chunk))):
             out[r["tx_id"]] = {"order_id": r["id"], "charge_id": r["charge_id"], "retailer": r["retailer"],
                                "order_number": r["order_number"], "channel": r["channel"], "items": r["items"]}
     return out
 
 
 def order_detail(conn, oid: str) -> dict:
-    o = conn.execute("SELECT id, retailer, order_number, channel, placed, total, subtotal, tax, shipping, payment, details "
-                     "FROM retail_orders WHERE id=?", (oid,)).fetchone()
+    ro, i, rc, t = RetailOrder, RetailItem, RetailCharge, Transaction
+    o = conn.execute(select(ro.id, ro.retailer, ro.order_number, ro.channel, ro.placed, ro.total, ro.subtotal, ro.tax,
+                            ro.shipping, ro.payment, ro.details).where(ro.id == oid)).fetchone()
     if not o:
         raise RetailError("Order not found")
     out = dict(o)
-    out["items"] = db.rows(conn.execute("SELECT id, title, quantity, amount, department, category, category_source, confidence "
-                                        "FROM retail_items WHERE order_id=? ORDER BY position, id", (oid,)))
+    out["items"] = db.rows(conn.execute(
+        select(i.id, i.title, i.quantity, i.amount, i.department, i.category, i.category_source, i.confidence)
+        .where(i.order_id == oid).order_by(i.position, i.id)))
     charges = db.rows(conn.execute(
-        "SELECT c.id, c.date, c.amount, c.payment, c.tx_id, c.match_source, c.applied, t.posted, t.payee, t.description, "
-        + db.label_sql("a") + " AS account_name FROM retail_charges c LEFT JOIN transactions t ON t.id=c.tx_id "
-        "LEFT JOIN accounts a ON a.id=t.account_id WHERE c.order_id=? ORDER BY c.date, c.id", (oid,)))
+        select(rc.id, rc.date, rc.amount, rc.payment, rc.tx_id, rc.match_source, rc.applied, t.posted, t.payee, t.description,
+               db.account_label_expr().label("account_name"))
+        .outerjoin(t, t.id == rc.tx_id).outerjoin(Account, Account.id == t.account_id)
+        .where(rc.order_id == oid).order_by(rc.date, rc.id)))
     for c in charges:
         applied = json.loads(c.pop("applied") or "null")
         c["applied"] = ("split" if applied and applied.get("parts") else "category" if applied else None)
@@ -989,15 +1002,17 @@ def order_detail(conn, oid: str) -> dict:
 def candidates(conn, charge_id: str) -> list[dict]:
     """Transactions a charge might be, for picking by hand: same amount within a month, or any from the store near
     the date."""
-    ch = conn.execute("SELECT c.*, o.retailer FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id WHERE c.id=?",
-                      (charge_id,)).fetchone()
+    c, t = RetailCharge, Transaction
+    ch = conn.execute(select(c.date, c.amount, RetailOrder.retailer).join(RetailOrder, RetailOrder.id == c.order_id)
+                      .where(c.id == charge_id)).fetchone()
     if not ch:
         raise RetailError("Charge not found")
     d = date.fromisoformat(ch["date"])
     rows = db.rows(conn.execute(
-        "SELECT t.id, t.posted, t.amount, t.payee, t.description, " + db.label_sql("a") + " AS account_name "
-        "FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE t.posted BETWEEN ? AND ? AND t.amount < 0 "
-        "ORDER BY t.posted", ((d - timedelta(days=10)).isoformat(), (d + timedelta(days=30)).isoformat())))
+        select(t.id, t.posted, t.amount, t.payee, t.description, db.account_label_expr().label("account_name"))
+        .join(Account, Account.id == t.account_id)
+        .where(t.posted.between((d - timedelta(days=10)).isoformat(), (d + timedelta(days=30)).isoformat()), t.amount < 0)
+        .order_by(t.posted)))
     rx = MERCHANT[ch["retailer"]]
     rows = [r for r in rows if abs(r["amount"] - ch["amount"]) < CENT or rx.search(f"{r['payee'] or ''} {r['description'] or ''}")]
     rows.sort(key=lambda r: (abs(r["amount"] - ch["amount"]) >= CENT, abs((date.fromisoformat(r["posted"]) - d).days)))
@@ -1007,19 +1022,20 @@ def candidates(conn, charge_id: str) -> list[dict]:
 def status(conn) -> dict:
     out: dict[str, Any] = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
            "ai": (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1", "stores": {}}
+    c, o = RetailCharge, RetailOrder
     for r in RETAILERS:
         counts = conn.execute(
-            "SELECT COUNT(*) AS orders, SUM(CASE WHEN details=1 THEN 1 ELSE 0 END) AS read FROM retail_orders WHERE retailer=?",
-            (r,)).fetchone()
-        matched = conn.execute("SELECT COUNT(*) FROM retail_charges c JOIN retail_orders o ON o.id=c.order_id "
-                               "WHERE o.retailer=? AND c.tx_id IS NOT NULL", (r,)).fetchone()[0]
+            select(func.count().label("orders"), func.sum(case((o.details == 1, 1), else_=0)).label("read"))
+            .where(o.retailer == r)).fetchone()
+        matched = conn.execute(select(func.count()).select_from(c).join(o, o.id == c.order_id)
+                               .where(o.retailer == r, c.tx_id.is_not(None))).scalar()
         out["stores"][r] = {"name": NAMES[r], "last": db.get_setting(conn, sk.retail_last(r)),
                             "orders": counts["orders"] or 0, "read": counts["read"] or 0, "matched": matched,
                             "unmatched": unmatched_count(conn, r)}
+    def charge_count(*where):
+        return select(func.count()).select_from(c).where(c.order_id == o.id, c.amount < 0, *where).scalar_subquery()
     out["recent"] = db.rows(conn.execute(
-        "SELECT o.id, o.retailer, o.order_number, o.channel, o.placed, o.total, o.details, "
-        "(SELECT COUNT(*) FROM retail_items i WHERE i.order_id=o.id) AS items, "
-        "(SELECT COUNT(*) FROM retail_charges c WHERE c.order_id=o.id AND c.amount < 0) AS charges, "
-        "(SELECT COUNT(*) FROM retail_charges c WHERE c.order_id=o.id AND c.amount < 0 AND c.tx_id IS NOT NULL) AS matched "
-        "FROM retail_orders o ORDER BY COALESCE(o.placed, '9999') DESC, o.id LIMIT 60"))
+        select(o.id, o.retailer, o.order_number, o.channel, o.placed, o.total, o.details, _item_count().label("items"),
+               charge_count().label("charges"), charge_count(c.tx_id.is_not(None)).label("matched"))
+        .order_by(func.coalesce(o.placed, "9999").desc(), o.id).limit(60)))
     return out
