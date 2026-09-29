@@ -12,8 +12,11 @@ import json
 from datetime import date
 from typing import Any
 
+from sqlalchemy import select
+
 from . import db, equity, forecast, networth
 from . import settings_keys as sk
+from .models import Account
 
 MAX_ROWS = 20   # incomes, events or assets: plenty for one household, and a cap on what's stored
 
@@ -135,7 +138,7 @@ def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
     them), and vested company equity."""
     owed = {a["id"]: forecast.owed(a) for a in db.rows(conn.execute(
-        "SELECT id, kind, balance, owed_positive FROM accounts WHERE kind IN ('credit','loan')"))}
+        select(Account.id, Account.kind, Account.balance, Account.owed_positive).where(Account.kind.in_(["credit", "loan"]))))}
     out = []
     for a in networth.assets(conn, today):
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],

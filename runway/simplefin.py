@@ -14,9 +14,12 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, UTC
 
+from sqlalchemy import delete, insert, select, update
+
 from . import db, plaidbank, sfinvest, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
+from .models import Account, Transaction
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
 BACKFILL_DAYS = 180      # history pulled on the first sync
@@ -233,7 +236,7 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     claimed: set = set()
     for acct in payload.get("accounts", []):
         acct_id = str(acct["id"])
-        setup = conn.execute("SELECT provider, provider_since FROM accounts WHERE id=?", (acct_id,)).fetchone()
+        setup = conn.execute(select(Account.provider, Account.provider_since).where(Account.id == acct_id)).fetchone()
         if setup and setup["provider"] == "plaid":
             continue   # this account's balance and transactions come from Plaid
         since = _plaid_overlap_since(conn, acct_id, setup)
@@ -252,7 +255,7 @@ def _plaid_overlap_since(conn, acct_id: str, setup) -> str | None:
     """Just switched back from Plaid: the last few days may already be here from Plaid. The day from which new
     transactions are checked against Plaid's, or None when there's nothing to check."""
     overlap = (setup and setup["provider_since"] and conn.execute(
-        "SELECT 1 FROM transactions WHERE account_id=? AND id LIKE ? LIMIT 1", (acct_id, "%|pl:%")).fetchone())
+        select(Transaction.id).where(Transaction.account_id == acct_id, Transaction.id.like("%|pl:%")).limit(1)).fetchone())
     return (date.fromisoformat(setup["provider_since"]) - timedelta(days=REFRESH_DAYS)).isoformat() if overlap else None
 
 
@@ -263,17 +266,15 @@ def _upsert_account(conn, acct: dict, acct_id: str) -> tuple[str | None, float, 
     balance = _to_float(acct.get("balance")) or 0.0
     available = _to_float(acct.get("available-balance"))
     bal_date = _ts_to_date(acct.get("balance-date")) or date.today().isoformat()
-    existing = conn.execute("SELECT id FROM accounts WHERE id=?", (acct_id,)).fetchone()
+    existing = conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone()
     if existing:
-        conn.execute(
-            "UPDATE accounts SET name=?, org=?, currency=?, balance=?, available=?, balance_date=? WHERE id=?",
-            (name, org, acct.get("currency", "USD"), balance, available, bal_date, acct_id),
-        )
+        conn.execute(update(Account).where(Account.id == acct_id).values(
+            name=name, org=org, currency=acct.get("currency", "USD"), balance=balance, available=available,
+            balance_date=bal_date))
     else:
-        conn.execute(
-            "INSERT INTO accounts(id, name, org, currency, balance, available, balance_date, kind) VALUES (?,?,?,?,?,?,?,?)",
-            (acct_id, name, org, acct.get("currency", "USD"), balance, available, bal_date, guess_kind(name)),
-        )
+        conn.execute(insert(Account).values(
+            id=acct_id, name=name, org=org, currency=acct.get("currency", "USD"), balance=balance, available=available,
+            balance_date=bal_date, kind=guess_kind(name)))
     return org, balance, existing is not None
 
 
@@ -281,20 +282,19 @@ def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
     """Pending items often come back with new ids once they post. Replace this window's pending items wholesale,
     but remember their categories (by description and amount) so the replacements don't go back through review."""
     carried: dict[tuple, list] = {}
+    in_window = (Transaction.account_id == acct_id, Transaction.pending == 1, Transaction.posted >= window_start.isoformat())
     for old in conn.execute(
-        "SELECT id, description, payee, amount, category, category_source, confidence, needs_review, is_split FROM transactions "
-        "WHERE account_id=? AND pending=1 AND posted>=?",
-        (acct_id, window_start.isoformat()),
+        select(Transaction.id, Transaction.description, Transaction.payee, Transaction.amount, Transaction.category,
+               Transaction.category_source, Transaction.confidence, Transaction.needs_review, Transaction.is_split)
+        .where(*in_window)
     ).fetchall():
         if old["category"] or old["is_split"]:
             carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
-    conn.execute(
-        "DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted>=?",
-        (acct_id, window_start.isoformat()),
-    )
+    conn.execute(delete(Transaction).where(*in_window))
     # Older than any window re-read: a hold that dropped off without posting would otherwise stay forever.
-    conn.execute("DELETE FROM transactions WHERE account_id=? AND pending=1 AND posted<?",
-                 (acct_id, (window_start - timedelta(days=STALE_PENDING_DAYS - REFRESH_DAYS)).isoformat()))
+    conn.execute(delete(Transaction).where(
+        Transaction.account_id == acct_id, Transaction.pending == 1,
+        Transaction.posted < (window_start - timedelta(days=STALE_PENDING_DAYS - REFRESH_DAYS)).isoformat()))
     return carried
 
 
@@ -307,12 +307,10 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
     desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
     payee = clean_payee(tx.get("payee") or desc)
     key = f"{acct_id}|{tx['id']}"
-    row = conn.execute("SELECT id, pending, is_split FROM transactions WHERE id=?", (key,)).fetchone()
+    row = conn.execute(select(Transaction.id, Transaction.pending, Transaction.is_split).where(Transaction.id == key)).fetchone()
     if row:
-        conn.execute(
-            "UPDATE transactions SET posted=?, amount=?, description=?, pending=? WHERE id=?",
-            (posted, amount, desc, pending, key),
-        )
+        conn.execute(update(Transaction).where(Transaction.id == key).values(
+            posted=posted, amount=amount, description=desc, pending=pending))
         if row["is_split"]:
             splits.follow_amount(conn, key, amount)
         return None
@@ -321,19 +319,16 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
     prior = carried.get((desc, round(amount, 2)))
     if prior:
         p = prior.pop(0)
-        conn.execute(
-            "INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending, "
-            "category, category_source, confidence, needs_review) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (key, acct_id, posted, amount, desc, p["payee"] or payee, pending,   # a rule may have renamed it
-             p["category"], p["category_source"], p["confidence"], p["needs_review"]),
-        )
+        conn.execute(insert(Transaction).values(
+            id=key, account_id=acct_id, posted=posted, amount=amount, description=desc,
+            payee=p["payee"] or payee, pending=pending,   # a rule may have renamed it
+            category=p["category"], category_source=p["category_source"], confidence=p["confidence"],
+            needs_review=p["needs_review"]))
         if p["is_split"]:
             splits.carry_over(conn, p["id"], key, amount)
         return None
-    conn.execute(
-        "INSERT INTO transactions(id, account_id, posted, amount, description, payee, pending) VALUES (?,?,?,?,?,?,?)",
-        (key, acct_id, posted, amount, desc, payee, pending),
-    )
+    conn.execute(insert(Transaction).values(
+        id=key, account_id=acct_id, posted=posted, amount=amount, description=desc, payee=payee, pending=pending))
     return key
 
 

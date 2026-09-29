@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from datetime import date
 
+from sqlalchemy import func, select
+
 from ... import db, networth, realie
 from ... import settings_keys as sk
+from ...models import Account
 from ..common import ApiError
 
 
@@ -14,8 +17,9 @@ def api_networth(conn, _q, _b):
     for a in out["assets_list"]:   # homes are looked up once a week at most: when the next lookup is allowed
         nxt = realie.next_lookup(a.get("last_lookup"))
         a["next_lookup"] = nxt.isoformat() if nxt and nxt > date.today() else None
+    name = func.coalesce(Account.display_name, Account.name).label("name")
     out["loan_accounts"] = db.rows(conn.execute(
-        "SELECT id, COALESCE(display_name, name) AS name, kind FROM accounts WHERE kind='loan' AND hidden=0 ORDER BY name"))
+        select(Account.id, name, Account.kind).where(Account.kind == "loan", Account.hidden == 0).order_by(name)))
     out["realie"] = {"configured": realie.configured(conn), "used": realie.used_this_month(conn), "limit": realie.monthly_limit()}
     return out
 

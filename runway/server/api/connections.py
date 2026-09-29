@@ -6,8 +6,11 @@ import threading
 import time
 from datetime import date, timedelta
 
+from sqlalchemy import func, select, update
+
 from ... import categorize, db, plaid, plaidbank, recurring, simplefin
 from ... import settings_keys as sk
+from ...models import Account, CardStatement, InvAccount, PlaidAccount, PlaidItem
 from ..common import ApiError
 from ..sync import _inv_lock, _sync_lock, refresh_prices
 
@@ -29,29 +32,34 @@ def api_connect(conn, _q, body):
 
 
 def api_plaid_status(conn, _q, _b):
-    items = db.rows(conn.execute("SELECT item_id, institution_name, env, created_at, last_sync, error, products FROM plaid_items ORDER BY institution_name"))
+    items = db.rows(conn.execute(
+        select(PlaidItem.item_id, PlaidItem.institution_name, PlaidItem.env, PlaidItem.created_at, PlaidItem.last_sync,
+               PlaidItem.error, PlaidItem.products).order_by(PlaidItem.institution_name)))
     for it in items:
         it["bank"] = plaidbank.is_bank_item(it)
         it["products"] = sorted(plaidbank.products(it))
         it["duplicates"] = plaid.duplicates(conn, it["item_id"])
         if it["bank"]:
             it["accounts"] = db.rows(conn.execute(
-                "SELECT p.plaid_account_id AS id, p.name, p.official_name, p.subtype, p.type, p.mask, p.current AS balance, "
-                "p.ignored, a.id AS account_id, " + db.label_sql("a") + " AS account_name, a.provider, "
-                "s.last_statement_date, s.last_statement_balance, s.next_due_date "
-                "FROM plaid_accounts p LEFT JOIN accounts a ON a.plaid_account_id=p.plaid_account_id "
-                "LEFT JOIN card_statements s ON s.plaid_account_id=p.plaid_account_id WHERE p.item_id=? ORDER BY p.type, p.name",
-                (it["item_id"],)))
+                select(PlaidAccount.plaid_account_id.label("id"), PlaidAccount.name, PlaidAccount.official_name, PlaidAccount.subtype,
+                       PlaidAccount.type, PlaidAccount.mask, PlaidAccount.current.label("balance"), PlaidAccount.ignored,
+                       Account.id.label("account_id"), db.account_label_expr().label("account_name"), Account.provider,
+                       CardStatement.last_statement_date, CardStatement.last_statement_balance, CardStatement.next_due_date)
+                .select_from(PlaidAccount)
+                .outerjoin(Account, Account.plaid_account_id == PlaidAccount.plaid_account_id)
+                .outerjoin(CardStatement, CardStatement.plaid_account_id == PlaidAccount.plaid_account_id)
+                .where(PlaidAccount.item_id == it["item_id"]).order_by(PlaidAccount.type, PlaidAccount.name)))
         else:
             it["accounts"] = db.rows(conn.execute(
-                "SELECT id, name, official_name, subtype, mask, balance, hidden, account_id FROM inv_accounts WHERE item_id=? ORDER BY name",
-                (it["item_id"],)))
+                select(InvAccount.id, InvAccount.name, InvAccount.official_name, InvAccount.subtype, InvAccount.mask,
+                       InvAccount.balance, InvAccount.hidden, InvAccount.account_id)
+                .where(InvAccount.item_id == it["item_id"]).order_by(InvAccount.name)))
             it["candidates"] = plaid.investment_candidates(conn, it["item_id"])   # what each account could be
     return {"configured": plaid.configured(conn), "env": db.get_setting(conn, sk.PLAID_ENV, "production"),
             "client_id": db.get_setting(conn, sk.PLAID_CLIENT_ID) or "", "items": items,
             "redirect_uri": plaid.redirect_uri(conn),
             "last_inv_sync": db.get_setting(conn, sk.LAST_INV_SYNC), "syncing": _inv_lock.locked(),
-            "inv_accounts": conn.execute("SELECT COUNT(*) FROM inv_accounts").fetchone()[0],
+            "inv_accounts": conn.execute(select(func.count()).select_from(InvAccount)).scalar(),
             "simplefin_connected": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
             "simplefin_last_sync": db.get_setting(conn, sk.LAST_SYNC_OK),
             "simplefin_seen": list(json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}").values())}
@@ -109,7 +117,7 @@ LINK_SYNC_WAIT = 120   # seconds a new connection waits for a running sync befor
 
 def _item_lock(conn, item_id: str) -> threading.Lock:
     """The sync lock a connection's own sync must hold: the bank sync's, or the investment sync's."""
-    item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+    item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
     return _sync_lock if item and plaidbank.is_bank_item(item) else _inv_lock
 
 
@@ -143,7 +151,7 @@ def _sync_new_item(conn, item_id: str, body: dict) -> dict:
             conn.commit()
             raise ApiError(f"{name} is already connected with these accounts, so nothing was added. To fix a connection, "
                            "use its Sync or Reconnect button instead.", 409)
-        item = conn.execute("SELECT products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        item = conn.execute(select(PlaidItem.products).where(PlaidItem.item_id == item_id)).fetchone()
         if plaidbank.is_bank_item(item):
             n = len(res.pop("new", []))
             return {"ok": True, "item_id": item_id, "bank": True, "new_transactions": n, **res}
@@ -184,7 +192,7 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
 def api_plaid_match(conn, _q, body):
     pid, target = str(body.get("plaid_account_id") or ""), str(body.get("target") or "")
     try:
-        if conn.execute("SELECT 1 FROM inv_accounts WHERE id=? AND source='plaid'", (pid,)).fetchone():
+        if conn.execute(select(InvAccount.id).where(InvAccount.id == pid, InvAccount.source == "plaid")).fetchone():
             return plaid.match_investment(conn, pid, target)
         return plaidbank.match(conn, pid, target)
     except ValueError as e:
@@ -192,5 +200,5 @@ def api_plaid_match(conn, _q, body):
 
 
 def api_inv_account(conn, _q, body, acct_id):
-    conn.execute("UPDATE inv_accounts SET hidden=? WHERE id=?", (1 if body.get("hidden") else 0, acct_id))
+    conn.execute(update(InvAccount).where(InvAccount.id == acct_id).values(hidden=1 if body.get("hidden") else 0))
     return {"ok": True}

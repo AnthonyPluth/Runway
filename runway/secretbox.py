@@ -20,8 +20,10 @@ import threading
 from typing import Literal, TypeGuard, overload
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+from sqlalchemy import select, update
 
 from . import settings_keys
+from .models import PlaidItem, Setting
 
 PREFIX = "enc:v1:"
 KEY_FILE = "secret.key"
@@ -151,23 +153,22 @@ def encrypt_stored(conn) -> int:
     """Encrypt (or re-encrypt with the current key) every stored secret. Runs at start-up; returns how many changed."""
     changed = 0
     keys = sorted(SECRET_SETTINGS)
-    marks = ",".join("?" * len(keys))
-    for r in conn.execute(f"SELECT key, value FROM settings WHERE key IN ({marks})", keys).fetchall():
+    for r in conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(keys))).fetchall():
         try:
             new = reencrypt(r["value"])
         except InvalidToken:
             print(f"Warning: the saved {r['key']} can't be decrypted with the current key; enter it again in Settings.", flush=True)
             continue
         if new != r["value"]:
-            conn.execute("UPDATE settings SET value=? WHERE key=?", (new, r["key"]))
+            conn.execute(update(Setting).where(Setting.key == r["key"]).values(value=new))
             changed += 1
-    for r in conn.execute("SELECT item_id, access_token FROM plaid_items").fetchall():
+    for r in conn.execute(select(PlaidItem.item_id, PlaidItem.access_token)).fetchall():
         try:
             new = reencrypt(r["access_token"])
         except InvalidToken:
             print("Warning: a Plaid connection's access can't be decrypted with the current key; reconnect it.", flush=True)
             continue
         if new != r["access_token"]:
-            conn.execute("UPDATE plaid_items SET access_token=? WHERE item_id=?", (new, r["item_id"]))
+            conn.execute(update(PlaidItem).where(PlaidItem.item_id == r["item_id"]).values(access_token=new))
             changed += 1
     return changed

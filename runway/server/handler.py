@@ -22,10 +22,12 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sqlalchemy.exc
+from sqlalchemy import func, select
 
 from .. import backup, carta, categories, db, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
 from .. import settings_keys as sk
 from . import sync
+from ..models import PlaidItem
 from .common import ApiError, _current, host_allowed, request_ref
 from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
 from .api.investments import live_tickers
@@ -717,7 +719,8 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
         categories.flatten(conn)      # subcategories are one level deep
         plaid.hide_all_duplicates(conn)  # an institution linked through both Plaid and SimpleFIN is counted once
-        for r in conn.execute("SELECT item_id FROM plaid_items WHERE COALESCE(products, 'investments') LIKE '%investments%'").fetchall():
+        for r in conn.execute(select(PlaidItem.item_id)
+                              .where(func.coalesce(PlaidItem.products, "investments").like("%investments%"))).fetchall():
             plaid.update_investment_accounts(conn, r["item_id"])   # investment accounts from Plaid in your accounts
         oidc.backfill_users(conn)        # people who signed in before owners existed
     sync.AUTO_SYNC = auto_sync   # sync_on_visit reads it there
