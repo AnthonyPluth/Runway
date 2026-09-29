@@ -11,15 +11,15 @@ from .. import categorize, db, merchants, monitoring, networth, notify, plaid, p
 from .. import settings_keys as sk
 from .common import ApiError
 
-DAILY_SYNC_HOUR = 6          # the daily sync runs on the first check after this hour (local time)
-PLAID_SYNC_HOUR = 7          # Plaid is asked once a day, on the first sync after this hour (local time; the image's TZ
-                             # is America/Chicago): late enough for overnight ACH, early enough to review in the morning.
-                             # Plaid's quota is small, so opening Runway or pressing Sync doesn't ask it again that day;
-                             # a connection's own Sync button in Settings still does.
+DAILY_SYNC_HOUR = 7          # banks and cards (SimpleFIN and Plaid) sync once a day, on the first check after this hour
+                             # (local time; the image's TZ is America/Chicago): late enough for overnight ACH, early
+                             # enough to review in the morning. Opening Runway only catches up a missed one.
+PLAID_SYNC_HOUR = DAILY_SYNC_HOUR   # Plaid's quota is small, so opening Runway or pressing Sync doesn't ask it again
+                             # that day; a connection's own Sync button in Settings still does.
 PLAID_REFRESH_AT = (6, 30)   # before that sync, Plaid is told to fetch from the banks (Transactions Refresh), so the
                              # sync gets the banks as of now and not as of Plaid's own last visit. Only before
                              # PLAID_SYNC_HOUR: a refresh after the day's sync would be a call for nothing.
-VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
+VISIT_SYNC_MINUTES = 60      # opening Runway refreshes investments (prices) if they're older than this
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
@@ -137,24 +137,25 @@ def _older_than(stamp: str | None, **delta) -> bool:
     return not stamp or datetime.now() - datetime.fromisoformat(stamp) > timedelta(**delta)
 
 
-def daily_due(last: str | None, now: datetime | None = None) -> bool:
-    """Once a day: after DAILY_SYNC_HOUR if the last sync was on an earlier day, or any time it's been 24 hours."""
+def _not_since(hour: int, last: str | None, now: datetime | None) -> bool:
+    """Whether `last` is before the most recent `hour` o'clock (today's, or yesterday's if it isn't that late yet)."""
     now = now or datetime.now()
     if not last:
         return True
-    prev = datetime.fromisoformat(last)
-    return (prev.date() < now.date() and now.hour >= DAILY_SYNC_HOUR) or now - prev > timedelta(hours=24)
+    since = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if now < since:
+        since -= timedelta(days=1)
+    return datetime.fromisoformat(last) < since
+
+
+def daily_due(last: str | None, now: datetime | None = None) -> bool:
+    """Whether the banks haven't synced since the most recent DAILY_SYNC_HOUR."""
+    return _not_since(DAILY_SYNC_HOUR, last, now)
 
 
 def plaid_due(last: str | None, now: datetime | None = None) -> bool:
     """Whether Plaid hasn't been asked since the most recent PLAID_SYNC_HOUR (today's, or yesterday's before it)."""
-    now = now or datetime.now()
-    if not last:
-        return True
-    since = now.replace(hour=PLAID_SYNC_HOUR, minute=0, second=0, microsecond=0)
-    if now < since:
-        since -= timedelta(days=1)
-    return datetime.fromisoformat(last) < since
+    return _not_since(PLAID_SYNC_HOUR, last, now)
 
 
 def plaid_refresh_due(last: str | None, now: datetime | None = None) -> bool:
@@ -200,19 +201,19 @@ def notify_now() -> None:
 
 
 def sync_on_visit() -> dict:
-    """Someone opened Runway: sync in the background if the data is more than VISIT_SYNC_MINUTES old."""
+    """Someone opened Runway: catch up a daily bank sync that was missed (Runway was off at DAILY_SYNC_HOUR, say), and
+    refresh investments if they're more than VISIT_SYNC_MINUTES old."""
     if not AUTO_SYNC:   # --no-sync / RUNWAY_NO_SYNC=1: only when you ask (Settings or the sync buttons)
         return {"started": False}
     with db.session() as conn:
-        # Plaid alone has nothing new until its daily sync is due: a bank sync would only ask SimpleFIN.
-        configured = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)) or (
-            plaid_banks(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC)))
-        bank = configured and _older_than(db.get_setting(conn, sk.LAST_SYNC_OK), minutes=VISIT_SYNC_MINUTES) \
-            and _older_than(db.get_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT), minutes=VISIT_SYNC_MINUTES)
+        # Banks sync once a day: a visit only starts the day's sync if it hasn't happened (at most one try every 3
+        # hours, as in background_sync, so a failing bank isn't asked on every visit).
+        bank = bank_configured(conn) and daily_due(db.get_setting(conn, sk.LAST_SYNC_OK)) \
+            and _older_than(db.get_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT), hours=3)
         has_inv = bool(conn.execute("SELECT 1 FROM inv_accounts").fetchone())
         invest = has_inv and _older_than(db.get_setting(conn, sk.LAST_INV_SYNC), minutes=VISIT_SYNC_MINUTES)
         # Only a sync that starts counts as an attempt: one skipped for a running sync would otherwise put the next
-        # visit's sync off for VISIT_SYNC_MINUTES.
+        # visit's catch-up off for 3 hours.
         start = (bank or invest) and not _sync_lock.locked() and not _inv_lock.locked()
         if start and bank:
             db.set_setting(conn, sk.LAST_AUTO_SYNC_ATTEMPT, datetime.now().isoformat(timespec="seconds"))
@@ -234,7 +235,7 @@ def background_sync() -> None:
                 plaid_bank = plaid_banks(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
                 plaid_inv = plaid.configured(conn) and plaid_due(db.get_setting(conn, sk.LAST_PLAID_INV_SYNC)) and any(
                     "investments" in (r["products"] or "investments") for r in conn.execute("SELECT products FROM plaid_items"))
-            # Don't hammer SimpleFIN after failures: at most one automatic attempt every 3 hours. Plaid's daily sync
+            # Don't hammer the banks after failures: at most one automatic attempt every 3 hours. Plaid's daily sync
             # goes ahead regardless: it's asked at most once a day anyway.
             bank = configured and ((daily_due(last) and _older_than(last_try, hours=3)) or plaid_bank)
             if bank:
