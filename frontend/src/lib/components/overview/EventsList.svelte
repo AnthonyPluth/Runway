@@ -38,10 +38,12 @@
   {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
     <div class="cell">
+      <!-- Logos as they are, as in Transactions: the white only shows through a transparent one, whose dark mark would
+           otherwise vanish on the dark page. -->
       {#if e.logo}
-        <img class="size-8 shrink-0 rounded-lg bg-white object-contain p-0.5" src={e.logo} alt="" loading="lazy" width="32" height="32" />
+        <img class="size-8 shrink-0 rounded-lg object-contain dark:bg-white" src={e.logo} alt="" loading="lazy" width="32" height="32" />
       {:else if bank?.logo}
-        <img class="size-8 shrink-0 rounded-lg bg-white object-contain p-1" src={`/banks/${bank.logo}.svg`} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
+        <img class="size-8 shrink-0 rounded-lg object-contain dark:bg-white" src={`/banks/${bank.logo}.svg`} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
       {:else}
         <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
       {/if}
