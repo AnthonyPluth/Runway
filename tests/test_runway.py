@@ -952,6 +952,26 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:15")))
         self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))    # over 24 hours
 
+    def test_plaid_once_a_day_at_7(self):
+        from runway import server
+        at = lambda s: datetime.fromisoformat(s)
+        self.assertTrue(server.plaid_due(None))
+        self.assertTrue(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T07:00")))    # the 7am sync
+        self.assertFalse(server.plaid_due("2026-09-25T07:01:00", at("2026-09-25T23:00")))   # already asked today
+        self.assertFalse(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T06:59")))   # not 7am yet
+        self.assertFalse(server.plaid_due("2026-09-24T22:00:00", at("2026-09-25T02:00")))   # asked after yesterday's 7am
+        self.assertTrue(server.plaid_due("2026-09-24T06:00:00", at("2026-09-25T02:00")))    # missed yesterday's
+        self.assertTrue(server.plaid_due("2026-09-20T09:00:00", at("2026-09-25T12:00")))
+
+    def test_plaid_refresh_at_630(self):
+        from runway import server
+        at = lambda s: datetime.fromisoformat(s)
+        self.assertTrue(server.plaid_refresh_due(None, at("2026-09-25T06:30")))
+        self.assertTrue(server.plaid_refresh_due("2026-09-24T06:31:00", at("2026-09-25T06:45")))
+        self.assertFalse(server.plaid_refresh_due("2026-09-25T06:31:00", at("2026-09-25T06:45")))   # already told today
+        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T06:29")))                    # too early
+        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T07:00")))                    # the sync's due: too late
+
     def test_sync_on_visit_needs_a_connection(self):
         self.assertEqual(self.req("POST", "/api/sync/auto"), (200, {"started": False}))
 

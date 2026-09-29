@@ -52,7 +52,7 @@ class MockBank(BaseHTTPRequestHandler):
             return self.reply(200, {"link_token": "link-1"})
         if self.path == "/item/public_token/exchange":
             return self.reply(200, {"access_token": "access-b", "item_id": "item-b"})
-        if self.path == "/item/remove":
+        if self.path in ("/item/remove", "/transactions/refresh"):
             return self.reply(200, {})
         if self.path == "/item/get":
             return self.reply(200, {"item": {"item_id": "item-b", "products": MockBank.products, "billed_products": MockBank.products}})
@@ -331,6 +331,16 @@ class PlaidBankTests(unittest.TestCase):
         out = plaidbank.sync_all(self.c, TODAY)
         self.assertEqual((out["items"], len(out["errors"])), (0, 2))
         self.assertTrue(self.c.execute("SELECT error FROM plaid_items WHERE item_id='item-a'").fetchone()[0])
+
+    def test_refresh_asks_each_transactions_connection(self):
+        self.link()
+        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
+                       "VALUES ('item-c', 'access-c', 'Amex', 'liabilities')")   # statements only: nothing to refresh
+        MockBank.calls = []
+        self.assertEqual(plaidbank.refresh_all(self.c), [])
+        self.assertEqual([p for p, _ in MockBank.calls], ["/transactions/refresh"])
+        MockBank.fail = {"/transactions/refresh": (400, {"error_code": "PRODUCTS_NOT_SUPPORTED", "error_message": "no"})}
+        self.assertEqual(len(plaidbank.refresh_all(self.c)), 1)
 
     def test_matching_an_account_added_as_its_own_retires_the_copy(self):
         self.link()
