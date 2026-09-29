@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, timedelta
+from typing import Any
 
 from . import db, equity, forecast
 
@@ -39,7 +40,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
         "SELECT a.id, " + db.label_sql("a") + " AS name, a.org, a.kind, a.balance, a.balance_date, a.owed_positive, a.owner FROM accounts a WHERE a.hidden=0"))
-    groups = {
+    groups: dict[str, dict[str, Any]] = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
         "equity": {"key": "equity", "label": "Equity (vested)", "side": "asset", "items": []},
@@ -100,7 +101,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
 
 def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None = None) -> int:
     today = today or date.today()
-    fields = {}
+    fields: dict[str, Any] = {}
     if "name" in body or asset_id is None:
         name = (body.get("name") or "").strip()
         if not name:

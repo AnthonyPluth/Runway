@@ -534,7 +534,7 @@ def monthly_spending(conn, today: date) -> float:
 
 def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[dict]:
     total = sum(h["value"] for h in hold)
-    rules = []
+    rules: list[dict] = []
     if total <= 0:
         return rules
     noncash = [h for h in hold if not h["is_cash"] and h["asset_class"] != "Not reported"]

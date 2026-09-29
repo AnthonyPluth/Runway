@@ -52,7 +52,7 @@ def seed(conn, today: date | None = None) -> int:
                      (acct_id, name, org, kind, balance, today.isoformat(), "simplefin",
                       "demo-checking" if kind == "credit" else None, 1 if kind in ("checking", "savings") else 0))
 
-    txs = []
+    txs: list[tuple] = []
     start = today - timedelta(days=180)
 
     def add(acct, day, amount, payee, category):
@@ -61,7 +61,7 @@ def seed(conn, today: date | None = None) -> int:
 
     first_payday = start + timedelta(days=(4 - start.weekday()) % 7)   # Fridays
     for name, acct, amount, freq, dom, match, category in BILLS:
-        anchor = first_payday if freq == "biweekly" else start.replace(day=dom)
+        anchor = first_payday if freq == "biweekly" else start.replace(day=dom)  # type: ignore[arg-type]  # monthly bills all have a day
         conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match) VALUES (?,?,?,?,?,?)",
                      (name, acct, amount, freq, anchor.isoformat(), match))
         day = anchor
@@ -70,7 +70,7 @@ def seed(conn, today: date | None = None) -> int:
             if freq == "biweekly":
                 day += timedelta(days=14)
             else:
-                day = (day.replace(day=1) + timedelta(days=32)).replace(day=dom)
+                day = (day.replace(day=1) + timedelta(days=32)).replace(day=dom)  # type: ignore[arg-type]  # as above
 
     for offset in range(181):
         day = start + timedelta(days=offset)

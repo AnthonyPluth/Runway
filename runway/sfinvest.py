@@ -107,16 +107,18 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
         desc = str(h.get("description") or h.get("name") or "").strip()
         shares = _num(h.get("shares"))
         value = _num(h.get("market_value"))
-        if value is None and shares is not None and _num(h.get("price")) is not None:
-            value = shares * _num(h.get("price"))
+        price = _num(h.get("price"))
+        if value is None and shares is not None and price is not None:
+            value = shares * price
         cash = _is_cash(symbol, desc)
         if not cash:
             value = market_value(conn, symbol, shares, value, today)
         if value is None:
             continue
         cost = _num(h.get("cost_basis"))
-        if cost is None and _num(h.get("purchase_price")) and shares:
-            cost = _num(h.get("purchase_price")) * shares   # purchase_price is per share
+        purchase_price = _num(h.get("purchase_price"))
+        if cost is None and purchase_price and shares:
+            cost = purchase_price * shares   # purchase_price is per share
         if not cost and not cash and shares:
             cost = None   # a zero cost basis on a real position means the brokerage didn't report one
         name = clean_name(desc, symbol) if symbol else (desc or None)

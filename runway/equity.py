@@ -16,6 +16,7 @@ from __future__ import annotations
 import calendar
 import secrets
 from datetime import date
+from typing import Any
 
 from . import db
 
@@ -176,7 +177,7 @@ def save_company(conn, body: dict, cid: str | None = None) -> str:
     name = " ".join(str(body.get("name") or "").split())[:80]
     if not name and cid is None:
         raise EquityError("Name the company")
-    fields = {}
+    fields: dict[str, Any] = {}
     if name:
         fields["name"] = name
     if "share_price" in body:

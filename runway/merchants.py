@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
+from typing import Any
 
 from . import brands, db
 from . import settings_keys as sk
@@ -87,7 +88,7 @@ def key(name: str | None) -> str:
 
 def note(conn, t: dict) -> str | None:
     """Remember the merchant of a Plaid transaction. Returns its id (for transactions.merchant_id), or None."""
-    cp = next((c for c in t.get("counterparties") or [] if (c.get("type") or "merchant") == "merchant"), {}) or {}
+    cp: dict[str, Any] = next((c for c in t.get("counterparties") or [] if (c.get("type") or "merchant") == "merchant"), {}) or {}
     entity = t.get("merchant_entity_id") or cp.get("entity_id")
     name = t.get("merchant_name") or cp.get("name")
     logo = t.get("logo_url") or cp.get("logo_url")
@@ -399,17 +400,17 @@ def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
     by_name: dict[str, str] = {}
     for mid, name in sorted(have.items()):
         by_name.setdefault(name, mid)
-    out = {}
+    out: dict[str, str] = {}
     for t in txs:
         mid = t.get("merchant_id")
-        if mid in have:
+        if mid is not None and mid in have:
             out[t["id"]] = mid
         else:
             payee = key(t.get("payee"))
-            name = payee if payee in by_name else max(
+            known = payee if payee in by_name else max(
                 (n for n in by_name if len(n) >= 4 and payee.startswith(n + " ")), key=len, default=None)
-            if name:
-                out[t["id"]] = by_name[name]
+            if known:
+                out[t["id"]] = by_name[known]
     return out
 
 

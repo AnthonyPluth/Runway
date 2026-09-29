@@ -47,3 +47,18 @@ source = ["runway"]
 
 [tool.coverage.report]
 skip_empty = true
+
+[tool.mypy]
+# Static type checking: `make lint` and CI run `mypy` over the app. Not strict yet: unannotated functions are still
+# checked inside (check_untyped_defs), but nothing is required to carry annotations. Database rows are loosely typed
+# for now (db.Row reads by name, db.rows() gives plain dicts), so most row access is Any.
+python_version = "3.14"
+files = ["runway", "run.py"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# Libraries that ship without type information (and have no stub package): imported as Any.
+[[tool.mypy.overrides]]
+module = ["amazonorders.*", "py_vapid", "pywebpush"]
+ignore_missing_imports = true

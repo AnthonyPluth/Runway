@@ -317,10 +317,11 @@ poetry run python run.py --no-sync                     # run without touching yo
 poetry run python -m unittest discover tests           # the test suite (SQLite)
 DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # the same tests against Postgres
 poetry run pip install coverage && poetry run coverage run -m unittest discover tests && poetry run coverage report   # how much they cover
+poetry run pip install mypy types-python-dateutil && poetry run mypy   # type-check the Python (settings in pyproject.toml)
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
-`make check` runs everything CI does before you push: ruff, the Python tests, and the web app's type-check, ESLint,
+`make check` runs everything CI does before you push: ruff, mypy, the Python tests, and the web app's type-check, ESLint,
 tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every
 commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install
 [pre-commit](https://pre-commit.com) and run `pre-commit install` once.

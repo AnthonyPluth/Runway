@@ -47,11 +47,11 @@ if __name__ == "__main__":
             if not a.file:
                 sys.exit("Which backup file? python3 run.py restore runway-backup.json.gz")
             with open(a.file, "rb") as f:
-                data = backup.load(f.read())
-            print(f"Backup from {data.get('created')} ({data.get('source')}): "
-                  f"{len(data['tables'].get('transactions', {}).get('rows', []))} transactions.")
+                restored = backup.load(f.read())
+            print(f"Backup from {restored.get('created')} ({restored.get('source')}): "
+                  f"{len(restored['tables'].get('transactions', {}).get('rows', []))} transactions.")
             if not a.yes and input(f"Replace everything in {db.describe()} with it? Type yes: ").strip().lower() != "yes":
                 sys.exit("Nothing changed.")
             with db.session() as conn:
-                counts = backup.restore(conn, data)
+                counts = backup.restore(conn, restored)
             print(f"Restored {sum(counts.values())} rows into {db.describe()}.")

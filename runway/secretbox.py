@@ -17,6 +17,7 @@ import functools
 import hashlib
 import os
 import threading
+from typing import Literal, TypeGuard, overload
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
@@ -58,6 +59,10 @@ def key_file_path() -> str:
     return os.path.join(_data_dir(), KEY_FILE)
 
 
+@overload
+def _read_or_make_key_file(create: Literal[True]) -> bytes: ...
+@overload
+def _read_or_make_key_file(create: bool) -> bytes | None: ...
 def _read_or_make_key_file(create: bool) -> bytes | None:
     path = key_file_path()
     try:
@@ -110,7 +115,7 @@ def _primary() -> Fernet:
     return Fernet(_from_passphrase(env) if env else _read_or_make_key_file(create=True))
 
 
-def is_encrypted(value) -> bool:
+def is_encrypted(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and value.startswith(PREFIX)
 
 
