@@ -955,10 +955,12 @@ class ServerTests(unittest.TestCase):
         from runway import server
         at = lambda s: datetime.fromisoformat(s)
         self.assertTrue(server.daily_due(None))
-        self.assertFalse(server.daily_due("2026-09-25T06:30:00", at("2026-09-25T23:00")))   # already synced today
-        self.assertFalse(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T05:00")))   # a new day, but before 6am
-        self.assertTrue(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:15")))
-        self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))    # over 24 hours
+        self.assertFalse(server.daily_due("2026-09-25T07:30:00", at("2026-09-25T23:00")))   # already synced today
+        self.assertTrue(server.daily_due("2026-09-25T06:30:00", at("2026-09-25T08:00")))    # an early sync doesn't skip 7am
+        self.assertFalse(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:45")))   # a new day, but before 7am
+        self.assertTrue(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T07:15")))
+        self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))    # missed yesterday's 7am
+        self.assertFalse(server.daily_due("2026-09-25T07:02:00", at("2026-09-25T13:00")))   # the hour's sync counts
 
     def test_plaid_once_a_day_at_7(self):
         from runway import server

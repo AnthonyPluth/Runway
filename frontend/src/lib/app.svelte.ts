@@ -72,8 +72,8 @@ export function editing(): boolean {
 }
 
 // ------------------------------------------------------------------------------------------ boot and sync
-// Opening Runway (or coming back to its tab) syncs in the background when the data is more than an hour old;
-// the server decides, so this is cheap to call. When the sync finishes, the page loads again with the new data.
+// Opening Runway (or coming back to its tab) asks the server to catch up: a missed daily bank sync, or investments
+// more than an hour old. The server decides, so this is cheap to call. When the sync finishes, the page loads again with the new data.
 let syncWatch: ReturnType<typeof setInterval> | null = null;
 export async function syncOnVisit(): Promise<void> {
   try {
