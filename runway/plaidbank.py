@@ -15,9 +15,9 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from . import db, merchants, splits
+from . import brands, db, merchants, splits
 from .categorize import clean_payee
-from .plaid import PlaidError, call
+from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
 HISTORY_DAYS = 730     # transaction history to ask for when linking (Plaid's maximum)
 OVERLAP_DAYS = 3       # the same transaction can post a few days apart at two providers
@@ -64,7 +64,6 @@ def _words(text: str | None) -> list[str]:
 
 def _score(pa: dict, acct: dict, institution: str | None) -> int:
     """How sure we are that Plaid account `pa` is Runway account `acct` (0 = no reason to think so)."""
-    from . import brands
     runway_text = f"{acct['name']} {acct.get('display_name') or ''}"
     plaid_names = [pa.get("official_name"), pa.get("name")]
     score = 0

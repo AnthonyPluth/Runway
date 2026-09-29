@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 
@@ -25,7 +26,7 @@ def _ctx() -> ssl.SSLContext:
         import certifi  # type: ignore
 
         ctx.load_verify_locations(certifi.where())
-    except Exception:
+    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     return ctx
 
@@ -175,7 +176,6 @@ def _quote(ticker: str) -> dict | None:
 def quotes(tickers: list[str], ttl: float = QUOTE_TTL) -> dict[str, dict]:
     """Latest price and previous close per ticker (Yahoo's quotes are real-time for most US stocks and ETFs;
     mutual funds only change once a day, after the close)."""
-    from concurrent.futures import ThreadPoolExecutor
     now = time.time()
     want = sorted(set(t for t in tickers if usable_ticker(t)))
     out, todo = {}, []
