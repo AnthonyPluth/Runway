@@ -17,7 +17,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from sqlalchemy import delete, func, insert, select, update
+
 from . import bankdays, db
+from .models import InvAccount, ManualContribution, ManualPosition, ManualState, Price, Security
 
 MIN_CONTRIBUTION = 5.0         # dollars
 MIN_CONTRIBUTION_SHARE = 0.003  # of the balance: below this, differences are treated as noise
@@ -26,16 +29,18 @@ DRIFT_WARN = 0.02
 
 def positions_for(conn, account_id: str) -> list[dict]:
     return db.rows(conn.execute(
-        "SELECT m.*, s.ticker, s.name FROM manual_positions m LEFT JOIN securities s ON s.id=m.security_id "
-        "WHERE m.account_id=? ORDER BY s.ticker, s.name", (account_id,)))
+        select(ManualPosition, Security.ticker, Security.name)
+        .outerjoin(Security, Security.id == ManualPosition.security_id)
+        .where(ManualPosition.account_id == account_id).order_by(Security.ticker, Security.name)))
 
 
 def _price_on(conn, ticker: str | None, on: str) -> tuple[float | None, str | None]:
     """The close on or shortly before `on`, and its date."""
     if not ticker:
         return None, None
-    r = conn.execute("SELECT close, date FROM prices WHERE ticker=? AND date<=? AND date>=? ORDER BY date DESC LIMIT 1",
-                     (ticker, on, (date.fromisoformat(on) - timedelta(days=7)).isoformat())).fetchone()
+    week_before = (date.fromisoformat(on) - timedelta(days=7)).isoformat()
+    r = conn.execute(select(Price.close, Price.date).where(Price.ticker == ticker, Price.date <= on, Price.date >= week_before)
+                     .order_by(Price.date.desc()).limit(1)).fetchone()
     return (r["close"], r["date"]) if r and r["close"] else (None, None)
 
 
@@ -60,7 +65,7 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
         return sum(r["shares"] * r["price"] for r in priced)
 
     unpriced_last = sum(r["last_value"] or 0 for r in unpriced)
-    state = conn.execute("SELECT * FROM manual_state WHERE account_id=?", (account_id,)).fetchone()
+    state = conn.execute(select(ManualState).where(ManualState.account_id == account_id)).fetchone()
     gap = balance - total_priced() - unpriced_last
     # The first time after you enter holdings, whatever gap there is (a statement a few weeks old, say) becomes the
     # baseline; only growth beyond it counts as new money.
@@ -82,10 +87,10 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     explained = sum(p["value"] for p in positions.values())
     leftover = balance - explained
     drift = abs(leftover) / balance if balance else 0.0
-    conn.execute("INSERT INTO manual_state(account_id, drift, checked, last_balance, baseline) VALUES (?,?,?,?,?) ON CONFLICT(account_id) DO UPDATE SET "
-                 "drift=excluded.drift, checked=excluded.checked, last_balance=excluded.last_balance, "
-                 "baseline=COALESCE(manual_state.baseline, excluded.baseline)",
-                 (account_id, round(drift, 5), today.isoformat(), balance, offset if priced else None))
+    db.upsert(conn, ManualState, {"account_id": account_id, "drift": round(drift, 5), "checked": today.isoformat(),
+                                  "last_balance": balance, "baseline": offset if priced else None},
+              key=["account_id"], update=lambda ex: {"drift": ex.drift, "checked": ex.checked, "last_balance": ex.last_balance,
+                                                     "baseline": func.coalesce(ManualState.baseline, ex.baseline)})
     return {"positions": positions, "leftover": leftover, "drift": drift, "contributed": contributed}
 
 
@@ -100,11 +105,11 @@ def _invest_contribution(conn, account_id: str, rows: list[dict], priced: list[d
     for r in priced:
         buy = amount * weights[r["security_id"]] / wsum
         r["shares"] += buy / r["price"]
-        conn.execute("UPDATE manual_positions SET shares=? WHERE account_id=? AND security_id=?",
-                     (r["shares"], account_id, r["security_id"]))
+        conn.execute(update(ManualPosition).where(ManualPosition.account_id == account_id,
+                                                  ManualPosition.security_id == r["security_id"]).values(shares=r["shares"]))
     for r in unpriced:
         r["last_value"] = (r["last_value"] or 0) + amount * weights[r["security_id"]] / wsum
-    conn.execute("INSERT INTO manual_contributions(account_id, date, amount) VALUES (?,?,?)", (account_id, on, round(amount, 2)))
+    conn.execute(insert(ManualContribution).values(account_id=account_id, date=on, amount=round(amount, 2)))
 
 
 def _spread_over_unpriced(conn, account_id: str, unpriced: list[dict], rest: float) -> None:
@@ -114,31 +119,33 @@ def _spread_over_unpriced(conn, account_id: str, unpriced: list[dict], rest: flo
     for r in unpriced:
         share = (r["last_value"] or 0) / base if base > 0 else 1 / len(unpriced)
         r["value"] = max(0.0, rest * share)
-        conn.execute("UPDATE manual_positions SET last_value=? WHERE account_id=? AND security_id=?",
-                     (r["value"], account_id, r["security_id"]))
+        conn.execute(update(ManualPosition).where(ManualPosition.account_id == account_id,
+                                                  ManualPosition.security_id == r["security_id"]).values(last_value=r["value"]))
 
 
 def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> None:
     """Replace what a tracked account holds. rows: [{ticker or name, shares, pct}] (shares may be empty for a
     fund without a ticker; give its current value instead as `value`)."""
     today = today or date.today()
-    if not conn.execute("SELECT 1 FROM inv_accounts WHERE id=?", (account_id,)).fetchone():
+    if not conn.execute(select(InvAccount.id).where(InvAccount.id == account_id)).fetchone():
         raise ValueError("Account not found")
-    clean = []
+    clean: list[dict[str, Any]] = []
     for r in rows:
         entry = _clean_entry(r)
         if entry is None:
             continue
         ticker, name, shares, pct, val = entry
         sec_id = "man:" + (ticker or "".join(ch for ch in name.lower() if ch.isalnum())[:40])
-        conn.execute("INSERT INTO securities(id, ticker, name, is_cash, currency) VALUES (?,?,?,0,'USD') ON CONFLICT(id) DO UPDATE SET "
-                     "name=COALESCE(excluded.name, securities.name)", (sec_id, ticker or None, name or None))
-        clean.append((account_id, sec_id, shares if ticker else 0.0, pct, None if ticker else val, today.isoformat()))
-    if clean and abs(sum(c[3] for c in clean) - 100) > 0.5 and sum(c[3] for c in clean) > 0:
-        raise ValueError(f"Contribution percentages add up to {sum(c[3] for c in clean):g}%, not 100%")
-    conn.execute("DELETE FROM manual_positions WHERE account_id=?", (account_id,))
-    conn.executemany("INSERT INTO manual_positions(account_id, security_id, shares, pct, last_value, updated) VALUES (?,?,?,?,?,?)", clean)
-    conn.execute("DELETE FROM manual_state WHERE account_id=?", (account_id,))
+        db.upsert(conn, Security, {"id": sec_id, "ticker": ticker or None, "name": name or None, "is_cash": 0, "currency": "USD"},
+                  key=["id"], update=lambda ex: {"name": func.coalesce(ex.name, Security.name)})
+        clean.append({"account_id": account_id, "security_id": sec_id, "shares": shares if ticker else 0.0, "pct": pct,
+                      "last_value": None if ticker else val, "updated": today.isoformat()})
+    total_pct = sum(c["pct"] for c in clean)
+    if clean and abs(total_pct - 100) > 0.5 and total_pct > 0:
+        raise ValueError(f"Contribution percentages add up to {total_pct:g}%, not 100%")
+    conn.execute(delete(ManualPosition).where(ManualPosition.account_id == account_id))
+    conn.execute(insert(ManualPosition), clean)
+    conn.execute(delete(ManualState).where(ManualState.account_id == account_id))
 
 
 def _clean_entry(r: dict) -> tuple[str, str, float, float, float] | None:

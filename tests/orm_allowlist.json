@@ -1,12 +1,3 @@
 {
-  "runway/carta.py": 6,
-  "runway/carta_web.py": 4,
-  "runway/portfolio.py": 17,
-  "runway/prices.py": 10,
-  "runway/realie.py": 3,
-  "runway/reports.py": 2,
-  "runway/server/api/investments.py": 7,
-  "runway/sfinvest.py": 26,
-  "runway/simplefin.py": 12,
-  "runway/tracked.py": 12
+
 }
