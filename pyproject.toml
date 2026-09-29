@@ -1,0 +1,49 @@
+[project]
+name = "runway"
+version = "1.0.0"   # releases are versioned by Git tags (see README → Releases); this isn't bumped by hand
+description = "Self-hosted personal finance: bank sync, a cash-flow forecast, budgets, investments and net worth"
+readme = "README.md"
+requires-python = ">=3.14,<4.0"
+dependencies = [
+    "sqlalchemy (>=2.1.1,<3.0)",           # database engine for SQLite and Postgres
+    "alembic (>=1.13,<2.0)",             # schema migrations
+    "psycopg[binary] (>=3.1,<4.0)",      # Postgres driver (only used when DATABASE_URL is set)
+    "pyjwt[crypto] (>=2.8,<3.0)",        # verifying sign-in (OIDC) ID tokens
+    "pywebpush (>=2.0,<3.0)",            # push notifications (VAPID + encrypted payloads)
+    "python-dateutil (>=2.9,<3.0)",      # recurring schedules and month arithmetic
+    "holidays (>=0.60,<1.0)",             # bank holidays, for when payments actually land
+    "amazon-orders (>=4.6,<5.0)",       # reading Amazon order pages your browser fetched (see extension/),
+    "sentry-sdk (>=2.30,<3.0)",         # error reports to Sentry (only when SENTRY_DSN is set; see runway/monitoring.py)
+]
+
+[tool.poetry]
+package-mode = false   # an application, not a library: `poetry install` just installs the dependencies
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+# Mistakes rather than style: undefined names, unused imports and variables, syntax errors, plus bugbear's likely
+# bugs, pyupgrade's modern idioms, simplifications and ruff's own checks. The code's own style (a few statements on
+# one line, lambdas for tiny helpers, imports after server/handler.py's MIME setup) is left alone.
+select = ["E4", "E7", "E9", "F", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "E402", "E702", "E731", "E741",
+    # User-facing strings and comments use real typography on purpose (’ – −), not look-alike ASCII.
+    "RUF001", "RUF002", "RUF003",
+    # Class-level fixtures and lookup tables are plain attributes; the code doesn't annotate with ClassVar.
+    "RUF012",
+    # Nested `with` keeps a patch's scope apart from the assertRaises (or block) it sets up.
+    "SIM117",
+]
+
+[tool.coverage.run]
+# CI measures how much of Runway the tests run (the README's coverage badge): `coverage run -m unittest discover tests`.
+source = ["runway"]
+
+[tool.coverage.report]
+skip_empty = true

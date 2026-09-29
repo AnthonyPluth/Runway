@@ -1,0 +1,52 @@
+# Dependabot keeps the build's moving parts up to date with weekly pull requests.
+version: 2
+updates:
+  # Python dependencies (pyproject.toml / poetry.lock)
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        update-types: [minor, patch]   # one PR for routine updates; major versions get their own
+    commit-message:
+      prefix: deps
+
+  # Actions used by .github/workflows/docker.yml (checkout, setup-python, Docker build, ghcr cleanup)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  # The web app's packages (frontend/package.json)
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      web:
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 (the Go rewrite) isn't supported by svelte-check yet (peer range ^5 || ^6).
+      # Remove once svelte-check accepts typescript 7.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: web
+
+  # The base images in the Dockerfile (python:3.14-slim, node:22-slim)
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: docker

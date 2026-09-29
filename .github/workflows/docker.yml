@@ -1,0 +1,340 @@
+name: Docker image
+
+# Every push to main: run the tests (on SQLite and Postgres) and, at the same time, build the image for Intel/AMD and
+# ARM with the next version (v1.2.3) baked in. Only once the tests pass is it published to GitHub Container Registry as
+# ghcr.io/<owner>/runway:latest plus :1.2.3, :v1.2.3, :1.2 and :1 (so you can pin a version), the version tagged and a
+# GitHub Release published for it; then untagged leftovers are deleted.
+#
+# Versions: each push bumps the patch number (v1.0.0 -> v1.0.1). Put "#minor" in a commit message (or start it with
+# "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
+# Pull requests (including Dependabot's) only run the tests. Only main is ever released: a manual run from another
+# branch just runs the tests, and re-running an old build never moves :latest back to it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-image-${{ github.ref }}
+  # A newer push replaces a pull request's run that's still going. On main a release is never cut off halfway;
+  # the next run waits for it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
+    strategy:
+      matrix:
+        python: ["3.14"]       # the only Python Runway supports: what the image runs (see the Dockerfile)
+        database: [sqlite, postgres]
+    services:
+      postgres:                # used by the postgres run; the sqlite run ignores it
+        image: postgres:16
+        env:
+          POSTGRES_USER: runway
+          POSTGRES_PASSWORD: runway
+          POSTGRES_DB: runway
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+
+      # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh.
+      - name: Cache Poetry
+        id: poetry-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: |
+            ~/.local/pipx/venvs/poetry
+            ~/.local/bin/poetry
+          key: poetry-2.5.1-${{ runner.os }}-py${{ steps.python.outputs.python-version }}
+      - name: Install Poetry
+        if: steps.poetry-cache.outputs.cache-hit != 'true'
+        run: pipx install --python "${{ steps.python.outputs.python-path }}" "poetry==2.5.1"
+      - name: Cache dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ matrix.database }}-${{ hashFiles('poetry.lock') }}
+      - name: Install dependencies
+        run: poetry install --no-root --no-interaction
+      - name: Run tests (postgres)
+        if: matrix.database == 'postgres'
+        env:
+          DATABASE_URL: postgresql://runway:runway@localhost:5432/runway
+        run: poetry run python -m unittest discover -v tests
+      # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and on main
+      # the number becomes the README's badge (the coverage-badge job below).
+      - name: Run tests (sqlite) and measure coverage
+        if: matrix.database == 'sqlite'
+        run: |
+          poetry run pip install --quiet "coverage==7.16.2"
+          poetry run coverage run -m unittest discover -v tests
+          poetry run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+          poetry run coverage json -q -o coverage.json
+      - name: Keep the coverage report
+        if: matrix.database == 'sqlite'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: coverage
+          path: coverage.json
+          retention-days: 7
+      - name: Check dependencies for known vulnerabilities
+        if: matrix.database == 'sqlite'
+        run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
+      - name: Lint (Python with ruff)
+        if: matrix.database == 'sqlite'
+        run: |
+          pipx run "ruff==0.16.9" check .
+
+  # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
+  # coverage, and make sure it builds.
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type-check (svelte-check)
+        run: npm run check
+      - name: Lint (ESLint, also over extension/ and runway/static/)
+        run: npm run lint
+      - name: Unit tests (Vitest), measuring coverage
+        run: npm run coverage
+      - name: Keep the frontend coverage report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/coverage-summary.json
+          retention-days: 7
+      - run: npm run build
+
+  # The README's coverage badges (docs/badges/coverage.svg for the backend, coverage-frontend.svg for the web app):
+  # redrawn from the tests' coverage on main, and committed only when a whole-number percentage changes. The
+  # repository is private, so no badge service could read the numbers.
+  # A push made with GITHUB_TOKEN doesn't start another run, so this never loops or cuts a release of its own.
+  coverage-badge:
+    needs: [test, web]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # commit the badges
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          ref: main
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+        with:
+          name: coverage
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+        with:
+          name: coverage-frontend
+      - name: Draw the badges, and commit them if a number changed
+        run: |
+          be=$(python3 .github/scripts/coverage_badge.py coverage.json docs/badges/coverage.svg "backend coverage")
+          fe=$(python3 .github/scripts/coverage_badge.py coverage-summary.json docs/badges/coverage-frontend.svg "frontend coverage")
+          echo "Coverage: backend ${be}%, frontend ${fe}%" >> "$GITHUB_STEP_SUMMARY"
+          if git diff --quiet -- docs/badges/; then echo "Still ${be}% / ${fe}%"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Coverage badges: backend ${be}%, frontend ${fe}%" -- docs/badges/
+          # main may have moved on while the tests ran: put the badge on top of it (it only touches this one file)
+          for try in 1 2 3; do git pull --rebase --quiet origin main && git push origin HEAD:main && exit 0; sleep 5; done
+          exit 1
+
+  # The image is built while the tests run, and published only once they (and the web app's checks) pass.
+  # build: works out the version, builds the image for this runner and checks it starts, then builds it for Intel/AMD
+  # and ARM into the build cache. Nothing leaves the runner: it has no permission to publish anything.
+  build:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      new: ${{ steps.next.outputs.new }}
+      newest: ${{ steps.next.outputs.newest }}
+      skip: ${{ steps.next.outputs.skip }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0       # full history and tags, to find the last version
+
+      - name: Work out the next version
+        id: next
+        run: |
+          # Only the newest commit on main moves :latest (and :1.2, :1); re-running an older build doesn't.
+          git fetch --quiet origin main
+          newest=$([ "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA" ] && echo true || echo false)
+          echo "newest=$newest" >> "$GITHUB_OUTPUT"
+          # Re-running a build for a commit that's already tagged reuses its version.
+          existing=$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          if [ -n "$existing" ]; then
+            echo "version=$existing" >> "$GITHUB_OUTPUT"; echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "Already tagged $existing"; exit 0
+          fi
+          if [ "$newest" != true ]; then
+            echo "::notice::$GITHUB_SHA isn't the newest commit on main any more, so it isn't released."
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # The last version released from this commit's own history.
+          last=$(git describe --tags --abbrev=0 --first-parent --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
+          if [ -z "$last" ]; then
+            next=v1.0.0
+          else
+            log=$(git log --format='%s%n%b' "$last"..HEAD)
+            IFS=. read -r major minor patch <<< "${last#v}"
+            if grep -qE '#major|BREAKING CHANGE' <<< "$log"; then
+              next="v$((major + 1)).0.0"
+            elif grep -qE '#minor|^feat(\(.*\))?:' <<< "$log"; then
+              next="v${major}.$((minor + 1)).0"
+            else
+              next="v${major}.${minor}.$((patch + 1))"
+            fi
+          fi
+          # Never reuse a version that's already tagged elsewhere (say, by an older release from another branch).
+          while git rev-parse -q --verify "refs/tags/$next" >/dev/null; do
+            IFS=. read -r major minor patch <<< "${next#v}"; next="v${major}.${minor}.$((patch + 1))"
+          done
+          echo "version=$next" >> "$GITHUB_OUTPUT"; echo "new=true" >> "$GITHUB_OUTPUT"
+          echo "Next version: $next (last: ${last:-none})"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1   # v4.4.0
+        if: steps.next.outputs.skip != 'true'
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069   # v4.4.1
+        if: steps.next.outputs.skip != 'true'
+
+      # Start the image and ask it /healthz.
+      - name: Build for this runner
+        if: steps.next.outputs.skip != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: runway:smoke
+          build-args: |
+            VERSION=${{ steps.next.outputs.version }}
+          cache-from: type=gha
+      - name: Check the image starts
+        if: steps.next.outputs.skip != 'true'
+        run: |
+          docker run -d --name smoke -p 8765:8765 -e RUNWAY_ALLOW_NO_AUTH=1 -e RUNWAY_NO_SYNC=1 runway:smoke
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/healthz; then docker rm -f smoke; exit 0; fi
+            sleep 1
+          done
+          docker logs smoke; exit 1
+
+      # The slow part (ARM is built under emulation), done now: into the build cache only, which publish reads back.
+      - name: Build for Intel/AMD and ARM (not pushed)
+        if: steps.next.outputs.skip != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=${{ steps.next.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # publish: once the tests, the web app's checks and the build have all passed, push the image (from the build's
+  # cache, so it isn't built again) and then tag the release. The tag and Release come last, so a failed or cancelled
+  # push never leaves a version with no image.
+  publish:
+    needs: [test, web, build]
+    if: needs.build.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # push the tag and create the release
+      packages: write          # publish to ghcr.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+
+      - name: Image name (registry names must be lowercase)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/runway" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1   # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069   # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f   # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags (latest, 1.2.3, v1.2.3, 1.2 and 1)
+        id: tags
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          NEWEST: ${{ needs.build.outputs.newest }}
+        run: |
+          v="${VERSION#v}"
+          IFS=. read -r major minor patch <<< "$v"
+          {
+            echo "list<<EOF"
+            echo "$IMAGE:$v"
+            echo "$IMAGE:v$v"
+            if [ "$NEWEST" = true ]; then
+              echo "$IMAGE:latest"
+              echo "$IMAGE:$major.$minor"
+              echo "$IMAGE:$major"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push (from the build's cache)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.list }}
+          build-args: |
+            VERSION=${{ needs.build.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.build.outputs.version }}
+          cache-from: type=gha
+
+      - name: Tag and publish the release
+        if: needs.build.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "$VERSION"
+          gh release create "$VERSION" --title "Runway $VERSION" --generate-notes --verify-tag
+
+  # A third-party action, so it runs on its own with only the permission it needs (no access to the repository).
+  cleanup:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write          # delete old versions from ghcr.io
+    steps:
+      - name: Delete untagged leftovers (every released version stays pullable)
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f   # v1.2.2
+        with:
+          package: runway
+          delete-untagged: true      # understands multi-architecture images, so tagged versions stay intact
+          token: ${{ secrets.GITHUB_TOKEN }}

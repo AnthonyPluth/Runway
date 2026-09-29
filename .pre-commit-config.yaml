@@ -1,0 +1,24 @@
+# Checks that run on `git commit` once you've run `pre-commit install`. `make check` runs the full suite; these are
+# the quick ones. `pre-commit run --all-files` runs them over the whole tree.
+#
+# Left alone: the files Runway serves as-is (runway/static: minified vendor code, fonts, logos), SVGs, lock files,
+# and the test fixtures, which are pages saved verbatim from real sites and must stay byte-for-byte what was captured.
+exclude: ^(runway/static/|tests/fixtures/)|\.svg$|(^|/)(poetry\.lock|package-lock\.json)$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # The same ruff version CI pins (.github/workflows/docker.yml), so a commit that passes here passes there.
+    rev: v0.16.9
+    hooks:
+      - id: ruff-check
