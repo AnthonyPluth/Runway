@@ -8,8 +8,8 @@ export function pct(x: number | null | undefined, digits = 1): string {
   const shown = Math.abs(x * 100).toFixed(digits);
   return Number(shown) === 0 ? `${shown}%` : x > 0 ? `+${shown}%` : `(${shown}%)`;
 }
-/** Gains are green, losses red; nothing (or what rounds to nothing) keeps the ordinary color. */
-export const gainCls = (x: number | null | undefined) => (x == null ? "" : x > 0 ? "text-emerald-500" : x < 0 ? "text-red-500" : "");
+/** Gains are green, losses a soft red (--loss); nothing (or what rounds to nothing) keeps the ordinary color. */
+export const gainCls = (x: number | null | undefined) => (x == null ? "" : x > 0 ? "text-emerald-500" : x < 0 ? "text-[var(--loss)]" : "");
 /** "+$1,234.00", "($12.00)" for a loss, "$0.00" for what rounds to nothing, or "—". */
 export function signed(x: number | null | undefined): string {
   if (x == null) return "—";
