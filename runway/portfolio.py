@@ -20,7 +20,7 @@ from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
 
-from . import db, planner, prices, splits
+from . import db, plaid, planner, prices, splits
 from . import settings_keys as sk
 
 HISTORY_DAYS = 730
@@ -48,7 +48,6 @@ def _accounts(conn) -> list[dict]:
     An account connected through both SimpleFIN and Plaid is one account: the Plaid one, which has the fuller data
     (holdings, cost basis, activity), stands for it, and the SimpleFIN one is marked duplicate_of it and never counted
     (the page leaves it out)."""
-    from . import plaid
     rows = db.rows(conn.execute(
         "SELECT a.*, COALESCE(i.institution_name, a.institution) AS institution_name, "
         "(SELECT COUNT(*) FROM manual_positions m WHERE m.account_id=a.id) AS tracked, "

@@ -5,6 +5,7 @@ Runway runs its migrations itself on start-up (db.init), handing Alembic an open
 the SQLite file in RUNWAY_DATA.
 """
 from alembic import context
+from alembic.operations import ops
 
 from runway import db, schema
 
@@ -23,7 +24,6 @@ def same_type(_ctx, _db_col, _model_col, db_type, model_type):
 
 def skip_pk_nullability(_ctx, _revision, directives) -> None:
     """Older SQLite databases report primary-key columns as nullable; that's not a change worth a migration."""
-    from alembic.operations import ops
     for script in directives:
         for group in script.upgrade_ops.ops:
             if isinstance(group, ops.ModifyTableOps):

@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, UTC
 
-from . import db, sfinvest, splits
+from . import db, plaidbank, sfinvest, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
 
@@ -34,7 +34,7 @@ def _ssl_context() -> ssl.SSLContext:
         import certifi  # type: ignore
 
         ctx.load_verify_locations(certifi.where())
-    except Exception:
+    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     return ctx
 
@@ -228,7 +228,6 @@ def guess_kind(name: str) -> str:
 
 def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     """Upsert accounts and transactions. Returns ids of newly inserted transactions."""
-    from . import plaidbank
     new_ids: list[str] = []
     claimed: set = set()
     for acct in payload.get("accounts", []):
