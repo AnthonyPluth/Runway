@@ -11,6 +11,10 @@ on:
   workflow_run:
     workflows: [Docker image]
     types: [completed]
+    # Only runs on Dependabot's branches start this workflow. Without the filter it started after every Docker image
+    # run (each push to a pull request or to main) and its job was skipped every time, filling the Actions list.
+    # The job's own condition below is still what decides whether to merge.
+    branches: ['dependabot/**']
 
 permissions: {}
 
