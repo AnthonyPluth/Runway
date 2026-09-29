@@ -1,14 +1,11 @@
 import gzip
 import json
 import os
-import sys
 import tempfile
 import unittest
 from datetime import date
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import backup, db, networth  # noqa: E402
+from runway import backup, db, networth
 
 
 class BackupTests(unittest.TestCase):

@@ -1,7 +1,6 @@
 """Amazon and Target orders: reading what the browser extension sends, matching charges to transactions, and splitting."""
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,9 +9,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import db, retail, splits  # noqa: E402
+from runway import db, retail, splits
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "amazon")
 ORDER = "111-6778632-7354601"   # 4 items, $57.69 + $2.99 shipping + $3.19 tax - $2.99 free shipping = $60.88

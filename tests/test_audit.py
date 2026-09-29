@@ -3,7 +3,6 @@ import base64
 import json
 import os
 import socket
-import sys
 import tempfile
 import threading
 import unittest
@@ -12,9 +11,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import backup, categorize, db, networth, notify, oidc, rules, secretbox, simplefin, splits  # noqa: E402
+from runway import backup, categorize, db, networth, notify, oidc, rules, secretbox, simplefin, splits
 
 
 class Redirecting(BaseHTTPRequestHandler):

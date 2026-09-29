@@ -1,12 +1,9 @@
 """Rules with conditions (text, amount, direction, account) and actions (category, rename, split, review)."""
 import os
-import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import categories, categorize, db, rules, splits  # noqa: E402
+from runway import categories, categorize, db, rules, splits
 
 
 class Base(unittest.TestCase):

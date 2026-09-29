@@ -5,7 +5,6 @@ import gzip
 import json
 import os
 import socket
-import sys
 import tempfile
 import threading
 import time
@@ -15,11 +14,9 @@ import urllib.request
 from datetime import date
 from unittest import mock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from cryptography.fernet import Fernet
 
-from cryptography.fernet import Fernet  # noqa: E402
-
-from runway import backup, db, notify, oidc, secretbox, server, simplefin  # noqa: E402
+from runway import backup, db, notify, oidc, secretbox, server, simplefin
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")
 

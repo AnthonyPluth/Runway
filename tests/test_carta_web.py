@@ -1,13 +1,10 @@
 """Carta through the browser extension: finding companies and grants in whatever carta.com's pages load."""
 import os
-import sys
 import tempfile
 import unittest
 from datetime import date
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import carta, carta_web, db, equity  # noqa: E402
+from runway import carta, carta_web, db, equity
 
 # Two made-up shapes, since Carta's web app isn't documented: a snake_case one with the company around its
 # securities, and a camelCase one with the company inside each security.

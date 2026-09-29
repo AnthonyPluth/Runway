@@ -519,4 +519,3 @@ def bulk_update(conn, tx_ids: list[str], category: str | None = None, payee: str
             conn.execute(f"UPDATE transactions SET needs_review=0, category_source=CASE WHEN category IS NULL "
                          f"THEN category_source ELSE 'manual' END WHERE id IN ({q})", chunk)
     return found
-
