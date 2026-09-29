@@ -68,3 +68,15 @@ class BackupTests(unittest.TestCase):
         backup.restore(dst, data)
         self.assertEqual(dst.execute("SELECT name FROM accounts").fetchone()[0], "Checking")
         src.close(); dst.close()
+
+    def test_a_column_only_the_database_has_travels(self):
+        src = self.fill(self.a)
+        src.execute("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")
+        src.execute("UPDATE accounts SET legacy_note='kept'")
+        data = backup.load(backup.dump(src))
+        self.assertIn("legacy_note", data["tables"]["accounts"]["columns"])
+        dst = db.connect(self.b)
+        dst.execute("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")
+        backup.restore(dst, data)
+        self.assertEqual(dst.execute("SELECT name, legacy_note FROM accounts").fetchall(), [("Checking", "kept")])
+        src.close(); dst.close()
