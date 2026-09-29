@@ -1,6 +1,5 @@
 import json
 import os
-import sys
 import tempfile
 import threading
 import unittest
@@ -10,9 +9,7 @@ from unittest import mock
 from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits  # noqa: E402
+from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits
 
 TODAY = date(2026, 9, 23)
 

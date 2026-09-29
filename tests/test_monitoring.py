@@ -1,13 +1,10 @@
 import os
-import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import sentry_sdk
 
-import sentry_sdk  # noqa: E402
-
-from runway import monitoring, server  # noqa: E402
+from runway import monitoring, server
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
