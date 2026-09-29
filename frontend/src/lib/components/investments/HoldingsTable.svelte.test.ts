@@ -38,8 +38,8 @@ describe("HoldingsTable", () => {
     const row = screen.getAllByRole("row")[1];
     expect(within(row).getByText("+$500.00")).toHaveClass("text-emerald-500");
     expect(within(row).getByText("+25.0%")).toHaveClass("text-emerald-500");
-    expect(within(row).getByText("($30.00)")).toHaveClass("text-red-500");
-    expect(within(row).getByText("(1.20%)")).toHaveClass("text-red-500");
+    expect(within(row).getByText("($30.00)")).toHaveClass("text-[var(--loss)]");
+    expect(within(row).getByText("(1.20%)")).toHaveClass("text-[var(--loss)]");
   });
 
   it("shows a dash instead of a gain when the cost basis is unknown, and offers to add it", () => {
