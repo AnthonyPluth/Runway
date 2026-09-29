@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import db, forecast, recurring, webpush
+from . import churning, db, forecast, recurring, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
@@ -24,6 +24,8 @@ DEFAULTS = {
     "big_charge": True, "big_charge_over": 500,     # a single charge over $X
     "review": False,                                # transactions waiting for a category (once a day)
     "sync_failed": True,                            # syncing has failed for a day
+    "churn_fee": True,                              # a churning card's annual fee is due within 30 days
+    "churn_bonus": True,                            # a sign-up bonus deadline is within 14 days, with spending left
 }
 LOW_BALANCE_DAYS = 30
 
@@ -191,6 +193,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
                         "body": (log["message"] or "The last sync failed.")[:160], "url": "/#setup/connections"})
+    out += churning.alerts(conn, today, p["churn_fee"], p["churn_bonus"])
     return out
 
 

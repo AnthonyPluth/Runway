@@ -67,6 +67,8 @@
     { k: "big_charge", label: "A large charge posts", num: ["big_charge_over", "over $", "", 50] },
     { k: "review", label: "Transactions are waiting for a category (at most once a day)" },
     { k: "sync_failed", label: "Syncing with your bank has been failing for a day" },
+    { k: "churn_fee", label: "A churning card's annual fee is due within 30 days" },
+    { k: "churn_bonus", label: "A sign-up bonus deadline (card or bank) is within 14 days, with requirements left" },
   ];
   const b = "font-medium text-foreground";
 </script>
