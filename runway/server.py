@@ -28,7 +28,7 @@ import sqlalchemy.exc
 from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
-from . import networth, notify, realie, webpush
+from . import networth, notify, planner, realie, webpush
 from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -1312,16 +1312,14 @@ def api_ai_apply(conn, _q, body):
     return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer}
 
 
-def api_fire_save(conn, _q, body):
-    """Keep the financial-independence assumptions, so they're still there next time the page loads."""
-    values = {k: v for k, v in (body or {}).items() if k in portfolio.FIRE_FIELDS}
-    if not values:
+def api_plan_save(conn, _q, body):
+    """Keep the retirement plan, so it's still there next time the page loads. {"plan": null} forgets it."""
+    if not isinstance(body, dict) or "plan" not in body:
         raise ApiError("Nothing to save")
     try:
-        saved = portfolio.save_fire(conn, values)
-    except ValueError as e:
+        return {"ok": True, "plan": planner.save(conn, body["plan"])}
+    except planner.PlanError as e:
         raise ApiError(str(e))
-    return {"ok": True, "saved": sorted(saved)}
 
 
 def api_recurring_suggestions(conn, _q, _b):
@@ -1814,7 +1812,7 @@ ROUTES = [
     ("POST", "/api/merchants/logo", api_merchant_logo),
     ("POST", "/api/logodev/fetch", api_logodev_fetch),
     ("GET", "/api/investments/live", api_live_quotes),
-    ("POST", "/api/investments/fire", api_fire_save),
+    ("POST", "/api/investments/plan", api_plan_save),
     ("GET", "/api/tracked/{id}", api_tracked_get),
     ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),
