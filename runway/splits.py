@@ -76,7 +76,7 @@ def follow_amount(conn, tx_id: str, amount: float) -> None:
         step = 1 if left > 0 else -1
         for i in sorted(range(len(parts)), key=lambda i: -abs(shares[i] - new[i]))[:abs(left)]:
             new[i] += step
-        for p, n in zip(parts, new):
+        for p, n in zip(parts, new, strict=True):
             conn.execute("UPDATE tx_splits SET amount=? WHERE id=?", (n / 100, p["id"]))
     conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tx_id,))
 
@@ -102,7 +102,7 @@ def set_splits(conn, tx_id: str, parts: list[dict]) -> list[dict]:
         try:
             amount = round(float(p.get("amount")), 2)
         except (TypeError, ValueError):
-            raise SplitError("Every part needs an amount")
+            raise SplitError("Every part needs an amount") from None
         if not abs(amount) >= CENT or abs(amount) == float("inf"):   # also refuses "nan", which fails every comparison
             raise SplitError("Every part needs an amount")
         category = (p.get("category") or "").strip()

@@ -94,13 +94,12 @@ jobs:
       - name: Check dependencies for known vulnerabilities
         if: matrix.database == 'sqlite'
         run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
-      - name: Lint (Python with ruff, JavaScript for syntax errors)
+      - name: Lint (Python with ruff)
         if: matrix.database == 'sqlite'
         run: |
           pipx run "ruff==0.16.9" check .
-          find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
 
-  # The web app (frontend/): type-check it and make sure it builds.
+  # The web app (frontend/): type-check and lint it (the lint covers the extension too) and make sure it builds.
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -116,6 +115,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Type-check (svelte-check)
         run: npm run check
+      - name: Lint (ESLint, also over extension/ and runway/static/)
+        run: npm run lint
       - run: npm run build
 
   # The README's coverage badge (docs/badges/coverage.svg): redrawn from the tests' coverage on main, and committed only

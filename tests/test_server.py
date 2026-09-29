@@ -72,7 +72,7 @@ class Provider(BaseHTTPRequestHandler):
                   "name": "Anthony", "nonce": grant["nonce"], "iat": now, "exp": now + 300, "groups": grant.get("groups", [])}
         tok = sign(claims)
         if grant.get("tamper"):
-            h, b, s = tok.split(".")
+            h, _b, s = tok.split(".")
             claims["email"] = "attacker@example.com"
             tok = f"{h}.{b64(json.dumps(claims).encode())}.{s}"
         self.reply({"access_token": "at", "token_type": "Bearer", "id_token": tok})
@@ -103,7 +103,7 @@ class OIDCTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.idp.shutdown()
-        for k in list(cls.env) + ["RUNWAY_PUBLIC_URL"]:
+        for k in [*cls.env, "RUNWAY_PUBLIC_URL"]:
             os.environ.pop(k, None)
         cls.tmp.cleanup()
 
@@ -168,7 +168,7 @@ class OIDCTests(unittest.TestCase):
         self.assertEqual(self.req("/api/state", session)[0], 401)
 
     def test_group_membership_is_enough(self):
-        status, loc, ck, _ = self.sign_in(email="partner@example.com", groups=["Finance"])
+        status, _loc, ck, _ = self.sign_in(email="partner@example.com", groups=["Finance"])
         self.assertEqual(status, 302)
         self.assertIn("runway_session", ck)
 
@@ -183,7 +183,7 @@ class OIDCTests(unittest.TestCase):
             self.assertNotIn("runway_session", {k: v for k, v in ck.items() if v})
 
     def test_login_state_cannot_be_replayed(self):
-        status, loc, ck, _ = self.req("/auth/login")
+        _status, loc, ck, _ = self.req("/auth/login")
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query))
         Provider.issued["c1"] = {"nonce": q["nonce"], "challenge": q["code_challenge"], "email": "me@example.com"}
         self.assertEqual(self.req(f"/auth/callback?code=c1&state={q['state']}", {"runway_login": ck["runway_login"]})[0], 302)

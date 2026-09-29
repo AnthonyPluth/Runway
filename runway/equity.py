@@ -157,7 +157,7 @@ def _num(v, name, allow_none=True):
     try:
         n = db.number(v)
     except (TypeError, ValueError):
-        raise EquityError(f"The {name} must be a number")
+        raise EquityError(f"The {name} must be a number") from None
     if n < 0:
         raise EquityError(f"The {name} can't be negative")
     return n
@@ -169,7 +169,7 @@ def _day(v, name):
     try:
         return date.fromisoformat(str(v)[:10]).isoformat()
     except ValueError:
-        raise EquityError(f"The {name} must be a date like 2024-03-01")
+        raise EquityError(f"The {name} must be a date like 2024-03-01") from None
 
 
 def save_company(conn, body: dict, cid: str | None = None) -> str:

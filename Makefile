@@ -12,10 +12,10 @@ RUFF ?= $(shell if poetry run ruff --version >/dev/null 2>&1; then echo "poetry 
 
 check: lint test frontend-check
 
-# Ruff for Python, and a syntax check of the plain JavaScript that isn't built (the service worker, the extension).
-lint:
+# Ruff for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
+lint: frontend/node_modules
 	$(RUFF) check .
-	find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
+	cd frontend && $(NPM) run lint
 
 test:
 	$(PYTHON) -m unittest discover tests
@@ -27,9 +27,9 @@ fix:
 frontend/node_modules:
 	cd frontend && $(NPM) ci --no-audit --no-fund
 
-# `npm run lint` and `npm test` run only if frontend/package.json defines them: `--if-present` skips a missing script.
+# `npm test` runs only if frontend/package.json defines it: `--if-present` skips a missing script.
 frontend-check: frontend/node_modules
-	cd frontend && $(NPM) run --if-present lint
 	cd frontend && $(NPM) run check
+	cd frontend && $(NPM) run lint
 	cd frontend && $(NPM) run --if-present test
 	cd frontend && $(NPM) run build

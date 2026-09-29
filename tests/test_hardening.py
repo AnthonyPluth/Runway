@@ -1,6 +1,7 @@
 """Fixes from the September 2026 review of the server: sign-in, slow clients, restore, outbound fetches, logos, and
 smaller hardening (Carta mock, sync on visit, notifications, secret keys)."""
 import base64
+import contextlib
 import gzip
 import json
 import os
@@ -14,6 +15,7 @@ import urllib.request
 from datetime import date
 from unittest import mock
 
+
 from cryptography.fernet import Fernet
 
 from runway import backup, db, notify, oidc, secretbox, server, simplefin
@@ -23,7 +25,7 @@ ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OID
 
 class SignInTests(unittest.TestCase):
     def setUp(self):
-        self.saved = {k: os.environ.get(k) for k in ENV + ("RUNWAY_DATA",)}
+        self.saved = {k: os.environ.get(k) for k in (*ENV, "RUNWAY_DATA")}
         for k in ENV:
             os.environ.pop(k, None)
         os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com"
@@ -115,10 +117,8 @@ class ServerTests(unittest.TestCase):
                 while time.monotonic() - started < 5 and not closed:
                     s.send(b"X")   # a header byte every 0.1s: each read is quick, the headers never finish
                     time.sleep(0.1)
-                    try:
+                    with contextlib.suppress(BlockingIOError):
                         closed = s.recv(1024) == b""
-                    except BlockingIOError:
-                        pass
             except OSError:
                 closed = True
             elapsed = time.monotonic() - started
