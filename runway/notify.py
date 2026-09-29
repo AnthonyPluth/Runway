@@ -11,8 +11,11 @@ import time
 import urllib.parse
 from datetime import date, timedelta
 
+from sqlalchemy import delete, func, insert, select, update
+
 from . import db, forecast, recurring, webpush
 from . import settings_keys as sk
+from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
 DEFAULTS = {
     "card_due": True, "card_due_days": 3,           # a card payment is due within N days
@@ -52,7 +55,7 @@ def save_prefs(conn, body: dict) -> dict:
 # ------------------------------------------------------------------------------------------------ devices
 
 def subscriptions(conn) -> list[dict]:
-    return db.rows(conn.execute("SELECT * FROM push_subscriptions ORDER BY created"))
+    return db.rows(conn.execute(select(PushSubscription).order_by(PushSubscription.created)))
 
 
 def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
@@ -64,9 +67,9 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
         raise ValueError("That push service isn't one Runway knows. Add its host to RUNWAY_PUSH_HOSTS if you trust it.")
     if not webpush.valid_public_key(keys["p256dh"]):
         raise ValueError("That isn't a push subscription.")
-    conn.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?) "
-                 "ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth, device=excluded.device",
-                 (endpoint, keys["p256dh"], keys["auth"], (device or "This device")[:80], user_sub, time.time()))
+    db.upsert(conn, PushSubscription, {"endpoint": endpoint, "p256dh": keys["p256dh"], "auth": keys["auth"],
+                                       "device": (device or "This device")[:80], "user_sub": user_sub, "created": time.time()},
+              key=["endpoint"], update=["p256dh", "auth", "device"])
 
 
 # The browsers' push services (Chrome and Edge through Google or Windows, Firefox through Mozilla, Safari through Apple).
@@ -81,12 +84,12 @@ def push_host_allowed(endpoint: str) -> bool:
 
 
 def unsubscribe(conn, endpoint: str) -> None:
-    conn.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+    conn.execute(delete(PushSubscription).where(PushSubscription.endpoint == endpoint))
 
 
 def subject(conn) -> str:
     """Who the push services can contact about these messages (required by Apple): your email, or Runway's address."""
-    row = conn.execute("SELECT email FROM users WHERE email IS NOT NULL ORDER BY last_seen DESC LIMIT 1").fetchone()
+    row = conn.execute(select(User.email).where(User.email.is_not(None)).order_by(User.last_seen.desc()).limit(1)).fetchone()
     if row and row["email"]:
         return f"mailto:{row['email']}"
     public = (os.environ.get("RUNWAY_PUBLIC_URL") or "").rstrip("/")
@@ -105,12 +108,14 @@ def send_all(conn, message: dict, only: str | None = None) -> dict:
             continue
         try:
             webpush.send(s, message, vapid, subject(conn))
-            conn.execute("UPDATE push_subscriptions SET last_ok=?, last_error=NULL WHERE endpoint=?", (time.time(), s["endpoint"]))
+            conn.execute(update(PushSubscription).where(PushSubscription.endpoint == s["endpoint"])
+                         .values(last_ok=time.time(), last_error=None))
             sent += 1
         except webpush.Gone:
             unsubscribe(conn, s["endpoint"])
         except Exception as e:   # one bad device shouldn't stop the rest
-            conn.execute("UPDATE push_subscriptions SET last_error=? WHERE endpoint=?", (str(e)[:300], s["endpoint"]))
+            conn.execute(update(PushSubscription).where(PushSubscription.endpoint == s["endpoint"])
+                         .values(last_error=str(e)[:300]))
             failed.append(f"{s['device']}: {e}")
     return {"sent": sent, "failed": failed}
 
@@ -164,21 +169,24 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
                         "url": "/#recurring"})
     if p["big_charge"]:
         since = (today - timedelta(days=3)).isoformat()
+        T = Transaction
         for t in conn.execute(
-                "SELECT t.id, t.amount, COALESCE(t.payee, t.description) AS who, " + db.label_sql("a") + " AS acct "
-                "FROM transactions t JOIN accounts a ON a.id=t.account_id LEFT JOIN categories c ON c.name=t.category "
-                "WHERE t.posted>=? AND t.amount<=? AND a.kind IN ('checking','savings','credit') AND a.hidden=0 "
-                "AND COALESCE(c.is_transfer, 0)=0", (since, -float(p["big_charge_over"]))).fetchall():
+                select(T.id, T.amount, func.coalesce(T.payee, T.description).label("who"), db.account_label_expr().label("acct"))
+                .join(Account, Account.id == T.account_id).outerjoin(Category, Category.name == T.category)
+                .where(T.posted >= since, T.amount <= -float(p["big_charge_over"]),
+                       Account.kind.in_(["checking", "savings", "credit"]), Account.hidden == 0,
+                       func.coalesce(Category.is_transfer, 0) == 0)).fetchall():
             out.append({"key": f"big:{t['id']}", "title": f"{_fmt(t['amount'])} at {t['who']}",
                         "body": f"On {t['acct']}.", "url": "/#transactions"})
     if p["review"]:
-        n = conn.execute(f"SELECT COUNT(*) FROM transactions WHERE needs_review=1 AND {db.NOT_INVESTMENT}").fetchone()[0]
+        n = conn.execute(select(func.count()).select_from(Transaction)
+                         .where(Transaction.needs_review == 1, db.not_investment())).fetchone()[0]
         if n:
             out.append({"key": f"review:{today.isoformat()}", "title": f"{n} transaction{'s' if n != 1 else ''} to review",
                         "body": "They're waiting for a category.", "url": "/#review"})
     if p["sync_failed"]:
         last_ok = db.get_setting(conn, sk.LAST_SYNC_OK)
-        log = conn.execute("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+        log = conn.execute(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
         stale = not last_ok or (date.today() - date.fromisoformat(last_ok[:10])).days >= 1
         if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
@@ -190,17 +198,17 @@ def run(conn, today: date | None = None) -> dict:
     """Send anything new. Nothing is sent (or remembered) while no device is subscribed, so turning notifications on
     later doesn't bring a flood of old alerts, except what's still true that day."""
     today = today or date.today()
-    if not conn.execute("SELECT 1 FROM push_subscriptions").fetchone():
+    if not conn.execute(select(PushSubscription.endpoint).limit(1)).fetchone():
         return {"sent": 0, "alerts": 0}
     p = prefs(conn)
     sent = 0
     for a in alerts(conn, today, p):
-        if conn.execute("SELECT 1 FROM notify_log WHERE key=?", (a["key"],)).fetchone():
+        if conn.execute(select(NotifyLog.key).where(NotifyLog.key == a["key"])).fetchone():
             continue
         # Saved before sending: if anything later rolled this back, the next run would send the same alert again.
-        conn.execute("INSERT INTO notify_log(key, sent, title) VALUES (?,?,?)", (a["key"], time.time(), a["title"]))
+        conn.execute(insert(NotifyLog).values(key=a["key"], sent=time.time(), title=a["title"]))
         conn.commit()
         r = send_all(conn, {"title": a["title"], "body": a["body"], "url": a.get("url", "/"), "tag": a["key"]})
         sent += r["sent"]
-    conn.execute("DELETE FROM notify_log WHERE sent < ?", (time.time() - 120 * 86400,))
+    conn.execute(delete(NotifyLog).where(NotifyLog.sent < time.time() - 120 * 86400))
     return {"sent": sent}
