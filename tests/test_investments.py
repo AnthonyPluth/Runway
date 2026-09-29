@@ -435,7 +435,7 @@ class QuoteStreamEndpointTests(unittest.TestCase):
             threading.Thread(target=httpd.serve_forever, daemon=True).start()
             try:
                 update = {"quotes": {"VTI": q(250)}, "market": "closed", "as_of": "2026-09-28T17:00:00"}
-                with mock.patch.object(prices, "quote_stream", return_value=iter([update])):
+                with mock.patch.object(prices, "quote_stream", side_effect=lambda *_a, **_k: (u for u in [update])):
                     resp = urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/api/investments/stream", timeout=10)
                     self.assertEqual(resp.headers["Content-Type"], "text/event-stream")
                     body = resp.read().decode()
