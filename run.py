@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from runway.server import serve  # noqa: E402
+from runway.server import serve
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Runway cash-flow forecaster")

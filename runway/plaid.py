@@ -10,7 +10,7 @@ import os
 import ssl
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 
 from . import db, secretbox
 from . import settings_keys as sk
@@ -381,7 +381,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         if not txs:
             break
     conn.execute("UPDATE plaid_items SET last_sync=?, error=NULL WHERE item_id=?",
-                 (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), item_id))
+                 (datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), item_id))
     conn.commit()
     return {"accounts": len(account_ids), "holdings": len(h.get("holdings", [])), "transactions": fetched}
 

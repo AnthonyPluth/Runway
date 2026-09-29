@@ -103,9 +103,9 @@ def _post_form(url: str, data: dict, client_id: str, secret: str, opener=None) -
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:200]
-        raise CartaError(f"Carta refused the sign-in ({e.code}): {detail}")
+        raise CartaError(f"Carta refused the sign-in ({e.code}): {detail}") from e
     except (urllib.error.URLError, OSError, ValueError) as e:
-        raise CartaError(f"Couldn't reach Carta: {e}")
+        raise CartaError(f"Couldn't reach Carta: {e}") from e
 
 
 def _store_token(conn, tok: dict) -> None:
@@ -158,10 +158,10 @@ def _get(conn, path: str, params: dict | None = None, opener=None):
         if e.code in (404, 405):
             return None
         if e.code in (401, 403):
-            raise CartaError("Carta refused access. Connect again from Settings (or ask Carta to enable your app's portfolio scopes).")
-        raise CartaError(f"Carta answered {e.code} for {path}")
+            raise CartaError("Carta refused access. Connect again from Settings (or ask Carta to enable your app's portfolio scopes).") from e
+        raise CartaError(f"Carta answered {e.code} for {path}") from e
     except (urllib.error.URLError, OSError, ValueError) as e:
-        raise CartaError(f"Couldn't reach Carta: {e}")
+        raise CartaError(f"Couldn't reach Carta: {e}") from e
 
 
 def _list(conn, path: str, opener=None) -> list[dict]:

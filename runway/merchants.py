@@ -198,9 +198,7 @@ def best_match(name: str, candidates: list[dict]) -> dict | None:
         s = difflib.SequenceMatcher(None, n, cn).ratio() if cn else 0.0
         if cn.replace(" ", "") == squashed or dom == squashed:
             s = 1.0
-        elif cn and len(n) >= 6 and cn.startswith(n):
-            s = max(s, 0.9)
-        elif cn and len(cn) >= 5 and n.startswith(cn + " "):
+        elif (cn and len(n) >= 6 and cn.startswith(n)) or (cn and len(cn) >= 5 and n.startswith(cn + " ")):
             s = max(s, 0.9)
         if s > score:
             best, score = c, s

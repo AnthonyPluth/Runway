@@ -1,3 +1,4 @@
+import itertools
 import json
 import os
 import sys
@@ -7,18 +8,18 @@ import unittest
 import urllib.error
 import urllib.request
 from unittest import mock
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits  # noqa: E402
+from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits
 
 TODAY = date(2026, 9, 23)
 
 
 def ts(d: date) -> int:
-    return int(datetime(d.year, d.month, d.day, 12, tzinfo=timezone.utc).timestamp())
+    return int(datetime(d.year, d.month, d.day, 12, tzinfo=UTC).timestamp())
 
 
 class Base(unittest.TestCase):
@@ -834,7 +835,7 @@ class SimpleFinStoreTests(Base):
         self.assertEqual(calls[-1][1], TODAY)
         for s, e in calls:
             self.assertLessEqual((e - s).days + 1, simplefin.CHUNK_DAYS)
-        for (s1, e1), (s2, _) in zip(calls, calls[1:]):
+        for (_, e1), (s2, _) in itertools.pairwise(calls):
             self.assertEqual(s2, e1 + timedelta(days=1))
         calls.clear()
         r = simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)

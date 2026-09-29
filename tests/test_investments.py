@@ -5,12 +5,12 @@ import tempfile
 import threading
 import unittest
 from unittest import mock
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, plaid, planner, portfolio, prices  # noqa: E402
+from runway import db, plaid, planner, portfolio, prices
 
 TODAY = date(2026, 9, 23)
 
@@ -121,7 +121,7 @@ class SplitTests(Base):
         self.c.execute("INSERT INTO price_meta(ticker, fetched_at, ok, splits) VALUES ('XYZ', ?, 1, ?)",
                        (datetime.now().isoformat(), json.dumps([["2026-07-01", 2.0]])))
         h = portfolio.history(self.c, TODAY)
-        vals = {d: v for d, v in zip(h["dates"], h["value"])}
+        vals = dict(zip(h["dates"], h["value"], strict=True))
         self.assertEqual(vals["2026-06-30"], 2000.0)
         self.assertEqual(vals["2026-07-01"], 2000.0)
         self.assertEqual(h["flows"][h["dates"].index("2026-07-01")], 0.0)
@@ -246,7 +246,7 @@ class MockYahoo(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        day = lambda d: int(datetime(d.year, d.month, d.day, 14, tzinfo=timezone.utc).timestamp())
+        day = lambda d: int(datetime(d.year, d.month, d.day, 14, tzinfo=UTC).timestamp())
         ts = [day(date(2026, 9, 21)), day(date(2026, 9, 22))]
         body = json.dumps({"chart": {"result": [{
             "meta": {"gmtoffset": -14400}, "timestamp": ts,
@@ -428,7 +428,7 @@ class DuplicateConnectionTests(unittest.TestCase):
         self.add("c", [("Individual", "1111")])            # a different Wealthfront login: fine
         self.assertEqual(plaid.duplicates(self.c, "a"), [{"item_id": "b", "shared": 2, "adds_nothing": True}])
         self.assertEqual(plaid.duplicates(self.c, "c"), [])
-        self.add("d", kids + [("Joint", "2222")])           # overlaps, but brings a new account too
+        self.add("d", [*kids, ("Joint", "2222")])           # overlaps, but brings a new account too
         self.assertEqual([d["adds_nothing"] for d in plaid.duplicates(self.c, "d")], [False, False])
 
     def test_linking_the_same_login_again_is_undone(self):

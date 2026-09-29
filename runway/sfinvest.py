@@ -180,7 +180,7 @@ def capture(conn, acct: dict, acct_id: str, org: str | None, balance: float, tod
 
     # What SimpleFIN actually sent, so Setup can show it (field names and counts only).
     seen = json.loads(db.get_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN) or "{}")
-    fields = sorted({k for h in raw for k in h.keys()}) if raw else []
+    fields = sorted({k for h in raw for k in h}) if raw else []
     seen[acct_id] = {"id": acct_id, "name": name, "org": org, "positions": len(raw), "fields": fields, "at": today.isoformat()}
     db.set_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps(seen))
     return True
