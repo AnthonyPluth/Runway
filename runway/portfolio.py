@@ -98,52 +98,66 @@ def holdings(conn) -> list[dict]:
     manual = {(r["account_id"], r["security_id"]): (r["cost_basis"], r["per_share"]) for r in conn.execute("SELECT * FROM cost_overrides")}
     by_sec: dict[str, dict] = {}
     for r in rows:
-        value = r["value"] if r["value"] is not None else (r["quantity"] or 0) * (r["price"] or r["close_price"] or 0)
-        key = (r["account_id"], r["security_id"])
-        per_share = manual[key][1] if key in manual else None
-        if key in manual:   # your own number: a price per share (scales with shares held) or an older total
-            cost = per_share * (r["quantity"] or 0) if per_share is not None else manual[key][0]
-        else:
-            cost = r["cost_basis"]
-        # The same fund in several accounts (or from different sources) is one row: group by ticker.
-        group = f"t:{r['ticker'].upper()}" if prices.usable_ticker(r["ticker"]) and not r["is_cash"] else r["security_id"]
-        h = by_sec.setdefault(group, {
-            "security_id": r["security_id"], "group": group, "ticker": r["ticker"], "name": r["sec_name"], "type": r["type"],
-            "asset_class": asset_class(r), "sector": r["sector"], "is_cash": bool(r["is_cash"]),
-            "quantity": 0.0, "value": 0.0, "cost_basis": 0.0, "cost_known": True, "accounts": [], "price": r["price"],
-            "lots": [], "cost_manual": False,
-        })
-        if not h["name"] and r["sec_name"]:
-            h["name"] = r["sec_name"]
-        h["lots"].append({"account_id": r["account_id"], "security_id": r["security_id"], "account_name": r["account_name"], "quantity": r["quantity"] or 0,
-                          "value": round(value, 2), "cost_basis": cost, "reported_cost_basis": r["cost_basis"],
-                          "per_share": per_share if per_share is not None else (cost / r["quantity"] if cost is not None and r["quantity"] else None),
-                          "manual": key in manual})
-        h["cost_manual"] = h["cost_manual"] or key in manual
-        h["quantity"] += r["quantity"] or 0
-        h["value"] += value
-        if cost is None and not r["is_cash"]:
-            h["cost_known"] = False
-        else:
-            h["cost_basis"] += cost if cost is not None else value
-        if r["account_name"] not in h["accounts"]:
-            h["accounts"].append(r["account_name"])
+        _add_lot(by_sec, r, manual)
     total = sum(h["value"] for h in by_sec.values()) or 1.0
-    out = []
-    for h in by_sec.values():
-        h["price"] = h["value"] / h["quantity"] if h["quantity"] else h["price"]
-        h["allocation"] = h["value"] / total
-        if h["cost_known"] and not h["is_cash"] and h["cost_basis"]:
-            h["gain"] = h["value"] - h["cost_basis"]
-            h["gain_pct"] = h["gain"] / h["cost_basis"]
-        else:
-            h["gain"] = h["gain_pct"] = None
-        h["day_change"] = _day_change(conn, h)
-        prev = h["value"] - h["day_change"] if h["day_change"] is not None else None
-        h["day_change_pct"] = h["day_change"] / prev if prev else None
-        out.append({k: (round(v, 6) if isinstance(v, float) else v) for k, v in h.items()})
+    out = [_finish_holding(conn, h, total) for h in by_sec.values()]
     out.sort(key=lambda h: -h["value"])
     return out
+
+
+def _lot_cost(r: dict, manual: dict) -> tuple[float | None, float | None]:
+    """A position's cost basis, and the per-share cost you entered if you did. Your own number is a price per share
+    (scales with shares held) or an older total; without one it's what the institution reports."""
+    key = (r["account_id"], r["security_id"])
+    if key not in manual:
+        return r["cost_basis"], None
+    total, per_share = manual[key]
+    return (per_share * (r["quantity"] or 0) if per_share is not None else total), per_share
+
+
+def _add_lot(by_sec: dict[str, dict], r: dict, manual: dict) -> None:
+    """Add one account's position to the row for its fund."""
+    value = r["value"] if r["value"] is not None else (r["quantity"] or 0) * (r["price"] or r["close_price"] or 0)
+    is_manual = (r["account_id"], r["security_id"]) in manual
+    cost, per_share = _lot_cost(r, manual)
+    # The same fund in several accounts (or from different sources) is one row: group by ticker.
+    group = f"t:{r['ticker'].upper()}" if prices.usable_ticker(r["ticker"]) and not r["is_cash"] else r["security_id"]
+    h = by_sec.setdefault(group, {
+        "security_id": r["security_id"], "group": group, "ticker": r["ticker"], "name": r["sec_name"], "type": r["type"],
+        "asset_class": asset_class(r), "sector": r["sector"], "is_cash": bool(r["is_cash"]),
+        "quantity": 0.0, "value": 0.0, "cost_basis": 0.0, "cost_known": True, "accounts": [], "price": r["price"],
+        "lots": [], "cost_manual": False,
+    })
+    if not h["name"] and r["sec_name"]:
+        h["name"] = r["sec_name"]
+    h["lots"].append({"account_id": r["account_id"], "security_id": r["security_id"], "account_name": r["account_name"], "quantity": r["quantity"] or 0,
+                      "value": round(value, 2), "cost_basis": cost, "reported_cost_basis": r["cost_basis"],
+                      "per_share": per_share if per_share is not None else (cost / r["quantity"] if cost is not None and r["quantity"] else None),
+                      "manual": is_manual})
+    h["cost_manual"] = h["cost_manual"] or is_manual
+    h["quantity"] += r["quantity"] or 0
+    h["value"] += value
+    if cost is None and not r["is_cash"]:
+        h["cost_known"] = False
+    else:
+        h["cost_basis"] += cost if cost is not None else value
+    if r["account_name"] not in h["accounts"]:
+        h["accounts"].append(r["account_name"])
+
+
+def _finish_holding(conn, h: dict, total: float) -> dict:
+    """A fund's row for the page: its price, share of the portfolio, gain and day's change, floats rounded."""
+    h["price"] = h["value"] / h["quantity"] if h["quantity"] else h["price"]
+    h["allocation"] = h["value"] / total
+    if h["cost_known"] and not h["is_cash"] and h["cost_basis"]:
+        h["gain"] = h["value"] - h["cost_basis"]
+        h["gain_pct"] = h["gain"] / h["cost_basis"]
+    else:
+        h["gain"] = h["gain_pct"] = None
+    h["day_change"] = _day_change(conn, h)
+    prev = h["value"] - h["day_change"] if h["day_change"] is not None else None
+    h["day_change_pct"] = h["day_change"] / prev if prev else None
+    return {k: (round(v, 6) if isinstance(v, float) else v) for k, v in h.items()}
 
 
 def _day_change(conn, h: dict) -> float | None:
@@ -239,28 +253,10 @@ def _is_income(t: dict) -> bool:
 
 def income(conn, today: date | None = None, months: int = 24) -> dict:
     today = today or date.today()
-    ids = _visible_ids(conn)
-    keys = []
-    y, m = today.year, today.month
-    for _ in range(months):
-        keys.append(f"{y:04d}-{m:02d}")
-        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
-    keys.reverse()
+    keys = _month_keys(today, months)
     inc = {k: 0.0 for k in keys}
     fees = {k: 0.0 for k in keys}
-    if ids:
-        q = ",".join("?" * len(ids))
-        for t in db.rows(conn.execute(f"SELECT * FROM inv_transactions WHERE account_id IN ({q}) AND date>=?",
-                                      (*ids, keys[0] + "-01"))):
-            k = t["date"][:7]
-            if k not in inc:
-                continue
-            if _is_income(t):
-                inc[k] += -t["amount"]
-            if (t["type"] or "") == "fee" and (t["amount"] or 0) > 0:
-                fees[k] += t["amount"]
-            elif (t["fees"] or 0) > 0:
-                fees[k] += t["fees"]
+    _add_plaid_income(conn, keys[0] + "-01", inc, fees)
     for t in _sf_activity(conn, since=keys[0] + "-01", limit=100000):
         k = t["date"][:7]
         if k in inc and t["subtype"] in ("dividend", "interest") and t["amount"] < 0:
@@ -270,6 +266,35 @@ def income(conn, today: date | None = None, months: int = 24) -> dict:
     last12 = keys[-12:]
     return {"months": keys, "income": [round(inc[k], 2) for k in keys], "fees": [round(fees[k], 2) for k in keys],
             "income_12m": round(sum(inc[k] for k in last12), 2), "fees_12m": round(sum(fees[k] for k in last12), 2)}
+
+
+def _month_keys(today: date, months: int) -> list[str]:
+    """The last `months` months ("2026-09"), oldest first, ending with this one."""
+    keys = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        keys.append(f"{y:04d}-{m:02d}")
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    keys.reverse()
+    return keys
+
+
+def _add_plaid_income(conn, since: str, inc: dict[str, float], fees: dict[str, float]) -> None:
+    """Add dividends, interest and fees from Plaid activity to the monthly totals (months not listed are skipped)."""
+    ids = _visible_ids(conn)
+    if not ids:
+        return
+    q = ",".join("?" * len(ids))
+    for t in db.rows(conn.execute(f"SELECT * FROM inv_transactions WHERE account_id IN ({q}) AND date>=?", (*ids, since))):
+        k = t["date"][:7]
+        if k not in inc:
+            continue
+        if _is_income(t):
+            inc[k] += -t["amount"]
+        if (t["type"] or "") == "fee" and (t["amount"] or 0) > 0:
+            fees[k] += t["amount"]
+        elif (t["fees"] or 0) > 0:
+            fees[k] += t["fees"]
 
 
 # ------------------------------------------------------------------------------------------------ history & returns
@@ -309,11 +334,7 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
     sf_ids = [a["id"] for a in accts if a.get("source") == "simplefin"]
     if not accts:
         return {"dates": [], "value": [], "flows": [], "invested": [], "twr": [], "missing_prices": [], "estimated_before": None}
-    q = ",".join("?" * len(ids))
-    first_tx = conn.execute(f"SELECT MIN(date) FROM inv_transactions WHERE account_id IN ({q})", ids).fetchone()[0] if ids else None
-    start = today - timedelta(days=days)
-    if first_tx and not sf_ids:
-        start = max(start, date.fromisoformat(first_tx) - timedelta(days=1))
+    start = _history_start(conn, ids, sf_ids, today, days)
     dates = [(start + timedelta(days=i)).isoformat() for i in range((today - start).days + 1)]
     n = len(dates)
     secs = {r["id"]: r for r in db.rows(conn.execute("SELECT * FROM securities"))}
@@ -322,106 +343,162 @@ def history(conn, today: date | None = None, days: int = HISTORY_DAYS) -> dict:
     flows = [0.0] * n
 
     for aid in ids:
-        hold = db.rows(conn.execute("SELECT * FROM holdings WHERE account_id=?", (aid,)))
-        txs = db.rows(conn.execute("SELECT * FROM inv_transactions WHERE account_id=? AND date>? AND type<>'cancel' ORDER BY date",
-                                   (aid, dates[0])))
-        cash_now = sum((h["value"] if h["value"] is not None else h["quantity"] or 0) for h in hold
-                       if secs.get(h["security_id"], {}).get("is_cash"))
-        if not hold:
-            bal = conn.execute("SELECT balance FROM inv_accounts WHERE id=?", (aid,)).fetchone()[0] or 0.0
-            cash_now = bal  # balance-only account: treat as cash-like
-        qty_now = {h["security_id"]: h["quantity"] or 0 for h in hold if not secs.get(h["security_id"], {}).get("is_cash")}
-        cur_price = {h["security_id"]: h["price"] for h in hold}
-
-        # Per-day changes after each date, applied backwards from today.
-        qty_delta: dict[str, list[float]] = defaultdict(lambda: [0.0] * n)
-        cash_delta = [0.0] * n
-        last_trade_price: dict[str, list[tuple[str, float]]] = defaultdict(list)
-        idx = {d: i for i, d in enumerate(dates)}
-        for t in txs:
-            i = idx.get(t["date"])
-            if i is None:
-                continue
-            sec = secs.get(t["security_id"] or "", {})
-            is_cash_sec = bool(sec.get("is_cash"))
-            ttype, sub = (t["type"] or "").lower(), (t["subtype"] or "").lower()
-            # Only trades and transfers change how many shares you hold. (Some institutions attach a share count to
-            # plain cash deposits or dividends; applying it would invent or remove shares.)
-            if t["security_id"] and not is_cash_sec and t["quantity"] and ttype in ("buy", "sell", "transfer"):
-                qty_delta[t["security_id"]][i] += t["quantity"]
-                if t["price"]:
-                    last_trade_price[t["security_id"]].append((t["date"], t["price"]))
-            # Buying or selling a money-market "cash" fund is just moving cash around; everything else changes cash.
-            if not (is_cash_sec and ttype in ("buy", "sell")):
-                cash_delta[i] += -(t["amount"] or 0)  # amount > 0 means cash left the account
-            if ttype == "cash" and sub in FLOW_SUBTYPES:
-                flows[i] += -(t["amount"] or 0)
-            elif ttype == "transfer" and sub in CORPORATE_ACTIONS:
-                pass  # splits, spin-offs and the like change share counts, not how much you've put in
-            elif ttype == "transfer":
-                if t["security_id"] and not is_cash_sec and t["quantity"]:
-                    px = t["price"] or book.price({"id": t["security_id"], **sec}, t["date"], cur_price.get(t["security_id"]))
-                    flows[i] += (t["quantity"] or 0) * (px or 0)
-                    cash_delta[i] += (t["amount"] or 0)  # in-kind transfers don't move cash
-                else:
-                    flows[i] += -(t["amount"] or 0)
-
-        # Walk backwards: end-of-day positions.
-        all_secs = set(qty_now) | set(qty_delta)
-        qty = {s: qty_now.get(s, 0.0) for s in all_secs}
-        cash = cash_now
-        acct_values = [0.0] * n
-        for i in range(n - 1, -1, -1):
-            d = dates[i]
-            v = cash
-            for s, qv in qty.items():
-                if abs(qv) < 1e-9:
-                    continue
-                sec = {"id": s, **secs.get(s, {})}
-                fallback = cur_price.get(s)
-                trades = last_trade_price.get(s)
-                if trades:
-                    before = [p for td, p in trades if td <= d]
-                    fallback = before[-1] if before else trades[0][1]
-                px = book.price(sec, d, fallback) or 0.0
-                v += qv * px
-            acct_values[i] = v
-            # step back to the end of the previous day
-            for s in all_secs:
-                qty[s] -= qty_delta[s][i] if s in qty_delta else 0.0
-            cash -= cash_delta[i]
-        # Today's value is what the institution reports right now.
-        today_total = sum((h["value"] if h["value"] is not None else 0) for h in hold) if hold else cash_now
-        acct_values[-1] = today_total
+        acct_values = _replay_account(conn, aid, dates, secs, book, flows)
         for i in range(n):
             value[i] += acct_values[i]
 
-    estimated_before = None
-    for aid in sf_ids:
-        vals, fl, first_snap = _snapshot_series(conn, aid, dates, secs, book)
-        for i in range(n):
-            value[i] += vals[i]
-            flows[i] += fl[i]
-        if first_snap and first_snap > dates[0]:
-            estimated_before = max(estimated_before or first_snap, first_snap)
+    estimated_before = _add_snapshot_accounts(conn, sf_ids, dates, secs, book, value, flows)
+    twr = _time_weighted(value, flows)
+    invested = _invested(value, flows)
+    return {"dates": dates, "value": [round(v, 2) for v in value], "flows": [round(f, 2) for f in flows],
+            "invested": [round(v, 2) for v in invested], "twr": [round(r, 6) for r in twr],
+            "missing_prices": sorted(book.missing), "estimated_before": estimated_before}
 
-    # Time-weighted return: each day's growth with that day's deposits/withdrawals taken out.
-    twr = [0.0] * n
+
+def _history_start(conn, ids: list[str], sf_ids: list[str], today: date, days: int) -> date:
+    """The first day of the history: `days` back, or the day before the first activity if that's later. SimpleFIN
+    accounts have no activity to start from, so with any of them the full span is shown."""
+    start = today - timedelta(days=days)
+    if not ids or sf_ids:
+        return start
+    q = ",".join("?" * len(ids))
+    first_tx = conn.execute(f"SELECT MIN(date) FROM inv_transactions WHERE account_id IN ({q})", ids).fetchone()[0]
+    if first_tx:
+        start = max(start, date.fromisoformat(first_tx) - timedelta(days=1))
+    return start
+
+
+def _replay_account(conn, aid: str, dates: list[str], secs: dict, book: _PriceBook, flows: list[float]) -> list[float]:
+    """One account's end-of-day value on each date, rebuilt from what it holds today by walking its activity backwards.
+    Money it gained or lost from outside is added to `flows` along the way."""
+    n = len(dates)
+    hold = db.rows(conn.execute("SELECT * FROM holdings WHERE account_id=?", (aid,)))
+    txs = db.rows(conn.execute("SELECT * FROM inv_transactions WHERE account_id=? AND date>? AND type<>'cancel' ORDER BY date",
+                               (aid, dates[0])))
+    cash_now = sum((h["value"] if h["value"] is not None else h["quantity"] or 0) for h in hold
+                   if secs.get(h["security_id"], {}).get("is_cash"))
+    if not hold:
+        bal = conn.execute("SELECT balance FROM inv_accounts WHERE id=?", (aid,)).fetchone()[0] or 0.0
+        cash_now = bal  # balance-only account: treat as cash-like
+    qty_now = {h["security_id"]: h["quantity"] or 0 for h in hold if not secs.get(h["security_id"], {}).get("is_cash")}
+    cur_price = {h["security_id"]: h["price"] for h in hold}
+    qty_delta, cash_delta, trades = _activity_changes(txs, dates, secs, book, cur_price, flows)
+
+    # Walk backwards: end-of-day positions.
+    all_secs = set(qty_now) | set(qty_delta)
+    qty = {s: qty_now.get(s, 0.0) for s in all_secs}
+    cash = cash_now
+    acct_values = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        d = dates[i]
+        v = cash
+        for s, qv in qty.items():
+            if abs(qv) < 1e-9:
+                continue
+            v += qv * _held_price(book, {"id": s, **secs.get(s, {})}, d, cur_price.get(s), trades.get(s))
+        acct_values[i] = v
+        # step back to the end of the previous day
+        for s in all_secs:
+            qty[s] -= qty_delta[s][i] if s in qty_delta else 0.0
+        cash -= cash_delta[i]
+    # Today's value is what the institution reports right now.
+    acct_values[-1] = sum((h["value"] if h["value"] is not None else 0) for h in hold) if hold else cash_now
+    return acct_values
+
+
+def _activity_changes(txs: list[dict], dates: list[str], secs: dict, book: _PriceBook, cur_price: dict,
+                      flows: list[float]) -> tuple[dict[str, list[float]], list[float], dict[str, list[tuple[str, float]]]]:
+    """What each day's activity changed: shares per security, cash, and the prices trades were made at. Money moved
+    in or out from outside is added to `flows`."""
+    n = len(dates)
+    qty_delta: dict[str, list[float]] = defaultdict(lambda: [0.0] * n)
+    cash_delta = [0.0] * n
+    trades: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    idx = {d: i for i, d in enumerate(dates)}
+    for t in txs:
+        i = idx.get(t["date"])
+        if i is None:
+            continue
+        sec = secs.get(t["security_id"] or "", {})
+        is_cash_sec = bool(sec.get("is_cash"))
+        ttype, sub = (t["type"] or "").lower(), (t["subtype"] or "").lower()
+        moves_shares = bool(t["security_id"] and not is_cash_sec and t["quantity"])
+        # Only trades and transfers change how many shares you hold. (Some institutions attach a share count to
+        # plain cash deposits or dividends; applying it would invent or remove shares.)
+        if moves_shares and ttype in ("buy", "sell", "transfer"):
+            qty_delta[t["security_id"]][i] += t["quantity"]
+            if t["price"]:
+                trades[t["security_id"]].append((t["date"], t["price"]))
+        # Buying or selling a money-market "cash" fund is just moving cash around; everything else changes cash.
+        if not (is_cash_sec and ttype in ("buy", "sell")):
+            cash_delta[i] += -(t["amount"] or 0)  # amount > 0 means cash left the account
+        flow, in_kind = _outside_money(t, sec, ttype, sub, moves_shares, book, cur_price)
+        flows[i] += flow
+        if in_kind:
+            cash_delta[i] += (t["amount"] or 0)  # in-kind transfers don't move cash
+    return qty_delta, cash_delta, trades
+
+
+def _outside_money(t: dict, sec: dict, ttype: str, sub: str, moves_shares: bool, book: _PriceBook,
+                   cur_price: dict) -> tuple[float, bool]:
+    """Money a transaction brought into the account from outside (negative: taken out), and whether it was shares
+    moved in kind rather than cash."""
+    if ttype == "cash" and sub in FLOW_SUBTYPES:
+        return -(t["amount"] or 0), False
+    if ttype != "transfer" or sub in CORPORATE_ACTIONS:
+        return 0.0, False   # splits, spin-offs and the like change share counts, not how much you've put in
+    if moves_shares:
+        px = t["price"] or book.price({"id": t["security_id"], **sec}, t["date"], cur_price.get(t["security_id"]))
+        return (t["quantity"] or 0) * (px or 0), True
+    return -(t["amount"] or 0), False
+
+
+def _held_price(book: _PriceBook, sec: dict, d: str, current: float | None, trades: list[tuple[str, float]] | None) -> float:
+    """A holding's price on a day. Without price history, the last trade on or before that day stands in (the first
+    trade for days before any), and failing that the price the institution reports today."""
+    fallback = current
+    if trades:
+        before = [p for td, p in trades if td <= d]
+        fallback = before[-1] if before else trades[0][1]
+    return book.price(sec, d, fallback) or 0.0
+
+
+def _time_weighted(value: list[float], flows: list[float]) -> list[float]:
+    """Time-weighted return: each day's growth with that day's deposits/withdrawals taken out."""
+    twr = [0.0] * len(value)
     growth = 1.0
-    for i in range(1, n):
+    for i in range(1, len(value)):
         # Skip days the portfolio was (nearly) empty: a first deposit into a $0 account isn't a return.
         if value[i - 1] > 1.0 and value[i] - flows[i] > 0:
             growth *= (value[i] - flows[i]) / value[i - 1]
         twr[i] = growth - 1.0
-    invested = [0.0] * n
+    return twr
+
+
+def _invested(value: list[float], flows: list[float]) -> list[float]:
+    """Money put in to date: the first day's value plus every deposit and withdrawal since."""
+    invested = [0.0] * len(value)
     running = value[0]
-    for i in range(n):
+    for i in range(len(value)):
         if i:
             running += flows[i]
         invested[i] = running
-    return {"dates": dates, "value": [round(v, 2) for v in value], "flows": [round(f, 2) for f in flows],
-            "invested": [round(v, 2) for v in invested], "twr": [round(r, 6) for r in twr],
-            "missing_prices": sorted(book.missing), "estimated_before": estimated_before}
+    return invested
+
+
+def _add_snapshot_accounts(conn, sf_ids: list[str], dates: list[str], secs: dict, book: _PriceBook,
+                           value: list[float], flows: list[float]) -> str | None:
+    """Add the SimpleFIN accounts' daily values and flows to the totals. Returns the latest first snapshot after the
+    first day: before it, those accounts' history is an estimate."""
+    estimated_before = None
+    for aid in sf_ids:
+        vals, fl, first_snap = _snapshot_series(conn, aid, dates, secs, book)
+        for i in range(len(dates)):
+            value[i] += vals[i]
+            flows[i] += fl[i]
+        if first_snap and first_snap > dates[0]:
+            estimated_before = max(estimated_before or first_snap, first_snap)
+    return estimated_before
 
 
 def _snapshot_series(conn, aid: str, dates: list[str], secs: dict, book: _PriceBook) -> tuple[list[float], list[float], str | None]:
@@ -539,13 +616,7 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
         return rules
     noncash = [h for h in hold if not h["is_cash"] and h["asset_class"] != "Not reported"]
     if noncash:
-        top = noncash[0]
-        share = top["value"] / total
-        fund = top["asset_class"] in ("ETFs", "Mutual funds")
-        rules.append({"name": "Largest single holding", "ok": share <= 0.25 or fund,
-                      "detail": f"{top['ticker'] or top['name']} is {share:.0%} of the portfolio"
-                                + (" (a fund, so it's diversified inside)" if fund and share > 0.25 else "")
-                                + ("" if share <= 0.25 or fund else ". Above 25% in one stock is a lot of single-company risk.")})
+        rules.append(_largest_holding_rule(noncash[0], total))
     cash_share = sum(h["value"] for h in hold if h["is_cash"]) / total
     rules.append({"name": "Uninvested cash", "ok": cash_share <= 0.15,
                   "detail": f"{cash_share:.0%} of the portfolio is cash" + ("" if cash_share <= 0.15 else "; that part isn't growing with the market.")})
@@ -557,18 +628,36 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
     rules.append({"name": "Fees paid", "ok": fee_ratio <= 0.005,
                   "detail": f"${inc['fees_12m']:,.0f} in the last 12 months ({fee_ratio:.2%} of the portfolio)"
                             + ("" if fee_ratio <= 0.005 else "; worth checking what they're for.")})
-    spend = monthly_spending(conn, today)
-    primary = db.get_setting(conn, sk.PRIMARY_ACCOUNT)
-    row = conn.execute("SELECT balance FROM accounts WHERE id=?", (primary,)).fetchone() if primary else None
-    if spend > 0 and row:
-        months = (row["balance"] or 0) / spend
-        rules.append({"name": "Emergency fund", "ok": months >= 3,
-                      "detail": f"Your primary account covers {months:.1f} months of your average spending (${spend:,.0f}/month); 3–6 months is the usual guide."})
+    emergency = _emergency_fund_rule(conn, today)
+    if emergency:
+        rules.append(emergency)
     missing_basis = [h for h in noncash if h["gain"] is None]
     if missing_basis:
         rules.append({"name": "Cost basis", "ok": False, "info": True,
                       "detail": f"{len(missing_basis)} holding{'s' if len(missing_basis) != 1 else ''} have no cost basis from the institution, so their gain isn't counted."})
     return rules
+
+
+def _largest_holding_rule(top: dict, total: float) -> dict:
+    """More than a quarter in one stock is a lot of single-company risk; a fund is diversified inside."""
+    share = top["value"] / total
+    fund = top["asset_class"] in ("ETFs", "Mutual funds")
+    return {"name": "Largest single holding", "ok": share <= 0.25 or fund,
+            "detail": f"{top['ticker'] or top['name']} is {share:.0%} of the portfolio"
+                      + (" (a fund, so it's diversified inside)" if fund and share > 0.25 else "")
+                      + ("" if share <= 0.25 or fund else ". Above 25% in one stock is a lot of single-company risk.")}
+
+
+def _emergency_fund_rule(conn, today: date) -> dict | None:
+    """How many months of spending the primary account covers; None without a primary account or any spending."""
+    spend = monthly_spending(conn, today)
+    primary = db.get_setting(conn, sk.PRIMARY_ACCOUNT)
+    row = conn.execute("SELECT balance FROM accounts WHERE id=?", (primary,)).fetchone() if primary else None
+    if not (spend > 0 and row):
+        return None
+    months = (row["balance"] or 0) / spend
+    return {"name": "Emergency fund", "ok": months >= 3,
+            "detail": f"Your primary account covers {months:.1f} months of your average spending (${spend:,.0f}/month); 3–6 months is the usual guide."}
 
 
 # The old financial-independence card kept the figures you changed as settings; a new retirement plan starts from them.

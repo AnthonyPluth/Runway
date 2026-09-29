@@ -67,29 +67,11 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     contributed = 0.0
     # Only with at least one priced fund can new money be told apart from market moves.
     if priced and fresh and diff > max(MIN_CONTRIBUTION, MIN_CONTRIBUTION_SHARE * balance):
-        # New money: buy per the contribution election (spread evenly if no election is set).
-        weights = {r["security_id"]: (r["pct"] or 0) for r in rows}
-        if sum(weights.values()) <= 0:
-            weights = {k: 1.0 for k in weights}
-        wsum = sum(weights.values())
-        for r in priced:
-            buy = diff * weights[r["security_id"]] / wsum
-            r["shares"] += buy / r["price"]
-            conn.execute("UPDATE manual_positions SET shares=? WHERE account_id=? AND security_id=?",
-                         (r["shares"], account_id, r["security_id"]))
-        for r in unpriced:
-            r["last_value"] = (r["last_value"] or 0) + diff * weights[r["security_id"]] / wsum
+        _invest_contribution(conn, account_id, rows, priced, unpriced, diff, on)
         contributed = diff
-        conn.execute("INSERT INTO manual_contributions(account_id, date, amount) VALUES (?,?,?)", (account_id, on, round(diff, 2)))
     # Funds without a price absorb the rest (market moves included), in proportion to their last value.
-    rest = balance - total_priced()
     if unpriced:
-        base = sum(r["last_value"] or 0 for r in unpriced)
-        for r in unpriced:
-            share = (r["last_value"] or 0) / base if base > 0 else 1 / len(unpriced)
-            r["value"] = max(0.0, rest * share)
-            conn.execute("UPDATE manual_positions SET last_value=? WHERE account_id=? AND security_id=?",
-                         (r["value"], account_id, r["security_id"]))
+        _spread_over_unpriced(conn, account_id, unpriced, balance - total_priced())
     positions = {}
     for r in priced:
         positions[r["security_id"]] = {"quantity": r["shares"], "value": r["shares"] * r["price"], "cost": 0.0, "cost_known": False}
@@ -105,6 +87,35 @@ def value(conn, account_id: str, balance: float, balance_date: str, today: date)
     return {"positions": positions, "leftover": leftover, "drift": drift, "contributed": contributed}
 
 
+def _invest_contribution(conn, account_id: str, rows: list[dict], priced: list[dict], unpriced: list[dict],
+                         amount: float, on: str) -> None:
+    """New money: buy per the contribution election (spread evenly if no election is set), save the new share
+    counts so the same money is never counted twice, and record the contribution."""
+    weights = {r["security_id"]: (r["pct"] or 0) for r in rows}
+    if sum(weights.values()) <= 0:
+        weights = {k: 1.0 for k in weights}
+    wsum = sum(weights.values())
+    for r in priced:
+        buy = amount * weights[r["security_id"]] / wsum
+        r["shares"] += buy / r["price"]
+        conn.execute("UPDATE manual_positions SET shares=? WHERE account_id=? AND security_id=?",
+                     (r["shares"], account_id, r["security_id"]))
+    for r in unpriced:
+        r["last_value"] = (r["last_value"] or 0) + amount * weights[r["security_id"]] / wsum
+    conn.execute("INSERT INTO manual_contributions(account_id, date, amount) VALUES (?,?,?)", (account_id, on, round(amount, 2)))
+
+
+def _spread_over_unpriced(conn, account_id: str, unpriced: list[dict], rest: float) -> None:
+    """Value the funds without a price at what the priced ones don't explain, split by their last known value
+    (evenly when none is known), and remember it."""
+    base = sum(r["last_value"] or 0 for r in unpriced)
+    for r in unpriced:
+        share = (r["last_value"] or 0) / base if base > 0 else 1 / len(unpriced)
+        r["value"] = max(0.0, rest * share)
+        conn.execute("UPDATE manual_positions SET last_value=? WHERE account_id=? AND security_id=?",
+                     (r["value"], account_id, r["security_id"]))
+
+
 def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> None:
     """Replace what a tracked account holds. rows: [{ticker or name, shares, pct}] (shares may be empty for a
     fund without a ticker; give its current value instead as `value`)."""
@@ -113,20 +124,10 @@ def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> 
         raise ValueError("Account not found")
     clean = []
     for r in rows:
-        ticker = (r.get("ticker") or "").strip().upper()
-        name = (r.get("name") or "").strip()
-        if not ticker and not name:
+        entry = _clean_entry(r)
+        if entry is None:
             continue
-        try:
-            shares = db.number(str(r.get("shares") or 0).replace(",", ""))
-            pct = db.number(str(r.get("pct") or 0).replace("%", ""))
-            val = db.number(str(r.get("value") or 0).replace(",", "").replace("$", ""))
-        except ValueError:
-            raise ValueError(f"Check the numbers for {ticker or name}") from None
-        if shares < 0 or not 0 <= pct <= 100 or val < 0:
-            raise ValueError(f"Check the numbers for {ticker or name}")
-        if not ticker and not val:
-            raise ValueError(f"{name}: without a ticker, enter its current value instead of shares")
+        ticker, name, shares, pct, val = entry
         sec_id = "man:" + (ticker or "".join(ch for ch in name.lower() if ch.isalnum())[:40])
         conn.execute("INSERT INTO securities(id, ticker, name, is_cash, currency) VALUES (?,?,?,0,'USD') ON CONFLICT(id) DO UPDATE SET "
                      "name=COALESCE(excluded.name, securities.name)", (sec_id, ticker or None, name or None))
@@ -136,3 +137,22 @@ def save(conn, account_id: str, rows: list[dict], today: date | None = None) -> 
     conn.execute("DELETE FROM manual_positions WHERE account_id=?", (account_id,))
     conn.executemany("INSERT INTO manual_positions(account_id, security_id, shares, pct, last_value, updated) VALUES (?,?,?,?,?,?)", clean)
     conn.execute("DELETE FROM manual_state WHERE account_id=?", (account_id,))
+
+
+def _clean_entry(r: dict) -> tuple[str, str, float, float, float] | None:
+    """One fund as entered: (ticker, name, shares, contribution percent, value), checked. None for a blank row."""
+    ticker = (r.get("ticker") or "").strip().upper()
+    name = (r.get("name") or "").strip()
+    if not ticker and not name:
+        return None
+    try:
+        shares = db.number(str(r.get("shares") or 0).replace(",", ""))
+        pct = db.number(str(r.get("pct") or 0).replace("%", ""))
+        val = db.number(str(r.get("value") or 0).replace(",", "").replace("$", ""))
+    except ValueError:
+        raise ValueError(f"Check the numbers for {ticker or name}") from None
+    if shares < 0 or not 0 <= pct <= 100 or val < 0:
+        raise ValueError(f"Check the numbers for {ticker or name}")
+    if not ticker and not val:
+        raise ValueError(f"{name}: without a ticker, enter its current value instead of shares")
+    return ticker, name, shares, pct, val
