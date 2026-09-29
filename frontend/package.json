@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@lucide/svelte": "^1.48.0",
+    "@sentry/browser": "^11.1.0",
     "bits-ui": "^2.19.3",
     "clsx": "^2.1.1",
     "svelte-sonner": "^1.2.1",

@@ -19,7 +19,6 @@ import socket
 import sys
 import threading
 import time
-import traceback
 import urllib.parse
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,7 +27,7 @@ import sqlalchemy.exc
 from dateutil.relativedelta import relativedelta
 
 from . import oidc, sfinvest
-from . import networth, notify, realie, webpush
+from . import monitoring, networth, notify, planner, realie, webpush
 from . import brands, carta, carta_web, categories, categorize, db, equity, forecast, merchants, reports, plaid, plaidbank, portfolio, prices, recurring, retail, rules, simplefin, splits
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -97,13 +96,13 @@ def run_sync() -> dict:
                     merchants.note_sites(conn)
                     merchants.fetch_logos(conn)
                 except Exception:
-                    traceback.print_exc()
+                    monitoring.report()
                 counts = categorize.categorize(conn, result["new"])
                 recurring.auto_match(conn)
                 try:   # new card transactions may be Amazon or Target orders the extension already sent
                     retail.match_and_apply(conn)
                 except Exception:
-                    traceback.print_exc()
+                    monitoring.report()
                 if conn.execute("SELECT 1 FROM inv_accounts WHERE source='simplefin'").fetchone():
                     try:
                         refresh_prices(conn)
@@ -126,7 +125,7 @@ def run_sync() -> dict:
             _record_failed_sync(str(e))
             raise ApiError(str(e), 502)
         except Exception as e:
-            traceback.print_exc()
+            monitoring.report()
             _record_failed_sync(f"The sync stopped with an error ({type(e).__name__}); the details are in Runway's log.")
             raise ApiError("The sync failed; the details are in Runway's log.", 500)
     finally:
@@ -217,7 +216,7 @@ def refresh_plaid() -> None:
             for e in plaidbank.refresh_all(conn):
                 print(f"Plaid refresh: {e}", file=sys.stderr)
     except Exception:
-        traceback.print_exc()
+        monitoring.report()
 
 
 def _sync_everything(bank: bool, invest: bool) -> None:
@@ -240,7 +239,7 @@ def notify_now() -> None:
         with db.session() as conn:
             notify.run(conn)
     except Exception:
-        traceback.print_exc()
+        monitoring.report()
 
 
 def sync_on_visit() -> dict:
@@ -286,7 +285,7 @@ def background_sync() -> None:
                     db.set_setting(conn, "last_auto_sync_attempt", datetime.now().isoformat(timespec="seconds"))
             _sync_everything(bank, daily_due(last_inv) or plaid_inv)
         except Exception:
-            traceback.print_exc()
+            monitoring.report()
         time.sleep(15 * 60)
 
 
@@ -313,6 +312,7 @@ def api_state(conn, _q, _b):
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
+        "sentry": monitoring.browser_config(),   # the web app's error reports (runway/monitoring.py), or None
         "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
         "setup": setup_steps(conn),
@@ -663,7 +663,7 @@ def _categorize_retail(retailer: str) -> None:
             with db.session() as conn:
                 retail.categorize_and_apply(conn, retailer)
         except Exception:
-            traceback.print_exc()
+            monitoring.report()
 
 
 def ext_finish(conn, body):
@@ -1312,16 +1312,14 @@ def api_ai_apply(conn, _q, body):
     return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer}
 
 
-def api_fire_save(conn, _q, body):
-    """Keep the financial-independence assumptions, so they're still there next time the page loads."""
-    values = {k: v for k, v in (body or {}).items() if k in portfolio.FIRE_FIELDS}
-    if not values:
+def api_plan_save(conn, _q, body):
+    """Keep the retirement plan, so it's still there next time the page loads. {"plan": null} forgets it."""
+    if not isinstance(body, dict) or "plan" not in body:
         raise ApiError("Nothing to save")
     try:
-        saved = portfolio.save_fire(conn, values)
-    except ValueError as e:
+        return {"ok": True, "plan": planner.save(conn, body["plan"])}
+    except planner.PlanError as e:
         raise ApiError(str(e))
-    return {"ok": True, "saved": sorted(saved)}
 
 
 def api_recurring_suggestions(conn, _q, _b):
@@ -1709,7 +1707,7 @@ def start_logo_backfill() -> None:
             with db.session() as conn:
                 merchants.backfill(conn)
         except Exception:   # logos are a nice-to-have: syncs carry on where this stopped
-            traceback.print_exc()
+            monitoring.report()
         finally:
             _logo_lock.release()
     threading.Thread(target=run, daemon=True).start()
@@ -1814,7 +1812,7 @@ ROUTES = [
     ("POST", "/api/merchants/logo", api_merchant_logo),
     ("POST", "/api/logodev/fetch", api_logodev_fetch),
     ("GET", "/api/investments/live", api_live_quotes),
-    ("POST", "/api/investments/fire", api_fire_save),
+    ("POST", "/api/investments/plan", api_plan_save),
     ("GET", "/api/tracked/{id}", api_tracked_get),
     ("POST", "/api/tracked/{id}", api_tracked_save),
     ("POST", "/api/investments/cost", api_cost_basis),
@@ -1878,7 +1876,7 @@ def content_security_policy(nonce: str | None = None) -> str:
             f"script-src {scripts}; "
             "style-src 'self' 'unsafe-inline'; "     # inline style attributes (and Plaid Link) need this
             "img-src 'self' data:; font-src 'self'; "
-            f"connect-src 'self' {PLAID_API}; "
+            f"connect-src 'self' {PLAID_API}{' ' + monitoring.browser_origin() if monitoring.browser_origin() else ''}; "
             f"frame-src {PLAID_ORIGINS}; worker-src 'self'; manifest-src 'self'; "
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
@@ -1954,7 +1952,7 @@ class Handler(BaseHTTPRequestHandler):
         """An unexpected failure: log the details, show only a reference to them."""
         ref = request_ref()
         print(f"[error {ref}] {self.command} {urllib.parse.urlsplit(self.path).path}", flush=True)
-        traceback.print_exception(type(e), e, e.__traceback__)
+        monitoring.report(e, ref=ref)
         self._json(500, {"error": f"Something went wrong on Runway's side (reference {ref}; the details are in its log)."})
 
     def _body_length(self, limit: int) -> int | None:
@@ -2056,7 +2054,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self._responded:
                 self._error(e)
             else:
-                traceback.print_exc()
+                monitoring.report()
 
     def _same_site(self) -> bool:
         """A state-changing request must come from Runway's own pages (defense in depth beside the X-Runway header)."""
@@ -2503,7 +2501,7 @@ class Server(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         if isinstance(sys.exc_info()[1], OSError):
             return   # the client went away (or was hung up on): nothing worth a traceback
-        super().handle_error(request, client_address)
+        monitoring.report()
 
     def process_request(self, request, client_address):
         if not self._slots.acquire(timeout=REQUEST_TIMEOUT):
@@ -2551,6 +2549,7 @@ def host_allowed(host_header: str) -> bool:
 
 def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> None:
     from . import secretbox
+    monitoring.init()   # error reports to Sentry, when SENTRY_DSN is set
     problems = secretbox.check_config()
     if problems:
         raise SystemExit("\n".join(problems))
