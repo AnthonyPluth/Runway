@@ -26,7 +26,7 @@ from .api.equity import (
     api_equity_grant_update
 )
 from .api.investments import (
-    api_cost_basis, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
+    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
 )
 from .api.merchants import (
     api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo, api_merchant_logo_options
@@ -122,6 +122,8 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/assets/{id}/remove", api_asset_remove),
     ("POST", "/api/assets/{id}/refresh", api_asset_refresh),
     ("POST", "/api/realie/settings", api_realie_settings),
+    ("POST", "/api/finnhub/settings", api_finnhub_settings),
+    ("GET", "/api/finnhub/status", api_finnhub_status),
     ("POST", "/api/logodev/settings", api_logodev_settings),
     ("GET", "/api/logodev/status", api_logodev_status),
     ("GET", "/api/merchants/logo-options", api_merchant_logo_options),
