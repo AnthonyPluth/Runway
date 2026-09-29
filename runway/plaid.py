@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import date, datetime, timedelta, UTC
+from typing import Any
 
 from . import db, plaidbank, secretbox
 from . import settings_keys as sk
@@ -321,7 +322,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
 
 
 def sync_all(conn) -> dict:
-    out = {"items": 0, "errors": []}
+    out: dict[str, Any] = {"items": 0, "errors": []}
     for row in conn.execute("SELECT item_id, institution_name, products FROM plaid_items").fetchall():
         if "investments" not in (row["products"] or "investments"):
             continue   # bank and card connections sync with the bank sync

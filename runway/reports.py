@@ -8,6 +8,7 @@ Money in that isn't categorized yet isn't counted as either: it's as likely a tr
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
@@ -83,7 +84,7 @@ def spending_over_time(conn, end: str, months: int = 12, group: str = "category"
             continue
         g = per.setdefault(_group_key(r, group, kinds), {})
         g[r["month"]] = g.get(r["month"], 0.0) - r["amount"]
-    series = []
+    series: list[dict[str, Any]] = []
     for name, by_month in per.items():
         values = [round(max(0.0, by_month.get(m, 0.0)), 2) for m in ms]
         total = round(sum(values), 2)
@@ -113,7 +114,7 @@ def income_vs_spending(conn, end: str, months: int = 12) -> dict:
             inc[r["month"]] += r["amount"]
         elif k == "spend":
             out[r["month"]] -= r["amount"]
-    rows = []
+    rows: list[dict[str, Any]] = []
     for m in ms:
         i, o = round(max(0.0, inc[m]), 2), round(max(0.0, out[m]), 2)
         rows.append({"month": m, "income": i, "spending": o, "net": round(i - o, 2),

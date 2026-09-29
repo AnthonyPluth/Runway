@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, timedelta
+from typing import Any
 
 from sqlalchemy import delete, insert, select, update
 
@@ -47,7 +48,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     accts = db.rows(conn.execute(
         select(Account.id, db.account_label_expr(Account).label("name"), Account.org, Account.kind, Account.balance,
                Account.balance_date, Account.owed_positive, Account.owner).where(Account.hidden == 0)))
-    groups = {
+    groups: dict[str, dict[str, Any]] = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
         "equity": {"key": "equity", "label": "Equity (vested)", "side": "asset", "items": []},
@@ -107,7 +108,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
 
 def save_asset(conn, body: dict, asset_id: int | None = None, today: date | None = None) -> int:
     today = today or date.today()
-    fields = {}
+    fields: dict[str, Any] = {}
     if "name" in body or asset_id is None:
         name = (body.get("name") or "").strip()
         if not name:

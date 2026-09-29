@@ -65,8 +65,8 @@ def api_overview(conn, q, _b):
             last.setdefault(t["recurring_id"], t)
         logos = tx_logos(conn, list(last.values()))
         for e in fc["events"]:
-            t = last.get(e.get("recurring_id"))
-            e["logo"] = logos.get(t["id"]) if t else None
+            hit = last.get(e.get("recurring_id"))
+            e["logo"] = logos.get(hit["id"]) if hit else None
     fc["all_accounts"] = db.rows(conn.execute(
         "SELECT id, COALESCE(display_name, name) AS name, kind, balance, balance_date, owed_positive, hidden "
         "FROM accounts ORDER BY kind, name"
