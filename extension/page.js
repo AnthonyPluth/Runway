@@ -71,7 +71,8 @@ function cartaLook() {
            signedOut: /\/(login|signin|accounts\/login)/i.test(location.pathname) };
 }
 
-// name -> [function, world it needs when run in a tab]
+// name -> [function, world it needs when run in a tab]. Used by background.js and frame.js, which load after this file.
+/* exported PAGE_COMMANDS */
 const PAGE_COMMANDS = {
   html: [pageHtml, "ISOLATED"],
   fetch: [pageFetch, "ISOLATED"],

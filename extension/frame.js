@@ -1,5 +1,6 @@
 // Runs only in the extension's own hidden frames (it names them "runway-hidden-…"), never in a store tab you have
 // open: it answers the extension's requests (page.js) with this page's own sign-in, as a tab would.
+/* global PAGE_COMMANDS -- from page.js, which is put in the frame along with this file */
 (() => {
   // The extension's frame sits right in its hidden page; a frame the store's page makes inside it (even one named
   // the same) isn't it.
