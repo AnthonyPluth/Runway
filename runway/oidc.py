@@ -23,6 +23,7 @@ Configuration (environment variables):
 from __future__ import annotations
 
 import base64
+import ipaddress
 import hashlib
 import json
 import os
@@ -73,7 +74,6 @@ def config() -> dict:
 def local_host(host: str) -> bool:
     """Names and addresses that only make sense at home: this machine, private and Tailscale addresses, .local and
     similar names, and bare names like "nas". Plain http is tolerable there; anywhere else it isn't."""
-    import ipaddress
     host = host.strip("[]").lower()
     if host == "localhost" or "." not in host:
         return True
@@ -114,7 +114,7 @@ def _ctx() -> ssl.SSLContext:
         import certifi  # type: ignore
 
         ctx.load_verify_locations(certifi.where())
-    except Exception:
+    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     return ctx
 
