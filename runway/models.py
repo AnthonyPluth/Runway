@@ -543,6 +543,102 @@ class PriceMeta(Base):
     long_name: Mapped[str | None]
 
 
+class ChurnCard(Base):
+    __table__ = schema.churn_cards
+    id: Mapped[int]
+    owner: Mapped[str]
+    issuer: Mapped[str]
+    product: Mapped[str]
+    family: Mapped[str | None]
+    account_id: Mapped[str | None]
+    opened_on: Mapped[str]
+    closed_on: Mapped[str | None]
+    status: Mapped[str | None]
+    changed_from: Mapped[int | None]
+    authorized_user: Mapped[int | None]
+    business: Mapped[int | None]
+    annual_fee: Mapped[float | None]
+    fee_month: Mapped[int | None]
+    currency: Mapped[str | None]
+    base_rate: Mapped[float | None]
+    earn_note: Mapped[str | None]
+    bonus: Mapped[float | None]
+    bonus_spend: Mapped[float | None]
+    bonus_months: Mapped[int | None]
+    bonus_deadline: Mapped[str | None]
+    bonus_earned_on: Mapped[str | None]
+    manual_spend: Mapped[float | None]
+    eligible_on: Mapped[str | None]
+    notes: Mapped[str | None]
+    created_at: Mapped[str | None]
+
+
+class ChurnRate(Base):
+    __table__ = schema.churn_rates
+    card_id: Mapped[int]
+    category: Mapped[str]
+    multiplier: Mapped[float]
+
+
+class ChurnCurrency(Base):
+    __table__ = schema.churn_currencies
+    key: Mapped[str]
+    name: Mapped[str]
+    cents: Mapped[float]
+
+
+class ChurnBalance(Base):
+    __table__ = schema.churn_balances
+    owner: Mapped[str]
+    currency: Mapped[str]
+    points: Mapped[float]
+    as_of: Mapped[str | None]
+
+
+class ChurnTask(Base):
+    __table__ = schema.churn_tasks
+    id: Mapped[int]
+    card_id: Mapped[int]
+    due_on: Mapped[str]
+    action: Mapped[str]
+    done: Mapped[int | None]
+
+
+class ChurnBankBonus(Base):
+    __table__ = schema.churn_bank_bonuses
+    id: Mapped[int]
+    owner: Mapped[str]
+    bank: Mapped[str]
+    account_type: Mapped[str | None]
+    account_id: Mapped[str | None]
+    opened_on: Mapped[str]
+    bonus: Mapped[float]
+    dd_total: Mapped[float | None]
+    dd_count: Mapped[int | None]
+    debit_count: Mapped[int | None]
+    min_balance: Mapped[float | None]
+    hold_until: Mapped[str | None]
+    other_reqs: Mapped[str | None]
+    deadline_days: Mapped[int | None]
+    deadline: Mapped[str | None]
+    post_days: Mapped[int | None]
+    manual_dd: Mapped[float | None]
+    manual_debits: Mapped[int | None]
+    status: Mapped[str | None]
+    received_on: Mapped[str | None]
+    received_amount: Mapped[float | None]
+    closed_on: Mapped[str | None]
+    monthly_fee: Mapped[float | None]
+    fee_waiver: Mapped[str | None]
+    early_close_fee: Mapped[float | None]
+    keep_open_days: Mapped[int | None]
+    repeat_months: Mapped[int | None]
+    once_per_lifetime: Mapped[int | None]
+    eligible_on: Mapped[str | None]
+    notes: Mapped[str | None]
+    created_at: Mapped[str | None]
+
+
 class Setting(Base):
     __table__ = schema.settings
     key: Mapped[str]
