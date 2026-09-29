@@ -8,7 +8,6 @@
   "runway/forecast.py": 21,
   "runway/merchants.py": 28,
   "runway/notify.py": 13,
-  "runway/oidc.py": 14,
   "runway/plaid.py": 43,
   "runway/plaidbank.py": 55,
   "runway/portfolio.py": 17,
