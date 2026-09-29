@@ -231,57 +231,15 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
 
 def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, caller=call_llm) -> dict:
     """Categorize the given transactions (or every uncategorized one). Returns counts by outcome."""
-    if tx_ids is None:
-        todo = db.rows(conn.execute(
-            "SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
-            "WHERE t.category IS NULL AND COALESCE(t.is_split, 0)=0"
-        ))
-    else:
-        todo = []
-        for i in range(0, len(tx_ids), 500):
-            chunk = tx_ids[i : i + 500]
-            q = ",".join("?" * len(chunk))
-            todo += db.rows(conn.execute(
-                f"SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
-                f"WHERE t.id IN ({q}) AND COALESCE(t.is_split, 0)=0",
-                chunk,
-            ))
+    todo = _to_categorize(conn, tx_ids)
     counts = {"auto": 0, "rule": 0, "history": 0, "ai": 0, "review": 0}
     rules = rulesmod.load(conn)
-    # What each merchant was settled as most recently (rules, your own picks, or confident AI answers).
-    history = {
-        (r["k"], r["sign"]): r["category"]
-        for r in conn.execute(
-            "SELECT lower(payee) AS k, amount > 0 AS sign, category FROM transactions "
-            "WHERE needs_review=0 AND category IS NOT NULL AND category_source IN ('manual','rule','ai','history') "
-            "AND payee<>'' ORDER BY posted, id"
-        )
-    }
+    history = _merchant_history(conn)
     leftover: list[dict] = []
     review_after: list[str] = []
     for tx in todo:
-        acts = rulesmod.actions_for(tx, rules)
-        if acts["rename"]:   # before the history lookup, which goes by merchant
-            rulesmod.apply_actions(conn, tx, {"rename": acts["rename"]})
-        if acts["review"]:
-            review_after.append(tx["id"])
-        # Your rules come before the built-in guesses: a rule saying an "autopay" is Utilities wins.
-        if acts["split"]:
-            if rulesmod.apply_actions(conn, tx, {"split": acts["split"]}):
-                counts["rule"] += 1
-                continue
-            if abs(tx["amount"] or 0) >= 0.005:
-                review_after.append(tx["id"])   # the rule couldn't split it: categorize it as usual, and ask
-        cat, source = acts["category"], "rule"
-        if not cat:
-            cat, source = heuristic_category(tx, tx["kind"]), "auto"
-        if not cat and tx.get("payee"):
-            cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
-        if cat:
-            conn.execute(
-                "UPDATE transactions SET category=?, category_source=?, confidence=1, needs_review=0 WHERE id=?",
-                (cat, source, tx["id"]),
-            )
+        source = _categorize_locally(conn, tx, rules, history, review_after)
+        if source:
             counts[source] += 1
         else:
             leftover.append(tx)
@@ -289,33 +247,7 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
     api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
     auto_ai = (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1"
     if leftover and use_ai and auto_ai and api_key:
-        groups = group_by_merchant(leftover)
-        conn.commit()  # don't hold the database while waiting on the model
-        try:
-            answers = ask_model(conn, groups, caller)
-        except RuntimeError:  # error is recorded; these wait in Review
-            answers = [(None, 0.0)] * len(groups)
-        # Categories that take money out of spending (transfers, card payments, Ignore): the model only ever
-        # suggests them. Its input includes text the other side of a payment writes (an ACH or Zelle memo), which
-        # could talk it into hiding a charge, so these always wait for you in Review.
-        hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
-        spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
-        for group, (cat, conf) in zip(groups, answers, strict=True):
-            for t in group:
-                if cat is None:
-                    conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
-                    counts["review"] += 1
-                    continue
-                review = 1 if (conf < REVIEW_THRESHOLD or cat in hides
-                               or (cat in spends_as_income and t["amount"] < 0)) else 0
-                conn.execute(
-                    # Don't overwrite a choice you made while the model was thinking.
-                    "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "
-                    "WHERE id=? AND COALESCE(category_source, '') <> 'manual'",
-                    (cat, conf, review, t["id"]),
-                )
-                counts["review" if review else "ai"] += 1
-        conn.commit()
+        _categorize_with_ai(conn, leftover, caller, counts)
     else:
         for t in leftover:
             conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (t["id"],))
@@ -323,6 +255,98 @@ def categorize(conn, tx_ids: list[str] | None = None, use_ai: bool = True, calle
     for tid in review_after:   # a rule said to look at these, whatever category they got
         conn.execute("UPDATE transactions SET needs_review=1 WHERE id=?", (tid,))
     return counts
+
+
+def _to_categorize(conn, tx_ids: list[str] | None) -> list[dict]:
+    """The given transactions (or every uncategorized one), leaving out split ones, with their account's kind."""
+    if tx_ids is None:
+        return db.rows(conn.execute(
+            "SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
+            "WHERE t.category IS NULL AND COALESCE(t.is_split, 0)=0"
+        ))
+    todo = []
+    for i in range(0, len(tx_ids), 500):
+        chunk = tx_ids[i : i + 500]
+        q = ",".join("?" * len(chunk))
+        todo += db.rows(conn.execute(
+            f"SELECT t.*, a.kind FROM transactions t JOIN accounts a ON a.id=t.account_id "
+            f"WHERE t.id IN ({q}) AND COALESCE(t.is_split, 0)=0",
+            chunk,
+        ))
+    return todo
+
+
+def _merchant_history(conn) -> dict[tuple, str]:
+    """What each merchant was settled as most recently (rules, your own picks, or confident AI answers), by
+    lowercased merchant and whether money came in."""
+    return {
+        (r["k"], r["sign"]): r["category"]
+        for r in conn.execute(
+            "SELECT lower(payee) AS k, amount > 0 AS sign, category FROM transactions "
+            "WHERE needs_review=0 AND category IS NOT NULL AND category_source IN ('manual','rule','ai','history') "
+            "AND payee<>'' ORDER BY posted, id"
+        )
+    }
+
+
+def _categorize_locally(conn, tx: dict, rules: list[dict], history: dict[tuple, str], review_after: list[str]) -> str | None:
+    """Categorize one transaction without the model: your rules, then the built-in guesses, then what the merchant
+    was last time. Returns how it was settled ("rule", "auto" or "history"), or None if it's still open. Adds its id
+    to review_after when a rule says to look at it."""
+    acts = rulesmod.actions_for(tx, rules)
+    if acts["rename"]:   # before the history lookup, which goes by merchant
+        rulesmod.apply_actions(conn, tx, {"rename": acts["rename"]})
+    if acts["review"]:
+        review_after.append(tx["id"])
+    # Your rules come before the built-in guesses: a rule saying an "autopay" is Utilities wins.
+    if acts["split"]:
+        if rulesmod.apply_actions(conn, tx, {"split": acts["split"]}):
+            return "rule"
+        if abs(tx["amount"] or 0) >= 0.005:
+            review_after.append(tx["id"])   # the rule couldn't split it: categorize it as usual, and ask
+    cat, source = acts["category"], "rule"
+    if not cat:
+        cat, source = heuristic_category(tx, tx["kind"]), "auto"
+    if not cat and tx.get("payee"):
+        cat, source = history.get((tx["payee"].lower(), int(tx["amount"] > 0))), "history"
+    if not cat:
+        return None
+    conn.execute(
+        "UPDATE transactions SET category=?, category_source=?, confidence=1, needs_review=0 WHERE id=?",
+        (cat, source, tx["id"]),
+    )
+    return source
+
+
+def _categorize_with_ai(conn, leftover: list[dict], caller, counts: dict[str, int]) -> None:
+    """Ask the model about what's left, one question per merchant, and save its answers (counted in counts)."""
+    groups = group_by_merchant(leftover)
+    conn.commit()  # don't hold the database while waiting on the model
+    try:
+        answers = ask_model(conn, groups, caller)
+    except RuntimeError:  # error is recorded; these wait in Review
+        answers = [(None, 0.0)] * len(groups)
+    # Categories that take money out of spending (transfers, card payments, Ignore): the model only ever
+    # suggests them. Its input includes text the other side of a payment writes (an ACH or Zelle memo), which
+    # could talk it into hiding a charge, so these always wait for you in Review.
+    hides = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1")}
+    spends_as_income = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_income=1")}
+    for group, (cat, conf) in zip(groups, answers, strict=True):
+        for t in group:
+            if cat is None:
+                conn.execute("UPDATE transactions SET needs_review=1 WHERE id=? AND COALESCE(category_source, '') <> 'manual'", (t["id"],))
+                counts["review"] += 1
+                continue
+            review = 1 if (conf < REVIEW_THRESHOLD or cat in hides
+                           or (cat in spends_as_income and t["amount"] < 0)) else 0
+            conn.execute(
+                # Don't overwrite a choice you made while the model was thinking.
+                "UPDATE transactions SET category=?, category_source='ai', confidence=?, needs_review=? "
+                "WHERE id=? AND COALESCE(category_source, '') <> 'manual'",
+                (cat, conf, review, t["id"]),
+            )
+            counts["review" if review else "ai"] += 1
+    conn.commit()
 
 
 def group_by_merchant(txs: list[dict]) -> list[list[dict]]:

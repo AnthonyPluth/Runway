@@ -809,6 +809,16 @@ class SimpleFinStoreTests(Base):
         self.assertEqual(simplefin.store_payload(self.conn, p4, date(2026, 9, 1)), [])
         self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id='A1|p10'").fetchone()[0], "Rideshare & Taxi")
 
+    def test_a_split_pending_charge_keeps_its_parts_when_it_posts_under_a_new_id(self):
+        simplefin.store_payload(self.conn, self.payload([{"id": "p1", "posted": 0, "transacted_at": ts(date(2026, 9, 22)),
+                                                          "amount": "-100.00", "description": "TARGET", "pending": True}]), date(2026, 9, 1))
+        splits.set_splits(self.conn, "A1|p1", [{"amount": -60, "category": "Groceries"}, {"amount": -40, "category": "Shopping"}])
+        new = simplefin.store_payload(self.conn, self.payload([{"id": "t1", "posted": ts(date(2026, 9, 23)), "amount": "-100.00",
+                                                                "description": "TARGET"}]), date(2026, 9, 1))
+        self.assertEqual(new, [])
+        self.assertEqual([(p["amount"], p["category"]) for p in splits.get(self.conn, "A1|t1")], [(-60.0, "Groceries"), (-40.0, "Shopping")])
+        self.assertEqual(self.conn.execute("SELECT is_split FROM transactions WHERE id='A1|t1'").fetchone()[0], 1)
+
     def test_a_hold_that_never_posts_is_cleared(self):
         old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
                              "description": "HOTEL HOLD", "pending": True}])

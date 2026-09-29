@@ -350,6 +350,34 @@ class TrackedHoldingsTests(Base):
             with self.assertRaises(ValueError):
                 self.tracked.save(self.c, "sf:vw", rows)
 
+    def test_without_an_election_new_money_is_spread_evenly_including_funds_without_a_ticker(self):
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 50}, {"name": "Stable Value CIT", "value": 10000}])
+        self.sync(20000, "2026-09-22")                            # 50*200 + 10,000: the baseline
+        h = self.sync(21000, "2026-09-22")                        # $1,000 in: $500 to each
+        self.assertAlmostEqual(h["man:FXAIX"]["quantity"], 50 + 500 / 200)
+        self.assertEqual(round(h["man:stablevaluecit"]["value"], 2), 10500.0)
+        self.assertEqual(self.c.execute("SELECT amount FROM manual_contributions").fetchone()[0], 1000.0)
+        got = self.tracked.value(self.c, "sf:vw", 21000.0, "2026-09-22", TODAY)
+        self.assertEqual((round(got["leftover"], 2), round(got["drift"], 6), got["contributed"]), (0.0, 0.0, 0.0))
+        self.assertIsNone(self.tracked.value(self.c, "sf:nothing", 1.0, "2026-09-22", TODAY))
+
+    def test_what_save_stores_and_what_it_says(self):
+        for rows, msg in [([{"ticker": "FXAIX", "shares": "ten", "pct": 100}], "Check the numbers for FXAIX"),
+                          ([{"ticker": "FXAIX", "shares": 10, "pct": 101}], "Check the numbers for FXAIX"),
+                          ([{"name": "Trust", "shares": 5, "pct": 100}], "Trust: without a ticker"),
+                          ([{"ticker": "A", "shares": 1, "pct": 60}, {"ticker": "B", "shares": 1, "pct": 30}], "add up to 90%, not 100%")]:
+            with self.assertRaisesRegex(ValueError, msg):
+                self.tracked.save(self.c, "sf:vw", rows)
+        with self.assertRaisesRegex(ValueError, "Account not found"):
+            self.tracked.save(self.c, "sf:nope", [])
+        self.tracked.save(self.c, "sf:vw", [{"ticker": " fxaix ", "shares": "1,000.5", "pct": "70%"}, {"ticker": "", "name": ""},
+                                            {"name": "Stable Value CIT #2", "shares": 3, "value": "$2,500", "pct": 30}], TODAY)
+        got = [tuple(r) for r in self.c.execute("SELECT security_id, shares, pct, last_value, updated FROM manual_positions ORDER BY security_id")]
+        self.assertEqual(got, [("man:FXAIX", 1000.5, 70.0, None, "2026-09-23"), ("man:stablevaluecit2", 0.0, 30.0, 2500.0, "2026-09-23")])
+        # No election at all is fine: contributions are spread evenly.
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 1}], TODAY)
+        self.assertEqual(self.c.execute("SELECT pct FROM manual_positions").fetchall()[0][0], 0.0)
+
 
 class MergeByTickerTests(Base):
     def test_same_fund_in_two_accounts_is_one_row(self):
