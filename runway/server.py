@@ -41,6 +41,9 @@ PLAID_SYNC_HOUR = 7          # Plaid is asked once a day, on the first sync afte
                              # is America/Chicago): late enough for overnight ACH, early enough to review in the morning.
                              # Plaid's quota is small, so opening Runway or pressing Sync doesn't ask it again that day;
                              # a connection's own Sync button in Settings still does.
+PLAID_REFRESH_AT = (6, 30)   # before that sync, Plaid is told to fetch from the banks (Transactions Refresh), so the
+                             # sync gets the banks as of now and not as of Plaid's own last visit. Only before
+                             # PLAID_SYNC_HOUR: a refresh after the day's sync would be a call for nothing.
 VISIT_SYNC_MINUTES = 60      # opening Runway syncs if the last sync is older than this (SimpleFIN allows ~24 a day)
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
@@ -194,6 +197,29 @@ def plaid_due(last: str | None, now: datetime | None = None) -> bool:
     return datetime.fromisoformat(last) < since
 
 
+def plaid_refresh_due(last: str | None, now: datetime | None = None) -> bool:
+    """Between PLAID_REFRESH_AT and PLAID_SYNC_HOUR, if Plaid hasn't been told to refresh since PLAID_REFRESH_AT."""
+    now = now or datetime.now()
+    start = now.replace(hour=PLAID_REFRESH_AT[0], minute=PLAID_REFRESH_AT[1], second=0, microsecond=0)
+    if not start <= now < now.replace(hour=PLAID_SYNC_HOUR, minute=0, second=0, microsecond=0):
+        return False
+    return not last or datetime.fromisoformat(last) < start
+
+
+def refresh_plaid() -> None:
+    """Tell Plaid to fetch from the banks ahead of the daily sync. A problem is logged and never stops the sync."""
+    try:
+        with db.session() as conn:
+            if not plaid_banks(conn) or not plaid_refresh_due(db.get_setting(conn, "last_plaid_refresh")):
+                return
+            db.set_setting(conn, "last_plaid_refresh", datetime.now().isoformat(timespec="seconds"))
+            conn.commit()
+            for e in plaidbank.refresh_all(conn):
+                print(f"Plaid refresh: {e}", file=sys.stderr)
+    except Exception:
+        traceback.print_exc()
+
+
 def _sync_everything(bank: bool, invest: bool) -> None:
     if bank:
         try:
@@ -242,6 +268,7 @@ def sync_on_visit() -> dict:
 
 def background_sync() -> None:
     while True:
+        refresh_plaid()
         try:
             with db.session() as conn:
                 configured = bank_configured(conn)

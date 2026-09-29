@@ -463,6 +463,20 @@ def sync_all(conn, today: date | None = None) -> dict:
     return out
 
 
+def refresh_all(conn) -> list[str]:
+    """Ask Plaid to fetch new transactions from each bank now (the Transactions Refresh add-on). Plaid does it in the
+    background and returns nothing; the next /transactions/sync picks it up. Returns the problems, one per connection."""
+    errors = []
+    for item in conn.execute("SELECT * FROM plaid_items").fetchall():
+        if "transactions" not in products(item):
+            continue
+        try:
+            call(conn, "/transactions/refresh", {"access_token": item["access_token"]})
+        except PlaidError as e:
+            errors.append(f"{item['institution_name'] or 'Plaid'}: {e}")
+    return errors
+
+
 def forget_item(conn, item_id: str) -> None:
     """A removed connection: its accounts go back to SimpleFIN (the ones only Plaid had keep their history)."""
     ids = [r[0] for r in conn.execute("SELECT plaid_account_id FROM plaid_accounts WHERE item_id=?", (item_id,)).fetchall()]
