@@ -168,7 +168,7 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(merchants.logo(self.c, "site:target.com"), (PNG + b"new", "image/png"))
 
     def test_the_key_setting(self):
-        started = mock.patch.object(server, "start_logo_backfill").start()
+        started = mock.patch.object(server.api.merchants, "start_logo_backfill").start()
         self.addCleanup(mock.patch.stopall)
         with self.assertRaises(server.ApiError):
             server.api_logodev_settings(self.c, {}, {"token": "sk_secret_abcdefgh"})
