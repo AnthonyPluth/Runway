@@ -24,12 +24,14 @@ test:
 fix:
 	$(RUFF) check --fix .
 
-frontend/node_modules:
+# Reinstalled whenever package-lock.json is newer, so a pull that adds a dependency picks it up.
+frontend/node_modules: frontend/package-lock.json
 	cd frontend && $(NPM) ci --no-audit --no-fund
+	touch frontend/node_modules
 
-# `npm test` runs only if frontend/package.json defines it: `--if-present` skips a missing script.
+# The web app's type-check, ESLint, Vitest tests and build, as CI runs them.
 frontend-check: frontend/node_modules
 	cd frontend && $(NPM) run check
 	cd frontend && $(NPM) run lint
-	cd frontend && $(NPM) run --if-present test
+	cd frontend && $(NPM) test
 	cd frontend && $(NPM) run build
