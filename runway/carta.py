@@ -24,8 +24,11 @@ import urllib.request
 from datetime import date
 from typing import Any
 
+from sqlalchemy import insert, select, update
+
 from . import db
 from . import settings_keys as sk
+from .models import EquityCompany, EquityGrant
 
 ENVS: dict[str, dict[str, Any]] = {
     "production": {"api": "https://api.carta.com", "authorize": "https://login.app.carta.com/o/authorize/",
@@ -312,13 +315,15 @@ def sync(conn, opener=None) -> dict:
                 name = _pick(issuer, "legalName", "name", "doingBusinessAsName", "displayName") or "Company"
                 price, when = _latest_price(conn, pid, iid, issuer, opener)
                 raw = json.dumps(issuer, separators=(",", ":"))[:MAX_RAW]
-                if conn.execute("SELECT 1 FROM equity_companies WHERE id=?", (cid,)).fetchone():
-                    conn.execute("UPDATE equity_companies SET name=?, share_price=COALESCE(?, share_price), "
-                                 "price_as_of=COALESCE(?, price_as_of), raw=?, source='carta' WHERE id=?",
-                                 (name, price, when or (date.today().isoformat() if price else None), raw, cid))
+                as_of = when or (date.today().isoformat() if price else None)
+                if conn.execute(select(EquityCompany.id).where(EquityCompany.id == cid)).fetchone():
+                    # COALESCE(new, old), decided here: a value Carta didn't send leaves the stored one
+                    conn.execute(update(EquityCompany).where(EquityCompany.id == cid).values(
+                        name=name, share_price=EquityCompany.share_price if price is None else price,
+                        price_as_of=EquityCompany.price_as_of if as_of is None else as_of, raw=raw, source="carta"))
                 else:
-                    conn.execute("INSERT INTO equity_companies(id, name, share_price, price_as_of, source, raw) VALUES (?,?,?,?,?,?)",
-                                 (cid, name, price, when or (date.today().isoformat() if price else None), "carta", raw))
+                    conn.execute(insert(EquityCompany).values(id=cid, name=name, share_price=price, price_as_of=as_of,
+                                                              source="carta", raw=raw))
                 out["companies"] += 1
                 for path, hint in (("optionGrants", "option"), ("rsuAwards", "rsu"), ("rsus", "rsu"), ("certificates", "shares")):
                     for item in _list(conn, f"portfolios/{pid}/issuers/{iid}/{path}", opener):
@@ -338,7 +343,8 @@ def sync(conn, opener=None) -> dict:
 
 def _save_grant(conn, cid: str, g: dict, item: dict) -> None:
     raw = json.dumps(item, separators=(",", ":"))[:MAX_RAW]
-    old = conn.execute("SELECT vest_months, cliff_months, vest_every FROM equity_grants WHERE id=?", (g["id"],)).fetchone()
+    old = conn.execute(select(EquityGrant.vest_months, EquityGrant.cliff_months, EquityGrant.vest_every)
+                       .where(EquityGrant.id == g["id"])).fetchone()
     today = date.today().isoformat()
     if old:
         # A schedule you filled in yourself stays when Carta doesn't say.
@@ -347,10 +353,9 @@ def _save_grant(conn, cid: str, g: dict, item: dict) -> None:
                 g[k] = old[k]
         if g["vest_every"] == 1 and old["vest_every"]:
             g["vest_every"] = old["vest_every"]
+        # g's keys are the grant columns _grant() (or carta_web) fills in, never a request's
         sets = {k: v for k, v in g.items() if k != "id"}
-        conn.execute(f"UPDATE equity_grants SET {', '.join(f'{k}=?' for k in sets)}, company_id=?, source='carta', raw=?, "
-                     f"vested_reported_on=? WHERE id=?", (*sets.values(), cid, raw, today, g["id"]))
+        conn.execute(update(EquityGrant).where(EquityGrant.id == g["id"]).values(
+            **sets, company_id=cid, source="carta", raw=raw, vested_reported_on=today))
     else:
-        cols = [*g, "company_id", "source", "raw", "vested_reported_on"]
-        conn.execute(f"INSERT INTO equity_grants({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                     (*g.values(), cid, "carta", raw, today))
+        conn.execute(insert(EquityGrant).values(**g, company_id=cid, source="carta", raw=raw, vested_reported_on=today))
