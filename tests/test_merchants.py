@@ -277,5 +277,65 @@ class MerchantTests(unittest.TestCase):
         self.assertIsNone(rules.redirect_request(req, None, 302, "Found", {}, "https://evil.example.com/x.png"))
         self.assertIsNotNone(rules.redirect_request(req, None, 302, "Found", {}, "https://img.logo.dev/walmart.com?token=x"))
 
+    def test_note_again_keeps_what_plaid_left_out(self):
+        merchants.note(self.c, {"merchant_name": "Blue Bottle", "merchant_entity_id": "e", "website": "bb.com",
+                                "logo_url": "https://plaid.com/a.png"})
+        self.c.execute("UPDATE merchants SET logo='x', logo_type='image/png', logo_checked='2026-01-01' WHERE id='e'")
+        merchants.note(self.c, {"merchant_name": "Blue Bottle Coffee", "merchant_entity_id": "e"})   # no website or logo
+        row = dict(self.c.execute("SELECT * FROM merchants WHERE id='e'").fetchone())
+        self.assertEqual(row, {"id": "e", "name": "Blue Bottle Coffee", "website": "bb.com", "logo_url": "https://plaid.com/a.png",
+                               "logo": "x", "logo_type": "image/png", "logo_checked": "2026-01-01"})
+        merchants.note(self.c, {"merchant_name": "BB", "merchant_entity_id": "e", "logo_url": "https://plaid.com/b.png"})
+        row = dict(self.c.execute("SELECT * FROM merchants WHERE id='e'").fetchone())
+        self.assertEqual(row, {"id": "e", "name": "BB", "website": "bb.com", "logo_url": "https://plaid.com/b.png",
+                               "logo": None, "logo_type": None, "logo_checked": None})   # a new logo: fetched again
+
+    def test_todo_order_and_the_key(self):
+        self.c.executemany("INSERT INTO merchants(id, name, logo_url, logo, logo_checked) VALUES (?,?,?,?,?)", [
+            ("p-old", "P", "https://plaid.com/1.png", None, "2020-01-01T00:00:00"),
+            ("p-new", "P", "https://plaid.com/2.png", None, None),
+            ("p-recent", "P", "https://plaid.com/3.png", None, "2099-01-01T00:00:00"),
+            ("p-have", "P", "https://plaid.com/4.png", "x", None),
+            ("p-nourl", "P", None, None, None),
+            ("site:a.com", None, "https://img.logo.dev/a.com", "x", "2020-01-01T00:00:00"),
+            ("site:b.com", None, "https://img.logo.dev/b.com", None, None),
+            ("brand:c", "C", "https://img.logo.dev/name/C", None, "2099-01-01T00:00:00")])
+        self.assertEqual([dict(r) for r in merchants._todo(self.c, 10)],
+                         [{"id": "p-new", "name": "P", "logo_url": "https://plaid.com/2.png"},
+                          {"id": "p-old", "name": "P", "logo_url": "https://plaid.com/1.png"}])
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.assertEqual([r["id"] for r in merchants._todo(self.c, 10)], ["p-new", "site:b.com", "p-old", "site:a.com"])
+        self.assertEqual([r["id"] for r in merchants._todo(self.c, 2)], ["p-new", "site:b.com"])
+        self.assertEqual(merchants.status(self.c), {"plaid": 1, "logodev": 1, "unknown": 1, "waiting": 4, "last_error": None,
+                                                    "last_error_name": None, "searchable": False})
+
+    def test_your_choice(self):
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.assertIsNone(merchants.choice(self.c, "Target"))
+        merchants.site_logos(self.c, ["target.com"])   # noted already, no logo yet
+        merchants.choose(self.c, " TARGET ", "target.com", opener=self.opener({self.logo_dev("target.com"): (PNG, "image/png")}))
+        self.assertEqual(merchants.choice(self.c, "target"), {"website": "target.com", "hidden": False})
+        row = self.c.execute("SELECT logo_url, logo_type, logo_checked IS NOT NULL FROM merchants WHERE id='site:target.com'").fetchone()
+        self.assertEqual(tuple(row), ("https://img.logo.dev/target.com", "image/png", 1))
+        merchants.choose(self.c, "Target", hidden=True)
+        self.assertEqual(merchants.choice(self.c, "Target"), {"website": None, "hidden": True})
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM merchant_logos").fetchone()[0], 1)
+        with self.assertRaises(ValueError):
+            merchants.choose(self.c, "  ", "target.com")
+
+    def test_the_secret_key_looks_up_names_again(self):
+        started = mock.patch.object(server.api.merchants, "start_logo_backfill").start()
+        self.addCleanup(mock.patch.stopall)
+        self.c.executemany("INSERT INTO merchants(id, logo_url, logo, logo_checked) VALUES (?,?,?,?)", [
+            ("brand:x", "u", "x", "2026-01-01"), ("site:y.com", "u", None, "2026-01-01"), ("e", "u", None, "2026-01-01")])
+        server.api_logodev_settings(self.c, {}, {"secret": "sk_abcdefgh123"})
+        self.assertEqual({r[0]: r[1] for r in self.c.execute("SELECT id, logo_checked FROM merchants")},
+                         {"brand:x": None, "site:y.com": "2026-01-01", "e": "2026-01-01"})
+        server.api_logodev_settings(self.c, {}, {"token": "pk_abcdefgh123"})
+        self.assertEqual({r[0]: r[1] for r in self.c.execute("SELECT id, logo_checked FROM merchants")},
+                         {"brand:x": None, "site:y.com": None, "e": "2026-01-01"})
+        self.assertEqual(started.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
