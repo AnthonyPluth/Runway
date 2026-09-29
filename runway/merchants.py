@@ -26,8 +26,11 @@ import urllib.request
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import ColumnElement, delete, func, insert, or_, select, update
+
 from . import brands, db
 from . import settings_keys as sk
+from .models import Category, Merchant, MerchantLogo, Transaction
 
 
 MAX_LOGO = 256 * 1024
@@ -97,14 +100,14 @@ def note(conn, t: dict) -> str | None:
     if not name or not (entity or logo):
         return None
     mid = entity or f"name:{key(name)}"
-    row = conn.execute("SELECT logo_url FROM merchants WHERE id=?", (mid,)).fetchone()
+    row = conn.execute(select(Merchant.logo_url).where(Merchant.id == mid)).fetchone()
     if row is None:
-        conn.execute("INSERT INTO merchants(id, name, website, logo_url) VALUES (?,?,?,?)", (mid, name, website, logo))
+        conn.execute(insert(Merchant).values(id=mid, name=name, website=website, logo_url=logo))
     else:
-        conn.execute("UPDATE merchants SET name=?, website=COALESCE(?, website), logo_url=COALESCE(?, logo_url) WHERE id=?",
-                     (name, website, logo, mid))
+        conn.execute(update(Merchant).where(Merchant.id == mid).values(
+            name=name, website=func.coalesce(website, Merchant.website), logo_url=func.coalesce(logo, Merchant.logo_url)))
         if logo and logo != row["logo_url"]:   # a new logo: fetch it again
-            conn.execute("UPDATE merchants SET logo=NULL, logo_type=NULL, logo_checked=NULL WHERE id=?", (mid,))
+            conn.execute(update(Merchant).where(Merchant.id == mid).values(logo=None, logo_type=None, logo_checked=None))
     return mid
 
 
@@ -207,17 +210,23 @@ def best_match(name: str, candidates: list[dict]) -> dict | None:
     return best if score >= 0.85 else None
 
 
+def _logo_dev():
+    """The merchants whose logo comes from Logo.dev (by website or name), not Plaid: a condition on merchants.id."""
+    return or_(Merchant.id.like(SITE + "%"), Merchant.id.like(BRAND + "%"))
+
+
 def _todo(conn, limit: int) -> list:
     """Logos to fetch: Plaid's that Runway doesn't have yet (or tried a month ago), and Logo.dev's (by website or name)
     that it doesn't have or last checked a month ago, when there's a Logo.dev key. Never tried ones first."""
     retry_before = (datetime.now() - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
     refresh_before = (datetime.now() - timedelta(days=REFRESH_DAYS)).isoformat(timespec="seconds")
-    return conn.execute("SELECT id, name, logo_url FROM merchants WHERE logo_url IS NOT NULL AND ("
-                        "(id NOT LIKE ? AND id NOT LIKE ? AND logo IS NULL AND (logo_checked IS NULL OR logo_checked < ?)) OR "
-                        "(? AND (id LIKE ? OR id LIKE ?) AND (logo_checked IS NULL OR logo_checked < ?))) "
-                        "ORDER BY logo_checked IS NOT NULL, id LIMIT ?",
-                        (SITE + "%", BRAND + "%", retry_before, configured(conn), SITE + "%", BRAND + "%", refresh_before,
-                         limit)).fetchall()
+    m = Merchant
+    want: ColumnElement[bool] = (m.id.not_like(SITE + "%") & m.id.not_like(BRAND + "%") & m.logo.is_(None)
+                                 & or_(m.logo_checked.is_(None), m.logo_checked < retry_before))
+    if configured(conn):
+        want = or_(want, _logo_dev() & or_(m.logo_checked.is_(None), m.logo_checked < refresh_before))
+    return conn.execute(select(m.id, m.name, m.logo_url).where(m.logo_url.is_not(None), want)
+                        .order_by(m.logo_checked.is_not(None), m.id).limit(limit)).fetchall()
 
 
 def _params(token: str | None) -> str:
@@ -233,7 +242,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     if db.get_setting(conn, sk.LOGODEV_THEME) != THEME:
         # Logos fetched for another theme (or before there was one) are fetched again, a batch per sync; one that
         # can't be keeps the logo Runway has.
-        conn.execute("UPDATE merchants SET logo_checked=NULL WHERE id LIKE ? OR id LIKE ?", (SITE + "%", BRAND + "%"))
+        conn.execute(update(Merchant).where(_logo_dev()).values(logo_checked=None))
         db.set_setting(conn, sk.LOGODEV_THEME, THEME)
     todo = _todo(conn, limit)
     got = 0
@@ -257,7 +266,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
                 pick = best_match(m["name"], cands) if cands else None
                 wrong = cands is not None and not pick   # Brand Search answered, and nothing is clearly this merchant
                 if pick:
-                    conn.execute("UPDATE merchants SET website=? WHERE id=?", (pick["domain"], m["id"]))
+                    conn.execute(update(Merchant).where(Merchant.id == m["id"]).values(website=pick["domain"]))
                     found = _download(f"{LOGO_DEV}{pick['domain']}?{params}", opener)
             else:
                 found = _download(f"{LOGO_DEV}name/{urllib.parse.quote(m['name'], safe='')}?{params}", opener)
@@ -272,14 +281,15 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
                 continue
         if found:
             data, ctype = found
-            conn.execute("UPDATE merchants SET logo=?, logo_type=?, logo_checked=? WHERE id=?",
-                         (base64.b64encode(data).decode(), ctype, now.isoformat(timespec="seconds"), m["id"]))
+            conn.execute(update(Merchant).where(Merchant.id == m["id"]).values(
+                logo=base64.b64encode(data).decode(), logo_type=ctype, logo_checked=now.isoformat(timespec="seconds")))
             got += 1
         elif kind == "name" and wrong:   # the logo a plain name lookup found may be someone else's: drop it
-            conn.execute("UPDATE merchants SET logo=NULL, logo_type=NULL, logo_checked=? WHERE id=?", (now.isoformat(timespec="seconds"), m["id"]))
+            conn.execute(update(Merchant).where(Merchant.id == m["id"]).values(
+                logo=None, logo_type=None, logo_checked=now.isoformat(timespec="seconds")))
         else:
             # (a Logo.dev logo that couldn't be fetched again keeps the one Runway has)
-            conn.execute("UPDATE merchants SET logo_checked=? WHERE id=?", (now.isoformat(timespec="seconds"), m["id"]))
+            conn.execute(update(Merchant).where(Merchant.id == m["id"]).values(logo_checked=now.isoformat(timespec="seconds")))
     return got
 
 
@@ -289,11 +299,10 @@ def site_logos(conn, sites) -> set[str]:
     if not sites:
         return set()
     ids = [SITE + s for s in sites]
-    ph = ",".join("?" * len(ids))
-    rows = {r["id"]: r["logo"] is not None for r in conn.execute(f"SELECT id, logo FROM merchants WHERE id IN ({ph})", ids)}
+    rows = {r["id"]: r["logo"] is not None for r in conn.execute(select(Merchant.id, Merchant.logo).where(Merchant.id.in_(ids)))}
     for s in sites:
         if SITE + s not in rows:
-            conn.execute("INSERT INTO merchants(id, logo_url) VALUES (?, ?)", (SITE + s, LOGO_DEV + s))
+            conn.execute(insert(Merchant).values(id=SITE + s, logo_url=LOGO_DEV + s))
     return {s for s in sites if rows.get(SITE + s)}
 
 
@@ -302,8 +311,8 @@ def sites_for(conn, txs: list[dict]) -> dict[str, str]:
     mids = sorted({t["merchant_id"] for t in txs if t.get("merchant_id")})
     websites = {}
     if mids:
-        ph = ",".join("?" * len(mids))
-        websites = {r["id"]: site(r["website"]) for r in conn.execute(f"SELECT id, website FROM merchants WHERE id IN ({ph})", mids)}
+        websites = {r["id"]: site(r["website"])
+                    for r in conn.execute(select(Merchant.id, Merchant.website).where(Merchant.id.in_(mids)))}
     out = {}
     for t in txs:
         s = websites.get(t.get("merchant_id")) or brands.merchant(t.get("payee"), t.get("description"))
@@ -320,7 +329,7 @@ _NOT_A_MERCHANT = re.compile(r"\b(transfer|xfer|payment|pmt|autopay|deposit|with
 def names_for(conn, txs: list[dict]) -> dict[str, tuple[str, str]]:
     """{transaction id: (key, name)}: the merchant name to ask Logo.dev about, for spending whose merchant has no website
     Runway knows. Not for transfers or income (by category), money in that isn't categorized, or payees like "Interest"."""
-    skip = {r["name"] for r in conn.execute("SELECT name FROM categories WHERE is_transfer=1 OR is_income=1")}
+    skip = {r["name"] for r in conn.execute(select(Category.name).where(or_(Category.is_transfer == 1, Category.is_income == 1)))}
     out = {}
     for t in txs:
         name = " ".join((t.get("payee") or "").split())
@@ -341,12 +350,12 @@ def brand_logos(conn, names) -> set[str]:
     have: dict[str, bool] = {}
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
-        ph = ",".join("?" * len(chunk))
-        have.update({r["id"]: r["logo"] is not None for r in conn.execute(f"SELECT id, logo FROM merchants WHERE id IN ({ph})", chunk)})
+        have.update({r["id"]: r["logo"] is not None
+                     for r in conn.execute(select(Merchant.id, Merchant.logo).where(Merchant.id.in_(chunk)))})
     for k, name in names.items():
         if BRAND + k not in have:
-            conn.execute("INSERT INTO merchants(id, name, logo_url) VALUES (?,?,?)",
-                         (BRAND + k, name, LOGO_DEV + "name/" + urllib.parse.quote(name, safe="")))
+            conn.execute(insert(Merchant).values(id=BRAND + k, name=name,
+                                                 logo_url=LOGO_DEV + "name/" + urllib.parse.quote(name, safe="")))
     return {k for k in names if have.get(BRAND + k)}
 
 
@@ -370,10 +379,10 @@ def note_sites(conn, days: int = 400) -> None:
     if not configured(conn):
         return
     since = (datetime.now() - timedelta(days=days)).date().isoformat()
-    rows = db.rows(conn.execute("SELECT DISTINCT merchant_id, payee, description, category, amount < 0 AS spend "
-                                "FROM transactions WHERE posted>=?", (since,)))
-    plaid = {r["id"] for r in conn.execute("SELECT id FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ? AND id NOT LIKE ?",
-                                           (SITE + "%", BRAND + "%"))}
+    t = Transaction
+    rows = db.rows(conn.execute(select(t.merchant_id, t.payee, t.description, t.category, (t.amount < 0).label("spend"))
+                                .distinct().where(t.posted >= since)))
+    plaid = {r["id"] for r in conn.execute(select(Merchant.id).where(Merchant.logo.is_not(None), ~_logo_dev()))}
     txs = [{**r, "id": str(i), "amount": -1 if r["spend"] else 1} for i, r in enumerate(rows) if r["merchant_id"] not in plaid]
     sites = sites_for(conn, txs)
     site_logos(conn, sites.values())
@@ -396,15 +405,15 @@ def backfill(conn, rounds: int = 40, opener=None) -> int:
 
 
 def logo(conn, mid: str) -> tuple[bytes, str] | None:
-    r = conn.execute("SELECT logo, logo_type FROM merchants WHERE id=? AND logo IS NOT NULL", (mid,)).fetchone()
+    r = conn.execute(select(Merchant.logo, Merchant.logo_type).where(Merchant.id == mid, Merchant.logo.is_not(None))).fetchone()
     return (base64.b64decode(r["logo"]), r["logo_type"]) if r else None
 
 
 def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
     """{transaction id: merchant id with a logo}: by the merchant Plaid named, else by the merchant name ("Starbucks
     Store 99" is Starbucks: the longest known name it starts with, as whole words)."""
-    have = {r["id"]: key(r["name"]) for r in conn.execute("SELECT id, name FROM merchants WHERE logo IS NOT NULL AND id NOT LIKE ? "
-                                                          "AND id NOT LIKE ?", (SITE + "%", BRAND + "%"))}
+    have = {r["id"]: key(r["name"]) for r in conn.execute(
+        select(Merchant.id, Merchant.name).where(Merchant.logo.is_not(None), ~_logo_dev()))}
     if not have:
         return {}
     by_name: dict[str, str] = {}
@@ -427,13 +436,13 @@ def for_transactions(conn, txs: list[dict]) -> dict[str, str]:
 def status(conn) -> dict:
     """How many merchants have a logo, from Plaid and from Logo.dev; how many Logo.dev doesn't know or are still to be
     fetched; and why the last Logo.dev download failed, if it did. For Settings."""
-    def count(where: str, *args) -> int:
-        return conn.execute(f"SELECT COUNT(*) FROM merchants WHERE {where}", args).fetchone()[0]
-    ld = "(id LIKE ? OR id LIKE ?)"
+    def count(*where) -> int:
+        return conn.execute(select(func.count()).select_from(Merchant).where(*where)).scalar()
+    m = Merchant
     return {
-        "plaid": count(f"logo IS NOT NULL AND NOT {ld}", SITE + "%", BRAND + "%"),
-        "logodev": count(f"logo IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
-        "unknown": count(f"logo IS NULL AND logo_checked IS NOT NULL AND {ld}", SITE + "%", BRAND + "%"),
+        "plaid": count(m.logo.is_not(None), ~_logo_dev()),
+        "logodev": count(m.logo.is_not(None), _logo_dev()),
+        "unknown": count(m.logo.is_(None), m.logo_checked.is_not(None), _logo_dev()),
         "waiting": len(_todo(conn, 100000)),
         "last_error": db.get_setting(conn, LAST_ERROR["site"]),
         "last_error_name": db.get_setting(conn, LAST_ERROR["name"]),
@@ -443,14 +452,14 @@ def status(conn) -> dict:
 
 def retry_unknown(conn) -> None:
     """Look up again the merchants Logo.dev had no logo for (their lookups may have failed, not found nothing)."""
-    conn.execute("UPDATE merchants SET logo_checked=NULL WHERE (id LIKE ? OR id LIKE ?) AND logo IS NULL", (SITE + "%", BRAND + "%"))
+    conn.execute(update(Merchant).where(_logo_dev(), Merchant.logo.is_(None)).values(logo_checked=None))
 
 
 # ---------------------------------------------------------------------------------------------- logos you choose
 
 def choice(conn, name: str | None) -> dict | None:
     """The logo you chose for a merchant: {website, hidden}, or None (Runway picks)."""
-    r = conn.execute("SELECT website, hidden FROM merchant_logos WHERE key=?", (key(name),)).fetchone()
+    r = conn.execute(select(MerchantLogo.website, MerchantLogo.hidden).where(MerchantLogo.key == key(name))).fetchone()
     return {"website": r["website"], "hidden": bool(r["hidden"])} if r else None
 
 
@@ -461,7 +470,7 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
     if not k:
         raise ValueError("Which merchant?")
     if not website and not hidden:
-        conn.execute("DELETE FROM merchant_logos WHERE key=?", (k,))
+        conn.execute(delete(MerchantLogo).where(MerchantLogo.key == k))
         return
     s = None
     if website:
@@ -471,7 +480,7 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
         if not configured(conn):
             raise ValueError("Add a Logo.dev publishable key in Settings → Connections first")
         mid = SITE + s
-        row = conn.execute("SELECT logo FROM merchants WHERE id=?", (mid,)).fetchone()
+        row = conn.execute(select(Merchant.logo).where(Merchant.id == mid)).fetchone()
         if not row or not row["logo"]:
             params = _params(db.get_setting(conn, sk.LOGODEV_TOKEN))
             found = _download(f"{LOGO_DEV}{s}?{params}", opener)
@@ -479,11 +488,10 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
                 raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))
             data, ctype = found
             now = datetime.now().isoformat(timespec="seconds")
-            conn.execute("INSERT INTO merchants(id, logo_url, logo, logo_type, logo_checked) VALUES (?,?,?,?,?) "
-                         "ON CONFLICT(id) DO UPDATE SET logo=excluded.logo, logo_type=excluded.logo_type, logo_checked=excluded.logo_checked",
-                         (mid, LOGO_DEV + s, base64.b64encode(data).decode(), ctype, now))
-    conn.execute("INSERT INTO merchant_logos(key, website, hidden) VALUES (?,?,?) "
-                 "ON CONFLICT(key) DO UPDATE SET website=excluded.website, hidden=excluded.hidden", (k, s, int(bool(hidden))))
+            db.upsert(conn, Merchant, {"id": mid, "logo_url": LOGO_DEV + s, "logo": base64.b64encode(data).decode(),
+                                       "logo_type": ctype, "logo_checked": now}, key=["id"],
+                      update=["logo", "logo_type", "logo_checked"])
+    db.upsert(conn, MerchantLogo, {"key": k, "website": s, "hidden": int(bool(hidden))}, key=["key"])
 
 
 def chosen_for(conn, txs: list[dict]) -> dict[str, str | None]:
@@ -492,8 +500,8 @@ def chosen_for(conn, txs: list[dict]) -> dict[str, str | None]:
     keys = sorted({key(t.get("payee")) for t in txs if t.get("payee")})
     if not keys:
         return {}
-    ph = ",".join("?" * len(keys))
-    rows = {r["key"]: r for r in conn.execute(f"SELECT key, website, hidden FROM merchant_logos WHERE key IN ({ph})", keys)}
+    ml = MerchantLogo
+    rows = {r["key"]: r for r in conn.execute(select(ml.key, ml.website, ml.hidden).where(ml.key.in_(keys)))}
     out: dict[str, str | None] = {}
     for t in txs:
         r = rows.get(key(t.get("payee")))
