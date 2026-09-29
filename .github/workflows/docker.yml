@@ -100,7 +100,7 @@ jobs:
           pipx run "ruff==0.16.9" check .
           find runway/static extension -name '*.js' -print0 | xargs -0 -n1 node --check
 
-  # The web app (frontend/): type-check it and make sure it builds.
+  # The web app (frontend/): type-check it, run its unit tests and make sure it builds.
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -116,6 +116,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - name: Type-check (svelte-check)
         run: npm run check
+      - name: Unit tests (Vitest)
+        run: npm test
       - run: npm run build
 
   # The README's coverage badge (docs/badges/coverage.svg): redrawn from the tests' coverage on main, and committed only

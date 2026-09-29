@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -10,6 +11,9 @@ export default defineConfig({
   plugins: [tailwindcss(), svelte()],
   resolve: { alias: { $lib: path.resolve("./src/lib") } },
   build: { outDir: "../runway/static/app", emptyOutDir: true },
+  // `npm test` (Vitest) runs in one time zone, so date tests read the same everywhere. It's one behind UTC, where
+  // the evening is already tomorrow: the case the date helpers are there for.
+  test: { env: { TZ: "America/New_York" } },
   server: {
     proxy: Object.fromEntries(["/api", "/auth", "/banks", "/logos", "/fonts", "/logo.svg", "/logo-180.png", "/sw.js", "/manifest.webmanifest", "/icon-192.png"].map((p) => [p, "http://127.0.0.1:8765"])),
   },
