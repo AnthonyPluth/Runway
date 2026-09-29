@@ -5,15 +5,18 @@ from __future__ import annotations
 import os
 from datetime import date
 
+from sqlalchemy import delete, func, select
+
 from ... import brands, categorize, db, forecast, merchants, monitoring, plaid, realie, recurring
 from ... import settings_keys as sk
+from ...models import Account, Budget, Override, Recurring, SyncLog, Transaction, User
 from ..common import ApiError, _current
 from ..sync import _inv_lock, _sync_lock, bank_configured
 from .transactions import tx_logos
 
 
 def api_state(conn, _q, _b):
-    last_log = conn.execute("SELECT at, ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+    last_log = conn.execute(select(SyncLog.at, SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
     return {
         "connected": bank_configured(conn),
         "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
@@ -23,7 +26,8 @@ def api_state(conn, _q, _b):
         "last_sync_ok": db.get_setting(conn, sk.LAST_SYNC_OK),
         "last_log": dict(last_log) if last_log else None,
         "last_llm_error": db.get_setting(conn, sk.LAST_LLM_ERROR),
-        "review_count": conn.execute(f"SELECT COUNT(*) FROM transactions WHERE needs_review=1 AND {db.NOT_INVESTMENT}").fetchone()[0],
+        "review_count": conn.execute(select(func.count()).select_from(Transaction)
+                                     .where(Transaction.needs_review == 1, db.not_investment())).fetchone()[0],
         "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are
         "horizon_days": int(db.get_setting(conn, sk.HORIZON_DAYS, "90") or 90),
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
@@ -42,8 +46,10 @@ def api_state(conn, _q, _b):
 
 def owner_choices(conn) -> list[str]:
     """First names of everyone who has signed in (plus any owner already set), for the account Owner menus."""
-    names = [r["first_name"] for r in conn.execute("SELECT first_name FROM users WHERE first_name IS NOT NULL ORDER BY last_seen")]
-    names += [r["owner"] for r in conn.execute("SELECT DISTINCT owner FROM accounts WHERE owner IS NOT NULL AND owner<>''")]
+    names = [r["first_name"] for r in conn.execute(
+        select(User.first_name).where(User.first_name.is_not(None)).order_by(User.last_seen))]
+    names += [r["owner"] for r in conn.execute(
+        select(Account.owner).distinct().where(Account.owner.is_not(None), Account.owner != ""))]
     out = []
     for n in names:
         if n and n not in out and n != "Joint":
@@ -59,18 +65,18 @@ def api_overview(conn, q, _b):
     # a recurring item wears the logo of the last transaction matched to it
     ids = sorted({e["recurring_id"] for e in fc["events"] if e.get("recurring_id")})
     if ids:
-        ph = ",".join("?" * len(ids))
         last: dict[int, dict] = {}
-        for t in db.rows(conn.execute(f"SELECT * FROM transactions WHERE recurring_id IN ({ph}) ORDER BY posted DESC", ids)):
+        for t in db.rows(conn.execute(
+                select(Transaction).where(Transaction.recurring_id.in_(ids)).order_by(Transaction.posted.desc()))):
             last.setdefault(t["recurring_id"], t)
         logos = tx_logos(conn, list(last.values()))
         for e in fc["events"]:
             hit = last.get(e.get("recurring_id"))
             e["logo"] = logos.get(hit["id"]) if hit else None
+    name = func.coalesce(Account.display_name, Account.name).label("name")
     fc["all_accounts"] = db.rows(conn.execute(
-        "SELECT id, COALESCE(display_name, name) AS name, kind, balance, balance_date, owed_positive, hidden "
-        "FROM accounts ORDER BY kind, name"
-    ))
+        select(Account.id, name, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.hidden)
+        .order_by(Account.kind, name)))
     return fc
 
 
@@ -82,25 +88,24 @@ def api_override_set(conn, _q, body):
         amount = db.number(body.get("amount"))
     except (TypeError, ValueError):
         raise ApiError("Enter an amount") from None
-    conn.execute(
-        "INSERT INTO overrides(key, amount) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET amount=excluded.amount", (key, amount)
-    )
+    db.upsert(conn, Override, {"key": key, "amount": amount}, key=["key"])
     return {"ok": True}
 
 
 def api_override_delete(conn, _q, body):
-    conn.execute("DELETE FROM overrides WHERE key=?", (str(body.get("key") or ""),))
+    conn.execute(delete(Override).where(Override.key == str(body.get("key") or "")))
     return {"ok": True}
 
 
 def setup_steps(conn) -> dict:
     """The getting-started checklist on the Overview: which steps are done, and whether it's been put away."""
-    checking = conn.execute("SELECT COUNT(*) FROM accounts WHERE hidden=0 AND kind='checking'").fetchone()[0]
+    checking = conn.execute(select(func.count()).select_from(Account)
+                            .where(Account.hidden == 0, Account.kind == "checking")).fetchone()[0]
     return {
-        "bank": bank_configured(conn) and bool(conn.execute("SELECT 1 FROM accounts LIMIT 1").fetchone()),
+        "bank": bank_configured(conn) and bool(conn.execute(select(Account.id).limit(1)).fetchone()),
         "primary": bool(db.get_setting(conn, sk.PRIMARY_ACCOUNT)) or checking == 1,
-        "recurring": bool(conn.execute("SELECT 1 FROM recurring LIMIT 1").fetchone()),
-        "budgets": bool(conn.execute("SELECT 1 FROM budgets WHERE amount>0 LIMIT 1").fetchone()),
+        "recurring": bool(conn.execute(select(Recurring.id).limit(1)).fetchone()),
+        "budgets": bool(conn.execute(select(Budget.category).where(Budget.amount > 0).limit(1)).fetchone()),
         "dismissed": db.get_setting(conn, sk.SETUP_DISMISSED) == "1",
     }
 
@@ -115,7 +120,8 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "primary_account" in body:
         acct = body.get("primary_account") or None
-        if acct and not conn.execute("SELECT 1 FROM accounts WHERE id=? AND kind IN ('checking','savings')", (acct,)).fetchone():
+        if acct and not conn.execute(
+                select(Account.id).where(Account.id == acct, Account.kind.in_(["checking", "savings"]))).fetchone():
             raise ApiError("Pick a checking or savings account")
         db.set_setting(conn, sk.PRIMARY_ACCOUNT, acct)
     if "auto_ai_on_sync" in body:
