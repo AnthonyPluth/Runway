@@ -11,7 +11,8 @@
 
 <p align="center">
   <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
-  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="docs/badges/coverage.svg" alt="Test coverage"></a>
+  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="docs/badges/coverage.svg" alt="Backend test coverage"></a>
+  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="docs/badges/coverage-frontend.svg" alt="Frontend test coverage"></a>
   <img src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&amp;logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/packaging-Poetry-60A5FA?logo=poetry&amp;logoColor=white" alt="Poetry">
   <img src="https://img.shields.io/badge/database-SQLite%20%7C%20Postgres-4cc38a" alt="SQLite or Postgres">
@@ -333,6 +334,8 @@ cd frontend && npm ci                 # its packages, into frontend/node_modules
 npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
 npm run lint                          # ESLint over it, the browser extension and the service worker (CI runs this)
+npm test                              # unit tests for its pure logic, with Vitest (CI runs these too)
+npm run coverage                      # the same, measuring how much of the web app they run (the frontend badge)
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 

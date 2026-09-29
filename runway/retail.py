@@ -24,10 +24,14 @@ import hashlib
 import hmac
 import html
 import json
+import os
 import re
 import secrets
+import tempfile
 import time
 from datetime import date, datetime, timedelta
+
+from dateutil import parser as dateparser
 
 from . import categorize, db, splits
 
@@ -83,8 +87,7 @@ def _day(v) -> str | None:
     if m:
         return m.group(0)
     try:
-        from dateutil import parser
-        return parser.parse(s).date().isoformat()
+        return dateparser.parse(s).date().isoformat()
     except (ValueError, OverflowError):
         return None
 
@@ -193,9 +196,7 @@ def _payment(method: str | None, last4: str | None) -> str | None:
 
 
 def _amazon_config():
-    import os
-    import tempfile
-    from amazonorders.conf import AmazonOrdersConfig
+    from amazonorders.conf import AmazonOrdersConfig   # amazon-orders is heavy: loaded only when an Amazon page comes in
     # A config file that doesn't exist: nothing is read from (or written to) ~/.config/amazonorders.
     return AmazonOrdersConfig(config_path=os.path.join(tempfile.gettempdir(), "runway-amazonorders-none.yml"),
                               data={"warn_on_missing_required_field": True})
@@ -226,6 +227,7 @@ def amazon_transactions(conn, html: str, seen: dict | None = None) -> dict:
     Returns what the extension should do next: `next_form` (post it back to the same page for the next page, or
     None when this page reaches back past `since`), `orders`, the order numbers whose details it should send, and
     `seen`, which it sends back with the next page (so the same charge twice across two pages is still two charges)."""
+    # amazon-orders (and BeautifulSoup) are heavy: loaded only when an Amazon page comes in.
     from amazonorders.exception import AmazonOrdersError
     from amazonorders.transactions import _parse_transactions_page
     from bs4 import BeautifulSoup
@@ -273,7 +275,7 @@ def _tried(conn, oid: str, final: bool) -> dict:
 def amazon_order(conn, number: str, html: str, final: bool = True) -> dict:
     """An Amazon order's details page: its items and totals. A sign-in or robot-check page raises (with its code)
     without using up one of the order's tries."""
-    from amazonorders.exception import AmazonOrdersError
+    from amazonorders.exception import AmazonOrdersError   # heavy: loaded only when an Amazon page comes in
     from amazonorders.orders import AmazonOrders
     number = (number or "").strip()
     if not AMAZON_ORDER.match(number):

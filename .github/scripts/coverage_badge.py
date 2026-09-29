@@ -1,11 +1,11 @@
-"""Draw the README's coverage badge from coverage.py's JSON report:  python coverage_badge.py coverage.json badge.svg
+"""Draw a README coverage badge:  python coverage_badge.py REPORT.json badge.svg [label]
 
-The repository is private, so a badge service can't read the number; the badge is an SVG in the repository instead,
-redrawn by CI on main when the whole-number percentage changes. Prints the percentage."""
+REPORT is coverage.py's JSON report (the backend) or Vitest's coverage-summary.json (the frontend). The repository is
+private, so a badge service can't read the number; the badge is an SVG in the repository instead, redrawn by CI on
+main when the whole-number percentage changes. Prints the percentage."""
 import json
 import sys
 
-LABEL = "coverage"
 CHAR = 6.6   # average width of a character at 11px Verdana, near enough for these few characters
 
 
@@ -13,7 +13,15 @@ def color(pct: int) -> str:
     return "#4c1" if pct >= 90 else "#97ca00" if pct >= 80 else "#dfb317" if pct >= 70 else "#fe7d37" if pct >= 60 else "#e05d44"
 
 
-def badge(pct: int) -> str:
+def percent(report: dict) -> int:
+    """Rounded down, so the badge never claims more."""
+    if "totals" in report:   # coverage.py
+        return int(report["totals"]["percent_covered"])
+    return int(report["total"]["lines"]["pct"])   # Vitest (istanbul's json-summary)
+
+
+def badge(pct: int, label: str = "coverage") -> str:
+    LABEL = label
     value = f"{pct}%"
     lw, vw = round(len(LABEL) * CHAR + 12), round(len(value) * CHAR + 12)
     w = lw + vw
@@ -31,8 +39,9 @@ def badge(pct: int) -> str:
 
 if __name__ == "__main__":
     report, out = sys.argv[1], sys.argv[2]
+    label = sys.argv[3] if len(sys.argv) > 3 else "coverage"
     with open(report) as f:
-        pct = int(json.load(f)["totals"]["percent_covered"])   # rounded down, so the badge never claims more
+        pct = percent(json.load(f))
     with open(out, "w") as f:
-        f.write(badge(pct))
+        f.write(badge(pct, label))
     print(pct)

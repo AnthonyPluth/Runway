@@ -11,7 +11,7 @@ import time
 import urllib.parse
 from datetime import date, timedelta
 
-from . import db, webpush
+from . import db, forecast, recurring, webpush
 
 DEFAULTS = {
     "card_due": True, "card_due_days": 3,           # a card payment is due within N days
@@ -133,7 +133,6 @@ def _when(d: str, today: date) -> str:
 
 def alerts(conn, today: date, p: dict) -> list[dict]:
     """Everything worth saying right now, each with a key so it's only said once."""
-    from . import forecast, recurring
     out = []
     fc = forecast.build(conn, today, max(LOW_BALANCE_DAYS, 30))
     if p["card_due"]:

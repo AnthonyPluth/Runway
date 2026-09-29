@@ -1,84 +1,21 @@
 """Plaid client: Link tokens, token exchange, and investment holdings and activity.
 
-Bank and credit card connections (transactions, balances and card statements) are in plaidbank.py."""
+Bank and credit card connections (transactions, balances and card statements) are in plaidbank.py, and the request
+helper both use is in plaidapi.py. This module sits on top: it hands bank connections to plaidbank when syncing or
+removing them."""
 from __future__ import annotations
 
-import http.client
-import json
-import re
 import os
-import ssl
-import urllib.error
-import urllib.request
+import re
 from datetime import date, datetime, timedelta, UTC
 
-from . import db, secretbox
+from . import db, plaidbank, secretbox
+# Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
+from .plaidapi import HOSTS as HOSTS, PlaidError as PlaidError, base_url as base_url, call as call, configured as configured
 
-HOSTS = {"sandbox": "https://sandbox.plaid.com", "production": "https://production.plaid.com"}
 HISTORY_DAYS = 730      # Plaid keeps up to 24 months of investment activity
 REFRESH_DAYS = 45       # window re-read on routine syncs
 PAGE = 500              # Plaid's maximum page size
-
-
-class PlaidError(Exception):
-    def __init__(self, message: str, code: str | None = None):
-        super().__init__(message)
-        self.code = code
-
-
-def _ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi  # type: ignore
-
-        ctx.load_verify_locations(certifi.where())
-    except Exception:
-        pass
-    return ctx
-
-
-def configured(conn) -> bool:
-    return bool(db.get_setting(conn, "plaid_client_id") and db.get_setting(conn, "plaid_secret"))
-
-
-def base_url(conn) -> str:
-    override = os.environ.get("RUNWAY_PLAID_URL")
-    if override:
-        return override.rstrip("/")
-    return HOSTS.get(db.get_setting(conn, "plaid_env", "production") or "production", HOSTS["production"])
-
-
-def call(conn, path: str, body: dict) -> dict:
-    client_id, secret = db.get_setting(conn, "plaid_client_id"), db.get_setting(conn, "plaid_secret")
-    if not client_id or not secret:
-        raise PlaidError("Add your Plaid client ID and secret in Settings first.")
-    if body.get("access_token"):   # stored encrypted (runway/secretbox.py); decrypted only to send to Plaid
-        try:
-            body = {**body, "access_token": secretbox.decrypt(body["access_token"])}
-        except secretbox.SecretError as e:
-            raise PlaidError(str(e), "RUNWAY_SECRET_KEY") from e
-    payload = json.dumps({"client_id": client_id, "secret": secret, **body}).encode()
-    req = urllib.request.Request(
-        base_url(conn) + path, data=payload, method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "Runway/0.1", "Plaid-Version": "2020-09-14"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90, context=_ctx()) as resp:
-            return json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        try:
-            err = json.loads(e.read().decode())
-        except Exception:
-            err = {}
-        code = err.get("error_code")
-        msg = err.get("display_message") or err.get("error_message") or f"HTTP {e.code}"
-        raise PlaidError(f"Plaid: {msg}" + (f" ({code})" if code else ""), code) from e
-    except urllib.error.URLError as e:
-        raise PlaidError(f"Couldn't reach Plaid: {e.reason}") from e
-    except (OSError, http.client.HTTPException) as e:   # a timeout or a dropped connection while reading the reply
-        raise PlaidError(f"Couldn't reach Plaid: {str(e) or type(e).__name__}") from e
-    except ValueError as e:   # not JSON: a proxy's error page, or a reply cut short
-        raise PlaidError("Plaid sent back a reply Runway couldn't read.") from e
 
 
 # ------------------------------------------------------------------------------------------------ linking
@@ -168,7 +105,6 @@ def remove_item(conn, item_id: str) -> None:
     except PlaidError as e:
         if e.code not in ("ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"):
             raise
-    from . import plaidbank
     plaidbank.forget_item(conn, item_id)
     ids = [r["id"] for r in conn.execute("SELECT id FROM inv_accounts WHERE item_id=?", (item_id,))]
     for aid in ids:
@@ -189,7 +125,6 @@ def item_accounts(conn, item_id: str) -> set[tuple[str, str]]:
 def duplicates(conn, item_id: str) -> list[dict]:
     """Other connections to the same institution, of the same kind, that include some of this one's accounts: the same
     login linked twice. Those accounts then count twice (investments and net worth)."""
-    from . import plaidbank
     me = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     mine = item_accounts(conn, item_id)
     if not me or not mine:
@@ -308,7 +243,6 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     item = conn.execute("SELECT * FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
     if not item:
         raise PlaidError("Connection not found")
-    from . import plaidbank
     if plaidbank.is_bank_item(item):
         return plaidbank.sync_item(conn, item_id, today)
     token = item["access_token"]
