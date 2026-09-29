@@ -1,13 +1,17 @@
 """Categories and the rules that assign them."""
 from __future__ import annotations
 
+from sqlalchemy import delete, func, select
+
 from ... import categories, db, rules, splits
+from ...models import Account, Rule
 from ..common import ApiError
 
 
 def api_categories(conn, _q, _b):
     cats = categories.all_categories(conn)
-    counts = {r["category"]: r["n"] for r in conn.execute(f"SELECT category, COUNT(*) AS n FROM {splits.PARTS} t GROUP BY category")}
+    p = splits.parts()
+    counts = {r["category"]: r["n"] for r in conn.execute(select(p.c.category, func.count().label("n")).group_by(p.c.category))}
     for c in cats:
         c["transactions"] = counts.get(c["name"], 0)
     return cats
@@ -55,7 +59,7 @@ def api_category_remove(conn, _q, body):
 
 
 def api_rules(conn, _q, _b):
-    names = {r["id"]: db.account_label(r) for r in conn.execute("SELECT id, name, display_name, owner FROM accounts")}
+    names = {r["id"]: db.account_label(r) for r in conn.execute(select(Account.id, Account.name, Account.display_name, Account.owner))}
     out = []
     for r in sorted(rules.load(conn), key=lambda r: (r["match"] or "~", r["id"])):
         r["summary"] = rules.describe(r, names)
@@ -92,5 +96,5 @@ def api_rule_apply(conn, _q, _b, rule_id):
 
 
 def api_rule_delete(conn, _q, _b, rule_id):
-    conn.execute("DELETE FROM rules WHERE id=?", (int(rule_id),))
+    conn.execute(delete(Rule).where(Rule.id == int(rule_id)))
     return {"ok": True}
