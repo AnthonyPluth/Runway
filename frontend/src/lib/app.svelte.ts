@@ -55,8 +55,8 @@ export function keepScroll(y: number): void {
 export const route = $state({ page: "overview", sub: "" as string });
 
 function readHash(): void {
-  let [page, sub = ""] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
-  if (page === "settings") page = "setup";
+  const [name, sub = ""] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
+  const page = name === "settings" ? "setup" : name;
   newPage();
   route.page = page || "overview";
   route.sub = sub;

@@ -11,7 +11,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, server  # noqa: E402
+from runway import db, server
 
 PAGE = b'<!doctype html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><div id="app"></div>'
 

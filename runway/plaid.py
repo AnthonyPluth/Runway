@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 
 from . import db, plaidbank, secretbox
 # Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
@@ -314,7 +314,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         if not txs:
             break
     conn.execute("UPDATE plaid_items SET last_sync=?, error=NULL WHERE item_id=?",
-                 (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), item_id))
+                 (datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), item_id))
     conn.commit()
     return {"accounts": len(account_ids), "holdings": len(h.get("holdings", [])), "transactions": fetched}
 

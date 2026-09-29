@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import calendar
+import contextlib
 import gzip
 import hashlib
 import html
@@ -125,11 +126,11 @@ def run_sync() -> dict:
             raise
         except simplefin.SimpleFinError as e:
             _record_failed_sync(str(e))
-            raise ApiError(str(e), 502)
+            raise ApiError(str(e), 502) from e
         except Exception as e:
             monitoring.report()
             _record_failed_sync(f"The sync stopped with an error ({type(e).__name__}); the details are in Runway's log.")
-            raise ApiError("The sync failed; the details are in Runway's log.", 500)
+            raise ApiError("The sync failed; the details are in Runway's log.", 500) from e
     finally:
         _sync_lock.release()
 
@@ -223,16 +224,12 @@ def refresh_plaid() -> None:
 
 def _sync_everything(bank: bool, invest: bool) -> None:
     if bank:
-        try:
+        with contextlib.suppress(ApiError):
             run_sync()
-        except ApiError:
-            pass
         notify_now()
     if invest:
-        try:
+        with contextlib.suppress(ApiError):
             run_investment_sync()
-        except ApiError:
-            pass
 
 
 def notify_now() -> None:
@@ -344,7 +341,7 @@ def api_push_subscribe(conn, _q, body):
     try:
         notify.subscribe(conn, body.get("subscription") or {}, str(body.get("device") or ""), (getattr(_current, "user", None) or {}).get("sub"))
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -357,7 +354,7 @@ def api_push_prefs(conn, _q, body):
     try:
         return notify.save_prefs(conn, body)
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_push_test(conn, _q, body):
@@ -429,7 +426,7 @@ def api_account_update(conn, _q, body, acct_id):
         try:
             plaidbank.set_provider(conn, acct_id, body["provider"])
         except ValueError as e:
-            raise ApiError(str(e))
+            raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -461,7 +458,7 @@ def api_transactions(conn, q, _b):
         if cat == "__none__":
             where.append("t.category IS NULL AND COALESCE(t.is_split, 0)=0")
         else:
-            family = [cat] + categories.descendants(conn, cat)   # a category includes its subcategories
+            family = [cat, *categories.descendants(conn, cat)]   # a category includes its subcategories
             ph = ",".join("?" * len(family))
             # a split transaction counts under every category it's split into, not the one on the row
             where.append(f"((COALESCE(t.is_split, 0)=0 AND t.category IN ({ph})) OR EXISTS "
@@ -503,7 +500,7 @@ def api_tx_category(conn, _q, body, tx_id):
         remember = bool(body.get("remember"))
         n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     # Not remembered yet: the app asks whether to use this category for the merchant from now on.
     offer = None if remember else categorize.rule_offer(conn, tx_id, body.get("category", ""))
     return {"ok": True, "also_updated": n, "offer_rule": offer}
@@ -517,7 +514,7 @@ def api_tx_split(conn, _q, body, tx_id):
     try:
         saved = splits.set_splits(conn, tx_id, parts)
     except splits.SplitError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True, "splits": saved}
 
 
@@ -530,7 +527,7 @@ def api_tx_bulk(conn, _q, body, *_):
         n = categorize.bulk_update(conn, ids, body.get("category") or None, body.get("payee") or None,
                                    bool(body.get("reviewed")))
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True, "updated": n}
 
 
@@ -577,14 +574,14 @@ def api_retail_order(conn, _q, _b, oid):
     try:
         return retail.order_detail(conn, oid)
     except retail.RetailError as e:
-        raise ApiError(str(e), 404)
+        raise ApiError(str(e), 404) from e
 
 
 def api_retail_item(conn, _q, body, item_id):
     try:
         return retail.set_item_category(conn, int(item_id), body.get("category") or "", body.get("remember", True) is not False)
     except retail.RetailError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_retail_unlink(conn, _q, _b, charge_id):
@@ -596,7 +593,7 @@ def api_retail_link(conn, _q, body, charge_id):
     try:
         return {"result": retail.link(conn, charge_id, body.get("tx_id") or "")}
     except retail.RetailError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_retail_apply(conn, _q, _b, charge_id):
@@ -608,7 +605,7 @@ def api_retail_candidates(conn, _q, _b, charge_id):
     try:
         return retail.candidates(conn, charge_id)
     except retail.RetailError as e:
-        raise ApiError(str(e), 404)
+        raise ApiError(str(e), 404) from e
 
 
 # The browser extension's calls (/api/ext/...), signed with its key rather than a sign-in. Each takes one page the
@@ -682,7 +679,7 @@ def ext_carta_data(conn, body):
     try:
         return carta_web.ingest(conn, str(body.get("url") or ""), body.get("data"))
     except carta_web.CartaWebError as e:
-        raise retail.RetailError(str(e))
+        raise retail.RetailError(str(e)) from e
 
 
 EXT_ROUTES = {
@@ -740,7 +737,7 @@ def _equity(fn, *args):
     try:
         return fn(*args)
     except equity.EquityError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_equity_company_add(conn, _q, body):
@@ -776,7 +773,7 @@ def api_carta_settings(conn, _q, body):
     try:
         carta.save_settings(conn, body)
     except carta.CartaError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True, "redirect_uri": carta_redirect_uri(body.get("origin"))}
 
 
@@ -785,14 +782,14 @@ def api_carta_connect(conn, _q, body):
     try:
         return {"url": carta.authorize_url(conn, carta_redirect_uri(body.get("origin")))}
     except carta.CartaError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_carta_sync(conn, _q, _b):
     try:
         return carta.sync(conn)
     except carta.CartaError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
 
 
 def api_carta_disconnect(conn, _q, _b):
@@ -813,7 +810,7 @@ def api_category_add(conn, _q, body):
         categories.add(conn, body.get("name") or "", body.get("parent") or None,
                        bool(body.get("is_transfer")), bool(body.get("is_income")))
     except categories.CategoryError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -821,7 +818,7 @@ def api_category_rename(conn, _q, body):
     try:
         categories.rename(conn, body.get("name") or "", body.get("new_name") or "")
     except categories.CategoryError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -829,7 +826,7 @@ def api_category_move(conn, _q, body):
     try:
         categories.move(conn, body.get("name") or "", body.get("parent") or None)
     except categories.CategoryError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -837,7 +834,7 @@ def api_category_look(conn, _q, body):
     try:
         categories.set_look(conn, body.get("name") or "", body.get("icon"), body.get("color"))
     except categories.CategoryError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -845,7 +842,7 @@ def api_category_remove(conn, _q, body):
     try:
         n = categories.remove(conn, body.get("name") or "", body.get("move_to") or None)
     except categories.CategoryError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True, "moved": n}
 
 
@@ -863,14 +860,14 @@ def api_rule_add(conn, _q, body):
         rid = rules.save(conn, body)
         return {"ok": True, "id": rid, "updated": rules.apply_rule(conn, rid) if body.get("apply") else 0}
     except rules.RuleError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_rule_update(conn, _q, body, rule_id):
     try:
         rules.save(conn, body, int(rule_id))
     except rules.RuleError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -883,7 +880,7 @@ def api_rule_apply(conn, _q, _b, rule_id):
     try:
         return {"ok": True, "updated": rules.apply_rule(conn, int(rule_id))}
     except rules.RuleError as e:
-        raise ApiError(str(e), 404)
+        raise ApiError(str(e), 404) from e
 
 
 def api_rule_delete(conn, _q, _b, rule_id):
@@ -931,7 +928,7 @@ def _recurring_values(conn, body):
         amount = db.number(body.get("amount"))
         anchor = date.fromisoformat(body.get("anchor_date") or "").isoformat()
     except (TypeError, ValueError):
-        raise ApiError("Amount and a date (YYYY-MM-DD) are required")
+        raise ApiError("Amount and a date (YYYY-MM-DD) are required") from None
     if not name or freq not in FREQS or not conn.execute("SELECT 1 FROM accounts WHERE id=?", (acct,)).fetchone():
         raise ApiError("Name, account and frequency are required")
     end = body.get("end_date") or None
@@ -947,7 +944,7 @@ def _recurring_values(conn, body):
             spec = forecast.parse_dates(body.get("dates") or "", freq)
         except ValueError:
             raise ApiError("List the dates like 04-15, 10-15 (or Apr 15, Oct 15)" if freq == "dates"
-                           else "List the days of the month like 1, 15")
+                           else "List the days of the month like 1, 15") from None
         dates = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
     return (name, acct, amount, freq, anchor, match, end, int(body.get("active", 1)), mode, dates)
 
@@ -1005,7 +1002,7 @@ def api_tx_recurring(conn, _q, body, tx_id):
         rid = body.get("recurring_id")
         recurring.link(conn, tx_id, int(rid) if rid else None)
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -1016,7 +1013,7 @@ def api_override_set(conn, _q, body):
     try:
         amount = db.number(body.get("amount"))
     except (TypeError, ValueError):
-        raise ApiError("Enter an amount")
+        raise ApiError("Enter an amount") from None
     conn.execute(
         "INSERT INTO overrides(key, amount) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET amount=excluded.amount", (key, amount)
     )
@@ -1034,7 +1031,7 @@ def _month_range(q):
         y, m = (int(x) for x in (q.get("month", [f"{today:%Y-%m}"])[0]).split("-"))
         start = date(y, m, 1)
     except ValueError:
-        raise ApiError("Month must look like 2026-09")
+        raise ApiError("Month must look like 2026-09") from None
     return start, start + relativedelta(months=1)
 
 
@@ -1189,7 +1186,7 @@ def _ym(q, key="end") -> str:
     try:
         date(int(v[:4]), int(v[5:7]), 1)
     except ValueError:
-        raise ApiError("Month must look like 2026-09")
+        raise ApiError("Month must look like 2026-09") from None
     return v
 
 
@@ -1200,7 +1197,7 @@ def _day(q, key: str, default: date) -> str:
     try:
         return date.fromisoformat(v).isoformat()
     except ValueError:
-        raise ApiError("Dates must look like 2026-09-01")
+        raise ApiError("Dates must look like 2026-09-01") from None
 
 
 def _months(q) -> int:
@@ -1217,7 +1214,7 @@ def api_report_spending(conn, q, _b):
     try:
         return reports.spending_over_time(conn, _ym(q), _months(q), q.get("group", ["category"])[0])
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_report_income(conn, q, _b):
@@ -1262,7 +1259,7 @@ def api_budget_set(conn, _q, body):
     try:
         amt = abs(db.number(amt))
     except (TypeError, ValueError):
-        raise ApiError("Enter an amount")
+        raise ApiError("Enter an amount") from None
     conn.execute("INSERT INTO budgets(category, amount) VALUES (?,?) ON CONFLICT(category) DO UPDATE SET amount=excluded.amount", (cat, amt))
     return {"ok": True}
 
@@ -1273,7 +1270,7 @@ def api_ai_suggest(conn, _q, _b):
     try:
         return categorize.suggest_for_review(conn)
     except RuntimeError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
 
 
 def api_ai_log(conn, _q, _b):
@@ -1300,13 +1297,13 @@ def api_ai_apply(conn, _q, body):
                 if parent and "levels deep" in str(e):
                     categories.add(conn, name, None)
                 else:
-                    raise ApiError(str(e))
+                    raise ApiError(str(e)) from e
             category, created = name, True
     remember = bool(body.get("remember"))
     try:
         n = categorize.apply_to_group(conn, ids, category, remember)
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     # Applying a suggestion categorizes; the app then asks whether this merchant should always be this category.
     offer = None if remember or not ids else categorize.rule_offer(conn, ids[0], category)
     return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer}
@@ -1319,7 +1316,7 @@ def api_plan_save(conn, _q, body):
     try:
         return {"ok": True, "plan": planner.save(conn, body["plan"])}
     except planner.PlanError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_recurring_suggestions(conn, _q, _b):
@@ -1337,7 +1334,7 @@ def api_connect(conn, _q, body):
         simplefin.check_address(access_url)
         simplefin.fetch_accounts(access_url, date.today() - timedelta(days=3))  # prove it works before saving
     except simplefin.SimpleFinError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
     db.set_setting(conn, "simplefin_access_url", access_url)
     return {"ok": True}
 
@@ -1430,11 +1427,11 @@ def api_plaid_link_token(conn, _q, body):
         token = plaid.link_token(conn, body.get("item_id") or None, kind)
     except plaid.PlaidError as e:
         if not (kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD")):
-            raise ApiError(str(e), 502)
+            raise ApiError(str(e), 502) from e
         try:   # Transactions isn't enabled for this Plaid account: card statements only
             token, kind = plaid.link_token(conn, None, "cards"), "cards"
         except plaid.PlaidError:
-            raise ApiError(str(e), 502)
+            raise ApiError(str(e), 502) from e
     # Kept so Link can pick up where it left off when a bank sends you back to /plaid/oauth (possibly in another
     # browser, like Safari from the installed app). Link tokens expire after 4 hours.
     db.set_setting(conn, "plaid_pending_link", json.dumps({"token": token, "kind": kind, "item_id": body.get("item_id") or None,
@@ -1472,7 +1469,7 @@ def api_plaid_exchange(conn, _q, body):
     try:
         item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {}, kind)
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
     lock = _item_lock(conn, item_id)
     if not lock.acquire(timeout=LINK_SYNC_WAIT):   # a sync reading the same connection at once would clash with it
         raise ApiError("Connected. A sync is running, so this connection's accounts come in with the next one.", 409)
@@ -1500,7 +1497,7 @@ def _sync_new_item(conn, item_id: str, body: dict) -> dict:
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
 
 
 def api_plaid_item_sync(conn, _q, _b, item_id):
@@ -1517,7 +1514,7 @@ def api_plaid_item_sync(conn, _q, _b, item_id):
         res["prices"] = refresh_prices(conn)
         return {"ok": True, **res}
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
     finally:
         lock.release()
 
@@ -1526,7 +1523,7 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
     try:
         plaid.remove_item(conn, item_id)
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
     return {"ok": True}
 
 
@@ -1537,7 +1534,7 @@ def api_plaid_match(conn, _q, body):
             return plaid.match_investment(conn, pid, target)
         return plaidbank.match(conn, pid, target)
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_inv_account(conn, _q, body, acct_id):
@@ -1557,7 +1554,7 @@ def api_cost_basis(conn, _q, body):
     try:
         v = db.number(str(v).replace(",", "").replace("$", ""))
     except ValueError:
-        raise ApiError("Enter a number")
+        raise ApiError("Enter a number") from None
     if v < 0:
         raise ApiError("Price can't be negative")
     if "per_share" in body:
@@ -1576,7 +1573,7 @@ def live_tickers(conn) -> list[str]:
 
 def api_live_quotes(conn, _q, _b):
     """Near real-time prices for everything held (plus the S&P 500 fund, which tells us if the market is open)."""
-    q = prices.quotes(live_tickers(conn) + [prices.BENCHMARK])
+    q = prices.quotes([*live_tickers(conn), prices.BENCHMARK])
     return {"quotes": q, "market": prices.market_state(q.get(prices.BENCHMARK)),
             "as_of": datetime.now().isoformat(timespec="seconds")}
 
@@ -1597,14 +1594,14 @@ def api_asset_add(conn, _q, body):
     try:
         return {"id": networth.save_asset(conn, body)}
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
 
 
 def api_asset_update(conn, _q, body, asset_id):
     try:
         networth.save_asset(conn, body, int(asset_id))
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -1617,7 +1614,7 @@ def api_asset_refresh(conn, _q, _b, asset_id):
     try:
         est = realie.refresh_asset(conn, int(asset_id))
     except realie.RealieError as e:
-        raise ApiError(str(e), 502)
+        raise ApiError(str(e), 502) from e
     return {"ok": True, **est, "used": realie.used_this_month(conn)}
 
 
@@ -1649,7 +1646,7 @@ def api_merchant_logo(conn, _q, body):
     try:
         merchants.choose(conn, body.get("name"), (body.get("website") or "").strip() or None, bool(body.get("hidden")))
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     return {"ok": True}
 
 
@@ -1723,7 +1720,7 @@ def api_tracked_save(conn, _q, body, acct_id):
     try:
         tracked.save(conn, acct_id, body.get("rows") or [])
     except ValueError as e:
-        raise ApiError(str(e))
+        raise ApiError(str(e)) from e
     conn.commit()
     try:
         refresh_prices(conn)   # prices for the funds just entered, then re-value the account
@@ -1846,7 +1843,7 @@ def _match(pattern: str, path: str):
     if len(p_parts) != len(parts):
         return None
     params = []
-    for a, b in zip(p_parts, parts):
+    for a, b in zip(p_parts, parts, strict=True):
         if a == "{id}":
             params.append(urllib.parse.unquote(b))
         elif a != b:
@@ -2485,10 +2482,8 @@ class Server(ThreadingHTTPServer):
                 for sock in late:
                     del self._deadlines[sock]
             for sock in late:
-                try:
+                with contextlib.suppress(OSError):
                     sock.shutdown(socket.SHUT_RDWR)   # the handler's blocked read returns, and it finishes
-                except OSError:
-                    pass
 
     def server_close(self):
         self._closed.set()
@@ -2576,7 +2571,5 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
     where = f"http://localhost:{port}" if host in ("127.0.0.1", "localhost") else f"port {port} on all network addresses"
     print(f"Runway is running at {where}  (data: {db.describe()})"
           f"{'  · sign-in via ' + oidc.config()['issuer'] if oidc.enabled() else ''}", flush=True)
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
