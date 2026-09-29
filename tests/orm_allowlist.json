@@ -4,7 +4,6 @@
   "runway/carta_web.py": 4,
   "runway/categories.py": 35,
   "runway/categorize.py": 30,
-  "runway/forecast.py": 21,
   "runway/merchants.py": 28,
   "runway/plaid.py": 43,
   "runway/plaidbank.py": 55,
