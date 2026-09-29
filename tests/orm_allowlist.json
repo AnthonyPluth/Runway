@@ -12,7 +12,6 @@
   "runway/oidc.py": 14,
   "runway/plaid.py": 43,
   "runway/plaidbank.py": 55,
-  "runway/realie.py": 3,
   "runway/recurring.py": 16,
   "runway/retail.py": 61,
   "runway/rules.py": 22,
