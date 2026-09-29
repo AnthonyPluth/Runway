@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy import delete, select
+
 from ... import db, planner, portfolio, prices, sfinvest, tracked
+from ...models import CostOverride, Holding, ManualContribution, ManualState, Security
 from ..common import ApiError
 from ..sync import refresh_prices
 
@@ -21,11 +24,11 @@ def api_plan_save(conn, _q, body):
 def api_cost_basis(conn, _q, body):
     """Set the price paid per share for a holding in one account (cost basis = that x shares held). Empty clears it."""
     acct, sec = body.get("account_id") or "", body.get("security_id") or ""
-    if not conn.execute("SELECT 1 FROM holdings WHERE account_id=? AND security_id=?", (acct, sec)).fetchone():
+    if not conn.execute(select(Holding.account_id).where(Holding.account_id == acct, Holding.security_id == sec)).fetchone():
         raise ApiError("That holding isn't in this account")
     v = body.get("per_share", body.get("cost_basis"))
     if v in (None, ""):
-        conn.execute("DELETE FROM cost_overrides WHERE account_id=? AND security_id=?", (acct, sec))
+        conn.execute(delete(CostOverride).where(CostOverride.account_id == acct, CostOverride.security_id == sec))
         return {"ok": True, "cleared": True}
     try:
         v = db.number(str(v).replace(",", "").replace("$", ""))
@@ -34,17 +37,18 @@ def api_cost_basis(conn, _q, body):
     if v < 0:
         raise ApiError("Price can't be negative")
     if "per_share" in body:
-        conn.execute("INSERT INTO cost_overrides(account_id, security_id, cost_basis, per_share) VALUES (?,?,0,?) "
-                     "ON CONFLICT(account_id, security_id) DO UPDATE SET per_share=excluded.per_share, cost_basis=0", (acct, sec, v))
+        db.upsert(conn, CostOverride, {"account_id": acct, "security_id": sec, "cost_basis": 0, "per_share": v},
+                  key=["account_id", "security_id"])
     else:
-        conn.execute("INSERT INTO cost_overrides(account_id, security_id, cost_basis, per_share) VALUES (?,?,?,NULL) "
-                     "ON CONFLICT(account_id, security_id) DO UPDATE SET cost_basis=excluded.cost_basis, per_share=NULL", (acct, sec, v))
+        db.upsert(conn, CostOverride, {"account_id": acct, "security_id": sec, "cost_basis": v, "per_share": None},
+                  key=["account_id", "security_id"])
     return {"ok": True}
 
 
 def live_tickers(conn) -> list[str]:
     return [r[0] for r in conn.execute(
-        "SELECT DISTINCT s.ticker FROM holdings h JOIN securities s ON s.id=h.security_id WHERE s.is_cash=0 AND s.ticker IS NOT NULL")]
+        select(Security.ticker).distinct().select_from(Holding).join(Security, Security.id == Holding.security_id)
+        .where(Security.is_cash == 0, Security.ticker.is_not(None)))]
 
 
 def api_live_quotes(conn, _q, _b):
@@ -55,9 +59,11 @@ def api_live_quotes(conn, _q, _b):
 
 
 def api_tracked_get(conn, _q, _b, acct_id):
-    st = conn.execute("SELECT * FROM manual_state WHERE account_id=?", (acct_id,)).fetchone()
+    st = conn.execute(select(ManualState).where(ManualState.account_id == acct_id)).fetchone()
+    c = ManualContribution
     return {"positions": tracked.positions_for(conn, acct_id), "state": dict(st) if st else None,
-            "contributions": db.rows(conn.execute("SELECT date, amount FROM manual_contributions WHERE account_id=? ORDER BY date DESC LIMIT 12", (acct_id,)))}
+            "contributions": db.rows(conn.execute(
+                select(c.date, c.amount).where(c.account_id == acct_id).order_by(c.date.desc()).limit(12)))}
 
 
 def api_tracked_save(conn, _q, body, acct_id):
