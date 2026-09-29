@@ -1,11 +1,11 @@
-"""Churning: cards you and your partner opened for their bonuses, what they earn, points values, balances and to-dos."""
+"""Churning: cards and bank accounts you and your partner opened for their bonuses, what they earn, points values, balances and to-dos."""
 from __future__ import annotations
 
 from datetime import date
 
 from sqlalchemy import select
 
-from ... import churning, db
+from ... import bank_bonuses, churning, db
 from ...models import Category
 from ..common import ApiError
 from .state import owner_choices
@@ -90,3 +90,16 @@ def api_churn_task_remove(conn, _q, _b, task_id):
     churning.remove_task(conn, _id(task_id))
     return {"ok": True}
 
+
+
+def api_bank_bonus_add(conn, _q, body):
+    return {"id": _churn(bank_bonuses.save, conn, body)}
+
+
+def api_bank_bonus_update(conn, _q, body, bonus_id):
+    return {"id": _churn(bank_bonuses.save, conn, body, _id(bonus_id))}
+
+
+def api_bank_bonus_remove(conn, _q, _b, bonus_id):
+    bank_bonuses.remove(conn, _id(bonus_id))
+    return {"ok": True}

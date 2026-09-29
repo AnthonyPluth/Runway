@@ -30,7 +30,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, insert, select, update
 
-from . import db, reports, splits
+from . import bank_bonuses, db, reports, splits
 from .models import Account, Category, ChurnBalance, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask
 
 # Each issuer's bonus rule, as commonly reported by the churning community (Doctor of Credit, r/churning data
@@ -439,8 +439,13 @@ def rewards(s: dict) -> dict:
 
 def overview(conn, today: date, people: list[str] | None = None) -> dict:
     s = state(conn, today, people)
-    return {"today": s["today"], "people": s["people"], "cards": s["cards"], "five24": s["five24"],
-            "upcoming": upcoming(s, today), "rewards": rewards(s), "tasks": s["tasks"],
+    bank, bank_income = bank_bonuses.overview(conn, today)
+    people = list(dict.fromkeys([*s["people"], *(b["owner"] for b in bank)]))
+    five = {o: s["five24"].get(o) or five24([], o, today) for o in people}
+    soon = upcoming(s, today) + bank_bonuses.upcoming(bank, today, today + relativedelta(days=HORIZON_DAYS))
+    soon.sort(key=lambda i: (i["date"], i["kind"] != "task", i["title"]))
+    return {"today": s["today"], "people": people, "cards": s["cards"], "five24": five,
+            "upcoming": soon, "rewards": rewards(s), "tasks": s["tasks"], "bank": bank, "bank_income": bank_income,
             "currencies": list(s["values"].values()),
             "issuers": [{"key": k, "name": v["name"], "rule": v["rule"]} for k, v in ISSUERS.items()],
             "accounts": db.rows(conn.execute(
@@ -460,9 +465,9 @@ def alerts(conn, today: date, fees: bool, bonuses: bool) -> list[dict]:
     left. Keyed by card and date, so each is sent once."""
     if not (fees or bonuses):
         return []
+    out = bank_bonuses.alerts(bank_bonuses.overview(conn, today)[0], today) if bonuses else []
     if not conn.execute(select(ChurnCard.id).limit(1)).fetchone():
-        return []
-    out = []
+        return out
     for c in state(conn, today)["cards"]:
         if fees and c["fee_due"] and (date.fromisoformat(c["fee_due"]) - today).days <= FEE_WARN_DAYS:
             out.append({"key": f"churnfee:{c['id']}:{c['fee_due']}",
