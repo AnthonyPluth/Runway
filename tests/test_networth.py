@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from runway import db, networth, prices, realie  # noqa: E402
+from runway import db, networth, prices, realie
 
 TODAY = date(2026, 9, 23)
 
