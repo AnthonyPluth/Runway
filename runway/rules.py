@@ -60,7 +60,7 @@ def _text_matches(r: dict, tx: dict) -> bool:
 
 def matches(r: dict, tx: dict) -> bool:
     amt = tx.get("amount") or 0
-    if r.get("direction") == "out" and amt >= 0 or r.get("direction") == "in" and amt <= 0:
+    if (r.get("direction") == "out" and amt >= 0) or (r.get("direction") == "in" and amt <= 0):
         return False
     if r.get("amount_min") is not None and abs(amt) < r["amount_min"] - CENT:
         return False
@@ -151,7 +151,7 @@ def clean(conn, body: dict) -> dict:
         try:
             r[k] = round(abs(db.number(v)), 2)
         except (TypeError, ValueError):
-            raise RuleError("Amounts must be numbers")
+            raise RuleError("Amounts must be numbers") from None
     if r["amount_min"] is not None and r["amount_max"] is not None and r["amount_min"] > r["amount_max"]:
         raise RuleError("The smallest amount is bigger than the largest")
     r["direction"] = body.get("direction") or None
@@ -182,7 +182,7 @@ def clean(conn, body: dict) -> dict:
             try:
                 pct = round(db.number((p or {}).get("percent")), 2)
             except (TypeError, ValueError):
-                raise RuleError("Give every part a percentage")
+                raise RuleError("Give every part a percentage") from None
             if not cat or not known(cat):
                 raise RuleError("Give every part a category")
             if pct <= 0:

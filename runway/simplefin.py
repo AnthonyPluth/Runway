@@ -12,7 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 
 from . import db, sfinvest, splits
 from . import settings_keys as sk
@@ -91,7 +91,7 @@ def _describe_http_error(e: urllib.error.HTTPError) -> str:
     except Exception:
         body = ""
     server = e.headers.get("Server", "") if e.headers else ""
-    blocked = "cloudflare" in server.lower() or "cf-ray" in {k.lower() for k in (e.headers or {}).keys()}
+    blocked = "cloudflare" in server.lower() or "cf-ray" in {k.lower() for k in (e.headers or {})}
     text = " ".join(re.sub(r"<[^>]+>", " ", body).split())[:160]
     parts = [f"HTTP {e.code}"]
     if blocked:
@@ -165,10 +165,10 @@ def _split_access_url(access_url: str) -> tuple[str, str]:
 
 def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dict:
     base, auth = _split_access_url(access_url)
-    params = {"start-date": str(int(datetime(start.year, start.month, start.day, tzinfo=timezone.utc).timestamp())),
+    params = {"start-date": str(int(datetime(start.year, start.month, start.day, tzinfo=UTC).timestamp())),
               "pending": "1"}
     if end is not None:
-        end_dt = datetime(end.year, end.month, end.day, tzinfo=timezone.utc) + timedelta(days=1)
+        end_dt = datetime(end.year, end.month, end.day, tzinfo=UTC) + timedelta(days=1)
         params["end-date"] = str(int(end_dt.timestamp()))
     url = f"{base}/accounts?{urllib.parse.urlencode(params)}"
     req = urllib.request.Request(url, headers={"Authorization": auth, "Accept": "application/json", "User-Agent": USER_AGENT})

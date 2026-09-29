@@ -390,7 +390,7 @@ def account_label(a) -> str:
     """How an account is named in lists: your name for it, plus whose it is ("AAdvantage (Sara)") when an owner is set
     and the name doesn't already say so."""
     name = a["display_name"] or a["name"]
-    owner = a["owner"] if "owner" in a.keys() else None
+    owner = a["owner"] if "owner" in a.keys() else None   # a row: `in` alone would search its values  # noqa: SIM118
     return f"{name} ({owner})" if owner and owner.lower() not in name.lower() else name
 
 

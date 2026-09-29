@@ -13,7 +13,7 @@ accounts (plaid_accounts) are matched to Runway accounts (accounts.plaid_account
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, UTC
 
 from . import db, merchants, splits
 from . import settings_keys as sk
@@ -27,7 +27,7 @@ KINDS = {"checking": "checking", "savings": "savings", "money market": "savings"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def products(item) -> set[str]:
@@ -111,7 +111,7 @@ def auto_match(conn, item_id: str) -> list[str]:
         if scored[0][0] >= 35 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 20):
             pairs.append((scored[0][0], pa["plaid_account_id"], scored[0][1]))
     matched, used_p, used_a = [], set(), set()
-    for _score_, pid, aid in sorted(pairs, reverse=True):   # strongest first; each account matched once
+    for _, pid, aid in sorted(pairs, reverse=True):   # strongest first; each account matched once
         if pid in used_p or aid in used_a:
             continue
         used_p.add(pid); used_a.add(aid)
