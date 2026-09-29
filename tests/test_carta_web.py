@@ -156,6 +156,28 @@ class ImportTests(unittest.TestCase):
         self.assertIn("Download what it read", carta.settings(self.c)["web_error"])
         self.assertTrue(carta.settings(self.c)["web_capture"])
 
+    def test_a_later_import_keeps_what_carta_left_out_and_drops_what_is_gone(self):
+        from unittest import mock
+
+        def grant(gid, qty, **kw):
+            return {"id": gid, "kind": "iso", "label": None, "quantity": qty, "strike": 1.0, "granted_on": "2024-01-10",
+                    "vest_start": "2024-01-15", "vest_months": kw.get("months"), "cliff_months": 12, "vest_every": kw.get("every", 1),
+                    "exercised": 0.0, "vested_reported": None, "expires_on": None}
+        first = {"companies": [{"id": "carta:42", "name": "Acme", "price": 4.25, "price_date": "2026-03-01"}],
+                 "grants": [("carta:42", grant("carta:1", 100.0, months=48, every=3), {"a": 1}),
+                            ("carta:42", grant("carta:2", 50.0, months=48), {"b": 2})], "gone": []}
+        again = {"companies": [{"id": "carta:42", "name": "Carta company 42", "unnamed": True, "price": None, "price_date": None}],
+                 "grants": [("carta:42", grant("carta:1", 120.0), {"a": 3})], "gone": ["carta:2"]}
+        self.c.execute("INSERT INTO equity_grants(id, company_id, kind, quantity, source) VALUES ('m1', 'carta:42', 'rsu', 5, 'manual')")
+        for found in (first, again):
+            with mock.patch.object(carta_web, "read", return_value=found):
+                carta_web.finish(self.c)
+        company = dict(self.c.execute("SELECT id, name, share_price, price_as_of, source FROM equity_companies").fetchone())
+        self.assertEqual(company, {"id": "carta:42", "name": "Acme", "share_price": 4.25, "price_as_of": "2026-03-01", "source": "carta"})
+        grants = [tuple(r) for r in self.c.execute(
+            "SELECT id, quantity, vest_months, vest_every, source, raw, vested_reported_on IS NOT NULL FROM equity_grants ORDER BY id")]
+        self.assertEqual(grants, [("carta:1", 120.0, 48, 3, "carta", '{"a":3}', 1), ("m1", 5.0, None, 1, "manual", None, 0)])
+
 
 if __name__ == "__main__":
     unittest.main()

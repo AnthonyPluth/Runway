@@ -378,6 +378,21 @@ class TrackedHoldingsTests(Base):
         self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 1}], TODAY)
         self.assertEqual(self.c.execute("SELECT pct FROM manual_positions").fetchall()[0][0], 0.0)
 
+    def test_what_the_tracked_page_reads(self):
+        from runway import server
+        self.tracked.save(self.c, "sf:vw", [{"ticker": "FXAIX", "shares": 60, "pct": 70}, {"ticker": "VTSAX", "shares": 80, "pct": 30}], TODAY)
+        self.sync(20000, "2026-09-22")
+        self.sync(21000, "2026-09-22")   # a $1,000 contribution
+        got = server.api_tracked_get(self.c, None, None, "sf:vw")
+        self.assertEqual(list(got), ["positions", "state", "contributions"])
+        self.assertEqual([(p["security_id"], p["ticker"], p["name"], round(p["shares"], 4), p["pct"]) for p in got["positions"]],
+                         [("man:FXAIX", "FXAIX", None, 63.5, 70.0), ("man:VTSAX", "VTSAX", None, 83.0, 30.0)])
+        self.assertEqual(list(got["positions"][0]), ["account_id", "security_id", "shares", "pct", "last_value", "updated", "ticker", "name"])
+        self.assertEqual(got["state"], {"account_id": "sf:vw", "drift": 0.0, "checked": "2026-09-22", "last_balance": 21000.0, "baseline": 0.0})
+        self.assertEqual(got["contributions"], [{"date": "2026-09-22", "amount": 1000.0}])
+        self.assertEqual(server.api_tracked_get(self.c, None, None, "sf:nope"), {"positions": [], "state": None, "contributions": []})
+        self.assertEqual(sorted(server.live_tickers(self.c)), ["FXAIX", "VTSAX"])
+
 
 class MergeByTickerTests(Base):
     def test_same_fund_in_two_accounts_is_one_row(self):

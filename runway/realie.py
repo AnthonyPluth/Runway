@@ -19,8 +19,11 @@ import urllib.parse
 import urllib.request
 from datetime import date, timedelta
 
+from sqlalchemy import or_, select, update
+
 from . import db, networth
 from . import settings_keys as sk
+from .models import Asset
 
 REFRESH_DAYS = 7   # at most one lookup per home per week, whether automatic or asked for
 
@@ -144,7 +147,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
 
 def refresh_asset(conn, asset_id: int, today: date | None = None) -> dict:
     today = today or date.today()
-    a = conn.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+    a = conn.execute(select(Asset).where(Asset.id == asset_id)).fetchone()
     if not a:
         raise RealieError("Not found")
     nxt = next_lookup(a["last_lookup"])
@@ -153,7 +156,7 @@ def refresh_asset(conn, asset_id: int, today: date | None = None) -> dict:
                           f"Runway checks each home once a week, so the next lookup is {nxt:%b %-d}.")
     est = value_estimate(conn, a["address"], today)
     networth.set_value(conn, asset_id, est["value"], "realie", today, est["low"], est["high"])
-    conn.execute("UPDATE assets SET last_lookup=? WHERE id=?", (today.isoformat(), asset_id))
+    conn.execute(update(Asset).where(Asset.id == asset_id).values(last_lookup=today.isoformat()))
     return est
 
 
@@ -169,8 +172,9 @@ def refresh_due(conn, today: date | None = None) -> int:
         return 0
     n = 0
     cutoff = (today - timedelta(days=REFRESH_DAYS)).isoformat()
-    for a in conn.execute("SELECT id FROM assets WHERE kind='home' AND auto_update=1 AND address IS NOT NULL "
-                          "AND (last_lookup IS NULL OR last_lookup<=?)", (cutoff,)).fetchall():
+    for a in conn.execute(select(Asset.id).where(
+            Asset.kind == "home", Asset.auto_update == 1, Asset.address.is_not(None),
+            or_(Asset.last_lookup.is_(None), Asset.last_lookup <= cutoff))).fetchall():
         try:
             refresh_asset(conn, a["id"], today)
             n += 1

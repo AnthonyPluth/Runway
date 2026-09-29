@@ -16,6 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, UTC
 from typing import TypeGuard
 
+from sqlalchemy import case, func, or_, select, update
+
+from . import db
+from .models import Price, PriceMeta, Security
 
 BENCHMARK = "SPY"   # S&P 500
 STALE_HOURS = 20
@@ -79,7 +83,7 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
     failed: list[str] = []
     now = datetime.now()
     for t in sorted(set(x for x in tickers if usable_ticker(x))):
-        meta = conn.execute("SELECT * FROM price_meta WHERE ticker=?", (t,)).fetchone()
+        meta = conn.execute(select(PriceMeta).where(PriceMeta.ticker == t)).fetchone()
         needs_name = meta is not None and meta["ok"] and meta["long_name"] is None   # fetched before names were kept
         if meta and not force and not needs_name and meta["fetched_at"]:
             age = now - datetime.fromisoformat(meta["fetched_at"])
@@ -101,14 +105,15 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
             continue
         except ValueError:
             rows, splits, info, ok = [], [], {}, 0
-        conn.executemany("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
-                         "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", [(t, *r) for r in rows])
-        conn.execute(
-            "INSERT INTO price_meta(ticker, fetched_at, ok, splits, instrument_type, long_name) VALUES (?,?,?,?,?,?) ON CONFLICT(ticker) DO UPDATE SET "
-            "fetched_at=excluded.fetched_at, ok=excluded.ok, splits=CASE WHEN excluded.ok=1 THEN excluded.splits ELSE price_meta.splits END, "
-            "instrument_type=COALESCE(excluded.instrument_type, price_meta.instrument_type), long_name=COALESCE(excluded.long_name, price_meta.long_name)",
-            (t, now.isoformat(timespec="seconds"), ok, json.dumps(splits), info.get("type"), (info.get("name") or "") if ok else None),
-        )
+        db.upsert(conn, Price, [{"ticker": t, "date": d, "close": c, "adjclose": a} for d, c, a in rows], key=["ticker", "date"])
+        db.upsert(conn, PriceMeta, {"ticker": t, "fetched_at": now.isoformat(timespec="seconds"), "ok": ok,
+                                    "splits": json.dumps(splits), "instrument_type": info.get("type"),
+                                    "long_name": (info.get("name") or "") if ok else None},
+                  key=["ticker"], update=lambda ex: {
+                      "fetched_at": ex.fetched_at, "ok": ex.ok,
+                      "splits": case((ex.ok == 1, ex.splits), else_=PriceMeta.splits),
+                      "instrument_type": func.coalesce(ex.instrument_type, PriceMeta.instrument_type),
+                      "long_name": func.coalesce(ex.long_name, PriceMeta.long_name)})
         conn.commit()
         (done if ok else failed).append(t)
         time.sleep(0.25)
@@ -117,9 +122,10 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
 
 def history(conn, ticker: str, start: date) -> tuple[dict[str, float], dict[str, float], list[tuple[str, float]]]:
     """(real close by date, adjusted close by date, splits). Real = split-adjusted close x splits that happened later."""
-    rows = conn.execute("SELECT date, close, adjclose FROM prices WHERE ticker=? AND date>=? ORDER BY date",
-                        (ticker, (start - timedelta(days=10)).isoformat())).fetchall()
-    meta = conn.execute("SELECT splits FROM price_meta WHERE ticker=?", (ticker,)).fetchone()
+    rows = conn.execute(select(Price.date, Price.close, Price.adjclose)
+                        .where(Price.ticker == ticker, Price.date >= (start - timedelta(days=10)).isoformat())
+                        .order_by(Price.date)).fetchall()
+    meta = conn.execute(select(PriceMeta.splits).where(PriceMeta.ticker == ticker)).fetchone()
     splits = [tuple(s) for s in json.loads(meta["splits"] or "[]")] if meta else []
     real, adj = {}, {}
     for r in rows:
@@ -138,15 +144,18 @@ YAHOO_TYPES = {"EQUITY": "equity", "ETF": "etf", "MUTUALFUND": "mutual fund", "M
 
 def fill_security_types(conn) -> None:
     """SimpleFIN doesn't say what a security is; borrow the price service's classification."""
-    for r in conn.execute("SELECT ticker, long_name FROM price_meta WHERE long_name IS NOT NULL AND long_name<>''").fetchall():
-        conn.execute("UPDATE securities SET name=? WHERE ticker=? AND (name IS NULL OR name='' OR upper(name)=upper(ticker))",
-                     (r["long_name"], r["ticker"]))
-    for r in conn.execute("SELECT ticker, instrument_type FROM price_meta WHERE instrument_type IS NOT NULL").fetchall():
+    for r in conn.execute(select(PriceMeta.ticker, PriceMeta.long_name)
+                          .where(PriceMeta.long_name.is_not(None), PriceMeta.long_name != "")).fetchall():
+        conn.execute(update(Security).where(
+            Security.ticker == r["ticker"],
+            or_(Security.name.is_(None), Security.name == "", func.upper(Security.name) == func.upper(Security.ticker)),
+        ).values(name=r["long_name"]))
+    for r in conn.execute(select(PriceMeta.ticker, PriceMeta.instrument_type).where(PriceMeta.instrument_type.is_not(None))).fetchall():
         t = YAHOO_TYPES.get((r["instrument_type"] or "").upper())
         if t:
-            conn.execute("UPDATE securities SET type=? WHERE ticker=? AND type IS NULL", (t, r["ticker"]))
+            conn.execute(update(Security).where(Security.ticker == r["ticker"], Security.type.is_(None)).values(type=t))
             if t == "cash":
-                conn.execute("UPDATE securities SET is_cash=1 WHERE ticker=? AND id LIKE 'sf:%'", (r["ticker"],))
+                conn.execute(update(Security).where(Security.ticker == r["ticker"], Security.id.like("sf:%")).values(is_cash=1))
 
 
 # ------------------------------------------------------------------------------------------------ live quotes

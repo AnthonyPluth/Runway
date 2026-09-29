@@ -12,10 +12,13 @@ from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
+from sqlalchemy import func, select
+
 from . import categories, db, splits
+from .models import Account, Transaction
 
 TOP = 7                      # series shown by name; the rest are "Everything else"
-SCOPE = "a.hidden=0 AND a.kind IN ('checking','savings','credit')"
+SCOPE = (Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))   # conditions on the joined Account
 GROUPS = ("category", "merchant", "account")
 
 
@@ -31,10 +34,12 @@ def _bounds(months: list[str]) -> tuple[str, str]:
 
 
 def _rows(conn, start: str, end: str) -> list[dict]:
+    t = splits.parts()
     return db.rows(conn.execute(
-        f"SELECT t.id, substr(t.posted, 1, 7) AS month, t.posted, t.amount, t.payee, t.description, t.category, "
-        f"t.account_id, {db.label_sql('a')} AS account_name FROM {splits.PARTS} t JOIN accounts a ON a.id=t.account_id "
-        f"WHERE t.posted>=? AND t.posted<? AND {SCOPE}", (start, end)))
+        select(t.c.id, func.substr(t.c.posted, 1, 7).label("month"), t.c.posted, t.c.amount, t.c.payee, t.c.description,
+               t.c.category, t.c.account_id, db.account_label_expr().label("account_name"))
+        .select_from(t).join(Account, Account.id == t.c.account_id)
+        .where(t.c.posted >= start, t.c.posted < end, *SCOPE)))
 
 
 class _Kinds:
@@ -173,9 +178,9 @@ def merchant(conn, name: str, end: str, months: int = 12) -> dict:
     whole = {}
     for i in range(0, len(ids), 500):
         chunk = ids[i:i + 500]
-        q = ",".join("?" * len(chunk))
         whole.update({r["id"]: r for r in db.rows(conn.execute(
-            f"SELECT id, posted, amount, category, is_split FROM transactions WHERE id IN ({q})", chunk))})
+            select(Transaction.id, Transaction.posted, Transaction.amount, Transaction.category, Transaction.is_split)
+            .where(Transaction.id.in_(chunk))))})
     values = [round(max(0.0, by_month[m]), 2) for m in ms]
     return {"name": name, "months": ms, "values": values, "total": round(sum(values), 2),
             "transactions": [{"id": t["id"], "posted": t["posted"], "amount": whole[t["id"]]["amount"],
