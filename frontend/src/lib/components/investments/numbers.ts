@@ -1,16 +1,21 @@
 // How the Investments page writes returns and gains, as in the classic app.
 import { fmt } from "$lib/format";
 
-/** "+4.2%", "−1.0%", "0.0%" (never "−0.0%"), or "—". */
+/** "+4.2%", "(1.0%)" for a loss, "0.0%" (never a negative zero), or "—". Losses are in parentheses, as on a
+ *  statement. */
 export function pct(x: number | null | undefined, digits = 1): string {
   if (x == null) return "—";
   const shown = Math.abs(x * 100).toFixed(digits);
-  return Number(shown) === 0 ? `${shown}%` : `${x > 0 ? "+" : "−"}${shown}%`;
+  return Number(shown) === 0 ? `${shown}%` : x > 0 ? `+${shown}%` : `(${shown}%)`;
 }
-/** Gains are green; losses stay the ordinary text color (red would read as an error). */
-export const gainCls = (x: number | null | undefined) => (x != null && x > 0 ? "text-emerald-500" : "");
-/** "+$1,234.00", "−$12.00" or "—". */
-export const signed = (x: number | null | undefined) => (x == null ? "—" : `${x >= 0 ? "+" : "−"}${fmt(Math.abs(x))}`);
+/** Gains are green, losses red; nothing (or what rounds to nothing) keeps the ordinary color. */
+export const gainCls = (x: number | null | undefined) => (x == null ? "" : x > 0 ? "text-emerald-500" : x < 0 ? "text-red-500" : "");
+/** "+$1,234.00", "($12.00)" for a loss, "$0.00" for what rounds to nothing, or "—". */
+export function signed(x: number | null | undefined): string {
+  if (x == null) return "—";
+  const shown = fmt(Math.abs(x));
+  return shown === fmt(0) ? shown : x > 0 ? `+${shown}` : `(${shown})`;
+}
 /** Round axis steps (1, 2, 2.5, 5 × 10ⁿ) covering min…max. */
 export function niceTicks(min: number, max: number, count = 5): number[] {
   const span = max - min || Math.abs(max) || 1, raw = span / count;
