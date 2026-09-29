@@ -88,11 +88,11 @@
           <td class="text-right font-semibold tabular-nums">{fmt(x.value)}</td>
           <td class="text-right tabular-nums">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
-            {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class="text-xs text-muted-foreground">{pct(x.day_change_pct, 2)}</div>{/if}
+            {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}
           </td>
           <td class="text-right tabular-nums">
             {#if x.gain == null}<span class="text-muted-foreground">—</span>
-            {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class="text-xs text-muted-foreground">{pct(x.gain_pct)}</div>{/if}
+            {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
           <td class="text-right tabular-nums">
             <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={`${Math.min(100, x.allocation * 100).toFixed(1)}%`}></span></span>{(x.allocation * 100).toFixed(1)}%
