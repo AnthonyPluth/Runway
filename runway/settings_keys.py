@@ -92,6 +92,10 @@ def realie_calls(day: date) -> str:
     return f"realie_calls:{day:%Y-%m}"
 
 
+# Live stock prices (Finnhub)
+FINNHUB_API_KEY = "finnhub_api_key"
+
+
 # Merchant logos (Logo.dev)
 LOGODEV_TOKEN = "logodev_token"     # the publishable key (pk_...)
 LOGODEV_SECRET = "logodev_secret"   # the secret key (sk_...), optional: Brand Search, for better name matches
@@ -114,5 +118,5 @@ def retail_summary(retailer: str) -> str:
 
 
 # Rows that hold secrets: stored encrypted (runway/secretbox.py) and left out of backups unless asked for.
-SECRETS = frozenset({SIMPLEFIN_ACCESS_URL, PLAID_SECRET, OPENROUTER_API_KEY, REALIE_API_KEY, LOGODEV_TOKEN, LOGODEV_SECRET,
+SECRETS = frozenset({SIMPLEFIN_ACCESS_URL, PLAID_SECRET, OPENROUTER_API_KEY, REALIE_API_KEY, FINNHUB_API_KEY, LOGODEV_TOKEN, LOGODEV_SECRET,
                      VAPID_PRIVATE_KEY, CARTA_CLIENT_SECRET, CARTA_ACCESS_TOKEN, CARTA_REFRESH_TOKEN, PLAID_PENDING_LINK})
