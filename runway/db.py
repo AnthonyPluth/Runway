@@ -30,7 +30,7 @@ from sqlalchemy.sql.expression import FunctionElement
 
 from . import schema, secretbox
 from . import settings_keys as sk
-from .models import Account, Category, Setting
+from .models import Account, Category, Setting, Transaction
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
 
@@ -493,6 +493,14 @@ def init(path: str | None = None) -> None:
 # Transactions in investment accounts (buys, sells, dividends) live on the Investments page, not in Transactions,
 # Review or the review count. A condition on transactions.account_id, for a WHERE clause.
 NOT_INVESTMENT = "account_id NOT IN (SELECT id FROM accounts WHERE kind='investment')"
+
+
+def not_investment(account_id=None):
+    """NOT_INVESTMENT for SQLAlchemy statements: `.where(db.not_investment())` (or pass the account id column, e.g.
+    a subquery's `p.c.account_id`; the default is Transaction.account_id)."""
+    col = Transaction.account_id if account_id is None else account_id
+    return col.not_in(select(Account.id).where(Account.kind == "investment"))
+
 
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
