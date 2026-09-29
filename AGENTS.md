@@ -4,7 +4,7 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 
 ## Layout
 
-- `runway/`: the backend. `server/` holds the HTTP handlers, `migrations/` the Alembic migrations, `static/` the served assets. Domain modules (`forecast.py`, `budgets`, `reports.py`, `networth.py`, `plaid*.py`, and so on) sit at the top level.
+- `runway/`: the backend. `server/` holds the HTTP handlers, `migrations/` the Alembic migrations, `static/` the served assets. Domain modules (`forecast.py`, `reports.py`, `networth.py`, `plaid*.py`, and so on) sit at the top level.
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
