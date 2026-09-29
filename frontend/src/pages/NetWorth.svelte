@@ -1,0 +1,146 @@
+<script lang="ts">
+  import { api } from "$lib/api";
+  import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import LineChart from "$lib/components/investments/LineChart.svelte";
+  import { signed } from "$lib/components/investments/numbers";
+  import AssetCard from "$lib/components/networth/AssetCard.svelte";
+  import AssetForm from "$lib/components/networth/AssetForm.svelte";
+  import EquityCard from "$lib/components/networth/EquityCard.svelte";
+  import { valueSource } from "$lib/components/networth/homeValues";
+  import type { Asset, NetWorth, NwGroup } from "$lib/components/networth/types";
+  import { Button } from "$lib/components/ui/button";
+  import * as Card from "$lib/components/ui/card";
+  import { fmt, fmt0, fmtDate, nb, shortMoney } from "$lib/format";
+  import { cn } from "$lib/utils";
+
+  let { sub: _sub = "" }: { sub?: string } = $props();
+
+  // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come.
+  let d = $state.raw<NetWorth | null>(null);
+  let error = $state<string | null>(null);
+  let version = $state(0);
+  async function load() {
+    try { d = await api<NetWorth>("/api/networth"); error = null; version++; }
+    catch (err) { error = (err as Error).message; }
+  }
+  load();
+
+  const ch = $derived(d?.change["30d"]);
+  const since = $derived(d?.first_snapshot ? fmtDate(d.first_snapshot, { month: "short", day: "numeric", year: "numeric" }) : null);
+  const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
+  const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
+
+  // The asset form: null when closed, "new" to add one, or the asset being edited.
+  let form = $state<Asset | "new" | null>(null);
+  const closeForm = (changed: boolean) => { form = null; if (changed) load(); };
+</script>
+
+{#snippet side(groups: NwGroup[])}
+  <table class="w-full text-sm">
+    <tbody>
+      {#each groups as g (g.key)}
+        <tr class="border-t border-border first:border-t-0"><td class="pt-3 pb-1 font-semibold">{g.label}</td><td class="pt-3 pb-1 text-right font-semibold tabular-nums">{fmt(g.total)}</td></tr>
+        {#each g.items as i (`${i.type}:${i.id}`)}
+          <tr class="align-top">
+            <td class="py-1.5 pr-3 pl-6">
+              {#if i.type === "account"}<AcctLabel id={String(i.id)} name={i.name} />{:else}{i.name}{/if}
+              <div class="text-xs text-muted-foreground">
+                {#if i.type === "account"}{i.org ?? ""}
+                {:else if i.type === "equity"}Vested{i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}{i.source === "carta" ? " · from Carta" : ""}
+                {:else}{valueSource(i.source)} · {i.as_of ? fmtDate(i.as_of) : ""}{/if}{#if i.equity != null && i.loan} · {fmt(i.equity)} equity after {i.loan.name}{/if}
+              </div>
+            </td>
+            <td class="py-1.5 text-right tabular-nums">{fmt(i.value)}</td>
+          </tr>
+        {/each}
+      {/each}
+    </tbody>
+  </table>
+{/snippet}
+
+{#if error && !d}
+  <Card.Root>
+    <Card.Content>
+      <p class="text-sm">Something went wrong: {error}</p>
+      <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
+    </Card.Content>
+  </Card.Root>
+{:else if !d}
+  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+{:else}
+  <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
+
+  <div class="mb-6 grid gap-4 md:grid-cols-3">
+    {#each [
+      { label: "Net worth", value: d.net, sub: ch != null ? `${signed(ch)} in the last 30 days` : since ? `tracking since ${since}` : "" },
+      { label: "Assets", value: d.assets, sub: assetGroups.map((g) => g.label).join(" · ") },
+      { label: "Liabilities", value: d.liabilities, sub: liabilities.map((g) => nb(`${g.label} ${fmt0(g.total)}`)).join(" · ") || "nothing owed" },
+    ] as t (t.label)}
+      <Card.Root class="gap-2">
+        <Card.Header>
+          <Card.Description>{t.label}</Card.Description>
+          <Card.Title class="text-2xl tabular-nums">{fmt0(t.value)}</Card.Title>
+        </Card.Header>
+        <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.label === "Net worth" && ch != null && ch > 0 && "text-emerald-500")}>{t.sub}</Card.Content>
+      </Card.Root>
+    {/each}
+  </div>
+
+  <Card.Root class="mb-6">
+    <Card.Header><Card.Title>Over time</Card.Title></Card.Header>
+    <Card.Content>
+      {#if d.history.length >= 2}
+        <LineChart xs={d.history.map((h) => h.date)} height={220} fmtY={shortMoney} fmtTip={fmt}
+          series={[{ name: "Net worth", values: d.history.map((h) => h.net), cls: "s-main", area: true }]} />
+      {:else}
+        <p class="py-6 text-center text-sm text-muted-foreground">Today: {fmt0(d.net)}</p>
+        <p class="text-sm text-muted-foreground">Fills in as the days go by.</p>
+      {/if}
+    </Card.Content>
+  </Card.Root>
+
+  <Card.Root class="mb-6">
+    <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
+    <Card.Content>
+      <div class="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted" role="img"
+        aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${((g.total / d!.assets) * 100).toFixed(0)}%`).join(", ")}`}>
+        {#each assetGroups as g, i (g.key)}
+          <span class="block h-full min-w-0.5" style:width={`${((g.total / d.assets) * 100).toFixed(2)}%`} style:background={`var(--nw-${(i % 6) + 1})`}
+            title={`${g.label} ${fmt0(g.total)}`}></span>
+        {/each}
+      </div>
+      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {#each assetGroups as g, i (g.key)}
+          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {((g.total / d.assets) * 100).toFixed(0)}%</span>
+        {/each}
+      </div>
+      <div class="mt-4 grid gap-6 lg:grid-cols-2">
+        <div><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}</div>
+        <div><h3 class="mb-1 font-semibold">Liabilities</h3>
+          {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
+        </div>
+      </div>
+    </Card.Content>
+  </Card.Root>
+
+  <EquityCard {version} refresh={load} />
+
+  <Card.Root>
+    <Card.Header>
+      <Card.Title>Home, vehicles and other assets</Card.Title>
+      <Card.Action><Button size="sm" onclick={() => (form = "new")}>Add an asset</Button></Card.Action>
+    </Card.Header>
+    <Card.Content>
+      {#if form}
+        {#key form}<AssetForm a={form === "new" ? null : form} {d} onclose={closeForm} />{/key}
+      {/if}
+      {#if d.assets_list.length}
+        <div class="grid gap-3">
+          {#each d.assets_list as a (a.id)}
+            <AssetCard {a} d={d} onedit={() => (form = a)} onchanged={load} />
+          {/each}
+        </div>
+      {:else}<p class="py-6 text-center text-sm text-muted-foreground">No assets yet.</p>{/if}
+    </Card.Content>
+  </Card.Root>
+{/if}

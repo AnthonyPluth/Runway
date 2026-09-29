@@ -1,0 +1,59 @@
+name: Dependabot merge
+
+# Merges Dependabot's patch and minor updates once the Docker image workflow's tests pass on them, then starts a
+# release build of main. Major updates, updates Dependabot can't classify (such as Docker image tags), and pull
+# requests anyone else has pushed to wait for a person.
+#
+# This replaces GitHub's auto-merge and required checks, which a private repository on the free plan doesn't have.
+# It runs from main's copy of this file with a write token, so it never checks out or runs the pull request's code;
+# it only reads the pull request through the API.
+on:
+  workflow_run:
+    workflows: [Docker image]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  merge:
+    # Only a successful pull request run that Dependabot started, from a branch in this repository.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # merge the pull request
+      pull-requests: write     # merge the pull request
+      actions: write           # start the release build (a merge made with this token doesn't start one by itself)
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Merge if it's only patch and minor updates
+        run: |
+          # The open pull request whose head is exactly the commit that was tested.
+          pr=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" \
+            --jq "[.[] | select(.state == \"open\" and .head.sha == \"$HEAD_SHA\" and .base.ref == \"main\" and .user.login == \"dependabot[bot]\")][0].number // empty")
+          if [ -z "$pr" ]; then echo "No open Dependabot pull request at $HEAD_SHA (merged, closed or pushed to since)."; exit 0; fi
+
+          # Every commit must be Dependabot's own, so nobody else's change rides along.
+          others=$(gh api "repos/$GH_REPO/pulls/$pr/commits" --paginate \
+            --jq '.[] | select(.author.login != "dependabot[bot]" or .commit.verification.verified != true) | .sha')
+          if [ -n "$others" ]; then echo "::notice::#$pr has commits from someone other than Dependabot; leaving it for review."; exit 0; fi
+
+          # Dependabot lists each dependency in its commit message with an update-type. All of them must be patch or
+          # minor (a group with one major version waits); a dependency with no update-type also waits.
+          messages=$(gh api "repos/$GH_REPO/pulls/$pr/commits" --paginate --jq '.[].commit.message')
+          deps=$(grep -c '^- dependency-name:' <<< "$messages" || true)
+          safe=$(grep -cE '^  update-type: version-update:semver-(patch|minor)$' <<< "$messages" || true)
+          echo "#$pr: $deps dependencies, $safe patch or minor"
+          if [ "$deps" -eq 0 ] || [ "$safe" -ne "$deps" ]; then
+            echo "::notice::#$pr includes a major or unclassified update; leaving it for review."; exit 0
+          fi
+
+          # --match-head-commit refuses if the pull request moved on since the tested commit.
+          gh pr merge "$pr" --squash --match-head-commit "$HEAD_SHA"
+          gh workflow run docker.yml --ref main
