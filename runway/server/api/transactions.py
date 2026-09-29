@@ -10,10 +10,11 @@ from ..common import ApiError, _month_range
 
 
 def tx_logos(conn, items: list[dict]) -> dict[str, str]:
-    """{transaction id: the URL of its merchant's logo}: Plaid's, else Logo.dev's (by the merchant's website or name;
-    a sync, or adding the key, fetches it), and a logo you chose for the merchant over both (or none at all)."""
-    logos = merchants.for_transactions(conn, items)
-    logos.update(merchants.logo_dev_logos(conn, [t for t in items if t["id"] not in logos]))
+    """{transaction id: the URL of its merchant's logo}: Logo.dev's (by the merchant's website or name; a sync, or adding
+    the key, fetches it), else Plaid's, and a logo you chose for the merchant over both (or none at all). Logo.dev's
+    come first because they're fetched for a dark background; Plaid's are opaque squares, often dark on white."""
+    logos = merchants.logo_dev_logos(conn, items)
+    logos.update(merchants.for_transactions(conn, [t for t in items if t["id"] not in logos]))
     for tid, mid in merchants.chosen_for(conn, items).items():
         if mid:
             logos[tid] = mid
