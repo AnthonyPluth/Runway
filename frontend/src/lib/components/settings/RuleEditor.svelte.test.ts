@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,7 +35,9 @@ describe("RuleEditor", () => {
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole");
     expect(await screen.findByText("Matches 5 past transactions · applying it would change 2")).toBeInTheDocument();
-    expect(posts("/api/rules/preview").at(-1)).toMatchObject({ match: "whole", match_mode: "contains" });
+    // The count can already be there from the preview of the empty rule (the mock answers every request alike), so
+    // wait for the debounced request that carries what was typed.
+    await waitFor(() => expect(posts("/api/rules/preview").at(-1)).toMatchObject({ match: "whole", match_mode: "contains" }));
   });
 
   it("shows the server's complaint about a bad rule in place of the count", async () => {
