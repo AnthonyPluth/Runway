@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import urllib.parse
+from collections.abc import Callable
+from typing import Any
 
 from .api.accounts import api_account_update, api_accounts
 from .api.budget import api_budget, api_budget_set
@@ -47,7 +49,8 @@ from .api.transactions import (
 )
 
 
-ROUTES = [
+# (method, path pattern, handler): each handler takes (conn, query, body, *path params) and returns the JSON reply.
+ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/state", api_state),
     ("GET", "/api/overview", api_overview),
     ("GET", "/api/accounts", api_accounts),

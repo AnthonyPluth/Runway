@@ -22,11 +22,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date
+from typing import Any
 
 from . import db
 from . import settings_keys as sk
 
-ENVS = {
+ENVS: dict[str, dict[str, Any]] = {
     "production": {"api": "https://api.carta.com", "authorize": "https://login.app.carta.com/o/authorize/",
                    "token": "https://login.app.carta.com/o/access_token/"},
     # Apps made in Carta's developer portal start here: Carta's Playground, with its own sign-in and dummy data. They
@@ -125,7 +126,7 @@ def finish_authorize(conn, code: str, state: str, opener=None) -> None:
         raise CartaError("That Carta sign-in expired or didn't start here. Connect again from Settings.")
     env = ENVS[settings(conn)["env"]]
     tok = _post_form(env["token"], {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
-                     db.get_setting(conn, sk.CARTA_CLIENT_ID), db.get_setting(conn, sk.CARTA_CLIENT_SECRET), opener)
+                     db.get_setting(conn, sk.CARTA_CLIENT_ID) or "", db.get_setting(conn, sk.CARTA_CLIENT_SECRET) or "", opener)
     _store_token(conn, tok)
 
 
@@ -139,9 +140,10 @@ def _token(conn, opener=None) -> str:
     if int(db.get_setting(conn, sk.CARTA_TOKEN_EXPIRES) or 0) - 60 < time.time() and db.get_setting(conn, sk.CARTA_REFRESH_TOKEN):
         _store_token(conn, _post_form(ENVS[env]["token"], {"grant_type": "refresh_token",
                                                             "refresh_token": db.get_setting(conn, sk.CARTA_REFRESH_TOKEN)},
-                                      db.get_setting(conn, sk.CARTA_CLIENT_ID), db.get_setting(conn, sk.CARTA_CLIENT_SECRET), opener))
+                                      db.get_setting(conn, sk.CARTA_CLIENT_ID) or "", db.get_setting(conn, sk.CARTA_CLIENT_SECRET) or "",
+                                      opener))
         conn.commit()   # Carta may have rotated the refresh token: keep the new one even if the sync then fails
-        tok = db.get_setting(conn, sk.CARTA_ACCESS_TOKEN)
+        tok = db.get_setting(conn, sk.CARTA_ACCESS_TOKEN) or tok   # _store_token refused a reply without one
     return tok
 
 

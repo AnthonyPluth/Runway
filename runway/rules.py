@@ -16,6 +16,7 @@ then exact text before "starts with" before "contains", then longer text). So "v
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from . import db, splits
 
@@ -74,7 +75,7 @@ def matches(r: dict, tx: dict) -> bool:
 def actions_for(tx: dict, rules: list[dict]) -> dict:
     """What the rules say to do with a transaction: {category, rename, split, review, rule_ids}. Each kind of action
     comes from the most specific matching rule that has one."""
-    out = {"category": None, "rename": None, "split": None, "review": False, "rule_ids": []}
+    out: dict[str, Any] = {"category": None, "rename": None, "split": None, "review": False, "rule_ids": []}
     for r in rules:
         if not matches(r, tx):
             continue

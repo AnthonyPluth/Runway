@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import urllib.parse
+from typing import Any
 
 from ... import categories, categorize, db, merchants, retail, splits
 from ... import settings_keys as sk
@@ -22,7 +23,8 @@ def tx_logos(conn, items: list[dict]) -> dict[str, str]:
 
 
 def api_transactions(conn, q, _b):
-    where, args = ["t." + db.NOT_INVESTMENT], []
+    where: list[str] = ["t." + db.NOT_INVESTMENT]
+    args: list[Any] = []
     if q.get("review", ["0"])[0] == "1":
         where.append("t.needs_review=1")
     if q.get("recurring", [""])[0]:
