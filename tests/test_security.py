@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
-from runway import backup, db, oidc, secretbox, server, simplefin
+from runway import backup, categories, db, oidc, secretbox, server, simplefin
 from tests.test_web_app import built_app, serving
 
 
@@ -161,7 +161,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertNotIn("int()", body["error"])
         self.assertIn("reference", body["error"])
-        with mock.patch.object(server.categories, "all_categories", side_effect=RuntimeError("secret detail")):
+        with mock.patch.object(categories, "all_categories", side_effect=RuntimeError("secret detail")):
             code, body = self.api("GET", "/api/categories")
         self.assertEqual(code, 500)
         self.assertNotIn("secret detail", body["error"])
@@ -179,7 +179,7 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.api("POST", "/api/settings", {"horizon_days": 90}, {"Origin": self.base})[0], 200)
 
     def test_static_files(self):
-        code, h, body = self.open("/../server.py")
+        code, h, body = self.open("/../server/handler.py")
         self.assertNotIn(b"def serve", body)                                        # never outside static/
         code, h, body = self.open("/sw.js", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(h["Content-Encoding"], "gzip")
@@ -199,7 +199,7 @@ class SyncStatusTests(unittest.TestCase):
             db.set_setting(c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
 
     def tearDown(self):
-        server.AUTO_SYNC = True
+        server.sync.AUTO_SYNC = True
         with db.session() as c:   # on Postgres the tests share one database: leave it as found
             db.set_setting(c, "simplefin_access_url", None)
             c.execute("DELETE FROM sync_log")
@@ -219,7 +219,7 @@ class SyncStatusTests(unittest.TestCase):
             self.assertIsNone(db.get_setting(c, "last_sync_ok"))
 
     def test_no_sync_means_no_sync_on_visit(self):
-        server.AUTO_SYNC = False
+        server.sync.AUTO_SYNC = False
         with mock.patch.object(threading, "Thread") as t:
             self.assertEqual(server.sync_on_visit(), {"started": False})
             t.assert_not_called()

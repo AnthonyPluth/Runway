@@ -18,7 +18,7 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
-from runway import backup, db, notify, oidc, secretbox, server, simplefin
+from runway import backup, carta, db, notify, oidc, secretbox, server, simplefin
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")
 
@@ -108,7 +108,7 @@ class ServerTests(unittest.TestCase):
         return resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read()
 
     def test_trickled_headers_are_hung_up_on(self):
-        with mock.patch.object(server, "HEADER_DEADLINE", 1):
+        with mock.patch.object(server.handler, "HEADER_DEADLINE", 1):
             s = socket.create_connection(("127.0.0.1", self.httpd.server_port), timeout=10)
             s.setblocking(False)
             started, closed = time.monotonic(), False
@@ -159,7 +159,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.open("/api/merchants/test:html/logo")[0], 404)
 
     def test_carta_mock_callback_needs_mock_mode_and_same_site(self):
-        with mock.patch.object(server.carta, "sync") as sync:
+        with mock.patch.object(carta, "sync") as sync:
             with db.session() as c:
                 db.set_setting(c, "carta_env", "production")
             self.assertEqual(self.open("/carta/callback?mock=1")[0], 400)
@@ -202,7 +202,7 @@ class SyncOnVisitTests(unittest.TestCase):
             self.assertEqual(server.sync_on_visit(), {"started": False})
         with db.session() as c:
             self.assertIsNone(db.get_setting(c, "last_auto_sync_attempt"))   # the next visit still syncs
-        with mock.patch.object(server, "_sync_everything"):
+        with mock.patch.object(server.sync, "_sync_everything"):
             self.assertEqual(server.sync_on_visit(), {"started": True})
         with db.session() as c:
             self.assertIsNotNone(db.get_setting(c, "last_auto_sync_attempt"))

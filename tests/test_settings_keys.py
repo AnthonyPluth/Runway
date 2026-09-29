@@ -13,13 +13,16 @@ SQL_KEY = re.compile(r"\bsettings\b.*\bkey\s*(=|LIKE|IN)\s*\(?\s*'", re.I | re.S
 
 
 def sources():
-    """runway/*.py, parsed. Migrations are left out: they're history, and use the names of their day."""
-    for name in sorted(os.listdir(RUNWAY)):
-        if name.endswith(".py") and name != "settings_keys.py":
-            path = os.path.join(RUNWAY, name)
-            with open(path) as f:
-                src = f.read()
-            yield name, src, ast.parse(src, path)
+    """runway/**/*.py, parsed. Migrations are left out: they're history, and use the names of their day."""
+    for root, dirs, files in os.walk(RUNWAY):
+        dirs[:] = sorted(d for d in dirs if d not in ("migrations", "static", "__pycache__"))
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, RUNWAY)
+            if name.endswith(".py") and rel != "settings_keys.py":
+                with open(path) as f:
+                    src = f.read()
+                yield rel, src, ast.parse(src, path)
 
 
 def literal(node) -> bool:

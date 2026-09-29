@@ -352,7 +352,7 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | Path | What |
 |---|---|
 | `run.py` | Starts the server; `backup` and `restore` commands |
-| `runway/server.py` | Web server, API routes, background sync |
+| `runway/server/` | Web server: `handler.py` (requests, sign-in, security headers, static files, `serve()`), `routes.py` and `api/` (the API, one module per area), `sync.py` (background sync) |
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
 | `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
 | `runway/tracked.py` | Hand-tracked holdings |
