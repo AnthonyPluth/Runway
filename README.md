@@ -116,7 +116,10 @@ plain Python with a handful of well-known libraries.
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a
   comparison with the S&P 500, gain per holding, allocation and a financial-independence calculator whose
   assumptions (spending, saving, return, withdrawal rate) start from your own numbers and keep whatever you change.
-- **Near-real-time prices** while the market is open, with each holding's gain today.
+- **Near-real-time prices** while the market is open, with each holding's gain today. With a free
+  [Finnhub](https://finnhub.io) key (Settings → Connections) they become real trades, pushed the moment they happen for up
+  to 50 of your stocks and ETFs; Runway holds one connection to Finnhub for the whole app, your browser never sees the
+  key, and Yahoo takes over for anything else (or if Finnhub can't be reached).
 - Positions from SimpleFIN, or optionally from Plaid for accounts SimpleFIN only knows the balance of. Accounts that
   neither can see into, like some 401(k)s, can be **tracked by hand**: enter shares and your contribution split, and
   Runway invests each new deposit accordingly.
@@ -266,6 +269,7 @@ were added are upgraded in place.
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to Claude Haiku) | Optional |
 | [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | For credit cards |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
+| [Finnhub](https://finnhub.io) | Real-time stock and ETF trades for the live prices (WebSocket; the free plan covers 50 tickers, for personal use) | Optional |
 | [Realie](https://www.realie.ai) | Automated home value estimates | Optional |
 
 - **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its

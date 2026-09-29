@@ -233,23 +233,71 @@ def stream_interval(n_tickers: int) -> float:
     return max(STREAM_SECONDS, n_tickers / 4)
 
 
-def quote_stream(tickers: list[str], lifetime: float = STREAM_LIFETIME, clock=time.monotonic, sleep=time.sleep):
+LIVE_QUOTE_TTL = 60       # with trades streaming in, Yahoo is only needed for previous close and market hours
+LIVE_THROTTLE = 1.0       # trades can come many times a second; the browser gets at most one update a second
+
+
+def _with_trades(q: dict[str, dict], want: list[str], live) -> dict[str, dict]:
+    """Yahoo's quotes with the price and time of each symbol's latest Finnhub trade on top (a trade from before Yahoo's own
+    quote, say yesterday's, is ignored). The previous close stays Yahoo's, or Finnhub's own when Yahoo has no quote."""
+    out = dict(q)
+    for t in want:
+        trade = live.latest(t)
+        if not trade:
+            continue
+        price, ms = trade
+        base = q.get(t)
+        if base is None:
+            fq = live.baseline(t)
+            if not fq:
+                continue
+            base = {"prev_close": float(fq["pc"]), "time": None, "open_start": None, "open_end": None, "type": None}
+        elif base.get("time") and ms / 1000 < base["time"]:
+            continue
+        out[t] = {**base, "price": price, "time": int(ms / 1000)}
+    return out
+
+
+def quote_stream(tickers: list[str], lifetime: float = STREAM_LIFETIME, clock=time.monotonic, sleep=time.sleep,
+                 live=None, live_key: str | None = None):
     """Prices as they move: first every quote, then only the tickers whose price or quote time changed. Yields a dict
     ({"quotes", "market", "as_of"}) for news, or None when nothing moved (the caller sends a keep-alive). Ends after one
-    update when the market is closed, or when `lifetime` seconds have passed."""
+    update when the market is closed, or when `lifetime` seconds have passed.
+
+    With `live` (a finnhub.Feed) and its key, trades from Finnhub replace Yahoo's price for stocks and ETFs as they
+    happen, and an update goes out as soon as one arrives (at most one a second) instead of every few seconds. Whenever
+    the feed isn't connected the polling below carries on unchanged, so a failure there is never a gap in prices."""
     want = sorted(set(tickers) | {BENCHMARK})
     interval = stream_interval(len(want))
     sent: dict[str, tuple] = {}
     started = clock()
-    while True:
-        q = quotes(want, ttl=interval - 1)   # the shared cache means two open tabs don't double Yahoo's traffic
-        market = market_state(q.get(BENCHMARK))
-        changed = {t: v for t, v in q.items() if sent.get(t) != (v["price"], v.get("time"))}
-        if changed or not sent:
-            sent.update({t: (v["price"], v.get("time")) for t, v in changed.items()})
-            yield {"quotes": changed, "market": market, "as_of": datetime.now().isoformat(timespec="seconds")}
-        else:
-            yield None
-        if market != "open" or clock() - started >= lifetime:
-            return
-        sleep(interval)
+    owner = object()
+    seen = live.version() if live else 0
+    try:
+        while True:
+            # the shared cache means two open tabs don't double Yahoo's traffic
+            q = quotes(want, ttl=LIVE_QUOTE_TTL if live and live.connected else interval - 1)
+            market = market_state(q.get(BENCHMARK))
+            if live and live_key and market == "open":
+                # mutual funds only price once a day, so they don't need one of the plan's few streamed symbols
+                live.watch(owner, [t for t in want if (q.get(t) or {}).get("type") != "MUTUALFUND"], live_key)
+                q = _with_trades(q, want, live)
+            changed = {t: v for t, v in q.items() if sent.get(t) != (v["price"], v.get("time"))}
+            if changed or not sent:
+                sent.update({t: (v["price"], v.get("time")) for t, v in changed.items()})
+                yield {"quotes": changed, "market": market, "as_of": datetime.now().isoformat(timespec="seconds")}
+            else:
+                yield None
+            last_sent = clock()
+            if market != "open" or clock() - started >= lifetime:
+                return
+            if live and live_key:
+                seen = live.wait(seen, interval)   # a trade (or the connection changing) ends the wait early
+                gap = LIVE_THROTTLE - (clock() - last_sent)
+                if gap > 0:
+                    sleep(gap)
+            else:
+                sleep(interval)
+    finally:
+        if live:
+            live.unwatch(owner)

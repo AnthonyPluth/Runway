@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlalchemy.exc
 from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, categories, db, finnhub, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
 from .. import settings_keys as sk
 from . import sync
 from ..models import PlaidItem
@@ -461,6 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         closed, one update and then the browser is told to come back in a few minutes."""
         with db.session() as conn:
             tickers = live_tickers(conn)
+            finnhub_key = db.get_setting(conn, sk.FINNHUB_API_KEY)   # with one, trades come from Finnhub's shared connection
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -471,9 +472,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "HEAD":
             return
         market = "closed"
+        stream = prices.quote_stream(tickers, live=finnhub.feed if finnhub_key else None, live_key=finnhub_key)
         try:
             self.wfile.write(b"retry: 5000\n\n")
-            for update in prices.quote_stream(tickers):
+            for update in stream:
                 if update is None:
                     self.wfile.write(b": still here\n\n")
                 else:
@@ -484,6 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode())
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
             pass   # the page was closed
+        finally:
+            stream.close()   # lets go of this page's symbols on the shared Finnhub connection at once
 
     def _carta_callback(self, url) -> None:
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
