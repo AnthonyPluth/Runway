@@ -37,7 +37,7 @@ from .api.equity import (
     api_equity_grant_update, carta_redirect_uri
 )
 from .api.investments import (
-    api_cost_basis, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save, live_tickers
+    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save, live_tickers
 )
 from .api.merchants import (
     api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo, api_merchant_logo_options,

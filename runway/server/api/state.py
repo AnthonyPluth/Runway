@@ -34,6 +34,7 @@ def api_state(conn, _q, _b):
         "primary_account": db.get_setting(conn, sk.PRIMARY_ACCOUNT),
         "auto_ai_on_sync": (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1",
         "realie_configured": realie.configured(conn),
+        "finnhub_configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY)),
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
