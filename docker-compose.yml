@@ -25,6 +25,11 @@ services:
       OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
       RUNWAY_ALLOWED_HOSTS: ${RUNWAY_ALLOWED_HOSTS:-}
       RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}             # encrypts saved bank access and API keys
+      # Optional: error reports to Sentry (see DOCKER.md). Off unless SENTRY_DSN is set.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_BROWSER_DSN: ${SENTRY_BROWSER_DSN:-}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
       # Optional: use Postgres instead of the built-in database (see DOCKER.md for moving your data over).
       DATABASE_URL: ${DATABASE_URL:-}
     # depends_on: [db]            # if you use the Postgres service below

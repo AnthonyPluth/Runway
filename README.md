@@ -282,7 +282,8 @@ were added are upgraded in place.
 ## Security and privacy
 
 - **Your data stays with you.** Everything lives in your database. Outbound calls go only to the services above, and
-  the AI only sees the date, amount, merchant text and account type of transactions you ask it about.
+  the AI only sees the date, amount, merchant text and account type of transactions you ask it about. Error reports to
+  Sentry are off unless you set `SENTRY_DSN`, and carry the error without your data (see DOCKER.md).
 - **Sign-in on the network is mandatory.** Runway refuses to listen beyond `localhost` without OIDC, unless you
   explicitly say a proxy handles it.
 - **OIDC done carefully:** authorization code flow with PKCE. ID tokens are verified with PyJWT against your provider's
