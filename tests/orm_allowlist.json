@@ -18,7 +18,6 @@
   "runway/recurring.py": 16,
   "runway/reports.py": 2,
   "runway/retail.py": 61,
-  "runway/rules.py": 22,
   "runway/secretbox.py": 4,
   "runway/server/api/accounts.py": 4,
   "runway/server/api/budget.py": 9,
