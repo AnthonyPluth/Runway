@@ -42,7 +42,7 @@ updates:
     commit-message:
       prefix: web
 
-  # The base images in the Dockerfile (python:3.14-slim, node:22-slim)
+  # The base images in the Dockerfile (python:3.14-slim, node:26-slim)
   - package-ecosystem: docker
     directory: /
     schedule:

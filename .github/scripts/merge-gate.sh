@@ -8,7 +8,8 @@
 #     REQUIRED_WORKFLOWS ran at all. CodeQL counts as one of them: GitHub's default setup runs it as a "dynamic" workflow
 #     (not a pull_request one), under the name "PR #<n>";
 #   - every other app's check run (CodeQL, Semgrep, Trivy, zizmor, ...) succeeded, and every commit status did;
-#   - no review thread whose first comment is a **P1:** finding (claude-review.yml) is still unresolved.
+#   - no review thread whose first comment is a **P1:** finding (claude-review.yml) is still open: unresolved, or
+#     resolved by the pull request's own author (unless they maintain the repository), so an author can't quiet one.
 # Anything still running makes it "pending". Workflows and apps that aren't about whether the change is sound are left
 # out (IGNORED_*). When it passes on one of Dependabot's pull requests, it merges it (see the end).
 #
@@ -36,12 +37,22 @@ if [ -n "${PR:-}" ]; then
 fi
 [[ "${SHA:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No head commit to check (SHA=${SHA:-})."; exit 1; }
 
-# The open pull request whose head is this commit (none: it was merged, closed, or pushed to since).
+# The open pull request whose head is this commit (none: it was merged, closed, or pushed to since). The status is
+# the commit's, so two pull requests sharing a head (a fork reusing another's commit) can't each be judged: neither is.
 prs=$(gh api --paginate "repos/$REPO/pulls?state=open&base=main&per_page=100" \
         --jq ".[] | select(.head.sha == \"$SHA\") | [.number, .user.login, .head.repo.full_name, .draft] | @tsv")
 if [ -z "$prs" ]; then echo "No open pull request into main at $SHA."; exit 0; fi
-IFS=$'\t' read -r number author head_repo draft <<< "$(head -n 1 <<< "$prs")"
+if [ "$(wc -l <<< "$prs")" -gt 1 ]; then
+  echo "::error::More than one open pull request has $SHA as its head; not deciding for any of them."
+  run gh api -X POST "repos/$REPO/statuses/$SHA" -f state=failure -f context="$CONTEXT" \
+    -f description="More than one open pull request has this commit as its head" ${RUN_URL:+-f target_url="$RUN_URL"} >/dev/null
+  exit 1
+fi
+IFS=$'\t' read -r number author head_repo draft <<< "$prs"
 echo "Pull request #$number by $author at $SHA"
+# Whether the author maintains the repository: then a P1 thread they resolved counts as resolved (see evaluate).
+role=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .role_name 2>/dev/null || echo none)
+case "$role" in admin|maintain) maintainer=true ;; *) maintainer=false ;; esac
 
 list() { local out="" x; for x in "$@"; do out+="${out:+, }$x"; done; echo "$out"; }
 
@@ -87,20 +98,22 @@ evaluate() {
     esac
   done <<< "$newest"
 
-  # 4. Unresolved P1 review findings: "must be fixed before merging" (claude-review.yml).
+  # 4. Open P1 review findings: "must be fixed before merging" (claude-review.yml). A thread the pull request's own
+  # author resolved is still open, unless they maintain the repository: anyone else resolving it is a review.
   # shellcheck disable=SC2016  # $owner, $name and $number are GraphQL's variables, not the shell's
-  p1=$(gh api graphql -F owner="${REPO%/*}" -F name="${REPO#*/}" -F number="$number" -f query='
+  p1=$(AUTHOR="$author" MAINTAINER="$maintainer" gh api graphql -F owner="${REPO%/*}" -F name="${REPO#*/}" -F number="$number" -f query='
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-        reviewThreads(first: 100) { nodes { isResolved comments(first: 1) { nodes { body } } } } } } }' \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)
-           | select(.comments.nodes[0].body // "" | test("^\\*\\*P1:\\*\\*"))] | length')
+        reviewThreads(first: 100) { nodes { isResolved resolvedBy { login } comments(first: 1) { nodes { body } } } } } } }' \
+    --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
+           | select(.comments.nodes[0].body // "" | test("^\\*\\*P1:\\*\\*"))
+           | select((.isResolved | not) or ((.resolvedBy.login // "") == env.AUTHOR and env.MAINTAINER != "true"))] | length')
 
   if [ ${#failing[@]} -gt 0 ] || [ "$p1" -gt 0 ]; then
     state=failure
     parts=()
     [ ${#failing[@]} -gt 0 ] && parts+=("Failed: $(list "${failing[@]}")")
-    [ "$p1" -gt 0 ] && parts+=("$p1 unresolved P1 review finding(s)")
+    [ "$p1" -gt 0 ] && parts+=("$p1 open P1 review finding(s)")
     description=$(list "${parts[@]}")
   elif [ ${#pending[@]} -gt 0 ]; then
     state=pending; description="Waiting for: $(list "${pending[@]}")"

@@ -11,7 +11,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 
 # Python 3.14 for Poetry's environment (uv fetches a build if the container has none).
 if ! command -v uv >/dev/null 2>&1; then
-  python3 -m pip install --quiet --user uv
+  python3 -m pip install --quiet --user "uv==0.12.21"
   export PATH="$HOME/.local/bin:$PATH"
 fi
 py=$(command -v python3.14 || uv python find 3.14 2>/dev/null || true)
