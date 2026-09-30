@@ -55,6 +55,27 @@ class NetWorthTests(Base):
         networth.remove_asset(self.c, car)
         self.assertEqual(len(networth.assets(self.c, TODAY)), 1)
 
+    def test_an_account_can_be_left_out_of_net_worth_only(self):
+        from runway.server.api.accounts import api_account_update
+        before = networth.summary(self.c, TODAY, save=False)
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "brk")
+        after = networth.summary(self.c, TODAY, save=False)
+        self.assertEqual(round(before["net"] - after["net"], 2), 154756.49)
+        self.assertNotIn("investments", {g["key"] for g in after["groups"]})
+        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment"}])
+        self.assertEqual(before["excluded"], [])
+        # a liability left out makes net worth go up; the account is still there for everything else
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
+        self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1510.72)
+        self.assertEqual(self.c.execute("SELECT hidden FROM accounts WHERE id='cc'").fetchone()[0], 0)
+        # a hidden account isn't offered to bring back (Settings hides it everywhere)
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "old")
+        self.assertEqual({a["id"] for a in networth.summary(self.c, TODAY, save=False)["excluded"]}, {"brk", "cc"})
+        # counted again
+        api_account_update(self.c, {}, {"networth_hidden": 0}, "brk")
+        api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
+        self.assertEqual(networth.summary(self.c, TODAY, save=False)["net"], before["net"])
+
     def test_validation(self):
         for bad in ({"name": "", "kind": "home", "value": 1}, {"name": "X", "kind": "boat", "value": 1},
                     {"name": "X", "kind": "home", "value": "abc"}, {"name": "X", "kind": "home", "value": -5},

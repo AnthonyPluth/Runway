@@ -45,6 +45,7 @@ class Account(Base):
     in_forecast: Mapped[int | None]
     daily_spend: Mapped[int | None]
     hidden: Mapped[int | None]
+    networth_hidden: Mapped[int | None]
     owner: Mapped[str | None]
     provider: Mapped[str | None]
     plaid_account_id: Mapped[str | None]

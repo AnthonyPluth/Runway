@@ -56,6 +56,8 @@ export interface InvAccount {
   drift: number | null;
   /** A Plaid account that SimpleFIN also sends (the SimpleFIN copy isn't listed or counted). */
   also_simplefin?: boolean;
+  /** A SimpleFIN account that a Plaid one also is (its id): this one is left out of the page. */
+  duplicate_of?: string | null;
 }
 
 export interface Activity {
