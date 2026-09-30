@@ -52,6 +52,7 @@ changes can say "N/A: why".
 - Work on the branch you were given; don't push to `main`.
 - Keep commits focused, with a clear message.
 - Open a PR only when asked, and summarize what changed and why.
+- Don't hard-wrap lines in PR descriptions, comments or issues: write each paragraph or list item as one line and let GitHub wrap it to the screen. (Code, commit messages and repo files keep their own wrapping.)
 
 ## Model routing
 
