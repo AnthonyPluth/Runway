@@ -3,17 +3,18 @@
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
-  import AssetCard from "$lib/components/networth/AssetCard.svelte";
-  import AssetForm from "$lib/components/networth/AssetForm.svelte";
+  import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
+  import AssetPanel from "$lib/components/networth/AssetPanel.svelte";
   import EquityView from "$lib/components/networth/EquityView.svelte";
   import { valueSource } from "$lib/components/networth/homeValues";
-  import type { Asset, NetWorth, NwGroup } from "$lib/components/networth/types";
+  import type { NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
 
   let { sub = "" }: { sub?: string } = $props();
@@ -67,33 +68,70 @@
     return ex.length && ex.every((a) => owes(a.kind) === owes(ex[0].kind)) ? ex.reduce((sum, a) => sum + a.balance, 0) : null;
   });
 
-  // The asset form: null when closed, "new" to add one, or the asset being edited.
-  let form = $state<Asset | "new" | null>(null);
-  const closeForm = (changed: boolean) => { form = null; if (changed) load(); };
+  // The side panels. Each row opens one: an asset (or "add" one of a kind) or an account. What they show is looked up in
+  // the page's data by id, so it stays current after a save.
+  let assetOpen = $state(false), acctOpen = $state(false);
+  let assetId = $state<number | null>(null), addKind = $state("home"), acctId = $state<string | null>(null);
+  const panelAsset = $derived(assetId == null ? null : d?.assets_list.find((a) => a.id === assetId) ?? null);
+  const panelAcct = $derived.by((): PanelAccount | null => {
+    if (!d || acctId == null) return null;
+    for (const g of d.groups) {
+      const i = g.items.find((it) => it.type === "account" && String(it.id) === acctId);
+      if (i) return { id: acctId, name: i.name, org: i.org ?? null, balance: i.value, as_of: i.as_of, counted: true };
+    }
+    const x = d.excluded.find((a) => a.id === acctId);
+    return x ? { id: x.id, name: x.name, org: x.org, balance: x.balance, counted: false } : null;
+  });
+  const openAsset = (id: number) => { assetId = id; assetOpen = true; };
+  const openAdd = (kind: string) => { assetId = null; addKind = kind; assetOpen = true; };
+  const openAccount = (id: string) => { acctId = id; acctOpen = true; };
+
+  // Asset-type groups (Real estate, Vehicles, Other assets) can be added to; any group can be folded away.
+  const ADDABLE: Record<string, string> = { home: "home", vehicle: "vehicle", other: "other" };
+  let folded = $state<Record<string, boolean>>({});
+  const hasAssetItems = $derived(!!d?.assets_list.length);
 </script>
 
 {#snippet side(groups: NwGroup[])}
-  <table class="w-full text-sm">
-    <tbody>
-      {#each groups as g (g.key)}
-        <tr class="border-t border-border first:border-t-0"><td class="pt-3 pb-1 font-semibold">{#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}</td><td class="pt-3 pb-1 text-right font-semibold tabular-nums">{fmt(g.total)}</td></tr>
-        {#each g.items as i (`${i.type}:${i.id}`)}
-          <tr class="align-top">
-            <td class="py-1.5 pr-3 pl-6">
-              {#if i.type === "account"}<AcctLabel id={String(i.id)} name={i.name} />{:else}{i.name}{/if}
-              <div class="text-xs text-muted-foreground">
-                {#if i.type === "account"}{i.org ?? ""}{#if i.org} · {/if}<button type="button" class="cursor-pointer underline underline-offset-2 hover:text-foreground"
-                  aria-label={`Leave ${i.name} out of net worth`} onclick={() => leaveOut(String(i.id), i.name, true)}>Leave out</button>
-                {:else if i.type === "equity"}Vested{i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}{i.source === "carta" ? " · from Carta" : ""}
-                {:else}{valueSource(i.source)} · {i.as_of ? fmtDate(i.as_of) : ""}{/if}{#if i.equity != null && i.loan} · {fmt(i.equity)} equity after {i.loan.name}{/if}
-              </div>
-            </td>
-            <td class="py-1.5 text-right tabular-nums">{fmt(i.value)}</td>
-          </tr>
-        {/each}
-      {/each}
-    </tbody>
-  </table>
+  {#each groups as g (g.key)}
+    <div class="border-t border-border first:border-t-0">
+      <div class="flex items-center justify-between gap-2 pt-3 pb-1 text-sm font-semibold">
+        <span class="flex min-w-0 items-center gap-1">
+          <button type="button" class="inline-flex cursor-pointer items-center gap-1 rounded-sm" aria-expanded={!folded[g.key]} aria-label={`${g.label}, ${folded[g.key] ? "expand" : "collapse"}`}
+            onclick={() => (folded[g.key] = !folded[g.key])}><ChevronDown class={cn("size-4 text-muted-foreground transition-transform", folded[g.key] && "-rotate-90")} /></button>
+          {#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}
+          {#if ADDABLE[g.key]}<button type="button" class="ml-1 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground" aria-label={`Add to ${g.label}`}
+            onclick={() => openAdd(ADDABLE[g.key])}>+ Add</button>{/if}
+        </span>
+        <span class="tabular-nums">{fmt(g.total)}</span>
+      </div>
+      {#if !folded[g.key]}
+        <ul>
+          {#each g.items as i (`${i.type}:${i.id}`)}
+            <li>
+              {#snippet row()}
+                <span class="min-w-0 py-1.5 pr-3 pl-6 text-left">
+                  <span class="block">{#if i.type === "account"}<AcctLabel id={String(i.id)} name={i.name} />{:else}{i.name}{/if}</span>
+                  <span class="block text-xs text-muted-foreground">
+                    {#if i.type === "account"}{i.org ?? ""}
+                    {:else if i.type === "equity"}Vested{i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}{i.source === "carta" ? " · from Carta" : ""}
+                    {:else}{valueSource(i.source)} · {i.as_of ? fmtDate(i.as_of) : ""}{/if}{#if i.equity != null && i.loan} · {fmt(i.equity)} equity after {i.loan.name}{/if}
+                  </span>
+                </span>
+                <span class="py-1.5 text-right text-sm tabular-nums">{fmt(i.value)}</span>
+              {/snippet}
+              {#if i.type === "equity"}
+                <a href="#networth/equity" class="flex w-full items-start justify-between gap-3 rounded-md text-sm hover:bg-muted/50" aria-label={`${i.name}, in the Equity view`}>{@render row()}</a>
+              {:else}
+                <button type="button" class="flex w-full cursor-pointer items-start justify-between gap-3 rounded-md text-sm hover:bg-muted/50" aria-label={`${i.name}, ${fmt(i.value)}`}
+                  onclick={() => (i.type === "asset" ? openAsset(Number(i.id)) : openAccount(String(i.id)))}>{@render row()}</button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/each}
 {/snippet}
 
 {#if sub === "equity"}
@@ -155,7 +193,11 @@
         {/each}
       </div>
       <div class="mt-4 grid gap-6 lg:grid-cols-2">
-        <div><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}</div>
+        <div><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}
+          {#if !hasAssetItems}
+            <p class="mt-2 text-sm text-muted-foreground">Add a home, vehicle or other asset · <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-2" onclick={() => openAdd("home")}>Add an asset</button></p>
+          {/if}
+        </div>
         <div><h3 class="mb-1 font-semibold">Liabilities</h3>
           {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
         </div>
@@ -172,7 +214,7 @@
             <ul class="mt-1 divide-y text-sm text-foreground">
               {#each d.excluded as a (a.id)}
                 <li class="flex items-center justify-between gap-3 py-2">
-                  <span><AcctLabel id={a.id} name={a.name} /><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
+                  <span><button type="button" class="cursor-pointer underline-offset-2 hover:underline" onclick={() => openAccount(a.id)}><AcctLabel id={a.id} name={a.name} /></button><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
                   <span class="flex items-center gap-3">
                     <span class="tabular-nums">{fmt(a.balance)}</span>
                     <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>
@@ -186,22 +228,6 @@
     </Card.Content>
   </Card.Root>
 
-  <Card.Root>
-    <Card.Header>
-      <Card.Title>Home, vehicles and other assets</Card.Title>
-      <Card.Action><Button size="sm" onclick={() => (form = "new")}>Add an asset</Button></Card.Action>
-    </Card.Header>
-    <Card.Content>
-      {#if form}
-        {#key form}<AssetForm a={form === "new" ? null : form} {d} onclose={closeForm} />{/key}
-      {/if}
-      {#if d.assets_list.length}
-        <div class="grid gap-3">
-          {#each d.assets_list as a (a.id)}
-            <AssetCard {a} d={d} onedit={() => (form = a)} onchanged={load} />
-          {/each}
-        </div>
-      {:else}<p class="py-6 text-center text-sm text-muted-foreground">No assets yet.</p>{/if}
-    </Card.Content>
-  </Card.Root>
+  <AssetPanel bind:open={assetOpen} a={panelAsset} kind={addKind} {d} onchanged={load} />
+  <AccountPanel bind:open={acctOpen} acct={panelAcct} onchange={(counted) => panelAcct && leaveOut(panelAcct.id, panelAcct.name, !counted)} />
 {/if}

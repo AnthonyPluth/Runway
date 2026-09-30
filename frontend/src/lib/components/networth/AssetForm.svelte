@@ -11,9 +11,9 @@
   import { ASSET_KIND_LABEL, type Asset, type NetWorth } from "./types";
 
   // Adding an asset, or editing one's details (each field saves as you change it; Done redraws the page).
-  let { a, d, onclose }: { a: Asset | null; d: NetWorth; onclose: (changed: boolean) => void } = $props();
+  let { a, d, kind: startKind = "home", onclose }: { a: Asset | null; d: NetWorth; kind?: string; onclose: (changed: boolean) => void } = $props();
 
-  const start = () => a ?? ({ kind: "home" } as Partial<Asset>);
+  const start = () => a ?? ({ kind: startKind } as Partial<Asset>);
   const v = start();
   let kind = $state(v.kind ?? "home");
   let name = $state(v.name ?? ""), value = $state(""), address = $state(v.address ?? ""), auto = $state(!!v.auto_update);
@@ -38,8 +38,7 @@
   const lbl = "flex flex-col gap-1 text-sm";
 </script>
 
-<div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
-  <h3 class="mb-3 font-semibold">{a ? `Edit ${a.name}` : "Add an asset"}</h3>
+<div bind:this={box} data-editor>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>What is it
       <NativeSelect bind:value={kind} {@attach edit("kind")}>
