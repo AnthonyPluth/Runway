@@ -338,11 +338,16 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 monitoring.report()
 
-    def _same_site(self) -> bool:
-        """A state-changing request must come from Runway's own pages (defense in depth beside the X-Runway header)."""
-        if (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site":
+    def _same_site(self, form: bool = False) -> bool:
+        """A state-changing request must come from Runway's own pages (defense in depth beside the X-Runway header).
+        form: a page's own <form> post, which browsers send with Origin "null" under Referrer-Policy: no-referrer; it
+        counts when the browser also says it's same-origin."""
+        site = (self.headers.get("Sec-Fetch-Site") or "").lower()
+        if site == "cross-site":
             return False
         origin = self.headers.get("Origin")
+        if origin == "null" and form:
+            return site == "same-origin"
         if origin:   # "null" (sandboxed frames, file: pages) is never Runway
             return origin != "null" and host_allowed(urllib.parse.urlsplit(origin).netloc)
         return True
@@ -373,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._mcp_rpc(method)
         if url.path.startswith(("/.well-known/", "/oauth/")) and url.path != "/oauth/authorize":
             return self._oauth(method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
-        if method != "GET" and not self._same_site():
+        if method != "GET" and url.path != "/oauth/authorize" and not self._same_site():   # (the consent form checks its own)
             return self._json(403, {"error": NOT_SAME_SITE})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
@@ -861,7 +866,7 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
     def _consent_answer(self, iss: str) -> None:
         clear = [self._cookie_header("runway_consent", "", 0, "/oauth")]
         again = "Start connecting again from the app."
-        if not self._same_site():
+        if not self._same_site(form=True):
             return self._page(403, "Can't connect this app", "The approval didn't come from Runway's page. " + again, cookies=clear)
         raw = self._oauth_body()
         if raw is None:
