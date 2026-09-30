@@ -65,10 +65,16 @@ def _links(data, found: set) -> None:
     elif isinstance(data, list):
         for v in data[:500]:
             _links(v, found)
-    elif isinstance(data, str) and len(data) < 400 and ("carta.com/" in data or data.startswith("/api/")):
-        url = data if data.startswith("http") else urllib.parse.urljoin(START_URL, data)
-        if carta_url(url) and FOLLOW.search(url) and not NEVER.search(url):
-            found.add(url.split("#")[0])
+    elif isinstance(data, str) and len(data) < 400:
+        is_relative_api = data.startswith("/api/")
+        is_carta_absolute = False
+        if data.startswith("http://") or data.startswith("https://"):
+            host = (urllib.parse.urlsplit(data).hostname or "").lower()
+            is_carta_absolute = bool(CARTA_HOSTS.search(host))
+        if is_relative_api or is_carta_absolute:
+            url = data if data.startswith("http") else urllib.parse.urljoin(START_URL, data)
+            if carta_url(url) and FOLLOW.search(url) and not NEVER.search(url):
+                found.add(url.split("#")[0])
 
 
 # Where carta.com's portfolio pages read your companies, each company's securities and its fair market value. Pages
