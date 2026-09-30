@@ -1,6 +1,6 @@
-# Runway's browser extension: Amazon, Target and Carta
+# Runway's browser extension: Amazon, Target, Costco and Carta
 
-Amazon and Target don't offer an API for your own order history, so this small extension reads it the way their
+Amazon, Target and Costco don't offer an API for your own order history, so this small extension reads it the way their
 websites do, with the sign-in already in your browser, and sends it to **your** Runway. Runway then matches each card
 charge to its order and splits the transaction by what you bought ($84 at Target: $52 Groceries, $32 Household).
 
@@ -8,6 +8,11 @@ charge to its order and splits the transaction by what you bought ($84 at Target
   shipment separately) and each order's details page.
 - **Target:** online orders and in-store purchases linked to your Target account (Target Circle, the Wallet barcode,
   a saved card or your phone number at the register).
+- **Costco:** your warehouse, gas station and car wash receipts, as costco.com's Orders & Purchases page lists them,
+  each with all of its items (instant savings are taken off the items they're for). The extension opens your Costco
+  account page, which sets up its sign-in in the browser's storage, and asks Costco's order service for your receipts
+  from inside that page, 90 days at a time, the way the page does. The sign-in never leaves the page: only the
+  receipts go to Runway. Orders placed on costco.com aren't read yet.
 
 - **Carta:** your stock options, RSUs and shares, and each company's latest share price, as carta.com shows them to
   you. The extension loads Carta out of sight, notes the data requests Carta's own pages make, reads the same
@@ -22,14 +27,15 @@ happens in Runway (the extension just fetches them), so when a store changes its
 
 Chrome, Edge, Brave, Arc or any other Chromium browser:
 
-1. In Runway, open **Settings → Connections → Amazon and Target** and click **Make a key**. Copy it.
+1. In Runway, open **Settings → Connections → Amazon and Target** (the card that makes the key) and click **Make a key**. Copy it.
 2. Click **Download the extension** on that same card and unzip it. Go to `chrome://extensions`, turn on
    **Developer mode**, click **Load unpacked** and choose the unzipped `runway-orders` folder (or this `extension`
    folder, if you have the repository).
 3. The options page opens: enter Runway's address (the one you open it at) and the key, then **Save and test**.
    Allow the extension to reach that address when asked.
-4. Stay signed in to amazon.com and target.com in that browser, and click the extension's toolbar button →
-   **Import both**. The first import reads six months back; later ones pick up where the last left off.
+4. Stay signed in to amazon.com, target.com and costco.com in that browser, and click the extension's toolbar button →
+   **Import all** (Amazon and Target), or **Costco** for Costco. The first import reads six months back; later ones
+   pick up where the last left off. Once Costco has worked, **Import all** and the daily import include it.
 
 Tick **Import once a day** in the options to have it run by itself while the browser is open.
 
@@ -57,11 +63,21 @@ only add orders.
 ## When a store changes its site
 
 Runway reads the pages with the [amazon-orders](https://github.com/alexdlaird/amazon-orders) library's parsers for
-Amazon, and loosely (by field names) for Target, whose order API is undocumented. Target's replies are kept with each
+Amazon, and loosely (by field names) for Target, whose order API is undocumented. Runway tells the extension which
+address to read Target's history from (`TARGET_HISTORY` in `runway/server/api/retail.py`: the newer one, 100 orders
+a page, then the older one if that isn't answered); Target says "too many requests" now and then, which the extension
+waits out once (and goes slower after) before it gives up until the next import. Target's replies are kept with each
 order, so if items are missing you can look at what Target sent (it's in the `retail_orders.raw` column) and Runway
 can be taught to read it. When the addresses Runway knows for a Target order's items don't answer, the extension
 loads that order's own page on target.com, reads the addresses the page called for it, and remembers them for the
 next orders. An order whose page can't be read is tried again on the next few imports, then left alone.
+
+For Costco, Runway holds the query and the list of headers to send (`COSTCO_GRAPHQL_CONFIG` in
+`runway/server/api/retail.py`) and reads the replies loosely (by field names); each receipt is kept with its order
+(`retail_orders.raw`). If the extension says it couldn't find how costco.com signs its requests, open
+Account → Orders & Purchases in that browser once and import again; if it still can't, the address of the account
+page (`page` in that config) or the names of the values the page keeps in storage (`storage_headers`) need updating,
+which is a change in Runway only.
 
 For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Connections ->
 Carta -> **Download what the extension read** shows why a grant was missed.

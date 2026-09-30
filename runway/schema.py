@@ -101,7 +101,7 @@ tx_splits = Table(
 retail_orders = Table(
     'retail_orders', metadata,
     Column('id', Text, primary_key=True, doc="'<retailer>:<order number>'"),
-    Column('retailer', Text, nullable=False, doc='amazon | target'),
+    Column('retailer', Text, nullable=False, doc='amazon | target | costco'),
     Column('order_number', Text, nullable=False),
     Column('channel', Text, doc='online | store'),
     Column('placed', Text, doc='YYYY-MM-DD'),
@@ -112,9 +112,9 @@ retail_orders = Table(
     Column('payment', Text, doc='how it was paid ("Visa 1234"), as the retailer says'),
     Column('details', Integer, server_default=text('0'), doc='1 once its items have been read'),
     Column('attempts', Integer, server_default=text('0'), doc='times its details page could not be read'),
-    Column('raw', Text, doc="Target: what its API sent (JSON), to troubleshoot or re-read later"),
+    Column('raw', Text, doc="Target, Costco: what its API sent (JSON), to troubleshoot or re-read later"),
     Column('updated', Text, server_default=now_text()),
-    info={'doc': 'orders from Amazon and Target (online and in store), sent by the browser extension'},
+    info={'doc': 'orders from Amazon, Target and Costco (online and in store), sent by the browser extension'},
 )
 
 retail_items = Table(

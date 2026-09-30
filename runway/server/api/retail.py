@@ -1,4 +1,4 @@
-"""Amazon and Target orders: the Settings page's calls, and the browser extension's (/api/ext/...), which bring the
+"""Amazon, Target and Costco orders: the Settings page's calls, and the browser extension's (/api/ext/...), which bring the
 orders in."""
 from __future__ import annotations
 
@@ -103,12 +103,48 @@ TARGET_ORDER_PAGES = {
 }
 
 
+# Costco's receipts come from one GraphQL service, which the extension asks for `max_days` of receipts at a time,
+# from `since` to today. The requests are made from costco.com's own account page, so they're the site's own kind of
+# request: the page keeps its sign-in in localStorage, and `storage_headers` says which header each stored value goes
+# in ({header: [localStorage key, text put before the value]}). The sign-in itself never leaves the page: each reply
+# is posted to /api/ext/costco/history. If costco.com's page changes, this is what to change (the extension only
+# does as it's told here).
+COSTCO_GRAPHQL_CONFIG = {
+    "url": retail.COSTCO_GRAPHQL,
+    "query": retail.COSTCO_QUERY,
+    "max_days": retail.COSTCO_MAX_DAYS,
+    "variables": {"documentType": "all", "documentSubType": "all"},   # warehouse, gas station and car wash receipts
+    # The page that sets up the sign-in in localStorage (costco.com's account app; its own address for Orders &
+    # Purchases is .../myaccount/#/app/<id>/ordersandpurchases, which the extension follows a link to if needed).
+    "page": "https://www.costco.com/myaccount/",
+    "headers": {"Content-Type": "application/json-patch+json", "costco.env": "ecom", "costco.service": "restOrders",
+                "client-identifier": "481b1aec-aa3b-454b-b81b-48187e28f205"},   # the site's own, the same for everyone
+    "storage_headers": {"costco-x-authorization": ["idToken", "Bearer "], "costco-x-wcs-clientId": ["clientID", ""]},
+}
+
+
+# Target's order history: the address its orders page uses for online orders, which answers for store purchases too,
+# 100 orders a page. (The older address, which the page's In-store tab still uses, takes 10 a page and gives a store
+# purchase no order number, only a receipt id.) The extension tries `url` first and falls back to `fallback_url` if
+# that isn't answered. {base} is the older API's address as the extension found it, {key} its API key.
+TARGET_HISTORY = {
+    "url": "https://api.target.com/post_orders/v1/orders/history?page_number={page}&page_size={size}"
+           "&order_purchase_type={type}&key={key}",
+    "page_size": 100,
+    "fallback_url": "{base}/order_history?page_number={page}&page_size={size}&order_purchase_type={type}"
+                    "&pending_order=true&shipt_status=true&key={key}",
+    "fallback_page_size": 10,
+}
+
+
 def ext_start(conn, body):
     r = body.get("retailer")
     if r not in retail.RETAILERS:
         raise retail.RetailError("Unknown store")
     return {"since": retail.since(conn, r), "detail_urls": TARGET_DETAIL_URLS if r == "target" else None,
             "order_pages": TARGET_ORDER_PAGES if r == "target" else None,
+            "history": TARGET_HISTORY if r == "target" else None,
+            "graphql": COSTCO_GRAPHQL_CONFIG if r == "costco" else None,
             "version": os.environ.get("RUNWAY_VERSION") or "dev"}
 
 
@@ -120,6 +156,10 @@ def ext_amazon_transactions(conn, body):
 def ext_amazon_order(conn, body):
     return retail.amazon_order(conn, str(body.get("order_number") or ""), str(body.get("html") or ""),
                                final=body.get("final", True) is not False)
+
+
+def ext_costco_history(conn, body):
+    return retail.costco_history(conn, body.get("data"))
 
 
 def ext_target_history(conn, body):
@@ -172,6 +212,7 @@ EXT_ROUTES = {
     "/api/ext/amazon/order": ext_amazon_order,
     "/api/ext/target/history": ext_target_history,
     "/api/ext/target/order": ext_target_order,
+    "/api/ext/costco/history": ext_costco_history,
     "/api/ext/finish": ext_finish,
 }
 MAX_EXT_BODY = 16 * 1024 * 1024      # one store page (Amazon's order pages are large)
