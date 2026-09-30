@@ -62,7 +62,7 @@ On Net worth → Investments.
 
 On Net worth → Retirement.
 
-- A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, inflation, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** goes back to Runway's figures.
+- A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** (after a confirmation) goes back to Runway's figures. Until you enter your own dates the results are marked as a sample, and with nothing invested yet the tab points you to Investments instead. It plans from your investments only, in today's dollars and before tax.
 
 ## Net worth and equity
 
