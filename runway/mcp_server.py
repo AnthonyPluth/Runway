@@ -1,13 +1,13 @@
 """Runway's MCP server: lets an AI assistant (Claude Desktop, Claude Code and the like) read your Runway, and, only if you
-switch it on, make a short list of churning changes.
+switch it on in Runway, make a short list of churning changes.
 
     RUNWAY_URL=https://runway.example.com RUNWAY_MCP_KEY=rwm_... python -m runway.mcp_server
 
-It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with a key made under
-Settings → Connections. It never opens the database itself. The read key (rwm_) only opens the pages in
-mcp_access.READABLE: nothing that changes data, and no settings, bank connections or backups. With RUNWAY_MCP_ALLOW_WRITES=1
-and a write key (rww_) it also offers the tools below that add and change churning data (mcp_access.WRITABLE: nothing
-else, and never a delete). Without both, those tools aren't offered at all. Standard library only.
+It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with the key made under
+Settings → Connections. It never opens the database itself. The key only opens the pages in mcp_access.READABLE: no
+settings, bank connections or backups. While "Let assistants change churning" is on in Settings (it's off until you turn
+it on) the server also offers the tools below that add and change churning data (mcp_access.WRITABLE: nothing else, and
+never a delete). Runway checks that switch on every change, so turning it off takes effect at once. Standard library only.
 """
 from __future__ import annotations
 
@@ -195,8 +195,12 @@ TOOLS: list[dict[str, Any]] = [
 
 # ------------------------------------------------------------------------------------------------ changes (opt-in)
 
-def writes_allowed() -> bool:
-    return os.environ.get("RUNWAY_MCP_ALLOW_WRITES") == "1"
+def writes_allowed(fetch: Fetch | None = None) -> bool:
+    """Whether Runway currently lets this key make changes (the switch in Settings). Unreachable or unsure: no."""
+    try:
+        return bool((fetch or http_fetch)("access", {}).get("writes"))
+    except (ToolError, AttributeError):
+        return False
 
 
 def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:
@@ -255,9 +259,9 @@ ALL_TOOLS = TOOLS + WRITE_TOOLS
 BY_NAME = {t["name"]: t for t in ALL_TOOLS}
 
 
-def offered() -> list[dict[str, Any]]:
-    """The tools this server offers: the reading ones, plus the changing ones only when RUNWAY_MCP_ALLOW_WRITES=1."""
-    return ALL_TOOLS if writes_allowed() else TOOLS
+def offered(fetch: Fetch | None = None) -> list[dict[str, Any]]:
+    """The tools this server offers: the reading ones, plus the changing ones only while Runway's switch is on."""
+    return ALL_TOOLS if writes_allowed(fetch) else TOOLS
 
 
 def _annotations(t: dict) -> dict:
@@ -271,8 +275,8 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     tool = BY_NAME.get(name)
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
-    if tool.get("write") and not writes_allowed():
-        raise ToolError("Changes are switched off in this MCP server (RUNWAY_MCP_ALLOW_WRITES=1 and a write key turn them on).")
+    if tool.get("write") and not writes_allowed(fetch):
+        raise ToolError("Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Connections.")
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
@@ -301,12 +305,12 @@ def handle(msg: Any, fetch: Fetch = http_fetch) -> dict | None:
                    "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "runway", "version": "1"},
                    "instructions": "Access to a Runway personal finance app: accounts, transactions, budget, reports, net worth and "
                                    "credit-card churning (cards, benefits, upcoming fees). Amounts are in dollars. Everything is read-only"
-                                   + (" except the churning tools that add or change things (never delete), which need the person's go-ahead." if writes_allowed() else ".")})
+                                   + (" except the churning tools that add or change things (never delete), which need the person's go-ahead." if writes_allowed(fetch) else ".")})
     if method == "ping":
         return ok({})
     if method == "tools/list":
         return ok({"tools": [{"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"],
-                              "annotations": _annotations(t)} for t in offered()]})
+                              "annotations": _annotations(t)} for t in offered(fetch)]})
     if method == "tools/call":
         try:
             name = params.get("name")

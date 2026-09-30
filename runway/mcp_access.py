@@ -1,10 +1,9 @@
-"""The MCP server's access to Runway: a read-only key, an optional write key, and what each may do.
+"""The MCP server's access to Runway: one key, and a switch for whether it may change churning.
 
-Keys are bearer tokens made under Settings → Connections (only a hash of each is kept), separate from the browser
-extension's key and from signing in. The read key (rwm_) opens GET /api/mcp/<page> for the pages in READABLE and nothing
-else: no settings, connections, bank credentials or backups, and nothing that changes data. The write key (rww_) is a
-second, opt-in key that reads the same pages and can also POST the churning actions in WRITABLE: nothing else, and no
-deletes. The read key can never write.
+The key is a bearer token made under Settings → Connections (only a hash of it is kept), separate from the browser
+extension's key and from signing in. It opens GET /api/mcp/<page> for the pages in READABLE and nothing else: no settings,
+connections, bank credentials or backups. Only while "Let assistants change churning" is switched on (allow_writes, off
+unless you turn it on) can it also POST the churning actions in WRITABLE: nothing else, and no deletes.
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ READABLE = frozenset({
 })
 
 
-# The churning changes the write key may make (POST /api/mcp/<the same path>): adding and changing, checking things off,
+# The churning changes the key may make while they're switched on (POST /api/mcp/<the same path>): adding and changing, checking things off,
 # and undoing that; never removing anything, and nothing outside churning.
 WRITABLE = (
     "/api/churning/cards", "/api/churning/cards/{id}", "/api/churning/cards/{id}/plan/done",
@@ -49,19 +48,6 @@ def remove_token(conn) -> None:
     db.set_setting(conn, sk.MCP_TOKEN_CREATED, None)
 
 
-def new_write_token(conn) -> str:
-    """A new write key (replacing any earlier one). Only a hash of it is kept."""
-    token = "rww_" + secrets.token_urlsafe(32)
-    db.set_setting(conn, sk.MCP_WRITE_TOKEN_HASH, hashlib.sha256(token.encode()).hexdigest())
-    db.set_setting(conn, sk.MCP_WRITE_TOKEN_CREATED, datetime.now().isoformat(timespec="seconds"))
-    return token
-
-
-def remove_write_token(conn) -> None:
-    db.set_setting(conn, sk.MCP_WRITE_TOKEN_HASH, None)
-    db.set_setting(conn, sk.MCP_WRITE_TOKEN_CREATED, None)
-
-
 def _matches(conn, key: str, authorization: str | None) -> bool:
     want = db.get_setting(conn, key)
     m = re.match(r"Bearer\s+(\S+)$", (authorization or "").strip())
@@ -70,19 +56,19 @@ def _matches(conn, key: str, authorization: str | None) -> bool:
     return hmac.compare_digest(hashlib.sha256(m.group(1).encode()).hexdigest(), want)
 
 
-def access(conn, authorization: str | None) -> str | None:
-    """What the key in this Authorization header may do: "write" (the write key), "read" (the read key), or None."""
-    if _matches(conn, sk.MCP_WRITE_TOKEN_HASH, authorization):
-        return "write"
-    return "read" if _matches(conn, sk.MCP_TOKEN_HASH, authorization) else None
-
-
 def check_token(conn, authorization: str | None) -> bool:
-    """Whether this is the read key (the write key is checked with access())."""
     return _matches(conn, sk.MCP_TOKEN_HASH, authorization)
+
+
+def allow_writes(conn) -> bool:
+    """Whether the churning changes in WRITABLE are switched on (they're off until you turn them on)."""
+    return db.get_setting(conn, sk.MCP_ALLOW_WRITES) == "1"
+
+
+def set_allow_writes(conn, on: bool) -> None:
+    db.set_setting(conn, sk.MCP_ALLOW_WRITES, "1" if on else "0")
 
 
 def status(conn) -> dict:
     return {"token": bool(db.get_setting(conn, sk.MCP_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.MCP_TOKEN_CREATED),
-            "write_token": bool(db.get_setting(conn, sk.MCP_WRITE_TOKEN_HASH)),
-            "write_token_created": db.get_setting(conn, sk.MCP_WRITE_TOKEN_CREATED)}
+            "allow_writes": allow_writes(conn)}

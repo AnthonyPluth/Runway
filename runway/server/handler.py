@@ -548,20 +548,24 @@ class Handler(BaseHTTPRequestHandler):
     def _mcp(self, method: str, url) -> None:
         """A call from Runway's MCP server (runway/mcp_server.py), carrying a key made under Settings → Connections (a bearer
         token, which a web page can't send on your behalf). GET /api/mcp/<page> answers like the web app's /api/<page> for
-        the pages in mcp_access.READABLE (either key); POST /api/mcp/<path> makes one of the churning changes in
-        mcp_access.WRITABLE, for the write key only. Nothing else is reachable."""
+        the pages in mcp_access.READABLE; POST /api/mcp/<path> makes one of the churning changes in mcp_access.WRITABLE, only
+        while "Let assistants change churning" is switched on in Settings. GET /api/mcp/access says whether it is. Nothing
+        else is reachable."""
         with db.session() as conn:
-            level = mcp_access.access(conn, self.headers.get("Authorization"))
-        if not level:
+            valid = mcp_access.check_token(conn, self.headers.get("Authorization"))
+            writes = mcp_access.allow_writes(conn)
+        if not valid:
             self.close_connection = True
             return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Connections."})
         path = "/api/" + url.path[len("/api/mcp/"):]
         body: dict = {}
+        if method == "GET" and path == "/api/access":
+            return self._json(200, {"writes": writes})
         if method == "GET" and path in mcp_access.READABLE:
             fn, params = next(fn for m, pattern, fn in ROUTES if m == "GET" and pattern == path), []
         elif method == "POST" and (hit := next(((p, _match(p, path)) for p in mcp_access.WRITABLE if _match(p, path) is not None), None)):
-            if level != "write":
-                return self._json(403, {"error": "This key can only read. Make a write key under Settings → Connections to let an assistant change churning."})
+            if not writes:
+                return self._json(403, {"error": "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Connections."})
             fn, params = next(fn for m, pattern, fn in ROUTES if m == "POST" and pattern == hit[0]), hit[1]
             n = self._body_length(MAX_JSON_BODY)
             if n is None:

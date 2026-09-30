@@ -14,14 +14,10 @@ def api_mcp_key_new(conn, _q, _b):
     return {"token": mcp_access.new_token(conn)}
 
 
-def api_mcp_write_key_new(conn, _q, _b):
-    """A new write key, which can also change churning data (see mcp_access.WRITABLE); shown once."""
-    return {"token": mcp_access.new_write_token(conn)}
-
-
-def api_mcp_write_key_remove(conn, _q, _b):
-    mcp_access.remove_write_token(conn)
-    return {"ok": True}
+def api_mcp_writes(conn, _q, body):
+    """Switch on or off letting the key make the churning changes in mcp_access.WRITABLE."""
+    mcp_access.set_allow_writes(conn, body.get("allow") in (True, 1, "1", "true", "on"))
+    return {"allow_writes": mcp_access.allow_writes(conn)}
 
 
 def api_mcp_key_remove(conn, _q, _b):
