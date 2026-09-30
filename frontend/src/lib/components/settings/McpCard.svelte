@@ -10,9 +10,9 @@
 
   // AI assistants connect to Runway's MCP endpoint (/mcp) by its address and sign in with OAuth: you approve each one
   // on Runway's consent page. This shows the address, lists the assistants connected (and disconnects them), and holds
-  // the switch that lets them change churning at all.
+  // the switches that let them change churning, or categorize, at all.
   type Connection = { id: number; client: string | null; who: string | null; scope: string[]; created: string | null; last_used: string | null };
-  type Status = { allow_writes: boolean; oauth: boolean; url: string | null; reason: string | null; connections: Connection[] };
+  type Status = { allow_writes: boolean; allow_categorize: boolean; oauth: boolean; url: string | null; reason: string | null; connections: Connection[] };
   let status = $state<Status | null>(null);
   let error = $state("");
 
@@ -27,6 +27,18 @@
       if (status) status = { ...status, allow_writes: r.allow_writes };
       toast.success(r.allow_writes ? "Assistants can change churning" : "Assistants can only read again");
     } catch (err) { toast.error((err as Error).message); await load(); }
+  }
+  async function setCategorize(e: Event) {
+    const allow = (e.currentTarget as HTMLInputElement).checked;
+    try {
+      const r = await api<{ allow_categorize: boolean }>("/api/mcp-settings/categorize", { method: "POST", body: { allow } });
+      if (status) status = { ...status, allow_categorize: r.allow_categorize };
+      toast.success(r.allow_categorize ? "Assistants can categorize" : "Assistants can't categorize any more");
+    } catch (err) { toast.error((err as Error).message); await load(); }
+  }
+  function access(scope: string[]): string {
+    const extra = [scope.includes("churning:write") && "churning", scope.includes("categorize:write") && "categorizing"].filter(Boolean);
+    return ["Read", ...extra].join(" + ");
   }
   async function revoke(c: Connection) {
     try {
@@ -68,7 +80,7 @@
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-2 last:border-b-0">
             <span class="flex min-w-0 flex-1 flex-col text-sm">
               <span class="flex flex-wrap items-center gap-1.5">{c.client || "Unnamed app"}
-                <Badge variant="secondary">{c.scope.includes("churning:write") ? "Read + churning" : "Read"}</Badge></span>
+                <Badge variant="secondary">{access(c.scope)}</Badge></span>
               <span class="text-xs text-muted-foreground">Approved {relTime(c.created)}{c.who ? ` by ${c.who}` : ""} ·
                 {c.last_used ? `last used ${relTime(c.last_used)}` : "not used yet"}</span>
             </span>
@@ -85,6 +97,13 @@
           <span class={`${helpCls} block`}>Applies to every connection. An assistant you allowed to change churning when you connected it can
             then mark a benefit used, add or update cards, benefits, to-dos and planned items, and check off a plan. It can't delete anything or
             touch accounts, transactions or settings. Turn it off any time and it stops at once.</span></span>
+      </label>
+      <label class={`${checkCls} w-full rounded-lg border p-3`}>
+        <input type="checkbox" checked={status.allow_categorize} onchange={setCategorize} aria-label="Let assistants categorize" />
+        <span><b>Let assistants categorize</b> <span class={titleNote}>off unless you turn it on</span>
+          <span class={`${helpCls} block`}>Applies to every connection. An assistant you allowed to categorize when you connected it can then
+            set the category of a transaction or an order item, accept the one Runway suggested, and (if you ask it to) remember it for the
+            merchant or item. It can't delete, split or rename anything, or add categories. Turn it off any time and it stops at once.</span></span>
       </label>
     {/if}
   </Card.Content>

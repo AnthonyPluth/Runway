@@ -5,8 +5,8 @@ A test that writes settings, or runs something that does (a sync, the AI categor
 takes a database of its own with own_database(), so nothing it writes reaches another module's test: a test left
 last_sync_ok in the shared schema and failed another module's on 2026-09-30.
 
-The "Let assistants change churning" switch is one settings row: a test that sets it, or depends on it, holds
-mcp_switch() so another process doesn't flip it in the middle. Everything else a test makes, it should find and remove
+The "Let assistants change churning" and "Let assistants categorize" switches are settings rows: a test that sets
+one, or depends on one, holds mcp_switch() (for both) so another process doesn't flip it in the middle. Everything else a test makes, it should find and remove
 by its own names and ids, never by clearing a table.
 """
 import fcntl

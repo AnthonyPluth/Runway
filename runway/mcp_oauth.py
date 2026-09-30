@@ -4,8 +4,9 @@ The person approving an app is whoever is signed in to Runway (runway/oidc.py): 
 The pieces: protected-resource metadata (RFC 9728), authorization-server metadata (RFC 8414), dynamic client
 registration (RFC 7591, without the management API of RFC 7592), the authorization code flow with PKCE (S256 only),
 refresh tokens that rotate, with a replayed one revoking its grant, revocation (RFC 7009), resource indicators
-(RFC 8707) and the iss parameter on redirects (RFC 9207). Scopes: "read" (always) and "churning:write" (opt-in, and
-only effective while "Let assistants change churning" is on: mcp_access.allow_writes).
+(RFC 8707) and the iss parameter on redirects (RFC 9207). Scopes: "read" (always), "churning:write" (opt-in, and
+only effective while "Let assistants change churning" is on: mcp_access.allow_writes) and "categorize:write" (opt-in,
+and only effective while "Let assistants categorize" is on: mcp_access.allow_categorize).
 
 A grant is one approval on the consent page: the unit Settings lists and revokes. Codes and tokens are random
 (secrets.token_urlsafe(32), with a prefix) and only their sha256 is stored; revoke_grant() ends everything under a
@@ -37,7 +38,7 @@ from sqlalchemy import delete, exists, insert, or_, select, update
 from . import oidc
 from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
 
-SCOPES = ("read", "churning:write")
+SCOPES = ("read", "churning:write", "categorize:write")
 ACCESS_TTL = 3600                 # seconds
 REFRESH_TTL = 90 * 86400
 CODE_TTL = 600
@@ -211,7 +212,7 @@ def parse_scope(value: Any, error: str = "invalid_scope") -> frozenset[str]:
     parts = set(value.split())
     unknown = parts - set(SCOPES)
     if unknown:
-        raise OAuthError(error, f"Unknown scope {sorted(unknown)[0]!r}: Runway has {' and '.join(SCOPES)}.")
+        raise OAuthError(error, f"Unknown scope {sorted(unknown)[0]!r}: Runway has {', '.join(SCOPES)}.")
     return frozenset(parts | {"read"})
 
 

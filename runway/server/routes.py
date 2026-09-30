@@ -31,7 +31,7 @@ from .api.equity import (
 from .api.investments import (
     api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
 )
-from .api.mcp import api_mcp_revoke, api_mcp_settings, api_mcp_writes
+from .api.mcp import api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
     api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo, api_merchant_logo_options
 )
@@ -182,6 +182,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/retail", api_retail),
     ("GET", "/api/mcp-settings", api_mcp_settings),
     ("POST", "/api/mcp-settings/writes", api_mcp_writes),
+    ("POST", "/api/mcp-settings/categorize", api_mcp_categorize),
     ("POST", "/api/mcp-settings/connections/{id}/revoke", api_mcp_revoke),
     ("POST", "/api/retail/token", api_retail_token),
     ("POST", "/api/retail/token/remove", api_retail_token_remove),

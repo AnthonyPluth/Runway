@@ -90,6 +90,7 @@ class OAuthServer(unittest.TestCase):
             forget_oauth(conn, self.clients)
             conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
             mcp_access.set_allow_writes(conn, False)
+            mcp_access.set_allow_categorize(conn, False)
 
     def mine(self, sql, *params):
         """The first column of this SQL's first row (put {mine} in it for "this test's clients")."""
@@ -137,9 +138,9 @@ class OAuthServer(unittest.TestCase):
         start = body.index('name="consent" value="') + len('name="consent" value="')
         return body[start:body.index('"', start)]
 
-    def answer(self, page, decision="allow", churning=False, cookies=None, headers=None, token=None):
+    def answer(self, page, decision="allow", churning=False, cookies=None, headers=None, token=None, categorize=False):
         fields = {"consent": token if token is not None else self.consent_token(page), "decision": decision,
-                  **({"churning": "1"} if churning else {})}
+                  **({"churning": "1"} if churning else {}), **({"categorize": "1"} if categorize else {})}
         ck = {"runway_consent": page.cookie("runway_consent").value} if cookies is None else cookies
         return self.form("/oauth/authorize", fields, headers, {**ck, **getattr(self, "session", {})})
 
@@ -188,7 +189,7 @@ class MetadataTests(OAuthServer):
                 r = self.http("GET", path)
                 self.assertEqual(r.status, 200)
                 self.assertEqual(r.json, {"resource": self.resource, "authorization_servers": [self.iss],
-                                          "scopes_supported": ["read", "churning:write"], "bearer_methods_supported": ["header"]})
+                                          "scopes_supported": ["read", "churning:write", "categorize:write"], "bearer_methods_supported": ["header"]})
                 self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))   # no CORS
         m = self.http("GET", "/.well-known/oauth-authorization-server").json
         self.assertEqual(m, mcp_oauth.authorization_server_metadata(self.iss))
@@ -314,6 +315,30 @@ class ConsentTests(OAuthServer):
         self.assertIn('name="churning" value="1" checked', page)
         page = self.authorize(c, scope="read").body.decode()                     # not asked: not there
         self.assertNotIn("Change churning", page)
+
+    def test_the_categorize_box_follows_its_own_switch(self):
+        c = self.client()
+        page = self.authorize(c, scope="read categorize:write").body.decode()    # asked, switch off: shown, off, and why
+        self.assertIn('type="checkbox" disabled><span><b>Categorize', page)
+        self.assertIn("Turn on Let assistants categorize in Settings → Advanced first", page)
+        self.assertNotIn("Change churning", page)
+        self.switch(True)                                                         # the churning switch isn't this one
+        self.assertIn('type="checkbox" disabled><span><b>Categorize', self.authorize(c, scope="read categorize:write").body.decode())
+        with db.session() as conn:
+            mcp_access.set_allow_categorize(conn, True)
+        page = self.authorize(c, scope="read churning:write categorize:write")
+        self.assertIn('name="categorize" value="1" checked', page.body.decode())
+        self.assertIn('name="churning" value="1" checked', page.body.decode())
+        tokens = self.exchange(c, self.answer(page, categorize=True).query()["code"]).json   # you unticked churning
+        self.assertEqual(tokens["scope"], "read categorize:write")
+        page = self.authorize(c, scope="read churning:write")                    # not asked: no box, and not granted
+        self.assertNotIn("<b>Categorize", page.body.decode())
+        self.assertEqual(self.exchange(c, self.answer(page, churning=True, categorize=True).query()["code"]).json["scope"],
+                         "read churning:write")
+        page = self.authorize(c, scope="read categorize:write")
+        with db.session() as conn:
+            mcp_access.set_allow_categorize(conn, False)                          # read again when you answer
+        self.assertEqual(self.exchange(c, self.answer(page, categorize=True).query()["code"]).json["scope"], "read")
 
     def test_allow_and_deny(self):
         c = self.client()
@@ -474,7 +499,7 @@ class McpTests(OAuthServer):
         t = self.tokens(scope="read churning:write", churning=True)
         self.assertEqual(t["scope"], "read churning:write")
         token = t["access_token"]
-        self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.ALL_TOOLS})
+        self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.TOOLS + mcp_server.WRITE_TOOLS})
         self.assertNotIn("isError", self.call(token, "add_card", {"fields": self.card}))
         self.switch(False)                                                        # off: at once, without revoking
         self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.TOOLS})

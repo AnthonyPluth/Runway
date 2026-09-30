@@ -827,6 +827,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._redirect(mcp_oauth.with_params(e.redirect_uri, {
                     "error": e.error, "error_description": e.description, "state": e.state, "iss": iss}))
             writes_on = mcp_access.allow_writes(conn)
+            categorize_on = mcp_access.allow_categorize(conn)
             token = mcp_oauth.start_consent(conn, {**req.params(), "sub": user.get("sub")})
         target = urllib.parse.urlsplit(req.redirect_uri)
         who = user.get("email") or user.get("name") or user.get("sub")
@@ -841,6 +842,14 @@ class Handler(BaseHTTPRequestHandler):
                                       "connection can only read.")
             churning = (f'<label class="choice"><input type="checkbox" {state}><span><b>Change churning</b>'
                         f'<span class="help">{html.escape(note)}</span></span></label>')
+        categorize = ""
+        if "categorize:write" in req.scope:
+            state = ('name="categorize" value="1" checked' if categorize_on else "disabled")
+            note = ("Set the category of a transaction or an order item, or accept the one Runway suggested. Never deletes, "
+                    "splits or renames anything." if categorize_on else
+                    "Turn on Let assistants categorize in Settings → Advanced first. Until then this connection can't categorize.")
+            categorize = (f'<label class="choice"><input type="checkbox" {state}><span><b>Categorize</b>'
+                          f'<span class="help">{html.escape(note)}</span></span></label>')
         name = req.client_name or "An app"
         inner = f"""<p class="help">{signed_in} Approving sends you back to <b>{html.escape(target.netloc)}</b>{
             ' (this computer)' if target.scheme == 'http' else ''}.</p>
@@ -849,6 +858,7 @@ class Handler(BaseHTTPRequestHandler):
 <label class="choice"><input type="checkbox" checked disabled><span><b>Read your finances</b><span class="help">Accounts, transactions,
 budget, reports, net worth, orders and churning. Never your bank connections, settings or backups.</span></span></label>
 {churning}
+{categorize}
 <div class="actions"><button class="btn primary" type="submit" name="decision" value="allow">Allow</button>
 <button class="btn" type="submit" name="decision" value="deny">Deny</button></div>
 </form>"""
@@ -890,6 +900,9 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
                 if ("churning:write" in params["scope"].split() and form.get("churning") == "1"
                         and mcp_access.allow_writes(conn)):
                     scope.add("churning:write")
+                if ("categorize:write" in params["scope"].split() and form.get("categorize") == "1"
+                        and mcp_access.allow_categorize(conn)):
+                    scope.add("categorize:write")
                 code = mcp_oauth.approve(conn, params, frozenset(scope), user.get("sub"), user.get("email"))
                 back = {"code": code}
             elif decision == "deny":
