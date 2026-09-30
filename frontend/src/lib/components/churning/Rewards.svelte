@@ -4,18 +4,20 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
+  import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { currencyGroups, fullDate, points, valueSource } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import type { Churning } from "./types";
 
-  // Points: what each person's linked cards earned this year (estimated, in points), bonuses earned this year, and the
-  // balances you enter, each as of a day. Points get spent, so what they're worth comes only from the balance you
-  // enter, at the value you set for that currency (which also feeds the best-card estimates); the year's earnings are
-  // never counted. Under a balance, an estimate of what it is now: that balance plus what the cards earned since its day.
+  // Points, in two views. Balances: what you have now (the balances you enter, each as of a day, worth what you set per point,
+  // with an estimate of the balance today: yours plus what the cards earned since its day). Earned this year: what each
+  // person's linked cards earned (estimated) and the bonuses, and what that's worth at the same values. They're kept apart
+  // because points get spent: the year's earnings aren't a balance, so they never count toward what your balances are worth.
   let { d, people, onchanged }: { d: Churning; people: string[]; onchanged: () => void } = $props();
   let values = $state(false);
+  let view = $state<"balances" | "earned">("balances");
   let newName = $state(""), newCents = $state("");
   const groups = $derived(currencyGroups(d));
 
@@ -60,8 +62,11 @@
 <Card.Root class="mb-6">
   <Card.Header>
     <Card.Title>Rewards</Card.Title>
-    <Card.Description>This year's points are estimated from linked cards' spending and earning rates.</Card.Description>
-    <Card.Action><Button size="sm" variant="outline" onclick={() => (values = !values)} aria-expanded={values}>Point values</Button></Card.Action>
+    <Card.Description>{view === "balances" ? "What you have now: the balances you enter, with an estimate of today's." : "What linked cards earned this year, estimated from their spending and earning rates, and bonuses."}</Card.Description>
+    <Card.Action class="flex flex-wrap items-center gap-2">
+      <Segmented label="Rewards view" bind:value={view} options={[{ value: "balances", label: "Balances" }, { value: "earned", label: "Earned this year" }]} />
+      <Button size="sm" variant="outline" onclick={() => (values = !values)} aria-expanded={values}>Point values</Button>
+    </Card.Action>
   </Card.Header>
   <Card.Content>
     {#if values}
@@ -97,19 +102,42 @@
         <div class="min-w-0">
           <div class="mb-1 flex items-baseline justify-between">
             <h3 class="font-semibold">{person}</h3>
-            <span class="text-sm text-muted-foreground tabular-nums" title="What the balances you entered are worth">{fmt0(r?.balance_value ?? 0)}</span>
+            {#if view === "balances"}
+              <span class="text-sm text-muted-foreground tabular-nums" title="What the balances you entered are worth">{fmt0(r?.balance_value ?? 0)}</span>
+            {:else}
+              <span class="text-sm text-muted-foreground tabular-nums" title="What this year's points and bonuses are worth at your point values, spent or not">{fmt0(r?.value ?? 0)}</span>
+            {/if}
           </div>
-          {#if r?.currencies.length}
+          {#if view === "earned"}
+            {@const earned = r?.currencies.filter((x) => x.earned + x.bonuses > 0) ?? []}
+            {#if earned.length}
+              <table class="w-full text-sm">
+                <thead><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal">
+                  <th class="text-left">Currency</th><th class="text-right">Spending</th><th class="text-right">Bonuses</th><th class="text-right">Total</th><th class="text-right">Worth</th>
+                </tr></thead>
+                <tbody>
+                  {#each earned as row (row.currency)}
+                    <tr class="border-t align-top [&>td]:py-1.5">
+                      <td class="pr-2">{row.name}</td>
+                      <td class="text-right tabular-nums">{row.earned ? `~${points(row.earned)}` : "—"}</td>
+                      <td class="text-right tabular-nums">{row.bonuses ? points(row.bonuses) : "—"}</td>
+                      <td class="text-right tabular-nums">~{points(row.earned + row.bonuses)}</td>
+                      <td class="text-right tabular-nums" title={`At ${row.cents}¢ a point`}>~{fmt0(row.value)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {:else}<p class="text-sm text-muted-foreground">Nothing earned yet this year.</p>{/if}
+          {:else if r?.currencies.length}
             <table class="w-full text-sm">
               <thead><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal">
-                <th class="text-left">Currency</th><th class="text-right">This year</th><th class="text-right">Balance</th><th class="text-right">Worth</th>
+                <th class="text-left">Currency</th><th class="text-right">Balance</th><th class="text-right">Worth</th>
               </tr></thead>
               <tbody>
                 {#each r.currencies as row (row.currency)}
                   {@const k = key(person, row.currency)}
                   <tr class="border-t align-top [&>td]:py-1.5">
                     <td class="pr-2">{row.name}</td>
-                    <td class="text-right tabular-nums" title={row.bonuses ? `${points(row.earned)} from spending, ${points(row.bonuses)} from bonuses` : undefined}>{row.earned + row.bonuses ? `~${points(row.earned + row.bonuses)}` : "—"}</td>
                     <td class="text-right">
                       <input type="number" min="0" step="1" value={row.balance ?? ""} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
                         use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
@@ -136,7 +164,7 @@
               </tbody>
             </table>
           {:else}<p class="text-sm text-muted-foreground">Nothing yet.</p>{/if}
-          <div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          {#if view === "balances"}<div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <CurrencySelect {d} blank="Add a balance…" bind:value={() => addFor[person] ?? "", (v) => (addFor[person] = v)} aria-label={`Add a balance for ${person}`}
               only={(c) => !r?.currencies.some((x) => x.currency === c)} class="h-8 py-0" />
             {#if addFor[person]}
@@ -149,7 +177,7 @@
                   class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
               </label>
             {/if}
-          </div>
+          </div>{/if}
         </div>
       {/each}
     </div>
