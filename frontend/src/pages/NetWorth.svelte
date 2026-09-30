@@ -6,6 +6,8 @@
   import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
   import AssetPanel from "$lib/components/networth/AssetPanel.svelte";
   import EquityView from "$lib/components/networth/EquityView.svelte";
+  import InvestmentsView from "$lib/components/investments/InvestmentsView.svelte";
+  import SubTabs from "$lib/components/SubTabs.svelte";
   import { valueSource } from "$lib/components/networth/homeValues";
   import type { NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
@@ -134,8 +136,17 @@
   {/each}
 {/snippet}
 
+<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
+<SubTabs label="Net worth" current={sub === "investments" || sub === "equity" ? sub : "summary"} tabs={[
+  { id: "summary", label: "Summary", href: "#networth" },
+  { id: "investments", label: "Investments", href: "#networth/investments" },
+  { id: "equity", label: "Equity", href: "#networth/equity" },
+]} />
+
 {#if sub === "equity"}
   <EquityView />
+{:else if sub === "investments"}
+  <InvestmentsView />
 {:else if error && !d}
   <Card.Root>
     <Card.Content>
@@ -146,8 +157,6 @@
 {:else if !d}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
-  <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
-
   <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
   <section class="mb-8">
     <div class="sr-only">Net worth</div>

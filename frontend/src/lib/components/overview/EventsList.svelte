@@ -35,7 +35,7 @@
 
 <!-- Rows of a grouped list (the caller puts them in a Group). -->
 {#if !events.length}
-  <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
+  <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#budget/recurring">Bills &amp; income</a>.</p>
 {:else}
   {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}

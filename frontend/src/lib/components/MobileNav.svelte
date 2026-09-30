@@ -9,8 +9,8 @@
 
   // On a phone: a tab bar along the bottom with the four pages you use most, and More for the rest (which opens a
   // sheet from the bottom). Hidden from md up, where the sidebar shows instead.
-  const TABS = MAIN_NAV.filter((x) => x.page !== "recurring");
-  const MORE: NavItem[] = [...MAIN_NAV.filter((x) => x.page === "recurring"), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
+  const TABS = MAIN_NAV;
+  const MORE: NavItem[] = [...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
 
   const current = $derived(currentPage());
   const s = $derived(app.state);
