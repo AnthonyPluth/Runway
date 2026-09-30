@@ -35,7 +35,7 @@ from typing import Any
 from sqlalchemy import delete, exists, insert, or_, select, update
 
 from . import oidc
-from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken
+from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
 
 SCOPES = ("read", "churning:write")
 ACCESS_TTL = 3600                 # seconds
@@ -429,6 +429,30 @@ def approve(conn, params: dict, scope: frozenset[str], sub: str | None, email: s
 
 # ------------------------------------------------------------------------------------------------ tokens
 
+def cut_off_reason(conn, grant, now: float) -> str | None:
+    """Why a grant must end because of who approved it, or None. An approval lasts only as long as its approver may
+    sign in, judged the way their browser sessions are (oidc.still_allowed): taken off OIDC_ALLOWED_EMAILS, it ends at
+    once ("user_removed"). With OIDC_ALLOWED_GROUPS, where that can be known only at sign-in, it ends RUNWAY_SESSION_DAYS
+    after the approver last signed in, as a session would ("sign_in_lapsed"). Without sign-in (OIDC off) nothing ends."""
+    if not oidc.enabled():
+        return None
+    if not oidc.still_allowed(grant["email"]):
+        return "user_removed"
+    if oidc.known_only_at_sign_in():
+        seen = conn.execute(select(User.last_seen).where(User.sub == grant["sub"])).scalar() if grant["sub"] else None
+        if seen is None or now - seen > oidc.config()["session_days"] * 86400:
+            return "sign_in_lapsed"
+    return None
+
+
+def _cut_off(conn, grant, now: float) -> bool:
+    """Revoke the grant if its approver may no longer sign in (see cut_off_reason). True if it was."""
+    why = cut_off_reason(conn, grant, now)
+    if why:
+        revoke_grant(conn, grant["id"], why, now)
+    return why is not None
+
+
 def _grant(conn, grant_id: int):
     return conn.execute(select(OAuthGrant).where(OAuthGrant.id == grant_id)).fetchone()
 
@@ -477,7 +501,8 @@ def _exchange_code(conn, client, form: dict[str, str], canonical: str, now: floa
     if not pkce_ok(verifier, row["code_challenge"]):
         raise OAuthError("invalid_grant", "code_verifier doesn't match the code_challenge.")
     grant = _grant(conn, row["grant_id"])
-    if grant is None or grant["revoked"] is not None or row["resource"] != canonical or grant["resource"] != canonical:
+    if (grant is None or grant["revoked"] is not None or row["resource"] != canonical or grant["resource"] != canonical
+            or _cut_off(conn, grant, now)):
         raise OAuthError("invalid_grant", "That code is no longer valid.")
     return _issue(conn, grant, now)[0]
 
@@ -491,6 +516,8 @@ def _refresh(conn, client, form: dict[str, str], canonical: str, now: float) -> 
     grant = _grant(conn, row["grant_id"]) if row is not None and _same(row["token_hash"], h) else None
     if row is None or grant is None or grant["client_id"] != client["id"]:
         raise OAuthError("invalid_grant", "That refresh token isn't valid.")
+    if grant["revoked"] is None and _cut_off(conn, grant, now):   # its approver may no longer sign in: no new tokens
+        raise OAuthError("invalid_grant", "The person who approved this connection can no longer sign in to Runway.")
     # Rotation: each refresh token works once. One used again means two parties have it, so the grant is revoked.
     if row["consumed"] is not None:
         revoke_grant(conn, grant["id"], "refresh_reuse", now)
@@ -546,6 +573,8 @@ def access_grant(conn, presented: str, canonical: str, now: float | None = None)
     if (row is None or not _same(row["token_hash"], h) or row["expires"] <= now or row["revoked"] is not None
             or row["resource"] != canonical):
         return None
+    if _cut_off(conn, row, now):   # checked on every request, so taking someone off the sign-in list ends it at once
+        return None
     if row["last_used"] is None or now - row["last_used"] > TOUCH_EVERY:
         conn.execute(update(OAuthGrant).where(OAuthGrant.id == row["id"]).values(last_used=now))
         conn.execute(update(OAuthClient).where(OAuthClient.id == row["client_id"]).values(last_used=now))
@@ -554,8 +583,10 @@ def access_grant(conn, presented: str, canonical: str, now: float | None = None)
 
 # ------------------------------------------------------------------------------------------------ Settings, and tidying
 
-def connections(conn) -> list[dict]:
-    """The live grants, newest first: what Settings lists as connected assistants."""
+def connections(conn, now: float | None = None) -> list[dict]:
+    """The live grants, newest first: what Settings lists as connected assistants (after ending any whose approver may
+    no longer sign in, so none is listed that no longer works)."""
+    cut_off_removed(conn, now)
     has_tokens = exists().where(OAuthToken.grant_id == OAuthGrant.id)
     rows = conn.execute(select(OAuthGrant.id, OAuthClient.name, OAuthGrant.sub, OAuthGrant.email, OAuthGrant.scope,
                                OAuthGrant.created, OAuthGrant.last_used)
@@ -564,6 +595,16 @@ def connections(conn) -> list[dict]:
                         .order_by(OAuthGrant.created.desc(), OAuthGrant.id.desc())).fetchall()
     return [{"id": r["id"], "client": r["name"], "who": r["email"] or r["sub"], "scope": r["scope"].split(),
              "created": r["created"], "last_used": r["last_used"]} for r in rows]
+
+
+def cut_off_removed(conn, now: float | None = None) -> None:
+    """Revoke every live grant whose approver may no longer sign in (cut_off_reason). Every use of a grant checks this
+    anyway (a token, a refresh, a code); this is so Settings doesn't list one that no longer works."""
+    now = time.time() if now is None else now
+    if not oidc.enabled():
+        return
+    for grant in conn.execute(select(OAuthGrant.id, OAuthGrant.sub, OAuthGrant.email).where(OAuthGrant.revoked.is_(None))).fetchall():
+        _cut_off(conn, grant, now)
 
 
 def housekeeping(conn, now: float | None = None) -> None:

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -334,7 +335,6 @@ class TokenTests(Db):
 
     def test_an_expired_code(self):
         c = self.client()
-        import time
         code, _ = self.code(c, now=time.time() - mcp_oauth.CODE_TTL - 5)
         with self.assertRaises(OAuthError) as e:
             self.exchange(c["client_id"], code)
@@ -427,6 +427,130 @@ class TokenTests(Db):
         self.assertTrue(mcp_oauth.revoke_grant(self.conn, got[0]["id"], "revoked_in_settings"))
         self.assertFalse(mcp_oauth.revoke_grant(self.conn, got[0]["id"], "revoked_in_settings"))
         self.assertEqual(mcp_oauth.connections(self.conn), [])
+
+
+OIDC = {"OIDC_ISSUER": "https://id.example.com", "OIDC_CLIENT_ID": "runway"}
+OIDC_RULES = ("OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER",
+              "OIDC_TRUST_UNVERIFIED_EMAIL", "RUNWAY_SESSION_DAYS")
+
+
+def sign_in(**env):
+    """Runway's sign-in rules as these environment variables say (the rest unset)."""
+    patch = mock.patch.dict(os.environ, env)
+    patch.start()
+    for k in OIDC_RULES:
+        if k not in env:
+            os.environ.pop(k, None)
+    return patch
+
+
+class ApproverTests(Db):
+    """An approval lasts only as long as its approver may sign in (mcp_oauth.cut_off_reason, by oidc.still_allowed)."""
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(sign_in(**OIDC, OIDC_ALLOWED_EMAILS="me@example.com,partner@example.com").stop)
+
+    def connect(self, sub, email, scope=frozenset({"read"}), now=None):
+        c = self.client()
+        req = self.request(c)
+        code = mcp_oauth.approve(self.conn, req.params(), scope, sub, email, now)
+        return c, mcp_oauth.token(self.conn, mcp_oauth.get_client(self.conn, c["client_id"]),
+                                  {"grant_type": "authorization_code", "code": code, "redirect_uri": req.redirect_uri,
+                                   "code_verifier": VERIFIER}, ISS, now)
+
+    def works(self, out):
+        return mcp_access.resolve_bearer(self.conn, "Bearer " + out["access_token"], RES) is not None
+
+    def reason(self, client):
+        return self.conn.execute("SELECT revoked_reason FROM oauth_grants WHERE client_id=?", (client["client_id"],)).fetchone()[0]
+
+    def tokens_of(self, client):
+        return self.count("oauth_tokens", f"grant_id IN (SELECT id FROM oauth_grants WHERE client_id='{client['client_id']}')")
+
+    def test_taken_off_the_email_list_ends_their_assistants_and_no_one_elses(self):
+        mine, mine_out = self.connect("sub-me", "me@example.com")
+        theirs, theirs_out = self.connect("sub-partner", "partner@example.com")
+        self.assertTrue(self.works(mine_out) and self.works(theirs_out))
+        os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
+        self.assertFalse(self.works(mine_out))                                     # the very next request
+        self.assertEqual(self.reason(mine), "user_removed")
+        self.assertTrue(self.works(theirs_out))                                    # still allowed: untouched
+        self.assertIsNone(self.reason(theirs))
+        with self.assertRaises(OAuthError) as e:                                   # and no new tokens
+            mcp_oauth.token(self.conn, mcp_oauth.get_client(self.conn, mine["client_id"]),
+                            {"grant_type": "refresh_token", "refresh_token": mine_out["refresh_token"]}, ISS)
+        self.assertEqual(e.exception.error, "invalid_grant")
+        self.assertEqual(self.tokens_of(mine), 0)
+        self.assertEqual([c["who"] for c in mcp_oauth.connections(self.conn)], ["partner@example.com"])
+        os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com,partner@example.com"   # put back: still ended (reconnect)
+        self.assertFalse(self.works(mine_out))
+
+    def test_refresh_is_refused_even_before_the_next_request(self):
+        mine, out = self.connect("sub-me", "me@example.com")
+        os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
+        with self.assertRaises(OAuthError) as e:
+            mcp_oauth._refresh(self.conn, mcp_oauth.get_client(self.conn, mine["client_id"]),
+                               {"refresh_token": out["refresh_token"]}, RES, time.time())   # straight to the check, without the sweep
+        self.assertEqual(e.exception.error, "invalid_grant")
+        self.assertEqual((self.reason(mine), self.tokens_of(mine)), ("user_removed", 0))
+
+    def test_a_code_approved_before_removal_is_not_exchanged(self):
+        c = self.client()
+        req = self.request(c)
+        code = mcp_oauth.approve(self.conn, req.params(), frozenset({"read"}), "sub-me", "me@example.com")
+        os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
+        with self.assertRaises(OAuthError) as e:
+            mcp_oauth._exchange_code(self.conn, mcp_oauth.get_client(self.conn, c["client_id"]),
+                                     {"code": code, "redirect_uri": req.redirect_uri, "code_verifier": VERIFIER}, RES, time.time())
+        self.assertEqual(e.exception.error, "invalid_grant")
+        self.assertEqual(self.reason(c), "user_removed")
+
+    def test_settings_stops_listing_a_removed_persons_assistant_even_unused(self):
+        self.connect("sub-me", "me@example.com")
+        self.assertEqual(len(mcp_oauth.connections(self.conn)), 1)
+        os.environ["OIDC_ALLOWED_EMAILS"] = "partner@example.com"
+        self.assertEqual(mcp_oauth.connections(self.conn), [])
+        self.assertEqual(self.count("oauth_grants", "revoked_reason='user_removed'"), 1)
+
+    def test_without_sign_in_grants_keep_working(self):
+        self.addCleanup(sign_in().stop)                                            # no OIDC at all ("local")
+        c, out = self.connect(None, None)
+        self.assertTrue(self.works(out))
+        mcp_oauth.housekeeping(self.conn)
+        self.assertTrue(self.works(out))
+        self.assertIsNone(self.reason(c))
+
+    def test_an_approval_from_before_sign_in_was_set_up_ends_with_it(self):
+        self.addCleanup(sign_in().stop)
+        c, out = self.connect(None, None)
+        self.addCleanup(sign_in(**OIDC, OIDC_ALLOWED_EMAILS="me@example.com").stop)
+        self.assertFalse(self.works(out))                                          # nobody on the list approved it
+        self.assertEqual(self.reason(c), "user_removed")
+
+    def test_anyone_allowed_means_nobody_is_cut_off(self):
+        self.addCleanup(sign_in(**OIDC, OIDC_ALLOW_ANY_USER="1").stop)
+        _c, out = self.connect("sub-x", "stranger@example.com")
+        self.assertTrue(self.works(out))
+
+    def test_with_groups_an_approval_lasts_as_long_as_a_sign_in(self):
+        # Groups are known only at sign-in, so like a browser session the approval ends RUNWAY_SESSION_DAYS after its
+        # approver last signed in: someone taken out of the group can't keep an assistant going.
+        self.addCleanup(sign_in(**OIDC, OIDC_ALLOWED_GROUPS="finance", RUNWAY_SESSION_DAYS="14").stop)
+        now = time.time()
+        for sub in ("recent", "lapsed", "gone"):                                  # all signed in when they approved
+            self.conn.execute("INSERT INTO users(sub, email, last_seen) VALUES (?, ?, ?)", (sub, sub + "@example.com", now - 60))
+        outs = {sub: self.connect(sub, sub + "@example.com") for sub in ("recent", "lapsed", "gone")}
+        self.assertTrue(all(self.works(out) for _c, out in outs.values()))
+        self.conn.execute("UPDATE users SET last_seen=? WHERE sub='recent'", (now - 13 * 86400,))
+        self.conn.execute("UPDATE users SET last_seen=? WHERE sub='lapsed'", (now - 15 * 86400,))   # no sign-in since
+        self.conn.execute("DELETE FROM users WHERE sub='gone'")
+        self.assertTrue(self.works(outs["recent"][1]))
+        self.assertFalse(self.works(outs["lapsed"][1]))
+        self.assertFalse(self.works(outs["gone"][1]))
+        self.assertEqual([self.reason(outs[s][0]) for s in ("recent", "lapsed", "gone")], [None, "sign_in_lapsed", "sign_in_lapsed"])
+        with self.assertRaises(OAuthError):                                        # nor a new code, for someone lapsed
+            self.connect("lapsed", "lapsed@example.com")
 
 
 class HousekeepingTests(Db):

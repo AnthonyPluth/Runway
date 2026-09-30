@@ -9,7 +9,7 @@ Add Runway's address, `<RUNWAY_PUBLIC_URL>/mcp`, to the assistant. It's shown wi
 - Claude Code: `claude mcp add --transport http runway https://runway.example.com/mcp`
 - Claude on the web or desktop: **Settings → Connectors → Add custom connector**, with the same address.
 
-The assistant then sends you to Runway to approve it (sign in first if you aren't). The page names the app and the address it returns to; choose **Allow** or **Deny**. Each approval shows up under **Connected assistants** in the same card, with who approved it and when it was last used; **Revoke** disconnects it at once.
+The assistant then sends you to Runway to approve it (sign in first if you aren't). The page names the app and the address it returns to; choose **Allow** or **Deny**. Each approval shows up under **Connected assistants** in the same card, with who approved it and when it was last used; **Revoke** disconnects it at once. An approval lasts only as long as its approver may sign in: taking them off `OIDC_ALLOWED_EMAILS` ends their assistants' connections too, and with `OIDC_ALLOWED_GROUPS` (checked only at sign-in) a connection ends `RUNWAY_SESSION_DAYS` after its approver last signed in to Runway.
 
 Runway is its own OAuth authorization server (OAuth 2.1 with PKCE, dynamic client registration), and its issuer is `RUNWAY_PUBLIC_URL`. Without `RUNWAY_PUBLIC_URL`, assistants can connect only on a home-network address (`http://localhost:8765`, `http://nas.local:8765`, …).
 

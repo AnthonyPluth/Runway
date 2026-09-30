@@ -573,6 +573,40 @@ class SignInTests(OAuthServer):
         self.assertEqual(signed_out.status, 302)
         self.assertTrue(signed_out.location.startswith("/auth/login"))
 
+    def sign_in_as(self, email):
+        """A Runway session for `email`, signed in through the test provider."""
+        login = self.http("GET", "/auth/login?next=/")
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(login.location).query))
+        code = "c-" + tag()
+        Provider.issued[code] = {"nonce": q["nonce"], "challenge": q["code_challenge"], "email": email}
+        done = self.http("GET", f"/auth/callback?code={code}&state={q['state']}", cookies={"runway_login": login.cookie("runway_login").value})
+        return {"runway_session": done.cookie("runway_session").value}
+
+    def test_taken_off_the_sign_in_list_ends_their_assistants(self):
+        self.session = self.sign_in_as("me@example.com")
+        c = self.client()
+        t = self.tokens(c)
+        self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
+        with mock.patch.dict(os.environ, {"OIDC_ALLOWED_EMAILS": "someone-else@example.com"}):
+            r = self.rpc(t["access_token"], "ping")                               # the very next request
+            self.assertEqual(r.status, 401)
+            self.assertEqual(r.headers["WWW-Authenticate"], f'Bearer realm="Runway", resource_metadata="{self.iss}'
+                                                              '/.well-known/oauth-protected-resource/mcp", error="invalid_token"')
+            self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "user_removed")
+            r = self.form("/oauth/token", {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": c["client_id"]})
+            self.assertEqual((r.status, r.json["error"]), (400, "invalid_grant"))
+            self.assertNotIn("access_token", r.json)
+            self.assertEqual(self.mine("SELECT COUNT(*) FROM oauth_tokens WHERE grant_id IN "
+                                       "(SELECT id FROM oauth_grants WHERE client_id IN {mine})"), 0)
+        self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)       # back on the list: still ended (reconnect)
+
+    def test_a_person_still_allowed_keeps_their_assistant(self):
+        self.session = self.sign_in_as("me@example.com")
+        t = self.tokens()
+        with mock.patch.dict(os.environ, {"OIDC_ALLOWED_EMAILS": "me@example.com,someone-else@example.com"}):
+            self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
+        self.assertIsNone(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"))
+
 
 if __name__ == "__main__":
     unittest.main()
