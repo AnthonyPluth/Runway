@@ -230,6 +230,17 @@ class PagesTests(RunwayServer):
             mcp_http.local_fetch("transactions/" + tx + "/accept", {}, {}, CATEGORIZE)
             self.assertEqual(row(), ("Restaurants", "manual", 0))
 
+            from runway import splits                                                 # a split one: refused, its parts kept
+            with db.session() as conn:
+                splits.set_splits(conn, tx, [{"amount": -7, "category": "Groceries"}, {"amount": -5, "category": "Shopping"}])
+                before = [(p["amount"], p["category"]) for p in splits.of(conn, [tx])[tx]]
+            with self.assertRaisesRegex(mcp_server.ToolError, "split"):
+                mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+            with db.session() as conn:
+                self.assertEqual([(p["amount"], p["category"]) for p in splits.of(conn, [tx])[tx]], before)
+                self.assertEqual(len(before), 2)
+                splits.set_splits(conn, tx, [])
+
             mcp_http.local_fetch(f"retail/items/{item}", {}, {"category": "Groceries", "remember": False}, CATEGORIZE)
             with db.session() as conn:
                 self.assertEqual(tuple(conn.execute("SELECT category, category_source FROM retail_items WHERE id=?", (item,)).fetchone()),
@@ -245,6 +256,7 @@ class PagesTests(RunwayServer):
                 mcp_http.local_fetch(path, {}, body, CATEGORIZE)
         finally:
             with db.session() as conn:
+                conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (tx,))
                 conn.execute("DELETE FROM transactions WHERE id=?", (tx,))
                 conn.execute("DELETE FROM retail_items WHERE order_id=?", ("costco|" + self.tag,))
                 conn.execute("DELETE FROM retail_orders WHERE id=?", ("costco|" + self.tag,))

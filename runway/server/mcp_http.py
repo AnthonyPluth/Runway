@@ -91,6 +91,10 @@ def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mc
             raise ToolError(why)
     elif "read" not in access.scopes:
         raise ToolError("Not found")
+    if kind == "categorize:write" and _match("/api/transactions/{id}/category", full) is not None:
+        with db.session() as conn:
+            if mcp_access.is_split(conn, args[0]):
+                raise ToolError(mcp_access.SPLIT_REFUSED)
     query = {k: [str(v)] for k, v in params.items() if v not in (None, "")}
     try:
         return run(fn, query, body or {}, args)

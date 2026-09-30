@@ -13,8 +13,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from sqlalchemy import select
+
 from . import db, mcp_oauth
 from . import settings_keys as sk
+from .models import Transaction
 
 # The GET /api/... pages an assistant may read (each also has to be a route in server/routes.py).
 READABLE = frozenset({
@@ -38,6 +41,9 @@ WRITABLE = (
 # The category changes an assistant may make with categorize:write while they're switched on: a transaction's category
 # (or accepting the one Runway suggested) and an order item's. Not splits, rules on their own, new categories or payees.
 CATEGORIZABLE = ("/api/transactions/{id}/category", "/api/transactions/{id}/accept", "/api/retail/items/{id}")
+# One category for a split transaction removes its parts, and nothing an assistant can reach puts them back.
+SPLIT_REFUSED = ("That transaction is split across categories, and one category would remove its parts. "
+                 "Change it in Runway's Transactions page instead.")
 
 # Each changing scope: the changes it allows, and the switch (a settings key, "1" for on) they also need.
 CHANGES = {"churning:write": (WRITABLE, sk.MCP_ALLOW_WRITES), "categorize:write": (CATEGORIZABLE, sk.MCP_ALLOW_CATEGORIZE)}
@@ -80,6 +86,11 @@ def allow_categorize(conn) -> bool:
 
 def set_allow_categorize(conn, on: bool) -> None:
     db.set_setting(conn, sk.MCP_ALLOW_CATEGORIZE, "1" if on else "0")
+
+
+def is_split(conn, tx_id: str) -> bool:
+    row = conn.execute(select(Transaction.is_split).where(Transaction.id == tx_id)).fetchone()
+    return bool(row and row["is_split"])
 
 
 def switched_on(conn, scope: str) -> bool:

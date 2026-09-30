@@ -33,7 +33,7 @@ An assistant can also ask for **categorize:write**: setting a transaction's cate
 - **Categorize** ticked on the approval page (offered only when the assistant asks for it), and
 - **Let assistants categorize** switched on in the card. It's separate from the churning switch, off until you turn it on, and checked on every change.
 
-A connection approved without it that tries to categorize is told to reconnect. `set_transaction_category` replies with what the transaction had before (`was`), so the assistant can put it back.
+A connection approved without it that tries to categorize is told to reconnect. A transaction that's split across categories is refused (one category would remove its parts); change those in Runway. Setting a category marks the transaction reviewed and yours; `set_transaction_category` replies with what it had before (`was`), but there's no undo over MCP: setting the old category again leaves it reviewed, and a remembered rule stays until you change it under Settings → Rules.
 
 ## Endpoints
 

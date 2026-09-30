@@ -290,9 +290,10 @@ _TX_ID = {"type": "string", "description": "A transaction's id (from list_transa
 _CATEGORY = {"type": "string", "description": "An existing category's name, exactly as list_categories gives it."}
 
 CATEGORIZE_TOOLS: list[dict[str, Any]] = [
-    _write_tool("set_transaction_category", "Set a transaction's category (it's then reviewed, and no longer split). With remember, "
-                "also use it for this merchant from now on, and for its other transactions still to review. The reply's `was` is "
-                "what it had before.",
+    _write_tool("set_transaction_category", "Set a transaction's category (it's then marked reviewed). With remember, also use "
+                "it for this merchant from now on, and for its other transactions still to review. A split transaction is "
+                "refused: it's changed in Runway itself. The reply's `was` is what it had before (for telling the person, "
+                "not a full undo).",
                 _categorize("transactions/{id}/category", "transaction_id", text_id=True),
                 {"transaction_id": _TX_ID, "category": _CATEGORY,
                  "remember": {"type": "boolean", "description": "Make a rule for this merchant (default false)."}},
