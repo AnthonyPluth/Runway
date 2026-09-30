@@ -111,11 +111,13 @@
 {:else if !status}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else if !status.inv_accounts || !d}
-  <Card.Root class="mx-auto mt-10 max-w-lg text-center">
-    <Card.Header>
-      <Card.Title>No investment accounts yet</Card.Title>
-      <Card.Description>Link your brokerage and retirement accounts in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Bank connections</a>.</Card.Description>
-    </Card.Header>
+  <Card.Root class="mb-6" data-testid="getting-started">
+    <Card.Content class="flex flex-col gap-3">
+      <p class="text-sm text-muted-foreground">Your brokerage and retirement accounts in one place: value and gains over time, return against the S&amp;P 500, holdings, allocation, dividends and a retirement planner.</p>
+      <div class="flex flex-wrap gap-2">
+        <Button size="sm" href="#setup/connections">Connect an investment account</Button>
+      </div>
+    </Card.Content>
   </Card.Root>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-end gap-3">

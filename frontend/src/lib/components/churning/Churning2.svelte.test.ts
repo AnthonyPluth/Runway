@@ -401,7 +401,7 @@ describe("the Churning page", () => {
     expect(await screen.findByPlaceholderText("e.g. Sapphire Preferred")).toBeInTheDocument();   // the new-card form opens
   });
 
-  it("collapses empty sections to one line and hides Best card and Rewards when there is one card and little else", async () => {
+  it("collapses empty sections to one line and hides Best card, and Rewards is a line, when there is one card and little else", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card({ status: "closed" })] }))) as never);
     render(Churning);
     await screen.findByRole("button", { name: "Add a card" });
@@ -409,7 +409,7 @@ describe("the Churning page", () => {
     expect(screen.getByText("nothing in the next six months")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Plan a card or bonus" })).toBeInTheDocument();
     expect(screen.queryByText("Best card for…")).toBeNull();
-    expect(screen.queryByText("Rewards")).toBeNull();
+    expect(screen.getByText("no points tracked yet")).toBeInTheDocument();
     expect(document.querySelectorAll("[data-slot=card-title]")).toHaveLength(1);   // only Cards
   });
 
@@ -420,5 +420,34 @@ describe("the Churning page", () => {
     await screen.findByRole("button", { name: "Add a card" });
     expect(screen.getByText("Best card for…")).toBeInTheDocument();
     expect(screen.getByText("Rewards", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
+  });
+
+  it("keeps Rewards as one line with an Add a balance action when nothing is tracked, and the action opens the balance entry", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
+    render(Churning);
+    await screen.findByRole("button", { name: "Add a card" });
+    expect(screen.getByText("no points tracked yet")).toBeInTheDocument();
+    expect(screen.queryByText("Rewards", { selector: "[data-slot=card-title]" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Add a balance" }));
+    expect(screen.getByText("Rewards", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
+    expect(screen.queryByText("no points tracked yet")).toBeNull();
+    expect(screen.getByLabelText("Add a balance for Alex")).toBeInTheDocument();
+  });
+
+  it("collapses the empty Bank bonuses tab to one line and hides Bonus money by year", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
+    render(Churning, { sub: "bank" });
+    await screen.findByText("none yet");
+    expect(screen.queryByText("Bank bonuses", { selector: "[data-slot=card-title]" })).toBeNull();
+    expect(screen.queryByText("Bonus money by year")).toBeNull();
+    expect(screen.queryByText("No bank bonuses received yet.")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Add a bank bonus" }));
+    expect(await screen.findByText("Bank bonuses", { selector: "[data-slot=card-title]" })).toBeInTheDocument();   // the form opens in its card
+  });
+
+  it("shows Bonus money by year once a bank bonus was received", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()], bank_income: { Alex: { "2026": 300 } } }))) as never);
+    render(Churning, { sub: "bank" });
+    expect(await screen.findByText("Bonus money by year")).toBeInTheDocument();
   });
 });
