@@ -11,7 +11,7 @@ from ..common import ApiError
 
 ACCOUNT_FIELDS = {
     "display_name": str, "kind": str, "pay_from": str,
-    "in_forecast": int, "daily_spend": int, "hidden": int, "owed_positive": int, "owner": str,
+    "in_forecast": int, "daily_spend": int, "hidden": int, "networth_hidden": int, "owed_positive": int, "owner": str,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
 
