@@ -60,8 +60,9 @@ jobs:
           files=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
           # The files API lists at most 3,000; a pull request that big runs everything.
           if [ "$(grep -c . <<< "$files" || true)" -ge 3000 ]; then files="(too many to list)"; fi
-          # Only the web app, the extension or docs: the Python tests can't be affected.
-          web_only='^(frontend/|extension/|docs/|[^/]+\.md$)'
+          # Only the web app or docs: the Python tests can't be affected. (Not extension/: the backend serves it as a zip,
+          # which tests/test_retail.py checks.)
+          web_only='^(frontend/|docs/|[^/]+\.md$)'
           # Only the backend, its tests or docs: the web app's checks can't be affected (ESLint also reads runway/static/).
           backend_only='^(runway/|tests/|docs/|[^/]+\.md$|pyproject\.toml$|poetry\.lock$)'
           backend=false web=false
