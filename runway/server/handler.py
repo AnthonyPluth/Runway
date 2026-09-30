@@ -495,7 +495,7 @@ class Handler(BaseHTTPRequestHandler):
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
         q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         if q.get("error"):
-            return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/connections", "Back to Settings"))
+            return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/extension", "Back to Settings"))
         try:
             with db.session() as conn:
                 if q.get("mock"):
@@ -504,13 +504,13 @@ class Handler(BaseHTTPRequestHandler):
                     if (db.get_setting(conn, sk.CARTA_ENV) != "mock"
                             or (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site"):
                         return self._page(400, "Carta wasn't connected", "Connect Carta from Settings.",
-                                          ("/#setup/connections", "Back to Settings"))
+                                          ("/#setup/extension", "Back to Settings"))
                 else:
                     carta.finish_authorize(conn, q.get("code", ""), q.get("state", ""))
             with db.session() as conn:
                 carta.sync(conn)
         except carta.CartaError as e:
-            return self._page(502, "Carta wasn't connected", str(e), ("/#setup/connections", "Back to Settings"))
+            return self._page(502, "Carta wasn't connected", str(e), ("/#setup/extension", "Back to Settings"))
         self._redirect("/#networth")
 
     def _extension(self, method: str, path: str) -> None:

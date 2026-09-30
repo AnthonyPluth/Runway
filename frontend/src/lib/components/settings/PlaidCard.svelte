@@ -50,9 +50,13 @@
         {/each}
       </div>
 
+      {#if plaidSession.last}
+        {@const l = plaidSession.last}
+        <p class={helpCls}>Last Link attempt ({l.at}): Link Session ID <code class="rounded bg-muted px-1 text-foreground select-all">{l.sid}</code>{#if l.request}{" · Request ID "} <code class="rounded bg-muted px-1 text-foreground select-all">{l.request}</code>{/if}</p>
+      {/if}
       <details open={!st.configured}>
         <summary class="cursor-pointer py-1 text-sm text-muted-foreground">
-          {st.configured ? `Keys · saved · ${st.env === "sandbox" ? "Sandbox" : "Production"}` : "Keys"}</summary>
+          {st.configured ? `Plaid API keys · saved · ${st.env === "sandbox" ? "Sandbox" : "Production"}` : "Plaid API keys · not set"}</summary>
         <div class="mt-2 flex flex-col gap-3">
           <p class={helpCls}>From Developers → Keys at <a class={linkCls} href="https://dashboard.plaid.com" target="_blank" rel="noopener">dashboard.plaid.com</a>.</p>
           <div class={rowCls}>
@@ -72,10 +76,6 @@
           {/if}
         </div>
       </details>
-      {#if plaidSession.last}
-        {@const l = plaidSession.last}
-        <p class={helpCls}>Last Link attempt ({l.at}): Link Session ID <code class="rounded bg-muted px-1 text-foreground select-all">{l.sid}</code>{#if l.request}{" · Request ID "} <code class="rounded bg-muted px-1 text-foreground select-all">{l.request}</code>{/if}</p>
-      {/if}
     {:catch err}
       <p class="text-sm text-muted-foreground">{err.message}</p>
     {/await}
