@@ -1,4 +1,4 @@
-// Runway orders: reads your Amazon and Target order history with the sign-in already in this browser and sends it to
+// Runway orders: reads your Amazon, Target and Costco order history with the sign-in already in this browser and sends it to
 // your Runway, which does all the reading of those pages. Nothing goes anywhere but the Runway address you set.
 //
 // Each store is read in a hidden page of its own site (see "pages" below), so nothing opens while it works.
@@ -13,8 +13,9 @@ const TARGET_ORDERS = "https://www.target.com/orders";
 const TARGET_API = "https://api.target.com/guest_order_aggregations/v1";
 const MAX_PAGES = 60;
 const PAUSE_MS = 400;        // between order pages, to go at a person's pace rather than hammer the store
-const RETAILERS = { amazon: "Amazon", target: "Target", carta: "Carta" };
-const EVERYDAY = ["amazon", "target"];   // "Import both"; Carta has its own button (and joins the daily import once it's worked)
+const RETAILERS = { amazon: "Amazon", target: "Target", costco: "Costco", carta: "Carta" };
+const EVERYDAY = ["amazon", "target"];   // "Import all"; Costco and Carta have their own buttons (and join once they've worked)
+const JOINS_ONCE_WORKED = ["costco", "carta"];   // in the daily import; Costco in "Import all" too (Carta stays out of it)
 
 const AMAZON_PARALLEL = 4;   // order pages read at once: quicker, and still a light load on Amazon
 
@@ -92,8 +93,8 @@ const HIDDEN_SUPPORTED = typeof document !== "undefined" || !!(chrome.offscreen 
 const HIDDEN_LOAD_MS = 30000;
 const HIDDEN_RETRY_MS = 7 * 24 * 3600 * 1000;
 const HIDDEN_RULE = 7101;
-const STORE_HOSTS = ["amazon.com", "target.com", "carta.com"];
-const STORE_MATCHES = ["https://www.amazon.com/*", "https://www.target.com/*", "https://*.carta.com/*"];
+const STORE_HOSTS = ["amazon.com", "target.com", "carta.com", "costco.com"];
+const STORE_MATCHES = ["https://www.amazon.com/*", "https://www.target.com/*", "https://*.carta.com/*", "https://www.costco.com/*"];
 
 // The only places a store page may be sent or fetch from, whatever an address came from (Runway's replies, a store's
 // own pages): a Runway that isn't yours, or someone pretending to be it, can't point the extension at another site
@@ -103,13 +104,14 @@ function storeUrl(url) {
   try { u = new URL(url); } catch (_) { u = null; }
   const host = u && u.hostname;
   if (!u || u.protocol !== "https:" || u.username || u.password ||
-      !(["www.amazon.com", "www.target.com", "api.target.com", "carta.com"].includes(host) || host.endsWith(".carta.com"))) {
-    throw new Error(`Runway won't read ${String(url).slice(0, 80)}: it isn't an Amazon, Target or Carta address.`);
+      !(["www.amazon.com", "www.target.com", "api.target.com", "www.costco.com", "ecom-api.costco.com", "carta.com"].includes(host) ||
+      host.endsWith(".carta.com"))) {
+    throw new Error(`Runway won't read ${String(url).slice(0, 80)}: it isn't an Amazon, Target, Costco or Carta address.`);
   }
   return u.href;
 }
 // A page command that goes somewhere (fetch, go) is only ever sent to a store address.
-const checkedArgs = (cmd, args) => (cmd === "fetch" || cmd === "go" ? [storeUrl(args[0]), ...args.slice(1)] : args);
+const checkedArgs = (cmd, args) => (cmd === "fetch" || cmd === "go" || cmd === "costcoFetch" ? [storeUrl(args[0]), ...args.slice(1)] : args);
 
 class HiddenUnavailable extends Error {}
 
@@ -145,6 +147,7 @@ class TabPage {
   get url() { return this.tab.url || ""; }
   run(cmd, ...args) { const [func, world] = PAGE_COMMANDS[cmd]; return inPage(this.tab.id, func, checkedArgs(cmd, args), world); }
   async navigate(url) { await chrome.tabs.update(this.tab.id, { url: storeUrl(url) }); this.tab = await waitForLoad(this.tab.id); }
+  async refresh() { try { this.tab = await chrome.tabs.get(this.tab.id); } catch (_) { /* closed */ } }   // where the tab is now (a page may have moved on)
   async signIn(site, robot = false) {
     this.keep = true;
     await chrome.tabs.update(this.tab.id, { active: true });
@@ -167,7 +170,7 @@ const frameHost = typeof document !== "undefined" ? {
   async open(name, url) {
     try {
       await chrome.offscreen.createDocument({ url: "offscreen.html", reasons: ["DOM_SCRAPING"],
-        justification: "Reads your Amazon, Target and Carta pages, with your sign-in, without opening a tab." });
+        justification: "Reads your Amazon, Target, Costco and Carta pages, with your sign-in, without opening a tab." });
     } catch (e) {
       if (!/single offscreen|already/i.test(String(e && e.message))) throw new HiddenUnavailable(`offscreen: ${e.message}`);
     }
@@ -257,6 +260,7 @@ class HiddenPage {
     await this.run("go", url);
     await ready.catch(() => { throw new HiddenUnavailable(`${url} didn't load in a hidden frame`); });
   }
+  async refresh() {}   // the frame reports its own address as it loads pages
   async signIn() { return new HiddenUnavailable("looked signed out"); }   // perhaps only in a frame: a tab will tell
   async close() {
     hiddenPages.delete(this.name);
@@ -387,7 +391,22 @@ async function importAmazon(progress, Page) {
 // ------------------------------------------------------------------------------------------------ Target
 
 // Target reads slower than the other stores, with a person's unevenness: it's quick to take a burst of reads for a bot.
-const targetPause = () => sleep(1500 + Math.random() * 2000);
+// After it has said "too many requests" once, the rest of the import goes slower (targetBackoff, up to four times).
+let targetBackoff = 1;
+const TARGET_RETRY_MS = 10000;   // how long to wait after "too many requests" before asking again
+const targetPause = () => sleep((1500 + Math.random() * 2000) * targetBackoff);
+
+// One read of a Target address. "Too many requests" (429) is usually a moment's too many (the next read a second later
+// is answered), so it's waited out once, and the import slows down; only a second one in a row is the end of it.
+async function targetGet(page, url, headers) {
+  let res = await page.run("fetch", url, { headers });
+  if (res.status === 429) {
+    targetBackoff = Math.min(targetBackoff * 2, 4);
+    await sleep(TARGET_RETRY_MS + Math.random() * 5000);
+    res = await page.run("fetch", url, { headers });
+  }
+  return res;
+}
 
 // A reply from Target's API as JSON (null if none). A refusal (401/403) means signed out when reading the order
 // history; for an order's details it may only mean that address isn't one this account can use, so it's null too.
@@ -395,10 +414,10 @@ const targetPause = () => sleep(1500 + Math.random() * 2000);
 // failure reading the history, whose pages can't be skipped.
 async function targetJson(page, url, token, { detail = false } = {}) {
   const headers = { Accept: "application/json" };
-  let res = await page.run("fetch", url, { headers });
+  let res = await targetGet(page, url, headers);
   // Target's sign-in token only ever goes to Target's own API.
   if ((res.status === 401 || res.status === 403) && token && new URL(url).hostname === "api.target.com") {
-    res = await page.run("fetch", url, { headers: { ...headers, Authorization: `Bearer ${token}` } });
+    res = await targetGet(page, url, { ...headers, Authorization: `Bearer ${token}` });
   }
   if ((res.status === 401 || res.status === 403) && !detail) throw Object.assign(new Error("signin"), { signin: true });
   if (res.status === 429 || (!detail && !res.ok)) {
@@ -437,6 +456,15 @@ function targetApiFromRequests() {
   }
   return other;
 }
+
+// An address for a page of Target's order history from one of Runway's templates ({base} {page} {size} {type} {key}).
+function targetHistoryUrl(tpl, api, type, page, size) {
+  return tpl.replace("{base}", api.base).replace("{page}", page).replace("{size}", size).replace("{type}", type)
+    .replace("{key}", encodeURIComponent(api.key));
+}
+// What older versions of Runway didn't say: the address the extension always used.
+const TARGET_OLD_HISTORY = "{base}/order_history?page_number={page}&page_size={size}&order_purchase_type={type}" +
+  "&pending_order=true&shipt_status=true&key={key}";
 
 function targetUrl(tpl, api, order) {
   return tpl.replace("{base}", api.base).replace("{key}", encodeURIComponent(api.key)).replace("{order}", encodeURIComponent(order));
@@ -485,6 +513,7 @@ async function targetCallsFor(page, order) {
 
 async function importTarget(progress, Page) {
   const start = await runway("/api/ext/start", { retailer: "target" });
+  targetBackoff = 1;
   progress("Opening your Target orders…");
   const page = await Page.open(TARGET_ORDERS);
   let complete = true;   // every page of history Runway asked for was read
@@ -513,27 +542,35 @@ async function importTarget(progress, Page) {
     const need = [];
     let refreshed = false;
     try {
+      const hist = start.history || {};
       for (const type of ["ONLINE", "STORE"]) {
         let whole = false;
+        // The newer address (100 orders a page) first; if it isn't answered on the first page, the older one (10 a page).
+        let source = hist.url ? "new" : "old";
         for (let n = 1; n <= MAX_PAGES; n++) {
           progress(`Reading Target ${type === "STORE" ? "in-store purchases" : "online orders"}, page ${n}…`);
-          const url = `${api.base}/order_history?page_number=${n}&page_size=10&order_purchase_type=${type}` +
-            `&pending_order=true&shipt_status=true&key=${encodeURIComponent(api.key)}`;
-          let data;
-          try {
-            data = await targetJson(page, url, api.token);
-          } catch (e) {
-            // A refusal while you're still signed in is usually a stale token: Target's page renews it when it loads
-            // (or when you click on it), so load the orders page again, take the new token and try once more.
-            if (!e.signin || refreshed) throw e;
-            refreshed = true;
-            progress("Target's sign-in looked stale; refreshing it…");
-            await page.navigate(TARGET_ORDERS);
-            await sleep(3000);
-            const fresh = await page.run("discover", TARGET_API);
-            if (fresh.signedIn === false) throw e;
-            api = { ...api, token: fresh.token || api.token, key: fresh.key || api.key };
-            n--; continue;   // read this page again
+          let data = null;
+          if (source === "new") {
+            data = await targetJson(page, targetHistoryUrl(hist.url, api, type, n, hist.page_size || 100), api.token, { detail: true });
+            if (!data && n === 1) source = "old";
+          }
+          if (source === "old") {
+            const url = targetHistoryUrl(hist.fallback_url || TARGET_OLD_HISTORY, api, type, n, hist.fallback_page_size || 10);
+            try {
+              data = await targetJson(page, url, api.token);
+            } catch (e) {
+              // A refusal while you're still signed in is usually a stale token: Target's page renews it when it loads
+              // (or when you click on it), so load the orders page again, take the new token and try once more.
+              if (!e.signin || refreshed) throw e;
+              refreshed = true;
+              progress("Target's sign-in looked stale; refreshing it…");
+              await page.navigate(TARGET_ORDERS);
+              await sleep(3000);
+              const fresh = await page.run("discover", TARGET_API);
+              if (fresh.signedIn === false) throw e;
+              api = { ...api, token: fresh.token || api.token, key: fresh.key || api.key };
+              n--; continue;   // read this page again
+            }
           }
           if (!data) break;   // not JSON: this page of history couldn't be read
           const r = await runway("/api/ext/target/history", { purchase_type: type, page: n, data });
@@ -599,6 +636,128 @@ async function importTarget(progress, Page) {
   }
   progress("Matching Target orders to your transactions…");
   return runway("/api/ext/finish", { retailer: "target", complete });
+}
+
+// ------------------------------------------------------------------------------------------------ Costco
+//
+// costco.com's own account page reads your receipts (warehouse, gas station, car wash) from a GraphQL service, signing
+// each request with the sign-in it keeps in localStorage. The extension opens that page, then asks the service for your
+// receipts a stretch of dates at a time (Runway says which service, which query and which headers), from inside the
+// page, so the requests are the site's own kind. The sign-in never leaves the page: only the service's replies go to
+// Runway, which reads them, and every receipt comes with its items, so there's no page per order to read.
+
+const COSTCO_READY_MS = 12000;   // how long the account page gets to set its sign-in up (twice: once more after following its link)
+const COSTCO_MAX_WINDOWS = 60;   // stretches of dates asked for (90 days each: fifteen years)
+const costcoSignedOut = (url) => /\/(LogonForm|LogoffView)|signin\.costco\.com/i.test(url || "");
+
+// Costco's form of a date for its receipts service: 9/01/2025 (month without a leading zero).
+const costcoDate = (d) => `${d.getMonth() + 1}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+
+// [from, to] stretches of at most `days` days covering `since` (YYYY-MM-DD) to today, newest first.
+function costcoWindows(since, days, today = new Date()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(since || "");
+  const first = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(today.getFullYear(), today.getMonth(), today.getDate() - 180);
+  const out = [];
+  let end = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  while (end >= first && out.length < COSTCO_MAX_WINDOWS) {
+    const from = new Date(end.getFullYear(), end.getMonth(), end.getDate() - (days - 1));
+    const start = from < first ? first : from;
+    out.push([start, end]);
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 1);
+  }
+  return out;
+}
+
+// Waits for the account page to set up its sign-in, and for it to be a good one: the token lasts fifteen minutes, and
+// the page swaps in a new one as it loads (so one left over from your last visit is waited out, and if the page
+// doesn't renew it, loaded again once). If the page doesn't set anything up by itself, follows its Orders & Purchases
+// link. Signed out ends the import; a hidden frame that never gets a sign-in falls back to a tab.
+async function costcoReady(page, g) {
+  let followed = false, reloaded = false;
+  for (let waited = 0; waited < COSTCO_READY_MS * 2; waited += 1000) {
+    await sleep(1000);
+    let state;
+    try {
+      state = await page.run("costcoState", g.storage_headers);
+    } catch (e) {
+      if (stopsImport(e)) throw e;
+      await page.refresh();   // a tab that moved to Costco's sign-in page can't be read: that's signed out
+      if (costcoSignedOut(page.url)) throw await page.signIn("Costco");
+      continue;
+    }
+    if (state.ready) return;
+    if (state.signedOut || costcoSignedOut(state.url)) throw await page.signIn("Costco");
+    if (waited >= COSTCO_READY_MS) {
+      if (state.stale && !reloaded) {   // a new load makes the page renew its sign-in
+        reloaded = true;
+        await page.navigate(g.page);
+      } else if (!state.stale && !followed && state.link) {   // the account app's own Orders & Purchases page
+        followed = true;
+        await page.run("go", state.link);
+      }
+    }
+  }
+  if (page.hidden) throw new HiddenUnavailable("no sign-in for Costco's order service in the hidden page");
+  throw new Error("Couldn't find how costco.com signs its order requests. Sign in to costco.com in this browser and open " +
+    "Account → Orders & Purchases once, then import again. If that doesn't help, Runway may need an update for Costco's site.");
+}
+
+// One reply from Costco's order service as JSON. Signed out (401/403 twice over, in case the page was still
+// refreshing its sign-in) ends the import; so does anything but an answer, which is kept for the next import.
+async function costcoQuery(page, g, body) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await page.run("costcoFetch", g.url, { method: "POST", headers: g.headers, body: JSON.stringify(body) }, g.storage_headers);
+    if (res.signedOut || res.status === 401 || res.status === 403) {
+      if (!res.signedOut && attempt < 2) { await sleep(2000); await costcoReady(page, g); continue; }   // perhaps the token ran out: wait for a new one
+      throw Object.assign(new Error("signin"), { signin: true });
+    }
+    if (!res.ok) {
+      throw Object.assign(new Error(`Costco stopped answering (${res.status ? `it answered ${res.status}` : res.error || "no reply"}). ` +
+        "Runway kept what it read and will read the rest next time."), { limited: true });
+    }
+    try { return JSON.parse(res.text); } catch (_) {
+      throw Object.assign(new Error("Costco's order service didn't answer with data. Runway kept what it read."), { limited: true });
+    }
+  }
+}
+
+async function importCostco(progress, Page) {
+  const start = await runway("/api/ext/start", { retailer: "costco" });
+  const g = start.graphql;
+  if (!g) throw new Error("This Runway doesn't know how to read Costco yet. Update Runway, then import again.");
+  progress("Opening your Costco account…");
+  const page = await Page.open(g.page);
+  let complete = true;   // every stretch of dates Runway asked for was read
+  try {
+    if (costcoSignedOut(page.url)) throw await page.signIn("Costco");
+    await costcoReady(page, g);
+    const windows = costcoWindows(start.since, g.max_days);
+    try {
+      let n = 0;
+      for (const [from, to] of windows) {
+        progress(`Reading Costco receipts, ${costcoDate(from)} to ${costcoDate(to)} (${++n} of ${windows.length})…`);
+        const data = await costcoQuery(page, g, {
+          query: g.query, variables: { ...g.variables, startDate: costcoDate(from), endDate: costcoDate(to) },
+        });
+        await runway("/api/ext/costco/history", { data, start: costcoDate(from), end: costcoDate(to) });
+        if (n < windows.length) await sleep(1500 + Math.random() * 1000);
+      }
+    } catch (e) {
+      if (e.signin) throw await page.signIn("Costco");
+      if (e.limited) {   // keep what was read (matched now), without moving the last import's date on
+        progress("Matching Costco receipts to your transactions…");
+        await runway("/api/ext/finish", { retailer: "costco", complete: false }).catch(() => {});
+      }
+      throw e;
+    }
+  } catch (e) {
+    if (e.code === "signin") throw await page.signIn("Costco");
+    throw e;
+  } finally {
+    await page.close();
+  }
+  progress("Matching Costco receipts to your transactions…");
+  return runway("/api/ext/finish", { retailer: "costco", complete });
 }
 
 // ------------------------------------------------------------------------------------------------ Carta
@@ -685,11 +844,14 @@ async function run(which) {
     const keepAlive = setInterval(() => chrome.runtime.getPlatformInfo(() => {}), 20000);   // a long import outlives the idle timer
     const { results = {} } = await store.get("results");
     try {
-      const everyday = which === "daily" ? [...EVERYDAY, ...(results.carta?.ok ? ["carta"] : [])] : EVERYDAY;
+      const joined = (r) => !!results[r]?.ok;
+      // "Import all": Amazon and Target, and Costco once it has worked; the daily import adds Carta too.
+      const everyday = which === "daily" ? [...EVERYDAY, ...JOINS_ONCE_WORKED.filter(joined)]
+        : [...EVERYDAY, ...(joined("costco") ? ["costco"] : [])];
       for (const retailer of which === "all" || which === "daily" ? everyday : [which]) {
         const progress = (message) => { if (live) setStatus({ running: true, retailer, message }); };
         try {
-          const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, carta: importCarta }[retailer], progress);
+          const r = await importStore(retailer, { amazon: importAmazon, target: importTarget, costco: importCostco, carta: importCarta }[retailer], progress);
           results[retailer] = { ok: true, at: new Date().toISOString(), message: summary(r), data: r };
         } catch (e) {
           results[retailer] = { ok: false, at: new Date().toISOString(), message: e.message || String(e) };

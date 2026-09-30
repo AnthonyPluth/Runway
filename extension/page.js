@@ -71,6 +71,45 @@ function cartaLook() {
            signedOut: /\/(login|signin|accounts\/login)/i.test(location.pathname) };
 }
 
+// Costco: costco.com's account page keeps the sign-in it signs its order requests with in localStorage. Only whether
+// it's there (and still good) goes back to the extension: the values themselves are read (and used) right here.
+// The token lasts fifteen minutes, and the page swaps in a new one as it loads, so one left over from your last visit
+// is `stale`: there, but no use until the page has renewed it.
+function costcoState(storage) {
+  const get = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
+  const entries = Object.values(storage || {});
+  const present = entries.every(([key]) => !!get(key));
+  const expired = entries.some(([key, prefix]) => {
+    if (!prefix || !get(key)) return false;   // only the header with a "Bearer " in front is a token that runs out
+    try {
+      const claims = JSON.parse(atob(get(key).split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      return typeof claims.exp === "number" && claims.exp * 1000 - Date.now() < 120000;
+    } catch (_) { return false; }
+  });
+  const link = [...document.querySelectorAll('a[href*="ordersandpurchases"]')].map((a) => a.href)[0] || null;
+  return { url: location.href, link, ready: present && !expired, stale: present && expired,
+           signedOut: /\/(LogonForm|LogoffView)|signin\.costco\.com/i.test(location.href) };
+}
+
+// One request to Costco's order service, signed the way costco.com's own page signs it: `storage` says which stored
+// value goes in which header. No cookies go with it (the site's own requests carry none: its sign-in is the header).
+async function costcoFetch(url, init, storage) {
+  try {
+    const u = new URL(url, location.href);
+    if (u.protocol !== "https:") throw new Error("not an https address");
+    const headers = { ...((init && init.headers) || {}) };
+    for (const [header, [key, prefix]] of Object.entries(storage || {})) {
+      const value = localStorage.getItem(key);
+      if (!value) return { ok: false, status: 0, url, text: "", signedOut: true, error: "not signed in" };
+      headers[header] = (prefix || "") + value;
+    }
+    const res = await fetch(u.href, { signal: AbortSignal.timeout(45000), ...init, credentials: "omit", headers });
+    return { ok: res.ok, status: res.status, url: res.url, text: await res.text() };
+  } catch (e) {
+    return { ok: false, status: 0, url, text: "", error: String(e && e.message || e) };
+  }
+}
+
 // name -> [function, world it needs when run in a tab]. Used by background.js and frame.js, which load after this file.
 /* exported PAGE_COMMANDS */
 const PAGE_COMMANDS = {
@@ -80,4 +119,6 @@ const PAGE_COMMANDS = {
   discover: [targetDiscover, "MAIN"],
   calls: [targetCalls, "MAIN"],
   look: [cartaLook, "ISOLATED"],
+  costcoState: [costcoState, "ISOLATED"],
+  costcoFetch: [costcoFetch, "ISOLATED"],
 };
