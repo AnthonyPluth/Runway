@@ -23,7 +23,10 @@ const data = (extra: Partial<PlanData> = {}, p: Partial<Plan> = {}): PlanData =>
 });
 const setup = (d = data()) => render(RetirementPlanner, { data: d });
 
-beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({}); });
+// Every edit schedules a save 700ms later. On real timers a test that edits and ends leaves that save pending, and it
+// lands in the next test (a second call where one is expected). Fake timers are dropped after each test, and
+// shouldAdvanceTime keeps user-event's own small delays moving.
+beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({}); });
 afterEach(() => vi.useRealTimers());
 
 describe("RetirementPlanner", () => {
