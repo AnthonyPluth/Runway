@@ -45,6 +45,22 @@ def start(env=None) -> Capture:
 
 
 class MonitoringTests(unittest.TestCase):
+    def own_db(self, **env):
+        """A database of this test's own, with db.session() pointed at it. On Postgres every module shares one schema
+        unless it names its own (by path), and CI runs modules in parallel: a sync here would otherwise write the
+        settings other modules' tests read (last_sync_ok, the SimpleFIN address, the AI key)."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patched = mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, **env})
+        patched.start()
+        self.addCleanup(patched.stop)
+        path = os.path.join(tmp.name, "runway.db")
+        db.init(path)
+        opened = db.session
+        session = mock.patch.object(db, "session", lambda p=None: opened(p or path))
+        session.start()
+        self.addCleanup(session.stop)
+
     def tearDown(self):
         sentry_sdk.get_client().close()
         sentry_sdk.init(dsn=None)
@@ -155,23 +171,20 @@ class MonitoringTests(unittest.TestCase):
             self.assertTrue(_traced(path), path)
 
     def test_a_request_is_traced_without_its_query_or_values(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name}):
-            db.init()
-            transport = start()
-            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-            threading.Thread(target=httpd.serve_forever, daemon=True).start()
-            self.addCleanup(httpd.server_close)
-            self.addCleanup(httpd.shutdown)
-            trace_id = "abcdef0123456789abcdef0123456789"
-            req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/transactions?q=rent-money&limit=5",
-                                         headers={"sentry-trace": f"{trace_id}-1234567890abcdef-1"})
-            with mock.patch("builtins.print"):
-                with urllib.request.urlopen(req, timeout=20) as r:
-                    self.assertEqual(r.status, 200)
-                urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
-            sentry_sdk.flush()
+        self.own_db()
+        transport = start()
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        trace_id = "abcdef0123456789abcdef0123456789"
+        req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/transactions?q=rent-money&limit=5",
+                                     headers={"sentry-trace": f"{trace_id}-1234567890abcdef-1"})
+        with mock.patch("builtins.print"):
+            with urllib.request.urlopen(req, timeout=20) as r:
+                self.assertEqual(r.status, 200)
+            urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
+        sentry_sdk.flush()
         txs = transport.of("transaction")
         self.assertEqual([t["transaction"] for t in txs], ["GET /api/transactions"])   # /healthz isn't traced
         tx = txs[0]
@@ -215,29 +228,26 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
 
     def test_a_bank_sync_checks_in_and_one_that_cant_start_doesnt(self):
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, "TZ": "America/Chicago"}):
-            db.init()
-            transport = start({**ALL_ON, "TZ": "America/Chicago"})
-            with db.session() as conn:
-                db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
-            with mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
-                sync.run_sync()   # the Sync button's, or the daily one: either counts
-                self.assertTrue(sync._sync_lock.acquire(blocking=False))
-                try:   # another sync is running: this one doesn't start, so it's neither a success nor a failure
-                    with self.assertRaises(sync.ApiError):
-                        sync.run_sync()
-                finally:
-                    sync._sync_lock.release()
-            with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
-                    mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
-                sync.run_sync()
-            with db.session() as conn:   # nothing connected: nothing to check in
-                db.set_setting(conn, "simplefin_access_url", None)
-            with self.assertRaises(sync.ApiError):
-                sync.run_sync()
-            sentry_sdk.flush()
+        self.own_db(TZ="America/Chicago")
+        transport = start({**ALL_ON, "TZ": "America/Chicago"})
+        with db.session() as conn:
+            db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
+        with mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
+            sync.run_sync()   # the Sync button's, or the daily one: either counts
+            self.assertTrue(sync._sync_lock.acquire(blocking=False))
+            try:   # another sync is running: this one doesn't start, so it's neither a success nor a failure
+                with self.assertRaises(sync.ApiError):
+                    sync.run_sync()
+            finally:
+                sync._sync_lock.release()
+        with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
+                mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
+            sync.run_sync()
+        with db.session() as conn:   # nothing connected: nothing to check in
+            db.set_setting(conn, "simplefin_access_url", None)
+        with self.assertRaises(sync.ApiError):
+            sync.run_sync()
+        sentry_sdk.flush()
         checkins = transport.of("check_in")
         self.assertEqual([c["status"] for c in checkins], ["in_progress", "ok", "in_progress", "error"])
         self.assertEqual({c["monitor_slug"] for c in checkins}, {"runway-bank-sync"})
@@ -285,17 +295,14 @@ class MonitoringTests(unittest.TestCase):
                  "usage": {"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128}}
         resp = mock.MagicMock()
         resp.__enter__.return_value = io.BytesIO(json.dumps(reply).encode())
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name}):
-            db.init()
-            with db.session() as conn:
-                db.set_setting(conn, "openrouter_api_key", "sk-or-key")
-                db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
-                conn.commit()
-                group = [{"posted": "2026-09-01", "amount": -87.12, "kind": "credit", "payee": "Whole Foods", "description": "WHOLE FOODS #123"}]
-                with monitoring.task("sync"), mock.patch("urllib.request.urlopen", return_value=resp):
-                    self.assertEqual(categorize.ask_model(conn, [group])[0][0], "Groceries")
+        self.own_db()
+        with db.session() as conn:
+            db.set_setting(conn, "openrouter_api_key", "sk-or-key")
+            db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
+            conn.commit()
+            group = [{"posted": "2026-09-01", "amount": -87.12, "kind": "credit", "payee": "Whole Foods", "description": "WHOLE FOODS #123"}]
+            with monitoring.task("sync"), mock.patch("urllib.request.urlopen", return_value=resp):
+                self.assertEqual(categorize.ask_model(conn, [group])[0][0], "Groceries")
         sentry_sdk.flush()
         spans = {sp["name"]: {k: v["value"] for k, v in sp["attributes"].items()} | {"trace_id": sp["trace_id"]}
                  for batch in transport.of("span") for sp in batch["items"]}
