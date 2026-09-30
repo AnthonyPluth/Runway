@@ -42,6 +42,15 @@
     } catch (err) { toast.error((err as Error).message); }
   }
 
+  // The "Not counted" footnote under the breakdown: a total when there are many, and a list to bring them back.
+  // The total only when they're all assets or all debts; adding the two together wouldn't mean anything.
+  let showExcluded = $state(false);
+  const owes = (kind: string) => kind === "credit" || kind === "loan";
+  const excludedTotal = $derived.by(() => {
+    const ex = d?.excluded ?? [];
+    return ex.length && ex.every((a) => owes(a.kind) === owes(ex[0].kind)) ? ex.reduce((sum, a) => sum + a.balance, 0) : null;
+  });
+
   // The asset form: null when closed, "new" to add one, or the asset being edited.
   let form = $state<Asset | "new" | null>(null);
   const closeForm = (changed: boolean) => { form = null; if (changed) load(); };
@@ -133,27 +142,31 @@
           {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
         </div>
       </div>
+      {#if d.excluded.length}
+        <div class="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
+          <p>
+            Not counted: {#if d.excluded.length > 3}{d.excluded.length} accounts{excludedTotal != null ? ` (${fmt0(excludedTotal)})` : ""}{:else}{d.excluded.map((a) => nb(`${a.name} ${fmt0(a.balance)}`)).join(" · ")}{/if}
+            · <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-2" aria-expanded={showExcluded}
+              onclick={() => (showExcluded = !showExcluded)}>Manage</button>
+          </p>
+          {#if showExcluded}
+            <p class="mt-2 text-xs">These accounts stay in the rest of Runway (transactions, the forecast, Investments) but aren’t counted here.</p>
+            <ul class="mt-1 divide-y text-sm text-foreground">
+              {#each d.excluded as a (a.id)}
+                <li class="flex items-center justify-between gap-3 py-2">
+                  <span><AcctLabel id={a.id} name={a.name} /><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
+                  <span class="flex items-center gap-3">
+                    <span class="tabular-nums">{fmt(a.balance)}</span>
+                    <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
     </Card.Content>
   </Card.Root>
-
-  {#if d.excluded.length}
-    <Card.Root class="mb-6">
-      <Card.Header>
-        <Card.Title>Left out of net worth</Card.Title>
-        <Card.Description>These accounts stay in the rest of Runway (transactions, the forecast, Investments) but aren't counted here.</Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <ul class="divide-y text-sm">
-          {#each d.excluded as a (a.id)}
-            <li class="flex items-center justify-between gap-3 py-2">
-              <span><AcctLabel id={a.id} name={a.name} /><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
-              <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>
-            </li>
-          {/each}
-        </ul>
-      </Card.Content>
-    </Card.Root>
-  {/if}
 
   <EquityCard {version} refresh={load} />
 
