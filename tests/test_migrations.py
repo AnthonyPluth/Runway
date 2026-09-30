@@ -99,6 +99,21 @@ class MigrationTests(unittest.TestCase):
             conn.execute("INSERT INTO churn_scores(owner, as_of, score) VALUES ('Alex', '2026-09-01', 720)")
         db.init(self.path)   # starting again changes nothing
 
+    def test_downgrade_plans_become_product_changes(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0020")
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("INSERT INTO churn_cards(id, owner, issuer, product, opened_on, plan) VALUES "
+                              "(1, 'Alex', 'chase', 'Sapphire', '2025-01-01', 'downgrade'), "
+                              "(2, 'Alex', 'chase', 'Ink', '2025-01-01', 'close')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            plans = [r[0] for r in conn.execute("SELECT plan FROM churn_cards ORDER BY id")]
+        self.assertEqual(plans, ["product_change", "close"])
+
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:

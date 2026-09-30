@@ -21,6 +21,7 @@
   let pick = $state("");
   let amounts = $state<Record<number, string>>({});
   const presets = $derived(d.benefit_presets.filter((p) => !card.benefits.some((b) => b.preset === p.key)));
+  const groups = $derived([...new Set(presets.map((p) => p.group))].map((g) => ({ name: g, items: presets.filter((p) => p.group === g) })));
   const summary = $derived(benefitSummary(card));
   const kindName = (k: string) => d.benefit_kinds.find((x) => x.key === k)?.name ?? k;
   const periodName = (p: string) => d.benefit_periods.find((x) => x.key === p)?.name ?? p;
@@ -100,7 +101,9 @@
     <div class="mt-2">
       <NativeSelect class="max-w-full" bind:value={pick} onchange={addPreset} aria-label={`Add a benefit to ${card.product}`}>
         <option value="">Add a benefit…</option>
-        {#each presets as p (p.key)}<option value={p.key}>{p.name}</option>{/each}
+        {#each groups as g (g.name)}
+          <optgroup label={g.name}>{#each g.items as p (p.key)}<option value={p.key}>{p.name}</option>{/each}</optgroup>
+        {/each}
         <option value="custom">Something else…</option>
       </NativeSelect>
     </div>

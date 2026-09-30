@@ -1,5 +1,5 @@
 """Churning (runway/churning.py), the second round: portal-only earning rates in the best-card ranking, rates sent
-with a new card, plans for a card (keep, downgrade, close) with Done and undo, hiding a card from Upcoming, snoozing
+with a new card, plans for a card (keep, close, product change) with Done and undo, hiding a card from Upcoming, snoozing
 a to-do, program currencies with estimated values, and whose card it is."""
 import os
 import tempfile
@@ -132,7 +132,7 @@ class ChurnDbTests(unittest.TestCase):
     def test_plans_in_upcoming_and_alerts(self):
         csr = self.add(product="Sapphire Reserve", annual_fee=795, plan="keep")
         aa = self.add(issuer="citi", product="AAdvantage Platinum", annual_fee=99, opened_on="2025-10-20",
-                      plan="downgrade", plan_target="AAdvantage MileUp")
+                      plan="product_change", plan_target="AAdvantage MileUp")
         undecided = self.add(issuer="amex", product="Gold", annual_fee=325, opened_on="2025-10-25")
         hidden = self.add(issuer="amex", product="Green", annual_fee=150, opened_on="2025-10-15", hide_upcoming=True,
                           bonus=40000, bonus_spend=3000)
@@ -146,11 +146,11 @@ class ChurnDbTests(unittest.TestCase):
         # The plan's day is the day before the fee, 20 days out: its reminder starts 14 days before
         self.assertEqual([(u["kind"], u["date"]) for u in by_card[aa]], [("fee", "2026-10-20")])
         self.assertEqual((by_card[aa][0]["detail"], by_card[aa][0]["warn"]),
-                         ("Your plan: Downgrade AAdvantage Platinum to AAdvantage MileUp before it posts", False))
+                         ("Your plan: Product change AAdvantage Platinum to AAdvantage MileUp before it posts", False))
         soon = [u for u in self.out(date(2026, 10, 5))["upcoming"] if u["card_id"] == aa]
         self.assertEqual([(u["kind"], u["date"]) for u in soon], [("plan", "2026-10-19"), ("fee", "2026-10-20")])
         plan = soon[0]
-        self.assertEqual(plan["title"], "Downgrade AAdvantage Platinum to AAdvantage MileUp by Oct 19")
+        self.assertEqual(plan["title"], "Product change AAdvantage Platinum to AAdvantage MileUp by Oct 19")
         self.assertEqual((plan["detail"], plan["warn"]), ("Before the $99 annual fee posts", False))
         self.assertEqual(by_card[undecided][0]["detail"], "Keep it, downgrade or close before it posts?")
 
@@ -182,7 +182,7 @@ class ChurnDbTests(unittest.TestCase):
 
     def test_done_and_undo(self):
         aa = self.add(issuer="citi", product="AAdvantage Platinum", annual_fee=99, opened_on="2025-10-20", account_id="cc",
-                      currency="aa", plan="downgrade", plan_target="AAdvantage MileUp")
+                      currency="aa", plan="product_change", plan_target="AAdvantage MileUp")
         self.assertEqual(self.out()["five24"]["Alex"]["count"], 1)
         r = churning.plan_done(self.c, aa, TODAY)
         self.assertEqual((r["status"], r["closed_on"], r["plan_done_on"]), ("product_changed", "2026-09-29", "2026-09-29"))
