@@ -152,14 +152,15 @@ def safety_copy(conn, directory: str | None = None) -> str | None:
 
 def unreadable_secrets(conn) -> list[str]:
     """The settings that hold a secret this Runway's key can't read (a backup from a machine with another key): what
-    to enter again in Settings. Plaid connections are listed as one entry each."""
+    to enter again in Settings, by name, then Plaid connections (one entry each)."""
     out = []
-    for r in conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(sorted(secretbox.SECRET_SETTINGS)))).fetchall():
+    for r in conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(sorted(secretbox.SECRET_SETTINGS)))
+                          .order_by(Setting.key)).fetchall():
         try:
             secretbox.decrypt(r["value"])
         except secretbox.SecretError:
             out.append(r["key"])
-    for r in conn.execute(select(PlaidItem.item_id, PlaidItem.access_token)).fetchall():
+    for r in conn.execute(select(PlaidItem.item_id, PlaidItem.access_token).order_by(PlaidItem.item_id)).fetchall():
         try:
             secretbox.decrypt(r["access_token"])
         except secretbox.SecretError:
