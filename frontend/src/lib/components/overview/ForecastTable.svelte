@@ -48,7 +48,7 @@
 {/if}
 <div class="mt-2 max-h-[32rem] overflow-auto rounded-md border">
   <table class="w-full text-sm">
-    <thead class="sticky top-0 z-10 bg-card max-sm:hidden">
+    <thead class="sticky top-[env(safe-area-inset-top)] z-10 bg-card max-sm:hidden">
       <tr class="text-left text-xs text-muted-foreground [&>th]:px-3 [&>th]:py-2 [&>th]:font-medium">
         <th>Date</th><th>In and out</th><th class="text-right max-sm:hidden">Forecast</th>
         {#if alt}<th class="whitespace-nowrap text-right max-sm:hidden"><span class="inline-flex items-center gap-1.5"><i class="inline-block h-0 w-3 border-t-2 border-dashed border-chart-2"></i>On budget</span></th>{/if}
