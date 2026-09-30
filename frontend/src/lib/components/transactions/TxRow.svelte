@@ -6,7 +6,8 @@
   import { orderLabel } from "$lib/components/orders/retail";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt } from "$lib/format";
+  import { app } from "$lib/app.svelte";
+  import { fmt, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import RecurringPicker from "./RecurringPicker.svelte";
@@ -19,7 +20,8 @@
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
   // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
-  // merchant; on a wider screen it has a column of its own.
+  // merchant; on a wider screen it has a column of its own. From lg up a row is one 40px line (logo, merchant, category,
+  // account, amount in aligned columns) and a chevron opens the details: the account with its institution and the bank's own text.
   let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
     t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
     onselect: (e: MouseEvent, checked: boolean) => void;
@@ -30,6 +32,7 @@
   let saving = $state(false);
   let picking = $state(false);
   let splitting = $state(false);
+  let open = $state(false);
   const showOrder = $derived(openOrders.has(t.id));
   const store = $derived(t.retail?.retailer === "amazon" ? "Amazon" : t.retail?.retailer === "target" ? "Target" : "store");
   function toggleOrder() { if (showOrder) openOrders.delete(t.id); else openOrders.add(t.id); }
@@ -43,6 +46,8 @@
     const d = (t.description ?? "").trim(), squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     return d && squash(d) !== squash(name) ? d : "";
   });
+  const brand = $derived(app.state?.brands?.[t.account_id]);
+  const sourceLabel = $derived(t.category_source === "manual" ? "You" : t.category_source === "ai" ? "AI suggestion" : t.category_source === "rule" ? "A rule" : t.category_source === "retail" ? "The store order" : t.category_source ?? "");
   const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
   // Shown on hover (and always on touch screens, and while focused).
   const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
@@ -54,22 +59,22 @@
   }
 </script>
 
-<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:px-4",
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_15rem_11rem_7.5rem_1.75rem] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
-  <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-1", !selecting && "max-md:hidden",
+  <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
     <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label={`Select ${name}`} checked={selected}
       onclick={(e) => onselect(e, e.currentTarget.checked)} />
   </label>
 
-  <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-1">
+  <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-2 lg:row-span-1 lg:mr-2.5">
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
            so a dark mark doesn't vanish on the dark page). -->
       {#if t.logo}
-        <Logo src={t.logo} size={36} />
+        <Logo src={t.logo} size={36} class="lg:size-5! lg:rounded" />
       {:else}
-        <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
+        <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground lg:size-5 lg:rounded lg:text-[11px]" aria-hidden="true">{initial}</span>
       {/if}
     </LogoPicker>
   </div>
@@ -98,14 +103,16 @@
           {orderLabel(t.retail)}</button>
       {/if}
     </div>
-    <div class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-md:hidden">
-      <AcctLabel id={t.account_id} name={t.account_name ?? ""} />
-      {#if detail}<span aria-hidden="true">·</span><span class="truncate" title={detail}>{detail}</span>{/if}
-    </div>
+  </div>
+  <!-- Account (and the bank's own text): under the merchant on a tablet, its own column from lg up (where the bank's text
+       is in the details instead). -->
+  <div class="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
+    <span class="min-w-0 lg:col-start-5 lg:row-start-1 lg:truncate lg:pr-3"><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" /></span>
+    {#if detail}<span aria-hidden="true" class="lg:hidden">·</span><span class="truncate lg:hidden" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
-  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-start-1 md:flex-nowrap">
+  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
     {#if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <Badge class="bg-primary/15 text-primary">split</Badge>
@@ -138,8 +145,23 @@
     {/if}
   </div>
 
-  <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-1",
+  <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-2 lg:col-start-6 lg:row-span-1",
     t.amount > 0 ? "font-semibold text-emerald-500" : "font-medium")}>{fmt(t.amount)}</div>
+
+  <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
+    aria-expanded={open} aria-controls={`detail-${t.id}`} aria-label={`Details for ${name}`} title={open ? "Hide the details" : "Show the details"} onclick={() => (open = !open)}>
+    <ChevronDown class={cn("size-4 transition-transform motion-reduce:transition-none", open && "rotate-180")} aria-hidden="true" />
+  </button>
+
+  {#if open}
+    <dl id={`detail-${t.id}`} class="col-span-full mb-2 hidden grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-2 pl-[3.75rem] text-xs lg:grid">
+      <div><dt class="text-muted-foreground">Account</dt><dd><AcctLabel id={t.account_id} name={t.account_name ?? ""} /></dd></div>
+      {#if brand?.institution}<div><dt class="text-muted-foreground">Source</dt><dd>{brand.institution}</dd></div>{/if}
+      <div><dt class="text-muted-foreground">Posted</dt><dd>{fmtDate(t.posted.slice(0, 10), { month: "short", day: "numeric", year: "numeric" })}</dd></div>
+      {#if t.description}<div><dt class="text-muted-foreground">Bank’s text</dt><dd class="break-words">{t.description}</dd></div>{/if}
+      {#if sourceLabel && t.category}<div><dt class="text-muted-foreground">Category set by</dt><dd>{sourceLabel}</dd></div>{/if}
+    </dl>
+  {/if}
 
   {#if splitting}
     <div class="col-span-full pt-2"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></div>
