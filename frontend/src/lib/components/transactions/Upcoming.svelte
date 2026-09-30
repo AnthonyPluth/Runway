@@ -11,8 +11,17 @@
   // Upcoming (projected) items for the forecast account, already filtered like the list below. Click an amount to
   // change just that one occurrence.
   let { events }: { events: UpcomingEvent[] } = $props();
+  // From lg up the block starts collapsed to its first 3, so the list below stays on screen.
+  const wide = typeof matchMedia === "function" ? matchMedia("(min-width: 1024px)") : null;
+  let limit = $state(wide?.matches ? 3 : 4);
+  $effect(() => {
+    if (!wide) return;
+    const on = () => (limit = wide.matches ? 3 : 4);
+    wide.addEventListener("change", on);
+    return () => wide.removeEventListener("change", on);
+  });
 </script>
 
 {#if events.length}
-  <Group title="Upcoming · projected" inset="3.75rem" class="mb-6"><EventsList {events} limit={4} accounts bind:all={showAll} /></Group>
+  <Group title="Upcoming · projected" inset="3.75rem" class="mb-6"><EventsList {events} {limit} accounts bind:all={showAll} /></Group>
 {/if}

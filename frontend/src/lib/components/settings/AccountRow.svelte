@@ -4,7 +4,7 @@
 
   // Why a linked card has no statement yet (Plaid's error code, if it gave one).
   const STATEMENT_NOTES: Record<string, string> = {
-    ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Connections.",
+    ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Bank connections.",
     PRODUCTS_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.", INSTITUTION_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.",
     INVALID_PRODUCT: "Card statements (Liabilities) aren't enabled for your Plaid account.", PRODUCTS_NOT_ENABLED: "Card statements (Liabilities) aren't enabled for your Plaid account.",
     PRODUCT_NOT_READY: "Plaid is still gathering the statement; it usually arrives with the next sync.",
@@ -39,6 +39,7 @@
   let payFrom = $state(init.pay_from || "");
   let kind = $state(init.kind);
   let hidden = $state(!!init.hidden);
+  let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
   let spend = $state(!!init.daily_spend);
   let changingType = $state(false);
@@ -63,6 +64,7 @@
       if (!link) bits.push({ text: "not linked through Plaid", warn: true });
       else if (!link.closed) bits.push({ text: `no statement from ${link.institution || "the bank"} yet`, warn: true, title: statementNote(link.statement_note) });
     }
+    if (a.networth_hidden) bits.push({ text: "not in net worth", title: "Left out of the Net worth page; still counted everywhere else" });
     if (a.provider === "plaid" || a.id.startsWith("pl:")) bits.push({ text: "via Plaid" });
     return bits;
   });
@@ -72,9 +74,9 @@
     if (open) openAccounts.add(a.id); else openAccounts.delete(a.id);
   }
 
-  // Saves the whole row. Fields that change the row's summary (owner, paying account, hidden, type) redraw the page.
+  // Saves the whole row. Fields that change the row's summary (owner, paying account, hidden, net worth, type) redraw the page.
   async function save(rerender: boolean) {
-    const body: Record<string, unknown> = { display_name: name, kind, hidden: hidden ? 1 : 0, owner };
+    const body: Record<string, unknown> = { display_name: name, kind, hidden: hidden ? 1 : 0, networth_hidden: counted ? 0 : 1, owner };
     if (a.kind === "credit") body.pay_from = payFrom;
     if (owes) body.owed_positive = sign ? 1 : 0;
     if (a.kind === "checking" || a.kind === "savings") body.daily_spend = spend ? 1 : 0;
@@ -142,6 +144,8 @@
       {#if owes}
         <label class={checkCls}><input type="checkbox" bind:checked={sign} use:autosave={() => save(false)} /> Bank reports what's owed as a positive number</label>
       {/if}
+      <label class={checkCls} title="Off leaves this account out of the Net worth page; it still shows everywhere else">
+        <input type="checkbox" bind:checked={counted} use:autosave={() => save(true)} /> Count in net worth</label>
       <label class={checkCls}><input type="checkbox" bind:checked={hidden} use:autosave={() => save(true)} /> Hide this account</label>
       <span class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         {a.kind} account ·

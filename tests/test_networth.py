@@ -62,8 +62,18 @@ class NetWorthTests(Base):
         after = networth.summary(self.c, TODAY, save=False)
         self.assertEqual(round(before["net"] - after["net"], 2), 154756.49)
         self.assertNotIn("investments", {g["key"] for g in after["groups"]})
-        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment"}])
+        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment", "balance": 154756.49}])
         self.assertEqual(before["excluded"], [])
+        # balances read like the groups: a liability is a positive amount owed, whichever sign convention the account uses
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "auto")
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "chk")
+        bal = {a["id"]: a["balance"] for a in networth.summary(self.c, TODAY, save=False)["excluded"]}
+        self.assertEqual(bal, {"brk": 154756.49, "cc": 1510.72, "auto": 12000.0, "chk": 4561.10})
+        api_account_update(self.c, {}, {"networth_hidden": 0}, "auto")
+        api_account_update(self.c, {}, {"networth_hidden": 0}, "chk")
+        api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
+        after = networth.summary(self.c, TODAY, save=False)
         # a liability left out makes net worth go up; the account is still there for everything else
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1510.72)

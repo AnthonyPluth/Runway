@@ -12,7 +12,7 @@ import Tile from "./Tile.svelte";
 import { reportState } from "./state.svelte";
 import type { Cashflow as Flow } from "./types";
 
-const desc = { selector: "[data-slot=card-description]" };   // "Money in" is also a table heading
+const desc = { selector: "dt > span" };   // "Money in" is also a table heading
 const flow = (extra: Partial<Flow> = {}): Flow => ({
   month: "2026-03",
   income: [{ name: "Salary", value: 4000 }],
@@ -26,9 +26,10 @@ describe("Cashflow report", () => {
     vi.mocked(api).mockResolvedValue(flow());
     render(Cashflow);
     expect(await screen.findByText("Money in", desc)).toBeInTheDocument();
-    expect(screen.getByText("$4,000", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
-    expect(screen.getAllByText("$2,000", { selector: "[data-slot=card-title]" })).toHaveLength(2);   // money out, and left over
-    expect(screen.getByText("Left over", desc)).toBeInTheDocument();
+    expect(screen.getByText("$4,000", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.getByText("$2,000", { selector: "dd" })).toBeInTheDocument();   // money out
+    expect(screen.getByText("$2,000", { selector: "div" })).toBeInTheDocument();   // the left-over hero
+    expect(screen.getByText("Left over", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("50% of money in")).toBeInTheDocument();
     expect(api).toHaveBeenCalledWith("/api/cashflow?month=2026-03");
   });
@@ -36,9 +37,9 @@ describe("Cashflow report", () => {
   it("flags a month that spent more than came in", async () => {
     vi.mocked(api).mockResolvedValue(flow({ total_in: 1000, total_out: 1500, net: -500 }));
     render(Cashflow);
-    const label = await screen.findByText("▲ Spent more than came in", { selector: "[data-slot=card-description]" });
+    const label = await screen.findByText("▲ Spent more than came in", { selector: "div" });
     expect(label).toHaveClass("text-destructive");
-    expect(screen.getByText("$500", { selector: "[data-slot=card-title]" })).toBeInTheDocument();   // shown without the sign
+    expect(screen.getByText("$500", { selector: "div" })).toHaveClass("text-destructive");   // shown without the sign
   });
 
   it("lists the same numbers as a table with shares and subcategories", async () => {

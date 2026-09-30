@@ -3,9 +3,9 @@
   import { app, refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
   import { Button } from "$lib/components/ui/button";
-  import * as Card from "$lib/components/ui/card";
   import { toast } from "svelte-sonner";
-  import { fieldCls, helpCls, inputCls, linkCls, rowCls, titleNote } from "./ui";
+  import ServiceRow from "./ServiceRow.svelte";
+  import { fieldCls, helpCls, inputCls, linkCls, rowCls } from "./ui";
 
   // Merchant logos through Logo.dev, for merchants Plaid has no logo for.
   const configured = $derived(!!app.state?.logodev_configured);
@@ -41,50 +41,47 @@
   }
 </script>
 
-<Card.Root>
-  <Card.Header><Card.Title>Merchant and bank logos <span class={titleNote}>optional, via Logo.dev</span></Card.Title></Card.Header>
-  <Card.Content class="flex flex-col gap-3">
-    <p class={helpCls}>Plaid has logos for many merchants. For the rest, a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
-      publishable key lets Runway fetch one by the merchant's website, or by its name when there's no website (most SimpleFIN
-      transactions). Adding the key fetches the past year's at once; after that, each sync fetches new merchants'. Runway downloads
-      and serves them itself, so your browser never contacts Logo.dev, and Logo.dev only sees merchants' websites and names, never
-      amounts or dates. The same key gives each account's bank its logo, by the bank's name; without it accounts show a letter.</p>
+<ServiceRow name="Merchant and bank logos" purpose="Logo.dev · logos for merchants Plaid has none for" on={configured}>
+  <p class={helpCls}>Plaid has logos for many merchants. For the rest, a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
+    publishable key lets Runway fetch one by the merchant's website, or by its name when there's no website (most SimpleFIN
+    transactions). Adding the key fetches the past year's at once; after that, each sync fetches new merchants'. Runway downloads
+    and serves them itself, so your browser never contacts Logo.dev, and Logo.dev only sees merchants' websites and names, never
+    amounts or dates. The same key gives each account's bank its logo, by the bank's name; without it accounts show a letter.</p>
+  <div class={rowCls}>
+    <label class={`${fieldCls} w-full sm:w-72`}>Publishable key
+      <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
+    {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
+  </div>
+  {#if configured}
     <div class={rowCls}>
-      <label class={`${fieldCls} w-full sm:w-72`}>Publishable key
-        <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
-      {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
+      <label class={`${fieldCls} w-full sm:w-72`}>Secret key <span class="font-normal text-muted-foreground">(optional)</span>
+        <input class={inputCls} type="password" autocomplete="off" placeholder={st?.searchable ? "•••••••• saved" : "sk_…"} use:autosave={saveSecret} /></label>
+      {#if st?.searchable}<Button variant="link" onclick={clearSecret}>Remove secret key</Button>{/if}
     </div>
-    {#if configured}
-      <div class={rowCls}>
-        <label class={`${fieldCls} w-full sm:w-72`}>Secret key <span class="font-normal text-muted-foreground">(optional)</span>
-          <input class={inputCls} type="password" autocomplete="off" placeholder={st?.searchable ? "•••••••• saved" : "sk_…"} use:autosave={saveSecret} /></label>
-        {#if st?.searchable}<Button variant="link" onclick={clearSecret}>Remove secret key</Button>{/if}
-      </div>
-      <p class={helpCls}>With the secret key, Runway finds merchants by name with Logo.dev's Brand Search and keeps a logo only when the
-        brand clearly is that merchant, so fewer logos are someone else's. Click any transaction's logo to choose a different one
-        for that merchant.</p>
-    {/if}
-    {#if st}
-      <div class="rounded-lg bg-muted/50 p-3 text-sm">
-        <p class="tabular-nums">
-          <b class="font-medium">{st.plaid + st.logodev}</b> merchants have a logo ({st.plaid} from Plaid, {st.logodev} from Logo.dev)
-          {#if st.unknown} · {st.unknown} Logo.dev doesn't know{/if}
-          {#if st.waiting} · {st.waiting} waiting to be fetched{/if}
-        </p>
-        {#if !configured && !st.plaid}
-          <p class="mt-1 text-muted-foreground">No logos yet: Plaid hasn't sent any, and there's no Logo.dev key. Add one above to get logos for most merchants.</p>
-        {/if}
-        {#if st.last_error}<p class="mt-1 text-destructive">Looking up by website: {st.last_error}</p>{/if}
-        {#if st.last_error_name}<p class="mt-1 text-destructive">Looking up by name: {st.last_error_name}</p>{/if}
-        {#if [st.last_error, st.last_error_name].some((e) => e && /40[13]/.test(e))}
-          <p class="mt-1 text-muted-foreground">Logo.dev refused the key. Check that it's the publishable one (<code>pk_…</code>), and in
-            Logo.dev's dashboard that it isn't limited to particular websites: Runway asks from its server, not from a web page.
-            {#if st.last_error_name && !st.last_error}Lookups by website work, so your plan may not include lookups by name.{/if}</p>
-        {/if}
-        {#if st.waiting || st.unknown}
-          <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : st.waiting ? "Fetch them now" : "Look them up again"}</Button>
-        {/if}
-      </div>
-    {/if}
-  </Card.Content>
-</Card.Root>
+    <p class={helpCls}>With the secret key, Runway finds merchants by name with Logo.dev's Brand Search and keeps a logo only when the
+      brand clearly is that merchant, so fewer logos are someone else's. Click any transaction's logo to choose a different one
+      for that merchant.</p>
+  {/if}
+  {#if st}
+    <div class="rounded-lg bg-muted/50 p-3 text-sm">
+      <p class="tabular-nums">
+        <b class="font-medium">{st.plaid + st.logodev}</b> merchants have a logo ({st.plaid} from Plaid, {st.logodev} from Logo.dev)
+        {#if st.unknown} · {st.unknown} Logo.dev doesn't know{/if}
+        {#if st.waiting} · {st.waiting} waiting to be fetched{/if}
+      </p>
+      {#if !configured && !st.plaid}
+        <p class="mt-1 text-muted-foreground">No logos yet: Plaid hasn't sent any, and there's no Logo.dev key. Add one above to get logos for most merchants.</p>
+      {/if}
+      {#if st.last_error}<p class="mt-1 text-destructive">Looking up by website: {st.last_error}</p>{/if}
+      {#if st.last_error_name}<p class="mt-1 text-destructive">Looking up by name: {st.last_error_name}</p>{/if}
+      {#if [st.last_error, st.last_error_name].some((e) => e && /40[13]/.test(e))}
+        <p class="mt-1 text-muted-foreground">Logo.dev refused the key. Check that it's the publishable one (<code>pk_…</code>), and in
+          Logo.dev's dashboard that it isn't limited to particular websites: Runway asks from its server, not from a web page.
+          {#if st.last_error_name && !st.last_error}Lookups by website work, so your plan may not include lookups by name.{/if}</p>
+      {/if}
+      {#if st.waiting || st.unknown}
+        <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : st.waiting ? "Fetch them now" : "Look them up again"}</Button>
+      {/if}
+    </div>
+  {/if}
+</ServiceRow>

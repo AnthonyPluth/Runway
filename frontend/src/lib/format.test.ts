@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmt, fmt0, fmtDate, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, plural, relDay, relTime, shortMoney, thisMonth } from "./format";
+import { fmt, fmt0, fmtDate, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
@@ -92,5 +92,20 @@ describe("plural", () => {
     expect(plural(1, "item")).toBe("1 item");
     expect(plural(0, "item")).toBe("0 items");
     expect(plural(3, "item")).toBe("3 items");
+  });
+});
+
+describe("pct", () => {
+  it("formats a share as a percentage", () => {
+    expect(pct(0)).toBe("0%");
+    expect(pct(0.001)).toBe("<1%");
+    expect(pct(0.004)).toBe("<1%");
+    expect(pct(0.005)).toBe("1%");
+    expect(pct(0.1)).toBe("10%");
+    expect(pct(0.5)).toBe("50%");
+    expect(pct(0.994)).toBe("99%");
+    expect(pct(0.995)).toBe(">99%");
+    expect(pct(0.999)).toBe(">99%");
+    expect(pct(1)).toBe("100%");
   });
 });

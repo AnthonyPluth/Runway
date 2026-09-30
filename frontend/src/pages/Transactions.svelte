@@ -120,7 +120,7 @@
   </h1>
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}
-      title={app.state?.has_api_key ? undefined : "Add an OpenRouter key in Settings → Connections first"}>
+      title={app.state?.has_api_key ? undefined : "Add an OpenRouter key in Settings → Services first"}>
       {aiStatus === "asking" ? "Asking the AI…" : aiStatus === "asked" ? "Ask again" : "Suggest categories with AI"}
     </Button>
   {/if}
