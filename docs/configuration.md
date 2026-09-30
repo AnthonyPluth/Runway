@@ -4,7 +4,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 
 | Variable | Default | What it does |
 |---|---|---|
-| `RUNWAY_PUBLIC_URL` | | The address you open Runway at, e.g. `https://runway.example.com`. Required with sign-in. |
+| `RUNWAY_PUBLIC_URL` | | The address you open Runway at, e.g. `https://runway.example.com`. Required with sign-in; also the OAuth issuer AI assistants connect to ([MCP](mcp.md)). |
 | `OIDC_ISSUER` | | Your identity provider's issuer URL. Setting it turns sign-in on. |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | The client registered with your provider. Leave the secret empty for a public (PKCE-only) client. |
 | `OIDC_ALLOWED_EMAILS` | | Comma-separated emails allowed in. An email counts only if your provider marks it verified (`email_verified`). Taking an email off ends that person's sessions. |
