@@ -179,13 +179,17 @@ jobs:
             echo "::notice::$GITHUB_SHA isn't the newest commit on main any more, so it isn't released."
             echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # The last version released from this commit's own history.
+          # How big a step this is comes from the commits since the last version released from this commit's own
+          # history. Where it steps from is the highest version ever tagged, so versions only go up, even when main's
+          # history is rewritten and its older tags aren't in it (after the rewrite of 2026-09-30, this step went back
+          # from v2.3.21 to v1.0.2).
           last=$(git describe --tags --abbrev=0 --first-parent --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null || true)
-          if [ -z "$last" ]; then
+          highest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -1)
+          if [ -z "$highest" ]; then
             next=v1.0.0
           else
-            log=$(git log --format='%s%n%b' "$last"..HEAD)
-            IFS=. read -r major minor patch <<< "${last#v}"
+            if [ -n "$last" ]; then log=$(git log --format='%s%n%b' "$last"..HEAD); else log=$(git log --format='%s%n%b' HEAD); fi
+            IFS=. read -r major minor patch <<< "${highest#v}"
             # Pull request titles say what a change is (they're in each merge commit's message): "feat: ..." is a
             # new feature (a minor version), "fix: ..." or anything else a patch, and a "!" before the colon
             # ("feat!: ...") something that breaks an existing setup (a major version).
@@ -204,7 +208,7 @@ jobs:
             IFS=. read -r major minor patch <<< "${next#v}"; next="v${major}.${minor}.$((patch + 1))"
           done
           echo "version=$next" >> "$GITHUB_OUTPUT"; echo "new=true" >> "$GITHUB_OUTPUT"
-          echo "Next version: $next (last: ${last:-none})"
+          echo "Next version: $next (last in this history: ${last:-none}; highest: ${highest:-none})"
 
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1   # v4.4.0
         if: steps.next.outputs.skip != 'true'
