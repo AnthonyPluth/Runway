@@ -51,7 +51,7 @@ export interface Benefit {
   uses: { id: number; amount_used: number | null; used_on: string }[];
 }
 
-export interface BenefitPreset { key: string; name: string; kind: BenefitKind; period: BenefitPeriod; basis: BenefitBasis }
+export interface BenefitPreset { group: string; key: string; name: string; kind: BenefitKind; period: BenefitPeriod; basis: BenefitBasis }
 
 export interface ChurnCard {
   id: number;
