@@ -55,7 +55,7 @@
       // The backup's bank access and API keys are encrypted with the key of the Runway that made it: under another
       // key they can't be read, and each is entered again in Settings.
       const n = r.unreadable_secrets?.length ?? 0;
-      if (n) toast.warning(`${n} saved ${n === 1 ? "key or connection" : "keys and connections"} can’t be read with this Runway’s secret key. Enter them again in Settings, or restore with the same RUNWAY_SECRET_KEY.`, { duration: 15000 });
+      if (n) toast.warning(`${n} saved ${n === 1 ? "key or connection" : "keys and connections"} can’t be read with this Runway’s secret key. Set the key the backup was made with as RUNWAY_SECRET_KEY_OLD and restart, or enter them again in Settings.`, { duration: 15000 });
       await refreshState(); reload();
     } catch (err) { toast.error((err as Error).message); return false; }
   }

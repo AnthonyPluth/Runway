@@ -9,7 +9,9 @@ encrypt_stored). Backups hold the secrets encrypted too (runway/backup.py): rest
 key, or the secrets are entered again.
 
 Changing keys: set the new RUNWAY_SECRET_KEY and keep the old one in RUNWAY_SECRET_KEY_OLD (or keep secret.key) for
-one start; Runway re-encrypts everything with the new key.
+one start; Runway re-encrypts everything with the new key. Keep the old key as long as you keep backups made with
+it: a backup's secrets are under the key of the time, and restoring one later needs that key in RUNWAY_SECRET_KEY_OLD
+for a start (encrypt_stored then moves them to the current key).
 """
 from __future__ import annotations
 

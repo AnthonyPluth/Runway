@@ -3,9 +3,10 @@
 Use it to move Runway (Mac -> server, SQLite -> Postgres) or just to keep a copy. It includes your settings, and so
 your SimpleFIN access, API keys and Plaid tokens: those stay encrypted in the file, as they are in the database
 (runway/secretbox.py), so a backup on its own doesn't give them away. Restoring on a machine with the same
-RUNWAY_SECRET_KEY (or a copy of secret.key) reads them again; under another key they can't be read, and you enter
-them again in Settings (the restore says how many). Sign-in sessions and assistants connected with OAuth aren't
-included, so you sign in (and reconnect them) again after restoring.
+RUNWAY_SECRET_KEY (or a copy of secret.key) reads them again; under another key they can't be read (the restore says
+which): set the key the backup was made with as RUNWAY_SECRET_KEY_OLD for one start, and they're re-encrypted with the
+current one, or enter them again in Settings. Sign-in sessions and assistants connected with OAuth aren't included, so
+you sign in (and reconnect them) again after restoring.
 """
 from __future__ import annotations
 

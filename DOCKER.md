@@ -63,8 +63,10 @@ If a setting is missing, the container stops with a message saying which one (se
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
 The backup holds your bank access and API keys encrypted with your key: set the same `RUNWAY_SECRET_KEY` on the
-server (or copy `secret.key` into its `./data`) before restoring, or enter them again in Settings afterwards (the
-restore says which). Delete stray copies of the file once you've restored it.
+server (or copy `secret.key` into its `./data`) before restoring. Restored under another key, they can't be read (the
+restore says which): put the key the backup was made with in `RUNWAY_SECRET_KEY_OLD` and restart once, and Runway
+re-encrypts them with the current key; or enter them again in Settings. Delete stray copies of the file once you've
+restored it.
 
 ## Using Postgres (optional)
 
@@ -87,7 +89,8 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
    the backup and restore one (see [SECURITY.md](SECURITY.md)). Let in only people you'd hand your finances to.
 3. **A secret key.** Set `RUNWAY_SECRET_KEY` (`openssl rand -base64 32`) and keep a copy in your password manager.
    It encrypts your saved bank access and API keys. (Without it, the key is `./data/secret.key`: back it up with the
-   database.)
+   database.) Changing it: put the old one in `RUNWAY_SECRET_KEY_OLD` for one start, and keep it as long as you keep
+   backups made with it (a backup's secrets are under the key of the time).
 4. **Rate limiting at the proxy** (optional but good): Runway caps how many requests it handles at once, and the proxy
    can limit requests per address, e.g. Caddy's `rate_limit` or Traefik's `RateLimit` middleware.
 5. **Backups kept private.** They contain your transactions, and your bank access and API keys encrypted with your
