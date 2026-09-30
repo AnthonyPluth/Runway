@@ -61,23 +61,27 @@ def save_prefs(conn, body: dict) -> dict:
 # ------------------------------------------------------------------------------------------------ devices
 
 def subscriptions(conn) -> list[dict]:
-    """Every device, oldest first (after dropping those whose person can no longer sign in: see lapsed)."""
+    """Every device, oldest first (after dropping those whose person was taken off the sign-in list: see lapsed)."""
     prune_lapsed(conn)
     return db.rows(conn.execute(select(PushSubscription).order_by(PushSubscription.created)))
 
 
-def lapsed(conn, sub: dict, now: float | None = None) -> bool:
-    """Whether a device's notifications must end because the person who turned them on can no longer sign in
-    (oidc.access_lapsed), as their sessions do. A device subscribed without sign-in has no person and never lapses."""
+def lapsed(conn, sub: dict, now: float | None = None) -> str | None:
+    """Why a device gets nothing for now, or None: the person who turned notifications on can no longer sign in
+    (oidc.access_lapsed), as with their sessions. "user_removed" (taken off OIDC_ALLOWED_EMAILS) is for good, and the
+    device is dropped (prune_lapsed). "sign_in_lapsed" (with OIDC_ALLOWED_GROUPS, nobody has seen them sign in for
+    RUNWAY_SESSION_DAYS) may be someone who just hasn't opened Runway lately: the device is kept and only skipped,
+    and their alerts come back on their own when they next sign in. A device subscribed without sign-in has no person
+    and never lapses."""
     if not sub.get("user_sub"):
-        return False
+        return None
     email = conn.execute(select(User.email).where(User.sub == sub["user_sub"])).scalar()
-    return oidc.access_lapsed(conn, sub["user_sub"], email, now) is not None
+    return oidc.access_lapsed(conn, sub["user_sub"], email, now)
 
 
 def prune_lapsed(conn, now: float | None = None) -> int:
-    """Remove the devices whose person can no longer sign in. Returns how many."""
-    gone = [s["endpoint"] for s in db.rows(conn.execute(select(PushSubscription))) if lapsed(conn, s, now)]
+    """Remove the devices whose person was taken off the sign-in list. Returns how many."""
+    gone = [s["endpoint"] for s in db.rows(conn.execute(select(PushSubscription))) if lapsed(conn, s, now) == "user_removed"]
     for endpoint in gone:
         unsubscribe(conn, endpoint)
     return len(gone)
@@ -149,8 +153,11 @@ def send_all(conn, message: dict, only: str | None = None) -> dict:
         if not push_host_allowed(s["endpoint"]):   # from a restored backup, never checked when it was saved
             unsubscribe(conn, s["endpoint"])
             continue
-        if lapsed(conn, s):   # subscriptions() pruned these, but a person may have been taken off since
+        why = lapsed(conn, s)
+        if why == "user_removed":   # subscriptions() pruned these, but a person may have been taken off since
             unsubscribe(conn, s["endpoint"])
+            continue
+        if why:   # not seen signing in lately: kept, and skipped until they do
             continue
         try:
             webpush.send(s, message, vapid, subject(conn))

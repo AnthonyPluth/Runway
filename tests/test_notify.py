@@ -109,12 +109,27 @@ class NotifyTests(unittest.TestCase):
             self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?)",
                            (f"http://127.0.0.1:{self.srv.server_port}/p/{n}", self.p256dh, webpush.b64u(b"0123456789abcdef"), f"{who}'s phone", who, n))
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
-            self.assertTrue(notify.lapsed(self.c, {"user_sub": "u2"}))
-            self.assertFalse(notify.lapsed(self.c, {"user_sub": "u1"}))
-            self.assertFalse(notify.lapsed(self.c, {"user_sub": None}))   # subscribed without sign-in: nobody to lose
+            self.assertEqual(notify.lapsed(self.c, {"user_sub": "u2"}), "user_removed")
+            self.assertIsNone(notify.lapsed(self.c, {"user_sub": "u1"}))
+            self.assertIsNone(notify.lapsed(self.c, {"user_sub": None}))   # subscribed without sign-in: nobody to lose
             self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "u1's phone"])
             self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 2)
         self.assertEqual(self.c.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0], 2)
+
+    def test_someone_let_in_by_group_who_hasnt_signed_in_lately_is_skipped_not_dropped(self):
+        # With OIDC_ALLOWED_GROUPS, whether someone may still sign in is known only when they do: their alerts pause
+        # RUNWAY_SESSION_DAYS after their last sign-in and come back by themselves when they next sign in (their browser
+        # still holds the subscription; nothing would put a dropped one back).
+        oidc.remember_user(self.c, "u1", "a@example.com", "A", when=time.time() - 40 * 86400)
+        self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?)",
+                       (f"http://127.0.0.1:{self.srv.server_port}/p/2", self.p256dh, webpush.b64u(b"0123456789abcdef"), "A's phone", "u1", 2))
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_GROUPS": "family"}):
+            self.assertEqual(notify.lapsed(self.c, {"user_sub": "u1"}), "sign_in_lapsed")
+            self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "A's phone"])   # kept
+            self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 1)                                # skipped
+            oidc.remember_user(self.c, "u1", "a@example.com", "A")                                              # signs in again
+            self.assertIsNone(notify.lapsed(self.c, {"user_sub": "u1"}))
+            self.assertEqual(notify.send_all(self.c, {"title": "y"})["sent"], 2)
 
     def test_delivery_is_recorded_on_the_device(self):
         notify.send_all(self.c, {"title": "x"})
