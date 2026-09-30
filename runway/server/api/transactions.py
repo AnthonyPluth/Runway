@@ -99,7 +99,9 @@ def restore(conn, rows: list) -> int:
         cat = r.get("category") or None
         if cat and not conn.execute(select(Category.name).where(Category.name == cat)).fetchone():
             cat = None
-        payee = " ".join(str(r.get("payee") or "").split())[:80] or None
+        # As it was, not through the rename's tidying: a bank's payee can be long or double-spaced, and rules and
+        # recurring items may match on that exact text.
+        payee = r.get("payee") if isinstance(r.get("payee"), str) and r.get("payee") else None
         cur = conn.execute(update(t).where(t.id == r["id"]).values(
             category=cat, category_source=r.get("category_source") or None, confidence=r.get("confidence"),
             needs_review=1 if r.get("needs_review") else 0, payee=payee))

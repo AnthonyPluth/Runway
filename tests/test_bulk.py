@@ -63,6 +63,19 @@ class BulkTests(Fixture):
         self.assertEqual(self.rows(), before)
         self.assertEqual([(p["category"], p["amount"]) for p in splits.get(self.c, "t2")], [("Groceries", -60), ("Shopping", -40)])
 
+    def test_restore_puts_the_payee_back_exactly(self):
+        # A bank's payee isn't tidied like a rename: double spaces and length survive an undo.
+        long = "ACH WEB SINGLE CO NAME " * 5
+        for tid, payee in (("t0", "SQ *JOES  COFFEE"), ("t1", long)):
+            self.c.execute("UPDATE transactions SET payee=? WHERE id=?", (payee, tid))
+        was = api_tx.snapshot(self.c, ["t0", "t1"])
+        categorize.bulk_update(self.c, ["t0", "t1"], payee="Joe")
+        self.assertEqual(api_tx.restore(self.c, was), 2)
+        self.assertEqual(self.rows()["t0"][0], "SQ *JOES  COFFEE")
+        self.assertEqual(self.rows()["t1"][0], long)
+        self.assertEqual(api_tx.restore(self.c, [{"id": "t0", "payee": 7}]), 1)   # not text: cleared, not str()'d
+        self.assertIsNone(self.rows()["t0"][0])
+
     def test_restore_skips_what_is_gone_and_unknown_categories(self):
         was = api_tx.snapshot(self.c, ["t1"])
         was[0]["category"] = "No such category"
