@@ -5,7 +5,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { fmt, fmtDate } from "$lib/format";
   import { toast } from "svelte-sonner";
-  import { ITEM_SOURCES, STORES, type RetailOrder } from "./retail";
+  import { ITEM_SOURCES, STORES, STORE_SITES, type RetailOrder } from "./retail";
 
   // An Amazon or Target order: its items, each with a category you can change (remembered for the next time you
   // buy it), and the card charges it was paid with. `onchange` runs after anything here changes a transaction.
@@ -42,7 +42,7 @@
         {o.placed ? fmtDate(o.placed, { month: "short", day: "numeric", year: "numeric" }) : ""}{o.total != null ? ` · ${fmt(o.total)}` : ""}{totals ? ` (${totals})` : ""}{o.payment ? ` · ${o.payment}` : ""}
       </span>
       <a class="ml-auto text-xs font-medium underline underline-offset-4" href={o.url} target="_blank" rel="noopener">
-        Open on {o.retailer === "amazon" ? "amazon.com" : "target.com"}</a>
+        Open on {STORE_SITES[o.retailer] || STORES[o.retailer] || o.retailer}</a>
     </div>
 
     {#if o.items.length}

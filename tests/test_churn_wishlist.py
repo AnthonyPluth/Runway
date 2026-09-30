@@ -99,6 +99,18 @@ class WishlistTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 wl.set_score(self.c, bad, TODAY)
 
+    def test_application_link(self):
+        w = self.wish(apply_url=" https://creditcards.chase.com/apply?x=1 ")
+        self.assertEqual(self.items()[w]["apply_url"], "https://creditcards.chase.com/apply?x=1")
+        wl.save(self.c, {"apply_url": ""}, w)
+        self.assertIsNone(self.items()[w]["apply_url"])
+        wl.save(self.c, {"apply_url": "http://example.com/apply"}, w)
+        for bad in ("javascript:alert(1)", "data:text/html,x", "ftp://example.com", "example.com/apply", "https://", "https://a b.com",
+                    "https://example.com/" + "x" * 500):
+            with self.subTest(link=bad), self.assertRaises(churning.ChurnError):
+                wl.save(self.c, {"apply_url": bad}, w)
+        self.assertEqual(self.items()[w]["apply_url"], "http://example.com/apply")
+
     def test_prior_planned_cards_can_count(self):
         for i, opened in enumerate(["2025-01-15", "2025-06-01", "2025-09-01", "2026-02-01"]):
             self.card(opened, product=f"Card {i}")
