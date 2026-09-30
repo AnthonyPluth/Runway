@@ -51,6 +51,7 @@ describe("churning helpers", () => {
     expect(sp(five24Line(f).next)).toBe("Under 5/24 on Jan 10, 2027");
     expect(sp(five24Line({ ...f, count: 3, under: true, under_on: null }).next)).toBe("2/24 on Oct 15, 2026");
     expect(five24Line(undefined).count).toBe("0/24");
+    expect(five24Line(undefined).next).toBe("No cards yet");
   });
 
   it("sorts, totals fees and lists what's left of a bank bonus", () => {

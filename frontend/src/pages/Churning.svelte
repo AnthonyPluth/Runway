@@ -99,6 +99,9 @@
     {#if people.length === 1}
       {@const f = five24Line(d.five24[people[0]])}
       {@render tile(`${people[0]}'s 5/24`, f.count, f.next, d.five24[people[0]] && !d.five24[people[0]].under ? "text-[var(--warning)]" : "")}
+    {:else if people.length === 0}
+      {@const f = five24Line(undefined)}
+      {@render tile("5/24", f.count, "Add cards you've opened in the last 24 months")}
     {:else}
       <Card.Root class="gap-2">
         <Card.Header><Card.Description>5/24</Card.Description></Card.Header>

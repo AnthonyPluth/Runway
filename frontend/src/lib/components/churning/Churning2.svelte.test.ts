@@ -320,6 +320,16 @@ describe("rewards", () => {
 });
 
 describe("the Churning page", () => {
+  it("shows the 5/24 tile with 0/24 and a helpful sub-line when there are no people", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [] }))) as never);
+    render(Churning, { sub: "" });
+    const value = await screen.findByText("0/24");
+    const tile = value.closest("[data-slot=card]");
+    expect(tile).toBeInTheDocument();
+    expect(within(tile!).getByText("5/24")).toBeInTheDocument();
+    expect(within(tile!).getByText("Add cards you've opened in the last 24 months")).toBeInTheDocument();
+  });
+
   it("keeps its data and place when you switch tabs (no reload)", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
     const { rerender } = render(Churning, { sub: "" });
