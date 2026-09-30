@@ -57,7 +57,7 @@ export const route = $state({ page: "overview", sub: "" as string });
 function readHash(): void {
   const [name, sub = ""] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
   const page = name === "settings" ? "setup" : name;
-  newPage();
+  if ((page || "overview") !== route.page) newPage();   // a tab inside the same page keeps its data and place
   route.page = page || "overview";
   route.sub = sub;
 }
