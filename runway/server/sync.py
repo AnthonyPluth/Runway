@@ -63,7 +63,7 @@ def run_sync() -> dict:
                     monitoring.report()
                 counts = categorize.categorize(conn, result["new"])
                 recurring.auto_match(conn)
-                try:   # new card transactions may be Amazon or Target orders the extension already sent
+                try:   # new card transactions may be Amazon, Target or Costco orders the extension already sent
                     retail.match_and_apply(conn)
                 except Exception:
                     monitoring.report()

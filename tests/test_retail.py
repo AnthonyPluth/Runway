@@ -527,6 +527,34 @@ class TargetTests(Base):
         self.assertEqual(self.row("t2")["is_split"], 0)                     # no items yet: left as it was
 
 
+class CostcoTests(Base):
+    RECEIPT = {"transactionBarcode": "21111500800662509301234", "transactionDate": "2025-09-30", "total": 41.98,
+               "subTotal": 40.0, "taxes": 1.98, "transactionType": "Sales", "documentType": "WarehouseReceipts",
+               "tenderArray": [{"tenderDescription": "VISA"}],
+               "itemArray": [
+                   {"itemNumber": "111", "itemDescription01": "KS PAPER TOWEL", "unit": 1, "amount": 24.0},
+                   {"itemNumber": "222", "itemDescription01": "ROTISSERIE CHICKEN", "unit": 1, "amount": 6.0},
+                   {"itemNumber": "333", "itemDescription01": "  /111", "unit": -1, "amount": -4.0},
+                   {"itemNumber": "444", "itemDescription01": "BANANAS", "unit": 1, "amount": 14.0}]}
+
+    def test_receipt_items_take_their_instant_savings_off(self):
+        r = retail.costco_history(self.c, {"data": {"receiptsWithCounts": {"receipts": [self.RECEIPT]}}})
+        self.assertEqual((r["read"], r["saved"]), (1, 1))
+        rows = {x["title"]: x["amount"] for x in self.c.execute("SELECT title, amount FROM retail_items")}
+        self.assertEqual(rows, {"KS PAPER TOWEL": 20.0, "ROTISSERIE CHICKEN": 6.0, "BANANAS": 14.0})
+        order = self.c.execute("SELECT * FROM retail_orders").fetchone()
+        self.assertEqual((order["retailer"], order["channel"], order["total"], order["details"]), ("costco", "store", 41.98, 1))
+
+    def test_an_error_reply_asks_to_sign_in(self):
+        with self.assertRaises(retail.RetailError) as cm:
+            retail.costco_history(self.c, {"errors": [{"message": "Unauthorized"}]})
+        self.assertEqual(cm.exception.code, "signin")
+
+    def test_statement_text(self):
+        self.assertTrue(retail.MERCHANT["costco"].search("COSTCO WHSE #0123"))
+        self.assertFalse(retail.MERCHANT["costco"].search("COSTCO ANYWHERE VISA PAYMENT"))
+
+
 class ExtensionApiTests(unittest.TestCase):
     """The extension's calls carry its key instead of a sign-in; everything else still needs the app's header."""
 
@@ -575,7 +603,7 @@ class ExtensionApiTests(unittest.TestCase):
         self.assertEqual((code, r["more"]), (200, False))
         self.assertEqual(self.req("POST", "/api/ext/finish", {"retailer": "target"}, ext)[0], 200)
         # What's still unmatched now, for the extension's popup (matches you make in Runway count straight away).
-        self.assertEqual(self.req("POST", "/api/ext/status", {}, ext), (200, {"unmatched": {"amazon": 0, "target": 0}}))
+        self.assertEqual(self.req("POST", "/api/ext/status", {}, ext), (200, {"unmatched": {"amazon": 0, "target": 0, "costco": 0}}))
         # The key only opens the extension's calls.
         self.assertEqual(self.req("POST", "/api/retail/token", headers=ext)[0], 403)
         self.req("POST", "/api/retail/token/remove", headers={"X-Runway": "1"})

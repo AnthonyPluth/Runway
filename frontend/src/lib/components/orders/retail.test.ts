@@ -8,6 +8,6 @@ describe("orderLabel", () => {
     expect(orderLabel({ retailer: "target", channel: "online" })).toBe("Target");
   });
   it("falls back to the retailer's own name", () => {
-    expect(orderLabel({ retailer: "costco", items: 0 })).toBe("costco");
+    expect(orderLabel({ retailer: "wayfair", items: 0 })).toBe("wayfair");
   });
 });
