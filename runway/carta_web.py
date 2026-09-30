@@ -65,7 +65,7 @@ def _links(data, found: set) -> None:
     elif isinstance(data, list):
         for v in data[:500]:
             _links(v, found)
-    elif isinstance(data, str) and len(data) < 400 and ("carta.com/" in data or data.startswith("/api/")):
+    elif isinstance(data, str) and len(data) < 400 and data.startswith(("http://", "https://", "/api/")):
         url = data if data.startswith("http") else urllib.parse.urljoin(START_URL, data)
         if carta_url(url) and FOLLOW.search(url) and not NEVER.search(url):
             found.add(url.split("#")[0])
