@@ -61,7 +61,24 @@ def scrub(text):
         return text
     text = _USERINFO.sub(r"\1[Filtered]@", text)
     text = _QUERY.sub(r"\1?[Filtered]", text)
+    text = _database_values(text)
     return _PLAID_TOKEN.sub("[Filtered]", text)
+
+
+def _database_values(text: str) -> str:
+    """A database error's text names the row it was writing: SQLAlchemy's "[parameters: ...]", and Postgres's "Failing row
+    contains (...)" and "Key (...)=(...) already exists". Blank the values and keep the rest (the SQL helps). Plain string
+    scans, a line at a time: a regex here could take quadratic time on text that repeats one of the markers."""
+    lines = text.split("\n")
+    for n, line in enumerate(lines):
+        if (i := line.find("[parameters: ")) != -1:
+            lines[n] = line[:i] + "[parameters: [Filtered]]"
+        elif (i := line.find("Failing row contains (")) != -1:
+            lines[n] = line[:i] + "Failing row contains ([Filtered])."
+        elif (i := line.find("Key (")) != -1 and (j := line.find(")=(", i)) != -1:
+            end = line.rfind(") ")   # before "already exists", "is not present in table ..." and the like
+            lines[n] = line[:j] + ")=([Filtered])" + (line[end + 1:] if end > j else "")
+    return "\n".join(lines)
 
 
 def _path_only(url: str | None) -> str | None:
@@ -430,14 +447,15 @@ def local_timezone() -> str | None:
     return None
 
 
-def cron_start(slug: str, schedule: str, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
-    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. Sentry creates
-    the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. When the zone can't be
-    told, the monitor isn't made here (its schedule would be off by hours): set it up in Sentry with the same slug."""
+def cron_start(slug: str, schedule: str | None, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
+    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. With a schedule,
+    Sentry creates the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. Without
+    one (the job isn't on a schedule here), or when the zone can't be told (the schedule would be off by hours), the
+    check-in carries no monitor_config: it goes to a monitor set up in Sentry with the same slug, and makes none."""
     if not (_enabled and _opts.get("crons")):
         return None
     from sentry_sdk.crons import capture_checkin
-    zone = local_timezone()
+    zone = local_timezone() if schedule else None
     config: Any = {"schedule": {"type": "crontab", "value": schedule}, "timezone": zone,
                    "checkin_margin": margin_minutes, "max_runtime": max_runtime_minutes} if zone else None
     check = {"slug": slug, "config": config, "started": time.monotonic()}

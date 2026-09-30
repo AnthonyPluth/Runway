@@ -15,6 +15,14 @@ poetry run pip install mypy types-python-dateutil && poetry run mypy   # type-ch
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
+To run the tests on Postgres as CI does (in parallel, where tests that share the database can trip over each other), start a throwaway one; Docker's default 64 MB of shared memory isn't enough for the schemas the tests make:
+
+```bash
+docker run -d --rm --name runway-test-pg --shm-size=1g -p 5432:5432 -e POSTGRES_USER=runway -e POSTGRES_PASSWORD=runway -e POSTGRES_DB=runway postgres:16
+DATABASE_URL=postgresql://runway:runway@127.0.0.1:5432/runway poetry run unittest-parallel -t . -s tests -j 4
+docker stop runway-test-pg
+```
+
 `make check` runs everything CI does before you push: ruff, mypy, the Python tests, and the web app's type-check, ESLint, tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## The web app

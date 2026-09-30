@@ -19,6 +19,12 @@ concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   review:
     # Dependabot's pull requests skip by their author, not by who pushed last (as dependabot-merge.yml checks).
@@ -56,7 +62,7 @@ jobs:
             gh api --paginate "repos/$REPO/pulls/$PR/comments" \
               --jq '.[] | "\n## \(.path):\(.line // .original_line) (\(.user.login), \(.created_at))\n\(.body)"'
           } > .claude-earlier-comments.md
-      - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
+      - uses: anthropics/claude-code-action@fd1c128679612beff4ca259c78021c506e8aa7a7   # v1.0.237
         if: steps.auth.outputs.ready == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

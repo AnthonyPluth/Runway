@@ -1,6 +1,10 @@
 """For tests that share one database with tests in other processes (on Postgres every test module uses the same schema
 unless it passes its own path, and CI runs the modules in parallel with unittest-parallel).
 
+A test that writes settings, or runs something that does (a sync, the AI categorizer, a request through the server),
+takes a database of its own with own_database(), so nothing it writes reaches another module's test: a test left
+last_sync_ok in the shared schema and failed another module's on 2026-09-30.
+
 The "Let assistants change churning" switch is one settings row: a test that sets it, or depends on it, holds
 mcp_switch() so another process doesn't flip it in the middle. Everything else a test makes, it should find and remove
 by its own names and ids, never by clearing a table.
@@ -10,6 +14,7 @@ import os
 import tempfile
 import uuid
 from contextlib import contextmanager
+from unittest import mock
 
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
 
@@ -47,3 +52,22 @@ def forget_oauth(conn, client_ids) -> None:
         conn.execute("DELETE FROM oauth_grants WHERE client_id=?", (cid,))
         conn.execute("DELETE FROM oauth_consents WHERE params LIKE ?", (f'%"{cid}"%',))
         conn.execute("DELETE FROM oauth_clients WHERE id=?", (cid,))
+
+
+def own_database(case, **env) -> str:
+    """In setUp (or a test): a database for this test alone, with db.session() pointed at it and RUNWAY_DATA (plus any
+    other environment variables given) set, all undone when the test is cleaned up. On Postgres its schema is named
+    after its path. Returns the path, for db.connect()."""
+    from runway import db
+    tmp = tempfile.TemporaryDirectory()
+    case.addCleanup(tmp.cleanup)
+    environ = mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, **env})
+    environ.start()
+    case.addCleanup(environ.stop)
+    path = os.path.join(tmp.name, "runway.db")
+    db.init(path)
+    opened = db.session
+    session = mock.patch.object(db, "session", lambda p=None: opened(p or path))
+    session.start()
+    case.addCleanup(session.stop)
+    return path

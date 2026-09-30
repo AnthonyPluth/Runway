@@ -20,6 +20,12 @@ concurrency:
 permissions:
   contents: read
 
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   python:
     name: Bandit and Semgrep

@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import tempfile
 import threading
 import unittest
 import urllib.request
@@ -13,6 +12,8 @@ import sentry_sdk
 from runway import categorize, db, monitoring, server, simplefin
 from runway.server import sync
 from runway.server.handler import _traced, trace_name
+
+from tests.shared import own_database
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
@@ -45,22 +46,6 @@ def start(env=None) -> Capture:
 
 
 class MonitoringTests(unittest.TestCase):
-    def own_db(self, **env):
-        """A database of this test's own, with db.session() pointed at it. On Postgres every module shares one schema
-        unless it names its own (by path), and CI runs modules in parallel: a sync here would otherwise write the
-        settings other modules' tests read (last_sync_ok, the SimpleFIN address, the AI key)."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        patched = mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, **env})
-        patched.start()
-        self.addCleanup(patched.stop)
-        path = os.path.join(tmp.name, "runway.db")
-        db.init(path)
-        opened = db.session
-        session = mock.patch.object(db, "session", lambda p=None: opened(p or path))
-        session.start()
-        self.addCleanup(session.stop)
-
     def tearDown(self):
         sentry_sdk.get_client().close()
         sentry_sdk.init(dsn=None)
@@ -105,6 +90,45 @@ class MonitoringTests(unittest.TestCase):
         self.assertNotIn("token=abc", exc["value"])
         self.assertTrue(all("vars" not in f for f in exc["stacktrace"]["frames"]))
         self.assertNotIn("1234.56", str(ev))
+
+    def test_database_errors_lose_the_row_they_were_writing(self):
+        import sqlalchemy as sa
+        engine = sa.create_engine("sqlite://")
+        with engine.begin() as c:
+            c.execute(sa.text("CREATE TABLE tx (id INTEGER PRIMARY KEY, payee TEXT, amount REAL)"))
+            c.execute(sa.text("INSERT INTO tx VALUES (1, 'WHOLE FOODS', 87.12)"))
+        transport = start({"SENTRY_DSN": DSN})
+        try:
+            with engine.begin() as c:
+                c.execute(sa.text("INSERT INTO tx VALUES (:id, :payee, :amount)"), {"id": 1, "payee": "WHOLE FOODS", "amount": 87.12})
+        except sa.exc.IntegrityError as e:
+            self.assertIn("WHOLE FOODS", str(e))   # what SQLAlchemy says, and the local log keeps
+            with mock.patch("traceback.print_exception"):
+                monitoring.report(e)
+        sentry_sdk.flush()
+        value = transport.events[0]["exception"]["values"][-1]["value"]
+        self.assertNotIn("WHOLE FOODS", value)
+        self.assertNotIn("87.12", value)
+        self.assertIn("[SQL: INSERT INTO tx VALUES", value)   # the query itself helps, and holds no data
+        self.assertIn("[parameters: [Filtered]]", value)
+        # Postgres's own details name the values too.
+        pg = ("(psycopg.errors.NotNullViolation) null value in column \"category\" violates not-null constraint\n"
+              "DETAIL:  Failing row contains (tx-9, 2026-09-01, -87.12, WHOLE FOODS, null).\n"
+              "[SQL: INSERT INTO transactions ...]\n[parameters: {'id': 'tx-9', 'amount': -87.12}]\n"
+              "(Background on this error at: https://sqlalche.me/e/20/gkpj)")
+        dup = "DETAIL:  Key (plaid_account_id)=(p-csp) already exists."
+        out = monitoring.scrub(pg) + monitoring.scrub(dup)
+        for private in ("WHOLE FOODS", "87.12", "tx-9", "p-csp"):
+            self.assertNotIn(private, out)
+        self.assertIn("Failing row contains ([Filtered])", out)
+        self.assertIn("Key (plaid_account_id)=([Filtered]) already exists", out)
+        self.assertIn("(Background on this error at: https://sqlalche.me/e/20/gkpj)", out)
+        # Text that repeats a marker is scrubbed in linear time (a regex could take minutes on it).
+        import time
+        for marker in ("[parameters: ", "Failing row contains (", "Key (", "Key ()=("):
+            started = time.monotonic()
+            monitoring.scrub(marker * 50_000)
+            self.assertLess(time.monotonic() - started, 1, marker)
 
     def test_request_details_are_trimmed(self):
         ev = monitoring._before_send({"request": {"method": "POST", "url": "https://runway.example/api/sync?x=1",
@@ -171,7 +195,7 @@ class MonitoringTests(unittest.TestCase):
             self.assertTrue(_traced(path), path)
 
     def test_a_request_is_traced_without_its_query_or_values(self):
-        self.own_db()
+        own_database(self)
         transport = start()
         httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -228,7 +252,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
 
     def test_a_bank_sync_checks_in_and_one_that_cant_start_doesnt(self):
-        self.own_db(TZ="America/Chicago")
+        own_database(self, TZ="America/Chicago")
         transport = start({**ALL_ON, "TZ": "America/Chicago"})
         with db.session() as conn:
             db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
@@ -243,13 +267,18 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
                 mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
             sync.run_sync()
+        # With automatic syncing off, a manual sync checks in without a schedule: it doesn't create a daily monitor.
+        with mock.patch.object(sync, "AUTO_SYNC", False), mock.patch("builtins.print"), \
+                mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}):
+            sync.run_sync()
         with db.session() as conn:   # nothing connected: nothing to check in
             db.set_setting(conn, "simplefin_access_url", None)
         with self.assertRaises(sync.ApiError):
             sync.run_sync()
         sentry_sdk.flush()
         checkins = transport.of("check_in")
-        self.assertEqual([c["status"] for c in checkins], ["in_progress", "ok", "in_progress", "error"])
+        self.assertEqual([c["status"] for c in checkins], ["in_progress", "ok", "in_progress", "error", "in_progress", "ok"])
+        self.assertTrue(all("monitor_config" not in c for c in checkins[4:]))
         self.assertEqual({c["monitor_slug"] for c in checkins}, {"runway-bank-sync"})
         self.assertEqual(checkins[0]["monitor_config"]["schedule"], {"type": "crontab", "value": f"0 {sync.DAILY_SYNC_HOUR} * * *"})
         self.assertEqual(checkins[0]["monitor_config"]["timezone"], "America/Chicago")
@@ -295,7 +324,7 @@ class MonitoringTests(unittest.TestCase):
                  "usage": {"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128}}
         resp = mock.MagicMock()
         resp.__enter__.return_value = io.BytesIO(json.dumps(reply).encode())
-        self.own_db()
+        own_database(self)
         with db.session() as conn:
             db.set_setting(conn, "openrouter_api_key", "sk-or-key")
             db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
