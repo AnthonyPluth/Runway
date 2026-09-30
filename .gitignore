@@ -21,6 +21,6 @@ venv/
 frontend/node_modules/
 runway/static/app/
 
-# test coverage data (CI turns it into docs/badges/coverage.svg)
+# test coverage data (CI turns it into the Pages badge JSON)
 .coverage
 coverage.json
