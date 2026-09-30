@@ -18,6 +18,7 @@ export interface RetailOrder {
 export interface OrderSummary { order_id?: string; id?: string; retailer: string; channel?: string | null; items?: number }
 
 export const STORES: Record<string, string> = { amazon: "Amazon", target: "Target", costco: "Costco" };
+export const STORE_SITES: Record<string, string> = { amazon: "amazon.com", target: "target.com", costco: "costco.com" };
 export const ITEM_SOURCES: Record<string, string> = { manual: "you picked", memory: "as before", ai: "AI", department: "store's department" };
 
 /** "Amazon · 3 items", "Target in store · 1 item" */
