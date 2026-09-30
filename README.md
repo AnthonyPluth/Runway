@@ -31,6 +31,7 @@
 - [Screenshots](#screenshots)
 - [Quick start](#quick-start)
 - [On your phone](#on-your-phone)
+- [AI assistants (MCP)](#ai-assistants-mcp)
 - [Running on a server](#running-on-a-server)
 - [Configuration](#configuration)
 - [Backups, migration and Postgres](#backups-migration-and-postgres)
@@ -211,6 +212,26 @@ Notifications need Runway to be served over `https://`.
 Notifications are sent with Web Push, signed (VAPID) and end-to-end encrypted (RFC 8291) by
 [pywebpush](https://github.com/web-push-libs/pywebpush). They go straight to your browser's push service (Apple's,
 Google's or Mozilla's), so no third-party notification service or account is involved.
+
+## AI assistants (MCP)
+
+Runway includes a [Model Context Protocol](https://modelcontextprotocol.io) server, so an assistant like Claude can read your
+accounts, transactions, budget, reports, net worth and credit-card churning (cards, benefits, upcoming fees) and answer
+questions about them. It is **read-only**: it can't change anything, and it never sees your bank connections, settings,
+API keys or backups.
+
+1. In Runway, open **Settings → Connections → AI assistants (MCP)** and choose **Make a key**. It's shown once; a new key
+   replaces the old one, and Remove switches the server off.
+2. Add the server to your assistant. It runs on your computer from a checkout of Runway (Python 3.14, standard library only) and
+   talks to Runway over HTTP. For Claude Code:
+
+```bash
+claude mcp add runway -e RUNWAY_URL=https://runway.example.com -e RUNWAY_MCP_KEY=rwm_... -- python -m runway.mcp_server
+```
+
+The key opens only `/api/mcp/<page>`, and only for the pages listed in `runway/mcp_access.py` (GET requests, no writes). Like
+the rest of Runway's API it needs your Runway to be reachable from the computer running the assistant, so on the internet
+put it behind HTTPS (see [Running on a server](#running-on-a-server)).
 
 ## Running on a server
 

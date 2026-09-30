@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlalchemy.exc
 from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, finnhub, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, categories, db, finnhub, mcp_access, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
 from .. import settings_keys as sk
 from . import sync
 from ..models import PlaidItem
@@ -268,6 +268,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"Runway doesn't recognise this address. Add it to RUNWAY_ALLOWED_HOSTS.", "text/plain")
         if url.path.startswith("/api/ext/"):   # the browser extension: its own key instead of a sign-in
             return self._extension(method, url.path)
+        if url.path.startswith("/api/mcp/"):   # the MCP server: its own read-only key instead of a sign-in
+            return self._mcp(method, url)
         if method != "GET" and not self._same_site():
             return self._json(403, {"error": "forbidden"})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
@@ -542,6 +544,35 @@ class Handler(BaseHTTPRequestHandler):
             if "locked" in str(e):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
             return self._error(e)
+
+    def _mcp(self, method: str, url) -> None:
+        """A read-only call from Runway's MCP server (runway/mcp_server.py): GET /api/mcp/<page> answers like the web
+        app's /api/<page>, for the pages in mcp_access.READABLE only. It carries the key made under Settings →
+        Connections (a bearer token, which a web page can't send on your behalf)."""
+        with db.session() as conn:
+            ok = mcp_access.check_token(conn, self.headers.get("Authorization"))
+        if not ok:
+            self.close_connection = True
+            return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Connections."})
+        path = "/api/" + url.path[len("/api/mcp/"):]
+        if method != "GET" or path not in mcp_access.READABLE:
+            return self._json(404, {"error": "Not found"})
+        fn = next(fn for m, pattern, fn in ROUTES if m == "GET" and pattern == path)
+        _current.user = None
+        try:
+            with db.session() as conn:
+                result = fn(conn, urllib.parse.parse_qs(url.query), {})
+            return self._json(200, result)
+        except ApiError as e:
+            return self._json(e.status, {"error": str(e)})
+        except sqlalchemy.exc.OperationalError as e:
+            if "locked" in str(e):
+                return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
+            return self._error(e)
+        except (ValueError, TypeError, KeyError) as e:
+            ref = request_ref()
+            print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
+            return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
 
     def _static(self, path: str) -> None:
         if path == "/next" or path.startswith("/next/"):   # where the web app lived while it was being rebuilt
