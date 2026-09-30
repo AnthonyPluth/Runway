@@ -171,6 +171,8 @@ class Handler(BaseHTTPRequestHandler):
             return oidc.session_user(conn, self._cookie("runway_session"))
 
     def _redirect(self, location: str, cookies: list[str] | None = None) -> None:
+        if "\r" in location or "\n" in location:   # never let a header line be split
+            location = "/"
         self.send_response(302)
         self.send_header("Location", location)
         for ck in cookies or []:
@@ -604,7 +606,7 @@ class Handler(BaseHTTPRequestHandler):
         full = None
         for base in (APP_DIR, STATIC):
             cand = os.path.realpath(os.path.join(base, rel))
-            if rel and os.path.commonpath([cand, base]) == base and os.path.isfile(cand):
+            if rel and cand.startswith(base + os.sep) and os.path.isfile(cand):
                 full = cand
                 break
         if full is None or full == APP_INDEX:
