@@ -75,7 +75,7 @@ describe("churning 2 helpers", () => {
     const c = (x: Partial<ChurnCard>) => ({ plan: "undecided", plan_target: null, plan_due: null, plan_done_on: null, ...x }) as ChurnCard;
     expect(planLine(c({}))).toBe("");
     expect(planLine(c({ plan: "keep" }))).toBe("Keeping it");
-    expect(sp(planLine(c({ plan: "downgrade", plan_target: "Freedom", plan_due: "2026-10-20" })))).toBe("Downgrade to Freedom by Oct 20");
+    expect(sp(planLine(c({ plan: "product_change", plan_target: "Freedom", plan_due: "2026-10-20" })))).toBe("Product change to Freedom by Oct 20");
     expect(sp(planLine(c({ plan: "close", plan_done_on: "2026-09-01" })))).toBe("Done Sep 1, 2026");
     expect(benefitSummary({ benefits: [], benefits_value: 0, net_fee: 95 })).toBe("");
     const two = [{}, {}] as Benefit[];

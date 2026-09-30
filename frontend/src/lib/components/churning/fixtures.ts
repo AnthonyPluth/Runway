@@ -42,7 +42,7 @@ export const churning = (over: Partial<Churning> = {}): Churning => ({
   ],
   values_as_of: "2026-06-01", values_note: "Estimates, not official values.",
   issuers: [{ key: "chase", name: "Chase", rule: "5/24" }, { key: "capital_one", name: "Capital One", rule: "" }],
-  plans: ["undecided", "keep", "downgrade", "close", "product_change"],
+  plans: ["undecided", "keep", "close", "product_change"],
   categories: [{ name: "Travel", parent: null }, { name: "Restaurants", parent: null }, { name: "Hotels", parent: "Travel" }],
   base_marker: "*",
   benefit_presets: [{ group: "Lounges & airline", key: "lounge", name: "Lounge access", kind: "access", period: "annual", basis: "calendar" }],
