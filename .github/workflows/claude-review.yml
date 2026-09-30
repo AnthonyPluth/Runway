@@ -58,6 +58,9 @@ jobs:
       - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
         id: review
         if: steps.auth.outputs.ready == 'true'
+        # Its own limit, under the job's 20 minutes: a step that times out fails (the job would be cancelled), so the
+        # post step below still runs and can say the review didn't finish.
+        timeout-minutes: 17
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
