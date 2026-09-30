@@ -14,6 +14,7 @@
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
@@ -138,22 +139,12 @@
       </details>
     </section>
 
-    <div class="mb-8 grid grid-cols-2 gap-3 md:grid-cols-3">
-      <div class={cn("tile", lowBad && "ring-1 ring-destructive")}>
-        <div class="text-[13px] text-muted-foreground">{lowBad ? "Goes negative" : "Lowest"} · {low ? fmtDow(low.date) : "—"}</div>
-        <div class={cn("mt-0.5 text-[22px] font-semibold tabular-nums", lowBad && "text-destructive")}>{low ? fmt(low.balance) : "—"}</div>
-      </div>
-      <div class="tile">
-        <div class="text-[13px] text-muted-foreground">In {span(days)}</div>
-        <div class="mt-0.5 text-[22px] font-semibold tabular-nums">{fmt(end)}</div>
-        <div class={cn("text-[13px] tabular-nums", end - cashNow >= 0 ? "text-emerald-400" : "text-destructive")}>{end - cashNow >= 0 ? "+" : "−"}{fmt(Math.abs(end - cashNow))}</div>
-      </div>
-      <div class="tile max-md:col-span-2">
-        <div class="text-[13px] text-muted-foreground">Owed on cards</div>
-        <div class="mt-0.5 text-[22px] font-semibold tabular-nums">{fmt(owed)}</div>
-        <div class="text-[13px] text-muted-foreground">{plural(allCards.length, "card")}{nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}</div>
-      </div>
-    </div>
+    <StatStrip class="mb-8" items={[
+      { label: `${lowBad ? "Goes negative" : "Lowest"} · ${low ? fmtDow(low.date) : "—"}`, value: low ? fmt(low.balance) : "—", tone: lowBad ? "bad" : undefined },
+      { label: `In ${span(days)}`, value: fmt(end), sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`,
+        subTone: end - cashNow >= 0 ? "good" : "bad" },
+      { label: "Owed on cards", value: fmt(owed), sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}` },
+    ]} />
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
