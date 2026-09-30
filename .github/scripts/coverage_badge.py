@@ -1,12 +1,9 @@
-"""Draw a README coverage badge:  python coverage_badge.py REPORT.json badge.svg [label]
+"""Write a shields.io endpoint badge:  python coverage_badge.py REPORT.json badge.json [label]
 
-REPORT is coverage.py's JSON report (the backend) or Vitest's coverage-summary.json (the frontend). The repository is
-private, so a badge service can't read the number; the badge is an SVG in the repository instead, redrawn by CI on
-main when the whole-number percentage changes. Prints the percentage."""
+REPORT is coverage.py's JSON report (the backend) or Vitest's coverage-summary.json (the frontend). CI publishes the
+result on GitHub Pages, and the README's badges are shields.io endpoint badges that read it. Prints the percentage."""
 import json
 import sys
-
-CHAR = 6.6   # average width of a character at 11px Verdana, near enough for these few characters
 
 
 def color(pct: int) -> str:
@@ -20,21 +17,9 @@ def percent(report: dict) -> int:
     return int(report["total"]["lines"]["pct"])   # Vitest (istanbul's json-summary)
 
 
-def badge(pct: int, label: str = "coverage") -> str:
-    LABEL = label
-    value = f"{pct}%"
-    lw, vw = round(len(LABEL) * CHAR + 12), round(len(value) * CHAR + 12)
-    w = lw + vw
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="20" role="img" aria-label="{LABEL}: {value}">
-<title>{LABEL}: {value}</title>
-<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
-<clipPath id="r"><rect width="{w}" height="20" rx="3" fill="#fff"/></clipPath>
-<g clip-path="url(#r)"><rect width="{lw}" height="20" fill="#555"/><rect x="{lw}" width="{vw}" height="20" fill="{color(pct)}"/><rect width="{w}" height="20" fill="url(#s)"/></g>
-<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-<text x="{lw / 2}" y="15" fill="#010101" fill-opacity=".3">{LABEL}</text><text x="{lw / 2}" y="14">{LABEL}</text>
-<text x="{lw + vw / 2}" y="15" fill="#010101" fill-opacity=".3">{value}</text><text x="{lw + vw / 2}" y="14">{value}</text>
-</g></svg>
-"""
+def endpoint(pct: int, label: str = "coverage") -> dict:
+    """The JSON shields.io's endpoint badge reads."""
+    return {"schemaVersion": 1, "label": label, "message": f"{pct}%", "color": color(pct)}
 
 
 if __name__ == "__main__":
@@ -43,5 +28,6 @@ if __name__ == "__main__":
     with open(report) as f:
         pct = percent(json.load(f))
     with open(out, "w") as f:
-        f.write(badge(pct, label))
+        json.dump(endpoint(pct, label), f)
+        f.write("\n")
     print(pct)
