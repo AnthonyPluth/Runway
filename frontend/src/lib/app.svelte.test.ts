@@ -41,6 +41,11 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "budget", sub: "recurring" });
   });
 
+  it("opens #networth/retirement as the Retirement tab of Net worth", async () => {
+    await go("#networth/retirement");
+    expect(route).toMatchObject({ page: "networth", sub: "retirement" });
+  });
+
   it("ignores a query string, which belongs to the page's filters", async () => {
     await go("#transactions?q=rent");
     expect(route).toMatchObject({ page: "transactions", sub: "" });
