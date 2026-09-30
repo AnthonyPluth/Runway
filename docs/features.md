@@ -10,11 +10,13 @@ Settings has eight tabs: **Accounts**, **Bank connections** (SimpleFIN and Plaid
 
 On the Overview page.
 
-- **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain language ("Checking stays above $2,084 for the next 120 days").
+- **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain language ("Checking stays above $2,084 for the next 120 days"), and a line under it saying what the forecast counts ("Includes 7 paychecks and bills and 2 card payments (1 estimated). Everyday spending isn’t included").
+- **Forecast settings:** click the account name above the balance to choose the account, turn on **everyday spending** (the account’s recent card swipes, cash and other non-recurring spending, spread evenly over each day; it shows what that comes to a day) and set the default length. The account can also be chosen with “Use for the forecast” in Settings → Accounts, and everyday spending turned on there per account.
 - **Credit cards paid the way you pay them:** each card's statement balance comes out of checking on its due date. Statement balances, closing dates, due dates and minimum payments come straight from the card issuer through Plaid (Liabilities), so there's nothing to set up by hand. You can still correct a statement figure.
 - **Future statements** are estimated from each card's average spending over its last three statements.
 - **Business days:** a payment due on a weekend or bank holiday lands on the next business day, and a paycheck on the business day before (Federal Reserve holiday calendar).
-- **One-off edits:** click any upcoming amount to change it for that date only.
+- **One-off edits:** click any upcoming amount (dotted underline) to change it for that date only; a recurring item’s ↻ opens Bills & income to change every one.
+- **Warnings link to their fix:** a card that isn’t linked, has no paying account or is missing a statement opens the Settings tab where that’s put right.
 - **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions.
 
 ## Bank connections
@@ -31,7 +33,8 @@ On Budget → Bills & income.
 
 - Paychecks, mortgage, bills and subscriptions: weekly, every two weeks, twice a month, monthly, quarterly, twice a year, yearly, or on specific dates (property tax on April 15 and October 15, say).
 - Transactions are **matched automatically** to their recurring item, and Runway **flags payments that didn't happen**.
-- Suggestions for recurring items it spots in your history.
+- Adding one asks for a name, money out or money in (a bill or a paycheck), a positive amount, how often and the next date (today unless you change it); the account, the amount to forecast (the fixed amount, the last payment or the average of the last three) and the merchant text to match are under More options.
+- Suggestions for recurring items it spots in your history. Add fills the form so you can adjust it first; Not recurring hides a suggestion for good.
 
 ## Transactions and categorization
 
@@ -62,7 +65,7 @@ On Net worth → Investments.
 
 On Net worth → Retirement.
 
-- A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, inflation, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** goes back to Runway's figures.
+- A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** (after a confirmation) goes back to Runway's figures. Until you enter your own dates the results are marked as a sample, and with nothing invested yet the tab points you to Investments instead. It plans from your investments only, in today's dollars and before tax.
 
 ## Net worth and equity
 
@@ -86,5 +89,5 @@ Credit cards and bank accounts opened for their sign-up bonuses, for you and you
 - **A setup checklist** for new users (connect a bank, pick your main account, add paychecks and bills, set budgets).
 - A dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and it **installs as an app** on your iPhone's Home Screen. See [Deployment](deployment.md#on-your-phone).
 - **Push notifications** (Settings → Notifications) on your phone or computer: a card payment coming up, the forecast getting low, a recurring payment that didn't show up, a large charge, syncing that keeps failing, or, for Churning, an annual fee or sign-up bonus deadline coming up, a card you planned to downgrade or close, a credit about to reset, or a card you planned that you can apply for now. Each alert is sent once.
-- **Backups** as a single file, restorable into either database (Settings → Advanced, or the command line). See [Deployment](deployment.md#backups-migration-and-postgres).
+- **Backups** as a single file, restorable into either database (Settings → Advanced, or the command line). Settings shows what a backup holds before you restore it, and keeps a copy of what it replaces in the data directory. See [Deployment](deployment.md#backups-migration-and-postgres).
 - **AI assistants** can read your data through Runway's [MCP endpoint](mcp.md) once you approve them (Settings → Advanced lists and revokes them), and, if you allow it, make some changes.

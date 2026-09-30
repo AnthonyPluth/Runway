@@ -73,11 +73,11 @@ describe("TxTable", () => {
       expect(tick("Bravo")).toBeChecked();
     });
 
-    it("selects and clears everything with the header checkbox and Clear", async () => {
+    it("selects and clears everything with the header checkbox and Clear selection", async () => {
       setup();
       await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
       expect(screen.getByText("4 selected")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+      await userEvent.click(screen.getByRole("button", { name: "Clear selection" }));
       expect(screen.queryByText("4 selected")).not.toBeInTheDocument();
     });
 
@@ -89,7 +89,10 @@ describe("TxTable", () => {
   });
 
   describe("changing many at once", () => {
-    beforeEach(() => { vi.mocked(api).mockResolvedValue({ updated: 2 }); });   // (braces: see pickers test)
+    const was = [{ id: "a", category: "Coffee", category_source: "ai", confidence: 0.8, needs_review: 1, payee: "Alpha", is_split: 0 }];
+    beforeEach(() => { vi.mocked(api).mockResolvedValue({ updated: 2, was }); });   // (braces: see pickers test)
+    // The toast a change leaves behind: its message, and the Undo that goes with it.
+    const undoToast = () => vi.mocked(toast).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => Promise<void> } }];
 
     it("sets a category for the selected transactions", async () => {
       const p = setup();
@@ -97,8 +100,91 @@ describe("TxTable", () => {
       await userEvent.click(tick("Bravo"));
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a", "b"], category: "Groceries" } });
-      expect(toast.success).toHaveBeenCalledWith("Set to Groceries · 2 transactions");
+      expect(undoToast()[0]).toBe("Set to Groceries · 2 transactions");
+      expect(undoToast()[1].action.label).toBe("Undo");
       expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it("empties the category and name boxes and the selection once it's done", async () => {
+      setup();
+      await userEvent.click(tick("Alpha"));
+      await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "Acme");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      expect(screen.queryByRole("region", { name: "Change the selected transactions" })).not.toBeInTheDocument();
+      await userEvent.click(tick("Bravo"));
+      expect(screen.getByRole("textbox", { name: "New merchant name" })).toHaveValue("");
+      expect(screen.getByRole("combobox", { name: "Category for the selected transactions" })).toHaveValue("");
+    });
+
+    it("undoes with what each transaction was, which the server sent back", async () => {
+      const p = setup();
+      await userEvent.click(tick("Alpha"));
+      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      vi.mocked(api).mockClear();
+      await undoToast()[1].action.onClick();
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: was } });
+      expect(toast).toHaveBeenLastCalledWith("Undone", undefined);
+      expect(p.onchanged).toHaveBeenCalledTimes(2);   // once after the change, once after the undo
+    });
+
+    it("says so when the undo fails", async () => {
+      setup();
+      await userEvent.click(tick("Alpha"));
+      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      vi.mocked(api).mockRejectedValue(new Error("Gone"));
+      await undoToast()[1].action.onClick();
+      expect(toast.error).toHaveBeenCalledWith("Gone");
+    });
+
+    it("marks the bar as an editor while something is selected, so a background reload leaves it alone", async () => {
+      setup();
+      await userEvent.click(tick("Alpha"));
+      expect(screen.getByRole("region", { name: "Change the selected transactions" })).toHaveAttribute("data-editor");
+    });
+
+    describe("asking first", () => {
+      const many = Array.from({ length: 12 }, (_, i) => tx({ id: `m${i}`, posted: "2026-03-10", amount: -1, payee: `Merchant ${i}` }));
+      const pickAll = async (n: number) => {
+        setup({ items: many, total: many.length });
+        for (let i = 0; i < n; i++) await userEvent.click(tick(`Merchant ${i}`));
+      };
+
+      it("asks with the count at ten or more, and only then changes them", async () => {
+        await pickAll(10);
+        await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        const dialog = await screen.findByRole("dialog", { name: "Set Groceries on 10 transactions?" });
+        expect(api).not.toHaveBeenCalled();
+        await userEvent.click(within(dialog).getByRole("button", { name: "Set category" }));
+        await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk",
+          { method: "POST", body: { ids: many.slice(0, 10).map((t) => t.id), category: "Groceries" } }));
+        expect(undoToast()[0]).toBe("Set to Groceries · 2 transactions");
+      });
+
+      it("leaves everything as it was when you cancel", async () => {
+        await pickAll(11);
+        await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
+        expect(api).not.toHaveBeenCalled();
+        expect(screen.getByText("11 selected")).toBeInTheDocument();
+        expect(screen.getByRole("combobox", { name: "Category for the selected transactions" })).toHaveValue("");
+      });
+
+      it("asks before a rename and before marking reviewed", async () => {
+        await pickAll(12);
+        await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "Acme");
+        await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+        await userEvent.click(within(await screen.findByRole("dialog", { name: "Rename 12 transactions to Acme?" })).getByRole("button", { name: "Cancel" }));
+        await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+        expect(await screen.findByRole("dialog", { name: "Mark 12 transactions reviewed?" })).toBeInTheDocument();
+        expect(api).not.toHaveBeenCalled();
+      });
+
+      it("doesn't ask for fewer than ten", async () => {
+        await pickAll(9);
+        await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+        await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", expect.objectContaining({ method: "POST" })));
+      });
     });
 
     it("renames the merchant on Enter or with the button, but not to nothing", async () => {
@@ -108,7 +194,7 @@ describe("TxTable", () => {
       expect(api).not.toHaveBeenCalled();
       await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "  Acme {Enter}");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], payee: "Acme" } });
-      expect(toast.success).toHaveBeenCalledWith("Renamed to Acme · 2 transactions");
+      expect(undoToast()[0]).toBe("Renamed to Acme · 2 transactions");
     });
 
     it("marks them reviewed", async () => {

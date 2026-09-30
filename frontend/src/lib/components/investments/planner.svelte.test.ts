@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The retirement planner form and its chart. The projection maths has its own tests (planner.test.ts); these check
 // what the page shows from it and what it saves.
-import { render, screen, waitFor, within } from "@testing-library/svelte";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -39,10 +39,38 @@ describe("RetirementPlanner", () => {
     expect(screen.getByRole("img", { name: /Projected investments by age/ })).toBeInTheDocument();
   });
 
-  it("says when it starts from Runway's own figures", () => {
+  it("says what the figures are based on, and that it isn't advice", () => {
+    setup();
+    expect(screen.getByText(/Based on your \$400,000 in investments today\./)).toHaveTextContent(/taxes aren't modeled\. Not financial advice\./);
+  });
+
+  it("marks the results as a sample while it starts from Runway's own figures", () => {
     setup(data({ is_default: true }));
-    expect(screen.getByText(/Starting from Runway's figures/)).toBeInTheDocument();
+    expect(screen.getByText("Sample · based on default assumptions")).toBeInTheDocument();
+    expect(screen.getByText(/Enter\s+your birth year and retirement age to make it yours/)).toBeInTheDocument();
+    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
     expect(screen.queryByRole("button", { name: /Start over/ })).not.toBeInTheDocument();
+  });
+
+  it("colours the result once the plan is your own", () => {
+    setup();
+    expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^\d+%$/).className).not.toContain("text-muted-foreground");
+  });
+
+  it("shows an empty state, not a projection, with nothing invested and no plan", () => {
+    setup(data({ is_default: true, current: 0 }));
+    expect(screen.getByText("Nothing to plan from yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#networth/investments");
+    expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Projected/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Born in")).not.toBeInTheDocument();
+  });
+
+  it("still plans with nothing invested once you've saved a plan of your own", () => {
+    setup(data({ current: 0 }));
+    expect(screen.queryByText("Nothing to plan from yet")).not.toBeInTheDocument();
+    expect(screen.getByText("Chance your money lasts")).toBeInTheDocument();
   });
 
   it("warns that the money runs out when the plan can't last", () => {
@@ -75,7 +103,7 @@ describe("RetirementPlanner", () => {
 
     it("stores percentages as fractions", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      setup();
+      setup(data({ assets: [{ key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0 }] }));
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const infl = screen.getByRole("spinbutton", { name: "Inflation" });
       expect(infl).toHaveValue(2.5);
@@ -83,6 +111,40 @@ describe("RetirementPlanner", () => {
       await user.type(infl, "3");
       await vi.advanceTimersByTimeAsync(800);
       expect((vi.mocked(api).mock.lastCall![1] as { body: { plan: Plan } }).body.plan.inflation).toBeCloseTo(0.03);
+    });
+
+    it("keeps inflation out of the assumptions, next to the homes it applies to", () => {
+      setup(data({ assets: [{ key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0 }] }));
+      expect(screen.queryByRole("spinbutton", { name: "Inflation" })).toBeInTheDocument();
+      expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("section")).toHaveTextContent("Homes & other assets");
+      cleanup();
+      setup();   // no homes to sell, so nothing for inflation to do
+      expect(screen.queryByRole("spinbutton", { name: "Inflation" })).not.toBeInTheDocument();
+    });
+
+    it("saves a pending change when you leave before the pause is up", async () => {
+      const { unmount } = setup();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.type(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" }), "5");
+      expect(api).not.toHaveBeenCalled();
+      unmount();
+      expect(api).toHaveBeenCalledOnce();
+      expect((vi.mocked(api).mock.calls[0][1] as { body: { plan: Plan } }).body.plan.spending).toBe(600005);
+    });
+
+    it("doesn't save on leaving when nothing changed", () => {
+      setup().unmount();
+      expect(api).not.toHaveBeenCalled();
+    });
+
+    it("confirms a save with a brief Saved ✓", async () => {
+      setup();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.type(screen.getByLabelText("Name"), "x");
+      await vi.advanceTimersByTimeAsync(800);
+      expect(await screen.findByRole("status")).toHaveTextContent("Saved ✓");
+      await vi.advanceTimersByTimeAsync(2500);
+      await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
     });
 
     it("shows why when the server refuses the plan", async () => {
@@ -178,12 +240,21 @@ describe("RetirementPlanner", () => {
     });
   });
 
+  it("asks before starting over, and doesn't clear anything on the first click", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
+    expect(screen.getByRole("button", { name: "Start over? This clears everything you entered here." })).toBeInTheDocument();
+    expect(api).not.toHaveBeenCalled();
+    expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(60000);
+  });
+
   it("starts over from Runway's figures, saving that the plan is the default again", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(api).toHaveBeenCalledWith("/api/investments/plan", { method: "POST", body: { plan: null } });
     await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));   // year - 40
-    expect(screen.getByText(/Starting from Runway's figures/)).toBeInTheDocument();
+    expect(screen.getByText("Sample · based on default assumptions")).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(55000);
   });
 
@@ -191,6 +262,7 @@ describe("RetirementPlanner", () => {
     vi.mocked(api).mockRejectedValue(new Error("Locked"));
     setup();
     await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Locked");
     expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(60000);
   });
@@ -205,6 +277,16 @@ describe("PlannerChart", () => {
     expect(container.querySelectorAll("svg path").length).toBeGreaterThanOrEqual(4);   // band, high, low, median
     expect(screen.getByText("retirement")).toBeInTheDocument();
     expect(screen.getByRole("img")).toHaveAttribute("aria-label", expect.stringMatching(/median \$[\d,]+ at the end/));
+  });
+
+  it("gives an all-zero plan a $0 to $1k axis, with no repeated labels", () => {
+    const zero = project(plan({ people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 0 }], spending: 0 }), 0, 2026, [], 20);
+    const { container } = render(PlannerChart, { p: zero, names: ["You"] });
+    const labels = [...container.querySelectorAll("svg text")].map((t) => t.textContent).filter((t) => t?.startsWith("$"));
+    expect(labels.length).toBeGreaterThan(1);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).toContain("$0");
+    expect(labels).toContain("$1k");
   });
 
   it("labels the axis with the first person's age", () => {

@@ -125,3 +125,12 @@ def api_tx_recurring(conn, _q, body, tx_id):
 
 def api_recurring_suggestions(conn, _q, _b):
     return forecast.suggest_recurring(conn, date.today())
+
+
+def api_recurring_suggestion_dismiss(conn, _q, body):
+    """Mark a suggestion as not recurring, so it isn't offered again."""
+    key = body.get("key")
+    if not isinstance(key, str) or not key.strip() or len(key) > 300:
+        raise ApiError("Unknown suggestion")
+    forecast.dismiss_suggestion(conn, key)
+    return {"ok": True}

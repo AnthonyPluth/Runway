@@ -1,17 +1,19 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { fmt0 } from "$lib/format";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
+  import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
   import { project, saleProceeds } from "./planner";
   import type { Plan, PlanData } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
-  // Everything is in today's dollars. Changes are kept a moment after you stop typing.
+  // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave).
   let { data }: { data: PlanData } = $props();
 
   const copy = (p: Plan): Plan => JSON.parse(JSON.stringify(p));
@@ -22,19 +24,25 @@
   let problem = $state<string | null>(null);
   const year = $derived(data.year);
 
-  // Keep the plan (a moment after the last change). A plan the server refuses stays on screen with the reason.
-  let timer: ReturnType<typeof setTimeout>;
-  function keep() {
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      try {
-        await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
-        problem = null; isDefault = false;
-      } catch (err) { problem = (err as Error).message; }
-    }, 700);
+  // Keep the plan (a moment after the last change, or as you leave, so a quick tab switch doesn't drop it). A plan the
+  // server refuses stays on screen with the reason; one it takes shows "Saved ✓" for a moment.
+  let timer: ReturnType<typeof setTimeout>, savedTimer: ReturnType<typeof setTimeout>;
+  let dirty = false, saved = $state(false);
+  async function save() {
+    clearTimeout(timer); dirty = false;
+    try {
+      await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
+      problem = null; isDefault = false; saved = true;
+      clearTimeout(savedTimer); savedTimer = setTimeout(() => (saved = false), 1600);
+    } catch (err) { problem = (err as Error).message; }
   }
+  function keep() {
+    dirty = true; clearTimeout(timer);
+    timer = setTimeout(save, 700);
+  }
+  onDestroy(() => { clearTimeout(savedTimer); if (dirty) save(); });
   async function startOver() {
-    clearTimeout(timer);
+    clearTimeout(timer); dirty = false;
     try { await api("/api/investments/plan", { method: "POST", body: { plan: null } }); }
     catch (err) { problem = (err as Error).message; return; }
     plan = copy({ ...data.plan, ...defaults() });
@@ -64,7 +72,11 @@
     return project(p, data.current, year, data.assets);
   });
   const names = $derived(plan.people.map((p, i) => p.name || (i ? "Partner" : "You")));
-  const successCls = (s: number) => (s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
+  // Nothing invested and no plan of your own yet: nothing to project from. With investments but still Runway's guesses,
+  // the results are a sample, so they're shown muted rather than as a verdict.
+  const empty = $derived(data.current <= 0 && isDefault);
+  const sample = $derived(isDefault && data.current > 0);
+  const successCls = (s: number) => (sample ? "text-muted-foreground" : s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
 
   function addPartner() {
     plan.people.push({ name: "Partner", birth_year: plan.people[0].birth_year, retire_age: plan.people[0].retire_age, savings: 0 });
@@ -104,9 +116,19 @@
   </span>
 {/snippet}
 
-{#if isDefault}
-  <p class="mb-3 text-sm text-muted-foreground">Starting from Runway's figures: your investments, and what you've spent and saved over the
-    last year. Enter your birth year and when you'd like to retire to make it yours.</p>
+{#if empty}
+  <div class="rounded-lg border border-dashed px-6 py-10 text-center">
+    <h3 class="font-medium">Nothing to plan from yet</h3>
+    <p class="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Runway plans from your investment accounts. Connect one, or enter holdings by
+      hand, and the planner starts from real numbers.</p>
+    <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
+  </div>
+{:else}
+{#if sample}
+  <p class="mb-3 text-sm text-muted-foreground">
+    <span class="mr-2 inline-block rounded-full border px-2 py-0.5 text-xs font-medium">Sample · based on default assumptions</span>
+    Starting from Runway's figures: your investments, and what you've spent and saved over the last year. <strong class="font-medium text-foreground">Enter
+    your birth year and retirement age to make it yours.</strong></p>
 {/if}
 
 {#if proj}
@@ -124,7 +146,7 @@
     <div>
       {#if proj.runsOutAge != null}
         <div class="text-sm text-muted-foreground">Typically runs out</div>
-        <div class="text-2xl font-semibold tabular-nums text-[var(--low)]">age {proj.runsOutAge}</div>
+        <div class={`text-2xl font-semibold tabular-nums ${sample ? "text-muted-foreground" : "text-[var(--low)]"}`}>age {proj.runsOutAge}</div>
         <div class="text-sm text-muted-foreground">save more, spend less or retire later</div>
       {:else}
         <div class="text-sm text-muted-foreground">Left at age {plan.plan_to_age}</div>
@@ -133,6 +155,8 @@
       {/if}
     </div>
   </div>
+  <p class="mt-3 text-sm text-muted-foreground">Based on your {fmt0(data.current)} in investments today. Cash, home equity and equity comp aren't
+    included, and taxes aren't modeled. Not financial advice.</p>
   <div class="mt-4"><PlannerChart p={proj} {names} /></div>
 {:else}
   <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
@@ -248,8 +272,12 @@
           </li>
         {/each}
       </ul>
-      <p class="mt-2 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say downsizing. Its value grows by the yearly
-        change set on the Net worth page, less inflation.</p>
+      <p class="mt-2 flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say
+        downsizing. Its value grows by the yearly change set on the Net worth page, and sale proceeds are reduced by
+        <span class="relative inline-block w-20">
+          <span class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
+          <Input type="number" step="0.5" class="h-7 pr-6 text-sm" aria-label="Inflation" value={pctIn(plan.inflation)} oninput={(e) => setPct("inflation", e.currentTarget.value)} />
+        </span> a year of inflation.</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}
@@ -257,21 +285,25 @@
 
   <section class="lg:col-span-2">
     <h3 class="mb-2 font-medium">Assumptions</h3>
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
       <label class="flex flex-col gap-1">{@render field("Return while saving", "after inflation")}
         {@render percent(plan.return_before, (s) => setPct("return_before", s), "Return while saving")}</label>
       <label class="flex flex-col gap-1">{@render field("Return in retirement", "after inflation")}
         {@render percent(plan.return_after, (s) => setPct("return_after", s), "Return in retirement")}</label>
       <label class="flex flex-col gap-1">{@render field("Ups and downs", "yearly")}
         {@render percent(plan.volatility, (s) => setPct("volatility", s), "Ups and downs")}</label>
-      <label class="flex flex-col gap-1">{@render field("Inflation")}
-        {@render percent(plan.inflation, (s) => setPct("inflation", s), "Inflation")}</label>
     </div>
     <p class="mt-2 text-sm text-muted-foreground">
-      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year's return around these averages; "ups
-      and downs" is how far a year typically strays (a stock-heavy portfolio is about 15%, a balanced one about 10%). Taxes aren't
-      modeled: enter spending as what you'd withdraw before tax.
-      {#if !isDefault}<Button variant="link" size="sm" class="h-auto px-1" onclick={startOver}>Start over from Runway's figures</Button>{/if}
+      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year's return around these averages, which are
+      already after inflation (everything is in today's dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
+      about 15%, a balanced one about 10%). Enter spending as what you'd withdraw before tax.
+      {#if !isDefault}<ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton>{/if}
     </p>
   </section>
 </div>
+{/if}
+
+{#if saved}
+  <div class="fixed right-4 bottom-20 z-40 rounded-md bg-card px-3 py-1.5 text-sm text-[var(--good)] shadow-lg ring-1 ring-border lg:bottom-4" role="status"
+    style:animation="saved-fade 1.6s ease forwards">Saved ✓</div>
+{/if}

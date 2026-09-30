@@ -6,16 +6,19 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import Check from "@lucide/svelte/icons/check";
+  import { openForecastSettings } from "./forecastSheet.svelte";
 
   // Getting started: four steps that tick themselves off as you do them. On its own (`welcome`) before a bank is
-  // connected; at the top of the Overview after that, until every step is done or you put it away.
+  // connected; at the top of the Overview after that, until every step is done or you put it away. The main account is
+  // chosen in the forecast settings on the Overview itself, so its step opens them there (and waits for a bank before).
   let { welcome = false }: { welcome?: boolean } = $props();
   const s = $derived(app.state?.setup);
-  const steps = $derived([
+  type Step = { done: boolean; title: string; text: string; action: string; href?: string; onclick?: () => void; hint?: string };
+  const steps: Step[] = $derived([
     { done: !!s?.bank, title: "Connect a bank", text: "Link your accounts through SimpleFIN or Plaid. The first sync brings in months of history.",
       href: "#setup/connections", action: "Connect" },
     { done: !!s?.primary, title: "Pick your main account", text: "The checking account your paychecks land in and your bills come out of. Runway forecasts its balance.",
-      href: "#setup/accounts", action: "Choose" },
+      action: "Choose", ...(welcome ? { hint: "after your bank connects" } : { onclick: openForecastSettings }) },
     { done: !!s?.recurring, title: "Add paychecks and bills", text: "Tell Runway what comes in and goes out on a schedule, or accept the ones it spots in your history.",
       href: "#budget/recurring", action: "Add" },
     { done: !!s?.budgets, title: "Set a few budgets", text: "Start with the categories you'd like to keep an eye on, like groceries and restaurants.",
@@ -55,8 +58,13 @@
             <div class={cn("text-sm font-medium", step.done && "text-muted-foreground line-through decoration-muted-foreground/50")}>{step.title}</div>
             {#if !step.done}<p class="text-xs text-muted-foreground">{step.text}</p>{/if}
           </div>
-          {#if !step.done}
-            <Button href={step.href} size="sm" variant={i === next ? "default" : "outline"}>{step.action}</Button>
+          {#if !step.done && step.hint}
+            <span class="flex shrink-0 flex-col items-end gap-1">
+              <Button size="sm" variant="outline" disabled aria-describedby={`step-${i}-hint`}>{step.action}</Button>
+              <span id={`step-${i}-hint`} class="text-[11px] text-muted-foreground">{step.hint}</span>
+            </span>
+          {:else if !step.done}
+            <Button href={step.href} onclick={step.onclick} size="sm" variant={i === next ? "default" : "outline"}>{step.action}</Button>
           {/if}
         </li>
       {/each}

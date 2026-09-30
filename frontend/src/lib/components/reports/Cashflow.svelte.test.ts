@@ -56,7 +56,19 @@ describe("Cashflow report", () => {
   it("says when the month has no transactions", async () => {
     vi.mocked(api).mockResolvedValue(flow({ income: [], spending: [], total_in: 0, total_out: 0, net: 0 }));
     render(Cashflow);
-    expect(await screen.findByText("No transactions in March 2026.")).toBeInTheDocument();
+    expect(await screen.findByText(/No transactions in March 2026\./)).toBeInTheDocument();
+    expect(screen.getByText(/Try an earlier month/)).toBeInTheDocument();
+  });
+
+  it("steps back a month from the empty message", async () => {
+    vi.mocked(api).mockResolvedValue(flow({ income: [], spending: [], total_in: 0, total_out: 0, net: 0 }));
+    render(Cashflow);
+    await screen.findByText(/No transactions in March 2026\./);
+    vi.mocked(api).mockResolvedValue(flow({ month: "2026-02" }));
+    await userEvent.click(screen.getByRole("button", { name: "Go back one month" }));
+    expect(api).toHaveBeenLastCalledWith("/api/cashflow?month=2026-02");
+    expect(await screen.findByText("February 2026")).toBeInTheDocument();
+    expect(screen.queryByText(/No transactions in/)).not.toBeInTheDocument();
   });
 
   it("loads another month when you move to it, keeping the old one until it arrives", async () => {

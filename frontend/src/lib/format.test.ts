@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmt, fmt0, fmtDate, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, shortMoney, thisMonth } from "./format";
+import { fmt, fmt0, fmtDate, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
@@ -68,6 +68,15 @@ describe("months", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 8, 15, 12));
     expect(thisMonth()).toBe("2026-09");
+  });
+});
+
+describe("serverTime", () => {
+  it("reads an offset, a local ISO time, and the log's UTC form", () => {
+    expect(serverTime("2026-09-30T12:02:00+00:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30T07:02:00-05:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30 12:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30T08:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");   // New York, the tests' zone
   });
 });
 

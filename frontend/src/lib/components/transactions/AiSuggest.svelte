@@ -7,15 +7,19 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { fmt, plural } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { onDestroy } from "svelte";
   import { askRemember } from "./remember.svelte";
+  import { restoreTx, type Was } from "./restore";
   import type { AiGroup } from "./types";
 
   // The AI's suggestions for what's in Review, one line per merchant. Nothing changes until you apply one; a
-  // suggested new category is created when you apply it. The page's button calls run().
+  // suggested new category is created when you apply it. Applying to CONFIRM_AT or more transactions asks first, and
+  // every apply can be undone from its toast. The page's button calls run().
   let { status = $bindable("idle"), onasked, onchanged }: {
     status?: "idle" | "asking" | "asked"; onasked: (failed: boolean) => void; onchanged: () => void;
   } = $props();
@@ -43,20 +47,30 @@
 
   // Applied or skipped lines go; the heading and the note keep describing what the AI answered.
   const done = (l: Line) => { l.gone = true; };
-  async function apply(l: Line) {
+  const CONFIRM_AT = 10;
+  let asking = $state(false);
+  let confirming = $state<Line | null>(null);
+  const chosen = (l: Line) => l.choice === "__new__" ? l.new_category?.name ?? "" : l.choice;
+  function apply(l: Line) {
     if (!l.choice) { toast.error("Choose a category first"); return; }
+    if (l.count < CONFIRM_AT) { send(l); return; }
+    confirming = l; asking = true;
+  }
+  async function send(l: Line): Promise<boolean> {
     l.busy = true;
     try {
       const body: Record<string, unknown> = { tx_ids: l.tx_ids, direction: l.direction };
       if (l.choice === "__new__") body.new_category = l.new_category; else body.category = l.choice;
-      const r = await api<{ updated: number; category: string; created: boolean; offer_rule: { merchant: string; replaces?: string | null } | null }>(
+      const r = await api<{ updated: number; category: string; created: boolean; offer_rule: { merchant: string; replaces?: string | null } | null; was: Was[] }>(
         "/api/ai/apply", { method: "POST", body });
       if (r.created) await loadCategories();
-      toast.success(`${l.merchant}: ${r.category}${r.created ? " (new category)" : ""} applied to ${r.updated}`);
       done(l); refreshState(); onchanged();
       // Applying categorizes; whether this merchant should always be that category is a separate question.
       if (r.offer_rule) askRemember(l.tx_ids[0], r.category, r.offer_rule, onchanged);
-    } catch (err) { toast.error((err as Error).message); l.busy = false; }
+      undoable(`${l.merchant}: ${r.category}${r.created ? " (new category)" : ""} applied to ${r.updated}`,
+        async () => { await restoreTx(r.was); onchanged(); });
+      return true;
+    } catch (err) { toast.error((err as Error).message); l.busy = false; return false; }
   }
   const answered = $derived(lines ? lines.filter((g) => g.category || g.new_category).length : 0);
   const left = $derived(lines?.filter((l) => !l.gone) ?? []);
@@ -109,4 +123,10 @@
       {/each}
     </Card.Content>
   </Card.Root>
+{/if}
+
+{#if confirming}
+  <ConfirmDialog bind:open={asking} title={`Apply ${chosen(confirming)} to ${plural(confirming.count, "transaction")}?`}
+    description={`${confirming.merchant} · ${fmt(confirming.total)}. ${confirming.choice === "__new__" ? "This adds the category, and they leave To review. " : "They leave To review. "}You can undo it afterwards.`}
+    confirmLabel="Apply" busyLabel="Applying…" onconfirm={() => send(confirming!)} />
 {/if}

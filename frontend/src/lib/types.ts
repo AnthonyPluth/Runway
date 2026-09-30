@@ -2,7 +2,8 @@
 
 export interface User { name?: string; email?: string; local?: boolean }
 export interface Brand { institution?: string; /** Logo.dev's logo for the institution, once Runway has fetched it. */ src?: string | null; initial?: string }
-export interface SyncLog { ok: boolean; message?: string }
+/** The last sync's log line; `at` is when it ran, ISO with its UTC offset. */
+export interface SyncLog { ok: boolean; message?: string; at?: string }
 
 /** GET /api/state (runway/server.py api_state). */
 export interface SentryConfig {
@@ -19,8 +20,11 @@ export interface AppState {
   simplefin?: boolean;
   has_api_key?: boolean;
   llm_model?: string;
+  /** When the banks last synced without an error, ISO with its UTC offset. */
   last_sync_ok?: string | null;
   last_log?: SyncLog | null;
+  /** What banks said on that sync (an expired login, say): it still worked, but they need you. */
+  sync_warnings?: string[];
   last_llm_error?: string | null;
   review_count?: number;
   plaid_undecided?: number;
@@ -89,6 +93,8 @@ export interface ForecastEvent {
   logo?: string | null;
   /** A card statement's card. */
   card_id?: string;
+  /** A recurring item's id (in Bills & income). */
+  recurring_id?: number;
 }
 
 export interface CardSummary {
@@ -114,12 +120,18 @@ export interface Overview {
   dates: string[];
   total: number[];
   low: { date: string; balance: number };
-  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on). */
-  accounts: { id: string; name: string; kind: string; balance: number; daily_spend?: number }[];
+  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on, which
+   *  daily_spend_on says); daily_spend_estimate: what that would be, on or off. */
+  accounts: {
+    id: string; name: string; kind: string; balance: number; balance_date?: string | null;
+    daily_spend?: number; daily_spend_on?: boolean; daily_spend_estimate?: number;
+  }[];
   events: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];
   warnings: string[];
+  /** The same warnings, each with the page where it's put right. */
+  warning_links: { text: string; href: string }[];
   missed?: Missed[];
   budget?: {
     monthly: number;

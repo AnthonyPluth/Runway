@@ -13,7 +13,23 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean };
+/** `background`: a call Runway makes on its own (the state poll, the sync on opening), not one you asked for. */
+type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean; background?: boolean };
+
+// When the session has expired, sending you to sign in throws away the page, and whatever you're typing on it. So
+// this event goes out first, and the app (lib/app.svelte.ts) cancels it while you're editing, and always for a
+// background call; it then shows a Sign in banner instead, and the page stays as it is.
+declare global {
+  interface WindowEventMap { "runway:signed-out": CustomEvent<{ background: boolean }> }
+}
+
+/** Sign in again, then come back to this page. */
+export function signInUrl(): string {
+  return "/auth/login?next=" + encodeURIComponent(location.pathname + location.hash);
+}
+
+const OFFLINE = "Can’t reach Runway. Check your connection and try again.";
+const UNREACHABLE = "Runway is restarting or unreachable. Try again in a moment.";   // what a proxy says while it's down
 
 export async function api<T = unknown>(path: string, opts: Options = {}): Promise<T> {
   const init: RequestInit = { method: opts.method ?? "GET", headers: {} };
@@ -24,13 +40,21 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   if (page) init.signal = page.signal;
   let res: Response;
   try { res = await fetch(path, init); }
-  catch (err) { if (page?.signal.aborted) return new Promise(() => {}); throw err; }
-  if (res.status === 401) {   // signed out (session expired): sign in, then come back here
-    location.href = "/auth/login?next=" + encodeURIComponent(location.pathname + location.hash);
+  catch (err) {
+    if (page?.signal.aborted) return new Promise(() => {});
+    // fetch fails with a TypeError when there's no answer at all; each browser words it differently
+    throw err instanceof TypeError ? new ApiError(OFFLINE, 0) : err;
+  }
+  if (res.status === 401) {   // signed out (session expired)
+    const leave = window.dispatchEvent(new CustomEvent("runway:signed-out", { cancelable: true, detail: { background: !!opts.background } }));
+    if (!leave || opts.background) throw new ApiError("Your session expired. Sign in again to keep going.", 401);
+    location.href = signInUrl();   // sign in, then come back here
     throw new ApiError("Signing you in again…", 401);
   }
   const data = await res.json().catch(() => ({}));
   if (page?.signal.aborted) return new Promise(() => {});
-  if (!res.ok) throw new ApiError(data.error || `Request failed (${res.status})`, res.status);
+  if (!res.ok) {
+    throw new ApiError(data.error || ([502, 503, 504].includes(res.status) ? UNREACHABLE : `Request failed (${res.status})`), res.status);
+  }
   return data as T;
 }

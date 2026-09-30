@@ -3,6 +3,7 @@
 // card's row, or in its edit area.
 import { api } from "$lib/api";
 import { fmt } from "$lib/format";
+import { undoable } from "$lib/undo";
 import { toast } from "svelte-sonner";
 import { fullDate } from "./churning";
 import type { PlanResult } from "./types";
@@ -14,17 +15,20 @@ const fail = (err: unknown) => toast.error((err as Error).message);
 export async function planDone(cardId: number, onchanged: () => void): Promise<void> {
   try {
     const r = await post<PlanResult>(`cards/${cardId}/plan/done`);
-    toast("Done", { description: r.changes.join(". "), action: { label: "Undo", onClick: () => planUndo(cardId, onchanged) } });
+    undoable("Done", () => planUndone(cardId, onchanged), { description: r.changes.join(". ") });
     onchanged();
   } catch (err) { fail(err); }
 }
 
+// The undo itself, for the toast (which shows a failure); planUndo is the same from a button.
+async function planUndone(cardId: number, onchanged: () => void): Promise<string> {
+  const r = await post<PlanResult>(`cards/${cardId}/plan/undo`);
+  onchanged();
+  return r.changes.join(". ");
+}
+
 export async function planUndo(cardId: number, onchanged: () => void): Promise<void> {
-  try {
-    const r = await post<PlanResult>(`cards/${cardId}/plan/undo`);
-    toast("Undone", { description: r.changes.join(". ") });
-    onchanged();
-  } catch (err) { fail(err); }
+  try { toast("Undone", { description: await planUndone(cardId, onchanged) }); } catch (err) { fail(err); }
 }
 
 /** Mark a benefit used: `amount` dollars of a credit, or (left out) the rest of this period's. */
@@ -32,29 +36,25 @@ export async function benefitUse(id: number, name: string, amount: number | stri
   try {
     const amt = amount == null || amount === "" ? null : Number(amount);
     const r = await post<{ id: number }>(`benefits/${id}/use`, amt == null ? {} : { amount: amt });
-    toast(`Marked ${name} used${amt != null ? ` (${fmt(amt)})` : ""}`, {
-      action: { label: "Undo", onClick: () => benefitUnuse(id, r.id, onchanged) },
-    });
+    undoable(`Marked ${name} used${amt != null ? ` (${fmt(amt)})` : ""}`, () => unuse(id, r.id, onchanged));
     onchanged();
   } catch (err) { fail(err); }
 }
 
 /** Undo a use: the one given, else the latest this period. */
 export async function benefitUnuse(id: number, useId: number | null, onchanged: () => void): Promise<void> {
-  try {
-    await post(`benefits/${id}/unuse`, useId == null ? {} : { use_id: useId });
-    toast("Undone");
-    onchanged();
-  } catch (err) { fail(err); }
+  try { await unuse(id, useId, onchanged); toast("Undone"); } catch (err) { fail(err); }
+}
+async function unuse(id: number, useId: number | null, onchanged: () => void): Promise<void> {
+  await post(`benefits/${id}/unuse`, useId == null ? {} : { use_id: useId });
+  onchanged();
 }
 
 /** Leave a to-do out of Upcoming for a while; the toast can bring it back. */
 export async function taskSnooze(id: number, days: number, onchanged: () => void): Promise<void> {
   try {
     const r = await post<{ snooze_until: string | null }>(`tasks/${id}/snooze`, { days });
-    toast(r.snooze_until ? `Snoozed until ${fullDate(r.snooze_until)}` : "Snoozed", {
-      action: { label: "Undo", onClick: async () => { try { await post(`tasks/${id}/snooze`, {}); onchanged(); } catch (err) { fail(err); } } },
-    });
+    undoable(r.snooze_until ? `Snoozed until ${fullDate(r.snooze_until)}` : "Snoozed", async () => { await post(`tasks/${id}/snooze`, {}); onchanged(); });
     onchanged();
   } catch (err) { fail(err); }
 }

@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
-vi.mock("$lib/app.svelte", () => ({ reload: vi.fn() }));
+vi.mock("$lib/app.svelte", () => ({ reload: vi.fn(), refreshState: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
-import { reload } from "$lib/app.svelte";
+import { refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
 import { connectPlaid, openPlaidLink, plaidSession, resumePlaidOAuth, runPlaidLink } from "./plaid.svelte";
 
@@ -35,6 +35,17 @@ describe("runPlaidLink", () => {
     expect(await done).toBe(true);
     expect(api).toHaveBeenCalledWith("/api/plaid/exchange", { method: "POST", body: { public_token: "public", institution: { name: "Chase" }, kind: "bank" } });
     expect(toast.success).toHaveBeenCalledWith("Found 2 accounts · matched Checking · 1 card statement");
+  });
+
+  it("says so, without an error, when the new connection's first sync waits for one already running", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, connected: true, sync_deferred: true, message: "Connected. A sync is running, so …" });
+    const done = runPlaidLink("tok", null, "bank");
+    await opts.onSuccess("public", { institution: { name: "Chase" } });
+    expect(await done).toBe(true);
+    expect(toast).toHaveBeenLastCalledWith("Connected. A sync is running, so …");
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(refreshState).toHaveBeenCalled();
   });
 
   it("re-syncs an existing connection instead of exchanging a token when reconnecting", async () => {

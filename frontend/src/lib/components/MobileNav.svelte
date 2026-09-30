@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app, route } from "$lib/app.svelte";
-  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
   import { cn } from "$lib/utils";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -40,10 +40,18 @@
         </a>
       {/each}
     </nav>
-    <div class="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-      <span class={cn("size-1.5 rounded-full bg-emerald-500", sync.tone === "busy" && "animate-pulse bg-muted-foreground", sync.tone === "bad" && "bg-destructive")}></span>
-      <span role="status" title={sync.title}>{sync.text}</span>
-      {#if s?.version}<span class="ml-auto">Runway {s.version}</span>{/if}
+    <div class="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
+      <div class="flex min-w-0 flex-1 flex-col" role="status" title={sync.title}>
+        {#if sync.href}
+          <a href={sync.href} class={cn("flex items-center gap-2 underline underline-offset-4", sync.tone === "warn" ? "text-amber-500" : "text-destructive")}>
+            <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
+          </a>
+        {:else}
+          <span class="flex items-center gap-2"><span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}</span>
+        {/if}
+        {#if sync.detail}<span class="truncate pl-3.5">{sync.detail}</span>{/if}
+      </div>
+      {#if s?.version}<span class="shrink-0">Runway {s.version}</span>{/if}
     </div>
     {#if user}
       <a href="/auth/logout" onclick={signOut} class="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LogOut class="size-4" />Sign out {user.email ?? ""}</a>
@@ -66,7 +74,10 @@
     {/each}
     <button type="button" aria-expanded={open} onclick={() => (open = !open)}
       class={cn("flex cursor-pointer flex-col items-center gap-0.5 pt-2 pb-1.5 text-[11px]", open || inMore ? "text-foreground" : "text-muted-foreground")}>
-      <Ellipsis class="size-5" aria-hidden="true" />More
+      <span class="relative"><Ellipsis class="size-5" aria-hidden="true" />
+        <!-- A sync problem shows here too, so it's seen without opening the sheet. -->
+        {#if sync.href}<span class={cn("absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-sidebar", syncDot(sync.tone))} data-testid="sync-dot"></span>{/if}
+      </span>More{#if sync.href}<span class="sr-only">{`, ${sync.text}`}</span>{/if}
     </button>
   </div>
 </nav>

@@ -291,18 +291,37 @@ class ForecastTests(Base):
         for i in range(1, len(s)):
             if dates[i] not in event_days:
                 self.assertEqual(s[i], s[i - 1], f"balance moved on {dates[i]} with nothing scheduled")
+        # switched off, the forecast still says what it would take out, for Overview's "about $25 a day"
+        acct = fc["accounts"][0]
+        self.assertEqual((acct["daily_spend"], acct["daily_spend_on"]), (0.0, False))
+        self.assertGreater(acct["daily_spend_estimate"], 0)
         # opting back in brings the drain back
         self.conn.execute("UPDATE accounts SET daily_spend=1 WHERE id='chk'")
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertGreater(fc["accounts"][0]["daily_spend"], 0)
+        self.assertTrue(fc["accounts"][0]["daily_spend_on"])
+        self.assertEqual(fc["accounts"][0]["daily_spend"], fc["accounts"][0]["daily_spend_estimate"])
 
     def test_card_without_bank_statements_warns(self):
         self.conn.execute("DELETE FROM card_statements")
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn("Plaid hasn’t sent a statement for cc yet", fc["warnings"][0])     # linked, statement not in yet
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
+        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/connections"}])
         self.conn.execute("UPDATE accounts SET plaid_account_id=NULL WHERE id='cc'")                  # not linked at all
-        self.assertIn("cc isn’t linked through Plaid yet", forecast.build(self.conn, TODAY, 30)["warnings"][0])
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
+        self.assertEqual(fc["warning_links"][0]["href"], "#setup/connections")   # nothing from Plaid to match: connect the bank
+        self.conn.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type) VALUES ('pcc', 'it', 'Visa', 'credit')")
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][0])
+        self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts")      # matched under “New from Plaid”
+
+    def test_warnings_link_to_where_they_are_fixed(self):
+        self.conn.execute("UPDATE accounts SET pay_from=NULL WHERE id='cc'")
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual(fc["warning_links"], [{"text": "cc: choose which account pays it in Settings.", "href": "#setup/accounts"}])
+        self.assertEqual(fc["warnings"], ["cc: choose which account pays it in Settings."])   # plain text, as MCP clients read it
 
     def test_paid_statement_no_event(self):
         self.tx("cc", "2026-09-22", 600.0, "PAYMENT", "Credit Card Payment")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -87,6 +88,8 @@ def run_sync() -> dict:
                 networth.summary(conn)   # record today's net worth
                 conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
+                # The sync worked, but a bank may still need you (an expired login): kept apart, so the sidebar can say so.
+                db.set_setting(conn, sk.LAST_SYNC_WARNINGS, json.dumps(result["errors"]) if result["errors"] else None)
                 monitoring.metric("count", "runway.sync.new_transactions", len(result["new"]))
                 out = {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
             monitoring.cron_finish(check_in, True)   # once it's saved

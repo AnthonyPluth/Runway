@@ -51,7 +51,8 @@
     <Card.Header><Card.Title>{short} cash flow</Card.Title></Card.Header>
     <Card.Content>
       {#if empty}
-        <p class="py-6 text-center text-sm text-muted-foreground">No transactions in {label}.</p>
+        <p class="py-6 text-center text-sm text-muted-foreground">No transactions in {label}. Try an earlier month ·
+          <Button variant="link" size="sm" class="h-auto px-0 py-0" onclick={() => shift(-1)}>Go back one month</Button></p>
       {:else}
         <Sankey {cf} monthName={short} />
         <details class="mt-2">

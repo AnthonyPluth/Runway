@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar
 import itertools
+import json
 from collections import defaultdict
 import statistics
 from datetime import date, datetime, timedelta
@@ -309,9 +310,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
 
     events: list[dict] = []
-    warnings: list[str] = []
+    warnings: list[dict] = []   # {"text", "href"}: what's wrong, and the page where it's put right
     card_status: list[dict] = []
     unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
+
+    def warn(text: str, href: str) -> None:
+        warnings.append({"text": text, "href": href})
 
     for item in recurring:
         if item["account_id"] not in by_id:
@@ -352,7 +356,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         card_status.append(info)
         payer = by_id.get(card["pay_from"] or "")
         if not payer:
-            warnings.append(f"{label}: choose which account pays it in Settings.")
+            warn(f"{label}: choose which account pays it in Settings.", "#setup/accounts")
             continue
         if payer not in cash:
             continue  # paid from an account that isn't being forecast
@@ -363,7 +367,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "amount": -info["remaining"], "kind": "card", "estimated": False,
                            "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["remaining"] > 0.005:
-            warnings.append(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.")
+            warn(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle
         # in progress, at least what's been charged already). Without enough history, the recent daily rate.
         close = next_after(_d(info["last_close"]), card["closing_day"])
@@ -392,8 +396,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                                "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
-            warnings.append(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
-                            "payment isn't in the forecast.")
+            warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
+                 "payment isn't in the forecast.", "#setup/connections")
 
     def listed(names):
         return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
@@ -405,14 +409,16 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             .where(PlaidAccount.type == "credit", PlaidAccount.ignored == 0, PlaidAccount.plaid_account_id.not_in(
                 select(Account.plaid_account_id).where(Account.plaid_account_id.is_not(None))))).fetchone()[0]
         one = len(not_linked) == 1
-        warnings.append(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
-                        f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
-                        + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
-                           f"choose “Same as …” for each under “New from Plaid”." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."))
+        # Cards Plaid already has are matched in Settings → Accounts; otherwise the bank needs connecting first.
+        warn(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
+             f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
+             + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
+                f"choose “Same as …” for each under “New from Plaid”." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."),
+             "#setup/accounts" if waiting else "#setup/connections")
     if no_statement:
         one = len(no_statement) == 1
-        warnings.append(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
-                        "in the forecast. It usually arrives with the next sync.")
+        warn(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
+             "in the forecast. It usually arrives with the next sync.", "#setup/connections")
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
@@ -424,9 +430,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     series_by_acct: dict[str, list[float]] = {}
     rates: dict[str, float] = {}
+    usual: dict[str, float] = {}   # each account's everyday spending, taken out or not (for "about $42 a day")
     for a in cash:
         matches = [r["match"] or r["name"] for r in recurring if r["account_id"] == a["id"]]
-        rate = daily_spend_rate(conn, a["id"], today, matches) if a["daily_spend"] else 0.0
+        spent = daily_spend_rate(conn, a["id"], today, matches)
+        usual[a["id"]] = round(spent, 2)
+        rate = spent if a["daily_spend"] else 0.0
         rates[a["id"]] = round(rate, 2)
         by_day: dict[str, float] = {}
         for e in events:
@@ -471,7 +480,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "dates": dates,
         "accounts": [
             {"id": a["id"], "name": db.account_label(a), "kind": a["kind"], "balance": round(a["balance"], 2),
-             "daily_spend": rates.get(a["id"], 0.0), "series": series_by_acct[a["id"]],
+             "daily_spend": rates.get(a["id"], 0.0), "daily_spend_on": bool(a["daily_spend"]),
+             "daily_spend_estimate": usual[a["id"]], "series": series_by_acct[a["id"]],
              "low": low(series_by_acct[a["id"]])}
             for a in cash
         ],
@@ -480,7 +490,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "events": events,
         "cards": card_status,
         "unlinked_cards": unlinked,
-        "warnings": warnings,
+        "warnings": [w["text"] for w in warnings],   # as plain text, as before (MCP clients read these)
+        "warning_links": warnings,
         "budget": scenario,
     }
 
@@ -620,9 +631,27 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
 
 # ------------------------------------------------------------------------------------------------ suggestions
 
+def suggestion_key(account_id: str, match: str, frequency: str) -> str:
+    """What identifies a suggestion across visits, so one marked "not recurring" stays gone (amount and dates drift)."""
+    return f"{account_id}|{match.strip().lower()}|{frequency}"
+
+
+def dismissed_suggestions(conn) -> set[str]:
+    try:
+        keys = json.loads(db.get_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED) or "[]")
+    except ValueError:
+        return set()
+    return {k for k in keys if isinstance(k, str)} if isinstance(keys, list) else set()
+
+
+def dismiss_suggestion(conn, key: str) -> None:
+    db.set_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps(sorted(dismissed_suggestions(conn) | {key})))
+
+
 def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150) -> list[dict]:
-    """Payees on cash accounts that show up on a regular schedule with similar amounts."""
+    """Payees on cash accounts that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
     today = today or date.today()
+    dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
     known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute(select(Recurring))]
     T = Transaction
@@ -668,7 +697,10 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
         expected_gap = {"weekly": 7, "biweekly": 14, "monthly": 30}[freq]
         if (today - ds[-1]).days > expected_gap * 2:
             continue  # stopped happening
-        out.append({"account_id": acct, "name": items[-1]["payee"], "match": payee, "amount": round(med, 2),
+        key = suggestion_key(acct, payee, freq)
+        if key in dismissed:
+            continue
+        out.append({"key": key, "account_id": acct, "name": items[-1]["payee"], "match": payee, "amount": round(med, 2),
                     "frequency": freq, "anchor_date": ds[-1].isoformat(), "count": len(items)})
     out.sort(key=lambda s: -abs(s["amount"]))
     return out

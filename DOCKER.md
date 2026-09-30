@@ -150,7 +150,10 @@ Also in Sentry, without a variable:
   `<RUNWAY_PUBLIC_URL>/plaid/oauth`. Add that address under **Allowed redirect URIs** in the Plaid Dashboard (Runway
   shows it in Settings → Bank connections); it's what makes those banks work from a phone or the installed app.
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
-- Sessions last 14 days (`RUNWAY_SESSION_DAYS`). Signing out ends the Runway session and your provider session.
+- A session ends after 14 days without using Runway (`RUNWAY_SESSION_DAYS`); using it keeps you signed in, for up to
+  90 days after you signed in. (If you're let in by `OIDC_ALLOWED_GROUPS` rather than by email, it ends 14 days after
+  signing in, so leaving the group takes effect.) Signing out ends the Runway session and your provider session.
+- Someone who isn't allowed in sees that, with a button to sign in with another account; the log says who was refused.
 - Runway answers only to addresses that are yours: `RUNWAY_PUBLIC_URL`'s host, local IPs, `*.local`, plain names like
   `nas`, and Tailscale names. Add others to `RUNWAY_ALLOWED_HOSTS`.
 - Use `https://` for `RUNWAY_PUBLIC_URL` (a reverse proxy like Caddy or Traefik, or Tailscale). Session cookies are

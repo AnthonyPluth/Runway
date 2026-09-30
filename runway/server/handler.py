@@ -54,6 +54,12 @@ HEADER_DEADLINE = 30                 # seconds to send the request line and head
 MIN_BODY_RATE = 16 * 1024            # bytes a second a request body must average, on top of REQUEST_TIMEOUT
 MAX_CONCURRENT_REQUESTS = 64
 
+# Why a change was refused (the CSRF checks), shown as the app's error message: what was refused, and the usual fix.
+NOT_SAME_SITE = ("Blocked a request that didn’t come from Runway’s own address. If you run Runway behind a proxy, check "
+                 "RUNWAY_PUBLIC_URL and RUNWAY_ALLOWED_HOSTS.")
+NO_APP_HEADER = ("Blocked a change that didn’t come from Runway’s app (it was missing the X-Runway header). Reload the page "
+                 "and try again; if you run Runway behind a proxy, make sure it passes that header on.")
+
 # Plaid Link (Settings → Bank connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
 PLAID_ORIGINS = "https://cdn.plaid.com"
 PLAID_API = "https://production.plaid.com https://sandbox.plaid.com"
@@ -108,6 +114,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "Runway"
     sys_version = ""                  # don't advertise the Python version
     timeout = REQUEST_TIMEOUT
+    _set_cookies: list[str]           # cookies for this request's answer, whatever it is (see _user and end_headers)
 
     def setup(self):
         super().setup()
@@ -209,12 +216,23 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return c[name].value if name in c else None
 
-    def _user(self) -> dict | None:
-        """The signed-in person, or None. Without OIDC configured everyone is 'local'."""
+    def _user(self, renew: bool = False) -> dict | None:
+        """The signed-in person, or None. Without OIDC configured everyone is 'local'. renew: a session in use is kept
+        going (see oidc.renew_session), and its cookie goes out again with this answer, with the new end."""
         if not oidc.enabled():
             return {"name": None, "email": None, "local": True}
+        token = self._cookie("runway_session")
         with db.session() as conn:
-            return oidc.session_user(conn, self._cookie("runway_session"))
+            user = oidc.session_user(conn, token)
+            if user and token and renew and (max_age := oidc.renew_session(conn, token)):
+                self._set_cookies.append(self._cookie_header("runway_session", token, max_age))
+        return user
+
+    def end_headers(self):
+        for ck in getattr(self, "_set_cookies", None) or []:   # a renewed session (_user), on whatever this request answers
+            self.send_header("Set-Cookie", ck)
+        self._set_cookies = []
+        super().end_headers()
 
     def _redirect(self, location: str, cookies: list[str] | None = None) -> None:
         if "\r" in location or "\n" in location:   # never let a header line be split
@@ -238,9 +256,12 @@ class Handler(BaseHTTPRequestHandler):
 {inner}</div></main></body></html>""".encode()
 
     def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None,
-              cookies: list[str] | None = None) -> None:
+              other: tuple[str, str] | None = None, cookies: list[str] | None = None) -> None:
+        """A message with up to two buttons: `link` is the main one, `other` a secondary (a different account, say)."""
+        buttons = "".join(f'<a class="btn{" primary" if i == 0 else ""}" href="{html.escape(href)}">{html.escape(text)}</a>'
+                          for i, (href, text) in enumerate(x for x in (link, other) if x))
         inner = (f'<p class="help" style="margin:0 auto 16px">{html.escape(message)}</p>\n'
-                 + (f'<a class="btn primary" href="{html.escape(link[0])}">{html.escape(link[1])}</a>' if link else ''))
+                 + (f'<div class="actions center">{buttons}</div>' if buttons else ''))
         self._send(status, self._page_html(title, inner), "text/html; charset=utf-8",
                    extra={"Set-Cookie": cookies[0]} if cookies else None)
 
@@ -256,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/"); return True
             try:
                 with db.session() as conn:
-                    target, state = oidc.start_login(conn, q.get("next") or "/")
+                    target, state = oidc.start_login(conn, q.get("next") or "/", q.get("prompt") == "select_account")
             except oidc.OIDCError as e:
                 self._page(502, "Can't reach sign-in", str(e), ("/auth/login", "Try again")); return True
             self._redirect(target, [self._cookie_header("runway_login", state, oidc.LOGIN_TTL, "/auth")]); return True
@@ -264,6 +285,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with db.session() as conn:
                     token, nxt = oidc.finish_login(conn, q, self._cookie("runway_login"))
+            except oidc.NotAllowed as e:
+                self._not_allowed(e.who); return True
             except oidc.OIDCError as e:
                 self._page(403, "Couldn't sign you in", str(e), ("/auth/login", "Try again")); return True
             days = oidc.config()["session_days"]
@@ -271,10 +294,23 @@ class Handler(BaseHTTPRequestHandler):
                                  self._cookie_header("runway_login", "", 0, "/auth")]); return True
         if url.path == "/auth/logout":
             # Signing out is a POST from the app (see _logout), so another site can't sign you out with a link or image.
-            self._page(405, "Sign out from Runway", "Use the sign-out button at the bottom of Runway's sidebar.", ("/", "Open Runway")); return True
+            self._page(405, "Sign out from Runway", "To sign out, use the Sign out button in Runway.", ("/", "Open Runway")); return True
         if url.path == "/auth/signed-out":
             self._page(200, "Signed out", "You've signed out of Runway.", ("/auth/login", "Sign in again")); return True
         return False
+
+    def _not_allowed(self, who: str) -> None:
+        """Signed in at the provider, but not someone Runway lets in. Trying again would sign the same account straight
+        back in, so the way out is choosing another account (or signing out at the provider). The fix for the operator
+        goes to the log, not to whoever was refused."""
+        print(f"[sign-in] refused {who!r}: not in OIDC_ALLOWED_EMAILS or OIDC_ALLOWED_GROUPS (add them there to let them in)",
+              flush=True)
+        c = oidc.config()
+        end = oidc.provider_sign_out(c)
+        provider = urllib.parse.urlsplit(c["issuer"]).hostname or "your sign-in provider"
+        self._page(403, "Not authorized", f"{who} isn’t allowed to use this Runway. Ask whoever runs it to add you, or sign in "
+                   "with a different account.", ("/auth/login?prompt=select_account", "Use a different account"),
+                   (end, f"Sign out of {provider}") if end else None)
 
     def send_response(self, code, message=None):
         self._responded, self._status = True, code
@@ -283,6 +319,7 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str) -> None:
         self._deadline(None)   # the headers are in
         self._started, self._responded = time.monotonic(), False
+        self._set_cookies = []
         self._ext_call = False
         path = urllib.parse.urlsplit(self.path).path
         if not _traced(path):
@@ -337,16 +374,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith(("/.well-known/", "/oauth/")) and url.path != "/oauth/authorize":
             return self._oauth(method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
         if method != "GET" and not self._same_site():
-            return self._json(403, {"error": "forbidden"})
+            return self._json(403, {"error": NOT_SAME_SITE})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
         if url.path == "/auth/logout" and method == "POST":
             if self.headers.get("X-Runway") != "1":
-                return self._json(403, {"error": "forbidden"})
+                return self._json(403, {"error": NO_APP_HEADER})
             return self._logout()
         # The look of the sign-in pages is public; everything else needs you signed in.
         if url.path not in PUBLIC_FILES:
-            self.user = self._user()
+            self.user = self._user(renew=url.path.startswith("/api/"))   # API answers are never cached, so a new cookie is safe there
             if not self.user:
                 if url.path.startswith("/api/"):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
@@ -362,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._static(url.path)
         # State-changing calls must carry a custom header, which a foreign web page can't add without CORS approval.
         if method != "GET" and self.headers.get("X-Runway") != "1":
-            return self._json(403, {"error": "forbidden"})
+            return self._json(403, {"error": NO_APP_HEADER})
         if method == "GET" and url.path == "/api/backup":
             with db.session() as conn:
                 data = backup.dump(conn)
@@ -431,6 +468,20 @@ class Handler(BaseHTTPRequestHandler):
             if self.command != "HEAD":
                 self.wfile.write(zipped)
             return
+        if method == "POST" and url.path == "/api/backup/inspect":
+            # What a backup file holds, and what's here now, shown before you restore it. The file goes up as for a restore.
+            n = self._body_length(MAX_RESTORE_BODY)
+            if n is None:
+                return
+            if not n:
+                return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
+            try:
+                held_in = backup.preview(backup.load(self._read_body(n)))
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            with db.session() as conn:
+                here = backup.counts(conn)
+            return self._json(200, {**held_in, "current": here, "database": "postgres" if db.using_postgres() else "sqlite"})
         if method == "POST" and url.path == "/api/restore":
             n = self._body_length(MAX_RESTORE_BODY)
             if n is None:
@@ -451,24 +502,29 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(409, {"error": "A sync is running. Restore once it has finished."})
                 held.append(lock)
             failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
+            copy = None
             try:
                 with db.session() as conn:
+                    copy = backup.safety_copy(conn)   # what's here now, in the data directory, in case the backup was the wrong one
                     counts = backup.restore(conn, restored)
                 with db.session() as conn:
                     sfinvest.repair_stored(conn)
-            except (ValueError, sqlalchemy.exc.OperationalError) as e:
+            except (ValueError, OSError, sqlalchemy.exc.OperationalError) as e:
                 failed = e
             finally:
                 for lock in held:
                     lock.release()
             if isinstance(failed, ValueError):
                 return self._json(400, {"error": str(failed)})
+            if isinstance(failed, OSError):
+                return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({failed.strerror or failed}), so nothing was restored."})
             if failed is not None:
                 if "locked" in str(failed):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(failed)
             return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
-                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
+                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0),
+                                    "safety_copy": copy})
         body = {}
         if method in ("POST", "DELETE"):
             n = self._body_length(MAX_JSON_BODY)

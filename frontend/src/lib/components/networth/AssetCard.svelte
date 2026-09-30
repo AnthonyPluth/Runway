@@ -1,8 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { fmt, fmt0, fmtDate, parseDate } from "$lib/format";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { tick } from "svelte";
@@ -43,9 +43,10 @@
       onchanged();
     } catch (err) { toast.error((err as Error).message); looking = false; }
   }
-  async function remove() {
-    try { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onremoved(); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+  let removing = $state(false);
+  async function remove(): Promise<boolean> {
+    try { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onremoved(); onchanged(); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
 </script>
 
@@ -72,7 +73,7 @@
       <Button variant="link" size="sm" href={link.href} target="_blank" rel="noopener">Check on {link.label} <ExternalLink class="size-3.5" /></Button>
     {/if}
     <Button variant="link" size="sm" onclick={onedit}>Edit details</Button>
-    <ConfirmButton confirm={`Remove ${a.name}?`} onconfirm={remove}>Remove</ConfirmButton>
+    <Button variant="link" size="sm" onclick={() => (removing = true)}>Remove</Button>
   </div>
   {#if quick}
     <div class="mt-3 flex flex-wrap items-end gap-2">
@@ -88,3 +89,6 @@
     </div>
   {/if}
 </div>
+
+<ConfirmDialog bind:open={removing} destructive title={`Remove ${a.name}?`} description="Its value history goes with it, and it stops counting toward your net worth."
+  confirmLabel="Remove" busyLabel="Removing…" onconfirm={remove} />

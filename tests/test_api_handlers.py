@@ -3,7 +3,7 @@ queries, called directly on the sample data (runway/demo.py) plus the cases each
 import os
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest import mock
 
 from runway import categories, db, demo, splits
@@ -93,6 +93,20 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(list(st["last_log"]), ["at", "ok", "message"])
         self.assertEqual(st["setup"], {"bank": True, "primary": True, "recurring": True, "budgets": True, "dismissed": False})
 
+    def test_state_sync_times_carry_their_offset(self):
+        # The setting is the server's local time, the log's `at` UTC: both go out with an offset, so the browser shows
+        # its own time zone and not the server's.
+        db.set_setting(self.c, "last_sync_ok", "2026-09-30T07:02:00")
+        self.c.execute("INSERT INTO sync_log(at, ok, message) VALUES ('2026-09-30 12:02:00', 1, '3 new transactions')")
+        st = state.api_state(self.c, {}, {})
+        self.assertEqual(datetime.fromisoformat(st["last_sync_ok"]), datetime(2026, 9, 30, 7, 2).astimezone())
+        self.assertEqual(st["last_log"]["at"], "2026-09-30T12:02:00+00:00")
+        self.assertEqual(st["sync_warnings"], [])
+        self.assertEqual(state.with_offset("2026-09-30T12:02:00+00:00"), "2026-09-30T12:02:00+00:00")
+        self.assertEqual(state.with_offset("2026-09-30T12:02:00-05:00", utc=True), "2026-09-30T12:02:00-05:00")
+        self.assertIsNone(state.with_offset(None))
+        self.assertEqual(state.with_offset("garbled"), "garbled")
+
     def test_owner_choices(self):
         self.c.execute("INSERT INTO users(sub, first_name, last_seen) VALUES ('a', 'Zoe', 2), ('b', 'Adam', 1), ('c', NULL, 0), "
                        "('d', 'Joint', 3)")
@@ -120,6 +134,12 @@ class HandlerTests(unittest.TestCase):
         self.assertTrue(rec)
         self.assertTrue(all("logo" in e for e in rec))
         self.assertIn("missed", fc)
+        self.assertEqual({a["id"]: a["balance_date"] for a in fc["accounts"]},
+                         {a["id"]: a["balance_date"] for a in fc["all_accounts"] if a["id"] in {b["id"] for b in fc["accounts"]}})
+        self.assertTrue(all(a["balance_date"] for a in fc["accounts"]))
+        # what the Overview's assumptions line and forecast settings read: whether everyday spending is taken out, and how much it'd be
+        self.assertTrue(all({"daily_spend", "daily_spend_on", "daily_spend_estimate"} <= set(a) for a in fc["accounts"]))
+        self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])
 
     def test_overview_names_sort_by_display_name(self):
         self.c.execute("INSERT INTO accounts(id, name, display_name, kind) VALUES ('c2', 'AAA', 'ZZZ', 'checking')")
@@ -313,6 +333,14 @@ class HandlerTests(unittest.TestCase):
             rp.assert_called_once()
         log = self.one("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1")
         self.assertEqual(tuple(log), (1, "0 new transactions · bank messages: Bank note"))
+        # It worked, so it counts as a good sync; what the bank said is kept apart for the sidebar, until a clean sync.
+        self.assertTrue(db.get_setting(self.c, "last_sync_ok"))
+        self.assertEqual(state.api_state(self.c, {}, {})["sync_warnings"], ["Bank note"])
+        with mock.patch.object(sync.simplefin, "sync", return_value={"new": [], "errors": []}), \
+                mock.patch.object(sync.merchants, "fetch_logos"), mock.patch.object(sync.realie, "refresh_due"), \
+                mock.patch.object(sync, "refresh_prices"):
+            sync.run_sync()
+        self.assertEqual(state.api_state(self.c, {}, {})["sync_warnings"], [])
 
 
 if __name__ == "__main__":

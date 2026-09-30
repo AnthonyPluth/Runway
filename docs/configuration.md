@@ -12,7 +12,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `OIDC_ALLOWED_GROUPS` | | Comma-separated groups (from the `groups` claim) allowed in. Groups are checked at sign-in, so an AI assistant someone approved keeps working until `RUNWAY_SESSION_DAYS` after they last signed in. |
 | `OIDC_ALLOW_ANY_USER` | | `1` lets in anyone your provider signs in. Only for a provider you fully control. |
 | `OIDC_SCOPES` | `openid email profile` | Add `groups` if your provider needs it to send group membership. |
-| `RUNWAY_SESSION_DAYS` | `14` | How long you stay signed in. |
+| `RUNWAY_SESSION_DAYS` | `14` | Days a session lasts unused. Using Runway keeps it going, for up to 90 days after signing in. |
 | `RUNWAY_ALLOWED_HOSTS` | | Extra host names Runway answers to (local IPs, `*.local`, bare names and Tailscale names always work). |
 | `RUNWAY_PUSH_HOSTS` | | Extra push-service hosts notifications may be sent to (Google, Mozilla, Apple and Windows push always work), e.g. a self-hosted UnifiedPush server. |
 | `RUNWAY_SECRET_KEY` | | Encrypts the bank access and API keys Runway saves (at least 32 characters: `openssl rand -base64 32`). Without it, Runway makes `secret.key` in `RUNWAY_DATA`. |

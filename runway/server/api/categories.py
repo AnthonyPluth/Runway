@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import delete, func, select
 
 from ... import categories, db, rules, splits
-from ...models import Account, Rule
+from ...models import Account, Rule, Transaction
 from ..common import ApiError
 
 
@@ -57,6 +57,8 @@ def api_category_remove(conn, _q, body):
         raise ApiError(str(e)) from e
     return {"ok": True, "moved": n}
 
+MAX_UNDO = 2000   # the most transactions a rule's Apply sends back for Undo
+
 
 def api_rules(conn, _q, _b):
     names = {r["id"]: db.account_label(r) for r in conn.execute(select(Account.id, Account.name, Account.display_name, Account.owner))}
@@ -89,10 +91,21 @@ def api_rule_preview(conn, _q, body):
 
 
 def api_rule_apply(conn, _q, _b, rule_id):
+    """Run one rule over past transactions. `changed` says what each one was before (for Undo), up to MAX_UNDO of them."""
+    t = Transaction
+    cols = (t.id, t.category, t.category_source, t.confidence, t.needs_review, t.payee, t.is_split)
+
+    def state() -> dict[str, tuple]:
+        return {r["id"]: tuple(r) for r in conn.execute(select(*cols))}
+    before = state()
     try:
-        return {"ok": True, "updated": rules.apply_rule(conn, int(rule_id))}
+        n = rules.apply_rule(conn, int(rule_id))
     except rules.RuleError as e:
         raise ApiError(str(e), 404) from e
+    after = state()
+    changed = [{"id": i, "was_category": b[1], "was_source": b[2], "was_confidence": b[3], "was_needs_review": 1 if b[4] else 0,
+                "was_payee": b[5], "was_split": 1 if b[6] else 0} for i, b in before.items() if after.get(i) != b]
+    return {"ok": True, "updated": n, "changed": changed if len(changed) <= MAX_UNDO else [], "undoable": len(changed) <= MAX_UNDO}
 
 
 def api_rule_delete(conn, _q, _b, rule_id):
