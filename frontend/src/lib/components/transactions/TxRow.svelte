@@ -59,7 +59,7 @@
   }
 </script>
 
-<div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_20rem_11rem_7.5rem_1.75rem] lg:py-0",
+<div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(10rem,1.2fr)_minmax(11rem,1fr)_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_1.75rem] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
