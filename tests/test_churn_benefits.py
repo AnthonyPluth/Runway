@@ -72,6 +72,7 @@ class PeriodTests(unittest.TestCase):
                 self.assertIn(p["basis"], cb.BASES)
                 self.assertNotIn("amount", p)   # amounts differ by card: you fill them in
                 self.assertTrue(p["name"])
+                self.assertTrue(p["group"])
 
 
 class BenefitDbTests(unittest.TestCase):
