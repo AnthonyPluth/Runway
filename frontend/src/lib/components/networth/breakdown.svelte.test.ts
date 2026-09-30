@@ -54,6 +54,9 @@ describe("the breakdown", () => {
     await user.click(await screen.findByRole("button", { name: /^House, / }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).getByText(/\$340,000\.00 equity after Mortgage/)).toBeInTheDocument();
+    // The kind and the value show once, in the header.
+    expect(within(dialog).getAllByText(/Home \/ property/)).toHaveLength(1);
+    expect(within(dialog).getAllByText(/\$540,000/)).toHaveLength(1);
     expect(within(dialog).getByRole("button", { name: "Update value" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Edit details" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));

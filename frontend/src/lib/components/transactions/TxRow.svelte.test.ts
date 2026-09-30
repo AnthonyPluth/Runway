@@ -32,6 +32,12 @@ describe("TxRow", () => {
     expect(within(row()).getByText("Coffee")).toBeInTheDocument();
   });
 
+  it("gives whatever can truncate a title with its full text", () => {
+    render(TxRow, props(tx()));
+    expect(within(row()).getByText("Blue Bottle")).toHaveAttribute("title", "Blue Bottle");
+    expect(within(row()).getByText("Coffee")).toHaveAttribute("title", "Coffee");
+  });
+
   it("makes money coming in green and bold, and leaves spending plain", () => {
     const { unmount } = render(TxRow, props(tx({ amount: 2500 })));
     expect(screen.getByText("$2,500.00")).toHaveClass("text-emerald-500", "font-semibold");
