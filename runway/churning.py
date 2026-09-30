@@ -411,7 +411,9 @@ def state(conn, today: date, people: list[str] | None = None) -> dict:
     benefits, uses = churn_benefits.load(conn)
     parents = {r["name"]: r["parent"] for r in conn.execute(select(Category.name, Category.parent))}
     year_start = date(today.year, 1, 1)
-    since = min([c["opened_on"] for c in cards if c.get("account_id")] + [year_start.isoformat()])
+    # Back to the earliest balance's day too: a balance is topped up with the points earned since it was entered.
+    since = min([c["opened_on"] for c in cards if c.get("account_id")] + [b["as_of"] for b in d["balances"] if b.get("as_of")]
+                + [year_start.isoformat()])
     spending = _spending(conn, cards, since, today)
     for c in cards:
         c["_deadline"] = (deadline(c) or today).isoformat() if has_bonus(c) else None
@@ -471,7 +473,27 @@ def state(conn, today: date, people: list[str] | None = None) -> dict:
             "rates": rates, "portal_rates": portal, "parents": parents, "raw_cards": cards,
             "tasks": [{**t, "product": by_id[t["card_id"]]["product"] if t["card_id"] in by_id else None,
                        "owner": by_id[t["card_id"]]["owner"] if t["card_id"] in by_id else None} for t in d["tasks"]],
-            "balances": d["balances"]}
+            "balances": d["balances"], "spending": spending}
+
+
+def earned_since(s: dict, owner: str, currency: str, since: str) -> float:
+    """Points a person's cards in a currency earned after a day: their linked accounts' spending at each card's normal
+    rates while it was open (portal bookings aren't visible in a transaction, so they aren't assumed), plus bonuses
+    that posted after it."""
+    total = 0.0
+    today = s["today"]
+    for c in s["raw_cards"]:
+        if c["owner"] != owner or (c.get("currency") or "cash") != currency:
+            continue
+        base = base_rate(c)
+        stop = min(c.get("closed_on") or today, today)
+        if c.get("account_id"):
+            total += sum(x["amount"] * rate_for(s["rates"].get(c["id"], {}), x["category"], s["parents"], base)
+                         for x in s["spending"] if x["account_id"] == c["account_id"] and since < x["posted"] <= stop
+                         and x["posted"] >= c["opened_on"])
+        if (c.get("bonus_earned_on") or "") > since:
+            total += c.get("bonus") or 0
+    return round(total)
 
 
 def upcoming(s: dict, today: date, horizon: int = HORIZON_DAYS) -> list[dict]:
@@ -561,6 +583,8 @@ def rewards(s: dict) -> dict:
                 row = by_cur.setdefault(b["currency"], {"currency": b["currency"], "name": v["name"] if v else b["currency"],
                                                         "earned": 0.0, "bonuses": 0.0, "balance": None})
                 row["balance"], row["as_of"] = b["points"], b["as_of"]
+                # What it probably is now: the balance you entered plus what the cards earned since (an estimate).
+                row["earned_since"] = earned_since(s, owner, b["currency"], b["as_of"]) if b.get("as_of") else 0
         rows = []
         for cur, row in by_cur.items():
             cents = (vals.get(cur) or vals["cash"])["cents"]
@@ -568,6 +592,10 @@ def rewards(s: dict) -> dict:
             row["cents"] = cents
             row["value"] = round((row["earned"] + row["bonuses"]) * cents / 100, 2)
             row["balance_value"] = round(row["balance"] * cents / 100, 2) if row["balance"] is not None else None
+            # Only when the cards earned something since the balance's day; otherwise the balance is the best figure.
+            since = row.get("earned_since") or 0
+            row["est_balance"] = round(row["balance"] + since) if row["balance"] is not None and since else None
+            row["est_value"] = round(row["est_balance"] * cents / 100, 2) if row["est_balance"] is not None else None
             rows.append(row)
         rows.sort(key=lambda r: -(r["value"] + (r["balance_value"] or 0)))
         out[owner] = {"currencies": rows, "value": round(sum(r["value"] for r in rows), 2),
@@ -941,16 +969,19 @@ def remove_currency(conn, key: str) -> None:
     conn.execute(delete(ChurnCurrency).where(ChurnCurrency.key == key))
 
 
-def set_balance(conn, owner: str, currency: str, points, today: date) -> None:
-    """A points balance you entered; nothing removes it."""
+def set_balance(conn, owner: str, currency: str, points, today: date, as_of=None) -> None:
+    """A points balance you entered, as of a day (today unless given); no number removes it."""
     owner = _owner(owner, conn)
     if currency not in values(conn):
         raise ChurnError("Unknown currency")
     n = _num(points, "balance", 0, 1e9)
+    day = _date(as_of, "day of the balance") or today.isoformat()
+    if day > today.isoformat():
+        raise ChurnError("The balance can't be as of a day in the future")
     if n is None:
         conn.execute(delete(ChurnBalance).where(ChurnBalance.owner == owner, ChurnBalance.currency == currency))
     else:
-        db.upsert(conn, ChurnBalance, {"owner": owner, "currency": currency, "points": n, "as_of": today.isoformat()},
+        db.upsert(conn, ChurnBalance, {"owner": owner, "currency": currency, "points": n, "as_of": day},
                   key=["owner", "currency"])
 
 
