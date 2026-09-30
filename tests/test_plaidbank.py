@@ -449,7 +449,7 @@ class PlaidBankTests(unittest.TestCase):
         self.assertTrue(server.api_plaid_item_sync(self.c, {}, {}, "item-b")["ok"])
 
     # ---------------------------------------------------------------------------------------- pinned behavior
-    # What Settings → Connections shows, and the less common sync paths, exactly as they are.
+    # What Settings → Bank connections shows, and the less common sync paths, exactly as they are.
 
     def test_status_shows_each_connection_and_its_accounts(self):
         from runway import server

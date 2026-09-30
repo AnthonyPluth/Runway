@@ -1,6 +1,6 @@
 """The MCP server's access to Runway: one key, and a switch for whether it may change churning.
 
-The key is a bearer token made under Settings → Connections (only a hash of it is kept), separate from the browser
+The key is a bearer token made under Settings → Advanced (only a hash of it is kept), separate from the browser
 extension's key and from signing in. It opens GET /api/mcp/<page> for the pages in READABLE and nothing else: no settings,
 connections, bank credentials or backups. Only while "Let assistants change churning" is switched on (allow_writes, off
 unless you turn it on) can it also POST the churning actions in WRITABLE: nothing else, and no deletes.

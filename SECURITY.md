@@ -6,7 +6,7 @@ Runway holds bank access and financial history, so security reports are welcome 
 
 Please report it privately through GitHub: the repository's **Security** tab → **Report a vulnerability**. Don't open
 a public issue for a security problem. Include what you found, how to reproduce it, and the version (shown at the
-bottom of Settings). You'll get an answer within a week, and a fix is released as soon as it's ready.
+Settings → Advanced). You'll get an answer within a week, and a fix is released as soon as it's ready.
 
 ## Supported versions
 

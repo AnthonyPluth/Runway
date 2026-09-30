@@ -1,6 +1,6 @@
 # Agent guide
 
-Instructions for AI coding agents working in Runway, a self-hosted personal finance app (Python backend in `runway/`, Svelte web app in `frontend/`, browser extension in `extension/`). Human contributors can use it too; the README's Development section has the long version.
+Instructions for AI coding agents working in Runway, a self-hosted personal finance app (Python backend in `runway/`, Svelte web app in `frontend/`, browser extension in `extension/`). Human contributors can use it too; [docs/development.md](docs/development.md) has the long version.
 
 ## Layout
 

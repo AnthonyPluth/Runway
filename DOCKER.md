@@ -26,7 +26,7 @@ in `docker-compose.yml`; every released version stays in the registry.
 
 Each of those pushes is also a release: it gets the next version tag (`v1.0.0`, `v1.0.1`, …) and a GitHub Release with
 notes listing what changed. Every push bumps the last number; put `#minor` in a commit message (or start it with
-`feat:`) to bump the middle one, or `#major` for the first. The running version is shown at the bottom of Settings,
+`feat:`) to bump the middle one, or `#major` for the first. The running version is shown under Settings → Advanced,
 and on the image as the `org.opencontainers.image.version` label.
 
 To try a pull request before merging it, add the `needs_preview` label to it. A comment on the pull request soon
@@ -58,8 +58,8 @@ If a setting is missing, the container stops with a message saying which one (se
 
 ## Moving your data from your Mac
 
-1. On the Mac: Settings → Backup → **Download a backup** (or `poetry run python run.py backup`).
-2. Start the container on the server, sign in, and go to Settings → Backup → **Restore**, choosing that file.
+1. On the Mac: Settings → Advanced → Backup → **Download a backup** (or `poetry run python run.py backup`).
+2. Start the container on the server, sign in, and go to Settings → Advanced → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
 The backup holds your bank access and API keys; delete stray copies once you've restored it. The server encrypts them
@@ -97,7 +97,7 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
   (or let Watchtower do it automatically). If you pinned a version, change the tag first. Database changes are
   applied automatically when the new version starts; take a backup first if you like to be careful.
 - Stop: `docker compose down` (data stays in `./data`)
-- Back up: Settings → Backup → Download a backup (works for either database)
+- Back up: Settings → Advanced → Backup → Download a backup (works for either database)
 
 ## Error reports (optional)
 
@@ -120,7 +120,7 @@ server and from the web app, tagged with the version. Without it, nothing is sen
 
 - Plaid: banks that sign you in on their own site (Chase, Capital One, …) send you back to
   `<RUNWAY_PUBLIC_URL>/plaid/oauth`. Add that address under **Allowed redirect URIs** in the Plaid Dashboard (Runway
-  shows it in Settings → Connections); it's what makes those banks work from a phone or the installed app.
+  shows it in Settings → Bank connections); it's what makes those banks work from a phone or the installed app.
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
 - Sessions last 14 days (`RUNWAY_SESSION_DAYS`). Signing out ends the Runway session and your provider session.
 - Runway answers only to addresses that are yours: `RUNWAY_PUBLIC_URL`'s host, local IPs, `*.local`, plain names like
