@@ -24,7 +24,7 @@ jobs:
     # Dependabot's pull requests skip by their author, not by who pushed last (as dependabot-merge.yml checks).
     if: github.event.pull_request.draft == false && github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write     # the review comments
@@ -97,6 +97,14 @@ jobs:
             Leave an inline comment on each real problem, on the line it's about, saying what's wrong, why it matters
             and what to do instead. Skip taste and nits a linter would catch: a comment should be worth someone's time.
             If you aren't sure something is a bug, say how sure you are rather than stating it as fact.
+
+            Start every comment with its priority, in bold, then the point: `**P1:** …`, `**P2:** …` or `**P3:** …`.
+            - P1: must be fixed before merging. Wrong money or dates, lost or corrupted data, a security hole (a leaked
+              secret, broken auth, a missing CSRF check), a crash or a broken page, a migration that fails.
+            - P2: should be fixed, in this pull request or right after. A real bug in an edge case, a regression, a
+              behavior change without a test, a query that only works on one of SQLite and Postgres.
+            - P3: worth knowing, fine to leave. Hardening, a clearer approach, a missing test for existing behavior.
+            When you're unsure between two, pick the lower one and say why it might be higher.
 
             Leave inline comments only: no summary comment (the pull request's description already says what it does),
             and don't approve or request changes. If you find nothing worth raising, leave no comment at all.
