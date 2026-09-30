@@ -1,8 +1,8 @@
 name: Claude review
 
 # An AI code review on each pull request: Claude reads the diff with the repository's own rules (AGENTS.md, CLAUDE.md,
-# SECURITY.md) and leaves inline comments on what it finds, plus one summary comment that each later review of the same
-# pull request edits. It only reads and comments: it can't push, approve or merge, and a person still decides.
+# SECURITY.md) and leaves inline comments on the lines where it finds problems. No summary comment: the pull request's
+# own description is the summary. It only reads and comments: it can't push, approve or merge, and a person decides.
 #
 # It runs when the repository has one of these secrets (Settings → Secrets and variables → Actions):
 #   ANTHROPIC_API_KEY        an Anthropic API key, billed per review
@@ -58,22 +58,17 @@ jobs:
       - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
         id: review
         if: steps.auth.outputs.ready == 'true'
-        # Its own limit, under the job's 20 minutes: a step that times out fails (the job would be cancelled), so the
-        # post step below still runs and can say the review didn't finish.
-        timeout-minutes: 17
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Opus for the review: the diffs here touch money math, bank sync and encryption (CLAUDE.md's routing).
-          # --max-turns caps the tool calls one review makes; the prompt keeps the summary from being the casualty.
-          # Its GitHub access is reading the pull request and leaving inline comments, nothing else. It doesn't post
-          # the summary: it returns it as structured output (--json-schema), and the step after this one posts it.
+          # --max-turns caps the tool calls one review makes.
+          # Its GitHub access is reading the pull request and leaving inline comments, nothing else.
           claude_args: |
             --model claude-opus-5-5
             --max-turns 60
             --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
-            --json-schema '{"type":"object","properties":{"summary":{"type":"string","description":"The review summary, in Markdown"}},"required":["summary"]}'
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -83,13 +78,12 @@ jobs:
             frontend/. Read AGENTS.md, CLAUDE.md and SECURITY.md first; they're the repository's rules.
 
             This may not be the first review of this pull request: every push starts a new one. Before reviewing, read
-            what's already there: `gh pr view --comments` (earlier summaries and replies) and the file
-            `.claude-earlier-comments.md` in the working directory (every earlier inline comment). Don't comment again on a problem that already has an inline comment, whether or not it's
-            fixed; only raise what's new, or a fix that made things worse.
+            what's already there: `gh pr view --comments` (replies) and the file `.claude-earlier-comments.md` in the
+            working directory (every earlier inline comment). Don't comment again on a problem that already has an
+            inline comment, whether or not it's fixed; only raise what's new, or a fix that made things worse.
 
             You have a limited number of tool calls. On a large pull request, look at the riskiest changes first
-            (money, bank sync, auth, encryption, migrations) rather than reading everything, and always leave the
-            summary below, even if you ran short: say which files you didn't get to.
+            (money, bank sync, auth, encryption, migrations) rather than reading everything.
 
             Read the pull request (`gh pr view`, `gh pr diff`) and the code around each change, then review it for:
             - Correctness: bugs, broken edge cases, regressions, anything that contradicts the pull request's own description.
@@ -104,38 +98,5 @@ jobs:
             and what to do instead. Skip taste and nits a linter would catch: a comment should be worth someone's time.
             If you aren't sure something is a bug, say how sure you are rather than stating it as fact.
 
-            Finish by returning the summary as your structured output (don't post it; the workflow does that, replacing
-            the previous review's summary). In Markdown: a line or two on what the change
-            does, the problems by severity (or that you found none), what's still open from earlier reviews, and anything
-            you couldn't check. Don't approve or request changes.
-
-      # Post the summary, or edit the one an earlier review of this pull request left. It's found by a hidden marker
-      # rather than "the bot's last comment", since other workflows (the preview's address and password) post as the
-      # same bot.
-      - name: Post the summary
-        if: steps.auth.outputs.ready == 'true' && !cancelled()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          OUTPUT: ${{ steps.review.outputs.structured_output }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          summary=$(jq -r '.summary // empty' <<<"${OUTPUT:-null}")
-          if [ -z "$summary" ]; then
-            # A review that ran out of turns or time returns nothing. Say so, rather than leave the last push's summary
-            # looking current.
-            echo "::warning::The review didn't return a summary."
-            summary=$(printf '%s\n\n%s' "**Claude review summary**" \
-              "The review of $HEAD_SHA didn't finish, so there's no summary for it ([the run]($RUN_URL)). Anything earlier on this pull request is about an older commit.")
-          fi
-          marker='<!-- claude-review-summary -->'
-          printf '%s\n%s\n' "$marker" "$summary" > "$RUNNER_TEMP/summary.md"
-          id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | tail -n 1)
-          if [ -n "$id" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F "body=@$RUNNER_TEMP/summary.md" > /dev/null
-          else
-            gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/summary.md"
-          fi
+            Leave inline comments only: no summary comment (the pull request's description already says what it does),
+            and don't approve or request changes. If you find nothing worth raising, leave no comment at all.
