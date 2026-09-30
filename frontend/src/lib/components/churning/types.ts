@@ -15,7 +15,7 @@ export interface Eligibility {
 // sends it, it's optional so a rate built in a form before saving type-checks.
 export interface ChurnRate { category: string; multiplier: number; portal_only?: boolean }
 
-export type Plan = "undecided" | "keep" | "downgrade" | "close" | "product_change";
+export type Plan = "undecided" | "keep" | "close" | "product_change";
 
 export type BenefitKind = "credit" | "access" | "status" | "other";
 export type BenefitPeriod = "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time";
@@ -88,7 +88,7 @@ export interface ChurnCard {
   plan_new_id: number | null;      // the card checking the plan off added (undo removes it)
   hide_upcoming: number;
   plan_due: string | null;         // plan_date, else the day before the next annual fee
-  plan_active: boolean;            // downgrade/close/product_change, not done, card open
+  plan_active: boolean;            // close/product_change, not done, card open
   benefits: Benefit[];
   benefits_value: number;          // a year, the benefits that count
   net_fee: number;                 // annual_fee − benefits_value (can be negative)

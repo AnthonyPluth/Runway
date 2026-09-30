@@ -153,7 +153,7 @@
         {#each d.plans as p (p)}<option value={p}>{PLAN_LABEL[p]}</option>{/each}
       </NativeSelect>
     </label>
-    {#if v.plan === "downgrade" || v.plan === "product_change"}
+    {#if v.plan === "product_change"}
       <label class={`${lbl} min-w-48`}>Change it to<Input bind:value={v.plan_target} {@attach edit("plan_target")} placeholder="e.g. Freedom Unlimited" /></label>
     {/if}
     {#if PLAN_ACTS.includes(v.plan)}
