@@ -28,9 +28,6 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write          # upload coverage to Codecov (OIDC, so there's no token to keep)
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
@@ -96,7 +93,7 @@ jobs:
           files: coverage.xml
           flags: backend
           disable_search: true
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false   # a Codecov outage never holds up a release
       - name: Check dependencies for known vulnerabilities
         if: matrix.database == 'sqlite'
@@ -116,9 +113,6 @@ jobs:
   # coverage, and make sure it builds.
   web:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write          # upload coverage to Codecov
     defaults:
       run:
         working-directory: frontend
@@ -142,7 +136,7 @@ jobs:
           files: frontend/coverage/lcov.info
           flags: frontend
           disable_search: true
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
       - run: npm run build
 
