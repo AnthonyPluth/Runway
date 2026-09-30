@@ -62,9 +62,8 @@
   ] : []);
 </script>
 
-<a href="#networth" class="mb-3 inline-block text-sm text-muted-foreground hover:text-foreground">← Net worth</a>
 <div class="mb-2 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Equity</h1>
+  <h2 class="text-[34px] leading-tight font-bold tracking-tight">Equity</h2>
   <div class="flex flex-wrap gap-2">
     {#if c?.connected}<Button variant="outline" size="sm" disabled={syncing} onclick={sync}>{syncing ? "Reading Carta…" : "Sync from Carta"}</Button>{/if}
     <Button size="sm" onclick={() => { adding = true; coName = ""; coPrice = ""; }}>Add a company</Button>

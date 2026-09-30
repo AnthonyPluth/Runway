@@ -16,7 +16,8 @@
   for (const [file, load] of Object.entries(modules)) {
     LOADERS[file.slice("./pages/".length, -".svelte".length).toLowerCase()] = load;
   }
-  // Routes that open another page: Review is a tab of Transactions, and #setup is Settings.
+  // Routes that open another page: Review is a tab of Transactions, and #setup is Settings. (#investments and #recurring,
+  // now tabs of Net worth and Budget, are resolved to their new routes in lib/app.svelte.ts.)
   const ALIASES: Record<string, string> = { review: "transactions", setup: "settings" };
   // Anything else (an old bookmark, a typo) opens Overview.
   const loaded: Record<string, Page> = $state({});

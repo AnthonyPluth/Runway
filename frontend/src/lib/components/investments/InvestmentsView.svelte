@@ -22,8 +22,6 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { tick, type Snippet } from "svelte";
 
-  let { sub: _sub = "" }: { sub?: string } = $props();
-
   // The page's data. A redraw (another period, a saved edit) keeps the old numbers on screen until the new ones come.
   let status = $state<PlaidStatus | null>(null);
   let d = $state<Investments | null>(null);
@@ -113,7 +111,6 @@
 {:else if !status}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else if !status.inv_accounts || !d}
-  <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Investments</h1>
   <Card.Root class="mx-auto mt-10 max-w-lg text-center">
     <Card.Header>
       <Card.Title>No investment accounts yet</Card.Title>
@@ -121,8 +118,7 @@
     </Card.Header>
   </Card.Root>
 {:else}
-  <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-[34px] leading-tight font-bold tracking-tight">Investments</h1>
+  <div class="mb-6 flex flex-wrap items-center justify-end gap-3">
     <div class="flex flex-wrap items-center gap-3">
       <span class={cn("inline-flex items-center gap-1.5 text-sm", live?.market === "open" ? "text-foreground/80" : "text-muted-foreground")} role="status"
         title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined}>

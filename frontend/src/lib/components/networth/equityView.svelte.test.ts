@@ -48,10 +48,10 @@ describe("Net worth summary", () => {
 });
 
 describe("#networth/equity", () => {
-  it("shows vested and still-to-vest figures, the companies and a way back", async () => {
+  it("shows vested and still-to-vest figures, the companies and the tab bar as the way back", async () => {
     render(NetWorth, { sub: "equity" });
     expect(await screen.findByRole("heading", { name: "Equity" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "← Net worth" })).toHaveAttribute("href", "#networth");
+    expect(screen.getByRole("link", { name: "Summary" })).toHaveAttribute("href", "#networth");
     expect(screen.getByText("Vested now")).toBeInTheDocument();
     expect(screen.getAllByText("Still to vest").length).toBeGreaterThan(0);
     expect(screen.getByText("Acme Robotics")).toBeInTheDocument();

@@ -30,6 +30,17 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "setup", sub: "rules" });
   });
 
+  it("opens the old #investments and #recurring routes as tabs of Net worth and Budget", async () => {
+    await go("#investments");
+    expect(route).toMatchObject({ page: "networth", sub: "investments" });
+    await go("#recurring");
+    expect(route).toMatchObject({ page: "budget", sub: "recurring" });
+    await go("#networth/investments");
+    expect(route).toMatchObject({ page: "networth", sub: "investments" });
+    await go("#budget/recurring");
+    expect(route).toMatchObject({ page: "budget", sub: "recurring" });
+  });
+
   it("ignores a query string, which belongs to the page's filters", async () => {
     await go("#transactions?q=rent");
     expect(route).toMatchObject({ page: "transactions", sub: "" });

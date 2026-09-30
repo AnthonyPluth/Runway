@@ -28,7 +28,7 @@ beforeEach(() => {
 describe("EventsList", () => {
   it("points to Recurring when nothing is scheduled", () => {
     show([]);
-    expect(screen.getByRole("link", { name: "Recurring" })).toHaveAttribute("href", "#recurring");
+    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
   });
 
   it("shows each item's name, date, amount and the balance after it", () => {
