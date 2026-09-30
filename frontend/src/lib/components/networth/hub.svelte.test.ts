@@ -35,7 +35,7 @@ describe("the Net worth tabs", () => {
   it("opens Investments on #networth/investments", async () => {
     render(NetWorth, { sub: "investments" });
     expect(screen.getByRole("link", { name: "Investments" })).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByText("No investment accounts yet")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Connect an investment account" })).toBeInTheDocument();
   });
 
   it("opens Equity on #networth/equity, without its own back link", () => {
