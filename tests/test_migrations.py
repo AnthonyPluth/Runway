@@ -114,6 +114,29 @@ class MigrationTests(unittest.TestCase):
             plans = [r[0] for r in conn.execute("SELECT plan FROM churn_cards ORDER BY id")]
         self.assertEqual(plans, ["product_change", "close"])
 
+    @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
+    def test_processes_starting_together_take_turns_migrating(self):
+        # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating
+        # alembic_version ("duplicate key value violates unique constraint pg_type_typname_nsp_index").
+        import threading
+        errors = []
+
+        def start(path):
+            try:
+                db.migrate(path)
+            except Exception as e:
+                errors.append(e)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "together.db")   # on Postgres the path only picks the test's own schema
+            threads = [threading.Thread(target=start, args=(path,)) for _ in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(60)
+            self.assertFalse([t for t in threads if t.is_alive()], "the migrations are stuck waiting on each other")
+            self.assertEqual(errors, [])
+            self.assertEqual(drift(path), [])
+
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:

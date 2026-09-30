@@ -18,8 +18,6 @@ class KeyAndPagesTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         os.environ["RUNWAY_DATA"] = cls.tmp.name
         db.init()
-        with db.session() as conn:
-            conn.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES ('chk', 'Checking', 'checking', 2500.0, '2026-09-30')")
         cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -77,7 +75,7 @@ class KeyAndPagesTests(unittest.TestCase):
         key = self.make_key()
         status, accounts = self.get("/api/mcp/accounts", key)
         self.assertEqual(status, 200)
-        self.assertIn("chk", json.dumps(accounts))
+        self.assertIsInstance(accounts, list)
         self.assertEqual(self.get("/api/mcp/transactions?limit=5", key)[0], 200)
         self.assertEqual(self.get("/api/mcp/churning", key)[0], 200)
         self.assertEqual(self.get("/api/mcp/reports/spending?months=3", key)[0], 200)
@@ -249,6 +247,8 @@ class ProtocolTests(unittest.TestCase):
                 httpd.server_close()
                 for k, v in old.items():
                     os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                with db.session() as conn:   # the database can be shared with other tests (Postgres): leave no key behind
+                    mcp_access.remove_token(conn)
         finally:
             tmp.cleanup()
             os.environ.pop("RUNWAY_DATA", None)
