@@ -120,6 +120,21 @@ class MerchantTests(unittest.TestCase):
         self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")),
                          ["brand:corner shop", "site:amazon.com", "site:starbucks.com"])   # no website known: by name
 
+    def test_held_tickers_get_a_logo_by_ticker(self):
+        self.c.execute("INSERT INTO inv_accounts(id, item_id, name) VALUES ('ia', 'item', 'Brokerage')")
+        self.c.executemany("INSERT INTO securities(id, ticker, name, is_cash) VALUES (?, ?, ?, ?)", [
+            ("s1", "vti", "Vanguard Total Market", 0), ("s2", "CUR:USD", "Cash", 1), ("s3", "BRK.B", "Berkshire", None),
+            ("s4", "NOTHELD", "Not held", 0)])
+        self.c.executemany("INSERT INTO holdings(account_id, security_id, quantity) VALUES ('ia', ?, 1)", [("s1",), ("s2",), ("s3",)])
+        merchants.note_tickers(self.c)
+        merchants.note_sites(self.c)
+        self.assertEqual(sorted(r[0] for r in self.c.execute("SELECT id FROM merchants")), ["ticker:BRK.B", "ticker:VTI"])   # no cash, nothing unheld
+        url = lambda t: f"https://img.logo.dev/ticker/{t}?token=pk_test123456&size=64&format=png&theme=dark&fallback=404"
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url("VTI"): (PNG, "image/png")})), 1)
+        self.assertEqual(merchants.logo(self.c, "ticker:VTI"), (PNG, "image/png"))
+        self.assertIsNone(merchants.logo(self.c, "ticker:BRK.B"))
+
     def by_name(self, name, token="pk_test123456"):
         return f"https://img.logo.dev/name/{urllib.parse.quote(name, safe='')}?token={token}&size=64&format=png&theme=dark&fallback=404"
 

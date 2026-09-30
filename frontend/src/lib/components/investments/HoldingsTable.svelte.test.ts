@@ -13,7 +13,7 @@ import { inv } from "./state.svelte";
 
 const lot = (extra = {}) => ({ account_id: "acc1", security_id: "s1", account_name: "Brokerage", quantity: 10, value: 2500, cost_basis: 2000,
   reported_cost_basis: 2000, per_share: 200, manual: false, ...extra });
-const rowsText = () => screen.getAllByRole("row").filter((r) => !r.hasAttribute("data-editor")).slice(1).map((r) => r.querySelector("td")!.textContent!.replace(/\s+/g, " ").trim());
+const rowsText = () => screen.getAllByRole("row").filter((r) => !r.hasAttribute("data-editor")).slice(1).map((r) => { const td = r.querySelector("td")!.cloneNode(true) as HTMLElement; td.querySelectorAll("[aria-hidden]").forEach((n) => n.remove()); return td.textContent!.replace(/\s+/g, " ").trim(); });
 const setup = (holdings = [holding()]) => {
   const onchanged = vi.fn();
   render(HoldingsTable, { holdings, onchanged });
