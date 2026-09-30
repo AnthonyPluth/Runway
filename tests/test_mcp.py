@@ -336,11 +336,11 @@ class ProtocolTests(unittest.TestCase):
                 fake = Fake({p: {"items": [], "cards": [], "upcoming": [], "five24": {}, "today": "2026-09-30"}
                              for p in ("overview", "accounts", "transactions", "budget", "categories", "cashflow", "month_pace",
                                        "reports/spending", "reports/income", "reports/merchants", "reports/breakdown", "retail", "networth", "recurring",
-                                       "investments", "equity", "churning", "churning/best")})
+                                       "investments", "equity", "churning", "churning/best", "retail/orders/x")})
                 r = ask("tools/call", {"name": t["name"], "arguments": {"amount": 20, "order_id": "x"}}, fake)
                 self.assertNotIn("isError", r["result"], r)
-                for path, _ in fake.calls:
-                    self.assertIn("/api/" + path, mcp_access.READABLE)
+                for path, *_rest in fake.calls:
+                    self.assertTrue("/api/" + path in mcp_access.READABLE or any(mcp_access_match(p, "/api/" + path) for p in mcp_access.READABLE_PATTERNS), path)
 
     def test_arguments_become_the_query(self):
         fake = Fake({"transactions": {"items": [{"id": "a", "posted": "2026-09-01", "amount": -5, "payee": "Cafe", "logo": "x" * 100, "splits": []}], "total": 9}})
