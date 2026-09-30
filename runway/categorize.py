@@ -426,9 +426,10 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 _log(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
                      f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
                      reply)
-            except Exception as e:  # network or API error
-                db.set_setting(conn, sk.LAST_LLM_ERROR, str(e)[:300])
-                _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
+            except Exception as e:  # network or API error (its text quotes OpenRouter's answer: kept scrubbed)
+                said = monitoring.public_text(str(e))
+                db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
+                _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
                 conn.commit()
                 raise RuntimeError(f"The AI request failed: {e}") from e
             conn.commit()

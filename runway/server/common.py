@@ -18,6 +18,9 @@ class ApiError(Exception):
         self.status = status
 
 
+MONTH_YEARS = 10   # how far from today a month in a request may be
+
+
 def _month_range(q):
     today = date.today()
     try:
@@ -25,6 +28,8 @@ def _month_range(q):
         start = date(y, m, 1)
     except ValueError:
         raise ApiError("Month must look like 2026-09") from None
+    if abs(y - today.year) > MONTH_YEARS:   # a budget's rollover is added up month by month from where it started
+        raise ApiError(f"Month must be within {MONTH_YEARS} years of today")
     return start, start + relativedelta(months=1)
 
 

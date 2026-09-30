@@ -9,6 +9,7 @@ plain SQL with `?` placeholders that sticks to what both databases understand (`
 from __future__ import annotations
 
 import hashlib
+import contextlib
 import math
 import os
 import re
@@ -70,7 +71,7 @@ DEFAULT_CATEGORIES = [
 
 def data_dir() -> str:
     d = os.environ.get("RUNWAY_DATA") or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-    os.makedirs(d, exist_ok=True)
+    os.makedirs(d, mode=0o700, exist_ok=True)   # the database and (without RUNWAY_SECRET_KEY) its key: Runway's user only
     return d
 
 
@@ -495,6 +496,8 @@ def migrate(path: str | None = None) -> None:
 
 def init(path: str | None = None) -> None:
     migrate(path)
+    if not using_postgres():
+        private_files(path or db_path())
     with session(path) as conn:
         # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.
         if not get_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF):
@@ -503,6 +506,14 @@ def init(path: str | None = None) -> None:
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
         if conn.execute(select(func.count()).select_from(Category)).fetchone()[0] == 0:
             conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])
+
+
+def private_files(path: str) -> None:
+    """The SQLite database (and its journal files, which SQLite makes with the same mode) readable by Runway's user
+    only: it's created with the process's umask, usually readable by everyone on the machine."""
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        with contextlib.suppress(OSError):
+            os.chmod(path + suffix, 0o600)
 
 
 # Categories the app itself relies on; they can't be renamed or removed.
@@ -521,12 +532,18 @@ def not_investment(account_id=None):
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
 
+MAX_NUMBER = 1e12   # more than any amount, price or count here; a sum of bigger ones overflows to inf
+
+
 def number(value) -> float:
     """float(), for a number someone typed or sent: "nan" and "inf" are refused (float() takes them, and one saved
-    would spoil every sum it's in, or stop the sync that uses it)."""
+    would spoil every sum it's in, or stop the sync that uses it), and so is anything past MAX_NUMBER (a product of
+    two such overflows to inf just the same, and inf isn't JSON)."""
     n = float(value)
     if math.isnan(n) or n in (float("inf"), float("-inf")):
         raise ValueError(f"{value!r} isn't a number")
+    if abs(n) > MAX_NUMBER:
+        raise ValueError(f"{value!r} is too large")
     return n
 
 

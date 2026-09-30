@@ -26,7 +26,7 @@ from typing import Any
 
 from sqlalchemy import insert, select, update
 
-from . import db
+from . import db, equity, monitoring
 from . import settings_keys as sk
 from .models import EquityCompany, EquityGrant
 
@@ -257,6 +257,9 @@ def _schedule(text) -> tuple[int | None, int | None, int]:
     elif (m := re.search(r"(\d+)\s*months?", s)):
         total = int(m.group(1))
     every = 3 if "quarter" in s else 12 if "annual" in s or "yearly" in s else 1
+    # A name that reads as an impossible length is no schedule (equity.MAX_MONTHS: longer runs off the calendar).
+    total = total if total is None or total <= equity.MAX_MONTHS else None
+    cliff = cliff if cliff is None or cliff <= equity.MAX_MONTHS else None
     return total, cliff, every
 
 
@@ -335,7 +338,7 @@ def sync(conn, opener=None) -> dict:
         db.set_setting(conn, sk.CARTA_LAST_ERROR, None)
     except CartaError as e:
         conn.rollback()   # none of a half-read sync, but the error is kept (the caller's session rolls back too)
-        db.set_setting(conn, sk.CARTA_LAST_ERROR, str(e)[:300])
+        db.set_setting(conn, sk.CARTA_LAST_ERROR, monitoring.public_text(str(e))[:300])
         conn.commit()
         raise
     return out

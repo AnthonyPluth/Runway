@@ -35,7 +35,7 @@ import time
 import traceback
 import urllib.parse
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, overload
 
 _enabled = False
 _opts: dict[str, Any] = {}   # which of the optional features are on (see init)
@@ -63,6 +63,21 @@ def scrub(text):
     text = _QUERY.sub(r"\1?[Filtered]", text)
     text = _database_values(text)
     return _PLAID_TOKEN.sub("[Filtered]", text)
+
+
+_DIGITS = re.compile(r"\d{5,}")
+
+
+@overload
+def public_text(text: str) -> str: ...
+@overload
+def public_text(text: None) -> None: ...
+def public_text(text: str | None) -> str | None:
+    """What another service said (a bank's message through SimpleFIN or Plaid, an API's error), made safe to keep and
+    show: scrub(), and any run of five or more digits blanked, in case a message names an account or card number."""
+    if not isinstance(text, str):
+        return text
+    return _DIGITS.sub("[number]", scrub(text))
 
 
 def _database_values(text: str) -> str:
@@ -210,10 +225,10 @@ def tracing() -> bool:
 
 def report(e: BaseException | None = None, **tags) -> None:
     """Log an error that was caught (the current one, or `e`), and send it to Sentry when that's on."""
-    if e is None:
-        traceback.print_exc()
-    else:
-        traceback.print_exception(type(e), e, e.__traceback__)
+    # Scrubbed like a Sentry report: a database error's text names the row it was writing, so the local log gets the
+    # same treatment as the remote one.
+    text = "".join(traceback.format_exception(*sys.exc_info()) if e is None else traceback.format_exception(type(e), e, e.__traceback__))
+    print(scrub(text), file=sys.stderr, end="", flush=True)
     if not _enabled:
         return
     import sentry_sdk   # loaded only when reporting is on (see init)

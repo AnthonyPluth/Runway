@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import func, select, update
 
-from ... import categorize, db, plaid, plaidbank, recurring, simplefin
+from ... import categorize, db, monitoring, plaid, plaidbank, recurring, simplefin
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, InvAccount, PlaidAccount, PlaidItem
 from ..common import ApiError
@@ -26,7 +26,7 @@ def api_connect(conn, _q, body):
         simplefin.check_address(access_url)
         simplefin.fetch_accounts(access_url, date.today() - timedelta(days=3))  # prove it works before saving
     except simplefin.SimpleFinError as e:
-        raise ApiError(str(e), 502) from e
+        raise ApiError(monitoring.public_text(str(e)), 502) from e
     db.set_setting(conn, sk.SIMPLEFIN_ACCESS_URL, access_url)
     return {"ok": True}
 
@@ -89,11 +89,11 @@ def api_plaid_link_token(conn, _q, body):
         token = plaid.link_token(conn, body.get("item_id") or None, kind)
     except plaid.PlaidError as e:
         if not (kind == "bank" and e.code in ("INVALID_PRODUCT", "PRODUCTS_NOT_SUPPORTED", "INVALID_FIELD")):
-            raise ApiError(str(e), 502) from e
+            raise ApiError(monitoring.public_text(str(e)), 502) from e
         try:   # Transactions isn't enabled for this Plaid account: card statements only
             token, kind = plaid.link_token(conn, None, "cards"), "cards"
         except plaid.PlaidError:
-            raise ApiError(str(e), 502) from e
+            raise ApiError(monitoring.public_text(str(e)), 502) from e
     # Kept so Link can pick up where it left off when a bank sends you back to /plaid/oauth (possibly in another
     # browser, like Safari from the installed app). Link tokens expire after 4 hours.
     db.set_setting(conn, sk.PLAID_PENDING_LINK, json.dumps({"token": token, "kind": kind, "item_id": body.get("item_id") or None,
@@ -131,7 +131,7 @@ def api_plaid_exchange(conn, _q, body):
     try:
         item_id = plaid.exchange(conn, body.get("public_token") or "", body.get("institution") or {}, kind)
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502) from e
+        raise ApiError(monitoring.public_text(str(e)), 502) from e
     lock = _item_lock(conn, item_id)
     if not lock.acquire(timeout=LINK_SYNC_WAIT):   # a sync reading the same connection at once would clash with it
         # Connected all the same: only its first sync waits, so this is good news, not an error.
@@ -161,7 +161,7 @@ def _sync_new_item(conn, item_id: str, body: dict) -> dict:
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502) from e
+        raise ApiError(monitoring.public_text(str(e)), 502) from e
 
 
 def api_plaid_item_sync(conn, _q, _b, item_id):
@@ -178,7 +178,7 @@ def api_plaid_item_sync(conn, _q, _b, item_id):
         res["prices"] = refresh_prices(conn)
         return {"ok": True, **res}
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502) from e
+        raise ApiError(monitoring.public_text(str(e)), 502) from e
     finally:
         lock.release()
 
@@ -187,7 +187,7 @@ def api_plaid_item_remove(conn, _q, _b, item_id):
     try:
         plaid.remove_item(conn, item_id)
     except plaid.PlaidError as e:
-        raise ApiError(str(e), 502) from e
+        raise ApiError(monitoring.public_text(str(e)), 502) from e
     return {"ok": True}
 
 

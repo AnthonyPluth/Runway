@@ -32,6 +32,10 @@ class EquityError(ValueError):
     pass
 
 
+MAX_MONTHS = 600          # the longest vesting (50 years): a longer one runs off the calendar (_add_months)
+MIN_YEAR, MAX_YEAR = 1900, 2200   # dates a grant can carry, for the same reason
+
+
 def _add_months(d: date, months: int) -> date:
     y, m = divmod(d.month - 1 + months, 12)
     y, m = d.year + y, m + 1
@@ -128,9 +132,13 @@ def overview(conn, today: date | None = None) -> dict:
         c["grants"] = by_company.get(c["id"], [])
         c["vested_value"] = c["unvested_value"] = 0.0
         for g in c["grants"]:
-            g["vested"] = round(vested_now(g, today), 4)
-            g["fully_vested_on"] = fully_vested_on(g)
-            g["schedule"] = schedule(g)
+            try:
+                g["vested"] = round(vested_now(g, today), 4)
+                g["fully_vested_on"] = fully_vested_on(g)
+                g["schedule"] = schedule(g)
+            except (ValueError, OverflowError):   # a schedule that runs off the calendar (saved before MAX_MONTHS):
+                g["vested"], g["fully_vested_on"], g["schedule"] = 0.0, None, []   # this grant, not the whole page
+                g["problem"] = "This grant’s vesting can’t be worked out: check its dates and vesting length."
             g.update(value(g, c["share_price"], g["vested"]))
             c["vested_value"] += g["vested_value"]
             c["unvested_value"] += g["unvested_value"]
@@ -173,9 +181,12 @@ def _day(v, name):
     if v in (None, ""):
         return None
     try:
-        return date.fromisoformat(str(v)[:10]).isoformat()
+        d = date.fromisoformat(str(v)[:10])
     except ValueError:
         raise EquityError(f"The {name} must be a date like 2024-03-01") from None
+    if not MIN_YEAR <= d.year <= MAX_YEAR:
+        raise EquityError(f"The {name} must be between {MIN_YEAR} and {MAX_YEAR}")
+    return d.isoformat()
 
 
 def save_company(conn, body: dict, cid: str | None = None) -> str:
@@ -226,6 +237,8 @@ def clean_grant(body: dict) -> dict:
         raise EquityError("More exercised than granted")
     for k, name in (("vest_months", "vesting length"), ("cliff_months", "cliff"), ("vest_every", "vesting interval")):
         n = _num(body.get(k), name)
+        if n is not None and n > MAX_MONTHS:
+            raise EquityError(f"The {name} can't be more than {MAX_MONTHS} months")
         g[k] = int(n) if n is not None else None
     if kind == "shares":
         g["vest_months"] = g["cliff_months"] = None
