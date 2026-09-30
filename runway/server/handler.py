@@ -561,8 +561,9 @@ class Handler(BaseHTTPRequestHandler):
         body: dict = {}
         if method == "GET" and path == "/api/access":
             return self._json(200, {"writes": writes})
-        if method == "GET" and path in mcp_access.READABLE:
-            fn, params = next(fn for m, pattern, fn in ROUTES if m == "GET" and pattern == path), []
+        if method == "GET" and (path in mcp_access.READABLE or any(_match(p, path) is not None for p in mcp_access.READABLE_PATTERNS)):
+            pattern = path if path in mcp_access.READABLE else next(p for p in mcp_access.READABLE_PATTERNS if _match(p, path) is not None)
+            fn, params = next(fn for m, p, fn in ROUTES if m == "GET" and p == pattern), ([] if pattern == path else _match(pattern, path))
         elif method == "POST" and (hit := next(((p, _match(p, path)) for p in mcp_access.WRITABLE if _match(p, path) is not None), None)):
             if not writes:
                 return self._json(403, {"error": "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Connections."})

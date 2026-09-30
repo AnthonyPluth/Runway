@@ -142,6 +142,21 @@ def churning_benefits(fetch: Fetch, a: dict) -> Any:
     return {"today": d["today"], **(out if show == "all" else {show: out[show]})}
 
 
+def orders(fetch: Fetch, a: dict) -> Any:
+    out = fetch("retail", {})
+    recent = [o for o in out.get("recent", []) if not a.get("retailer") or o.get("retailer") == a["retailer"]]
+    return {"orders": recent, "stores": {k: {f: v.get(f) for f in ("name", "orders", "matched", "unmatched", "last")} for k, v in (out.get("stores") or {}).items()}}
+
+
+def order(fetch: Fetch, a: dict) -> Any:
+    oid = str(a.get("order_id") or "")
+    if not oid:
+        raise ToolError("Give an order_id (from list_orders).")
+    o = fetch("retail/orders/" + urllib.parse.quote(oid, safe=""), {})
+    keep = ("id", "title", "quantity", "amount", "category", "category_source")
+    return {**{k: v for k, v in o.items() if k not in ("items", "raw")}, "items": [{k: i.get(k) for k in keep} for i in o.get("items", [])]}
+
+
 TOOLS: list[dict[str, Any]] = [
     {"name": "get_overview", "description": "The cash-flow forecast: balances, upcoming bills and income, and what's left to spend.",
      "inputSchema": _schema(), "run": _pass("overview")},
@@ -171,6 +186,16 @@ TOOLS: list[dict[str, Any]] = [
      "inputSchema": _schema({"start": _DAY, "end": {**_DAY, "description": "The day after the last day (exclusive)."},
                              "category": {"type": "string"}}),
      "run": _pass("reports/merchants", "start", "end", "category")},
+    {"name": "spending_breakdown", "description": "Where the money went between two days, by category (an order's item categories included, "
+     "since orders are split by item), with each category's share.",
+     "inputSchema": _schema({"start": _DAY, "end": {**_DAY, "description": "The day after the last day (exclusive)."}}),
+     "run": _pass("reports/breakdown", "start", "end")},
+    {"name": "list_orders", "description": "Recent Amazon, Target and Costco orders Runway has read: date, total, item count and whether "
+     "each is matched to a card transaction. Use get_order for one order's items and their categories.",
+     "inputSchema": _schema({"retailer": {"type": "string", "enum": ["amazon", "target", "costco"]}}), "run": orders},
+    {"name": "get_order", "description": "One order: each item with its price and category (and whether you picked it, the AI did, or "
+     "it takes the transaction's), and the card charges it was paid with.",
+     "inputSchema": _schema({"order_id": {"type": "string", "description": "An order's id from list_orders."}}, ["order_id"]), "run": order},
     {"name": "get_net_worth", "description": "Net worth now and over time, with assets and debts.", "inputSchema": _schema(), "run": _pass("networth")},
     {"name": "list_recurring", "description": "Recurring bills and income Runway tracks.", "inputSchema": _schema(), "run": _pass("recurring")},
     {"name": "get_investments", "description": "Investment accounts and holdings.",
