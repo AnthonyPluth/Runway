@@ -207,3 +207,30 @@ export function reorder(open: Wish[], id: number, dir: -1 | 1): { id: number; pr
   [next[from], next[to]] = [next[to], next[from]];
   return next.flatMap((x, i) => (x.priority === i + 1 ? [] : [{ id: x.id, priority: i + 1 }]));
 }
+
+export interface BenefitRow { card: ChurnCard; b: Benefit }
+export interface BenefitBoard {
+  expiring: BenefitRow[];     // money left and the period ends soon, soonest first
+  available: BenefitRow[];    // not used up yet, not expiring soon
+  used: BenefitRow[];         // all of a credit used, or an access benefit used, this period
+  left: number;               // dollars of credits still unused this period
+  usedAmount: number;         // dollars of credits used this period
+  value: number;              // a year, the benefits that count
+}
+
+/** The benefits of these cards (open ones, the benefits still active) sorted into expiring soon, still to use and used this
+ * period, with the dollars behind each figure. */
+export function benefitBoard(cards: ChurnCard[]): BenefitBoard {
+  const rows = cards.filter((c) => c.status === "open").flatMap((card) => card.benefits.filter((b) => b.active).map((b) => ({ card, b })));
+  const byName = (x: BenefitRow, y: BenefitRow) => x.card.product.localeCompare(y.card.product) || x.b.name.localeCompare(y.b.name);
+  const board: BenefitBoard = { expiring: [], available: [], used: [], left: 0, usedAmount: 0, value: 0 };
+  for (const r of rows) {
+    if (r.b.kind === "credit" && r.b.amount != null) { board.left += r.b.remaining ?? 0; board.usedAmount += r.b.used ?? 0; }
+    if (r.b.counts) board.value += r.b.value_per_year;
+    (r.b.expiring ? board.expiring : canUse(r.b) ? board.available : board.used).push(r);
+  }
+  board.expiring.sort((x, y) => (x.b.days_left ?? 0) - (y.b.days_left ?? 0) || byName(x, y));
+  board.available.sort(byName);
+  board.used.sort(byName);
+  return board;
+}
