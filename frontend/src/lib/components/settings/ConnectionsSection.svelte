@@ -3,6 +3,7 @@
   import CartaCard from "./CartaCard.svelte";
   import FinnhubCard from "./FinnhubCard.svelte";
   import LogoDevCard from "./LogoDevCard.svelte";
+  import McpCard from "./McpCard.svelte";
   import PlaidCard from "./PlaidCard.svelte";
   import HomeValuesCard from "./HomeValuesCard.svelte";
   import RetailCard from "./RetailCard.svelte";
@@ -21,3 +22,4 @@
 <HomeValuesCard />
 <FinnhubCard />
 <LogoDevCard />
+<McpCard />
