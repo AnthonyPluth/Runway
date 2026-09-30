@@ -41,7 +41,22 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         with:
           fetch-depth: 1
+      # What earlier reviews of this pull request already said, gathered here so Claude needs no GitHub API access
+      # of its own to read it (every push starts a fresh review).
+      - name: Collect earlier review comments
+        if: steps.auth.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "# Earlier inline review comments on this pull request"
+            gh api --paginate "repos/$REPO/pulls/$PR/comments" \
+              --jq '.[] | "\n## \(.path):\(.line // .original_line) (\(.user.login), \(.created_at))\n\(.body)"'
+          } > .claude-earlier-comments.md
       - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
+        id: review
         if: steps.auth.outputs.ready == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -49,12 +64,13 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Opus for the review: the diffs here touch money math, bank sync and encryption (CLAUDE.md's routing).
           # --max-turns caps the tool calls one review makes; the prompt keeps the summary from being the casualty.
-          # `gh api …/pulls/N/comments` is there to read the inline comments earlier reviews left. Claude doesn't post
-          # the summary itself: it writes it to a file, and the step after this one posts it.
+          # Its GitHub access is reading the pull request and leaving inline comments, nothing else. It doesn't post
+          # the summary: it returns it as structured output (--json-schema), and the step after this one posts it.
           claude_args: |
             --model claude-opus-5-5
             --max-turns 60
-            --allowedTools "Read,Grep,Glob,Write,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments:*)"
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
+            --json-schema '{"type":"object","properties":{"summary":{"type":"string","description":"The review summary, in Markdown"}},"required":["summary"]}'
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
@@ -64,9 +80,8 @@ jobs:
             frontend/. Read AGENTS.md, CLAUDE.md and SECURITY.md first; they're the repository's rules.
 
             This may not be the first review of this pull request: every push starts a new one. Before reviewing, read
-            what's already there: `gh pr view --comments` (earlier summaries and replies) and
-            `gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments --paginate`
-            (earlier inline comments; --paginate matters, since without it you only get the first 30). Don't comment again on a problem that already has an inline comment, whether or not it's
+            what's already there: `gh pr view --comments` (earlier summaries and replies) and the file
+            `.claude-earlier-comments.md` in the working directory (every earlier inline comment). Don't comment again on a problem that already has an inline comment, whether or not it's
             fixed; only raise what's new, or a fix that made things worse.
 
             You have a limited number of tool calls. On a large pull request, look at the riskiest changes first
@@ -86,8 +101,8 @@ jobs:
             and what to do instead. Skip taste and nits a linter would catch: a comment should be worth someone's time.
             If you aren't sure something is a bug, say how sure you are rather than stating it as fact.
 
-            Then write the summary, in Markdown, to the file `.claude-review-summary.md` in the working directory (don't
-            post it; the workflow does that, replacing the previous review's summary): a line or two on what the change
+            Finish by returning the summary as your structured output (don't post it; the workflow does that, replacing
+            the previous review's summary). In Markdown: a line or two on what the change
             does, the problems by severity (or that you found none), what's still open from earlier reviews, and anything
             you couldn't check. Don't approve or request changes.
 
@@ -100,10 +115,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          OUTPUT: ${{ steps.review.outputs.structured_output }}
         run: |
-          if [ ! -s .claude-review-summary.md ]; then echo "::warning::The review didn't leave a summary."; exit 0; fi
+          summary=$(jq -r '.summary // empty' <<<"${OUTPUT:-{\}}")
+          if [ -z "$summary" ]; then echo "::warning::The review didn't return a summary."; exit 0; fi
           marker='<!-- claude-review-summary -->'
-          { echo "$marker"; cat .claude-review-summary.md; } > "$RUNNER_TEMP/summary.md"
+          printf '%s\n%s\n' "$marker" "$summary" > "$RUNNER_TEMP/summary.md"
           id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | tail -n 1)
           if [ -n "$id" ]; then
