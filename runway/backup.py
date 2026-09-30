@@ -1,8 +1,8 @@
 """Backups that work across databases: one gzip'd JSON file with every table's rows.
 
 Use it to move Runway (Mac -> server, SQLite -> Postgres) or just to keep a copy. It includes your settings, so
-it holds your SimpleFIN access, API keys and Plaid tokens: keep backup files private. Sign-in sessions aren't
-included, so you sign in again after restoring.
+it holds your SimpleFIN access, API keys and Plaid tokens: keep backup files private. Sign-in sessions and assistants
+connected with OAuth aren't included, so you sign in (and reconnect them) again after restoring.
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from . import db, schema, secretbox
 
 FORMAT = "runway-backup"
 VERSION = 1
-SKIP = {"auth_sessions", "auth_pending"}
+# Sign-ins, and the assistants connected with OAuth: neither travels (reconnect them after a restore).
+SKIP = {"auth_sessions", "auth_pending", "oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"}
 
 
 def tables() -> list[str]:

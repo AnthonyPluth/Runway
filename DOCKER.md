@@ -90,6 +90,9 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
 5. **Backups kept private.** They contain your bank access in the clear so they restore anywhere.
 6. **Updates.** Pull new images regularly; each release is tested, and its dependencies are checked for known
    vulnerabilities.
+7. **AI assistants** connect with OAuth at `<RUNWAY_PUBLIC_URL>/mcp` ([docs/mcp.md](docs/mcp.md)). If a forward-auth
+   proxy signs you in (`RUNWAY_ALLOW_NO_AUTH=1`), exempt `/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`
+   and `/.well-known/oauth-*` from it, and keep `/oauth/authorize` behind it.
 
 ## Everyday
 

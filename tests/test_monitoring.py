@@ -142,14 +142,16 @@ class MonitoringTests(unittest.TestCase):
 
     def test_requests_are_named_by_route(self):
         cases = {"/api/transactions/chk%7C0/category": "/api/transactions/{id}/category", "/api/state": "/api/state",
-                 "/api/merchants/starbucks/logo": "/api/merchants/{id}/logo", "/api/mcp/overview": "/api/mcp/*",
+                 "/api/merchants/starbucks/logo": "/api/merchants/{id}/logo", "/oauth/token": "/oauth/token",
+                 "/oauth/authorize": "/oauth/authorize", "/.well-known/oauth-protected-resource/mcp": "/.well-known/oauth-protected-resource/mcp",
+                 "/oauth/whatever-1234": "/oauth/*", "/.well-known/security.txt": "/.well-known/*",
                  "/api/sync": "/api/sync", "/api/ext/ping": "/api/ext/ping", "/api/nope/secret-name": "/api/*",
                  "/": "/", "/plaid/oauth": "/", "/auth/callback": "/auth/callback", "/auth/whatever": "/"}
         for path, name in cases.items():
             self.assertEqual(trace_name(path), name, path)
         for path in ("/healthz", "/api/investments/stream", "/assets/index-abc.js", "/sw.js", "/logo.svg"):
             self.assertFalse(_traced(path), path)
-        for path in ("/", "/api/state", "/mcp", "/plaid/oauth"):
+        for path in ("/", "/api/state", "/mcp", "/plaid/oauth", "/oauth/token", "/.well-known/oauth-authorization-server"):
             self.assertTrue(_traced(path), path)
 
     def test_a_request_is_traced_without_its_query_or_values(self):
