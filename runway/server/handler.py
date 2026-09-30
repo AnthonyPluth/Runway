@@ -48,6 +48,12 @@ HEADER_DEADLINE = 30                 # seconds to send the request line and head
 MIN_BODY_RATE = 16 * 1024            # bytes a second a request body must average, on top of REQUEST_TIMEOUT
 MAX_CONCURRENT_REQUESTS = 64
 
+# Why a change was refused (the CSRF checks), shown as the app's error message: what was refused, and the usual fix.
+NOT_SAME_SITE = ("Blocked a request that didn’t come from Runway’s own address. If you run Runway behind a proxy, check "
+                 "RUNWAY_PUBLIC_URL and RUNWAY_ALLOWED_HOSTS.")
+NO_APP_HEADER = ("Blocked a change that didn’t come from Runway’s app (it was missing the X-Runway header). Reload the page "
+                 "and try again; if you run Runway behind a proxy, make sure it passes that header on.")
+
 # Plaid Link (Settings → Bank connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
 PLAID_ORIGINS = "https://cdn.plaid.com"
 PLAID_API = "https://production.plaid.com https://sandbox.plaid.com"
@@ -70,6 +76,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "Runway"
     sys_version = ""                  # don't advertise the Python version
     timeout = REQUEST_TIMEOUT
+    _set_cookies: list[str]           # cookies for this request's answer, whatever it is (see _user and end_headers)
 
     def setup(self):
         super().setup()
@@ -165,12 +172,23 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return c[name].value if name in c else None
 
-    def _user(self) -> dict | None:
-        """The signed-in person, or None. Without OIDC configured everyone is 'local'."""
+    def _user(self, renew: bool = False) -> dict | None:
+        """The signed-in person, or None. Without OIDC configured everyone is 'local'. renew: a session in use is kept
+        going (see oidc.renew_session), and its cookie goes out again with this answer, with the new end."""
         if not oidc.enabled():
             return {"name": None, "email": None, "local": True}
+        token = self._cookie("runway_session")
         with db.session() as conn:
-            return oidc.session_user(conn, self._cookie("runway_session"))
+            user = oidc.session_user(conn, token)
+            if user and token and renew and (max_age := oidc.renew_session(conn, token)):
+                self._set_cookies.append(self._cookie_header("runway_session", token, max_age))
+        return user
+
+    def end_headers(self):
+        for ck in getattr(self, "_set_cookies", None) or []:   # a renewed session (_user), on whatever this request answers
+            self.send_header("Set-Cookie", ck)
+        self._set_cookies = []
+        super().end_headers()
 
     def _redirect(self, location: str, cookies: list[str] | None = None) -> None:
         if "\r" in location or "\n" in location:   # never let a header line be split
@@ -184,13 +202,15 @@ class Handler(BaseHTTPRequestHandler):
         self._security_headers()
         self.end_headers()
 
-    def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None) -> None:
+    def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None,
+              other: tuple[str, str] | None = None) -> None:
         body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)} · Runway</title><link rel="icon" href="/logo.svg"><link rel="stylesheet" href="/page.css"></head>
 <body><main style="max-width:520px;margin:12vh auto"><div class="card" style="text-align:center">
 <img src="/logo.svg" width="48" height="48" alt=""><h1 style="margin-top:12px">{html.escape(title)}</h1>
 <p class="help" style="margin:0 auto 16px">{html.escape(message)}</p>
-{f'<a class="btn primary" href="{html.escape(link[0])}">{html.escape(link[1])}</a>' if link else ''}</div></main></body></html>"""
+<div class="actions">{"".join(f'<a class="btn{" primary" if i == 0 else ""}" href="{html.escape(href)}">{html.escape(text)}</a>'
+                              for i, (href, text) in enumerate(x for x in (link, other) if x))}</div></div></main></body></html>"""
         self._send(status, body.encode(), "text/html; charset=utf-8")
 
     def _cookie_header(self, name: str, value: str, max_age: int, path: str = "/") -> str:
@@ -205,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/"); return True
             try:
                 with db.session() as conn:
-                    target, state = oidc.start_login(conn, q.get("next") or "/")
+                    target, state = oidc.start_login(conn, q.get("next") or "/", q.get("prompt") == "select_account")
             except oidc.OIDCError as e:
                 self._page(502, "Can't reach sign-in", str(e), ("/auth/login", "Try again")); return True
             self._redirect(target, [self._cookie_header("runway_login", state, oidc.LOGIN_TTL, "/auth")]); return True
@@ -213,6 +233,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with db.session() as conn:
                     token, nxt = oidc.finish_login(conn, q, self._cookie("runway_login"))
+            except oidc.NotAllowed as e:
+                self._not_allowed(e.who); return True
             except oidc.OIDCError as e:
                 self._page(403, "Couldn't sign you in", str(e), ("/auth/login", "Try again")); return True
             days = oidc.config()["session_days"]
@@ -220,10 +242,23 @@ class Handler(BaseHTTPRequestHandler):
                                  self._cookie_header("runway_login", "", 0, "/auth")]); return True
         if url.path == "/auth/logout":
             # Signing out is a POST from the app (see _logout), so another site can't sign you out with a link or image.
-            self._page(405, "Sign out from Runway", "Use the sign-out button at the bottom of Runway's sidebar.", ("/", "Open Runway")); return True
+            self._page(405, "Sign out from Runway", "To sign out, use the Sign out button in Runway.", ("/", "Open Runway")); return True
         if url.path == "/auth/signed-out":
             self._page(200, "Signed out", "You've signed out of Runway.", ("/auth/login", "Sign in again")); return True
         return False
+
+    def _not_allowed(self, who: str) -> None:
+        """Signed in at the provider, but not someone Runway lets in. Trying again would sign the same account straight
+        back in, so the way out is choosing another account (or signing out at the provider). The fix for the operator
+        goes to the log, not to whoever was refused."""
+        print(f"[sign-in] refused {who!r}: not in OIDC_ALLOWED_EMAILS or OIDC_ALLOWED_GROUPS (add them there to let them in)",
+              flush=True)
+        c = oidc.config()
+        end = oidc.provider_sign_out(c)
+        provider = urllib.parse.urlsplit(c["issuer"]).hostname or "your sign-in provider"
+        self._page(403, "Not authorized", f"{who} isn’t allowed to use this Runway. Ask whoever runs it to add you, or sign in "
+                   "with a different account.", ("/auth/login?prompt=select_account", "Use a different account"),
+                   (end, f"Sign out of {provider}") if end else None)
 
     def send_response(self, code, message=None):
         self._responded = True
@@ -232,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
     def _dispatch(self, method: str) -> None:
         self._deadline(None)   # the headers are in
         self._started, self._responded = time.monotonic(), False
+        self._set_cookies = []
         self._ext_call = False
         try:
             self._route(method)
@@ -277,16 +313,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.startswith("/api/mcp/"):   # the MCP server: its own read-only key instead of a sign-in
             return self._mcp(method, url)
         if method != "GET" and not self._same_site():
-            return self._json(403, {"error": "forbidden"})
+            return self._json(403, {"error": NOT_SAME_SITE})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
             return
         if url.path == "/auth/logout" and method == "POST":
             if self.headers.get("X-Runway") != "1":
-                return self._json(403, {"error": "forbidden"})
+                return self._json(403, {"error": NO_APP_HEADER})
             return self._logout()
         # The look of the sign-in pages is public; everything else needs you signed in.
         if url.path not in PUBLIC_FILES:
-            self.user = self._user()
+            self.user = self._user(renew=url.path.startswith("/api/"))   # API answers are never cached, so a new cookie is safe there
             if not self.user:
                 if url.path.startswith("/api/"):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
@@ -300,7 +336,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._static(url.path)
         # State-changing calls must carry a custom header, which a foreign web page can't add without CORS approval.
         if method != "GET" and self.headers.get("X-Runway") != "1":
-            return self._json(403, {"error": "forbidden"})
+            return self._json(403, {"error": NO_APP_HEADER})
         if method == "GET" and url.path == "/api/backup":
             with db.session() as conn:
                 data = backup.dump(conn)

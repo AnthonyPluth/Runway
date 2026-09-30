@@ -10,10 +10,13 @@ export const app = $state({
   bootError: "" as string,
   /** Bumped when the page should load again (a sync finished, an amount changed). */
   version: 0,
+  /** Signed out while the page was open: App shows a Sign in banner, and Runway stops checking in until you do. */
+  sessionExpired: false,
 });
 
-export async function refreshState(): Promise<void> {
-  app.state = await api<AppState>("/api/state", { keep: true });
+/** background: Runway checking in on its own (see api's `background`), rather than for something you did. */
+export async function refreshState(background = false): Promise<void> {
+  app.state = await api<AppState>("/api/state", background ? { keep: true, background } : { keep: true });
 }
 
 /** Load the page's data again (after a change, or when a sync brings new data). The page is drawn afresh, so this
@@ -74,6 +77,13 @@ export function editing(): boolean {
   const f = document.activeElement;
   return !!(f && ["INPUT", "TEXTAREA", "SELECT"].includes(f.tagName)) || !!document.querySelector("[data-editor]");
 }
+// A session that expires while you're editing, or while Runway is only checking in, mustn't send you off to sign in
+// (see lib/api.ts): App shows a Sign in banner instead.
+window.addEventListener("runway:signed-out", (e) => {
+  if (!e.detail.background && !editing()) return;
+  e.preventDefault();
+  app.sessionExpired = true;
+});
 
 // ------------------------------------------------------------------------------------------ boot and sync
 // Opening Runway (or coming back to its tab) asks the server to catch up: a missed daily bank sync, or investments
@@ -81,12 +91,17 @@ export function editing(): boolean {
 let syncWatch: ReturnType<typeof setInterval> | null = null;
 export async function syncOnVisit(): Promise<void> {
   try {
-    const r = await api<{ started: boolean }>("/api/sync/auto", { method: "POST" });
+    const r = await api<{ started: boolean }>("/api/sync/auto", { method: "POST", background: true });
     if (!r.started || syncWatch) return;
     if (app.state) app.state.syncing = true;
     const before = app.state?.last_sync_ok;
     syncWatch = setInterval(async () => {
-      await refreshState();
+      try { await refreshState(true); }
+      catch (err) {   // keep checking through a blip, but not once signed out
+        console.error(err);
+        if (app.sessionExpired) { clearInterval(syncWatch!); syncWatch = null; }
+        return;
+      }
       if (app.state?.syncing) return;
       clearInterval(syncWatch!); syncWatch = null;
       const synced = app.state?.last_sync_ok !== before && app.state?.last_log?.ok;
@@ -113,5 +128,12 @@ export async function boot(): Promise<void> {
   syncOnVisit();
 }
 window.addEventListener("online", () => { if (!booted) boot(); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && booted) syncOnVisit(); });
-setInterval(() => (booted ? refreshState().catch((err) => console.error(err)) : boot()), 60_000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && booted && !app.sessionExpired) syncOnVisit();
+});
+/** Every minute: pick up what changed meanwhile (or try to boot again, if Runway hasn't answered yet). */
+export function checkIn(): void {
+  if (app.sessionExpired) return;   // nothing more to ask until you've signed in again
+  if (booted) refreshState(true).catch((err) => console.error(err)); else boot();
+}
+setInterval(checkIn, 60_000);

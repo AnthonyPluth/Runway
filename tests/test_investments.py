@@ -496,6 +496,21 @@ class DuplicateConnectionTests(unittest.TestCase):
         self.assertIn("already connected", str(e.exception))
         self.assertEqual(removed, ["b"])
 
+    def test_connecting_while_a_sync_runs_is_still_a_success(self):
+        """The connection is made; only its first sync waits for the next one, so the answer isn't an error."""
+        from runway import server
+        from runway.server.api import connections
+        self.add("a", [("Roth IRA", "3639")])
+        lock = mock.Mock(acquire=mock.Mock(return_value=False))
+        with mock.patch.object(plaid, "exchange", return_value="a"), mock.patch.object(connections, "_item_lock", return_value=lock), \
+                mock.patch.object(plaid, "sync_item") as sync:
+            res = server.api_plaid_exchange(self.c, {}, {"public_token": "p", "institution": {"name": "Wealthfront"}})
+        self.assertEqual({k: res[k] for k in ("ok", "connected", "sync_deferred", "item_id")},
+                         {"ok": True, "connected": True, "sync_deferred": True, "item_id": "a"})
+        self.assertIn("come in with the next one", res["message"])
+        sync.assert_not_called()
+        lock.release.assert_not_called()
+
 
 class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
     """Investment accounts linked through Plaid show under Settings → Accounts and count in net worth, once."""

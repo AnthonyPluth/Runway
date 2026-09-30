@@ -18,7 +18,8 @@ Configuration (environment variables):
                        provider where nobody can register or change their own email, e.g. Microsoft Entra ID, which
                        doesn't send email_verified)
   OIDC_SCOPES          default "openid email profile" (add "groups" if your provider needs it for the claim)
-  RUNWAY_SESSION_DAYS  default 14
+  RUNWAY_SESSION_DAYS  default 14: days a session lasts unused. Using Runway keeps it going, but SESSION_MAX_DAYS (90)
+                       after signing in you sign in again.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ import urllib.parse
 import urllib.request
 
 import jwt
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, insert, select, update
 
 from . import db, secretbox
 from .models import AuthPending, AuthSession, User
@@ -43,12 +44,22 @@ from .models import AuthPending, AuthSession, User
 
 LOGIN_TTL = 600            # seconds to finish signing in at the provider
 MAX_PENDING = 10000        # unfinished sign-ins kept at once (a few MB at most)
+SESSION_RENEW_AFTER = 86400   # a session in use is extended at most once a day (one write, one new cookie)
+SESSION_MAX_DAYS = 90      # however much it's used, a session ends this long after signing in (or RUNWAY_SESSION_DAYS if longer)
 _discovery: dict = {}
 _jwks: dict = {}
 
 
 class OIDCError(Exception):
     pass
+
+
+class NotAllowed(OIDCError):
+    """The provider signed someone in, but they aren't on the allow-list. `who` is their email (or subject)."""
+
+    def __init__(self, who: str):
+        super().__init__(f"{who} isn’t allowed to use this Runway.")
+        self.who = who
 
 
 # ------------------------------------------------------------------------------------------------ configuration
@@ -153,8 +164,9 @@ def _hash(token: str) -> str:
 
 # ------------------------------------------------------------------------------------------------ login flow
 
-def start_login(conn, next_path: str = "/") -> tuple[str, str]:
-    """Returns (provider URL to send the browser to, value for the short-lived login cookie)."""
+def start_login(conn, next_path: str = "/", choose_account: bool = False) -> tuple[str, str]:
+    """Returns (provider URL to send the browser to, value for the short-lived login cookie). choose_account asks the
+    provider to let you pick another account rather than signing the current one straight back in."""
     c, d = config(), discovery()
     state, nonce, verifier = secrets.token_urlsafe(24), secrets.token_urlsafe(24), secrets.token_urlsafe(48)
     challenge = _b64e(hashlib.sha256(verifier.encode()).digest())
@@ -167,7 +179,18 @@ def start_login(conn, next_path: str = "/") -> tuple[str, str]:
     params = {"response_type": "code", "client_id": c["client_id"], "redirect_uri": c["redirect_uri"],
               "scope": c["scopes"], "state": state, "nonce": nonce,
               "code_challenge": challenge, "code_challenge_method": "S256"}
+    if choose_account and (prompt := _choose_account_prompt(d)):
+        params["prompt"] = prompt
     return d["authorization_endpoint"] + ("&" if "?" in d["authorization_endpoint"] else "?") + urllib.parse.urlencode(params), state
+
+
+def _choose_account_prompt(d: dict) -> str | None:
+    """The prompt that lets you pick an account: select_account (Google, Microsoft, Keycloak), or login where the provider
+    lists what it supports without it. A provider that lists neither gets nothing: an unknown prompt may be refused."""
+    supported = d.get("prompt_values_supported")
+    if not isinstance(supported, list):
+        return "select_account"   # not advertised (most providers): it's a standard value, and others ignore it
+    return next((p for p in ("select_account", "login") if p in supported), None)
 
 
 def safe_next(next_path: str | None) -> str:
@@ -278,7 +301,7 @@ def authorize(info: dict) -> dict:
         raise OIDCError(f"The provider hasn't said {email} is verified, so Runway can't let it in. If your provider never "
                         "sends email_verified and nobody can change their own email there, set OIDC_TRUST_UNVERIFIED_EMAIL=1.")
     if not ok:
-        raise OIDCError(f"{email or info.get('sub')} isn't on Runway's allow-list (OIDC_ALLOWED_EMAILS / OIDC_ALLOWED_GROUPS).")
+        raise NotAllowed(email or str(info.get("sub")))
     return {"sub": str(info.get("sub")), "email": email or None,
             "name": info.get("name") or info.get("preferred_username") or email or str(info.get("sub"))}
 
@@ -358,14 +381,49 @@ def session_user(conn, token: str | None) -> dict | None:
     return {"sub": row["sub"], "email": row["email"], "name": row["name"]}
 
 
+def renew_session(conn, token: str | None) -> int | None:
+    """Keep a session in use going: once a day at most, push its end back to RUNWAY_SESSION_DAYS from now, but never past
+    SESSION_MAX_DAYS after signing in, so a stolen cookie can't be kept alive forever. Returns the new cookie Max-Age in
+    seconds if it moved. Only sessions let in by email (or OIDC_ALLOW_ANY_USER) are extended: groups aren't kept with a
+    session, so someone taken out of an allowed group still loses access RUNWAY_SESSION_DAYS after signing in."""
+    if not token:
+        return None
+    c = config()
+    row = conn.execute(select(AuthSession.expires, AuthSession.created, AuthSession.email)
+                       .where(AuthSession.token_hash == _hash(token))).fetchone()
+    now, life = time.time(), c["session_days"] * 86400
+    if not row or row["expires"] < now or row["expires"] > now + life - SESSION_RENEW_AFTER:
+        return None   # gone, over, or extended within the last day
+    if not (c["any_user"] or (row["email"] or "").lower() in c["emails"]):
+        return None
+    expires = min(now + life, (row["created"] or now) + max(SESSION_MAX_DAYS * 86400, life))
+    if expires <= row["expires"]:
+        return None   # at its limit: it ends when it ends
+    conn.execute(update(AuthSession).where(AuthSession.token_hash == _hash(token)).values(expires=expires))
+    return int(expires - now)
+
+
 def still_allowed(email: str | None) -> bool:
     """Whether a session may go on after the allow-list changed. With only OIDC_ALLOWED_EMAILS set, an email taken off
     it ends that person's sessions at once. Groups aren't kept with a session, so with OIDC_ALLOWED_GROUPS set, someone
-    who got in may stay until their session ends (RUNWAY_SESSION_DAYS)."""
+    who got in may stay until their session ends (RUNWAY_SESSION_DAYS after signing in; see renew_session)."""
     c = config()
     if c["any_user"] or c["groups"]:
         return True
     return bool(email and email.lower() in c["emails"])
+
+
+def provider_sign_out(c: dict | None = None) -> str | None:
+    """The provider's sign-out page, if it has one, coming back to Runway's signed-out page afterwards."""
+    c = c or config()
+    try:
+        end = discovery().get("end_session_endpoint")
+    except OIDCError:
+        return None
+    if not end:
+        return None
+    q = {"client_id": c["client_id"], "post_logout_redirect_uri": c["public_url"] + "/auth/signed-out"}
+    return end + ("&" if "?" in end else "?") + urllib.parse.urlencode(q)
 
 
 def logout(conn, token: str | None) -> str:
@@ -379,14 +437,7 @@ def logout(conn, token: str | None) -> str:
             id_token = None   # only a hint for the provider's sign-out page
         conn.execute(delete(AuthSession).where(AuthSession.token_hash == _hash(token)))
     conn.execute(delete(AuthSession).where(AuthSession.expires < time.time()))
-    c = config()
-    try:
-        end = discovery().get("end_session_endpoint")
-    except OIDCError:
-        end = None
-    if end:
-        q = {"client_id": c["client_id"], "post_logout_redirect_uri": c["public_url"] + "/auth/signed-out"}
-        if id_token:
-            q["id_token_hint"] = id_token
-        return end + ("&" if "?" in end else "?") + urllib.parse.urlencode(q)
-    return "/auth/signed-out"
+    end = provider_sign_out()
+    if end and id_token:
+        end += "&" + urllib.parse.urlencode({"id_token_hint": id_token})
+    return end or "/auth/signed-out"

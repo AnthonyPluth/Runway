@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { signInUrl } from "$lib/api";
   import { app, boot, route, whenBooted } from "$lib/app.svelte";
   import MobileNav from "$lib/components/MobileNav.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import { Button } from "$lib/components/ui/button";
+  import * as Alert from "$lib/components/ui/alert";
   import * as Card from "$lib/components/ui/card";
   import { Toaster } from "svelte-sonner";
   import type { Component } from "svelte";
@@ -43,6 +45,13 @@
   <Sidebar />
   <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:p-8">
     <div class="mx-auto max-w-7xl">
+      {#if app.sessionExpired}
+        <!-- Above the page, which stays drawn underneath, so an open edit isn't lost; signing in is up to you. -->
+        <Alert.Root class="sticky top-[calc(env(safe-area-inset-top)+0.5rem)] z-30 mb-4 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+          <Alert.Description>Your session expired. Sign in again — what you’re editing stays on this page until you do.</Alert.Description>
+          <Button size="sm" onclick={() => { location.href = signInUrl(); }}>Sign in</Button>
+        </Alert.Root>
+      {/if}
       {#if app.bootError && !app.state}
         <Card.Root class="mx-auto mt-10 max-w-md">
           <Card.Header>

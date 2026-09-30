@@ -40,7 +40,7 @@ export async function openPlaidLink(itemId: string | null, kind = "investments")
   return runPlaidLink(lt.link_token, itemId, lt.kind || kind);
 }
 
-type Linked = { bank?: boolean; accounts: number; matched?: string[]; statements?: number; holdings?: number; transactions?: number; hidden_simplefin?: string[] };
+type Linked = { sync_deferred?: boolean; message?: string; bank?: boolean; accounts: number; matched?: string[]; statements?: number; holdings?: number; transactions?: number; hidden_simplefin?: string[] };
 const s = (n: number | undefined, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Runs Plaid Link. receivedRedirectUri: continuing after a bank's own sign-in page sent you back (OAuth). */
@@ -55,7 +55,10 @@ export function runPlaidLink(token: string, itemId: string | null, kind: string,
           const r = itemId
             ? await api<Linked>(`/api/plaid/items/${encodeURIComponent(itemId)}/sync`, { method: "POST" })
             : await api<Linked>("/api/plaid/exchange", { method: "POST", body: { public_token: publicToken, institution: metadata.institution, kind } });
-          toast.success(r.bank
+          if (r.sync_deferred) {   // connected, but a sync was already running: its accounts come with the next one
+            toast(r.message ?? "Connected. Its accounts come in with the next sync.");
+            await refreshState();
+          } else toast.success(r.bank
             ? `Found ${s(r.accounts, "account")}` + (r.matched?.length ? ` · matched ${r.matched.join(", ")}` : "") +
               (r.statements ? ` · ${s(r.statements, "card statement")}` : "")
             : `Synced ${s(r.accounts, "account")}, ${r.holdings} holdings, ${r.transactions} activities` +
