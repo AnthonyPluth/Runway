@@ -124,6 +124,10 @@ Your data stays in your own database; outbound calls go only to the services you
 
 Every push to `main` that passes the tests publishes a new image and a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases). You can pin a version (`ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose. The running version is shown under **Settings → Advanced**; how versions are chosen is in [docs/development.md](docs/development.md#releases).
 
+## License
+
+Runway is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
 ---
 
 <sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.

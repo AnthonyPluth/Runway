@@ -8,6 +8,7 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import { tick } from "svelte";
   import LiveDot from "./LiveDot.svelte";
+  import TickerIcon from "./TickerIcon.svelte";
   import { gainCls, pct, qty, signed } from "./numbers";
   import { inv, type SortKey } from "./state.svelte";
   import type { Holding } from "./types";
@@ -77,8 +78,13 @@
       {#each rows as x (keyOf(x))}
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-3">
           <td class="min-w-48">
-            <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
-            <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
+            <div class="flex gap-2.5">
+              <TickerIcon ticker={x.ticker} name={x.name} />
+              <div>
+                <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
+                <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
+              </div>
+            </div>
           </td>
           <td class="text-right tabular-nums">{x.is_cash ? "—" : qty(x.quantity)}</td>
           <td class="text-right tabular-nums">
