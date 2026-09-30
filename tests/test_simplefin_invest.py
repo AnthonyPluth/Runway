@@ -1,11 +1,12 @@
 import os
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from runway import db, portfolio, prices, sfinvest, simplefin
 
 TODAY = date(2026, 9, 23)
+RECENT = (date.today() - timedelta(days=1)).isoformat()   # a price the checks still count as current, whenever the tests run
 
 
 def account(acct_id="wf1", name="Wealthfront Automated Investing", balance="3500.00", holdings=None, transactions=None):
@@ -107,8 +108,8 @@ class BadFeedTests(Base):
     and scraped page text as the name."""
 
     def test_wrong_values_are_fixed_from_market_prices(self):
-        self.price("PAYX", "2026-09-22", 104.49)
-        self.price("MSFT", "2026-09-22", 500.59)
+        self.price("PAYX", RECENT, 104.49)
+        self.price("MSFT", RECENT, 500.59)
         holdings = [
             {"symbol": "PAYX", "description": "Paychex Inc", "shares": "29", "market_value": "-291.16", "cost_basis": "0"},
             {"symbol": "MSFT", "description": "keyboard_arrow_right MSFT info_outline Trade keyboard_arrow_down",
@@ -131,7 +132,7 @@ class BadFeedTests(Base):
     def test_values_rechecked_when_prices_arrive_later(self):
         holdings = [{"symbol": "PAYX", "shares": "29", "market_value": "-291.16", "description": "Paychex Inc"}]
         simplefin.store_payload(self.c, {"accounts": [account("et", "Individual Brokerage", "3044.21", holdings)]}, TODAY)
-        self.price("PAYX", "2026-09-22", 104.49)   # first sync had no price yet
+        self.price("PAYX", RECENT, 104.49)   # first sync had no price yet
         sfinvest.recapture_all(self.c, TODAY)
         h = {r["security_id"]: r["value"] for r in self.c.execute("SELECT * FROM holdings")}
         self.assertAlmostEqual(h["sf:PAYX"], 3030.21, places=2)
@@ -185,7 +186,7 @@ class RepairTests(Base):
         self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source, institution) VALUES ('sf:et','simplefin','Individual Brokerage',3044.21,'simplefin','E*Trade')")
         self.c.execute("INSERT INTO securities(id, ticker, name, is_cash) VALUES ('sf:PAYX','PAYX','keyboard_arrow_right PAYX info_outline Trade keyboard_arrow_down',0), ('sf:cash',NULL,'Cash',1)")
         self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('sf:et','sf:PAYX',29,-10.04,-291.16,0), ('sf:et','sf:cash',3335.37,1,3335.37,0)")
-        self.price("PAYX", "2026-09-22", 104.49)
+        self.price("PAYX", RECENT, 104.49)
         self.assertEqual(sfinvest.repair_stored(self.c, TODAY), 1)
         h = {r["security_id"]: dict(r) for r in self.c.execute("SELECT * FROM holdings")}
         self.assertAlmostEqual(h["sf:PAYX"]["value"], 3030.21, places=2)
