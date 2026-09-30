@@ -41,6 +41,7 @@ jobs:
         if: steps.auth.outputs.ready == 'true'
         with:
           fetch-depth: 1
+          persist-credentials: false
       # What earlier reviews of this pull request already said, gathered here so Claude needs no GitHub API access
       # of its own to read it (every push starts a fresh review).
       - name: Collect earlier review comments
