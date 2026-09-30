@@ -28,6 +28,11 @@
     dayEdited.delete(k);
     onchanged();
   };
+  // Takes a balance off the list (a program you no longer use); the row stays only while a card still earns in it.
+  const remove = (owner: string, currency: string) => async () => {
+    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: null } });
+    onchanged();
+  };
   // Changing the day keeps the balance and moves the day the estimate counts from.
   const setDay = (owner: string, currency: string, balance: number | null) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (balance == null) { dayEdited.add(key(owner, currency)); return; }
@@ -114,6 +119,8 @@
                             oninput={(e) => (day[k] = e.currentTarget.value)} use:autosave={setDay(person, row.currency, row.balance)}
                             class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
                         </label>
+                        <button type="button" class="mt-1 text-xs text-muted-foreground underline hover:text-foreground"
+                          aria-label={`Remove ${person}'s ${row.name} balance`} onclick={remove(person, row.currency)}>Remove</button>
                         {#if row.est_balance != null}
                           <div class="mt-1 text-xs text-muted-foreground" title={`Your balance plus the ${points(row.earned_since)} points your linked cards earned since ${row.as_of ? fullDate(row.as_of) : "then"}, at their normal rates. An estimate: redemptions and portal bookings aren't counted.`}>
                             Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>
