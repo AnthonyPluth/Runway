@@ -209,8 +209,12 @@ def _ts_to_date(ts) -> str | None:
         return None
     if ts <= 0:
         return None
-    # Bank dates are calendar days; read them in local time so a midnight-UTC stamp isn't shifted a day.
-    return datetime.fromtimestamp(ts).date().isoformat()
+    # Bank dates are calendar days, which banks stamp at midnight UTC (or midnight where they are: still that day in UTC).
+    # Read a stamp in the morning hours of UTC as that UTC day, so a server in the US (TZ=America/Chicago is the default)
+    # doesn't call Monday's midnight-UTC stamp Sunday evening. Later in the day it carries a real time (a card swipe): the
+    # server's own time zone is the best guess at the day it happened.
+    moment = datetime.fromtimestamp(ts, UTC)
+    return (moment if moment.hour < 12 else datetime.fromtimestamp(ts)).date().isoformat()
 
 
 CREDIT_WORDS = re.compile(r"card|visa|mastercard|amex|american express|sapphire|venture|credit|discover|aadvantage|freedom|quicksilver|strata|premier|rewards", re.I)
