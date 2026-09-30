@@ -26,6 +26,9 @@ DEFAULTS = {
     "sync_failed": True,                            # syncing has failed for a day
     "churn_fee": True,                              # a churning card's annual fee is due within 30 days
     "churn_bonus": True,                            # a sign-up bonus deadline is within 14 days, with spending left
+    "churn_plan": True,                             # time to downgrade, close or change a card, as you planned
+    "churn_benefit": True,                          # a card credit with money left resets soon
+    "churn_apply": True,                            # a planned card or bank bonus can be applied for, or its offer ends soon
 }
 LOW_BALANCE_DAYS = 30
 
@@ -193,7 +196,8 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
                         "body": (log["message"] or "The last sync failed.")[:160], "url": "/#setup/connections"})
-    out += churning.alerts(conn, today, p["churn_fee"], p["churn_bonus"])
+    out += churning.alerts(conn, today, p["churn_fee"], p["churn_bonus"], p["churn_plan"], p["churn_benefit"],
+                            p["churn_apply"])
     return out
 
 

@@ -146,14 +146,19 @@ plain Python with a handful of well-known libraries.
   as an app** on your iPhone's Home Screen.
 - **Push notifications** on your phone or computer: a card payment coming up, the forecast getting low, a recurring
   payment that didn't show up, a large charge, syncing that keeps failing, or (Churning) an annual fee or a sign-up
-  bonus deadline coming up. Each alert is sent once.
+  bonus deadline coming up, a card you planned to downgrade or close, a credit about to reset, or a card you planned
+  that you can apply for now. Each alert is sent once.
 - **Churning:** credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. 5/24 per
   person (authorized-user, business and product-changed cards left out) with the day each card stops counting;
-  annual fees coming up (keep, downgrade or close?); bonus spending and direct deposits followed from linked
-  accounts; when a bonus can be earned again, by each bank's commonly reported rule (a rule of thumb, overridable);
-  safe-to-close days and fee-waiver reminders for bank accounts; your own to-dos; the best card for a purchase by
-  category; estimated points and what they're worth at values you set; and bank bonus money per year (usually
-  reported as interest).
+  annual fees coming up (keep, downgrade or close?), or your plan for each card (keep it and it stops asking;
+  downgrade or close it and you're reminded before the fee, with a Done that updates the card); bonus spending and
+  direct deposits followed from linked accounts; when a bonus can be earned again, by each bank's commonly reported
+  rule (a rule of thumb, overridable); card benefits and credits, what's left this period, and the annual fee net of
+  the ones you use; safe-to-close days and fee-waiver reminders for bank accounts; your own to-dos (snoozable); the
+  cards and bank bonuses you want next, with what's in the way (5/24, bonus rules, a credit score you want first) and
+  the earliest day to apply; the best card for a purchase by category, including rates earned only through the
+  issuer's travel portal; estimated points by program (airline and hotel programs each their own) at estimated
+  values you can change; and bank bonus money per year (usually reported as interest).
 - **Backups** as a single file, restorable into either database.
 
 ## Screenshots
@@ -288,7 +293,10 @@ were added are upgraded in place.
 - **Churning:** spending toward a card's bonus is counted the way Reports counts spending (split transactions by their
   parts, transfers and card payments left out, refunds lowering it). A bank bonus's direct deposits are deposits
   categorized as income, or that look like payroll. The banks' bonus rules live in `runway/churning.py` as data, and
-  every estimate says it is one.
+  every estimate says it is one. Points values are community-consensus estimates with an as-of date
+  (`VALUES_AS_OF`), not fetched from anywhere: no bank or aggregator (Plaid included) reports what a point is worth,
+  so they're data you can override per program. Points estimated from spending use a card's normal rates, since a
+  transaction doesn't say whether it was booked through the issuer's portal.
 - **Stack:** Python with a handful of well-known libraries: [SQLAlchemy](https://www.sqlalchemy.org) and
   [Alembic](https://alembic.sqlalchemy.org) for SQLite/Postgres and migrations (psycopg 3 for Postgres),
   [PyJWT](https://pyjwt.readthedocs.io) for sign-in tokens, [pywebpush](https://github.com/web-push-libs/pywebpush)

@@ -578,6 +578,15 @@ churn_cards = Table(
     Column('eligible_on', Text, doc="you know better: the day its bonus can be earned again (overrides the issuer's rule)"),
     Column('notes', Text),
     Column('created_at', Text, server_default=now_text()),
+    Column('portal_name', Text, doc="the issuer's travel portal, for rates earned only there (e.g. Capital One Travel)"),
+    Column('plan', Text, server_default=text("'undecided'"),
+           doc='what you mean to do before the annual fee: undecided | keep | downgrade | close | product_change'),
+    Column('plan_target', Text, doc='the card to downgrade or change it to'),
+    Column('plan_date', Text, doc='do it by this day; NULL = the day before the next annual fee'),
+    Column('plan_remind_days', Integer, server_default=text('14'), doc='remind you this many days before plan_date'),
+    Column('plan_done_on', Text, doc='the day you checked the plan off'),
+    Column('plan_new_id', Integer, doc='the card checking off a downgrade or product change added (churn_cards.id); undo removes it'),
+    Column('hide_upcoming', Integer, server_default=text('0'), doc='1: leave this card out of Upcoming and its alerts'),
     sqlite_autoincrement=True,
     info={'doc': 'credit cards you and your partner opened for their sign-up bonuses and rewards'},
 )
@@ -587,7 +596,9 @@ churn_rates = Table(
     Column('card_id', Integer, nullable=False),
     Column('category', Text, nullable=False, doc='a category (its subcategories earn the same unless they have their own)'),
     Column('multiplier', Float, nullable=False, doc='points per dollar'),
-    PrimaryKeyConstraint('card_id', 'category'),
+    Column('portal_only', Integer, nullable=False, server_default=text('0'),
+           doc="1: only when booked through the issuer's portal (churn_cards.portal_name)"),
+    PrimaryKeyConstraint('card_id', 'category', 'portal_only'),
     info={'doc': 'what a card earns in a category, instead of its base rate'},
 )
 
@@ -596,6 +607,7 @@ churn_currencies = Table(
     Column('key', Text, primary_key=True),
     Column('name', Text, nullable=False),
     Column('cents', Float, nullable=False, doc='what one point is worth to you, in cents'),
+    Column('kind', Text, doc='a currency you added: bank | airline | hotel | cash | other (NULL = other)'),
     info={'doc': "points values you set, and currencies you added (the rest are churning.CURRENCIES' defaults)"},
 )
 
@@ -616,8 +628,88 @@ churn_tasks = Table(
     Column('due_on', Text, nullable=False),
     Column('action', Text, nullable=False, doc='e.g. close, downgrade to Freedom, call retention'),
     Column('done', Integer, server_default=text('0')),
+    Column('snooze_until', Text, doc='left out of Upcoming until this day'),
     sqlite_autoincrement=True,
     info={'doc': 'things to do about a card, and when'},
+)
+
+churn_benefits = Table(
+    'churn_benefits', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('card_id', Integer, nullable=False),
+    Column('name', Text, nullable=False, doc='e.g. Uber Cash, Priority Pass lounges'),
+    Column('kind', Text, server_default=text("'credit'"), doc='credit | access | status | other (churn_benefits.KINDS)'),
+    Column('amount', Float, doc='a credit: dollars per period (NULL for access and the like)'),
+    Column('period', Text, server_default=text("'annual'"),
+           doc='monthly | quarterly | semiannual | annual | every_4_years | one_time'),
+    Column('basis', Text, server_default=text("'calendar'"),
+           doc="calendar (resets Jan 1, the 1st of the month...) | anniversary (the cardmember year, from opened_on)"),
+    Column('annual_value', Float, doc="what it's worth to you a year, instead of amount times periods (access: the only value)"),
+    Column('counts', Integer, server_default=text('1'), doc="1: you'll use it, so it counts against the annual fee"),
+    Column('remind', Integer, server_default=text('1'), doc='1: remind you before a credit with money left resets'),
+    Column('remind_days', Integer, doc='... this many days ahead (NULL = 14 for monthly and quarterly, else 30)'),
+    Column('expires_on', Text, doc='a one-time benefit: the last day to use it'),
+    Column('preset', Text, doc='the quick-add preset it came from (churn_benefits.PRESETS)'),
+    Column('notes', Text),
+    Column('active', Integer, server_default=text('1'), doc='0: kept for the record, but no longer on the card'),
+    Column('created_at', Text, server_default=now_text()),
+    sqlite_autoincrement=True,
+    info={'doc': "a card's perks and credits (lounges, Uber, airline and hotel credits...)"},
+)
+
+churn_benefit_uses = Table(
+    'churn_benefit_uses', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('benefit_id', Integer, nullable=False),
+    Column('period_start', Text, nullable=False, doc='the first day of the period it was used in'),
+    Column('amount_used', Float, doc='dollars of a credit used (NULL: a benefit without an amount, used)'),
+    Column('used_on', Text, nullable=False),
+    sqlite_autoincrement=True,
+    info={'doc': 'when a benefit was used, per period'},
+)
+
+churn_wishlist = Table(
+    'churn_wishlist', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('owner', Text, nullable=False, doc="whose it will be: a person's first name (as accounts.owner has it)"),
+    Column('kind', Text, server_default=text("'card'"), doc='card | bank_bonus'),
+    Column('issuer', Text, doc='a card: churning.ISSUERS key'),
+    Column('bank', Text, doc='a bank bonus: the bank'),
+    Column('product', Text, doc='a card: e.g. Sapphire Preferred; a bank bonus: the account, if you like'),
+    Column('family', Text, doc="cards whose bonuses count as one for the issuer's rules (NULL = the product)"),
+    Column('business', Integer, server_default=text('0')),
+    Column('annual_fee', Float, doc='expected'),
+    Column('bonus', Float, doc='the expected bonus: points or miles in its currency, or dollars'),
+    Column('currency', Text, doc='a card: what the bonus is paid in (churning.CURRENCIES or churn_currencies)'),
+    Column('bonus_spend', Float, doc='a card: spending needed for the bonus'),
+    Column('bonus_months', Integer, doc='a card: months to spend it'),
+    Column('account_type', Text, doc='a bank bonus: checking | savings | business'),
+    Column('requirements', Text, doc='a bank bonus: deposits, balance and the like, as the offer says'),
+    Column('repeat_months', Integer, doc="a bank bonus: the bank's rule, a bonus again this many months after the last"),
+    Column('once_per_lifetime', Integer, server_default=text('0'), doc="a bank bonus: 1 if the bank's rule is once per lifetime"),
+    Column('offer_expires_on', Text, doc='the offer ends on this day'),
+    Column('priority', Integer, doc='1 = the next one to get'),
+    Column('status', Text, server_default=text("'wanted'"), doc='wanted | ready (you mean to apply now) | applied | dropped'),
+    Column('wait_until', Text, doc='your own "not before" day'),
+    Column('min_score', Integer, doc='the credit score you want before applying'),
+    Column('assume_prior_planned', Integer, server_default=text('0'),
+           doc="1: count your earlier-priority planned cards as opened, for this one's 5/24"),
+    Column('notes', Text),
+    Column('applied_on', Text),
+    Column('applied_id', Integer, doc='what applying made: churn_cards.id or churn_bank_bonuses.id (by kind)'),
+    Column('created_at', Text, server_default=now_text()),
+    sqlite_autoincrement=True,
+    info={'doc': "cards and bank bonuses you want next, and what's in the way of applying"},
+)
+
+churn_scores = Table(
+    'churn_scores', metadata,
+    Column('owner', Text, nullable=False),
+    Column('as_of', Text, nullable=False, doc='YYYY-MM-DD'),
+    Column('score', Integer, nullable=False, doc='a credit score you looked up (Runway never fetches one)'),
+    Column('source', Text, doc='e.g. Experian FICO 8'),
+    PrimaryKeyConstraint('owner', 'as_of'),
+    info={'doc': 'credit scores you entered, per person and day'},
 )
 
 churn_bank_bonuses = Table(
@@ -682,6 +774,8 @@ Index('retail_items_order', retail_items.c.order_id)
 Index('retail_charges_order', retail_charges.c.order_id)
 Index('retail_charges_tx', retail_charges.c.tx_id)
 Index('churn_tasks_card', churn_tasks.c.card_id)
+Index('churn_benefits_card', churn_benefits.c.card_id)
+Index('churn_benefit_uses_benefit', churn_benefit_uses.c.benefit_id)
 Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a Plaid account is one of your accounts, never two
 
 # Tables whose integer id is assigned by the database.
