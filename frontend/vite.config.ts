@@ -18,7 +18,7 @@ export default defineConfig({
     svelte(),
     svelteTesting(),
     codecovVitePlugin({
-      enableBundleAnalysis: process.env.CODECOV_TOKEN !== undefined,
+      enableBundleAnalysis: Boolean(process.env.CODECOV_TOKEN),
       bundleName: "runway-web",
       uploadToken: process.env.CODECOV_TOKEN,
       telemetry: false,
