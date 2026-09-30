@@ -110,7 +110,7 @@ jobs:
           poetry run mypy
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
-  # coverage, and make sure it builds.
+  # coverage, and build it (reporting its bundle sizes to Codecov).
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -138,7 +138,10 @@ jobs:
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
-      - run: npm run build
+      - name: Build (and send its bundle sizes to Codecov)
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: npm run build
 
   # The image is built while the tests run, and published only once they (and the web app's checks) pass.
   # build: works out the version, builds the image for this runner and checks it starts, then builds it for Intel/AMD
