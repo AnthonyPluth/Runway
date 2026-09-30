@@ -74,14 +74,16 @@ jobs:
         if: matrix.database == 'postgres'
         env:
           DATABASE_URL: postgresql://runway:runway@localhost:5432/runway
-        run: poetry run python -m unittest discover -v tests
+        run: |
+          poetry run pip install --quiet "unittest-parallel==1.8.6"
+          poetry run unittest-parallel -t . -s tests -j 4
       # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and on main
       # the number becomes the README's badge (the coverage-badge job below).
       - name: Run tests (sqlite) and measure coverage
         if: matrix.database == 'sqlite'
         run: |
-          poetry run pip install --quiet "coverage==7.16.2"
-          poetry run coverage run -m unittest discover -v tests
+          poetry run pip install --quiet "coverage==7.16.2" "unittest-parallel==1.8.6"
+          poetry run unittest-parallel -t . -s tests -j 4 --coverage --coverage-rcfile pyproject.toml
           poetry run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
           poetry run coverage json -q -o coverage.json
       - name: Keep the coverage report
