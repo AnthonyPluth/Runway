@@ -18,7 +18,8 @@ charge to its order and splits the transaction by what you bought ($84 at Target
   you. The extension loads Carta out of sight, notes the data requests Carta's own pages make, reads the same
   addresses again (reads only, carta.com only; never sign-out, exercise, accept or download links) and sends the
   replies to Runway, which finds your companies and grants in them. Click **Carta** in the extension; once an import
-  has worked, the daily import includes it.
+  has worked, the daily import includes it: every day, or about once a week or month if you
+  choose that in Options (Carta signs you out often, so reading it less often means fewer sign-ins).
 
 It sends pages only to the Runway address you set, and never sees your passwords. All the reading of those pages
 happens in Runway (the extension just fetches them), so when a store changes its site the fix is a Runway update.
