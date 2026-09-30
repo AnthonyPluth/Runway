@@ -1,0 +1,38 @@
+name: Cancel runs on close
+
+# When a pull request is merged or closed, stop its runs that are still going: the Claude review, the Docker image
+# build and tests, and the security scans. Nothing is lost, since a merge starts main's own runs.
+#
+# GitHub doesn't cancel a pull request's runs when it closes. Each of those workflows is in a concurrency group per pull
+# request with cancel-in-progress, which is how a new push already replaces an older run. Each job below joins one of
+# those groups (the names must match the workflows'), so starting it cancels the run in progress; the job itself does
+# nothing. GitHub's own CodeQL checks come from the repository's settings, not a workflow here, so they aren't covered.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}   # claude-review.yml
+      cancel-in-progress: true
+    steps:
+      - run: echo "Stopped any Claude review still running on this pull request."
+  docker:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docker-image-${{ github.ref }}   # docker.yml
+      cancel-in-progress: true
+    steps:
+      - run: echo "Stopped any Docker image run still going on this pull request."
+  security:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: security-${{ github.ref }}   # security.yml
+      cancel-in-progress: true
+    steps:
+      - run: echo "Stopped any security scan still running on this pull request."
