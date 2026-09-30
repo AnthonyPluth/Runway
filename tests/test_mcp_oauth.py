@@ -85,6 +85,9 @@ class IssuerTests(unittest.TestCase):
         self.assertEqual(self.issuer("127.0.0.1:8765", "https://runway.example.com"), "https://runway.example.com")
         self.assertEqual(self.issuer("x", "http://nas.local:8765"), "http://nas.local:8765")
         self.assertIsNone(self.issuer("127.0.0.1", "http://runway.example.com"))   # plain http on the internet: no
+        for odd in ('https://runway.example.com/"x', "https://runway.example.com/a b", "https://user@runway.example.com", "ftp://x.example"):
+            with self.subTest(public=odd):
+                self.assertIsNone(self.issuer("127.0.0.1", odd))
 
     def test_without_it_only_a_home_address(self):
         for host in ("127.0.0.1:8765", "localhost:8765", "nas.local", "[::1]:8765", "192.168.1.5", "homeserver"):

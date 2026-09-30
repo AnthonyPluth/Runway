@@ -55,6 +55,7 @@ LOOPBACK = ("127.0.0.1", "::1", "localhost")
 TOUCH_EVERY = 60                  # seconds between updates of a grant's last_used
 
 _HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*")
+_PUBLIC_URL = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?")   # nothing to escape in a header
 _HOST_HEADER = re.compile(r"(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::\d{1,5})?")
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -99,6 +100,8 @@ def issuer(host: str | None) -> str | None:
     http://<Host> only for an address that makes sense only at home (oidc.local_host); otherwise None, and OAuth is off."""
     public = oidc.config()["public_url"]
     if public:
+        if not _PUBLIC_URL.fullmatch(public):
+            return None
         p = urllib.parse.urlsplit(public)
         ok = p.scheme == "https" or (p.scheme == "http" and oidc.local_host(p.hostname or ""))
         return public if ok and p.hostname else None
