@@ -606,8 +606,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._mcp_origin_ok():   # a web page in a browser (DNS rebinding); real clients send no Origin
             return self._json(403, {"error": "Origin not allowed."})
         with db.session() as conn:
-            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
-        if not valid:
+            access = mcp_http.authorized(conn, self.headers.get("Authorization"))
+        if access is None:
             self.close_connection = True
             return self._send(401, json.dumps({"error": "Missing or unknown key. Make one under Settings → Advanced."}).encode(),
                               extra={"WWW-Authenticate": "Bearer"})
@@ -621,7 +621,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(msg, dict):   # a batch or something else: one message per POST
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
         try:
-            reply = mcp_server.handle(msg, mcp_http.local_fetch)
+            reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
         except sqlalchemy.exc.OperationalError as e:
             return self._error(e)
         if reply is None:

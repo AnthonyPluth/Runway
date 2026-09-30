@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import datetime
 
 from . import db
@@ -37,6 +38,21 @@ WRITABLE = (
 )
 
 
+@dataclass(frozen=True)
+class Access:
+    """What one caller of /mcp may do: its scopes ("read", "churning:write"), the grant it came from (None for the key)
+    and who approved it. A change also needs allow_writes() on at that moment."""
+    scopes: frozenset[str]
+    grant_id: int | None
+    who: str | None
+
+    def may_write(self, conn) -> bool:
+        return "churning:write" in self.scopes and allow_writes(conn)
+
+
+KEY_ACCESS = Access(frozenset({"read", "churning:write"}), None, None)   # the rwm_ key: the switch alone decides changes
+
+
 def new_token(conn) -> str:
     """A new key for the MCP server (replacing any earlier one). Only a hash of it is kept."""
     token = "rwm_" + secrets.token_urlsafe(32)
@@ -60,6 +76,10 @@ def _matches(conn, key: str, authorization: str | None) -> bool:
 
 def check_token(conn, authorization: str | None) -> bool:
     return _matches(conn, sk.MCP_TOKEN_HASH, authorization)
+
+
+def key_access(conn, authorization: str | None, _resource: str | None = None) -> Access | None:
+    return KEY_ACCESS if check_token(conn, authorization) else None
 
 
 def allow_writes(conn) -> bool:

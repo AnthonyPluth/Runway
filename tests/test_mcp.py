@@ -314,7 +314,9 @@ class StreamableHttpTests(RunwayServer):
             mcp_http.local_fetch("accounts", {}, {})
         with self.assertRaises(mcp_server.ToolError):
             mcp_http.local_fetch("churning/cards", {}, {"owner": "Alex"})   # writes are off
-        self.assertEqual(mcp_http.local_fetch("access", {}), {"writes": False})
+        self.assertEqual(mcp_http.local_fetch("access", {}), {"writes": False, "why": mcp_http.WRITES_OFF})
+        read_only = mcp_access.Access(frozenset({"read"}), None, None)
+        self.assertEqual(mcp_http.local_fetch("access", {}, access=read_only), {"writes": False, "why": mcp_http.READ_ONLY})
         key = self.make_key()                                                       # and through the protocol
         result = self.call(key, "get_order", {"order_id": "../../settings"})
         self.assertTrue(result["isError"])

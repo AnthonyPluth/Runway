@@ -228,6 +228,15 @@ def writes_allowed(fetch: Fetch | None = None) -> bool:
         return False
 
 
+def _refusal(fetch: Fetch) -> str:
+    """Why a change can't be made: the switch is off, or this connection was only allowed to read."""
+    try:
+        why = fetch("access", {}).get("why")
+    except (ToolError, AttributeError):
+        why = None
+    return why or "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
+
+
 def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:
     """A tool that makes one churning change: POSTs to `template` (its {id} from `id_arg`) the `fields` object and any of
     the `extra` arguments, as the web app's forms send them."""
@@ -301,7 +310,7 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
     if tool.get("write") and not writes_allowed(fetch):
-        raise ToolError("Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced.")
+        raise ToolError(_refusal(fetch))
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
