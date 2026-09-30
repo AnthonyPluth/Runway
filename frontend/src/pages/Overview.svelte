@@ -11,6 +11,7 @@
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
+  import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
@@ -90,7 +91,7 @@
 
     {#if alerts}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
-        {#each fc.warnings as w (w)}{@render attention(w, `/#setup/${/Plaid/.test(w) ? "connections" : "accounts"}`)}{/each}
+        {#each fc.warnings as w (w)}{@render attention(w, "/#setup/accounts")}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
         {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your primary checking account in Settings.", "/#setup/accounts")}{/if}
       </Group>
@@ -100,7 +101,7 @@
     <!-- The hero: today's balance, whether it holds up, and the forecast under it. The chart is green while the
          balance stays above zero and red when it dips below. -->
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
-      <div class="text-[15px] text-muted-foreground">{fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")}</div>
+      <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} onhorizon={(d) => setDays(String(d))} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
@@ -115,7 +116,7 @@
         </p>
       {/if}
       {#if fc.accounts.length > 1}
-        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined · <a class="text-primary" href="/#setup/accounts">pick a primary account</a></p>
+        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined · choose one account by clicking the name above</p>
       {/if}
 
       <div class="mt-5">

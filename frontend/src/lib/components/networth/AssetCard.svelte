@@ -11,8 +11,9 @@
   import { HOME_VALUES, valueSource } from "./homeValues";
   import { ASSET_KIND_LABEL, type Asset, type NetWorth } from "./types";
 
-  // A home, vehicle or other asset: its value and where it came from, with a quick way to update it.
-  let { a, d, onedit, onchanged }: { a: Asset; d: NetWorth; onedit: () => void; onchanged: () => void } = $props();
+  // A home, vehicle or other asset as the side panel shows it: its value and where it came from, with a quick way to update
+  // it, the value link, and removing it. `onremoved` runs after Remove goes through (the panel closes).
+  let { a, d, onedit, onchanged, onremoved }: { a: Asset; d: NetWorth; onedit: () => void; onchanged: () => void; onremoved: () => void } = $props();
 
   // Where to check what it's worth: your own link, Zillow for a home with an address, KBB for a vehicle.
   const link = $derived(a.url && /^https?:\/\//i.test(a.url) ? { href: a.url, label: a.url.includes("zillow") ? "Zillow" : a.url.includes("kbb") ? "KBB" : "Link" }
@@ -44,15 +45,15 @@
     } catch (err) { toast.error((err as Error).message); looking = false; }
   }
   async function remove() {
-    try { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onchanged(); }
+    try { await api(`/api/assets/${a.id}/remove`, { method: "POST" }); toast("Removed"); onremoved(); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
 </script>
 
-<div class="rounded-xl border border-border p-4">
+<div>
   <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:gap-1">
     <div class="min-w-0">
-      <div class="mb-0.5 flex flex-wrap items-center gap-2 font-semibold">{a.name} <Badge variant="secondary">{ASSET_KIND_LABEL[a.kind] ?? a.kind}</Badge></div>
+      <div class="mb-0.5"><Badge variant="secondary">{ASSET_KIND_LABEL[a.kind] ?? a.kind}</Badge></div>
       <div class="text-sm text-muted-foreground">
         {valueSource(a.source)}{a.source !== "manual" && a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}
         · set {a.as_of ? fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" }) : "—"}{a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year since` : ""}

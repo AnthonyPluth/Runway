@@ -20,17 +20,24 @@
   import { autosave } from "$lib/autosave";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
   import { fmt, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
+  import { tick } from "svelte";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import BankIcon from "./BankIcon.svelte";
-  import type { SettingsAccount } from "./types";
-  import { checkCls, fieldCls, inputCls, selectCls, warnText } from "./ui";
+  import { linkable, plaidFor, plaidLabel } from "./plaidAccounts";
+  import { connectPlaid, matchPlaidAccount } from "./plaid.svelte";
+  import PlaidChoice from "./PlaidChoice.svelte";
+  import type { PlaidStatus, SettingsAccount } from "./types";
+  import { checkCls, fieldCls, inputCls, rowCls, selectCls, warnText } from "./ui";
 
-  // One account: a compact line (name, what's notable, balance) that opens into its settings, each saved as you go.
-  let { a, cash, byName }: { a: SettingsAccount; cash: SettingsAccount[]; byName: Record<string, string> } = $props();
+  // One account: a compact line (name, where it syncs from, what's notable, balance) that opens into its settings, each saved as you go.
+  let { a, cash, byName, plaid = null, mine = [] }: {
+    a: SettingsAccount; cash: SettingsAccount[]; byName: Record<string, string>; plaid?: PlaidStatus | null; mine?: SettingsAccount[];
+  } = $props();
 
   // svelte-ignore state_referenced_locally
   const init = a;
@@ -53,19 +60,34 @@
   // Where balances and transactions come from: a choice once the account is matched to a Plaid account.
   const canSwitch = $derived(!a.id.startsWith("pl:") && !!link?.transactions);
   const where = $derived(`${link?.institution || "Plaid"}${link?.mask ? ` ••${link.mask}` : ""}`);
+  const own = $derived(a.id.startsWith("pl:"));
+  // The Plaid account behind this one (its connection says when it last synced), and the ones it could be linked to.
+  const behind = $derived(plaidFor(plaid, a.id));
+  const options = $derived(linkable(plaid));
+  const linkKind = $derived(["checking", "savings", "credit", "loan"].includes(a.kind));
+  // Shown once Plaid is set up, or this account already uses it.
+  const showSource = $derived(!!link || own || (linkKind && !!plaid && (plaid.configured || plaid.items.length > 0)));
+  const mask = $derived(link?.mask ? ` ••${link.mask}` : "");
+  const source = $derived(own ? `Plaid${mask}` : link ? `SimpleFIN + Plaid${mask}` : "SimpleFIN");
+  const plaidSynced = $derived.by(() => {
+    const t = behind?.it.last_sync;
+    if (!t) return "";
+    const d = new Date(t.replace(" ", "T") + "Z");
+    return isNaN(d.getTime()) ? t : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  });
 
   // The line under the name: "primary · Anthony · paid from Checking · via Plaid", with what needs a look in orange.
   const summary = $derived.by(() => {
-    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string }[] = [];
+    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean }[] = [];
     if (a.id === app.state?.primary_account) bits.push({ text: "primary", tag: true });
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
-      if (!link) bits.push({ text: "not linked through Plaid", warn: true });
+      if (!link) bits.push({ text: "not linked to Plaid", warn: true }, { text: "Link…", link: true });
       else if (!link.closed) bits.push({ text: `no statement from ${link.institution || "the bank"} yet`, warn: true, title: statementNote(link.statement_note) });
     }
     if (a.networth_hidden) bits.push({ text: "not in net worth", title: "Left out of the Net worth page; still counted everywhere else" });
-    if (a.provider === "plaid" || a.id.startsWith("pl:")) bits.push({ text: "via Plaid" });
+    bits.push({ text: source, title: a.provider === "plaid" || own ? "Balances and transactions come from Plaid" : "Balances and transactions come from SimpleFIN" });
     return bits;
   });
 
@@ -95,6 +117,26 @@
     } catch (err) { toast.error((err as Error).message); reload(); }
   }
   let kindSelect = $state<HTMLSelectElement | null>(null);
+
+  // "Link…" on the line opens the row at its Data source section.
+  let sourceBox = $state<HTMLElement | null>(null);
+  async function openSource(e: Event) {
+    e.preventDefault(); e.stopPropagation();
+    open = true; openAccounts.add(a.id);
+    await tick();
+    sourceBox?.scrollIntoView({ block: "nearest" });
+    sourceBox?.querySelector<HTMLElement>("select, button")?.focus();
+  }
+  let linking = $state("");
+  async function linkTo(e: Event) {
+    const el = e.currentTarget as HTMLSelectElement;
+    const v = el.value;
+    if (!v) return;
+    linking = v;
+    if (v === "__connect") await connectPlaid("bank");
+    else await matchPlaidAccount(v, a.id);
+    linking = ""; el.value = "";
+  }
 </script>
 
 <details class="group border-b last:border-b-0" {open} ontoggle={toggled}>
@@ -103,7 +145,8 @@
     <span class="flex min-w-0 flex-1 flex-col">
       <span class="truncate font-medium">{name.trim() || a.name}</span>
       <span class="text-xs text-muted-foreground">
-        {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else}<span
+        {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else if bit.link}<button
+          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openSource}>{bit.text}</button>{:else}<span
           class={bit.warn ? warnText : ""} title={bit.title}>{nb(bit.text)}</span>{/if}{/each}
       </span>
     </span>
@@ -127,14 +170,38 @@
         </select>
       </label>
     {/if}
-    {#if canSwitch}
-      <label class={fieldCls} title="Where balances and transactions come from. Switching keeps your history; transactions both have are matched up.">
-        Transactions from
-        <select class={selectCls} value={a.provider === "plaid" ? "plaid" : "simplefin"} onchange={setProvider}>
-          <option value="simplefin">SimpleFIN</option>
-          <option value="plaid">Plaid ({where})</option>
-        </select>
-      </label>
+    {#if showSource}
+      <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source" bind:this={sourceBox}>
+        <h4 class="text-sm font-medium">Data source</h4>
+        <p class="text-sm text-muted-foreground">{nb(source)}{#if plaidSynced}{" · "}{nb(`Plaid synced ${plaidSynced}`)}{/if}</p>
+        <div class={rowCls}>
+          {#if canSwitch}
+            <label class={fieldCls} title="Where balances and transactions come from. Switching keeps your history; transactions both have are matched up.">
+              Transactions from
+              <select class={selectCls} value={a.provider === "plaid" ? "plaid" : "simplefin"} onchange={setProvider}>
+                <option value="simplefin">SimpleFIN</option>
+                <option value="plaid">Plaid ({where})</option>
+              </select>
+            </label>
+          {/if}
+          {#if own && behind}
+            <label class={fieldCls}>Which of your accounts this is
+              <PlaidChoice p={behind.p} {mine} />
+            </label>
+          {:else if link && a.plaid_account_id}
+            <span class="flex items-center gap-2 text-sm">Linked to {where}
+              <Button variant="outline" size="sm" onclick={() => matchPlaidAccount(a.plaid_account_id!, "")}>Unlink</Button></span>
+          {:else if !link && linkKind}
+            <label class={fieldCls}>Link to a Plaid account
+              <select class={`${selectCls} w-full sm:w-72`} disabled={!!linking} onchange={linkTo}>
+                <option value="">Choose…</option>
+                {#each options as o (o.p.id)}<option value={o.p.id}>{plaidLabel(o)} · {fmt(o.p.balance)}</option>{/each}
+                {#if plaid?.configured}<option value="__connect">Connect a new bank through Plaid…</option>{/if}
+              </select>
+            </label>
+          {/if}
+        </div>
+      </section>
     {/if}
     <div class="flex flex-col gap-2.5 sm:col-span-2 lg:col-span-3">
       {#if a.kind === "checking" || a.kind === "savings"}

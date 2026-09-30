@@ -13,7 +13,7 @@ import MobileNav from "./MobileNav.svelte";
 import Sidebar from "./Sidebar.svelte";
 
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: "2020-01-05T09:00:00", ...extra });
-beforeEach(() => { app.state = null; route.page = "overview"; });
+beforeEach(() => { app.state = null; route.page = "overview"; route.sub = ""; });
 
 describe("Sidebar", () => {
   it("links to every page and marks the current one", () => {
@@ -21,12 +21,30 @@ describe("Sidebar", () => {
     route.page = "budget";
     render(Sidebar);
     const nav = screen.getByRole("navigation", { name: "Main" });
-    for (const name of ["Overview", "Transactions", "Budget", "Recurring", "Reports", "Investments", "Net worth"])
+    for (const name of ["Overview", "Transactions", "Budget", "Reports", "Net worth", "Churning"])
       expect(within(nav).getByRole("link", { name })).toHaveAttribute("href", expect.stringMatching(/^#/));
     expect(within(nav).getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "#setup");
   });
+
+  it("no longer lists Investments or Recurring as pages of their own", () => {
+    app.state = state();
+    render(Sidebar);
+    const nav = screen.getByRole("navigation", { name: "Main" });
+    expect(within(nav).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(
+      ["Overview", "Transactions", "Budget", "Reports", "Net worth", "Churning"]);
+  });
+
+  it.each([["networth", "investments", "Net worth"], ["networth", "equity", "Net worth"], ["budget", "recurring", "Budget"]])(
+    "keeps %s/%s lit as %s", (page, sub, label) => {
+      app.state = state();
+      route.page = page; route.sub = sub;
+      render(Sidebar);
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("aria-current", "page");
+      expect(within(nav).getAllByRole("link").filter((l) => l.hasAttribute("aria-current"))).toHaveLength(1);
+    });
 
   it("shows Review as part of Transactions", () => {
     app.state = state();
@@ -75,7 +93,7 @@ describe("Sidebar", () => {
 });
 
 describe("MobileNav", () => {
-  it("has the main tabs and a More button, with recurring and the rest tucked away", () => {
+  it("has the main tabs and a More button, with the rest tucked away", () => {
     app.state = state();
     render(MobileNav);
     const bar = screen.getByRole("navigation", { name: "Main" });
@@ -94,7 +112,9 @@ describe("MobileNav", () => {
     render(MobileNav);
     await userEvent.click(screen.getByRole("button", { name: "More" }));
     const sheet = screen.getByRole("dialog", { name: "More pages" });
-    for (const name of ["Recurring", "Investments", "Net worth", "Settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
+    for (const name of ["Net worth", "Churning", "Settings"]) expect(within(sheet).getByRole("link", { name })).toBeInTheDocument();
+    expect(within(sheet).queryByRole("link", { name: "Investments" })).not.toBeInTheDocument();
+    expect(within(sheet).queryByRole("link", { name: "Recurring" })).not.toBeInTheDocument();
     expect(sheet).toHaveTextContent("Runway 1.4.0");
     expect(within(sheet).getByRole("link", { name: /Sign out ann@x\.com/ })).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
@@ -105,7 +125,7 @@ describe("MobileNav", () => {
     app.state = state();
     render(MobileNav);
     await userEvent.click(screen.getByRole("button", { name: "More" }));
-    route.page = "recurring";
+    route.page = "budget";
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
@@ -114,6 +134,14 @@ describe("MobileNav", () => {
     route.page = "networth";
     render(MobileNav);
     expect(screen.getByRole("button", { name: "More" })).toHaveClass("text-foreground");
+  });
+
+  it("lights up Budget, not More, on its Bills & income tab", () => {
+    app.state = state();
+    route.page = "budget"; route.sub = "recurring";
+    render(MobileNav);
+    expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "More" })).not.toHaveClass("text-foreground");
   });
 
   it("closes the sheet from the backdrop", async () => {

@@ -99,6 +99,8 @@ describe("churning 2 helpers", () => {
     expect(ownerChoices(["Alex"], "Pat")).toEqual(["Alex", "Pat"]);
     expect(ownerChoices(["Alex", "Joint"], "Joint")).toEqual(["Alex"]);
     expect(ownerChoices(["Alex"], "Joint", true)).toEqual(["Alex", "Joint"]);
+    // alphabetical whatever order people signed in, an old name slotted in, and Joint still last
+    expect(ownerChoices(["Sam", "alex", "Pat"], "Chris", true)).toEqual(["alex", "Chris", "Pat", "Sam", "Joint"]);
   });
 
   it("groups currencies and says where each value came from", () => {

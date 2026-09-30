@@ -11,7 +11,7 @@ import { app } from "$lib/app.svelte";
 import type { RecurringItem, Suggestion } from "$lib/components/recurring/types";
 import type { Account } from "$lib/types";
 import { toast } from "svelte-sonner";
-import Recurring from "./Recurring.svelte";
+import Recurring from "./RecurringView.svelte";
 
 const accounts: Account[] = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "a2", name: "Old", kind: "checking", hidden: 1 }];
 const item = (extra: Partial<RecurringItem> = {}): RecurringItem => ({

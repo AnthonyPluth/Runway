@@ -36,7 +36,7 @@ describe("SetupChecklist", () => {
     expect(screen.getByText("2 of 4 done")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Done")).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#recurring");
+    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#budget/recurring");
     expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "#budget");
   });
 
@@ -75,6 +75,7 @@ describe("CardsTable", () => {
   it("explains how to link cards when there are none", () => {
     render(CardsTable, { cards: [] });
     expect(screen.getByText(/Link your cards through Plaid/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
   });
 
   it("shows what a card owes, its statement, due date, minimum and usual spending", () => {

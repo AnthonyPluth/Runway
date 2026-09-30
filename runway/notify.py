@@ -171,7 +171,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         for m in recurring.missed(conn, today):
             out.append({"key": f"missed:{m['key']}", "title": f"Missed payment: {m['name']}",
                         "body": f"{_fmt(m['amount'])} was expected around {date.fromisoformat(m['date']):%b %-d} and hasn't shown up.",
-                        "url": "/#recurring"})
+                        "url": "/#budget/recurring"})
     if p["big_charge"]:
         since = (today - timedelta(days=3)).isoformat()
         T = Transaction

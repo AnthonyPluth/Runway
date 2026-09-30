@@ -19,8 +19,6 @@
   import { tick } from "svelte";
   import Plus from "@lucide/svelte/icons/plus";
 
-  let { page: _page = "", sub: _sub = "" }: { page?: string; sub?: string } = $props();
-
   type Data = { accounts: Account[]; items: Item[]; suggestions: Suggestion[] };
   async function load(): Promise<Data> {
     const [accounts, items] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
@@ -54,7 +52,7 @@
 </script>
 
 <div class="mb-6 flex items-center justify-between gap-4">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Recurring</h1>
+  <p class="text-sm text-muted-foreground">The paychecks and bills the forecast expects.</p>
   <Button onclick={openForm}><Plus />Add</Button>
 </div>
 

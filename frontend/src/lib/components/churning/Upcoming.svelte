@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
@@ -58,6 +59,9 @@
   };
 </script>
 
+{#if !items.length && !adding}
+  <EmptyLine label="Upcoming" message="nothing in the next six months" action={cards.length ? "Add a to-do" : undefined} onaction={() => (adding = true)} />
+{:else}
 <Card.Root class="mb-6">
   <Card.Header>
     <Card.Title>Upcoming</Card.Title>
@@ -115,6 +119,7 @@
       {#if items.length > 8}
         <Button variant="link" size="sm" class="mt-1 px-0" onclick={() => (all = !all)}>{all ? "Show fewer" : `Show all ${items.length}`}</Button>
       {/if}
-    {:else}<p class="py-4 text-center text-sm text-muted-foreground">Nothing in the next six months.</p>{/if}
+    {/if}
   </Card.Content>
 </Card.Root>
+{/if}

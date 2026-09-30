@@ -6,12 +6,11 @@
   import * as Card from "$lib/components/ui/card";
   import { toast } from "svelte-sonner";
   import PlaidItemRow from "./PlaidItemRow.svelte";
-  import { openPlaidLink, plaidSession } from "./plaid.svelte";
-  import type { PlaidStatus, SettingsAccount } from "./types";
+  import { connectPlaid, plaidSession } from "./plaid.svelte";
+  import type { PlaidStatus } from "./types";
   import { fieldCls, helpCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
 
-  // Plaid: your connections (each with its accounts matched to yours), the buttons to add one, and the API keys.
-  let { accounts }: { accounts: SettingsAccount[] } = $props();
+  // Plaid: your connections (their accounts are matched to yours under Accounts), the buttons to add one, and the API keys.
   const status = api<PlaidStatus>("/api/plaid/status");
 
   const saveKeys = (env: string, clientId: string) => api("/api/plaid/settings", { method: "POST", body: { env, client_id: clientId } });
@@ -27,7 +26,7 @@
   let connecting = $state("");
   async function connect(kind: string) {
     connecting = kind;
-    try { if (await openPlaidLink(null, kind)) reload(); } catch (err) { toast.error((err as Error).message); }
+    await connectPlaid(kind);
     connecting = "";
   }
 </script>
@@ -40,7 +39,7 @@
     {:then st}
       {#if st.items.length}
         <div class="flex flex-col gap-3">
-          {#each st.items as it (it.item_id)}<PlaidItemRow {it} items={st.items} {accounts} />{/each}
+          {#each st.items as it (it.item_id)}<PlaidItemRow {it} items={st.items} />{/each}
         </div>
       {/if}
       <div class="flex flex-wrap gap-2">

@@ -9,8 +9,6 @@ import CreditCard from "@lucide/svelte/icons/credit-card";
 import House from "@lucide/svelte/icons/house";
 import Landmark from "@lucide/svelte/icons/landmark";
 import List from "@lucide/svelte/icons/list";
-import Repeat from "@lucide/svelte/icons/repeat";
-import TrendingUp from "@lucide/svelte/icons/trending-up";
 
 export interface NavItem { page: string; label: string; icon: typeof House }
 
@@ -18,16 +16,14 @@ export const MAIN_NAV: NavItem[] = [
   { page: "overview", label: "Overview", icon: House },
   { page: "transactions", label: "Transactions", icon: List },
   { page: "budget", label: "Budget", icon: ChartPie },
-  { page: "recurring", label: "Recurring", icon: Repeat },
   { page: "reports", label: "Reports", icon: ChartColumn },
 ];
 export const MONEY_NAV: NavItem[] = [
-  { page: "investments", label: "Investments", icon: TrendingUp },
   { page: "networth", label: "Net worth", icon: Landmark },
   { page: "churning", label: "Churning", icon: CreditCard },
 ];
 
-/** The page to show as current: Review is a tab of Transactions. */
+/** The nav item to light up: Review is a tab of Transactions (Investments and Recurring resolve to their new hubs in the router). */
 export const currentPage = () => (route.page === "review" ? "transactions" : route.page);
 
 export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? s.user : null);

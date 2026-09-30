@@ -155,3 +155,21 @@ describe("Budget page", () => {
     expect(await screen.findByText("Money in this month: $4,000.00")).toBeInTheDocument();
   });
 });
+
+describe("Budget tabs", () => {
+  it("has Budget and Bills & income tabs, with the month picker only on Budget", async () => {
+    serve(month());
+    const { unmount } = render(Budget);
+    const tabs = screen.getByRole("navigation", { name: "Budget" });
+    expect(within(tabs).getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
+    expect(within(tabs).getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    expect(await screen.findByRole("button", { name: "Previous month" })).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/accounts" || path === "/api/recurring" ? [] : {})) as never);
+    render(Budget, { sub: "recurring" });
+    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("button", { name: "Add" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
+  });
+});
