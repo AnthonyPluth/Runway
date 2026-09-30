@@ -65,7 +65,7 @@
     {:else}
       <p class="text-sm text-muted-foreground">
         {#if lastRead}From Carta, last read {fmtDate(lastRead)}. {/if}Stock options, RSUs and shares: enter them here, or read them from Carta with
-        Runway's browser extension (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Connections</a>).
+        Runway's browser extension (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/extension">Settings → Browser extension</a>).
         Only what has vested counts toward net worth, at each company's latest share price (its 409A value, for a private company).
       </p>
       {#if c.last_error}

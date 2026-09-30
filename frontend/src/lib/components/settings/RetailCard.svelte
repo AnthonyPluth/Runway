@@ -10,11 +10,13 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import type { Snippet } from "svelte";
   import type { RecentOrder, RetailStatus } from "./types";
-  import { checkCls, helpCls, inputCls, linkCls, titleNote, warnText } from "./ui";
+  import { checkCls, helpCls, inputCls, linkCls, warnText } from "./ui";
 
-  // Amazon and Target orders, through the Runway browser extension: how to set it up (with the key it needs), what
-  // it has imported from each store, and the recent orders, each opening to its items and charges.
+  // The Runway browser extension: how to set it up (with the key it needs), what it has imported from each store
+  // (`children` adds Carta's row to that list), and the recent orders, each opening to its items and charges.
+  let { children }: { children?: Snippet } = $props();
   let data = $state<RetailStatus | null>(null);
   let error = $state("");
   let shownKey = $state("");
@@ -69,7 +71,7 @@
 </script>
 
 <Card.Root>
-  <Card.Header><Card.Title>Amazon, Target and Costco orders{#if data}<span class={titleNote}>optional, via the Runway browser extension</span>{/if}</Card.Title></Card.Header>
+  <Card.Header><Card.Title>Browser extension</Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-3">
     {#if error}
       <p class="text-sm text-muted-foreground">{error}</p>
@@ -77,9 +79,9 @@
       <p class="text-sm text-muted-foreground">Loading…</p>
     {:else}
       {@const r = data}
-      <p class={helpCls}>Runway matches each Amazon, Target or Costco charge to its order (online, or in store with your Target account) and
-        splits the transaction by what you bought. Neither store has an API for this, so a small extension in your browser reads your
-        orders with the sign-in you already have there and sends them only to Runway.</p>
+      <p class={helpCls}>Optional. Amazon, Target, Costco and Carta have no API for this, so a small extension in your browser reads your orders
+        (and your Carta equity) with the sign-in you already have there and sends them only to Runway. Runway matches each Amazon, Target or
+        Costco charge to its order (online, or in store with your Target account) and splits the transaction by what you bought.</p>
       <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
         <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
           <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
@@ -99,7 +101,7 @@
             </span>
           {/if}
         </li>
-        <li>Stay signed in to Amazon, Target and Costco in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
+        <li>Stay signed in to Amazon, Target, Costco and Carta in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
       </ol>
 
       <div class="flex flex-col">
@@ -114,6 +116,7 @@
             </span>
           </div>
         {/each}
+        {@render children?.()}
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -121,7 +124,7 @@
           <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI
             <span class="text-muted-foreground">(only item names and prices are sent)</span></label>
         {:else}
-          <span class={helpCls}>Add an OpenRouter key below and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>
+          <span class={helpCls}>Add an OpenRouter key in <a class={linkCls} href="#setup/services">Services</a> and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>
         {/if}
         {#if r.recent.length}<Button variant="outline" size="sm" disabled={matching} onclick={matchAgain}>{matching ? "Working…" : "Match and split again"}</Button>{/if}
       </div>

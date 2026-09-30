@@ -117,7 +117,7 @@
   <Card.Root class="mx-auto mt-10 max-w-lg text-center">
     <Card.Header>
       <Card.Title>No investment accounts yet</Card.Title>
-      <Card.Description>Link your brokerage and retirement accounts in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Connections</a>.</Card.Description>
+      <Card.Description>Link your brokerage and retirement accounts in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Bank connections</a>.</Card.Description>
     </Card.Header>
   </Card.Root>
 {:else}
