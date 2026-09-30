@@ -91,7 +91,7 @@
 
     {#if alerts}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
-        {#each fc.warnings as w (w)}{@render attention(w, `/#setup/${/Plaid/.test(w) ? "connections" : "accounts"}`)}{/each}
+        {#each fc.warnings as w (w)}{@render attention(w, "/#setup/accounts")}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
         {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your primary checking account in Settings.", "/#setup/accounts")}{/if}
       </Group>

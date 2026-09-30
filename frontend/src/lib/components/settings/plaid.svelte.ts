@@ -2,7 +2,7 @@
 // (runway/server.py) lets it in: the app's own <script> carries the page's nonce, and 'strict-dynamic' trusts the
 // script it adds here; Link's iframe comes from cdn.plaid.com, which frame-src allows.
 import { api } from "$lib/api";
-import { reload } from "$lib/app.svelte";
+import { refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
 
 interface PlaidLinkMeta { link_session_id?: string; request_id?: string; institution?: { name?: string } | null }
@@ -88,4 +88,25 @@ export async function resumePlaidOAuth(): Promise<boolean> {
     if (linked) reload();
     return linked;
   } catch (err) { toast.error((err as Error).message); return false; }
+}
+
+/** Your choice for one Plaid account (a Runway account id, "new", "ignore", or "" to unmatch), with the toast that says what happened.
+ *  Bank accounts match your accounts; an investment item's accounts match its candidates, so the message differs. */
+export async function matchPlaidAccount(plaidAccountId: string, target: string, bank = true): Promise<boolean> {
+  try {
+    await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: plaidAccountId, target } });
+    toast.success(target === "new" ? "Added to your accounts" : target === "ignore" ? "Left out" : !target ? "Unmatched"
+      : !bank ? "Matched: it's counted once" : "Matched. Choose where its data comes from under Accounts.");
+    await refreshState(); reload();
+    return true;
+  } catch (err) { toast.error((err as Error).message); return false; }
+}
+
+/** The Connect buttons: opens Link, and once a bank is connected, lands on Settings → Accounts where its accounts wait for a decision. */
+export async function connectPlaid(kind: string): Promise<void> {
+  try {
+    if (!(await openPlaidLink(null, kind))) return;
+    if (kind === "bank") location.hash = "#setup/accounts";
+    reload();
+  } catch (err) { toast.error((err as Error).message); }
 }

@@ -1,21 +1,20 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { refreshState, reload } from "$lib/app.svelte";
+  import { reload } from "$lib/app.svelte";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { fmt, nb } from "$lib/format";
-  import { accountName } from "$lib/types";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import BankIcon from "./BankIcon.svelte";
-  import { openPlaidLink } from "./plaid.svelte";
-  import type { PlaidAccount, PlaidItem, SettingsAccount } from "./types";
-  import { selectCls, warnText } from "./ui";
+  import { matchPlaidAccount, openPlaidLink } from "./plaid.svelte";
+  import type { PlaidAccount, PlaidItem } from "./types";
+  import { linkCls, selectCls, warnText } from "./ui";
 
-  // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove, then each of its
-  // accounts matched to one of yours, added as its own, or left out.
-  let { it, items, accounts }: { it: PlaidItem; items: PlaidItem[]; accounts: SettingsAccount[] } = $props();
+  // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Bank and card accounts
+  // are matched to yours under Settings → Accounts; an investment connection's accounts are still matched here.
+  let { it, items }: { it: PlaidItem; items: PlaidItem[] } = $props();
 
   const utc = (t: string) => new Date(t.replace(" ", "T") + "Z");
   // Two connections to the same institution look alike, so each says when it was made (with the time, if there's a twin).
@@ -42,10 +41,9 @@
       : `${d.shared} of these accounts ${d.shared === 1 ? "is" : "are"} also in the other ${inst} connection`}, so ${d.shared === 1 ? "it's" : "they're"} counted twice. Remove one of the two.`;
   });
 
-  // Bank connections: yours that could be each Plaid account (one Plaid account each). Investments: the server's candidates.
-  const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind)));
   const bankAccounts = $derived(it.accounts.filter((p) => p.type !== "investment"));
-  const selected = (p: PlaidAccount) => (it.bank ? (p.ignored ? "ignore" : p.account_id || "") : p.account_id || "");
+  const waiting = $derived(bankAccounts.filter((p) => !p.account_id && !p.ignored).length);
+  const selected = (p: PlaidAccount) => p.account_id || "";
 
   let syncing = $state(false);
   async function sync() {
@@ -64,14 +62,6 @@
     try { await api(`/api/plaid/items/${encodeURIComponent(it.item_id)}/remove`, { method: "POST" }); toast.success("Connection removed"); reload(); }
     catch (err) { toast.error((err as Error).message); }
   }
-  async function match(p: PlaidAccount, target: string) {
-    try {
-      await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: p.id, target } });
-      toast.success(target === "new" ? "Added to your accounts" : target === "ignore" ? "Left out" : !target ? "Unmatched"
-        : !it.bank ? "Matched: it's counted once" : "Matched. Choose where its data comes from under Accounts.");
-      await refreshState(); reload();
-    } catch (err) { toast.error((err as Error).message); }
-  }
 </script>
 
 {#snippet account(p: PlaidAccount, kind: string)}
@@ -82,19 +72,13 @@
       <span class="text-xs text-muted-foreground">{nb(kind)} · {nb(fmt(p.balance))}</span>
     </span>
     <select class={cn(selectCls, "w-full sm:ml-auto sm:w-60", sel && sel !== "ignore" && "border-transparent shadow-none dark:bg-transparent hover:border-input")}
-      aria-label="Which of your accounts this is" value={!it.bank && sel.startsWith("pl:") ? "new" : sel} onchange={(e) => match(p, e.currentTarget.value)}>
+      aria-label="Which of your accounts this is" value={sel.startsWith("pl:") ? "new" : sel} onchange={(e) => matchPlaidAccount(p.id, e.currentTarget.value, false)}>
       <option value="">Choose…</option>
-      {#if it.bank}
-        {#if p.account_id?.startsWith("pl:")}<option value={p.account_id}>Its own account</option>{:else}<option value="new">Add as a new account</option>{/if}
-        {#each mine.filter((a) => !a.plaid_account_id || a.plaid_account_id === p.id) as a (a.id)}<option value={a.id}>Same as {accountName(a)}</option>{/each}
-        <option value="ignore">Don't use</option>
-      {:else}
-        {#if sel.startsWith("pl:")}<option value="new">Its own account</option>{:else}<option value="new">Add as a new account</option>{/if}
-        {#each (it.candidates || []).filter((a) => !a.linked_to || a.linked_to === p.id) as a (a.id)}
-          <option value={a.id}>Same as {a.display_name || a.name} ({fmt(a.balance)})</option>
-        {/each}
-        <option value="ignore">Don't count it</option>
-      {/if}
+      {#if sel.startsWith("pl:")}<option value="new">Its own account</option>{:else}<option value="new">Add as a new account</option>{/if}
+      {#each (it.candidates || []).filter((a) => !a.linked_to || a.linked_to === p.id) as a (a.id)}
+        <option value={a.id}>Same as {a.display_name || a.name} ({fmt(a.balance)})</option>
+      {/each}
+      <option value="ignore">Don't count it</option>
     </select>
   </div>
 {/snippet}
@@ -117,7 +101,8 @@
   {#if duplicate}<p class={cn("mt-2 text-sm sm:ml-10", warnText)}>{duplicate}</p>{/if}
   <div class="mt-1.5 sm:ml-10">
     {#if it.bank}
-      {#each bankAccounts as p (p.id)}{@render account(p, p.subtype || p.type || "")}{/each}
+      <p class="border-t pt-2 text-sm text-muted-foreground">{bankAccounts.length === 1 ? "1 account" : `${bankAccounts.length} accounts`}{#if waiting}{" · "}<a class={linkCls}
+        href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}</p>
     {:else}
       {#each it.accounts as p (p.id)}{@render account(p, p.subtype || "investment")}{:else}<p class="text-xs text-muted-foreground">no accounts yet</p>{/each}
     {/if}

@@ -49,7 +49,7 @@
     {#if section === "accounts"}<AccountsSection accounts={d.accounts} />
     {:else if section === "categories"}<CategoriesSection />
     {:else if section === "rules"}<RulesSection rules={d.rules} accounts={d.accounts} />
-    {:else if section === "connections"}<ConnectionsSection accounts={d.accounts} />
+    {:else if section === "connections"}<ConnectionsSection />
     {:else if section === "extension"}<ExtensionSection />
     {:else if section === "services"}<ServicesSection />
     {:else if section === "notifications"}<NotificationsSection />

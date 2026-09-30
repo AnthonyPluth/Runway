@@ -32,9 +32,9 @@ beforeEach(() => {
 });
 
 describe("owner select", () => {
-  it("offers the people, keeps an old name that's set, and leaves out Joint", () => {
+  it("offers the people alphabetically, keeps an old name that's set, and leaves out Joint", () => {
     render(OwnerSelect, { owners: ["Alex", "Sam", "Joint"], value: "Pat" });
-    expect(within(screen.getByRole("combobox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Alex", "Sam", "Pat"]);
+    expect(within(screen.getByRole("combobox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["Alex", "Pat", "Sam"]);
   });
 });
 
