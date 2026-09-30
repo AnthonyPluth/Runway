@@ -1,6 +1,6 @@
-"""How the MCP server reaches Runway's pages: the allowlist lookup and the call itself, shared by GET/POST /api/mcp/*
-(the stdio proxy, over HTTP) and POST /mcp (Runway serving MCP itself, in process). Both go through resolve(), so
-mcp_access.READABLE and WRITABLE and the "writes" switch apply the same way to each."""
+"""How the MCP server (POST /mcp) reaches Runway's pages, in this process: who the caller is (authorized), the
+allowlist lookup (resolve) and the call itself. Every page goes through resolve(), so mcp_access.READABLE and
+WRITABLE, the connection's scope and the "writes" switch apply to every call."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -15,7 +15,7 @@ from .routes import ROUTES, _match
 
 # The ways to prove a caller may use the MCP server: each takes (conn, Authorization header, this server's resource)
 # and answers what the caller may do (mcp_access.Access), or None.
-CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.resolve_bearer, mcp_access.key_access)
+CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.resolve_bearer,)
 
 WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
 READ_ONLY = ("This connection can only read. To let the assistant change churning, reconnect Runway in the assistant and "
@@ -36,7 +36,7 @@ def authorized(conn, authorization: str | None, resource: str | None = None) -> 
 
 
 def resolve(method: str, path: str) -> tuple[str, Callable, list] | None:
-    """Which page `method path` (like GET /api/overview) is, if the key may use it: ("read" | "write", handler, path
+    """Which page `method path` (like GET /api/overview) is, if an assistant may use it: ("read" | "write", handler, path
     parameters). None for anything outside mcp_access.READABLE / WRITABLE."""
     if method == "GET":
         pattern = path if path in mcp_access.READABLE else next((p for p in mcp_access.READABLE_PATTERNS if _match(p, path) is not None), None)
@@ -50,16 +50,15 @@ def resolve(method: str, path: str) -> tuple[str, Callable, list] | None:
 
 
 def run(fn: Callable, query: dict, body: dict, params: list) -> Any:
-    """Call a resolved page as the MCP key (no signed-in person). ApiError and the like are left for the caller."""
+    """Call a resolved page as an assistant (no signed-in person). ApiError and the like are left for the caller."""
     _current.user = None
     with db.session() as conn:
         return fn(conn, query, body, *params)
 
 
-def local_fetch(path: str, params: dict[str, Any], body: dict | None = None,
-                access: mcp_access.Access = mcp_access.KEY_ACCESS) -> Any:
-    """mcp_server's fetch(path, query, body) answered in this process instead of over HTTP, as `access` may: the same
-    lookup, the scope and the switch checked on every change, the same replies (and refusals, as ToolError)."""
+def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mcp_access.Access) -> Any:
+    """mcp_server's fetch(path, query, body) as `access` may: the lookup, the scope and the switch checked on every
+    change, and the page's own reply (or refusal, as ToolError)."""
     full = "/api/" + path
     with db.session() as conn:
         switch = mcp_access.allow_writes(conn)

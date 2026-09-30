@@ -114,16 +114,20 @@ class MigrationTests(unittest.TestCase):
             plans = [r[0] for r in conn.execute("SELECT plan FROM churn_cards ORDER BY id")]
         self.assertEqual(plans, ["product_change", "close"])
 
-    def test_0024_adds_the_oauth_tables(self):
+    def test_0024_adds_the_oauth_tables_and_drops_the_old_key(self):
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0023")
         with db.engine(self.path).begin() as c:
             self.assertNotIn("oauth_grants", sa.inspect(c).get_table_names())
+            c.exec_driver_sql("INSERT INTO settings(key, value) VALUES ('mcp_token_hash', 'abc'), ('mcp_token_created', 'x'), "
+                              "('mcp_allow_writes', '1')")
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.engine(self.path).begin() as c:
+            left = dict(c.exec_driver_sql("SELECT key, value FROM settings WHERE key LIKE 'mcp%'").fetchall())
+            self.assertEqual(left, {"mcp_allow_writes": "1"})                     # the old key is gone; the switch stays
             self.assertLessEqual({"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"},
                                  set(sa.inspect(c).get_table_names()))
         self.assertEqual(drift(self.path), [])

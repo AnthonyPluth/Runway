@@ -1,4 +1,5 @@
-"""MCP over OAuth: the apps registered to connect, each approval (grant), and their codes and tokens.
+"""MCP over OAuth: the apps registered to connect, each approval (grant), and their codes and tokens. The MCP key it
+replaces (the rwm_ bearer key, kept as a hash in settings) is deleted.
 
 Revision ID: 0024
 Revises: 0023
@@ -70,6 +71,8 @@ def upgrade() -> None:
                         sa.Column('params', sa.Text(), nullable=False),
                         sa.Column('created', sa.Float(), nullable=False),
                         sa.PrimaryKeyConstraint('token_hash'))
+    settings = sa.table('settings', sa.column('key'))
+    op.execute(sa.delete(settings).where(settings.c.key.in_(['mcp_token_hash', 'mcp_token_created'])))
 
 
 def downgrade() -> None:

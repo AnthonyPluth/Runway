@@ -289,8 +289,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._mcp_rpc(method)
         if url.path.startswith(("/.well-known/", "/oauth/")) and url.path != "/oauth/authorize":
             return self._oauth(method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
-        if url.path.startswith("/api/mcp/"):   # the MCP server: its own read-only key instead of a sign-in
-            return self._mcp(method, url)
         if method != "GET" and not self._same_site():
             return self._json(403, {"error": "forbidden"})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
@@ -569,56 +567,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
             return self._error(e)
 
-    def _mcp(self, method: str, url) -> None:
-        """A call from Runway's MCP server (runway/mcp_server.py), carrying a key made under Settings → Advanced (a bearer
-        token, which a web page can't send on your behalf). GET /api/mcp/<page> answers like the web app's /api/<page> for
-        the pages in mcp_access.READABLE; POST /api/mcp/<path> makes one of the churning changes in mcp_access.WRITABLE, only
-        while "Let assistants change churning" is switched on in Settings. GET /api/mcp/access says whether it is. Nothing
-        else is reachable."""
-        with db.session() as conn:
-            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
-            writes = mcp_access.allow_writes(conn)
-        if not valid:
-            self.close_connection = True
-            return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Advanced."})
-        path = "/api/" + url.path[len("/api/mcp/"):]
-        body: dict = {}
-        if method == "GET" and path == "/api/access":
-            return self._json(200, {"writes": writes})
-        hit = mcp_http.resolve(method, path)
-        if hit is None:
-            return self._json(404, {"error": "Not found"})
-        kind, fn, params = hit
-        if kind == "write":
-            if not writes:
-                return self._json(403, {"error": mcp_http.WRITES_OFF})
-            n = self._body_length(MAX_JSON_BODY)
-            if n is None:
-                return
-            try:
-                body = json.loads(self._read_body(n).decode() or "{}") if n else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return self._json(400, {"error": "Bad JSON"})
-            if not isinstance(body, dict):
-                return self._json(400, {"error": "Bad JSON"})
-        try:
-            return self._json(200, mcp_http.run(fn, urllib.parse.parse_qs(url.query), body, params))
-        except ApiError as e:
-            return self._json(e.status, {"error": str(e)})
-        except sqlalchemy.exc.OperationalError as e:
-            if "locked" in str(e):
-                return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-            return self._error(e)
-        except (ValueError, TypeError, KeyError) as e:
-            ref = request_ref()
-            print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
-            return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
-
     def _mcp_rpc(self, method: str) -> None:
-        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process. Same
-        bearer key as /api/mcp/* (mcp_http.authorized), same allowlists and writes switch (mcp_http.local_fetch). One
-        JSON-RPC message per POST, answered with application/json; notifications get 202. There is no server-to-client
-        stream, so GET is 405."""
+        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process, for an
+        OAuth access token issued for this address (mcp_http.authorized), within its scope, the allowlists and the writes
+        switch (mcp_http.local_fetch). One JSON-RPC message per POST, answered with application/json; notifications get
+        202. There is no server-to-client stream, so GET is 405."""
         if method != "POST":
             return self._send(405, b"", "text/plain", extra={"Allow": "POST"})
         if not self._mcp_origin_ok():   # a web page in a browser (DNS rebinding); real clients send no Origin
