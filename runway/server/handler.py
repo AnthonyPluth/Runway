@@ -24,9 +24,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlalchemy.exc
 from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, finnhub, mcp_access, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, categories, db, finnhub, mcp_access, mcp_server, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
 from .. import settings_keys as sk
-from . import sync
+from . import mcp_http, sync
 from ..models import PlaidItem
 from .common import ApiError, _current, host_allowed, request_ref
 from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
@@ -119,9 +119,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Strict-Transport-Security", "max-age=31536000")
 
     def _send(self, status: int, body: bytes, ctype: str = "application/json", cache: str = "no-store",
-              nonce: str | None = None) -> None:
+              nonce: str | None = None, extra: dict[str, str] | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", ctype)
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
         self._security_headers(nonce)
@@ -270,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"Runway doesn't recognise this address. Add it to RUNWAY_ALLOWED_HOSTS.", "text/plain")
         if url.path.startswith("/api/ext/"):   # the browser extension: its own key instead of a sign-in
             return self._extension(method, url.path)
+        if url.path == "/mcp":   # MCP over HTTP, served here: the same key
+            return self._mcp_rpc(method)
         if url.path.startswith("/api/mcp/"):   # the MCP server: its own read-only key instead of a sign-in
             return self._mcp(method, url)
         if method != "GET" and not self._same_site():
@@ -554,7 +558,7 @@ class Handler(BaseHTTPRequestHandler):
         while "Let assistants change churning" is switched on in Settings. GET /api/mcp/access says whether it is. Nothing
         else is reachable."""
         with db.session() as conn:
-            valid = mcp_access.check_token(conn, self.headers.get("Authorization"))
+            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
             writes = mcp_access.allow_writes(conn)
         if not valid:
             self.close_connection = True
@@ -563,13 +567,13 @@ class Handler(BaseHTTPRequestHandler):
         body: dict = {}
         if method == "GET" and path == "/api/access":
             return self._json(200, {"writes": writes})
-        if method == "GET" and (path in mcp_access.READABLE or any(_match(p, path) is not None for p in mcp_access.READABLE_PATTERNS)):
-            pattern = path if path in mcp_access.READABLE else next(p for p in mcp_access.READABLE_PATTERNS if _match(p, path) is not None)
-            fn, params = next(fn for m, p, fn in ROUTES if m == "GET" and p == pattern), ([] if pattern == path else _match(pattern, path))
-        elif method == "POST" and (hit := next(((p, _match(p, path)) for p in mcp_access.WRITABLE if _match(p, path) is not None), None)):
+        hit = mcp_http.resolve(method, path)
+        if hit is None:
+            return self._json(404, {"error": "Not found"})
+        kind, fn, params = hit
+        if kind == "write":
             if not writes:
-                return self._json(403, {"error": "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."})
-            fn, params = next(fn for m, pattern, fn in ROUTES if m == "POST" and pattern == hit[0]), hit[1]
+                return self._json(403, {"error": mcp_http.WRITES_OFF})
             n = self._body_length(MAX_JSON_BODY)
             if n is None:
                 return
@@ -579,13 +583,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "Bad JSON"})
             if not isinstance(body, dict):
                 return self._json(400, {"error": "Bad JSON"})
-        else:
-            return self._json(404, {"error": "Not found"})
-        _current.user = None
         try:
-            with db.session() as conn:
-                result = fn(conn, urllib.parse.parse_qs(url.query), body, *params)
-            return self._json(200, result)
+            return self._json(200, mcp_http.run(fn, urllib.parse.parse_qs(url.query), body, params))
         except ApiError as e:
             return self._json(e.status, {"error": str(e)})
         except sqlalchemy.exc.OperationalError as e:
@@ -596,6 +595,45 @@ class Handler(BaseHTTPRequestHandler):
             ref = request_ref()
             print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
             return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
+
+    def _mcp_rpc(self, method: str) -> None:
+        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process. Same
+        bearer key as /api/mcp/* (mcp_http.authorized), same allowlists and writes switch (mcp_http.local_fetch). One
+        JSON-RPC message per POST, answered with application/json; notifications get 202. There is no server-to-client
+        stream, so GET is 405."""
+        if method != "POST":
+            return self._send(405, b"", "text/plain", extra={"Allow": "POST"})
+        if not self._mcp_origin_ok():   # a web page in a browser (DNS rebinding); real clients send no Origin
+            return self._json(403, {"error": "Origin not allowed."})
+        with db.session() as conn:
+            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
+        if not valid:
+            self.close_connection = True
+            return self._send(401, json.dumps({"error": "Missing or unknown key. Make one under Settings → Advanced."}).encode(),
+                              extra={"WWW-Authenticate": "Bearer"})
+        n = self._body_length(MAX_JSON_BODY)
+        if n is None:
+            return
+        try:
+            msg = json.loads(self._read_body(n).decode() or "null")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+        if not isinstance(msg, dict):   # a batch or something else: one message per POST
+            return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
+        try:
+            reply = mcp_server.handle(msg, mcp_http.local_fetch)
+        except sqlalchemy.exc.OperationalError as e:
+            return self._error(e)
+        if reply is None:
+            return self._send(202, b"")
+        return self._json(200, reply)
+
+    def _mcp_origin_ok(self) -> bool:
+        """No Origin (an app, not a web page), or this Runway's own address. Anything else, and "null", is refused."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return origin != "null" and urllib.parse.urlsplit(origin).netloc.lower() == (self.headers.get("Host") or "").strip().lower()
 
     def _static(self, path: str) -> None:
         if path == "/next" or path.startswith("/next/"):   # where the web app lived while it was being rebuilt
