@@ -1,10 +1,13 @@
-"""Runway's MCP server: lets an AI assistant (Claude Desktop, Claude Code and the like) read your Runway, and only read.
+"""Runway's MCP server: lets an AI assistant (Claude Desktop, Claude Code and the like) read your Runway, and, only if you
+switch it on, make a short list of churning changes.
 
     RUNWAY_URL=https://runway.example.com RUNWAY_MCP_KEY=rwm_... python -m runway.mcp_server
 
-It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with the read-only key made
-under Settings → Connections. It never opens the database itself, and the key only opens the pages in
-mcp_access.READABLE: nothing that changes data, and no settings, bank connections or backups. Standard library only.
+It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with a key made under
+Settings → Connections. It never opens the database itself. The read key (rwm_) only opens the pages in
+mcp_access.READABLE: nothing that changes data, and no settings, bank connections or backups. With RUNWAY_MCP_ALLOW_WRITES=1
+and a write key (rww_) it also offers the tools below that add and change churning data (mcp_access.WRITABLE: nothing
+else, and never a delete). Without both, those tools aren't offered at all. Standard library only.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 TIMEOUT = 60
 MAX_TEXT = 200_000   # characters in one reply: enough for a big month, not enough to flood the assistant's context
 
-Fetch = Callable[[str, dict[str, Any]], Any]
+Fetch = Callable[..., Any]   # fetch(path, query) reads; fetch(path, query, body) makes a change
 
 
 class ToolError(Exception):
@@ -30,16 +33,17 @@ class ToolError(Exception):
 
 # ------------------------------------------------------------------------------------------------ talking to Runway
 
-def http_fetch(path: str, params: dict[str, Any]) -> Any:
-    """GET /api/mcp/<path> on the Runway named by RUNWAY_URL, with the key in RUNWAY_MCP_KEY."""
+def http_fetch(path: str, params: dict[str, Any], body: dict | None = None) -> Any:
+    """GET /api/mcp/<path> on the Runway named by RUNWAY_URL, with the key in RUNWAY_MCP_KEY (a POST of `body` for a change)."""
     base = (os.environ.get("RUNWAY_URL") or "http://127.0.0.1:8765").rstrip("/")
     key = os.environ.get("RUNWAY_MCP_KEY") or ""
     if not key:
         raise ToolError("RUNWAY_MCP_KEY isn't set. Make a key under Settings → Connections in Runway and set it in the "
                         "server's environment.")
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
-    req = urllib.request.Request(f"{base}/api/mcp/{path}" + (f"?{query}" if query else ""),
-                                 headers={"Authorization": f"Bearer {key}", "Accept": "application/json"})
+    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json", **({"Content-Type": "application/json"} if body is not None else {})}
+    req = urllib.request.Request(f"{base}/api/mcp/{path}" + (f"?{query}" if query else ""), headers=headers,
+                                 data=None if body is None else json.dumps(body).encode(), method="GET" if body is None else "POST")
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return json.load(r)
@@ -188,13 +192,87 @@ TOOLS: list[dict[str, Any]] = [
                             ["amount"]),
      "run": _pass("churning/best", "amount", "category", "owner")},
 ]
-BY_NAME = {t["name"]: t for t in TOOLS}
+
+# ------------------------------------------------------------------------------------------------ changes (opt-in)
+
+def writes_allowed() -> bool:
+    return os.environ.get("RUNWAY_MCP_ALLOW_WRITES") == "1"
+
+
+def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:
+    """A tool that makes one churning change: POSTs to `template` (its {id} from `id_arg`) the `fields` object and any of
+    the `extra` arguments, as the web app's forms send them."""
+    def run(fetch: Fetch, a: dict) -> Any:
+        path = template.format(id=int(a[id_arg])) if id_arg else template
+        body = dict(a.get("fields") or {}) if fields else {}
+        body.update({k: a[k] for k in extra if a.get(k) is not None})
+        return fetch(path, {}, body)
+    return run
+
+
+_ID = {"type": "integer", "minimum": 1}
+_FIELDS = {"type": "object", "description": "The fields to set, named as in Runway's form for it (see churning_cards for a card's)."}
+_CARD_ID = {**_ID, "description": "A card's id (from churning_cards)."}
+_BENEFIT_ID = {**_ID, "description": "A benefit's id (from churning_benefits)."}
+_TASK_ID = {**_ID, "description": "A to-do's id."}
+_WISH_ID = {**_ID, "description": "A planned item's id."}
+
+
+def _write_tool(name: str, description: str, run: Callable[[Fetch, dict], Any], props: dict, required: list[str], idempotent: bool = False) -> dict:
+    return {"name": name, "description": description, "inputSchema": _schema(props, required), "run": run, "write": True, "idempotent": idempotent}
+
+
+WRITE_TOOLS: list[dict[str, Any]] = [
+    _write_tool("mark_benefit_used", "Mark a card benefit used this period: `amount` dollars of a credit (the rest of it if left out), or just used.",
+                _change("churning/benefits/{id}/use", "benefit_id", extra=("amount", "used_on")),
+                {"benefit_id": _BENEFIT_ID, "amount": {"type": "number", "minimum": 0}, "used_on": _DAY}, ["benefit_id"]),
+    _write_tool("undo_benefit_use", "Undo a benefit's last use this period (or a particular one with use_id).",
+                _change("churning/benefits/{id}/unuse", "benefit_id", extra=("use_id",)),
+                {"benefit_id": _BENEFIT_ID, "use_id": _ID}, ["benefit_id"]),
+    _write_tool("add_benefit", "Add a benefit to a card (name, kind, amount, period...).", _change("churning/cards/{id}/benefits", "card_id", True),
+                {"card_id": _CARD_ID, "fields": _FIELDS}, ["card_id", "fields"]),
+    _write_tool("update_benefit", "Change fields of a benefit.", _change("churning/benefits/{id}", "benefit_id", True),
+                {"benefit_id": _BENEFIT_ID, "fields": _FIELDS}, ["benefit_id", "fields"], True),
+    _write_tool("add_card", "Add a credit card to churning (owner, issuer, product, opened_on...).", _change("churning/cards", None, True),
+                {"fields": _FIELDS}, ["fields"]),
+    _write_tool("update_card", "Change fields of a card (its plan, notes, annual fee, bonus, closed date...). Never removes it.",
+                _change("churning/cards/{id}", "card_id", True), {"card_id": _CARD_ID, "fields": _FIELDS}, ["card_id", "fields"], True),
+    _write_tool("complete_card_plan", "Check off a card's plan (close it, or product change it) as done, on a day (today unless given).",
+                _change("churning/cards/{id}/plan/done", "card_id", extra=("on",)), {"card_id": _CARD_ID, "on": _DAY}, ["card_id"]),
+    _write_tool("undo_card_plan", "Undo checking off a card's plan.", _change("churning/cards/{id}/plan/undo", "card_id"),
+                {"card_id": _CARD_ID}, ["card_id"], True),
+    _write_tool("add_task", "Add a to-do for a card (card_id, due_on, action).", _change("churning/tasks", None, True), {"fields": _FIELDS}, ["fields"]),
+    _write_tool("update_task", "Change fields of a to-do (mark it done, move its date...).", _change("churning/tasks/{id}", "task_id", True),
+                {"task_id": _TASK_ID, "fields": _FIELDS}, ["task_id", "fields"], True),
+    _write_tool("snooze_task", "Leave a to-do out of Upcoming until a day, or for a number of days.", _change("churning/tasks/{id}/snooze", "task_id", extra=("until", "days")),
+                {"task_id": _TASK_ID, "until": _DAY, "days": {"type": "integer", "minimum": 1, "maximum": 365}}, ["task_id"], True),
+    _write_tool("add_planned_item", "Plan a card or bank bonus to apply for (kind, owner, issuer, product, bonus, apply_url...).",
+                _change("churning/wishlist", None, True), {"fields": _FIELDS}, ["fields"]),
+    _write_tool("update_planned_item", "Change fields of a planned item (its priority, notes, status wanted or dropped, apply_url...).",
+                _change("churning/wishlist/{id}", "wish_id", True), {"wish_id": _WISH_ID, "fields": _FIELDS}, ["wish_id", "fields"], True),
+]
+ALL_TOOLS = TOOLS + WRITE_TOOLS
+BY_NAME = {t["name"]: t for t in ALL_TOOLS}
+
+
+def offered() -> list[dict[str, Any]]:
+    """The tools this server offers: the reading ones, plus the changing ones only when RUNWAY_MCP_ALLOW_WRITES=1."""
+    return ALL_TOOLS if writes_allowed() else TOOLS
+
+
+def _annotations(t: dict) -> dict:
+    if not t.get("write"):
+        return {"readOnlyHint": True, "openWorldHint": False}
+    # A change, but never a delete: the assistant asks you first
+    return {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": bool(t.get("idempotent")), "openWorldHint": False}
 
 
 def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     tool = BY_NAME.get(name)
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
+    if tool.get("write") and not writes_allowed():
+        raise ToolError("Changes are switched off in this MCP server (RUNWAY_MCP_ALLOW_WRITES=1 and a write key turn them on).")
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
@@ -221,13 +299,14 @@ def handle(msg: Any, fetch: Fetch = http_fetch) -> dict | None:
         asked = params.get("protocolVersion")
         return ok({"protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                    "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "runway", "version": "1"},
-                   "instructions": "Read-only access to a Runway personal finance app: accounts, transactions, budget, reports, "
-                                   "net worth and credit-card churning (cards, benefits, upcoming fees). Amounts are in dollars."})
+                   "instructions": "Access to a Runway personal finance app: accounts, transactions, budget, reports, net worth and "
+                                   "credit-card churning (cards, benefits, upcoming fees). Amounts are in dollars. Everything is read-only"
+                                   + (" except the churning tools that add or change things (never delete), which need the person's go-ahead." if writes_allowed() else ".")})
     if method == "ping":
         return ok({})
     if method == "tools/list":
         return ok({"tools": [{"name": t["name"], "description": t["description"], "inputSchema": t["inputSchema"],
-                              "annotations": {"readOnlyHint": True, "openWorldHint": False}} for t in TOOLS]})
+                              "annotations": _annotations(t)} for t in offered()]})
     if method == "tools/call":
         try:
             name = params.get("name")
