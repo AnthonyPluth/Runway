@@ -1,7 +1,7 @@
 // The shapes of Runway's API replies that the pages use (see runway/server.py).
 
 export interface User { name?: string; email?: string; local?: boolean }
-export interface Brand { institution?: string; logo?: string | null; /** The logo's address: a bundled one, or Logo.dev's once fetched. */ src?: string | null; initial?: string }
+export interface Brand { institution?: string; /** Logo.dev's logo for the institution, once Runway has fetched it. */ src?: string | null; initial?: string }
 export interface SyncLog { ok: boolean; message?: string }
 
 /** GET /api/state (runway/server.py api_state). */

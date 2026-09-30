@@ -97,7 +97,9 @@ plain Python with a handful of well-known libraries.
 - **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself (nothing else is
   asked); SimpleFIN transactions from the same merchant get the logo too. With a free Logo.dev publishable key
   (Settings), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names
-  like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway.
+  like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway. The same
+  key gives each **bank or card its logo** by the institution's name (Runway bundles no logos, so a new bank needs
+  nothing added); without the key, accounts show a letter.
 - Categories with one level of subcategories, each with an **emoji and a color** (sensible defaults, yours to change
   in Settings), a review queue for anything uncategorized, and search and filters.
 - The transaction list is **grouped by day** with each day's total, and loads more as you scroll.
@@ -418,7 +420,7 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/db.py`, `schema.py`, `backup.py` | Database connections (SQLite or Postgres), the schema, backups |
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
-| `runway/brands.py`, `runway/static/banks/` | Which institution each account belongs to, and their logos |
+| `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components |
 | `runway/static/` | Files Runway serves beside the app: the service worker (`sw.js`), manifest, fonts, icons, bank logos, and `page.css` for the sign-in pages |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
@@ -449,4 +451,4 @@ up to date; each one runs the tests before it can be merged.
 ---
 
 <sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.
-Bank and card logos are from <a href="https://github.com/selfhst/icons">selfh.st/icons</a> (CC BY 4.0); merchant logos from Plaid and <a href="https://logo.dev">Logo.dev</a>. They're trademarks of their owners.</sub>
+Merchant, bank and card logos are from Plaid and <a href="https://logo.dev">Logo.dev</a>. They're trademarks of their owners.</sub>

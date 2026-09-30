@@ -42,13 +42,13 @@
 </script>
 
 <Card.Root>
-  <Card.Header><Card.Title>Merchant logos <span class={titleNote}>optional, via Logo.dev</span></Card.Title></Card.Header>
+  <Card.Header><Card.Title>Merchant and bank logos <span class={titleNote}>optional, via Logo.dev</span></Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-3">
     <p class={helpCls}>Plaid has logos for many merchants. For the rest, a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
       publishable key lets Runway fetch one by the merchant's website, or by its name when there's no website (most SimpleFIN
       transactions). Adding the key fetches the past year's at once; after that, each sync fetches new merchants'. Runway downloads
       and serves them itself, so your browser never contacts Logo.dev, and Logo.dev only sees merchants' websites and names, never
-      amounts or dates.</p>
+      amounts or dates. The same key gives each account's bank its logo, by the bank's name; without it accounts show a letter.</p>
     <div class={rowCls}>
       <label class={`${fieldCls} w-full sm:w-72`}>Publishable key
         <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
