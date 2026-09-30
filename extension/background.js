@@ -511,6 +511,7 @@ async function importTarget(progress, Page) {
         (paths.length ? `(Target's page called: ${paths.slice(-4).join(", ")}, none with a key.)` : "(Target's page made no API calls that Runway could see.)"));
     }
     const need = [];
+    let refreshed = false;
     try {
       for (const type of ["ONLINE", "STORE"]) {
         let whole = false;
@@ -518,7 +519,22 @@ async function importTarget(progress, Page) {
           progress(`Reading Target ${type === "STORE" ? "in-store purchases" : "online orders"}, page ${n}…`);
           const url = `${api.base}/order_history?page_number=${n}&page_size=10&order_purchase_type=${type}` +
             `&pending_order=true&shipt_status=true&key=${encodeURIComponent(api.key)}`;
-          const data = await targetJson(page, url, api.token);
+          let data;
+          try {
+            data = await targetJson(page, url, api.token);
+          } catch (e) {
+            // A refusal while you're still signed in is usually a stale token: Target's page renews it when it loads
+            // (or when you click on it), so load the orders page again, take the new token and try once more.
+            if (!e.signin || refreshed) throw e;
+            refreshed = true;
+            progress("Target's sign-in looked stale; refreshing it…");
+            await page.navigate(TARGET_ORDERS);
+            await sleep(3000);
+            const fresh = await page.run("discover", TARGET_API);
+            if (fresh.signedIn === false) throw e;
+            api = { ...api, token: fresh.token || api.token, key: fresh.key || api.key };
+            n--; continue;   // read this page again
+          }
           if (!data) break;   // not JSON: this page of history couldn't be read
           const r = await runway("/api/ext/target/history", { purchase_type: type, page: n, data });
           r.orders.forEach((o) => need.push({ n: o, type }));
