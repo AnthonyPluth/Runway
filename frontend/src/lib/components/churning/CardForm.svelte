@@ -75,7 +75,7 @@
   }
 
   const sameOwner = $derived(d.cards.filter((x) => x.owner === v.owner && x.id !== c?.id));
-  const lbl = "flex flex-col gap-1 text-sm";
+  const lbl = "flex max-w-full flex-col gap-1 text-sm";
   const h = "mt-4 mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase";
 </script>
 

@@ -41,7 +41,7 @@
 </script>
 
 <div class="mt-2" role="group" aria-label={`Benefits of ${card.product}`}>
-  {#if summary}<p class="mb-2 text-sm text-muted-foreground">{summary}<span class="text-xs"> (the annual fee, {fmt0(card.annual_fee)}, less the benefits you'll use)</span></p>{/if}
+  {#if summary}<p class="mb-2 text-sm text-muted-foreground">{summary}{" "}<span class="text-xs">(the annual fee, {fmt0(card.annual_fee)}, less the benefits you'll use)</span></p>{/if}
   {#if card.benefits.length}
     <ul class="divide-y rounded-lg border bg-background">
       {#each card.benefits as b (b.id)}
@@ -67,7 +67,7 @@
             {/if}
             <div class="mt-2 flex flex-wrap items-center gap-2">
               {#if b.kind === "credit" && b.amount && canUse(b)}
-                <Input type="number" min="0" step="1" class="h-8 w-24" bind:value={amounts[b.id]} placeholder={`${fmt0(b.remaining)} left`} aria-label={`Amount of ${b.name} used (blank: the rest)`} />
+                <Input type="number" min="0" step="1" class="h-8 w-28" bind:value={amounts[b.id]} placeholder={`${fmt0(b.remaining)} left`} aria-label={`Amount of ${b.name} used (blank: the rest)`} />
               {/if}
               <Button size="sm" variant="outline" disabled={!canUse(b)} aria-label={`Mark ${b.name} used`}
                 onclick={async () => { await benefitUse(b.id, b.name, amounts[b.id], onchanged); amounts[b.id] = ""; }}>Mark used</Button>
@@ -98,7 +98,7 @@
     {#key "new"}<BenefitForm {card} {d} b={null} onclose={closeForm} />{/key}
   {:else}
     <div class="mt-2">
-      <NativeSelect bind:value={pick} onchange={addPreset} aria-label={`Add a benefit to ${card.product}`}>
+      <NativeSelect class="max-w-full" bind:value={pick} onchange={addPreset} aria-label={`Add a benefit to ${card.product}`}>
         <option value="">Add a benefit…</option>
         {#each presets as p (p.key)}<option value={p.key}>{p.name}</option>{/each}
         <option value="custom">Something else…</option>

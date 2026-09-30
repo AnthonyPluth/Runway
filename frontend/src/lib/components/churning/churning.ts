@@ -159,8 +159,8 @@ export function currencyGroups(d: Pick<Churning, "currencies" | "currency_groups
 export function valueSource(c: Currency, valuesAsOf: string): string {
   if (c.custom) return "your currency";
   if (c.overridden) return "your value";
-  const day = c.as_of || valuesAsOf;
-  return day ? `estimate (as of ${fmtDate(day, { month: "short", year: "numeric" })})` : "estimate";
+  const day = c.as_of || valuesAsOf;   // the server dates its estimates by month ("2026-09")
+  return day ? `estimate (as of ${fmtDate(day.length === 7 ? `${day}-01` : day, { month: "short", year: "numeric" })})` : "estimate";
 }
 
 /** A benefit's current period in words: "$150 of $300 used · resets Dec 31", "Not used this period". */
