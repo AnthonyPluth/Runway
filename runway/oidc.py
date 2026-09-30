@@ -403,6 +403,14 @@ def renew_session(conn, token: str | None) -> int | None:
     return int(expires - now)
 
 
+def known_only_at_sign_in() -> bool:
+    """Whether still_allowed() can't tell: with OIDC_ALLOWED_GROUPS set (and not OIDC_ALLOW_ANY_USER), membership is
+    checked only when someone signs in, since groups aren't kept. Anything that outlives a sign-in (an assistant's
+    approval) must then end with it: see mcp_oauth.cut_off_reason."""
+    c = config()
+    return bool(c["groups"]) and not c["any_user"]
+
+
 def still_allowed(email: str | None) -> bool:
     """Whether a session may go on after the allow-list changed. With only OIDC_ALLOWED_EMAILS set, an email taken off
     it ends that person's sessions at once. Groups aren't kept with a session, so with OIDC_ALLOWED_GROUPS set, someone

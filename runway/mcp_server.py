@@ -1,60 +1,27 @@
-"""Runway's MCP server: lets an AI assistant (Claude Desktop, Claude Code and the like) read your Runway, and, only if you
-switch it on in Runway, make a short list of churning changes.
+"""Runway's MCP server: the tools that let an AI assistant (Claude and the like) read your Runway, and, only if you
+switch it on in Runway and allowed it when connecting, make a short list of churning changes.
 
-    RUNWAY_URL=https://runway.example.com RUNWAY_MCP_KEY=rwm_... python -m runway.mcp_server
-
-It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with the key made under
-Settings → Advanced. It never opens the database itself. The key only opens the pages in mcp_access.READABLE: no
-settings, bank connections or backups. While "Let assistants change churning" is on in Settings (it's off until you turn
-it on) the server also offers the tools below that add and change churning data (mcp_access.WRITABLE: nothing else, and
-never a delete). Runway checks that switch on every change, so turning it off takes effect at once. Standard library only.
+Runway serves it at POST /mcp (runway/server/handler.py), to an assistant connected with OAuth (runway/mcp_oauth.py).
+handle() answers one JSON-RPC message; every page it reads or change it makes goes through the `fetch` it's given
+(mcp_http.fetch_for), which allows only the pages in mcp_access.READABLE and the churning changes in WRITABLE, and
+checks the connection's scope and the "Let assistants change churning" switch on every change, so turning the switch
+off takes effect at once. Nothing is ever deleted.
 """
 from __future__ import annotations
 
 import json
-import os
-import sys
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from typing import Any
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
-TIMEOUT = 60
 MAX_TEXT = 200_000   # characters in one reply: enough for a big month, not enough to flood the assistant's context
 
 Fetch = Callable[..., Any]   # fetch(path, query) reads; fetch(path, query, body) makes a change
 
 
 class ToolError(Exception):
-    """Something to tell the assistant instead of a result (a bad argument, Runway refusing or unreachable)."""
-
-
-# ------------------------------------------------------------------------------------------------ talking to Runway
-
-def http_fetch(path: str, params: dict[str, Any], body: dict | None = None) -> Any:
-    """GET /api/mcp/<path> on the Runway named by RUNWAY_URL, with the key in RUNWAY_MCP_KEY (a POST of `body` for a change)."""
-    base = (os.environ.get("RUNWAY_URL") or "http://127.0.0.1:8765").rstrip("/")
-    key = os.environ.get("RUNWAY_MCP_KEY") or ""
-    if not key:
-        raise ToolError("RUNWAY_MCP_KEY isn't set. Make a key under Settings → Advanced in Runway and set it in the "
-                        "server's environment.")
-    query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
-    headers = {"Authorization": f"Bearer {key}", "Accept": "application/json", **({"Content-Type": "application/json"} if body is not None else {})}
-    req = urllib.request.Request(f"{base}/api/mcp/{path}" + (f"?{query}" if query else ""), headers=headers,
-                                 data=None if body is None else json.dumps(body).encode(), method="GET" if body is None else "POST")
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        try:
-            said = json.load(e).get("error")
-        except Exception:
-            said = None
-        raise ToolError(said or f"Runway answered {e.code}.") from None
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise ToolError(f"Can't reach Runway at {base}: {getattr(e, 'reason', e)}") from None
+    """Something to tell the assistant instead of a result (a bad argument, or Runway refusing)."""
 
 
 # ------------------------------------------------------------------------------------------------ tools
@@ -220,12 +187,21 @@ TOOLS: list[dict[str, Any]] = [
 
 # ------------------------------------------------------------------------------------------------ changes (opt-in)
 
-def writes_allowed(fetch: Fetch | None = None) -> bool:
-    """Whether Runway currently lets this key make changes (the switch in Settings). Unreachable or unsure: no."""
+def writes_allowed(fetch: Fetch) -> bool:
+    """Whether this connection may make changes right now (its scope, and the switch in Settings). Unsure: no."""
     try:
-        return bool((fetch or http_fetch)("access", {}).get("writes"))
+        return bool(fetch("access", {}).get("writes"))
     except (ToolError, AttributeError):
         return False
+
+
+def _refusal(fetch: Fetch) -> str:
+    """Why a change can't be made: the switch is off, or this connection was only allowed to read."""
+    try:
+        why = fetch("access", {}).get("why")
+    except (ToolError, AttributeError):
+        why = None
+    return why or "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
 
 
 def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:
@@ -284,8 +260,8 @@ ALL_TOOLS = TOOLS + WRITE_TOOLS
 BY_NAME = {t["name"]: t for t in ALL_TOOLS}
 
 
-def offered(fetch: Fetch | None = None) -> list[dict[str, Any]]:
-    """The tools this server offers: the reading ones, plus the changing ones only while Runway's switch is on."""
+def offered(fetch: Fetch) -> list[dict[str, Any]]:
+    """The tools this server offers: the reading ones, plus the changing ones only while this connection may use them."""
     return ALL_TOOLS if writes_allowed(fetch) else TOOLS
 
 
@@ -301,7 +277,7 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
     if tool.get("write") and not writes_allowed(fetch):
-        raise ToolError("Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced.")
+        raise ToolError(_refusal(fetch))
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
@@ -310,7 +286,7 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
 
 # ------------------------------------------------------------------------------------------------ the protocol
 
-def handle(msg: Any, fetch: Fetch = http_fetch) -> dict | None:
+def handle(msg: Any, fetch: Fetch) -> dict | None:
     """One JSON-RPC message in, its reply out (None for a notification)."""
     if not isinstance(msg, dict) or "method" not in msg:
         return None
@@ -349,21 +325,3 @@ def handle(msg: Any, fetch: Fetch = http_fetch) -> dict | None:
             return ok({"content": [{"type": "text", "text": f"That didn't work: {type(e).__name__}: {e}"}], "isError": True})
     return fail(-32601, f"Method not found: {method}")
 
-
-def serve(stdin=None, stdout=None, fetch: Fetch = http_fetch) -> None:
-    stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
-    for line in stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            reply = handle(json.loads(line), fetch)
-        except json.JSONDecodeError:
-            reply = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}
-        if reply is not None:
-            stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
-            stdout.flush()
-
-
-if __name__ == "__main__":
-    serve()

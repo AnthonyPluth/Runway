@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { codecovVitePlugin } from "@codecov/vite-plugin";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import tailwindcss from "@tailwindcss/vite";
 import { svelteTesting } from "@testing-library/svelte/vite";
@@ -10,7 +11,19 @@ import { defineConfig } from "vite";
 export default defineConfig({
   base: "/",
   // svelteTesting() makes Svelte resolve to its browser build under Vitest and unmounts components after each test.
-  plugins: [tailwindcss(), svelte(), svelteTesting()],
+  // codecovVitePlugin() sends the build's bundle sizes to Codecov, which tracks them and reports the change on pull
+  // requests. Only in CI, where CODECOV_TOKEN is set; elsewhere it does nothing.
+  plugins: [
+    tailwindcss(),
+    svelte(),
+    svelteTesting(),
+    codecovVitePlugin({
+      enableBundleAnalysis: Boolean(process.env.CODECOV_TOKEN),
+      bundleName: "runway-web",
+      uploadToken: process.env.CODECOV_TOKEN,
+      telemetry: false,
+    }),
+  ],
   resolve: { alias: { $lib: path.resolve("./src/lib") } },
   build: { outDir: "../runway/static/app", emptyOutDir: true },
   // `npm test` (Vitest) runs in one time zone, so date tests read the same everywhere. It's one behind UTC, where
@@ -20,12 +33,12 @@ export default defineConfig({
     // Logic tests run in Node (fast). A component test opts into the DOM with a `// @vitest-environment jsdom` first line.
     setupFiles: ["src/test/setup.ts"],
     // `npm run coverage`: how much of the web app the tests run, components included (so the number is honest about
-    // what's untested). CI turns coverage/coverage-summary.json into the README's frontend badge.
+    // what's untested). CI sends coverage/lcov.info to Codecov (the README's frontend badge).
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,svelte}"],
       exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/main.ts", "src/test/**"],
-      reporter: ["text-summary", "json-summary"],
+      reporter: ["text-summary", "lcovonly"],
     },
   },
   server: {

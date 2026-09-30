@@ -11,25 +11,67 @@ import McpCard from "./McpCard.svelte";
 
 beforeEach(() => { vi.mocked(api).mockReset(); });
 
-describe("the MCP key and the switch for changes", () => {
-  it("makes a key, and lets you switch on and off letting assistants change churning", async () => {
-    let status = { token: false, token_created: null as string | null, allow_writes: false };
-    vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string; body?: { allow?: boolean } }) => {
-      if (path === "/api/mcp-key" && !opts?.method) return status;
-      if (path === "/api/mcp-key" && opts?.method === "POST") { status = { ...status, token: true, token_created: "2026-09-30T00:00:00" }; return { token: "rwm_read" }; }
-      if (path === "/api/mcp-key/writes") { status = { ...status, allow_writes: !!opts?.body?.allow }; return { allow_writes: status.allow_writes }; }
-      return { ok: true };
-    }) as never);
+type Status = {
+  allow_writes: boolean; oauth: boolean; url: string | null; reason: string | null;
+  connections: { id: number; client: string | null; who: string | null; scope: string[]; created: string | null; last_used: string | null }[];
+};
+
+function serve(status: Status) {
+  vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string; body?: { allow?: boolean } }) => {
+    if (path === "/api/mcp-settings") return status;
+    if (path === "/api/mcp-settings/writes") { status.allow_writes = !!opts?.body?.allow; return { allow_writes: status.allow_writes }; }
+    const m = path.match(/^\/api\/mcp-settings\/connections\/(\d+)\/revoke$/);
+    if (m) { status.connections = status.connections.filter((c) => c.id !== Number(m[1])); return { ok: true }; }
+    throw new Error(`unexpected ${path}`);
+  }) as never);
+}
+
+describe("AI assistants (MCP)", () => {
+  it("shows the address to connect to and how, with no key to make", async () => {
+    serve({ allow_writes: false, oauth: true, url: "https://runway.example.com/mcp", reason: null, connections: [] });
+    render(McpCard);
+    expect(await screen.findByLabelText("MCP address")).toHaveValue("https://runway.example.com/mcp");
+    expect(screen.getByText(/claude mcp add --transport http runway https:\/\/runway.example.com\/mcp/)).toBeInTheDocument();
+    expect(screen.getByText("None yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/Make a key/)).not.toBeInTheDocument();
+  });
+
+  it("says why assistants can't connect yet", async () => {
+    serve({ allow_writes: false, oauth: false, url: null, reason: "Set RUNWAY_PUBLIC_URL to the address you open Runway at.", connections: [] });
+    render(McpCard);
+    expect(await screen.findByText(/Set RUNWAY_PUBLIC_URL/)).toBeInTheDocument();
+    expect(screen.getByLabelText("MCP address")).toHaveValue(`${location.origin}/mcp`);
+  });
+
+  it("lists connected assistants and revokes one", async () => {
+    serve({ allow_writes: true, oauth: true, url: "https://r.example/mcp", reason: null, connections: [
+      { id: 1, client: "Claude", who: "me@example.com", scope: ["read", "churning:write"], created: "2026-09-01T10:00:00", last_used: null },
+      { id: 2, client: null, who: null, scope: ["read"], created: "2026-09-02T10:00:00", last_used: "2026-09-03T10:00:00" },
+    ] });
+    render(McpCard);
+    expect(await screen.findByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Read + churning")).toBeInTheDocument();
+    expect(screen.getByText("Unnamed app")).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(screen.getByText(/by me@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/not used yet/)).toBeInTheDocument();
+    const revoke = screen.getAllByRole("button", { name: "Revoke" })[0];
+    await userEvent.click(revoke);                                   // asks first
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect it?" }));
+    await waitFor(() => expect(screen.queryByText("Claude")).not.toBeInTheDocument());
+    expect(vi.mocked(api)).toHaveBeenCalledWith("/api/mcp-settings/connections/1/revoke", { method: "POST" });
+    expect(screen.getByText("Unnamed app")).toBeInTheDocument();
+  });
+
+  it("switches letting assistants change churning on and off", async () => {
+    serve({ allow_writes: false, oauth: true, url: "https://r.example/mcp", reason: null, connections: [] });
     render(McpCard);
     const box = await screen.findByRole("checkbox", { name: "Let assistants change churning" });
-    expect(box).toBeDisabled();                                        // no key yet
-    await userEvent.click(screen.getByRole("button", { name: "Make a key" }));
-    expect(await screen.findByLabelText("MCP key")).toHaveValue("rwm_read");
-    await waitFor(() => expect(box).toBeEnabled());
-    expect(box).not.toBeChecked();                                     // off unless you turn it on
+    expect(box).toBeEnabled();
+    expect(box).not.toBeChecked();                                   // off unless you turn it on
     await userEvent.click(box);
     await waitFor(() => expect(box).toBeChecked());
-    const posts = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/mcp-key/writes").map((c) => (c[1] as { body: unknown }).body);
+    const posts = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/mcp-settings/writes").map((c) => (c[1] as { body: unknown }).body);
     expect(posts()).toEqual([{ allow: true }]);
     await userEvent.click(box);
     await waitFor(() => expect(posts()).toEqual([{ allow: true }, { allow: false }]));

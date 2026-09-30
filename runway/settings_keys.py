@@ -112,10 +112,8 @@ RETAIL_TOKEN_HASH = "retail_token_hash"
 RETAIL_TOKEN_CREATED = "retail_token_created"
 RETAIL_AI = "retail_ai"   # "1"/"0"; on unless switched off
 
-# MCP server (runway/mcp_server.py): its read-only key
-MCP_TOKEN_HASH = "mcp_token_hash"
-MCP_TOKEN_CREATED = "mcp_token_created"
-MCP_ALLOW_WRITES = "mcp_allow_writes"   # "1": the key may also make the churning changes in mcp_access.WRITABLE (off unless switched on)
+# MCP (runway/mcp_access.py). ("mcp_token_hash" and "mcp_token_created", the old key's, were removed by migration 0024.)
+MCP_ALLOW_WRITES = "mcp_allow_writes"   # "1": assistants allowed churning:write may make the changes in mcp_access.WRITABLE (off unless switched on)
 
 
 def retail_last(retailer: str) -> str:

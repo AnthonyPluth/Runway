@@ -31,6 +31,9 @@ class BackupTests(unittest.TestCase):
         networth.save_asset(c, {"name": "House", "kind": "home", "value": 400000}, today=date(2026, 9, 1))
         db.set_setting(c, "openrouter_api_key", "sk-secret")
         c.execute("INSERT INTO auth_sessions(token_hash, sub, created, expires) VALUES ('h', 's', 0, 9e9)")
+        c.execute("INSERT INTO oauth_clients(id, name, redirect_uris, auth_method, created) VALUES ('rwc_x', 'App', '[]', 'none', 0)")
+        c.execute("INSERT INTO oauth_grants(client_id, scope, resource, created) VALUES ('rwc_x', 'read', 'https://r/mcp', 0)")
+        c.execute("INSERT INTO oauth_tokens(token_hash, kind, grant_id, created, expires) VALUES ('t', 'access', 1, 0, 9e9)")
         c.commit()
         return c
 
@@ -40,6 +43,8 @@ class BackupTests(unittest.TestCase):
         data = backup.load(raw)
         self.assertEqual(data["format"], "runway-backup")
         self.assertNotIn("auth_sessions", data["tables"])          # sessions don't travel
+        for t in ("oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"):
+            self.assertNotIn(t, data["tables"])                    # nor assistants connected with OAuth
         dst = db.connect(self.b)
         dst.execute("INSERT INTO accounts(id, name) VALUES ('old', 'Old stuff')")   # replaced, not merged
         counts = backup.restore(dst, data)

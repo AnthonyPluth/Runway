@@ -1,88 +1,91 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { relTime } from "$lib/format";
   import { toast } from "svelte-sonner";
-  import { helpCls, inputCls, titleNote } from "./ui";
+  import { checkCls, helpCls, inputCls, titleNote, warnText } from "./ui";
 
-  // The MCP server (runway/mcp_server.py): lets an AI assistant read your accounts, budget, reports and churning, and only
-  // read. This makes (or replaces, or removes) its key, which is shown once and never opens anything that changes data.
-  let status = $state<{ token: boolean; token_created: string | null; allow_writes: boolean } | null>(null);
+  // AI assistants connect to Runway's MCP endpoint (/mcp) by its address and sign in with OAuth: you approve each one
+  // on Runway's consent page. This shows the address, lists the assistants connected (and disconnects them), and holds
+  // the switch that lets them change churning at all.
+  type Connection = { id: number; client: string | null; who: string | null; scope: string[]; created: string | null; last_used: string | null };
+  type Status = { allow_writes: boolean; oauth: boolean; url: string | null; reason: string | null; connections: Connection[] };
+  let status = $state<Status | null>(null);
   let error = $state("");
-  let shownKey = $state("");
-  let keyInput = $state<HTMLInputElement | null>(null);
 
   async function load() {
-    try { status = await api("/api/mcp-key"); error = ""; } catch (err) { error = (err as Error).message; }
+    try { status = await api<Status>("/api/mcp-settings"); error = ""; } catch (err) { error = (err as Error).message; }
   }
   load();
-  async function newKey() {
-    try {
-      const { token } = await api<{ token: string }>("/api/mcp-key", { method: "POST" });
-      await load();
-      shownKey = token;
-    } catch (err) { toast.error((err as Error).message); }
-  }
-  async function removeKey() {
-    try { await api("/api/mcp-key/remove", { method: "POST" }); toast.success("Key removed"); shownKey = ""; await load(); }
-    catch (err) { toast.error((err as Error).message); }
-  }
   async function setWrites(e: Event) {
     const allow = (e.currentTarget as HTMLInputElement).checked;
     try {
-      const r = await api<{ allow_writes: boolean }>("/api/mcp-key/writes", { method: "POST", body: { allow } });
+      const r = await api<{ allow_writes: boolean }>("/api/mcp-settings/writes", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_writes: r.allow_writes };
       toast.success(r.allow_writes ? "Assistants can change churning" : "Assistants can only read again");
     } catch (err) { toast.error((err as Error).message); await load(); }
   }
-  function copy() {
-    navigator.clipboard?.writeText(shownKey).then(() => toast.success("Copied"), () => {});
-    keyInput?.select();
+  async function revoke(c: Connection) {
+    try {
+      await api(`/api/mcp-settings/connections/${c.id}/revoke`, { method: "POST" });
+      toast.success(`${c.client || "The assistant"} is disconnected`);
+    } catch (err) { toast.error((err as Error).message); }
+    await load();
   }
-  const selectOnMount = (el: HTMLInputElement) => { el.select(); };
-  const command = $derived(`RUNWAY_URL=${location.origin} RUNWAY_MCP_KEY=${shownKey || "rwm_…"} python -m runway.mcp_server`);
+  const url = $derived(status?.url || `${location.origin}/mcp`);
+  function copy() {
+    navigator.clipboard?.writeText(url).then(() => toast.success("Copied"), () => {});
+  }
 </script>
 
 <Card.Root>
-  <Card.Header><Card.Title>AI assistants (MCP)<span class={titleNote}>optional, read-only</span></Card.Title></Card.Header>
+  <Card.Header><Card.Title>AI assistants (MCP)<span class={titleNote}>optional</span></Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-3">
     {#if error}
       <p class="text-sm text-muted-foreground">{error}</p>
     {:else if !status}
       <p class="text-sm text-muted-foreground">Loading…</p>
     {:else}
-      <p class={helpCls}>Runway's MCP server lets an assistant like Claude read your accounts, transactions, budget, reports, net worth and
-        credit-card benefits, to answer questions about them. It can only read: it can't change anything, and it never sees your bank
-        connections, settings or backups. It runs on your computer and talks to Runway with this key.</p>
-      <div class={helpCls}>
-        {#if status.token}
-          Key made {relTime(status.token_created)}.
-          <ConfirmButton class="h-auto px-1" confirm="Replace the key? Assistants using the old one stop working" onconfirm={newKey}>Make a new key</ConfirmButton>
-          <ConfirmButton class="h-auto px-1" confirm="Remove? Assistants stop working" onconfirm={removeKey}>Remove</ConfirmButton>
-        {:else}
-          <Button variant="outline" size="sm" onclick={newKey}>Make a key</Button>
-        {/if}
-      </div>
-      {#if shownKey}
-        <span class="flex flex-wrap items-center gap-2">
-          <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={shownKey} aria-label="MCP key" bind:this={keyInput} use:selectOnMount />
-          <Button variant="outline" size="sm" onclick={copy}>Copy</Button>
-          <span class="text-xs text-muted-foreground">Shown once: copy it now.</span>
-        </span>
+      <p class={helpCls}>Let an assistant like Claude read your accounts, transactions, budget, reports, net worth, orders and churning to
+        answer questions about them. It never sees your bank connections, settings or backups. Add this address to the assistant, and
+        approve it in Runway when it asks.</p>
+      <span class="flex flex-wrap items-center gap-2">
+        <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={url} aria-label="MCP address" />
+        <Button variant="outline" size="sm" onclick={copy}>Copy</Button>
+      </span>
+      {#if !status.oauth}
+        <p class={`text-sm ${warnText}`}>{status.reason}</p>
       {/if}
-      <label class="flex items-start gap-2 rounded-lg border p-3 text-sm">
-        <input type="checkbox" class="mt-0.5 size-4" checked={status.allow_writes} disabled={!status.token} onchange={setWrites} aria-label="Let assistants change churning" />
+      <p class={helpCls}>Claude Code: <code class="rounded bg-muted px-1 text-foreground">claude mcp add --transport http runway {url}</code>.
+        Claude on the web or desktop: Settings → Connectors → Add custom connector.</p>
+
+      <div class="flex flex-col">
+        <span class="text-sm font-medium">Connected assistants</span>
+        {#each status.connections as c (c.id)}
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-2 last:border-b-0">
+            <span class="flex min-w-0 flex-1 flex-col text-sm">
+              <span class="flex flex-wrap items-center gap-1.5">{c.client || "Unnamed app"}
+                <Badge variant="secondary">{c.scope.includes("churning:write") ? "Read + churning" : "Read"}</Badge></span>
+              <span class="text-xs text-muted-foreground">Approved {relTime(c.created)}{c.who ? ` by ${c.who}` : ""} ·
+                {c.last_used ? `last used ${relTime(c.last_used)}` : "not used yet"}</span>
+            </span>
+            <ConfirmButton confirm="Disconnect it?" onconfirm={() => revoke(c)}>Revoke</ConfirmButton>
+          </div>
+        {:else}
+          <p class={helpCls}>None yet.</p>
+        {/each}
+      </div>
+
+      <label class={`${checkCls} w-full rounded-lg border p-3`}>
+        <input type="checkbox" checked={status.allow_writes} onchange={setWrites} aria-label="Let assistants change churning" />
         <span><b>Let assistants change churning</b> <span class={titleNote}>off unless you turn it on</span>
-          <span class={`${helpCls} block`}>Lets the key mark a benefit used, add or update cards, benefits, to-dos and planned items, and check off a plan.
-            It can't delete anything or touch accounts, transactions or settings. Turn it off any time and it stops at once. Assistants like Claude should
-            ask before making a change.</span></span>
+          <span class={`${helpCls} block`}>Applies to every connection. An assistant you allowed to change churning when you connected it can
+            then mark a benefit used, add or update cards, benefits, to-dos and planned items, and check off a plan. It can't delete anything or
+            touch accounts, transactions or settings. Turn it off any time and it stops at once.</span></span>
       </label>
-      <p class={helpCls}>In a checkout of Runway, add it to your assistant (for Claude Code:
-        <code class="rounded bg-muted px-1 text-foreground">claude mcp add runway -e RUNWAY_URL={location.origin} -e RUNWAY_MCP_KEY=… -- python -m runway.mcp_server</code>),
-        or run it by hand:</p>
-      <code class="block overflow-x-auto rounded bg-muted px-2 py-1.5 text-xs whitespace-pre">{command}</code>
     {/if}
   </Card.Content>
 </Card.Root>
