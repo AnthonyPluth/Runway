@@ -3,6 +3,7 @@
   import { app, reload } from "$lib/app.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
+  import Logo from "$lib/components/Logo.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { fmt, fmtDow } from "$lib/format";
@@ -40,7 +41,7 @@
     <div class="cell">
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}
-        <img class="size-8 shrink-0 rounded-lg object-contain" src={e.logo} alt="" loading="lazy" width="32" height="32" />
+        <Logo src={e.logo} />
       {:else if bank?.logo}
         <img class="size-8 shrink-0 rounded-lg object-contain" src={`/banks/${bank.logo}.svg`} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
       {:else}
