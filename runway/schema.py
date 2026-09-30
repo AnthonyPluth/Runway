@@ -41,6 +41,7 @@ accounts = Table(
     Column('in_forecast', Integer, server_default=text('1'), doc='cash accounts: include in the projection'),
     Column('daily_spend', Integer, server_default=text('0'), doc='cash accounts: also subtract average everyday spending (opt-in)'),
     Column('hidden', Integer, server_default=text('0')),
+    Column('networth_hidden', Integer, server_default=text('0'), doc='1: left out of Net worth (still shown everywhere else)'),
     Column('owner', Text, doc='a signed-in person\'s first name, "Joint", or NULL'),
     Column('provider', Text, server_default=text("'simplefin'"), doc='where balances and transactions come from: simplefin | plaid'),
     Column('plaid_account_id', Text, doc='the same account in a Plaid connection, if any'),
