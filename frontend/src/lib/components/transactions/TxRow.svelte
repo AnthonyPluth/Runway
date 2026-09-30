@@ -11,6 +11,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import RecurringPicker from "./RecurringPicker.svelte";
   import LogoPicker from "./LogoPicker.svelte";
+  import Logo from "$lib/components/Logo.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { RecurringItem, Tx } from "./types";
   import { openOrders } from "./expanded.svelte";
@@ -66,7 +67,7 @@
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
            so a dark mark doesn't vanish on the dark page). -->
       {#if t.logo}
-        <img class="size-9 rounded-lg object-contain" src={t.logo} alt="" loading="lazy" width="36" height="36" />
+        <Logo src={t.logo} size={36} />
       {:else}
         <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground" aria-hidden="true">{initial}</span>
       {/if}
