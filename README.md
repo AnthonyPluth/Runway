@@ -334,6 +334,7 @@ poetry run python run.py --no-sync                     # run without touching yo
 poetry run python -m unittest discover tests           # the test suite (SQLite)
 DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # the same tests against Postgres
 poetry run pip install coverage && poetry run coverage run -m unittest discover tests && poetry run coverage report   # how much they cover
+poetry run pip install unittest-parallel && poetry run unittest-parallel -t . -s tests -j 4   # the same suite across 4 processes (what CI does): about 3x faster
 poetry run pip install mypy types-python-dateutil && poetry run mypy   # type-check the Python (settings in pyproject.toml)
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
