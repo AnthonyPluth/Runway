@@ -16,14 +16,30 @@ const cat = { name: "Dining", icon: "🍽️", color: "#3987e5", custom_icon: nu
 beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({ ok: true } as never); });
 
 describe("a category's emoji picker", () => {
-  it("offers emoji only: no colors and no box to type or search in", async () => {
+  it("offers emoji only, no colors, with a box to type one in that has the focus", async () => {
     render(LookPicker, { c: cat });
     await userEvent.click(screen.getByRole("button", { name: "Emoji for Dining" }));
     const dialog = screen.getByRole("dialog", { name: "Emoji for Dining" });
     expect(dialog).toHaveTextContent("Emoji");
     expect(dialog).not.toHaveTextContent("Color");
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Use color/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Type an emoji for Dining" })).toHaveFocus());
+  });
+
+  it("saves an emoji typed or pasted in, and nothing for letters", async () => {
+    render(LookPicker, { c: cat });
+    await userEvent.click(screen.getByRole("button", { name: "Emoji for Dining" }));
+    const box = screen.getByRole("textbox", { name: "Type an emoji for Dining" });
+    await userEvent.type(box, "taco");
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    await userEvent.clear(box);
+    await userEvent.click(box);
+    await userEvent.paste("🌮");
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledTimes(1));
+    const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { body: { name: string; icon: string; color: string } }];
+    expect(path).toBe("/api/categories/look");
+    expect(opts.body).toEqual({ name: "Dining", icon: "🌮", color: "#d95926" });
+    expect(box).toHaveValue("");                                   // ready for another
   });
 
   it("saves the emoji you pick and leaves a color set before as it is", async () => {

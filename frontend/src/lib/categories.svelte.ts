@@ -34,6 +34,13 @@ export function catLook(name: string | null | undefined): { icon: string; color:
 }
 /** The colors a category can wear (the server's categories.PALETTE). */
 export const CAT_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86"];
+/** The last emoji in some typed or pasted text (one whole emoji: skin tones, flags, keycaps and ZWJ sequences included),
+ * or null when there's none: letters, digits and punctuation on their own aren't emoji. */
+export function lastEmoji(text: string): string | null {
+  const emoji = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u;
+  const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map((s) => s.segment);
+  return parts.reverse().find((g) => emoji.test(g)) ?? null;
+}
 /** Emoji offered when picking one (any emoji can be typed too). */
 export const CAT_EMOJI = ["🛒", "🍽️", "☕", "🍔", "🍷", "🛍️", "👕", "✈️", "🚆", "🚕", "⛽", "🅿️", "🚗", "💡", "📱", "🔁", "💻",
   "🩺", "💊", "🏋️", "🔨", "🏠", "🏡", "🏦", "🧾", "🎬", "🎮", "🎨", "🎁", "💸", "📦", "💰", "↩️", "💳", "🔄", "🚫", "🐾",
