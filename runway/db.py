@@ -29,7 +29,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.schema import CreateColumn
 from sqlalchemy.sql.expression import FunctionElement
 
-from . import schema, secretbox
+from . import monitoring, schema, secretbox
 from . import settings_keys as sk
 from .models import Account, Category, Setting, Transaction
 
@@ -537,7 +537,7 @@ def get_setting(conn, key: str, default: str | None = None) -> str | None:
         try:
             value = secretbox.decrypt(value)
         except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
-            print(f"Warning: {key}: {e}", flush=True)
+            monitoring.log(f"Warning: {key}: {e}", "warning")
             value = None
     return value if value is not None else default
 

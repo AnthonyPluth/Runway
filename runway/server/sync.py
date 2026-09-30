@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import sys
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -23,6 +22,7 @@ PLAID_REFRESH_AT = (6, 30)   # before that sync, Plaid is told to fetch from the
                              # sync gets the banks as of now and not as of Plaid's own last visit. Only before
                              # PLAID_SYNC_HOUR: a refresh after the day's sync would be a call for nothing.
 VISIT_SYNC_MINUTES = 60      # opening Runway refreshes investments (prices) if they're older than this
+CRON_SLUG = "runway-bank-sync"   # the bank sync's Sentry Cron Monitor (SENTRY_CRONS; see run_sync)
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
@@ -40,6 +40,7 @@ def bank_configured(conn) -> bool:
 def run_sync() -> dict:
     if not _sync_lock.acquire(blocking=False):
         raise ApiError("A sync is already running.", 409)
+    check_in = None
     try:
         try:
             with db.session() as conn:
@@ -47,6 +48,10 @@ def run_sync() -> dict:
                 has_plaid = plaid_banks(conn)
                 if not access_url and not has_plaid:
                     raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
+                # Every bank sync that starts checks in with Sentry's Cron Monitor (SENTRY_CRONS), yours from the Sync
+                # button too: the monitor is about the data being fresh each day. One that can't start (another is
+                # running, nothing is connected) doesn't.
+                check_in = monitoring.cron_start(CRON_SLUG, f"0 {DAILY_SYNC_HOUR} * * *")
                 use_plaid = has_plaid and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
                 if use_plaid:   # counted when asked, so a failing Plaid isn't asked again until tomorrow
                     db.set_setting(conn, sk.LAST_PLAID_BANK_SYNC, datetime.now().isoformat(timespec="seconds"))
@@ -82,13 +87,19 @@ def run_sync() -> dict:
                 networth.summary(conn)   # record today's net worth
                 conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
-                return {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
+                monitoring.metric("count", "runway.sync.new_transactions", len(result["new"]))
+                out = {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
+            monitoring.cron_finish(check_in, True)   # once it's saved
+            return out
         except ApiError:
+            monitoring.cron_finish(check_in, False)
             raise
         except simplefin.SimpleFinError as e:
+            monitoring.cron_finish(check_in, False)
             _record_failed_sync(str(e))
             raise ApiError(str(e), 502) from e
         except Exception as e:
+            monitoring.cron_finish(check_in, False)
             monitoring.report()
             _record_failed_sync(f"The sync stopped with an error ({type(e).__name__}); the details are in Runway's log.")
             raise ApiError("The sync failed; the details are in Runway's log.", 500) from e
@@ -179,19 +190,22 @@ def refresh_plaid() -> None:
                 return
             db.set_setting(conn, sk.LAST_PLAID_REFRESH, datetime.now().isoformat(timespec="seconds"))
             conn.commit()
-            for e in plaidbank.refresh_all(conn):
-                print(f"Plaid refresh: {e}", file=sys.stderr)
+            with monitoring.task("plaid refresh"):   # traced only when it's due, not on every check
+                for e in plaidbank.refresh_all(conn):
+                    monitoring.log(f"Plaid refresh: {e}", "warning", stderr=True)
     except Exception:
         monitoring.report()
 
 
 def _sync_everything(bank: bool, invest: bool) -> None:
+    """The syncs Runway starts itself (the daily one, and catching up when you open it), each a trace of its own."""
     if bank:
-        with contextlib.suppress(ApiError):
+        with contextlib.suppress(ApiError), monitoring.task("bank sync"):
             run_sync()
-        notify_now()
+        with monitoring.task("notifications"):
+            notify_now()
     if invest:
-        with contextlib.suppress(ApiError):
+        with contextlib.suppress(ApiError), monitoring.task("investment sync"):
             run_investment_sync()
 
 

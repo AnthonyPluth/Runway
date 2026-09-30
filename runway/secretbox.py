@@ -22,7 +22,7 @@ from typing import Literal, TypeGuard, overload
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy import select, update
 
-from . import settings_keys
+from . import monitoring, settings_keys
 from .models import PlaidItem, Setting
 
 PREFIX = "enc:v1:"
@@ -157,7 +157,7 @@ def encrypt_stored(conn) -> int:
         try:
             new = reencrypt(r["value"])
         except InvalidToken:
-            print(f"Warning: the saved {r['key']} can't be decrypted with the current key; enter it again in Settings.", flush=True)
+            monitoring.log(f"Warning: the saved {r['key']} can't be decrypted with the current key; enter it again in Settings.", "warning")
             continue
         if new != r["value"]:
             conn.execute(update(Setting).where(Setting.key == r["key"]).values(value=new))
@@ -166,7 +166,7 @@ def encrypt_stored(conn) -> int:
         try:
             new = reencrypt(r["access_token"])
         except InvalidToken:
-            print("Warning: a Plaid connection's access can't be decrypted with the current key; reconnect it.", flush=True)
+            monitoring.log("Warning: a Plaid connection's access can't be decrypted with the current key; reconnect it.", "warning")
             continue
         if new != r["access_token"]:
             conn.execute(update(PlaidItem).where(PlaidItem.item_id == r["item_id"]).values(access_token=new))
