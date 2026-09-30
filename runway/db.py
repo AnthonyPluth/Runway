@@ -9,6 +9,7 @@ plain SQL with `?` placeholders that sticks to what both databases understand (`
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import re
 import threading
@@ -524,7 +525,7 @@ def number(value) -> float:
     """float(), for a number someone typed or sent: "nan" and "inf" are refused (float() takes them, and one saved
     would spoil every sum it's in, or stop the sync that uses it)."""
     n = float(value)
-    if n != n or n in (float("inf"), float("-inf")):
+    if math.isnan(n) or n in (float("inf"), float("-inf")):
         raise ValueError(f"{value!r} isn't a number")
     return n
 

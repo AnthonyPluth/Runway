@@ -127,7 +127,7 @@
       <span class={cn("inline-flex items-center gap-1.5 text-sm", live?.market === "open" ? "text-foreground/80" : "text-muted-foreground")} role="status"
         title={!live || live.market === "open" ? "Stock and ETF prices update as they move while the market is open" : undefined}>
         {#if !live}Holdings updated {synced}
-        {:else if live.market === "open"}<LiveDot /> Live prices · {liveTime}
+        {:else if live.market === "open"}<LiveDot /> Live prices
         {:else}Market closed · latest prices as of {liveTime}{/if}
       </span>
       <Segmented label="Period" value={inv.period} onchange={setPeriod} class={busy ? "opacity-70" : ""}

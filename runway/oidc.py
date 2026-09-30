@@ -224,7 +224,7 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
             if ui.get("sub") == claims.get("sub"):
                 info = {**ui, **claims, "groups": claims.get("groups", ui.get("groups"))}
         except (urllib.error.URLError, ValueError, OSError):
-            pass
+            pass   # userinfo is a bonus: carry on with what the ID token said
     who = authorize(info)
     token = secrets.token_urlsafe(32)
     now = time.time()
