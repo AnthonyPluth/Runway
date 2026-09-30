@@ -3,6 +3,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Input } from "$lib/components/ui/input";
   import { fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
@@ -126,6 +127,9 @@
   </li>
 {/snippet}
 
+{#if !parts.open.length && !parts.closed.length && !form && !scoring}
+  <EmptyLine id="churning-planned" label="Planned" message="no cards or bank bonuses you’re eyeing" action="Plan a card or bonus" onaction={() => (form = "new")} />
+{:else}
 <Card.Root class="mb-6" id="churning-planned">
   <Card.Header>
     <Card.Title>Planned</Card.Title>
@@ -166,3 +170,4 @@
     {/if}
   </Card.Content>
 </Card.Root>
+{/if}
