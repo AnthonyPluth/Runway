@@ -9,8 +9,8 @@
   import TrackedEditor from "./TrackedEditor.svelte";
   import type { InvAccount, SimplefinSeen } from "./types";
 
-  // The investment accounts: untick one to leave it out of the page, and enter the funds of a SimpleFIN account
-  // that only sends a balance. An account connected through both Plaid and SimpleFIN is listed once, as its Plaid one.
+  // The investment accounts, and where to enter the funds of a SimpleFIN account that only sends a balance. Accounts
+  // aren't left out here any more (leave one out of net worth on that page); one you had hidden can be shown again. An account connected through both Plaid and SimpleFIN is listed once, as its Plaid one.
   let { accounts, seen, onchanged }: { accounts: InvAccount[]; seen: SimplefinSeen[]; onchanged: () => void } = $props();
 
   const seenBy = $derived(Object.fromEntries(seen.map((x) => [x.id || "", x])));
@@ -35,12 +35,15 @@
       {#each accounts as a (a.id)}
         <tr class="border-t border-border first:border-t-0 [&>td]:py-2">
           <td class="pr-3">
-            <label class="inline-flex items-center gap-2" title={a.hidden_in_accounts ? "Hidden in Settings → Accounts; show it there to count it here" : undefined}>
-              <input type="checkbox" class="size-4 accent-[var(--nw-1)]" checked={!a.hidden} disabled={!!a.hidden_in_accounts}
-                onchange={(e) => toggle(a, e.currentTarget.checked)} />
+            <span class="inline-flex flex-wrap items-center gap-2">
               <span>{a.institution_name ?? ""} · {a.name || a.official_name || ""}{a.mask ? ` ••${a.mask}` : ""}</span>
-              {#if a.hidden_in_accounts}<Badge variant="secondary">hidden in Settings</Badge>{/if}
-            </label>
+              {#if a.hidden_in_accounts}<Badge variant="secondary" title="Hidden in Settings → Accounts; show it there to count it here">hidden in Settings</Badge>
+              {:else if a.duplicate_of}<Badge variant="secondary" title="The same account, connected another way, is shown instead">also connected another way</Badge>
+              {:else if a.hidden}
+                <Badge variant="secondary">hidden</Badge>
+                <Button variant="link" size="sm" class="h-auto px-0" aria-label={`Show ${a.name || a.official_name || "this account"} again`} onclick={() => toggle(a, true)}>Show again</Button>
+              {/if}
+            </span>
           </td>
           <td class="pr-3 text-xs text-muted-foreground">{via(a)}</td>
           <td class="pr-3 text-right tabular-nums">{fmt(a.balance)}</td>
