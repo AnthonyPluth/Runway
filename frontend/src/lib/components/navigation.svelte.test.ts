@@ -36,7 +36,7 @@ describe("Sidebar", () => {
       ["Overview", "Transactions", "Budget", "Reports", "Net worth", "Churning"]);
   });
 
-  it.each([["networth", "investments", "Net worth"], ["networth", "equity", "Net worth"], ["budget", "recurring", "Budget"]])(
+  it.each([["networth", "investments", "Net worth"], ["networth", "equity", "Net worth"], ["networth", "retirement", "Net worth"], ["budget", "recurring", "Budget"]])(
     "keeps %s/%s lit as %s", (page, sub, label) => {
       app.state = state();
       route.page = page; route.sub = sub;

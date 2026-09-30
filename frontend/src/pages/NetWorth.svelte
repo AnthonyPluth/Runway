@@ -6,6 +6,7 @@
   import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
   import AssetPanel from "$lib/components/networth/AssetPanel.svelte";
   import EquityView from "$lib/components/networth/EquityView.svelte";
+  import RetirementView from "$lib/components/networth/RetirementView.svelte";
   import InvestmentsView from "$lib/components/investments/InvestmentsView.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import { valueSource } from "$lib/components/networth/homeValues";
@@ -137,14 +138,17 @@
 {/snippet}
 
 <h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
-<SubTabs label="Net worth" current={sub === "investments" || sub === "equity" ? sub : "summary"} tabs={[
+<SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
   { id: "investments", label: "Investments", href: "#networth/investments" },
   { id: "equity", label: "Equity", href: "#networth/equity" },
+  { id: "retirement", label: "Retirement", href: "#networth/retirement" },
 ]} />
 
 {#if sub === "equity"}
   <EquityView />
+{:else if sub === "retirement"}
+  <RetirementView />
 {:else if sub === "investments"}
   <InvestmentsView />
 {:else if error && !d}

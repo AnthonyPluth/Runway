@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
+  import EmptyLine from "$lib/components/EmptyLine.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import BankForm from "$lib/components/churning/BankForm.svelte";
@@ -49,6 +50,8 @@
   // Best card ranks open cards, and Rewards shows what linked cards earned or a balance you entered: with neither they'd be empty.
   const hasOpenCards = $derived(cards.some((c) => c.status === "open"));
   const hasRewards = $derived(people.some((p) => d?.rewards[p]?.currencies.some((r) => r.earned + r.bonuses > 0 || r.balance != null)));
+  // With nothing to show, Rewards is one line; "Add a balance" opens the card, which is where balances are entered.
+  let addingBalance = $state(false);
   const startCard = () => { bankFormId = null; formId = "new"; location.hash = "#churning"; };
   const startBank = () => { formId = null; bankFormId = "new"; location.hash = "#churning/bank"; };
 
@@ -122,7 +125,8 @@
     <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
     <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
     {#if hasOpenCards}<BestCard {person} {version} showOwner={people.length > 1} />{/if}
-    {#if hasRewards}<Rewards {d} {people} onchanged={load} />{/if}
+    {#if hasRewards || addingBalance}<Rewards {d} {people} onchanged={load} />
+    {:else}<EmptyLine label="Rewards" message="no points tracked yet" action="Add a balance" onaction={() => (addingBalance = true)} />{/if}
   {/if}
 
   <div class="flex flex-wrap items-center justify-between gap-3">
@@ -155,28 +159,32 @@
   {:else if tab === "benefits"}
     <Benefits {cards} showOwner={people.length > 1} onchanged={load} />
   {:else}
-    <Card.Root class="mb-6">
-      <Card.Header>
-        <Card.Title>Bank bonuses</Card.Title>
-        <Card.Action><Button size="sm" onclick={() => (bankFormId = "new")}>Add a bank bonus</Button></Card.Action>
-      </Card.Header>
-      <Card.Content>
-        {#if bankForm}{#key bankFormId}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
-        {#if visibleBank.length}
-          <BankList bonuses={visibleBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
-        {:else}
-          <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing open. Tick Show closed to see the rest." : "No bank bonuses yet."}</p>
-        {/if}
-        <p class="mt-4 text-xs text-muted-foreground">Linked to a Runway account, deposits categorized as income (or that look like payroll) count as direct deposits, and purchases as debit transactions. Banks decide what counts: check the offer's terms.</p>
-      </Card.Content>
-    </Card.Root>
-    <Card.Root class="mb-6">
-      <Card.Header>
-        <Card.Title>Bonus money by year</Card.Title>
-        <Card.Description>Banks usually report account bonuses as interest on a 1099-INT, so they're usually taxable. For your records, not tax advice.</Card.Description>
-      </Card.Header>
-      <Card.Content>
-        {#if incomeYears.length}
+    {#if !bank.length && !bankForm}
+      <EmptyLine label="Bank bonuses" message="none yet" action="Add a bank bonus" onaction={() => (bankFormId = "new")} />
+    {:else}
+      <Card.Root class="mb-6">
+        <Card.Header>
+          <Card.Title>Bank bonuses</Card.Title>
+          <Card.Action><Button size="sm" onclick={() => (bankFormId = "new")}>Add a bank bonus</Button></Card.Action>
+        </Card.Header>
+        <Card.Content>
+          {#if bankForm}{#key bankFormId}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
+          {#if visibleBank.length}
+            <BankList bonuses={visibleBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
+          {:else}
+            <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing open. Tick Show closed to see the rest." : "No bank bonuses yet."}</p>
+          {/if}
+          <p class="mt-4 text-xs text-muted-foreground">Linked to a Runway account, deposits categorized as income (or that look like payroll) count as direct deposits, and purchases as debit transactions. Banks decide what counts: check the offer's terms.</p>
+        </Card.Content>
+      </Card.Root>
+    {/if}
+    {#if incomeYears.length}
+      <Card.Root class="mb-6">
+        <Card.Header>
+          <Card.Title>Bonus money by year</Card.Title>
+          <Card.Description>Banks usually report account bonuses as interest on a 1099-INT, so they're usually taxable. For your records, not tax advice.</Card.Description>
+        </Card.Header>
+        <Card.Content>
           <table class="w-full max-w-md text-sm">
             <thead><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal"><th class="text-left">Year</th>{#each people as p (p)}<th class="text-right">{p}</th>{/each}</tr></thead>
             <tbody>
@@ -185,8 +193,8 @@
               {/each}
             </tbody>
           </table>
-        {:else}<p class="text-sm text-muted-foreground">No bank bonuses received yet.</p>{/if}
-      </Card.Content>
-    </Card.Root>
+        </Card.Content>
+      </Card.Root>
+    {/if}
   {/if}
 {/if}

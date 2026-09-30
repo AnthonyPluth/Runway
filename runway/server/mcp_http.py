@@ -17,7 +17,7 @@ from .routes import ROUTES, _match
 # A later credential (an OAuth-issued access token) is another entry here; the rest of the auth path doesn't change.
 CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None], bool], ...] = (mcp_access.check_token,)
 
-WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Connections."
+WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
 
 
 def authorized(conn, authorization: str | None) -> bool:

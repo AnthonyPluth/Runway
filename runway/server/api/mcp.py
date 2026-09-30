@@ -1,4 +1,4 @@
-"""The MCP server's key (Settings → Connections). The server itself is runway/mcp_server.py; what it may read is
+"""The MCP server's key (Settings → Advanced). The server itself is runway/mcp_server.py; what it may read is
 mcp_access.READABLE."""
 from __future__ import annotations
 
