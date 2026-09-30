@@ -43,6 +43,13 @@ def assets(conn, today: date | None = None) -> list[dict]:
     return out
 
 
+def _presented(a: dict) -> float:
+    """An account's value the way the groups show it: credit and loan accounts as a positive amount owed."""
+    if a["kind"] in ("credit", "loan"):
+        return round(forecast.owed({**a, "balance": a["balance"] or 0.0}), 2)
+    return round(a["balance"] or 0.0, 2)
+
+
 def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
@@ -63,14 +70,12 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     owed_by_account = {}
     for a in accts:
         item = {"type": "account", "id": a["id"], "name": a["name"], "org": a["org"], "as_of": a["balance_date"], "owner": a["owner"]}
+        value = _presented(a)
         if a["kind"] in ("credit", "loan"):
-            owed = round(forecast.owed(a), 2)
-            owed_by_account[a["id"]] = owed
-            groups[a["kind"]]["items"].append({**item, "value": owed})
-        elif a["kind"] == "investment":
-            groups["investments"]["items"].append({**item, "value": round(a["balance"] or 0.0, 2)})
+            owed_by_account[a["id"]] = value
+            groups[a["kind"]]["items"].append({**item, "value": value})
         else:
-            groups["cash"]["items"].append({**item, "value": round(a["balance"] or 0.0, 2)})
+            groups["investments" if a["kind"] == "investment" else "cash"]["items"].append({**item, "value": value})
     names = {a["id"]: a["name"] for a in accts}
     for a in assets(conn, today):
         item = {"type": "asset", "id": a["id"], "name": a["name"], "value": a["current_value"], "as_of": a["as_of"],
@@ -103,7 +108,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     return {
         "today": today.isoformat(), "net": net, "assets": total_assets, "liabilities": total_liab,
         "groups": [g for g in groups.values() if g["items"]],
-        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"]} for a in left_out],
+        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a)} for a in left_out],
         "history": hist, "first_snapshot": hist[0]["date"] if hist else None,
         "change": {"30d": change_since(30), "90d": change_since(90), "1y": change_since(365)},
     }

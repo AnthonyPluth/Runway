@@ -76,7 +76,7 @@
 
 <div>
   {#if ids.length}
-    <div class="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
+    <div class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
       <span class="tabular-nums"><b>{ids.length} selected</b> <span class="text-muted-foreground">{fmt(sum)}</span></span>
       <CategorySelect bind:value={bulkCat} blank="Set category…" label="Category for the selected transactions" class="w-48"
         onchange={(v) => v && send({ category: v }, `Set to ${v}`)} />
@@ -106,7 +106,7 @@
   <div data-tx-list class="flex flex-col gap-4 lg:gap-0 lg:rounded-[0.875rem] lg:bg-card lg:[&>section:first-child>h3]:rounded-t-[0.875rem] lg:[&>section:last-child>div]:rounded-b-[0.875rem]">
     {#each days as d (d.day)}
       <section aria-label={dayLabel(d.day)}>
-        <h3 class="sticky top-0 z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:text-xs lg:backdrop-blur-none">
+        <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:text-xs lg:backdrop-blur-none">
           <span>{dayLabel(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case">{fmt(d.net)}</span>{/if}
         </h3>
