@@ -695,6 +695,7 @@ churn_wishlist = Table(
     Column('assume_prior_planned', Integer, server_default=text('0'),
            doc="1: count your earlier-priority planned cards as opened, for this one's 5/24"),
     Column('notes', Text),
+    Column('apply_url', Text, doc='where to apply: the offer\'s page (http or https)'),
     Column('applied_on', Text),
     Column('applied_id', Integer, doc='what applying made: churn_cards.id or churn_bank_bonuses.id (by kind)'),
     Column('created_at', Text, server_default=now_text()),
