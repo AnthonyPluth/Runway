@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import calendar
 import itertools
+import json
 from collections import defaultdict
 import statistics
 from datetime import date, datetime, timedelta
@@ -620,9 +621,27 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
 
 # ------------------------------------------------------------------------------------------------ suggestions
 
+def suggestion_key(account_id: str, match: str, frequency: str) -> str:
+    """What identifies a suggestion across visits, so one marked "not recurring" stays gone (amount and dates drift)."""
+    return f"{account_id}|{match.strip().lower()}|{frequency}"
+
+
+def dismissed_suggestions(conn) -> set[str]:
+    try:
+        keys = json.loads(db.get_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED) or "[]")
+    except ValueError:
+        return set()
+    return {k for k in keys if isinstance(k, str)} if isinstance(keys, list) else set()
+
+
+def dismiss_suggestion(conn, key: str) -> None:
+    db.set_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps(sorted(dismissed_suggestions(conn) | {key})))
+
+
 def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150) -> list[dict]:
-    """Payees on cash accounts that show up on a regular schedule with similar amounts."""
+    """Payees on cash accounts that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
     today = today or date.today()
+    dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
     known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute(select(Recurring))]
     T = Transaction
@@ -668,7 +687,10 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
         expected_gap = {"weekly": 7, "biweekly": 14, "monthly": 30}[freq]
         if (today - ds[-1]).days > expected_gap * 2:
             continue  # stopped happening
-        out.append({"account_id": acct, "name": items[-1]["payee"], "match": payee, "amount": round(med, 2),
+        key = suggestion_key(acct, payee, freq)
+        if key in dismissed:
+            continue
+        out.append({"key": key, "account_id": acct, "name": items[-1]["payee"], "match": payee, "amount": round(med, 2),
                     "frequency": freq, "anchor_date": ds[-1].isoformat(), "count": len(items)})
     out.sort(key=lambda s: -abs(s["amount"]))
     return out

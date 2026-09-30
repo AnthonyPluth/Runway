@@ -31,7 +31,8 @@ On Budget → Bills & income.
 
 - Paychecks, mortgage, bills and subscriptions: weekly, every two weeks, twice a month, monthly, quarterly, twice a year, yearly, or on specific dates (property tax on April 15 and October 15, say).
 - Transactions are **matched automatically** to their recurring item, and Runway **flags payments that didn't happen**.
-- Suggestions for recurring items it spots in your history.
+- Adding one asks for a name, money out or money in (a bill or a paycheck), a positive amount, how often and the next date (today unless you change it); the account, the amount to forecast (the fixed amount, the last payment or the average of the last three) and the merchant text to match are under More options.
+- Suggestions for recurring items it spots in your history. Add fills the form so you can adjust it first; Not recurring hides a suggestion for good.
 
 ## Transactions and categorization
 

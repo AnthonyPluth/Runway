@@ -15,10 +15,11 @@
   import CatIcon from "$lib/components/CatIcon.svelte";
   import RecIcon from "./RecIcon.svelte";
   import RecurringFields from "./RecurringFields.svelte";
-  import { FREQ, needsDates, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
+  import { FREQ, validate, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
 
-  // One recurring item: a summary line that opens into its fields, each saved as you change it.
-  let { r, accounts, open, ontoggle }: { r: RecurringItem; accounts: Account[]; open: boolean; ontoggle: (open: boolean) => void } = $props();
+  // One recurring item: a summary line that opens into its fields, each saved as you change it. After a save,
+  // `onsaved` gets the fresh list, so the summary (amount, next date, matches) and its Money in/out group catch up.
+  let { r, accounts, open, ontoggle, onsaved }: { r: RecurringItem; accounts: Account[]; open: boolean; ontoggle: (open: boolean) => void; onsaved?: (items: RecurringItem[]) => void } = $props();
 
   const init = () => ({
     name: r.name, account_id: r.account_id, amount: r.amount, amount_mode: r.amount_mode || "fixed", frequency: r.frequency,
@@ -28,7 +29,10 @@
   // Open or closed is yours to change; `open` only says how it starts.
   let isOpen = $state(untrack(() => open));
   let active = $state(untrack(() => !!r.active));
-  let missed = $state(untrack(() => r.missed ?? []));
+  let dismissed = $state<string[]>([]);
+  const missed = $derived((r.missed ?? []).filter((m) => !dismissed.includes(m.key)));
+  let attempted = $state(false);   // once a save was refused, the fields that need fixing say so
+  const errors = $derived(attempted ? validate(v) : {});
   let matches = $state<MatchedTx[] | null>(null);
 
   const amt = $derived(r.expected_amount ?? r.amount);
@@ -38,13 +42,20 @@
   type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
   async function save(f: Field) {
     await tick();   // let the field's binding catch up with the change first
-    // Don't save a dates schedule until its dates are filled in.
-    if (needsDates(v.frequency) && !v.dates.trim()) {
-      if (f.name === "frequency") f.closest("details")?.querySelector<HTMLInputElement>("input[name=dates]")?.focus();
-      return;
+    // Nothing saves until the fields are complete. Throwing (rather than returning) keeps "Saved ✓" from flashing.
+    const errs = validate(v);
+    const first = Object.values(errs)[0];
+    attempted = !!first;
+    if (first) {
+      if (errs.dates && f.name === "frequency") f.closest("details")?.querySelector<HTMLInputElement>("input[name=dates]")?.focus();
+      throw new Error(`Not saved yet. ${first}`);
     }
     const res = await api<{ linked: number }>(`/api/recurring/${r.id}`, { method: "POST", body: { ...v, active: active ? 1 : 0 } });
     if (res.linked) toast(`Saved · matched ${res.linked} more`);
+    if (onsaved) {
+      try { onsaved(await api<RecurringItem[]>("/api/recurring")); }
+      catch { /* saved; the summary catches up on the next load */ }
+    }
   }
   async function remove() {
     try { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); }
@@ -70,8 +81,8 @@
     <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
   </summary>
   <div class="pt-3 pb-5 sm:pl-10">
-    {#if missed.length}<div class="group-list mb-3 bg-muted/60" style:--inset="3.75rem">{#each missed as m (m.key)}<MissedAlert {m} ondismiss={(k) => (missed = missed.filter((x) => x.key !== k))} />{/each}</div>{/if}
-    <RecurringFields bind:v {accounts} {save} />
+    {#if missed.length}<div class="group-list mb-3 bg-muted/60" style:--inset="3.75rem">{#each missed as m (m.key)}<MissedAlert {m} ondismiss={(k) => (dismissed = [...dismissed, k])} />{/each}</div>{/if}
+    <RecurringFields bind:v {accounts} {save} {errors} />
     <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
       <label class="relative flex cursor-pointer items-center gap-2 text-sm">
         <input type="checkbox" name="active" class="size-4 accent-primary" bind:checked={active} use:autosave={save} /> Active
