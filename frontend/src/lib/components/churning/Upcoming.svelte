@@ -30,7 +30,7 @@
   const shown = $derived(all ? items : items.slice(0, 8));
   let adding = $state(false);
   let card = $state(""), due = $state(""), action = $state("");
-  const SUGGEST = ["Close", "Downgrade (product change)", "Call for a retention offer", "Check the bonus posted", "Move spending elsewhere"];
+  const SUGGEST = ["Close", "Product change (downgrade)", "Call for a retention offer", "Check the bonus posted", "Move spending elsewhere"];
 
   async function done(i: UpcomingItem) {
     try { await api(`/api/churning/tasks/${i.task_id}`, { method: "POST", body: { done: true } }); toast("Done"); onchanged(); }

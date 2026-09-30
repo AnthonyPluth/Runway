@@ -93,11 +93,11 @@ class ChurningApiTests(unittest.TestCase):
 
     def test_rates_plans_benefits_and_portal(self):
         vx = self.add(issuer="capital_one", product="Venture X", currency="c1", portal_name="Capital One Travel",
-                      plan="downgrade", plan_target="VentureOne", annual_fee=395,
+                      plan="product_change", plan_target="VentureOne", annual_fee=395,
                       rates=[{"category": "*", "multiplier": 2}, {"category": "Travel", "multiplier": 10, "portal_only": True}])
         out = api.api_churning(self.c, {}, {})
         card = out["cards"][0]
-        self.assertEqual((card["base_rate"], card["plan"], card["rates"][0]["portal_only"]), (2.0, "downgrade", True))
+        self.assertEqual((card["base_rate"], card["plan"], card["rates"][0]["portal_only"]), (2.0, "product_change", True))
         self.assertIn("Alex", out["owners"])
         self.assertIn("Travel", [c["name"] for c in out["categories"]])
         self.assertNotIn("Transfer", [c["name"] for c in out["categories"]])
