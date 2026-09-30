@@ -10,6 +10,7 @@ import urllib.request
 from datetime import date
 
 from runway import backup, db, networth, server
+from tests.shared import own_database
 
 
 class BackupTests(unittest.TestCase):
@@ -126,15 +127,13 @@ class BackupTests(unittest.TestCase):
 
 
 class BackupServerTests(unittest.TestCase):
-    """POST /api/backup/inspect, and the copy POST /api/restore keeps of what it replaces."""
+    """POST /api/backup/inspect, and the copy POST /api/restore keeps of what it replaces. A restore replaces the whole
+    database, so the test has one of its own: on Postgres, restoring the shared one reset its tables' ids under the
+    other modules' tests (test_mcp got a grant id that was already taken)."""
     HEADERS = {"X-Runway": "1", "Content-Type": "application/octet-stream"}
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
         cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -142,14 +141,9 @@ class BackupServerTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.httpd.server_close()
-        with db.session() as c:   # on Postgres the tests share one database: leave it as found
-            c.execute("DELETE FROM transactions WHERE id LIKE 'test:bk%'")
-            c.execute("DELETE FROM accounts WHERE id = 'test:bk'")
-        cls.tmp.cleanup()
-        if cls.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = cls.saved
+
+    def setUp(self):
+        self.data = os.path.dirname(own_database(self))   # RUNWAY_DATA, where the safety copy goes
 
     def post(self, path, body):
         r = urllib.request.Request(self.base + path, method="POST", data=body, headers=self.HEADERS)
@@ -173,12 +167,12 @@ class BackupServerTests(unittest.TestCase):
         self.assertEqual(got["current"], here)
         self.assertIn(got["database"], ("sqlite", "postgres"))
         self.assertEqual(self.post("/api/backup/inspect", b"hello"), (400, {"error": "That file isn't a Runway backup."}))
-        self.assertFalse([f for f in os.listdir(self.tmp.name) if f.startswith("runway-before-restore-")])   # inspecting changes nothing
+        self.assertFalse([f for f in os.listdir(self.data) if f.startswith("runway-before-restore-")])   # inspecting changes nothing
 
         code, got = self.post("/api/restore", raw)
         self.assertEqual(code, 200)
         path = got["safety_copy"]
-        self.assertEqual(os.path.dirname(path), self.tmp.name)
+        self.assertEqual(os.path.dirname(path), self.data)
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
         with open(path, "rb") as f:
             self.assertEqual(backup.preview(backup.load(f.read()))["counts"], here)
