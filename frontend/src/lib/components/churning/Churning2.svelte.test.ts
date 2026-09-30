@@ -330,6 +330,19 @@ describe("the Churning page", () => {
     expect(calls("/api/churning").length).toBe(before);   // the same data, not fetched again
   });
 
+  it("shows 0/24 with a prompt when there are no people yet", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [] }))) as never);
+    render(Churning);
+    expect(await screen.findByText("0/24")).toBeInTheDocument();
+    expect(screen.getByText("Add cards you’ve opened in the last 24 months")).toBeInTheDocument();
+  });
+
+  it("flags a person who is over 5/24 in the stat strip", async () => {
+    const five24 = { count: 6, under: false, under_on: "2027-01-10", next_fall_off: "2027-01-10" };
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: ["Alex"], five24: { Alex: five24 } } as never))) as never);
+    render(Churning);
+    expect(await screen.findByText("6/24")).toHaveClass("text-[var(--warning)]");
+  });
 
   it("puts the Cards section last, after Upcoming, Planned, Best card and Rewards", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);

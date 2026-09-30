@@ -1,15 +1,16 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { fmt, fmt0, monthLabel, thisMonth } from "$lib/format";
+  import { cn } from "$lib/utils";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { Report } from "./chart.svelte";
   import Sankey from "./Sankey.svelte";
   import { reportState as st } from "./state.svelte";
   import Status from "./Status.svelte";
-  import Tile from "./Tile.svelte";
   import type { Cashflow } from "./types";
 
   // Cash flow: one month as a Sankey, with its totals and the same numbers as a table.
@@ -37,12 +38,15 @@
     <Button variant="ghost" size="icon" class="size-8" aria-label="Next month" onclick={() => shift(1)}><ChevronRight /></Button>
   </div>
   {#if report.error}<Status error={report.error} retry={() => report.load()} />{:else}
-  <div class="mb-6 grid gap-4 md:grid-cols-3">
-    <Tile label="Money in" value={fmt0(cf.total_in)} sub="income and refunds" />
-    <Tile label="Money out" value={fmt0(cf.total_out)} sub="spending, not card payments or transfers" />
-    <Tile label={cf.net >= 0 ? "Left over" : "▲ Spent more than came in"} value={fmt0(Math.abs(cf.net))} alert={cf.net < 0}
-      sub={cf.total_in > 0 ? `${Math.round((cf.net / cf.total_in) * 100)}% of money in` : ""} />
-  </div>
+  <section class="mb-6">
+    <div class={cn("text-[15px]", cf.net < 0 ? "font-semibold text-destructive" : "text-muted-foreground")}>{cf.net >= 0 ? "Left over" : "▲ Spent more than came in"}</div>
+    <div class={cn("text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]", cf.net < 0 && "text-destructive")}>{fmt0(Math.abs(cf.net))}</div>
+    {#if cf.total_in > 0}<p class="mt-2 text-[15px] text-muted-foreground">{Math.round((cf.net / cf.total_in) * 100)}% of money in</p>{/if}
+    <StatStrip class="mt-5" items={[
+      { label: "Money in", value: fmt0(cf.total_in), sub: "income and refunds" },
+      { label: "Money out", value: fmt0(cf.total_out), sub: "spending, not card payments or transfers" },
+    ]} />
+  </section>
   <Card.Root>
     <Card.Header><Card.Title>{short} cash flow</Card.Title></Card.Header>
     <Card.Content>

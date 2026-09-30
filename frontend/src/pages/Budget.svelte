@@ -8,6 +8,7 @@
   import { loadCategories } from "$lib/categories.svelte";
   import BudgetRow from "$lib/components/budget/BudgetRow.svelte";
   import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import Group from "$lib/components/ui/group/Group.svelte";
@@ -113,22 +114,20 @@
 {:else}
   {@const v = view}
   {@const over = v.totLeft < 0.005 && v.totOver > 0.005}
-  <div class="mb-8 grid grid-cols-2 gap-3 md:grid-cols-3">
-    {#each [
-      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `monthly · plus ${fmt0(v.totCarried)} rolled over` : "monthly · repeats every month", alert: false },
-      { label: "Spent in budgeted categories", value: fmt0(v.totSpent), alert: over,
-        sub: v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
-          v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ") },
-      { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized), alert: false,
+  <!-- The hero is what's spent in the budgeted categories; the strip has what it's measured against and the rest. -->
+  <section class="mb-8">
+    <div class="text-[15px] text-muted-foreground">Spent in budgeted categories</div>
+    <div class={cn("text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]", over && "text-destructive")}>{fmt0(v.totSpent)}</div>
+    <p class={cn("mt-2 text-[15px] tabular-nums", over ? "font-semibold text-destructive" : "text-muted-foreground")}>
+      {v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
+        v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ")}
+    </p>
+    <StatStrip class="mt-5" items={[
+      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `monthly · plus ${fmt0(v.totCarried)} rolled over` : "monthly · repeats every month" },
+      { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized),
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
-    ] as t (t.label)}
-      <div class={cn("tile last:max-md:col-span-2", t.alert && "ring-1 ring-destructive")}>
-        <div class="text-[13px] text-muted-foreground">{t.label}</div>
-        <div class={cn("mt-0.5 text-[22px] font-semibold tabular-nums", t.alert && "text-destructive")}>{t.value}</div>
-        <div class={cn("text-[13px] text-muted-foreground tabular-nums", t.alert && "text-destructive")}>{t.sub}</div>
-      </div>
-    {/each}
-  </div>
+    ]} />
+  </section>
 
   <Group title="Budgets" inset="3.4rem" class="mb-8">
       {#if v.inBudget.length}

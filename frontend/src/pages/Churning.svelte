@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import BankForm from "$lib/components/churning/BankForm.svelte";
   import BankList from "$lib/components/churning/BankList.svelte";
@@ -17,7 +18,6 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
-  import { cn } from "$lib/utils";
 
   // Churning: credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. #churning
   // shows the cards, #churning/bank the bank account bonuses, #churning/benefits the card benefits; the tiles and Upcoming cover both.
@@ -44,6 +44,8 @@
   const visibleCards = $derived(showClosed ? cards : cards.filter((c) => c.status === "open"));
   const visibleBank = $derived(showClosed ? bank : bank.filter((b) => b.state !== "closed"));
 
+  // Over 5/24 is a warning; someone with no cards on file isn't.
+  const five24Tone = (p: string) => (d?.five24[p] && !d.five24[p].under ? ("warn" as const) : undefined);
   const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0 });
   const activeCards = $derived(cards.filter((c) => c.bonus_state === "active"));
   const activeBank = $derived(bank.filter((b) => b.state === "active" || b.state === "met"));
@@ -67,16 +69,6 @@
   }
 </script>
 
-{#snippet tile(label: string, value: string, sub: string, tone = "")}
-  <Card.Root class="gap-2">
-    <Card.Header>
-      <Card.Description>{label}</Card.Description>
-      <Card.Title class={cn("text-2xl tabular-nums", tone)}>{value}</Card.Title>
-    </Card.Header>
-    <Card.Content class="text-sm text-muted-foreground">{sub}</Card.Content>
-  </Card.Root>
-{/snippet}
-
 {#if error && !d}
   <Card.Root>
     <Card.Content>
@@ -95,30 +87,18 @@
     {/if}
   </div>
 
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {#if people.length === 1}
-      {@const f = five24Line(d.five24[people[0]])}
-      {@render tile(`${people[0]}'s 5/24`, f.count, f.next, d.five24[people[0]] && !d.five24[people[0]].under ? "text-[var(--warning)]" : "")}
-    {:else}
-      <Card.Root class="gap-2">
-        <Card.Header><Card.Description>5/24</Card.Description></Card.Header>
-        <Card.Content class="space-y-1.5">
-          {#each people as p (p)}
-            {@const f = five24Line(d.five24[p])}
-            <div>
-              <div class="flex items-baseline justify-between"><span>{p}</span><span class={cn("text-xl font-semibold tabular-nums", !d.five24[p]?.under && "text-[var(--warning)]")}>{f.count}</span></div>
-              <div class="text-xs text-muted-foreground">{f.next}</div>
-            </div>
-          {/each}
-        </Card.Content>
-      </Card.Root>
-    {/if}
-    {@render tile("Annual fees, next 90 days", fmt0(fees.total), fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}: keep, downgrade or close?` : "None due", fees.count ? "text-[var(--warning)]" : "")}
-    {@render tile("Bonuses in progress", String(activeCards.length + activeBank.length),
-      [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
-       activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now")}
-    {@render tile(`Bank bonuses in ${year}`, fmt0(bankThisYear), "Received so far; usually reported as taxable interest")}
-  </div>
+  <StatStrip class="mb-6" items={[
+    ...(people.length === 1
+      ? [{ label: `${people[0]}’s 5/24`, value: five24Line(d.five24[people[0]]).count, sub: five24Line(d.five24[people[0]]).next, tone: five24Tone(people[0]) }]
+      : people.length === 0
+        ? [{ label: "5/24", value: "0/24", sub: "Add cards you’ve opened in the last 24 months" }]
+        : people.map((p) => ({ label: `${p}’s 5/24`, value: five24Line(d!.five24[p]).count, sub: five24Line(d!.five24[p]).next, tone: five24Tone(p) }))),
+    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}: keep, downgrade or close?` : "None due", tone: fees.count ? "warn" : undefined },
+    { label: "Bonuses in progress", value: String(activeCards.length + activeBank.length),
+      sub: [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
+        activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now" },
+    { label: `Bank bonuses in ${year}`, value: fmt0(bankThisYear), sub: "Received so far; usually reported as taxable interest" },
+  ]} />
 
   <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
 
