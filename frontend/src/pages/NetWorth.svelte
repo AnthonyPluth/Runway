@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
   import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
@@ -165,6 +167,11 @@
 {:else if !d}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
+{#if !app.state?.connected && !hasAssetItems}
+  <NotConnected title="Connect a bank to track your net worth"
+    text="Runway adds up your accounts and keeps the history as it grows. The first sync brings in your balances."
+    secondary={{ label: "Add an asset by hand", onclick: () => openAdd("home") }} />
+{:else}
   <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
   <section class="mb-8">
     <div class="sr-only">Net worth</div>
@@ -244,6 +251,7 @@
       {/if}
     </Card.Content>
   </Card.Root>
+{/if}
 
   <AssetPanel bind:open={assetOpen} a={panelAsset} kind={addKind} {d} onchanged={load} />
   <AccountPanel bind:open={acctOpen} acct={panelAcct} onchange={(counted) => panelAcct && leaveOut(panelAcct.id, panelAcct.name, !counted)} />

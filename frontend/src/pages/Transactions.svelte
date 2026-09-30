@@ -7,6 +7,7 @@
   import AiSuggest from "$lib/components/transactions/AiSuggest.svelte";
   import RememberBar from "$lib/components/transactions/RememberBar.svelte";
   import TxTable from "$lib/components/transactions/TxTable.svelte";
+  import NotConnected from "$lib/components/NotConnected.svelte";
   import Upcoming from "$lib/components/transactions/Upcoming.svelte";
   import { askRemember } from "$lib/components/transactions/remember.svelte";
   import { restoreTx, type Was } from "$lib/components/transactions/restore";
@@ -15,8 +16,9 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { txFilters, type TxFilters } from "$lib/filters.svelte";
+  import { clearAll, isFiltered, txFilters, type TxFilters } from "$lib/filters.svelte";
   import { monthLabel } from "$lib/format";
+  import { syncStatus } from "$lib/nav.svelte";
   import { undoable } from "$lib/undo";
   import { accountName, type Account, type Overview } from "$lib/types";
   import { tick } from "svelte";
@@ -79,11 +81,12 @@
   }
   let selecting = $state(false);
 
-  const filtered = $derived(!!(applied.q || applied.account || applied.category || applied.month));
+  const filtered = $derived(isFiltered(applied));
 
   let timer: ReturnType<typeof setTimeout>;
   function search(v: string) { f.q = v; clearTimeout(timer); timer = setTimeout(load, 250); }
   function clearMonth() { f.month = ""; f.scope = ""; load(); }
+  function clearFilters() { clearTimeout(timer); clearAll(f); load(); }
 
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = applied, q = a.q.trim().toLowerCase();
@@ -134,7 +137,7 @@
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
   <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-tight font-bold tracking-tight outline-none">
     Transactions
-    <span class="text-base font-normal text-muted-foreground tabular-nums">{list ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
+    <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
   </h1>
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}
@@ -149,6 +152,10 @@
   { id: "review", href: "#review", label: "To review", badge: app.state?.review_count || undefined },
 ]} />
 
+{#if !app.state?.connected}
+  <NotConnected title={review ? "Connect a bank to review transactions" : "Connect a bank to see your transactions"}
+    text="Runway lists what your accounts take in and pay out, and sorts it into categories. The first sync brings in months of history." />
+{:else}
 {#await setup}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:then [, accounts, recurring]}
@@ -179,6 +186,9 @@
           onclick={clearMonth}><X class="size-3.5" /></button>
       </span>
     {/if}
+    {#if isFiltered(f)}
+      <Button variant="link" size="sm" class="h-auto px-1 py-0" onclick={clearFilters}>Clear filters</Button>
+    {/if}
   </div>
 
   {#if !review}
@@ -193,8 +203,17 @@
   {:else if !list}
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">Loading…</Card.Content></Card.Root>
   {:else if !list.items.length}
+    {@const sync = syncStatus(app.state).text}
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">
-      <p bind:this={caughtUp} tabindex="-1" class="outline-none">{review && !filtered ? "All caught up. New transactions that need a decision will show up here." : "No transactions match."}</p>
+      {#if filtered}
+        <p bind:this={caughtUp} tabindex="-1" class="outline-none">No transactions match these filters.</p>
+        <Button class="mt-3" variant="outline" onclick={clearFilters}>Clear filters</Button>
+      {:else if review}
+        <p bind:this={caughtUp} tabindex="-1" class="outline-none">All caught up. New transactions that need a decision will show up here.</p>
+      {:else}
+        <p bind:this={caughtUp} tabindex="-1" class="outline-none">No transactions yet. The first sync brings in months of history.</p>
+        {#if sync}<p class="mt-1 text-xs">{sync}</p>{/if}
+      {/if}
     </Card.Content></Card.Root>
   {:else}
     {#key loads}
@@ -208,5 +227,6 @@
 {:catch err}
   <Card.Root><Card.Content><p class="text-sm">Something went wrong: {err.message}</p></Card.Content></Card.Root>
 {/await}
+{/if}
 
 <RememberBar />

@@ -26,6 +26,7 @@ const serve = (list: Tx[] = rows(), total = list.length, extra: Handler = () => 
     if (path === "/api/categories") return [category("Coffee"), category("Groceries")];
     if (path === "/api/accounts") return accounts;
     if (path === "/api/recurring") return [];
+    if (path === "/api/state") return { connected: true, review_count: 3 };   // refreshState after a change
     if (path.startsWith("/api/overview")) return { events: [] };
     if (path.startsWith("/api/transactions?")) return { items: list, total };
     return {};
@@ -90,10 +91,52 @@ describe("Transactions page", () => {
     expect(screen.queryByText(/March 2026/)).not.toBeInTheDocument();
   });
 
-  it("says when nothing matches", async () => {
+  it("asks you to connect a bank first, without the list or its filters", async () => {
+    app.state = { connected: false };
+    serve();
+    render(Transactions);
+    expect(screen.getByText("Connect a bank to see your transactions")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Transactions");
+    expect(screen.getByRole("link", { name: /To review/ })).toBeInTheDocument();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+  });
+
+  it("says there are no transactions yet once a bank is connected, with the sync status", async () => {
+    app.state = { connected: true, syncing: true };
     serve([], 0);
     render(Transactions);
-    expect(await screen.findByText("No transactions match.")).toBeInTheDocument();
+    expect(await screen.findByText("No transactions yet. The first sync brings in months of history.")).toBeInTheDocument();
+    expect(screen.getByText("Syncing…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
+  it("says when the filters match nothing, and clears them all", async () => {
+    Object.assign(txFilters.transactions, { q: "zzz", account: "a1", category: "Coffee", month: "2026-03", scope: "budget" });
+    serve([], 0);
+    render(Transactions);
+    expect(await screen.findByText("No transactions match these filters.")).toBeInTheDocument();
+    expect(screen.queryByText(/No transactions yet/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Clear filters" })).toHaveLength(2);   // beside the filters, and in the empty card
+    await userEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[1]);
+    expect(txFilters.transactions).toEqual({ q: "", account: "", category: "", month: "", scope: "" });
+    await waitFor(() => expect(lastList()).not.toContain("zzz"));
+    expect(lastList()).toContain("q=&account=&category=&month=&scope=");
+    expect(await screen.findByText(/No transactions yet/)).toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+  });
+
+  it("offers Clear filters beside the filters whenever one is on, and reloads the full list", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
+    await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    expect(txFilters.transactions.account).toBe("");
+    await waitFor(() => expect(lastList()).not.toContain("account=a1"));
+    expect(screen.getByRole("combobox", { name: "Account" })).toHaveValue("");
   });
 
   it("shows the error with a way to retry", async () => {
@@ -234,7 +277,14 @@ describe("Transactions page", () => {
       unmount();
       txFilters.review.q = "zzz";
       render(Transactions, { page: "review" });
-      expect(await screen.findByText("No transactions match.")).toBeInTheDocument();
+      expect(await screen.findByText("No transactions match these filters.")).toBeInTheDocument();
+    });
+
+    it("asks you to connect a bank before there's anything to review", () => {
+      app.state = { connected: false };
+      serve();
+      render(Transactions, { page: "review" });
+      expect(screen.getByText("Connect a bank to review transactions")).toBeInTheDocument();
     });
 
     it("keeps AI suggestions disabled until an OpenRouter key is set", async () => {
