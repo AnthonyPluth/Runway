@@ -111,8 +111,7 @@ RETAIL_AI = "retail_ai"   # "1"/"0"; on unless switched off
 # MCP server (runway/mcp_server.py): its read-only key
 MCP_TOKEN_HASH = "mcp_token_hash"
 MCP_TOKEN_CREATED = "mcp_token_created"
-MCP_WRITE_TOKEN_HASH = "mcp_write_token_hash"   # the second key, which can also change churning data
-MCP_WRITE_TOKEN_CREATED = "mcp_write_token_created"
+MCP_ALLOW_WRITES = "mcp_allow_writes"   # "1": the key may also make the churning changes in mcp_access.WRITABLE (off unless switched on)
 
 
 def retail_last(retailer: str) -> str:
