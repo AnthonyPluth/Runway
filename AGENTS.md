@@ -34,6 +34,8 @@ Python goes through Poetry (Python 3.14).
 Any change that alters how the app looks or behaves in the browser (`frontend/`, CSS, the pages Runway serves) needs
 before and after screenshots in its PR, in the **Screenshots** section of the PR template. Only backend, test or docs
 changes can say "N/A: why".
+**The section must contain actual images** (`![before](…)` / `![after](…)` or an `<img>`), not a written
+description of what you looked at; a sentence like "I checked it at 1440×900" doesn't count.
 
 - Use the made-up demo data: `python run.py demo` seeds a throwaway database; never screenshot real accounts.
 - Capture with Playwright and the Chromium that's already installed (`PLAYWRIGHT_BROWSERS_PATH` is set; don't run
@@ -52,7 +54,7 @@ changes can say "N/A: why".
 - Work on the branch you were given; don't push to `main`.
 - Keep commits focused, with a clear message.
 - Open a PR only when asked, and summarize what changed and why.
-- Don't hard-wrap lines in PR descriptions, comments or issues: write each paragraph or list item as one line and let GitHub wrap it to the screen. (Code, commit messages and repo files keep their own wrapping.)
+- Don't hard-wrap lines in PR descriptions, comments, issues or the body of a commit message: write each paragraph or list item as one line, and let GitHub wrap it to the screen. Only code and repo files keep their own wrapping. Keep the commit subject to one short line.
 
 ## Model routing
 
