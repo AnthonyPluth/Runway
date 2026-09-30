@@ -545,6 +545,33 @@ class CostcoTests(Base):
         order = self.c.execute("SELECT * FROM retail_orders").fetchone()
         self.assertEqual((order["retailer"], order["channel"], order["total"], order["details"]), ("costco", "store", 41.98, 1))
 
+    def test_costco_items_are_categorized_by_the_ai_with_the_receipt_codes_taken_off(self):
+        receipt = {**self.RECEIPT, "itemArray": [
+            {"itemNumber": "1", "itemDescription01": "CLOROX WAND P=120", "unit": 1, "amount": 17.78},
+            {"itemNumber": "2", "itemDescription01": "WHITE QUESO 32OZ", "itemDescription02": "T6H7P504 SL60 DOM120", "unit": 1, "amount": 8.89},
+            {"itemNumber": "3", "itemDescription01": "BURATTA #00123 SL24 T9H8", "unit": 1, "amount": 7.40},
+            {"itemNumber": "4", "itemDescription01": "CREST PRO 5PK/5.9OZ P324 CU38", "unit": 1, "amount": 11.85}]}
+        retail.costco_history(self.c, {"data": {"receiptsWithCounts": {"receipts": [receipt]}}})
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        asked = []
+
+        def model(key, name, prompt):
+            asked.append(prompt)
+            items = json.loads(prompt.split("Items (JSON):\n", 1)[1].split("\n", 1)[0])
+            return json.dumps([{"i": it["i"], "category": "Groceries", "confidence": 0.8} for it in items])
+        out = retail.finish(self.c, "costco", caller=model)
+        self.assertEqual(out["items"]["ai"], 4)
+        self.assertEqual({r["category_source"] for r in self.c.execute("SELECT category_source FROM retail_items")}, {"ai"})
+        self.assertIn("KS is Kirkland Signature", asked[0])
+        sent = [it["item"] for it in json.loads(asked[0].split("Items (JSON):\n", 1)[1].split("\n", 1)[0])]
+        self.assertEqual(sent, ["CLOROX WAND", "WHITE QUESO 32OZ", "BURATTA", "CREST PRO 5PK/5.9OZ"])
+        # what's stored is the receipt's own wording
+        self.assertIn("CLOROX WAND P=120", [r["title"] for r in self.c.execute("SELECT title FROM retail_items")])
+
+    def test_only_costco_titles_are_cleaned(self):
+        self.assertEqual(retail.ai_title("amazon", "Widget P=120 #12"), "Widget P=120 #12")
+        self.assertEqual(retail.ai_title("costco", "P=120"), "P=120")   # never left empty
+
     def test_an_error_reply_asks_to_sign_in(self):
         with self.assertRaises(retail.RetailError) as cm:
             retail.costco_history(self.c, {"errors": [{"message": "Unauthorized"}]})
