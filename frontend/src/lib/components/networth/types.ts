@@ -43,6 +43,8 @@ export interface NetWorth {
   assets: number;
   liabilities: number;
   groups: NwGroup[];
+  /** Accounts you left out of net worth (still shown elsewhere), to bring back. */
+  excluded: { id: string; name: string; org: string | null; kind: string }[];
   history: { date: string; net: number; assets: number; liabilities: number }[];
   first_snapshot: string | null;
   change: Record<"30d" | "90d" | "1y", number | null>;

@@ -47,7 +47,9 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
         select(Account.id, db.account_label_expr(Account).label("name"), Account.org, Account.kind, Account.balance,
-               Account.balance_date, Account.owed_positive, Account.owner).where(Account.hidden == 0)))
+               Account.balance_date, Account.owed_positive, Account.owner, Account.networth_hidden).where(Account.hidden == 0)))
+    left_out = [a for a in accts if a["networth_hidden"]]   # you left these out of Net worth: listed at the bottom, to bring back
+    accts = [a for a in accts if not a["networth_hidden"]]
     groups: dict[str, dict[str, Any]] = {
         "cash": {"key": "cash", "label": "Cash", "side": "asset", "items": []},
         "investments": {"key": "investments", "label": "Investments", "side": "asset", "items": []},
@@ -101,6 +103,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     return {
         "today": today.isoformat(), "net": net, "assets": total_assets, "liabilities": total_liab,
         "groups": [g for g in groups.values() if g["items"]],
+        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"]} for a in left_out],
         "history": hist, "first_snapshot": hist[0]["date"] if hist else None,
         "change": {"30d": change_since(30), "90d": change_since(90), "1y": change_since(365)},
     }
