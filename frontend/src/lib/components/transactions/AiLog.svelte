@@ -10,11 +10,17 @@
   import type { AiLogRow } from "./types";
 
   // Every request Runway made to the AI (the Suggest button, automatic runs during sync, order items), newest first.
-  let rows = $state<Promise<AiLogRow[]>>(get());
-  function get() { return api<AiLogRow[]>("/api/ai/log", { keep: true }); }
+  // Loading again keeps the log on screen until the new one arrives.
+  let rows = $state<Promise<AiLogRow[]> | AiLogRow[]>(get());
+  let seq = 0;
+  function get() {
+    const n = ++seq, p = api<AiLogRow[]>("/api/ai/log", { keep: true });
+    p.then((r) => { if (n === seq) rows = r; }, () => {});
+    return p;
+  }
 
   /** Load the log again; `show` opens it (after a failed request, so you see why). */
-  export function refresh(show = false) { if (show) open = true; rows = get(); }
+  export function refresh(show = false) { if (show) open = true; if (Array.isArray(rows)) get(); else rows = get(); }
 
   const when = (at: string, seconds = false) => new Date(at.replace(" ", "T")).toLocaleString("en-US",
     { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}) });
