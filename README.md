@@ -224,8 +224,18 @@ API keys or backups.
 
 1. In Runway, open **Settings → Connections → AI assistants (MCP)** and choose **Make a key**. It's shown once; a new key
    replaces the old one, and Remove switches the server off.
-2. Add the server to your assistant. It runs on your computer from a checkout of Runway (Python 3.14, standard library only) and
-   talks to Runway over HTTP. For Claude Code:
+2. Add Runway to your assistant. Runway serves MCP itself over Streamable HTTP at `/mcp`, so there's nothing to install or check
+   out. For Claude Code:
+
+```bash
+claude mcp add --transport http runway https://runway.example.com/mcp --header "Authorization: Bearer rwm_..."
+```
+
+   Any client that supports remote MCP servers with a custom `Authorization` header works the same way. Requests from a web page
+   on another origin are refused.
+
+   **Or run the stdio server instead.** It still works: it runs on your computer from a checkout of Runway (Python 3.14, standard
+   library only) and talks to Runway over HTTP with the same key:
 
 ```bash
 claude mcp add runway -e RUNWAY_URL=https://runway.example.com -e RUNWAY_MCP_KEY=rwm_... -- python -m runway.mcp_server
@@ -237,7 +247,7 @@ card. It's off until you switch it on, and turning it off takes effect at once (
 changes can't delete anything or touch accounts, transactions or settings (the list is `WRITABLE` in `runway/mcp_access.py`),
 and they're marked as changing data so assistants like Claude ask before running them.
 
-The key opens only `/api/mcp/<page>`, and only for the pages listed in `runway/mcp_access.py` (GET requests). Like
+The key opens only `/mcp` and `/api/mcp/<page>`, and only for the pages listed in `runway/mcp_access.py` (GET requests). Like
 the rest of Runway's API it needs your Runway to be reachable from the computer running the assistant, so on the internet
 put it behind HTTPS (see [Running on a server](#running-on-a-server)).
 
