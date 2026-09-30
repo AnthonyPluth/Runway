@@ -5,7 +5,7 @@
   import { signed } from "$lib/components/investments/numbers";
   import AssetCard from "$lib/components/networth/AssetCard.svelte";
   import AssetForm from "$lib/components/networth/AssetForm.svelte";
-  import EquityCard from "$lib/components/networth/EquityCard.svelte";
+  import EquityView from "$lib/components/networth/EquityView.svelte";
   import { valueSource } from "$lib/components/networth/homeValues";
   import type { Asset, NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
@@ -14,14 +14,13 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
 
-  let { sub: _sub = "" }: { sub?: string } = $props();
+  let { sub = "" }: { sub?: string } = $props();
 
   // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come.
   let d = $state.raw<NetWorth | null>(null);
   let error = $state<string | null>(null);
-  let version = $state(0);
   async function load() {
-    try { d = await api<NetWorth>("/api/networth"); error = null; version++; }
+    try { d = await api<NetWorth>("/api/networth"); error = null; }
     catch (err) { error = (err as Error).message; }
   }
   load();
@@ -60,7 +59,7 @@
   <table class="w-full text-sm">
     <tbody>
       {#each groups as g (g.key)}
-        <tr class="border-t border-border first:border-t-0"><td class="pt-3 pb-1 font-semibold">{g.label}</td><td class="pt-3 pb-1 text-right font-semibold tabular-nums">{fmt(g.total)}</td></tr>
+        <tr class="border-t border-border first:border-t-0"><td class="pt-3 pb-1 font-semibold">{#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}</td><td class="pt-3 pb-1 text-right font-semibold tabular-nums">{fmt(g.total)}</td></tr>
         {#each g.items as i (`${i.type}:${i.id}`)}
           <tr class="align-top">
             <td class="py-1.5 pr-3 pl-6">
@@ -80,7 +79,9 @@
   </table>
 {/snippet}
 
-{#if error && !d}
+{#if sub === "equity"}
+  <EquityView />
+{:else if error && !d}
   <Card.Root>
     <Card.Content>
       <p class="text-sm">Something went wrong: {error}</p>
@@ -167,8 +168,6 @@
       {/if}
     </Card.Content>
   </Card.Root>
-
-  <EquityCard {version} refresh={load} />
 
   <Card.Root>
     <Card.Header>
