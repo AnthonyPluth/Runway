@@ -49,7 +49,7 @@ from .api.reports import (
 )
 from .api.retail import (
     api_retail, api_retail_apply, api_retail_candidates, api_retail_item, api_retail_link, api_retail_match,
-    api_retail_order, api_retail_settings, api_retail_token, api_retail_token_remove, api_retail_unlink
+    api_retail_order, api_retail_settings, api_retail_suggest, api_retail_token, api_retail_token_remove, api_retail_unlink
 )
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
 from .api.transactions import (
@@ -188,6 +188,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/retail/match", api_retail_match),
     ("GET", "/api/retail/orders/{id}", api_retail_order),
     ("POST", "/api/retail/items/{id}", api_retail_item),
+    ("POST", "/api/retail/orders/{id}/suggest", api_retail_suggest),
     ("POST", "/api/retail/charges/{id}/unlink", api_retail_unlink),
     ("POST", "/api/retail/charges/{id}/link", api_retail_link),
     ("POST", "/api/retail/charges/{id}/apply", api_retail_apply),

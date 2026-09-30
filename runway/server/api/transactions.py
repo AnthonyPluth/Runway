@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 
 from ... import categories, categorize, db, merchants, retail, splits
 from ... import settings_keys as sk
-from ...models import Account, AiLog, Category, Recurring, Transaction, TxSplit
+from ...models import Account, AiLog, Recurring, Transaction, TxSplit
 from ..common import ApiError, _month_range
 
 
@@ -130,22 +130,10 @@ def api_ai_apply(conn, _q, body):
     new = body.get("new_category") or None
     created = False
     if new:   # accept an AI-proposed category: create it (unless it exists by now), then use it
-        name = " ".join(str(new.get("name") or "").split())
-        existing = conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(name))).fetchone()
-        if existing:
-            category = existing["name"]
-        else:
-            parent = new.get("parent") or None
-            if parent and not conn.execute(select(Category.name).where(Category.name == parent)).fetchone():
-                parent = None
-            try:
-                categories.add(conn, name, parent, is_income=(body.get("direction") == "in" and not parent))
-            except categories.CategoryError as e:
-                if parent and "levels deep" in str(e):
-                    categories.add(conn, name, None)
-                else:
-                    raise ApiError(str(e)) from e
-            category, created = name, True
+        try:
+            category, created = categorize.create_proposed(conn, new, is_income=body.get("direction") == "in")
+        except ValueError as e:
+            raise ApiError(str(e)) from e
     remember = bool(body.get("remember"))
     try:
         n = categorize.apply_to_group(conn, ids, category, remember)

@@ -9,7 +9,7 @@ import zipfile
 
 from sqlalchemy import select
 
-from ... import carta_web, db, monitoring, retail
+from ... import carta_web, categorize, db, monitoring, retail
 from ... import settings_keys as sk
 from ...models import RetailCharge
 from ..common import ApiError
@@ -56,10 +56,23 @@ def api_retail_order(conn, _q, _b, oid):
 
 
 def api_retail_item(conn, _q, body, item_id):
+    """Pick an item's category, or accept the AI's proposed new one (`new_category`: {name, parent}): it's created, then used."""
+    category, created = body.get("category") or "", False
     try:
-        return retail.set_item_category(conn, int(item_id), body.get("category") or "", body.get("remember", True) is not False)
-    except retail.RetailError as e:
+        if body.get("new_category"):
+            category, created = categorize.create_proposed(conn, body["new_category"])
+        return {**retail.set_item_category(conn, int(item_id), category, body.get("remember", True) is not False),
+                "category": category, "created": created}
+    except (retail.RetailError, ValueError) as e:
         raise ApiError(str(e)) from e
+
+
+def api_retail_suggest(conn, _q, _b, order_id):
+    """The AI's category (or a new one) for each item of the order that has none. Nothing is saved."""
+    try:
+        return retail.suggest_for_order(conn, order_id)
+    except retail.RetailError as e:
+        raise ApiError(str(e), 502) from e
 
 
 def api_retail_unlink(conn, _q, _b, charge_id):
