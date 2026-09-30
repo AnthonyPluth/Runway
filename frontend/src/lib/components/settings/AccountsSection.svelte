@@ -60,7 +60,7 @@
     <Alert.Description><p>
       {undecided === 1 ? "An account" : `${undecided} accounts`} from Plaid {undecided === 1 ? "is" : "are"} waiting for you to say what
       {undecided === 1 ? "it is" : "they are"}, so {undecided === 1 ? "it isn't" : "they aren't"} listed here or counted in net worth yet.
-      <a class={linkCls} href="#setup/connections">Connections</a>
+      <a class={linkCls} href="#setup/connections">Bank connections</a>
     </p></Alert.Description>
   </Alert.Root>
 {/if}

@@ -83,7 +83,7 @@
             <Button type="submit" size="sm" disabled={busy || !website.trim()}>Use</Button>
           </form>
         {:else}
-          <p class="text-xs text-muted-foreground">Add a Logo.dev key in Settings → Connections to pick logos by website.</p>
+          <p class="text-xs text-muted-foreground">Add a Logo.dev key in Settings → Services to pick logos by website.</p>
         {/if}
         <div class="mt-3 flex items-center justify-between">
           <Button variant="link" size="sm" class="px-0" disabled={busy || opts.choice?.hidden} onclick={() => choose({ hidden: true }, "No logo")}>No logo</Button>

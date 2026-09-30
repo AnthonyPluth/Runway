@@ -25,7 +25,7 @@
 
 <!-- One row per card, for a grouped list. -->
 {#if !cards.length}
-  <p class="cell text-sm text-muted-foreground">Link your cards through Plaid in Settings → Connections to see their statements and due dates.</p>
+  <p class="cell text-sm text-muted-foreground">Link your cards through Plaid in Settings → Bank connections to see their statements and due dates.</p>
 {:else}
   {#each cards as c (c.id)}
     {@const soon = c.remaining > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}

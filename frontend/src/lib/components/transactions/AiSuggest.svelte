@@ -77,7 +77,7 @@
       <Card.Description>
         {answered === lines.length ? "The AI suggested a category for every merchant."
           : answered ? `The AI suggested a category for ${answered} of ${lines.length}; pick the rest yourself.`
-          : "The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5)."}
+          : "The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Services (for example anthropic/claude-haiku-4.5)."}
       </Card.Description>
       <Card.Action class="text-xs text-muted-foreground">Nothing changes until you apply</Card.Action>
     </Card.Header>

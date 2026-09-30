@@ -4,7 +4,7 @@
 
   // Why a linked card has no statement yet (Plaid's error code, if it gave one).
   const STATEMENT_NOTES: Record<string, string> = {
-    ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Connections.",
+    ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Bank connections.",
     PRODUCTS_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.", INSTITUTION_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.",
     INVALID_PRODUCT: "Card statements (Liabilities) aren't enabled for your Plaid account.", PRODUCTS_NOT_ENABLED: "Card statements (Liabilities) aren't enabled for your Plaid account.",
     PRODUCT_NOT_READY: "Plaid is still gathering the statement; it usually arrives with the next sync.",
