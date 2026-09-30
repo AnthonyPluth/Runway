@@ -112,8 +112,8 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
 ## Error reports (optional)
 
 Set `SENTRY_DSN` (Sentry → your project → Settings → Client Keys) and Runway sends its errors to Sentry, from the
-server and from the web app, tagged with the version. Without it, nothing is sent anywhere. Errors are all it sends
-until you turn on more of Sentry below.
+server and from the web app, tagged with the version, and everything in the table below. Without it, nothing is sent
+anywhere.
 
 - A report has the error, its stack trace and the page or API path. It never has request bodies, cookies, headers,
   query strings, the values of variables, or anything on screen; addresses with a password in them (SimpleFIN's) and
@@ -124,18 +124,19 @@ until you turn on more of Sentry below.
 - `SENTRY_ENVIRONMENT` (default `production`).
 - An error page's "reference" code is on the Sentry event as the `ref` tag, so a reference from the app finds its report.
 
-The rest of Sentry, each off until you set it:
+The rest of Sentry, all on with a DSN. Turn a rate down (`0` for none, the default is `1`: all) or a switch off
+(`=0`):
 
 | Variable | What it adds |
 | --- | --- |
-| `SENTRY_TRACES_SAMPLE_RATE` | Tracing, for that share of requests, syncs and page views (`0` to `1`): each API request by its route (`GET /api/transactions/{id}/category`, never the ids or what was searched), its database queries (without their values) and calls to banks and services; the daily sync; page loads and navigations with Web Vitals. A page's trace continues into the server's. |
+| `SENTRY_TRACES_SAMPLE_RATE` | Tracing, for that share of requests, syncs and page views: each API request by its route (`GET /api/transactions/{id}/category`, never the ids or what was searched), its database queries (without their values) and calls to banks and services; the daily sync; page loads and navigations with Web Vitals. A page's trace continues into the server's. |
 | `SENTRY_PROFILE_SESSION_SAMPLE_RATE` | Profiling while tracing, for that share of server runs and browser visits: which functions the time goes to. The browser's profiler is Chrome's and Edge's. |
 | `SENTRY_REPLAY_SAMPLE_RATE`, `SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE` | Session Replay, for that share of visits (or of visits with an error, their last minute). Every piece of text, every input and every image is masked: a replay shows the layout, the clicks and the pages, not your data. |
-| `SENTRY_LOGS=1` | Runway's log lines as Sentry Logs (one per request, with its route and timing but not your address), and the web app's console warnings and errors. |
-| `SENTRY_METRICS=1` | Metrics: how long syncs take and whether they fail, new transactions per sync, and the AI's tokens. |
-| `SENTRY_CRONS=1` | A Cron Monitor for the bank sync (`runway-bank-sync`), so Sentry tells you when a day goes by without one or one fails. Any bank sync counts, the Sync button's too. Sentry makes the monitor in Runway's time zone (`TZ`, or the system's); if `TZ` is a rule like `EST5EDT` rather than a name like `America/New_York`, or automatic syncing is off (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug. |
-| `SENTRY_FEEDBACK=1` | "Send feedback" at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a screenshot. |
-| `SENTRY_AI_CONTENT=1` | With tracing, the AI's prompts and replies on its spans in Sentry's Agent Tracing (the merchants, amounts and dates it's asked about, which the AI provider sees anyway). Without it, Agent Tracing still has each categorizing run, its model, timings and tokens. |
+| `SENTRY_LOGS` | Runway's log lines as Sentry Logs (one per request, with its route and timing but not your address), and the web app's console warnings and errors. |
+| `SENTRY_METRICS` | Metrics: how long syncs take and whether they fail, new transactions per sync, and the AI's tokens. |
+| `SENTRY_CRONS` | A Cron Monitor for the bank sync (`runway-bank-sync`), so Sentry tells you when a day goes by without one or one fails. Any bank sync counts, the Sync button's too. Sentry makes the monitor in Runway's time zone (`TZ`, or the system's); if `TZ` is a rule like `EST5EDT` rather than a name like `America/New_York`, or automatic syncing is off (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug. |
+| `SENTRY_FEEDBACK` | "Send feedback" at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a screenshot. |
+| `SENTRY_AI_CONTENT` | With tracing, the AI's prompts and replies on its spans in Sentry's Agent Tracing (the merchants, amounts and dates it's asked about, which the AI provider sees anyway). With `SENTRY_AI_CONTENT=0`, Agent Tracing still has each categorizing run, its model, timings and tokens. |
 
 Also in Sentry, without a variable:
 
