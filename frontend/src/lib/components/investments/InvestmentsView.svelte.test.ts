@@ -14,7 +14,7 @@ describe("InvestmentsView", () => {
     vi.mocked(api).mockResolvedValue({ inv_accounts: 0, items: [] } as never);
     render(InvestmentsView);
     const block = await screen.findByTestId("getting-started");
-    expect(within(block).getByText(/holdings, allocation, dividends and a retirement planner/)).toBeInTheDocument();
+    expect(within(block).getByText(/holdings, allocation, dividends and activity/)).toBeInTheDocument();
     expect(within(block).getByRole("link", { name: "Connect an investment account" })).toHaveAttribute("href", "#setup/connections");
     expect(screen.queryByText("No investment accounts yet")).toBeNull();
   });

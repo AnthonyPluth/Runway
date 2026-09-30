@@ -6,7 +6,7 @@
   import { toast } from "svelte-sonner";
   import { fieldCls, helpCls, inputCls } from "./ui";
 
-  // Settings → Backup: download everything, or replace everything with a backup file.
+  // Settings → Advanced: download everything, or replace everything with a backup file.
   let file = $state<File | null>(null);
   let restoring = $state(false);
 

@@ -1,0 +1,111 @@
+name: Claude review
+
+# An AI code review on each pull request: Claude reads the diff with the repository's own rules (AGENTS.md, CLAUDE.md,
+# SECURITY.md) and leaves inline comments on the lines where it finds problems. No summary comment: the pull request's
+# own description is the summary. It only reads and comments: it can't push, approve or merge, and a person decides.
+#
+# It runs when the repository has one of these secrets (Settings → Secrets and variables → Actions):
+#   ANTHROPIC_API_KEY        an Anthropic API key, billed per review
+#   CLAUDE_CODE_OAUTH_TOKEN  a Claude Pro or Max subscription instead (make one with `claude setup-token`)
+# Without either it skips. Pull requests from forks never see the secrets, so they skip too; so do drafts and
+# Dependabot's updates (the Docker workflow already tests those).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A new push to the pull request replaces a review still running on the old one.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Dependabot's pull requests skip by their author, not by who pushed last (as dependabot-merge.yml checks).
+    if: github.event.pull_request.draft == false && github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    permissions:
+      contents: read
+      pull-requests: write     # the review comments
+      id-token: write          # the action asks for it even when it posts with GITHUB_TOKEN
+    steps:
+      - name: Check for a Claude credential
+        id: auth
+        env:
+          HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' || secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+        run: |
+          echo "ready=$HAS_KEY" >> "$GITHUB_OUTPUT"
+          if [ "$HAS_KEY" != true ]; then echo "::notice::No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN secret, so no review."; fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        if: steps.auth.outputs.ready == 'true'
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      # What earlier reviews of this pull request already said, gathered here so Claude needs no GitHub API access
+      # of its own to read it (every push starts a fresh review).
+      - name: Collect earlier review comments
+        if: steps.auth.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          {
+            echo "# Earlier inline review comments on this pull request"
+            gh api --paginate "repos/$REPO/pulls/$PR/comments" \
+              --jq '.[] | "\n## \(.path):\(.line // .original_line) (\(.user.login), \(.created_at))\n\(.body)"'
+          } > .claude-earlier-comments.md
+      - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
+        if: steps.auth.outputs.ready == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Opus for the review: the diffs here touch money math, bank sync and encryption (CLAUDE.md's routing).
+          # --max-turns caps the tool calls one review makes, sized to fit the job's 17 minutes (a timed-out review
+          # shows as a failed check, and its inline comments so far stay up).
+          # Its GitHub access is reading the pull request and leaving inline comments, nothing else.
+          claude_args: |
+            --model claude-opus-5-5
+            --max-turns 60
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*)"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You're reviewing a pull request to Runway, a self-hosted personal finance app: a Python backend in runway/
+            (SQLite or Postgres through SQLAlchemy Core, Alembic migrations) and a Svelte 5 + TypeScript web app in
+            frontend/. Read AGENTS.md, CLAUDE.md and SECURITY.md first; they're the repository's rules.
+
+            This may not be the first review of this pull request: every push starts a new one. Before reviewing, read
+            what's already there: `gh pr view --comments` (replies) and the file `.claude-earlier-comments.md` in the
+            working directory (every earlier inline comment). Don't comment again on a problem that already has an
+            inline comment, whether or not it's fixed; only raise what's new, or a fix that made things worse.
+
+            You have a limited number of tool calls. On a large pull request, look at the riskiest changes first
+            (money, bank sync, auth, encryption, migrations) rather than reading everything.
+
+            Read the pull request (`gh pr view`, `gh pr diff`) and the code around each change, then review it for:
+            - Correctness: bugs, broken edge cases, regressions, anything that contradicts the pull request's own description.
+            - Money and dates: amounts, signs (what's owed vs what's held), rounding, time zones, business days, the forecast.
+            - Security: authentication and OIDC, bank credentials and tokens (Plaid, SimpleFIN), encryption at rest,
+              anything that could log or render a secret, injection, missing CSRF protection on state-changing routes.
+            - Data: schema changes without an Alembic migration, queries that won't work on both SQLite and Postgres.
+            - Tests: behavior that changed without a test, and tests that were skipped, weakened or deleted.
+            - The rules in AGENTS.md (style, real typography in user-facing strings, no hard-wrapped PR text).
+
+            Leave an inline comment on each real problem, on the line it's about, saying what's wrong, why it matters
+            and what to do instead. Skip taste and nits a linter would catch: a comment should be worth someone's time.
+            If you aren't sure something is a bug, say how sure you are rather than stating it as fact.
+
+            Start every comment with its priority, in bold, then the point: `**P1:** …`, `**P2:** …` or `**P3:** …`.
+            - P1: must be fixed before merging. Wrong money or dates, lost or corrupted data, a security hole (a leaked
+              secret, broken auth, a missing CSRF check), a crash or a broken page, a migration that fails.
+            - P2: should be fixed, in this pull request or right after. A real bug in an edge case, a regression, a
+              behavior change without a test, a query that only works on one of SQLite and Postgres.
+            - P3: worth knowing, fine to leave. Hardening, a clearer approach, a missing test for existing behavior.
+            When you're unsure between two, pick the lower one and say why it might be higher.
+
+            Leave inline comments only: no summary comment (the pull request's description already says what it does),
+            and don't approve or request changes. If you find nothing worth raising, leave no comment at all.

@@ -10,9 +10,11 @@ import urllib.error
 import urllib.request
 
 from runway import db, mcp_access, mcp_server, server
+from runway.server import mcp_http
 
 
-class KeyAndPagesTests(unittest.TestCase):
+class RunwayServer(unittest.TestCase):
+    """A real Runway on a temporary database, and the MCP key."""
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
@@ -34,6 +36,13 @@ class KeyAndPagesTests(unittest.TestCase):
             mcp_access.remove_token(conn)
             mcp_access.set_allow_writes(conn, False)
 
+    def make_key(self):
+        with db.session() as conn:
+            return mcp_access.new_token(conn)
+
+
+
+class KeyAndPagesTests(RunwayServer):
     def get(self, path, key=None, method="GET"):
         headers = {"X-Runway": "1", **({"Authorization": f"Bearer {key}"} if key else {})}
         r = urllib.request.Request(self.base + path, method=method, headers=headers, data=b"{}" if method == "POST" else None)
@@ -42,10 +51,6 @@ class KeyAndPagesTests(unittest.TestCase):
                 return resp.status, json.loads(resp.read() or b"null")
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"null")
-
-    def make_key(self):
-        with db.session() as conn:
-            return mcp_access.new_token(conn)
 
     def test_key_lifecycle(self):
         with db.session() as conn:
@@ -230,6 +235,116 @@ CHURNING = {
         {"id": 3, "owner": "Alex", "product": "Old card", "status": "closed", "benefits": [{"name": "Gone", "kind": "access", "active": 1}]},
     ],
 }
+
+
+class StreamableHttpTests(RunwayServer):
+    """POST /mcp: the same server, served by Runway itself."""
+
+    def rpc(self, msg, key="", headers=None, method="POST", raw=None):
+        h = {"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {}), **(headers or {})}
+        r = urllib.request.Request(self.base + "/mcp", method=method, headers=h,
+                                   data=raw if raw is not None else (json.dumps(msg).encode() if method == "POST" else None))
+        try:
+            with urllib.request.urlopen(r, timeout=20) as resp:
+                return resp.status, resp.headers, resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    def call(self, key, name, args=None, mid=1):
+        status, _, body = self.rpc({"jsonrpc": "2.0", "id": mid, "method": "tools/call", "params": {"name": name, "arguments": args or {}}}, key)
+        self.assertEqual(status, 200)
+        return json.loads(body)["result"]
+
+    def test_auth_failures_are_401_with_a_challenge(self):
+        ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        self.assertEqual(self.rpc(ping)[0], 401)                                   # no key set up, none sent
+        key = self.make_key()
+        for k in ("", "rwm_wrong", key + "x"):
+            with self.subTest(key=k):
+                status, headers, _ = self.rpc(ping, k)
+                self.assertEqual(status, 401)
+                self.assertEqual(headers["WWW-Authenticate"], "Bearer")
+        status, _, _ = self.rpc(ping, headers={"Authorization": key})              # not a bearer header
+        self.assertEqual(status, 401)
+        self.assertEqual(self.rpc(ping, key)[0], 200)
+
+    def test_initialize_and_tools_list(self):
+        key = self.make_key()
+        status, headers, body = self.rpc({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}, key)
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["Content-Type"].startswith("application/json"))
+        reply = json.loads(body)
+        self.assertEqual((reply["id"], reply["result"]["protocolVersion"], reply["result"]["serverInfo"]["name"]), (1, "2025-06-18", "runway"))
+        names = [t["name"] for t in json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, key)[2])["result"]["tools"]]
+        self.assertEqual(names, [t["name"] for t in mcp_server.TOOLS])             # reads only: the switch is off
+
+    def test_a_read_tool_runs_in_process(self):
+        key = self.make_key()
+        result = self.call(key, "list_accounts")
+        self.assertNotIn("isError", result)
+        self.assertIsInstance(json.loads(result["content"][0]["text"]), (list, dict))
+        self.assertIn("isError", self.call(key, "no_such_tool"))
+
+    def test_a_write_tool_is_refused_while_the_switch_is_off_and_works_when_on(self):
+        key = self.make_key()
+        fields = {"owner": "Alex", "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}
+        result = self.call(key, "add_card", {"fields": fields})
+        self.assertTrue(result["isError"])
+        self.assertIn("switched off", result["content"][0]["text"])
+        with db.session() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 0)
+            mcp_access.set_allow_writes(conn, True)
+        try:
+            listed = json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, key)[2])["result"]["tools"]
+            self.assertIn("add_card", [t["name"] for t in listed])
+            self.assertNotIn("isError", self.call(key, "add_card", {"fields": fields}))
+            with db.session() as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 1)
+                mcp_access.set_allow_writes(conn, False)                           # and off again applies to the next change
+            self.assertTrue(self.call(key, "add_card", {"fields": fields})["isError"])
+        finally:
+            with db.session() as conn:
+                conn.execute("DELETE FROM churn_cards")
+
+    def test_local_fetch_reaches_only_the_allowlists(self):
+        for path in ("state", "settings", "plaid/status", "backup", "mcp-key", "accounts/x", "../accounts", ""):
+            with self.subTest(path=path), self.assertRaises(mcp_server.ToolError):
+                mcp_http.local_fetch(path, {})
+        with self.assertRaises(mcp_server.ToolError):                              # a page that's only readable can't be posted to
+            mcp_http.local_fetch("accounts", {}, {})
+        with self.assertRaises(mcp_server.ToolError):
+            mcp_http.local_fetch("churning/cards", {}, {"owner": "Alex"})   # writes are off
+        self.assertEqual(mcp_http.local_fetch("access", {}), {"writes": False})
+        key = self.make_key()                                                       # and through the protocol
+        result = self.call(key, "get_order", {"order_id": "../../settings"})
+        self.assertTrue(result["isError"])
+
+    def test_notifications_are_202_without_a_body(self):
+        key = self.make_key()
+        status, _, body = self.rpc({"jsonrpc": "2.0", "method": "notifications/initialized"}, key)
+        self.assertEqual((status, body), (202, b""))
+
+    def test_get_is_405(self):
+        key = self.make_key()
+        for method in ("GET", "DELETE"):
+            status, headers, _ = self.rpc(None, key, method=method)
+            self.assertEqual((status, headers["Allow"]), (405, "POST"))
+
+    def test_a_foreign_origin_is_refused_even_with_the_key(self):
+        key = self.make_key()
+        ping = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+        for origin in ("https://evil.example", "null", "http://127.0.0.1:1"):
+            with self.subTest(origin=origin):
+                self.assertEqual(self.rpc(ping, key, {"Origin": origin})[0], 403)
+        self.assertEqual(self.rpc(ping, key, {"Origin": self.base})[0], 200)       # its own address is fine
+
+    def test_bad_bodies(self):
+        key = self.make_key()
+        status, _, body = self.rpc(None, key, raw=b"{nope")
+        self.assertEqual((status, json.loads(body)["error"]["code"]), (400, -32700))
+        self.assertEqual(self.rpc([{"jsonrpc": "2.0", "id": 1, "method": "ping"}], key)[0], 400)   # no batches
+        status, _, body = self.rpc({"jsonrpc": "2.0", "id": 3, "method": "nope"}, key)
+        self.assertEqual((status, json.loads(body)["error"]["code"]), (200, -32601))
 
 
 class Fake:

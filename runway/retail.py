@@ -816,7 +816,7 @@ def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
     caller = caller or categorize.call_llm
     api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
     if not api_key:
-        raise RetailError("Add an OpenRouter key in Settings → Connections first")
+        raise RetailError("Add an OpenRouter key in Settings → Services first")
     i, o = RetailItem, RetailOrder
     items = db.rows(conn.execute(
         select(i.id, i.title, i.amount, i.department, o.retailer).join(o, o.id == i.order_id)

@@ -10,7 +10,7 @@ When Plaid has no logo, Runway asks Logo.dev for one by the merchant's website: 
 the merchant's name, for spending only (not transfers, income or "Interest"), and keeps no logo when Logo.dev knows no
 such brand. That needs a Logo.dev publishable key (Settings). Runway, never the browser, downloads each (during a sync,
 and for the past year's merchants right after you add the key), keeps it as merchant "site:<website>" or
-"brand:<name>", and checks it again every month so a brand's new logo shows up by itself. Logo.dev only ever learns
+"brand:<name>" (or "ticker:<symbol>" for a stock or fund you hold: its logo shows in Investments), and checks it again every month so a brand's new logo shows up by itself. Logo.dev only ever learns
 merchants' websites and names, never what you bought or paid.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from sqlalchemy import ColumnElement, delete, func, insert, or_, select, update
 
 from . import brands, db
 from . import settings_keys as sk
-from .models import Category, Merchant, MerchantLogo, Transaction
+from .models import Category, Holding, Merchant, MerchantLogo, Security, Transaction
 
 
 MAX_LOGO = 256 * 1024
@@ -41,8 +41,10 @@ THEME = "dark"         # Logo.dev's version for dark backgrounds: the app is dar
 REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in case it changed
 SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
 BRAND = "brand:"       # ... and by the merchant's name, when no website is known
+TICKER = "ticker:"     # ... and by a held stock's or fund's ticker symbol
 LOGO_DEV = "https://img.logo.dev/"
 SEARCH = "https://api.logo.dev/search"
+_TICKER_RX = re.compile(r"^[A-Z0-9](?:[A-Z0-9.-]{0,10})$")
 _SITE_RX = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
 
 
@@ -217,7 +219,7 @@ def best_match(name: str, candidates: list[dict]) -> dict | None:
 
 def _logo_dev():
     """The merchants whose logo comes from Logo.dev (by website or name), not Plaid: a condition on merchants.id."""
-    return or_(Merchant.id.like(SITE + "%"), Merchant.id.like(BRAND + "%"))
+    return or_(Merchant.id.like(SITE + "%"), Merchant.id.like(BRAND + "%"), Merchant.id.like(TICKER + "%"))
 
 
 def _todo(conn, limit: int) -> list:
@@ -226,7 +228,7 @@ def _todo(conn, limit: int) -> list:
     retry_before = (datetime.now() - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
     refresh_before = (datetime.now() - timedelta(days=REFRESH_DAYS)).isoformat(timespec="seconds")
     m = Merchant
-    want: ColumnElement[bool] = (m.id.not_like(SITE + "%") & m.id.not_like(BRAND + "%") & m.logo.is_(None)
+    want: ColumnElement[bool] = (m.id.not_like(SITE + "%") & m.id.not_like(BRAND + "%") & m.id.not_like(TICKER + "%") & m.logo.is_(None)
                                  & or_(m.logo_checked.is_(None), m.logo_checked < retry_before))
     if configured(conn):
         want = or_(want, _logo_dev() & or_(m.logo_checked.is_(None), m.logo_checked < refresh_before))
@@ -253,7 +255,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
     got = 0
     refused: set[str] = set()   # kinds of Logo.dev lookup that failed this round: the rest of that kind wait for next time
     for m in todo:
-        kind = "site" if m["id"].startswith(SITE) else "name" if m["id"].startswith(BRAND) else None
+        kind = "site" if m["id"].startswith((SITE, TICKER)) else "name" if m["id"].startswith(BRAND) else None
         if kind in refused:
             continue
         _why = ""   # (a merchant skipped below isn't a failed download)
@@ -262,6 +264,9 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
         if m["id"].startswith(SITE):
             s = m["id"][len(SITE):]
             found = _download(f"{LOGO_DEV}{s}?{params}", opener) if site(s) == s else None
+        elif m["id"].startswith(TICKER):
+            t = m["id"][len(TICKER):]
+            found = _download(f"{LOGO_DEV}ticker/{urllib.parse.quote(t, safe='')}?{params}", opener) if _TICKER_RX.match(t) else None
         elif m["id"].startswith(BRAND):
             found = None
             if not m["name"]:
@@ -364,6 +369,18 @@ def brand_logos(conn, names) -> set[str]:
     return {k for k in names if have.get(BRAND + k)}
 
 
+def note_tickers(conn) -> None:
+    """Note the stocks and funds you hold (never cash), so a sync fetches their logos from Logo.dev by ticker. Investments
+    asks for a holding's logo at ticker:<SYMBOL> and shows a letter until it's there."""
+    have = {r["id"] for r in conn.execute(select(Merchant.id).where(Merchant.id.like(TICKER + "%")))}
+    for r in conn.execute(select(Security.ticker).distinct().join(Holding, Holding.security_id == Security.id)
+                          .where(Security.ticker.is_not(None), or_(Security.is_cash.is_(None), Security.is_cash == 0))):
+        t = (r["ticker"] or "").strip().upper()
+        if _TICKER_RX.match(t) and TICKER + t not in have:
+            conn.execute(insert(Merchant).values(id=TICKER + t, name=t, logo_url=f"{LOGO_DEV}ticker/{urllib.parse.quote(t, safe='')}"))
+            have.add(TICKER + t)
+
+
 def logo_dev_logos(conn, txs: list[dict]) -> dict[str, str]:
     """{transaction id: merchant id}: Logo.dev's logo by the merchant's website, else by its name. Ones not fetched yet
     are noted (and get their logo once a sync has fetched it); until then a Plaid logo, if there is one, stands in."""
@@ -391,6 +408,7 @@ def note_sites(conn, days: int = 400) -> None:
     sites = sites_for(conn, txs)
     site_logos(conn, sites.values())
     brand_logos(conn, names_for(conn, [t for t in txs if t["id"] not in sites]).values())
+    note_tickers(conn)
 
 
 def backfill(conn, rounds: int = 40, opener=None) -> int:
@@ -482,7 +500,7 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
         if not s:
             raise ValueError("That doesn't look like a website (e.g. target.com)")
         if not configured(conn):
-            raise ValueError("Add a Logo.dev publishable key in Settings → Connections first")
+            raise ValueError("Add a Logo.dev publishable key in Settings → Services first")
         mid = SITE + s
         row = conn.execute(select(Merchant.logo).where(Merchant.id == mid)).fetchone()
         if not row or not row["logo"]:

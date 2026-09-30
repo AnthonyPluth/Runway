@@ -1,5 +1,5 @@
 # Everything CI checks, runnable before you push: `make check`. The other targets run one part of it.
-# Python commands go through Poetry, as in the README's Development section.
+# Python commands go through Poetry, as in docs/development.md.
 
 PYTHON ?= poetry run python
 NPM ?= npm
