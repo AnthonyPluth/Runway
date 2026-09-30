@@ -25,6 +25,6 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_NO_SYNC` | | `1` turns off the automatic background sync. |
 | `TZ` | system | Decides what "today" is for forecasts and budgets, and when the daily sync runs. |
 
-Reporting to Sentry is off unless you set `SENTRY_DSN`: then errors, and tracing, profiling, replays, logs, metrics, cron monitoring, feedback and Agent Tracing as you turn each on. See [DOCKER.md](../DOCKER.md#error-reports-optional) for the variables.
+Reporting to Sentry is off unless you set `SENTRY_DSN`: then errors, tracing, profiling, replays, logs, metrics, cron monitoring, feedback and Agent Tracing (with the AI's prompts), each of which you can turn off. See [DOCKER.md](../DOCKER.md#error-reports-optional) for the variables.
 
 With no `OIDC_ISSUER`, Runway refuses to listen beyond `localhost` unless `RUNWAY_ALLOW_NO_AUTH` is set. See [Deployment](deployment.md) and [SECURITY.md](../SECURITY.md).

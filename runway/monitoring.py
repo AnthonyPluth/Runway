@@ -2,26 +2,27 @@
 
 Runway holds bank access and your transactions, so what's sent carries only what it takes to find a bug or a slow
 spot: errors and their stack traces (without the values of variables), request methods and route names, timings, and
-the release. Never request bodies, cookies, headers or query strings, nor the values bound to database queries or
-what's sent to the AI; credentials in addresses (a SimpleFIN access URL has them) and Plaid tokens are blanked wherever
+the release. Never request bodies, cookies, headers or query strings, nor the values bound to database queries (what's
+sent to the AI only on its own spans, with SENTRY_AI_CONTENT below); credentials in addresses (a SimpleFIN access URL has them) and Plaid tokens are blanked wherever
 they turn up.
 
-Errors are sent once SENTRY_DSN is set. Everything else is off until you turn it on:
+Once SENTRY_DSN is set, everything below is on; turn any of it off with a rate of 0, or =0:
 
   SENTRY_DSN                          the server's reports (from your Sentry project's Client Keys)
   SENTRY_BROWSER_DSN                  the web app's reports; defaults to SENTRY_DSN (RUNWAY_SENTRY_BROWSER=0 turns them off)
   SENTRY_ENVIRONMENT                  e.g. production (the default) or staging
-  SENTRY_TRACES_SAMPLE_RATE           share of requests, syncs and page views to trace for performance, 0 (the default) to 1
-  SENTRY_PROFILE_SESSION_SAMPLE_RATE  share of server runs and browser visits to profile while tracing, 0 to 1
-  SENTRY_REPLAY_SAMPLE_RATE           share of browser visits to record as a replay (text, inputs and images masked)
-  SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE  share of visits with an error whose last minute is sent as a replay
-  SENTRY_LOGS=1                       Runway's log lines (and the web app's console warnings and errors) as Sentry Logs
-  SENTRY_METRICS=1                    a few counters and timings: sync durations, new transactions, AI tokens
-  SENTRY_AI_CONTENT=1                 the prompts sent to the AI and its replies, on its spans (Agent Tracing's
+  SENTRY_TRACES_SAMPLE_RATE           share of requests, syncs and page views to trace for performance, 0 to 1 (the default)
+  SENTRY_PROFILE_SESSION_SAMPLE_RATE  share of server runs and browser visits to profile while tracing, 0 to 1 (the default)
+  SENTRY_REPLAY_SAMPLE_RATE           share of browser visits to record as a replay (text, inputs and images masked), 0 to 1
+                                      (the default)
+  SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE  share of visits with an error whose last minute is sent as a replay, 0 to 1 (the default)
+  SENTRY_LOGS                         Runway's log lines (and the web app's console warnings and errors) as Sentry Logs
+  SENTRY_METRICS                      a few counters and timings: sync durations, new transactions, AI tokens
+  SENTRY_AI_CONTENT                   the prompts sent to the AI and its replies, on its spans (Agent Tracing's
                                       Conversations): the merchants, amounts and dates of the transactions it's asked
                                       about, which the AI provider sees anyway. Off, only models, timings and tokens.
-  SENTRY_CRONS=1                      a Cron Monitor for the daily bank sync, so a missed or failed one alerts you
-  SENTRY_FEEDBACK=1                   a "Send feedback" link in Settings
+  SENTRY_CRONS                        a Cron Monitor for the daily bank sync, so a missed or failed one alerts you
+  SENTRY_FEEDBACK                     a "Send feedback" link in Settings
 """
 from __future__ import annotations
 
@@ -169,14 +170,24 @@ def _before_send_log(entry, _hint):
 
 
 def _rate(name: str) -> float:
+    """A share from 0 to 1: all (1) when it's not set, none when it's not a number."""
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return 1.0
     try:
-        return min(1.0, max(0.0, float(os.environ.get(name) or 0)))
+        return min(1.0, max(0.0, float(raw)))
     except ValueError:
         return 0.0
 
 
 def _on(name: str) -> bool:
-    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+    """On unless it's set to something else than 1, true, yes or on (see the top of this file)."""
+    raw = (os.environ.get(name) or "").strip().lower()
+    return not raw or raw in ("1", "true", "yes", "on")
+
+
+def _profiles(traces: float) -> float:
+    return _rate("SENTRY_PROFILE_SESSION_SAMPLE_RATE") if traces else 0.0
 
 
 def init() -> bool:
@@ -190,7 +201,7 @@ def init() -> bool:
     import sentry_sdk   # loaded only when reporting is on, so it costs nothing otherwise
     from sentry_sdk.integrations.logging import LoggingIntegration
     traces = _rate("SENTRY_TRACES_SAMPLE_RATE")
-    _opts = {"traces": traces, "profiles": _rate("SENTRY_PROFILE_SESSION_SAMPLE_RATE") if traces else 0.0,
+    _opts = {"traces": traces, "profiles": _profiles(traces),
              "logs": _on("SENTRY_LOGS"), "metrics": _on("SENTRY_METRICS"), "crons": _on("SENTRY_CRONS"),
              "ai_content": _on("SENTRY_AI_CONTENT")}
     sentry_sdk.init(
@@ -501,7 +512,7 @@ def browser_config() -> dict | None:
     traces = _rate("SENTRY_TRACES_SAMPLE_RATE")
     return {"dsn": dsn, "environment": os.environ.get("SENTRY_ENVIRONMENT") or "production",
             "release": os.environ.get("RUNWAY_VERSION") or "dev",
-            "traces": traces, "profiles": _rate("SENTRY_PROFILE_SESSION_SAMPLE_RATE") if traces else 0.0,
+            "traces": traces, "profiles": _profiles(traces),
             "replays": _rate("SENTRY_REPLAY_SAMPLE_RATE"), "replays_on_error": _rate("SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE"),
             "logs": _on("SENTRY_LOGS"), "feedback": _on("SENTRY_FEEDBACK")}
 

@@ -34,6 +34,9 @@ class Capture(sentry_sdk.transport.Transport):
 
 
 ALL_ON = {"SENTRY_DSN": DSN, "SENTRY_TRACES_SAMPLE_RATE": "1", "SENTRY_LOGS": "1", "SENTRY_METRICS": "1", "SENTRY_CRONS": "1"}
+# Errors only: everything that's on by default with a DSN, turned off.
+ERRORS_ONLY = {"SENTRY_DSN": DSN, **{f"SENTRY_{k}_SAMPLE_RATE": "0" for k in ("TRACES", "PROFILE_SESSION", "REPLAY", "REPLAY_ON_ERROR")},
+               **{f"SENTRY_{k}": "0" for k in ("LOGS", "METRICS", "CRONS", "FEEDBACK", "AI_CONTENT")}}
 
 
 def start(env=None) -> Capture:
@@ -163,7 +166,7 @@ class MonitoringTests(unittest.TestCase):
 
 
     def test_the_web_app_is_told_which_features_are_on(self):
-        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN}):
+        with mock.patch.dict(os.environ, ERRORS_ONLY):
             cfg = monitoring.browser_config()
             self.assertEqual((cfg["traces"], cfg["profiles"], cfg["replays"], cfg["logs"], cfg["feedback"]), (0, 0, 0, False, False))
             self.assertFalse(monitoring.browser_profiling())
@@ -174,11 +177,32 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual((cfg["traces"], cfg["profiles"], cfg["replays"], cfg["replays_on_error"], cfg["logs"], cfg["feedback"]),
                              (0.5, 1.0, 1.0, 0.0, True, True))
             self.assertTrue(monitoring.browser_profiling())
-        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"}):
+        with mock.patch.dict(os.environ, {**ERRORS_ONLY, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"}):
             self.assertEqual(monitoring.browser_config()["profiles"], 0)   # profiling needs tracing
 
+    def test_everything_is_on_with_just_a_dsn(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
+        with mock.patch.dict(os.environ, {**env, "SENTRY_DSN": DSN, "SENTRY_TRACES_SAMPLE_RATE": ""}, clear=True):
+            cfg = monitoring.browser_config()
+            self.assertEqual((cfg["traces"], cfg["profiles"], cfg["replays"], cfg["replays_on_error"], cfg["logs"], cfg["feedback"]),
+                             (1.0, 1.0, 1.0, 1.0, True, True))   # an empty rate (compose's default) is an unset one
+            self.assertTrue(monitoring.browser_profiling())
+        transport = start({**env, "SENTRY_DSN": DSN})
+        self.assertEqual(monitoring._opts, {"traces": 1.0, "profiles": 1.0, "logs": True, "metrics": True, "crons": True,
+                                            "ai_content": True})
+        opts = sentry_sdk.get_client().options
+        self.assertEqual((opts["traces_sample_rate"], opts["profile_session_sample_rate"]), (1.0, 1.0))
+        with mock.patch("builtins.print"):
+            monitoring.log("hello")
+        sentry_sdk.flush()
+        self.assertTrue(transport.of("log"))
+        # Each can still be turned off.
+        with mock.patch.dict(os.environ, {**ERRORS_ONLY, "SENTRY_LOGS": "false"}):
+            cfg = monitoring.browser_config()
+            self.assertEqual((cfg["traces"], cfg["replays"], cfg["logs"], cfg["feedback"]), (0, 0, False, False))
+
     def test_off_features_send_nothing(self):
-        transport = start({"SENTRY_DSN": DSN})
+        transport = start(ERRORS_ONLY)
         with monitoring.request("GET", "/api/state", {}) as tx, mock.patch("builtins.print"):
             monitoring.log("hello")
             monitoring.metric("count", "runway.test", 1)
@@ -255,7 +279,7 @@ class MonitoringTests(unittest.TestCase):
         start({**ALL_ON, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "0.25"})
         opts = sentry_sdk.get_client().options
         self.assertEqual((opts["profile_session_sample_rate"], opts["profile_lifecycle"]), (0.25, "trace"))
-        start({"SENTRY_DSN": DSN, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"})   # no tracing: nothing to profile
+        start({**ERRORS_ONLY, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"})   # no tracing: nothing to profile
         self.assertEqual(sentry_sdk.get_client().options["profile_session_sample_rate"], 0)
         self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
 
@@ -346,7 +370,7 @@ class MonitoringTests(unittest.TestCase):
         return transport, spans
 
     def test_the_categorizer_is_an_agent_without_its_prompt(self):
-        transport, spans = self._categorize_once()
+        transport, spans = self._categorize_once({**ALL_ON, "SENTRY_AI_CONTENT": "0"})
         agent, chat = spans["invoke_agent Transaction categorizer"], spans["chat anthropic/claude-haiku-4.5"]
         self.assertEqual((agent["sentry.op"], agent["gen_ai.agent.name"], agent["gen_ai.pipeline.name"]),
                          ("gen_ai.invoke_agent", "Transaction categorizer", "sync"))
@@ -367,8 +391,8 @@ class MonitoringTests(unittest.TestCase):
             categorize.call_llm("k", "m", "p")
         urlopen.assert_not_called()
 
-    def test_the_prompt_and_reply_only_when_asked(self):
-        _, spans = self._categorize_once({**ALL_ON, "SENTRY_AI_CONTENT": "1"})
+    def test_the_prompt_and_reply_unless_turned_off(self):
+        _, spans = self._categorize_once()
         chat = spans["chat anthropic/claude-haiku-4.5"]
         sent = json.loads(chat["gen_ai.input.messages"])
         self.assertEqual(sent[0]["role"], "user")
