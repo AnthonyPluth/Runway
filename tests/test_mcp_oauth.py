@@ -101,7 +101,7 @@ class IssuerTests(unittest.TestCase):
 
     def test_metadata(self):
         self.assertEqual(mcp_oauth.protected_resource_metadata(ISS), {
-            "resource": RES, "authorization_servers": [ISS], "scopes_supported": ["read", "churning:write"],
+            "resource": RES, "authorization_servers": [ISS], "scopes_supported": ["read", "churning:write", "categorize:write"],
             "bearer_methods_supported": ["header"]})
         m = mcp_oauth.authorization_server_metadata(ISS)
         self.assertEqual((m["issuer"], m["authorization_endpoint"], m["token_endpoint"], m["registration_endpoint"], m["revocation_endpoint"]),

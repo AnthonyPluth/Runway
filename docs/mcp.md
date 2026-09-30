@@ -26,6 +26,15 @@ An assistant always gets **read**. It can also ask for **churning:write**: marki
 
 A connection approved read-only that tries a change is told to reconnect. The changing tools are marked as such, so assistants like Claude ask before running them.
 
+## Letting it categorize (optional)
+
+An assistant can also ask for **categorize:write**: setting a transaction's category (`set_transaction_category`), accepting the category Runway suggested for one that needs review (`accept_transaction_category`), and setting an order item's category (`set_order_item_category`). Only existing categories can be used (the assistant finds them with `list_categories`); it can't split transactions, rename payees, or add, rename or remove categories (the list is `CATEGORIZABLE` in `runway/mcp_access.py`). With `remember`, a transaction's category also becomes a rule for its merchant, and an item's is used for the same item in other orders; that's off unless the assistant asks for it. Like churning, a change needs both:
+
+- **Categorize** ticked on the approval page (offered only when the assistant asks for it), and
+- **Let assistants categorize** switched on in the card. It's separate from the churning switch, off until you turn it on, and checked on every change.
+
+A connection approved without it that tries to categorize is told to reconnect. A transaction that's split across categories is refused (one category would remove its parts); change those in Runway. Setting a category marks the transaction reviewed and yours; `set_transaction_category` replies with what it had before (`was`), but there's no undo over MCP: setting the old category again leaves it reviewed, and a remembered rule stays until you change it under Settings → Rules.
+
 ## Endpoints
 
 | Path | What |

@@ -411,7 +411,7 @@ oauth_grants = Table(
     Column('client_id', Text, nullable=False),
     Column('sub', Text, doc='who approved it'),
     Column('email', Text),
-    Column('scope', Text, nullable=False, doc='space-separated: read, churning:write'),
+    Column('scope', Text, nullable=False, doc='space-separated: read, churning:write, categorize:write'),
     Column('resource', Text, nullable=False, doc='the /mcp address its tokens are for'),
     Column('created', Float, nullable=False),
     Column('last_used', Float),

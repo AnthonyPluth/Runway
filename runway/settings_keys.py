@@ -114,6 +114,7 @@ RETAIL_AI = "retail_ai"   # "1"/"0"; on unless switched off
 
 # MCP (runway/mcp_access.py). ("mcp_token_hash" and "mcp_token_created", the old key's, were removed by migration 0024.)
 MCP_ALLOW_WRITES = "mcp_allow_writes"   # "1": assistants allowed churning:write may make the changes in mcp_access.WRITABLE (off unless switched on)
+MCP_ALLOW_CATEGORIZE = "mcp_allow_categorize"   # "1": assistants allowed categorize:write may make the changes in mcp_access.CATEGORIZABLE (off unless switched on)
 
 
 def retail_last(retailer: str) -> str:

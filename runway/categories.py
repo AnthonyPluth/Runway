@@ -1,6 +1,8 @@
 """Category management: add, rename, move and remove, with one level of subcategories (Parent > Sub)."""
 from __future__ import annotations
 
+import unicodedata
+
 from sqlalchemy import delete, func, insert, select, update
 
 from . import db, rules
@@ -57,12 +59,24 @@ def default_look(name: str, parent_color: str | None = None) -> tuple[str, str]:
     return look[0], parent_color or look[1]
 
 
+def is_emoji(text: str) -> bool:
+    """Whether `text` is an emoji, as the phone's emoji keyboard or the computer's emoji panel types one: a symbol
+    (with any skin tone, variation or joined parts), a flag, a keycap (1️⃣, #️⃣), or a character shown as an emoji by
+    U+FE0F (▶️, ℹ️, ‼️). Not letters, digits or punctuation on their own, and not something long. The web app's
+    lastEmoji (frontend/src/lib/categories.svelte.ts) uses the same rule."""
+    if not text or len(text) > 16:
+        return False
+    if any(ch.isascii() for ch in text) and "\u20e3" not in text:   # ASCII only as a keycap's base
+        return False
+    return any(unicodedata.category(ch) == "So" or ch in "\ufe0f\u20e3" for ch in text)
+
+
 def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
     """Set a category's emoji and color. An empty value goes back to the default."""
     if not _exists(conn, name):
         raise CategoryError("Category not found")
     icon = (icon or "").strip() or None
-    if icon and (len(icon) > 16 or any(ch.isalnum() and ch.isascii() for ch in icon)):
+    if icon and not is_emoji(icon):
         raise CategoryError("Pick an emoji for the icon")
     color = (color or "").strip().lower() or None
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in "0123456789abcdef" for ch in color[1:])):

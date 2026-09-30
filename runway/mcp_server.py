@@ -1,11 +1,11 @@
 """Runway's MCP server: the tools that let an AI assistant (Claude and the like) read your Runway, and, only if you
-switch it on in Runway and allowed it when connecting, make a short list of churning changes.
+switch it on in Runway and allowed it when connecting, make a short list of churning changes or pick categories.
 
 Runway serves it at POST /mcp (runway/server/handler.py), to an assistant connected with OAuth (runway/mcp_oauth.py).
 handle() answers one JSON-RPC message; every page it reads or change it makes goes through the `fetch` it's given
-(mcp_http.fetch_for), which allows only the pages in mcp_access.READABLE and the churning changes in WRITABLE, and
-checks the connection's scope and the "Let assistants change churning" switch on every change, so turning the switch
-off takes effect at once. Nothing is ever deleted.
+(mcp_http.fetch_for), which allows only the pages in mcp_access.READABLE and the changes in mcp_access.CHANGES, and
+checks the connection's scope and that change's switch ("Let assistants change churning", "Let assistants
+categorize") on every change, so turning a switch off takes effect at once. Nothing is ever deleted.
 """
 from __future__ import annotations
 
@@ -187,21 +187,25 @@ TOOLS: list[dict[str, Any]] = [
 
 # ------------------------------------------------------------------------------------------------ changes (opt-in)
 
-def writes_allowed(fetch: Fetch) -> bool:
-    """Whether this connection may make changes right now (its scope, and the switch in Settings). Unsure: no."""
+CHURNING, CATEGORIZE = "churning:write", "categorize:write"   # the scopes that allow changes (mcp_access.CHANGES)
+_SWITCHES = {CHURNING: "Let assistants change churning", CATEGORIZE: "Let assistants categorize"}
+
+
+def writes_allowed(fetch: Fetch, scope: str = CHURNING) -> bool:
+    """Whether this connection may make `scope`'s changes right now (its scope, and the switch in Settings). Unsure: no."""
     try:
-        return bool(fetch("access", {}).get("writes"))
+        return bool(fetch("access", {"scope": scope}).get("writes"))
     except (ToolError, AttributeError):
         return False
 
 
-def _refusal(fetch: Fetch) -> str:
-    """Why a change can't be made: the switch is off, or this connection was only allowed to read."""
+def _refusal(fetch: Fetch, scope: str = CHURNING) -> str:
+    """Why a change can't be made: the switch is off, or this connection wasn't allowed it when it connected."""
     try:
-        why = fetch("access", {}).get("why")
+        why = fetch("access", {"scope": scope}).get("why")
     except (ToolError, AttributeError):
         why = None
-    return why or "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
+    return why or f"Changes are switched off. Turn on \"{_SWITCHES[scope]}\" in Runway under Settings → Advanced."
 
 
 def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:
@@ -223,8 +227,10 @@ _TASK_ID = {**_ID, "description": "A to-do's id."}
 _WISH_ID = {**_ID, "description": "A planned item's id."}
 
 
-def _write_tool(name: str, description: str, run: Callable[[Fetch, dict], Any], props: dict, required: list[str], idempotent: bool = False) -> dict:
-    return {"name": name, "description": description, "inputSchema": _schema(props, required), "run": run, "write": True, "idempotent": idempotent}
+def _write_tool(name: str, description: str, run: Callable[[Fetch, dict], Any], props: dict, required: list[str], idempotent: bool = False,
+                scope: str = CHURNING) -> dict:
+    return {"name": name, "description": description, "inputSchema": _schema(props, required), "run": run, "write": scope,
+            "idempotent": idempotent}
 
 
 WRITE_TOOLS: list[dict[str, Any]] = [
@@ -256,13 +262,60 @@ WRITE_TOOLS: list[dict[str, Any]] = [
     _write_tool("update_planned_item", "Change fields of a planned item (its priority, notes, status wanted or dropped, apply_url...).",
                 _change("churning/wishlist/{id}", "wish_id", True), {"wish_id": _WISH_ID, "fields": _FIELDS}, ["wish_id", "fields"], True),
 ]
-ALL_TOOLS = TOOLS + WRITE_TOOLS
+
+
+def _categorize(template: str, id_arg: str, text_id: bool = False) -> Callable[[Fetch, dict], Any]:
+    """A tool that picks a category: POSTs {category, remember} to `template`, as the web app does (remember only when
+    asked: it changes other transactions or items too)."""
+    def run(fetch: Fetch, a: dict) -> Any:
+        raw = a.get(id_arg)
+        if raw in (None, ""):
+            raise ToolError(f"Give a {id_arg}.")
+        rid = urllib.parse.quote(str(raw), safe="") if text_id else str(int(raw))
+        category = a.get("category")
+        if not isinstance(category, str) or not category.strip():
+            raise ToolError("Give a category (a name from list_categories).")
+        return fetch(template.format(id=rid), {}, {"category": category.strip(), "remember": a.get("remember") is True})
+    return run
+
+
+def _accept(fetch: Fetch, a: dict) -> Any:
+    tid = a.get("transaction_id")
+    if tid in (None, ""):
+        raise ToolError("Give a transaction_id.")
+    return fetch("transactions/" + urllib.parse.quote(str(tid), safe="") + "/accept", {}, {})
+
+
+_TX_ID = {"type": "string", "description": "A transaction's id (from list_transactions)."}
+_CATEGORY = {"type": "string", "description": "An existing category's name, exactly as list_categories gives it."}
+
+CATEGORIZE_TOOLS: list[dict[str, Any]] = [
+    _write_tool("set_transaction_category", "Set a transaction's category (it's then marked reviewed). With remember, also use "
+                "it for this merchant from now on, and for its other transactions still to review. A split transaction is "
+                "refused: it's changed in Runway itself. The reply's `was` is what it had before (for telling the person, "
+                "not a full undo).",
+                _categorize("transactions/{id}/category", "transaction_id", text_id=True),
+                {"transaction_id": _TX_ID, "category": _CATEGORY,
+                 "remember": {"type": "boolean", "description": "Make a rule for this merchant (default false)."}},
+                ["transaction_id", "category"], True, CATEGORIZE),
+    _write_tool("accept_transaction_category", "Accept the category Runway gave a transaction that needs review, as it is.",
+                _accept, {"transaction_id": _TX_ID}, ["transaction_id"], True, CATEGORIZE),
+    _write_tool("set_order_item_category", "Set an order item's category (the transactions its order paid for are split again "
+                "by item). With remember, also for the same item in other orders.",
+                _categorize("retail/items/{id}", "item_id"),
+                {"item_id": {**_ID, "description": "An item's id (from get_order)."}, "category": _CATEGORY,
+                 "remember": {"type": "boolean", "description": "Use it for this item in other orders too (default false)."}},
+                ["item_id", "category"], True, CATEGORIZE),
+]
+ALL_TOOLS = TOOLS + WRITE_TOOLS + CATEGORIZE_TOOLS
 BY_NAME = {t["name"]: t for t in ALL_TOOLS}
 
 
 def offered(fetch: Fetch) -> list[dict[str, Any]]:
-    """The tools this server offers: the reading ones, plus the changing ones only while this connection may use them."""
-    return ALL_TOOLS if writes_allowed(fetch) else TOOLS
+    """The tools this server offers: the reading ones, plus each scope's changing ones only while this connection may
+    use them."""
+    return (TOOLS + (WRITE_TOOLS if writes_allowed(fetch, CHURNING) else [])
+            + (CATEGORIZE_TOOLS if writes_allowed(fetch, CATEGORIZE) else []))
 
 
 def _annotations(t: dict) -> dict:
@@ -276,8 +329,8 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     tool = BY_NAME.get(name)
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
-    if tool.get("write") and not writes_allowed(fetch):
-        raise ToolError(_refusal(fetch))
+    if tool.get("write") and not writes_allowed(fetch, tool["write"]):
+        raise ToolError(_refusal(fetch, tool["write"]))
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
@@ -302,11 +355,14 @@ def handle(msg: Any, fetch: Fetch) -> dict | None:
         return None
     if method == "initialize":
         asked = params.get("protocolVersion")
+        can = [what for scope, what in ((CHURNING, "the churning tools that add or change things (never delete)"),
+                                        (CATEGORIZE, "the tools that set a transaction's or order item's category"))
+               if writes_allowed(fetch, scope)]
         return ok({"protocolVersion": asked if asked in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0],
                    "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "runway", "version": "1"},
                    "instructions": "Access to a Runway personal finance app: accounts, transactions, budget, reports, net worth and "
                                    "credit-card churning (cards, benefits, upcoming fees). Amounts are in dollars. Everything is read-only"
-                                   + (" except the churning tools that add or change things (never delete), which need the person's go-ahead." if writes_allowed(fetch) else ".")})
+                                   + (f" except {' and '.join(can)}, which need the person's go-ahead." if can else ".")})
     if method == "ping":
         return ok({})
     if method == "tools/list":

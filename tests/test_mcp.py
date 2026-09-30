@@ -19,6 +19,7 @@ VERIFIER = "v" * 50
 CALLBACK = "http://127.0.0.1:1/cb"
 READ = mcp_access.Access(frozenset({"read"}), None, None)
 WRITE = mcp_access.Access(frozenset({"read", "churning:write"}), None, None)
+CATEGORIZE = mcp_access.Access(frozenset({"read", "categorize:write"}), None, None)
 
 
 class RunwayServer(unittest.TestCase):
@@ -53,6 +54,7 @@ class RunwayServer(unittest.TestCase):
             forget_oauth(conn, self.clients)
             conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
             mcp_access.set_allow_writes(conn, False)
+            mcp_access.set_allow_categorize(conn, False)
 
     def cards(self):
         with db.session() as conn:
@@ -176,6 +178,88 @@ class PagesTests(RunwayServer):
         for path in mcp_access.WRITABLE:
             self.assertTrue(path.startswith("/api/churning/"), path)
             self.assertNotRegex(path, r"remove|delete|currenc|balance|score|bank")
+        self.assertLessEqual(set(mcp_access.CATEGORIZABLE), posts)
+        for path in mcp_access.CATEGORIZABLE:
+            self.assertRegex(path, r"^/api/(transactions/\{id\}/(category|accept)|retail/items/\{id\})$")
+        self.assertEqual({s: paths for s, (paths, _key) in mcp_access.CHANGES.items()},
+                         {"churning:write": mcp_access.WRITABLE, "categorize:write": mcp_access.CATEGORIZABLE})
+
+    def test_categorizing_needs_its_own_scope_and_switch(self):
+        tx, item = "mcp-" + self.tag, None
+        with db.session() as conn:
+            conn.execute("INSERT INTO transactions(id, account_id, posted, amount, payee, category, needs_review) "
+                         "VALUES (?, 'mcp-acct', '2026-09-20', -12, 'Corner Market', 'Shopping', 1)", (tx,))
+            conn.execute("INSERT INTO retail_orders(id, retailer, order_number, channel, placed, total, details) "
+                         "VALUES (?, 'costco', ?, 'store', '2026-09-26', 10, 1)", ("costco|" + self.tag, self.tag))
+            conn.execute("INSERT INTO retail_items(order_id, title, amount, quantity, category, category_source) "
+                         "VALUES (?, ?, 5, 1, 'Shopping', 'ai')", ("costco|" + self.tag, "APPLES " + self.tag))
+            item = conn.execute("SELECT id FROM retail_items WHERE order_id=?", ("costco|" + self.tag,)).fetchone()[0]
+
+        def row():
+            with db.session() as conn:
+                return tuple(conn.execute("SELECT category, category_source, needs_review FROM transactions WHERE id=?", (tx,)).fetchone())
+        try:
+            path, body = "transactions/" + tx + "/category", {"category": "Groceries", "remember": False}
+            with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):       # scope, switch off
+                mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+            self.assertEqual(mcp_http.local_fetch("access", {"scope": "categorize:write"}, None, CATEGORIZE),
+                             {"writes": False, "why": mcp_http.CATEGORIZE_OFF})
+            with db.session() as conn:
+                mcp_access.set_allow_writes(conn, True)                              # the churning switch doesn't do it
+            with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):
+                mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+            with db.session() as conn:
+                mcp_access.set_allow_categorize(conn, True)
+            for access in (READ, WRITE):                                              # nor does churning:write
+                with self.subTest(scopes=access.scopes), self.assertRaisesRegex(mcp_server.ToolError, "reconnect"):
+                    mcp_http.local_fetch(path, {}, body, access)
+            self.assertEqual(mcp_http.local_fetch("access", {"scope": "categorize:write"}, None, WRITE),
+                             {"writes": False, "why": mcp_http.CANT_CATEGORIZE})
+            with self.assertRaisesRegex(mcp_server.ToolError, "reconnect"):          # and categorize:write doesn't change churning
+                mcp_http.local_fetch("churning/cards", {}, {"owner": self.owner, "issuer": "chase", "product": "X"}, CATEGORIZE)
+            self.assertEqual(row(), ("Shopping", None, 1))                            # nothing changed so far
+            self.assertEqual(mcp_http.local_fetch("access", {"scope": "categorize:write"}, None, CATEGORIZE), {"writes": True})
+
+            got = mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+            self.assertEqual(got["was"][0]["category"], "Shopping")
+            self.assertEqual(row(), ("Groceries", "manual", 0))
+            with self.assertRaisesRegex(mcp_server.ToolError, "Unknown category"):   # only categories that exist
+                mcp_http.local_fetch(path, {}, {"category": "Made Up " + self.tag}, CATEGORIZE)
+            with db.session() as conn:
+                conn.execute("UPDATE transactions SET category='Restaurants', category_source='ai', needs_review=1 WHERE id=?", (tx,))
+            mcp_http.local_fetch("transactions/" + tx + "/accept", {}, {}, CATEGORIZE)
+            self.assertEqual(row(), ("Restaurants", "manual", 0))
+
+            from runway import splits                                                 # a split one: refused, its parts kept
+            with db.session() as conn:
+                splits.set_splits(conn, tx, [{"amount": -7, "category": "Groceries"}, {"amount": -5, "category": "Shopping"}])
+                before = [(p["amount"], p["category"]) for p in splits.of(conn, [tx])[tx]]
+            with self.assertRaisesRegex(mcp_server.ToolError, "split"):
+                mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+            with db.session() as conn:
+                self.assertEqual([(p["amount"], p["category"]) for p in splits.of(conn, [tx])[tx]], before)
+                self.assertEqual(len(before), 2)
+                splits.set_splits(conn, tx, [])
+
+            mcp_http.local_fetch(f"retail/items/{item}", {}, {"category": "Groceries", "remember": False}, CATEGORIZE)
+            with db.session() as conn:
+                self.assertEqual(tuple(conn.execute("SELECT category, category_source FROM retail_items WHERE id=?", (item,)).fetchone()),
+                                 ("Groceries", "manual"))
+                self.assertIsNone(conn.execute("SELECT 1 FROM retail_item_memory WHERE key LIKE ?", (f"%{self.tag}%",)).fetchone())
+            for other in (f"transactions/{tx}/split", f"transactions/{tx}/recurring", "transactions/bulk", "recategorize",
+                         "categories", "categories/rename", "categories/remove", f"retail/orders/costco%7C{self.tag}/suggest"):
+                with self.subTest(path=other), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
+                    mcp_http.local_fetch(other, {}, {}, CATEGORIZE)                    # only the listed changes
+            with db.session() as conn:
+                mcp_access.set_allow_categorize(conn, False)
+            with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):       # off again applies to the very next change
+                mcp_http.local_fetch(path, {}, body, CATEGORIZE)
+        finally:
+            with db.session() as conn:
+                conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (tx,))
+                conn.execute("DELETE FROM transactions WHERE id=?", (tx,))
+                conn.execute("DELETE FROM retail_items WHERE order_id=?", ("costco|" + self.tag,))
+                conn.execute("DELETE FROM retail_orders WHERE id=?", ("costco|" + self.tag,))
 
 
 class SettingsTests(RunwayServer):
@@ -194,11 +278,15 @@ class SettingsTests(RunwayServer):
         status, got = self.api("/api/mcp-settings")
         self.assertEqual(status, 200)
         self.assertEqual({k: v for k, v in got.items() if k != "connections"},
-                         {"allow_writes": False, "oauth": True, "url": self.base + "/mcp", "reason": None})
+                         {"allow_writes": False, "allow_categorize": False, "oauth": True, "url": self.base + "/mcp", "reason": None})
         self.assertIsInstance(got["connections"], list)                          # (listed in the next test)
         self.assertEqual(self.api("/api/mcp-settings/writes", {"allow": True})[1], {"allow_writes": True})
         self.assertTrue(self.api("/api/mcp-settings")[1]["allow_writes"])
         self.assertEqual(self.api("/api/mcp-settings/writes", {})[1], {"allow_writes": False})   # no value: off
+        self.assertEqual(self.api("/api/mcp-settings/categorize", {"allow": True})[1], {"allow_categorize": True})
+        self.assertEqual({k: v for k, v in self.api("/api/mcp-settings")[1].items() if k.startswith("allow")},
+                         {"allow_writes": False, "allow_categorize": True})              # one switch doesn't flip the other
+        self.assertEqual(self.api("/api/mcp-settings/categorize", {})[1], {"allow_categorize": False})
 
     def test_connections_are_listed_and_revoked(self):
         mine, other = "Claude Code " + self.tag, "Other " + self.tag   # other tests' connections may be listed too
@@ -358,6 +446,20 @@ class Fake:
         return self.pages[path]
 
 
+class ScopedFake(Fake):
+    """A Fake whose connection may make only the changes of the `allowed` scopes."""
+    def __init__(self, allowed):
+        super().__init__()
+        self.allowed = set(allowed)
+
+    def __call__(self, path, params, body=None):
+        if path == "access":
+            self.calls.append((path, params))
+            scope = params.get("scope")
+            return {"writes": True} if scope in self.allowed else {"writes": False, "why": f"No {scope}."}
+        return super().__call__(path, params, body)
+
+
 def mcp_access_match(pattern, path):
     return server.routes._match(pattern, path) is not None
 
@@ -406,7 +508,7 @@ class ProtocolTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}):
             tools = {t["name"]: t for t in ask("tools/list", fake=on)["result"]["tools"]}
             self.assertEqual(set(tools), {t["name"] for t in mcp_server.ALL_TOOLS})
-            for t in mcp_server.WRITE_TOOLS:
+            for t in mcp_server.WRITE_TOOLS + mcp_server.CATEGORIZE_TOOLS:
                 with self.subTest(tool=t["name"]):
                     a = tools[t["name"]]["annotations"]
                     self.assertEqual((a["readOnlyHint"], a["destructiveHint"]), (False, False))   # a change, never a delete
@@ -443,6 +545,49 @@ class ProtocolTests(unittest.TestCase):
         from runway.mcp_access import WRITABLE
         for _name, _args, want in calls:   # every path a tool posts to is one the write key may reach
             self.assertTrue(any(mcp_access_match(p, "/api/" + want[0]) for p in WRITABLE), want[0])
+
+    def test_each_scope_offers_only_its_own_changing_tools(self):
+        churning, categorize = ({t["name"] for t in ts} for ts in (mcp_server.WRITE_TOOLS, mcp_server.CATEGORIZE_TOOLS))
+        read = {t["name"] for t in mcp_server.TOOLS}
+        for allowed, want in (((), read), (("churning:write",), read | churning), (("categorize:write",), read | categorize),
+                              (("churning:write", "categorize:write"), read | churning | categorize)):
+            with self.subTest(allowed=allowed):
+                fake = ScopedFake(allowed)
+                self.assertEqual({t["name"] for t in ask("tools/list", fake=fake)["result"]["tools"]}, want)
+                told = ask("initialize", {}, fake)["result"]["instructions"]
+                self.assertEqual("churning tools" in told, "churning:write" in allowed)
+                self.assertEqual("category" in told, "categorize:write" in allowed)
+        fake = ScopedFake(("churning:write",))
+        r = ask("tools/call", {"name": "set_transaction_category", "arguments": {"transaction_id": "a", "category": "Groceries"}}, fake)
+        self.assertEqual(r["result"]["content"][0]["text"], "No categorize:write.")   # Runway says why
+        self.assertEqual([c for c in fake.calls if len(c) == 3], [])
+
+    def test_categorizing_tools_post_what_the_web_app_sends(self):
+        calls = [("set_transaction_category", {"transaction_id": "plaid/a b", "category": " Groceries "},
+                  ("transactions/plaid%2Fa%20b/category", {}, {"category": "Groceries", "remember": False})),
+                 ("set_transaction_category", {"transaction_id": "t1", "category": "Groceries", "remember": True},
+                  ("transactions/t1/category", {}, {"category": "Groceries", "remember": True})),
+                 ("accept_transaction_category", {"transaction_id": "t1"}, ("transactions/t1/accept", {}, {})),
+                 ("set_order_item_category", {"item_id": 7, "category": "Groceries"},
+                  ("retail/items/7", {}, {"category": "Groceries", "remember": False})),   # the web app remembers unless told not to
+                 ("set_order_item_category", {"item_id": 7, "category": "Groceries", "remember": True},
+                  ("retail/items/7", {}, {"category": "Groceries", "remember": True}))]
+        self.assertEqual({c[0] for c in calls}, {t["name"] for t in mcp_server.CATEGORIZE_TOOLS})
+        fake = ScopedFake(("categorize:write",))
+        for name, args, want in calls:
+            with self.subTest(tool=name, args=args):
+                fake.calls.clear()
+                r = ask("tools/call", {"name": name, "arguments": args}, fake)
+                self.assertNotIn("isError", r["result"], r)
+                self.assertEqual([c for c in fake.calls if len(c) == 3], [want])
+                self.assertTrue(any(mcp_access_match(p, "/api/" + want[0]) for p in mcp_access.CATEGORIZABLE), want[0])
+        for name, args in (("set_transaction_category", {"transaction_id": "t1"}), ("set_transaction_category", {"category": "Groceries"}),
+                           ("set_transaction_category", {"transaction_id": "t1", "category": "  "}),
+                           ("set_order_item_category", {"item_id": "x", "category": "Groceries"}), ("accept_transaction_category", {})):
+            with self.subTest(tool=name, args=args):
+                fake.calls.clear()
+                self.assertTrue(ask("tools/call", {"name": name, "arguments": args}, fake)["result"]["isError"])
+                self.assertEqual([c for c in fake.calls if len(c) == 3], [])
 
     def test_every_tool_reads_a_page_the_key_opens(self):
         for t in mcp_server.TOOLS:

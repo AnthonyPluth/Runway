@@ -3,7 +3,7 @@ import type { Category } from "./types";
 
 vi.mock("./api", () => ({ api: vi.fn() }));
 import { api } from "./api";
-import { CAT_COLORS, catColor, catLabel, catLook, catParentOf, categories, categoryGroups, loadCategories } from "./categories.svelte";
+import { CAT_COLORS, catColor, catLabel, catLook, catParentOf, categories, categoryGroups, lastEmoji, loadCategories } from "./categories.svelte";
 
 const cat = (name: string, extra: Partial<Category> = {}): Category => ({ name, path: [name], depth: 0, top: name, ...extra });
 const tree: Category[] = [
@@ -79,5 +79,16 @@ describe("categoryGroups", () => {
 
   it("applies an exclusion", () => {
     expect(categoryGroups({ exclude: (c) => c.name === "Food" })[0].items.map((c) => c.name)).toEqual(["Groceries"]);
+  });
+});
+
+describe("lastEmoji", () => {
+  it("finds one whole emoji in what was typed or pasted", () => {
+    for (const e of ["🌮", "🍽️", "👍🏽", "🇯🇵", "1️⃣", "#️⃣", "👩‍💻", "👨‍👩‍👧‍👦", "❤️", "▶️", "ℹ️", "‼️", "〰️", "↔️"]) expect(lastEmoji(e)).toBe(e);
+    expect(lastEmoji("taco 🌮")).toBe("🌮");
+    expect(lastEmoji("🌮🍕")).toBe("🍕");                              // the latest one
+  });
+  it("finds nothing in letters, digits or punctuation", () => {
+    for (const t of ["", "taco", "1", "#", "!?", "  ", "é", "!\ufe0f"]) expect(lastEmoji(t)).toBeNull();
   });
 });

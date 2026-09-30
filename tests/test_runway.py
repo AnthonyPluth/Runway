@@ -621,7 +621,11 @@ class CategoryTests(Base):
         self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], "🍔")
         categories.set_look(self.conn, "Eating out", "", "")                      # back to the default
         self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], None)
-        for icon, color in (("abc", None), (None, "red"), (None, "#12345g")):
+        for icon in ("1️⃣", "#️⃣", "🇯🇵", "👍🏽", "👨‍👩‍👧‍👦", "❤️", "↩️", "▶️", "ℹ️", "‼️", "〰️", "↔️"):             # anything the emoji keyboard types
+            categories.set_look(self.conn, "Eating out", icon, None)
+            self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], icon)
+        for icon, color in (("abc", None), ("1", None), ("#", None), ("!?", None), ("é", None), ("!\ufe0f", None), ("🍔" * 17, None),
+                            (None, "red"), (None, "#12345g")):
             with self.assertRaises(categories.CategoryError):
                 categories.set_look(self.conn, "Eating out", icon, color)
         with self.assertRaises(categories.CategoryError):
