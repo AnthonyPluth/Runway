@@ -56,7 +56,7 @@ describe("EventsList", () => {
     });
 
     it("uses the bank's logo for a card payment", () => {
-      app.state = { connected: true, brands: { card1: { institution: "Chase", logo: "chase" } } };
+      app.state = { connected: true, brands: { card1: { institution: "Chase", logo: "chase", src: "/banks/chase.svg" } } };
       const { container } = show([ev({ kind: "card", card_id: "card1", name: "Chase Sapphire", key: undefined })]);
       const img = container.querySelector("img")!;
       expect(img).toHaveAttribute("src", "/banks/chase.svg");

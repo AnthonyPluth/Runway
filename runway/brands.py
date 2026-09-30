@@ -7,6 +7,7 @@ account's own name ("Venture X" is Capital One). Accounts without a match get a 
 from __future__ import annotations
 
 import re
+import urllib.parse
 
 from sqlalchemy import select
 
@@ -53,8 +54,13 @@ def brand(*names: str | None) -> str | None:
 
 
 def account_brands(conn) -> dict[str, dict]:
-    """{account_id: {"logo": slug or None, "initial": "C", "institution": "Chase"}} for every account."""
+    """{account_id: {"logo": slug or None, "src": image address or None, "initial": "C", "institution": "Chase"}} for every account.
+
+    A bundled logo (runway/static/banks) comes first. For an institution without one, Logo.dev's logo by the institution's
+    name (Settings → Connections → Logo.dev) once Runway has fetched it, so a new bank needs nothing added to the app."""
+    from . import merchants   # imports this module too
     out = {}
+    unmatched: dict[str, str] = {}   # institution key -> name, for those with no bundled logo
     rows = conn.execute(
         select(Account.id, Account.name, Account.display_name, Account.org, PlaidItem.institution_name)
         .outerjoin(PlaidAccount, PlaidAccount.plaid_account_id == Account.plaid_account_id)
@@ -63,7 +69,17 @@ def account_brands(conn) -> dict[str, dict]:
         inst = r["institution_name"] or r["org"]
         logo = brand(r["institution_name"], r["org"], r["display_name"], r["name"])
         label = inst or r["display_name"] or r["name"] or "?"
-        out[r["id"]] = {"logo": logo, "institution": inst, "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
+        out[r["id"]] = {"logo": logo, "src": f"/banks/{logo}.svg" if logo else None, "institution": inst,
+                        "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
+        if not logo and inst and len(re.findall(r"[A-Za-z]", inst)) >= 3:
+            unmatched[merchants.key(inst)] = inst
+    if unmatched and merchants.configured(conn):
+        have = merchants.brand_logos(conn, list(unmatched.items()))   # notes the ones never asked about, for the next fetch
+        for r in rows:
+            inst = r["institution_name"] or r["org"]
+            k = merchants.key(inst)
+            if out[r["id"]]["src"] is None and k in have:
+                out[r["id"]]["src"] = f"/api/merchants/{urllib.parse.quote(merchants.BRAND + k, safe='')}/logo"
     return out
 
 

@@ -18,13 +18,13 @@
   // Falls back to the first letter, or "?" when Runway doesn't know the bank.
   let { id, name }: { id?: string; name?: string | null } = $props();
   const brand = $derived(id ? app.state?.brands?.[id] : undefined);
-  const logo = $derived(id ? brand?.logo : brandFor(name || ""));
+  const src = $derived(id ? brand?.src : ((l) => (l ? `/banks/${l}.svg` : null))(brandFor(name || "")));
   const letter = $derived(id ? brand?.initial || "?" : (name || "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "?");
   const title = $derived(id ? brand?.institution ?? "" : "");
 </script>
 
-{#if logo}
-  <img class="size-7 shrink-0 rounded-md bg-white object-contain p-0.5" src={`/banks/${logo}.svg`} alt="" {title} width="28" height="28" loading="lazy" />
+{#if src}
+  <img class="size-7 shrink-0 rounded-md bg-white object-contain p-0.5" src={src} alt="" {title} width="28" height="28" loading="lazy" />
 {:else}
   <span class="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground" {title}
     aria-hidden="true">{letter}</span>

@@ -1,4 +1,5 @@
 """Institution logos for accounts, and which big merchant a transaction is from."""
+import base64
 import os
 import tempfile
 import unittest
@@ -29,8 +30,36 @@ class BrandTests(unittest.TestCase):
             c.execute("INSERT INTO accounts(id, name, kind, plaid_account_id) VALUES ('a1','My card','credit','p1')")
             c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('a2','Joint','Wealthfront','savings')")
             got = brands.account_brands(c)
-        self.assertEqual(got["a1"], {"logo": "citibank", "institution": "Citibank", "initial": "C"})
-        self.assertEqual(got["a2"], {"logo": None, "institution": "Wealthfront", "initial": "W"})
+        self.assertEqual(got["a1"], {"logo": "citibank", "src": "/banks/citibank.svg", "institution": "Citibank", "initial": "C"})
+        self.assertEqual(got["a2"], {"logo": None, "src": None, "institution": "Wealthfront", "initial": "W"})   # no Logo.dev key: a letter
+
+    def test_an_institution_without_a_bundled_logo_gets_logo_dev_s(self):
+        from unittest import mock
+
+        from runway import merchants
+        path = os.path.join(tempfile.mkdtemp(), "b.db")
+        db.init(path)
+        with db.session(path) as c:
+            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('w','Roth','Wealthfront','investment')")
+            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('v','401k','Vestwell','investment')")
+            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('f','Brokerage','Fidelity Investments','investment')")
+            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('x','Odd','?','checking')")
+            db.set_setting(c, "logodev_token", "pk_test")
+            first = brands.account_brands(c)
+            self.assertEqual(first["f"]["src"], "/banks/fidelity.svg")                 # bundled: never asked about
+            self.assertIsNone(first["w"]["src"])                                        # not fetched yet: a letter until it is
+            asked = {r["id"]: r["logo_url"] for r in c.execute("SELECT id, logo_url FROM merchants WHERE id LIKE 'brand:%'")}
+            self.assertEqual(sorted(asked), ["brand:vestwell", "brand:wealthfront"])    # noted for the next fetch, and only those
+            self.assertTrue(asked["brand:wealthfront"].startswith("https://img.logo.dev/name/Wealthfront"))
+            # once the logo has been fetched (a sync does it), the account uses it
+            c.execute("UPDATE merchants SET logo=?, logo_type='image/png' WHERE id='brand:wealthfront'", (base64.b64encode(b"png").decode(),))
+            got = brands.account_brands(c)
+            self.assertEqual(got["w"]["src"], "/api/merchants/brand%3Awealthfront/logo")
+            self.assertIsNone(got["v"]["src"])
+            self.assertEqual(got["w"]["logo"], None)
+            self.assertEqual(merchants.logo(c, "brand:wealthfront"), (b"png", "image/png"))
+            with mock.patch.object(merchants, "configured", return_value=False):       # without the key nothing is asked or used
+                self.assertIsNone(brands.account_brands(c)["w"]["src"])
 
 
 

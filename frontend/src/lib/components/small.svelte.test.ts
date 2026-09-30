@@ -25,11 +25,17 @@ describe("AcctLabel", () => {
   });
 
   it("shows the institution's logo", () => {
-    app.state = { connected: true, brands: { a1: { institution: "Chase", logo: "chase" } } };
+    app.state = { connected: true, brands: { a1: { institution: "Chase", logo: "chase", src: "/banks/chase.svg" } } };
     render(AcctLabel, { id: "a1", name: "Checking" });
     const img = document.querySelector("img")!;
     expect(img).toHaveAttribute("src", "/banks/chase.svg");
     expect(img).toHaveAttribute("title", "Chase");
+  });
+
+  it("shows a logo Runway fetched from Logo.dev for an institution it doesn't bundle one for", () => {
+    app.state = { connected: true, brands: { a1: { institution: "Wealthfront", logo: null, src: "/api/merchants/brand%3Awealthfront/logo", initial: "W" } } };
+    render(AcctLabel, { id: "a1", name: "Roth IRA" });
+    expect(document.querySelector("img")).toHaveAttribute("src", "/api/merchants/brand%3Awealthfront/logo");
   });
 
   it("falls back to the institution's initial when it has no logo", () => {
