@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  KIND_LABEL, bankLeft, bankOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
+  KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
   eligibilityText, feesDue, five24Line, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
   scoreProgress, spendProgress, splitWishes, valueSource, wishName,
 } from "./churning";
+import { benefit, card } from "./fixtures";
 import type { BankBonus, Benefit, ChurnCard, Currency, Eligibility, Five24, Wish } from "./types";
 
 const TODAY = "2026-09-29";
@@ -120,6 +121,20 @@ describe("churning 2 helpers", () => {
     expect(canUse(b({}))).toBe(true);
     expect(canUse(b({ used: 300, remaining: 0 }))).toBe(false);
     expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(false);
+  });
+
+  it("sorts every open card's benefits into expiring, still to use and used", () => {
+    const soon = benefit({ id: 1, name: "Lyft", amount: 10, remaining: 10, expiring: true, days_left: 5 });
+    const later = benefit({ id: 2, name: "Uber", expiring: true, days_left: 2 });
+    const open = benefit({ id: 3, name: "Hotel", amount: 300, remaining: 150, used: 150 });
+    const done = benefit({ id: 4, name: "Dining", amount: 100, remaining: 0, used: 100, value_per_year: 100 });
+    const off = benefit({ id: 5, name: "Old", active: 0 });
+    const closedCard = card({ id: 2, status: "closed", benefits: [benefit({ id: 6, name: "Gone" })] });
+    const b = benefitBoard([card({ benefits: [soon, later, open, done, off] }), closedCard]);
+    expect(b.expiring.map((r) => r.b.name)).toEqual(["Uber", "Lyft"]);   // soonest first
+    expect(b.available.map((r) => r.b.name)).toEqual(["Hotel"]);
+    expect(b.used.map((r) => r.b.name)).toEqual(["Dining"]);
+    expect([b.left, b.usedAmount, b.value]).toEqual([460, 250, 1000]);   // left 10+300+150; used 150+100; worth 300×3+100
   });
 
   it("shows a score against what a planned item wants, and reorders a person's list", () => {
