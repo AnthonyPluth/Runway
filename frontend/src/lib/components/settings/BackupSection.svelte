@@ -50,8 +50,12 @@
   async function restore() {
     if (!file) return false;
     try {
-      const r = await upload<{ created?: string | null; safety_copy?: string | null }>("/api/restore", file, "Restore failed");
+      const r = await upload<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[] }>("/api/restore", file, "Restore failed");
       toast.success(r.safety_copy ? `Restored. A copy of what was here is at ${r.safety_copy}` : `Restored the backup from ${when(r.created)}`);
+      // The backup's bank access and API keys are encrypted with the key of the Runway that made it: under another
+      // key they can't be read, and each is entered again in Settings.
+      const n = r.unreadable_secrets?.length ?? 0;
+      if (n) toast.warning(`${n} saved ${n === 1 ? "key or connection" : "keys and connections"} can’t be read with this Runway’s secret key. Enter them again in Settings, or restore with the same RUNWAY_SECRET_KEY.`, { duration: 15000 });
       await refreshState(); reload();
     } catch (err) { toast.error((err as Error).message); return false; }
   }
@@ -60,7 +64,7 @@
 <Card.Root>
   <Card.Header><Card.Title>Backup &amp; restore</Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-4">
-    <p class={helpCls}>Everything, including bank access and API keys: keep it private. Database: {app.state?.database === "postgres" ? "Postgres" : "SQLite"}.</p>
+    <p class={helpCls}>Everything. Bank access and API keys are in it encrypted with this Runway’s secret key (restoring elsewhere needs the same key): keep it private anyway. Database: {app.state?.database === "postgres" ? "Postgres" : "SQLite"}.</p>
     <div><Button href="/api/backup" download>Download a backup</Button></div>
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-end gap-3">

@@ -5,7 +5,8 @@ database, a misplaced file) doesn't give those away.
 The key comes from RUNWAY_SECRET_KEY (a long random string; best, since it lives apart from the data), or else from
 a key file Runway creates next to the database (RUNWAY_DATA/secret.key). Values are stored as "enc:v1:<Fernet token>";
 anything without that prefix is plaintext from an earlier version and is encrypted at the next start (see
-encrypt_stored). Backups hold the secrets decrypted, so a backup restores on any machine; keep backups private.
+encrypt_stored). Backups hold the secrets encrypted too (runway/backup.py): restoring one elsewhere needs the same
+key, or the secrets are entered again.
 
 Changing keys: set the new RUNWAY_SECRET_KEY and keep the old one in RUNWAY_SECRET_KEY_OLD (or keep secret.key) for
 one start; Runway re-encrypts everything with the new key.

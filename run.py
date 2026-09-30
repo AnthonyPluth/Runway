@@ -36,13 +36,17 @@ if __name__ == "__main__":
             with db.session() as conn:
                 print(f"Added sample data ({demo.seed(conn)} transactions) to {db.describe()}.")
         elif a.command == "backup":
-            out = a.file or f"runway-backup-{date.today().isoformat()}.json.gz"
+            # Without a file name: this folder, or the data folder when Runway has one set (in Docker, /data: the code
+            # folder there is read-only).
+            name = f"runway-backup-{date.today().isoformat()}.json.gz"
+            out = a.file or (os.path.join(db.data_dir(), name) if os.environ.get("RUNWAY_DATA") else name)
             with db.session() as conn:
                 data = backup.dump(conn)
             with open(out, "wb") as f:
                 f.write(data)
             os.chmod(out, 0o600)
-            print(f"Saved {out} ({len(data) / 1024:.0f} KB) from {db.describe()}. It includes your API keys and bank access: keep it private.")
+            print(f"Saved {out} ({len(data) / 1024:.0f} KB) from {db.describe()}. Your API keys and bank access are in it "
+                  f"encrypted: restoring it elsewhere needs the same RUNWAY_SECRET_KEY (or secret.key).")
         else:
             if not a.file:
                 sys.exit("Which backup file? python3 run.py restore runway-backup.json.gz")

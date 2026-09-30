@@ -107,9 +107,11 @@ LOGODEV_LAST_ERROR = "logodev_last_error"            # why the last lookup by we
 LOGODEV_LAST_ERROR_NAME = "logodev_last_error_name"  # ... and by name
 LOGODEV_THEME = "logodev_theme"     # the theme (merchants.THEME) the stored Logo.dev logos were fetched for
 
-# Retailer order import
+# Retailer order import: the browser extension's key (runway/retail.py), who made it and when it was last used
 RETAIL_TOKEN_HASH = "retail_token_hash"
 RETAIL_TOKEN_CREATED = "retail_token_created"
+RETAIL_TOKEN_OWNER = "retail_token_owner"       # JSON: {"sub", "email"} of the person who made it (nothing without sign-in)
+RETAIL_TOKEN_USED = "retail_token_used"         # ISO timestamp of the last call that carried it
 RETAIL_AI = "retail_ai"   # "1"/"0"; on unless switched off
 
 # MCP (runway/mcp_access.py). ("mcp_token_hash" and "mcp_token_created", the old key's, were removed by migration 0024.)
@@ -124,6 +126,8 @@ def retail_summary(retailer: str) -> str:
     return f"retail_summary_{retailer}"
 
 
-# Rows that hold secrets: stored encrypted (runway/secretbox.py) and left out of backups unless asked for.
+# Rows that hold secrets, or what was read from a service you signed in to: stored encrypted (runway/secretbox.py),
+# and encrypted in backups too (runway/backup.py).
 SECRETS = frozenset({SIMPLEFIN_ACCESS_URL, PLAID_SECRET, OPENROUTER_API_KEY, REALIE_API_KEY, FINNHUB_API_KEY, LOGODEV_TOKEN, LOGODEV_SECRET,
-                     VAPID_PRIVATE_KEY, CARTA_CLIENT_SECRET, CARTA_ACCESS_TOKEN, CARTA_REFRESH_TOKEN, PLAID_PENDING_LINK})
+                     VAPID_PRIVATE_KEY, CARTA_CLIENT_SECRET, CARTA_ACCESS_TOKEN, CARTA_REFRESH_TOKEN, PLAID_PENDING_LINK,
+                     CARTA_WEB_CAPTURE})

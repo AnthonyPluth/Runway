@@ -202,7 +202,9 @@ class Handler(BaseHTTPRequestHandler):
         return n
 
     def _json(self, status: int, obj) -> None:
-        self._send(status, json.dumps(obj).encode())
+        # allow_nan=False: an inf (an overflowed sum) would go out as `Infinity`, which isn't JSON; a ValueError here
+        # is a bug, answered as one (_error).
+        self._send(status, json.dumps(obj, allow_nan=False).encode())
 
     def _host_ok(self) -> bool:
         # Refuse requests addressed to hostnames we don't know (DNS-rebinding protection).
@@ -437,7 +439,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "private, max-age=604800")
+            self.send_header("Cache-Control", "private, no-cache")   # kept, but checked each time (the ETag): gone at sign-out on a shared machine
             self.send_header("ETag", etag)
             self._security_headers()
             self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")   # opened directly, it's inert
@@ -508,10 +510,12 @@ class Handler(BaseHTTPRequestHandler):
                 held.append(lock)
             failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
             copy = None
+            unreadable: list[str] = []
             try:
                 with db.session() as conn:
                     copy = backup.safety_copy(conn)   # what's here now, in the data directory, in case the backup was the wrong one
                     counts = backup.restore(conn, restored)
+                    unreadable = backup.unreadable_secrets(conn)   # from a machine with another key: entered again
                 with db.session() as conn:
                     sfinvest.repair_stored(conn)
             except (ValueError, OSError, sqlalchemy.exc.OperationalError) as e:
@@ -529,7 +533,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(failed)
             return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
                                     "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0),
-                                    "safety_copy": copy})
+                                    "safety_copy": copy, "unreadable_secrets": unreadable})
         body = {}
         if method in ("POST", "DELETE"):
             n = self._body_length(MAX_JSON_BODY)
@@ -584,7 +588,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(e)
             except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
                 ref = request_ref()
-                monitoring.log(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", "warning",
+                monitoring.log(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}", "warning",   # not the value itself
                                remote=f"[bad request {ref}] {method} {pattern}: {type(e).__name__}", ref=ref)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
@@ -652,16 +656,16 @@ class Handler(BaseHTTPRequestHandler):
         if method != "POST" or not fn:
             return self._json(404, {"error": "Not found"})
         with db.session() as conn:
-            ok = retail.check_token(conn, self.headers.get("Authorization"))
-        if not ok:
+            refused = retail.token_check(conn, self.headers.get("Authorization"))
+        if refused:
             self.close_connection = True
-            return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Browser extension."})
+            return self._json(401, {"error": retail.REFUSALS[refused]})
         n = self._body_length(MAX_EXT_BODY)
         if n is None:
             return
         try:
             body = json.loads(self._read_body(n).decode() or "{}") if n else {}
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
             return self._json(400, {"error": "Bad JSON"})
         if not isinstance(body, dict):
             return self._json(400, {"error": "Bad JSON"})
@@ -669,6 +673,8 @@ class Handler(BaseHTTPRequestHandler):
             with db.session() as conn:
                 result = fn(conn, body)
             return self._json(200, result)   # once it's saved, so the extension's next call sees it
+        except RecursionError:   # a page nested deeper than anything a store sends
+            return self._json(400, {"error": "Bad JSON"})
         except retail.RetailError as e:
             return self._json(400, {"error": str(e), **({"code": e.code} if e.code else {})})
         except sqlalchemy.exc.OperationalError as e:
@@ -1067,9 +1073,10 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
     problems = secretbox.check_config()
     if problems:
         raise SystemExit("\n".join(problems))
-    if db.using_postgres() and not os.environ.get("RUNWAY_SECRET_KEY"):
+    if not os.environ.get("RUNWAY_SECRET_KEY"):
         monitoring.log(f"Note: set RUNWAY_SECRET_KEY. Without it, the key that encrypts your saved bank access and API keys is "
-              f"{secretbox.key_file_path()}, and losing that file means reconnecting them.", "warning")
+              f"{secretbox.key_file_path()}: losing that file means reconnecting them, and whoever can read the data folder has "
+              f"the key along with the database.", "warning")
     if oidc.enabled():
         problems = oidc.check_config()
         if problems:
