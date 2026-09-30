@@ -1,11 +1,10 @@
 <script lang="ts">
   import PlaidCard from "./PlaidCard.svelte";
   import SimpleFinCard from "./SimpleFinCard.svelte";
-  import type { SettingsAccount } from "./types";
 
-  // Settings → Bank connections: where Runway's bank data comes from (SimpleFIN and Plaid).
-  let { accounts }: { accounts: SettingsAccount[] } = $props();
+  // Settings → Bank connections: where Runway's bank data comes from (SimpleFIN and Plaid). Which of your accounts each
+  // bank account is, is decided under Accounts.
 </script>
 
 <SimpleFinCard />
-<PlaidCard {accounts} />
+<PlaidCard />
