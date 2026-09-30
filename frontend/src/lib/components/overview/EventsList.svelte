@@ -8,6 +8,7 @@
   import { Button } from "$lib/components/ui/button";
   import { fmt, fmtDow } from "$lib/format";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
 
@@ -75,6 +76,11 @@
   {#if events.length > shown.length}
     <button type="button" class="cell justify-between text-[15px] text-primary" onclick={() => (all = true)}>
       Show all {events.length}<ChevronRight class="size-4 text-muted-foreground" aria-hidden="true" />
+    </button>
+  {/if}
+  {#if all && events.length > limit}
+    <button type="button" class="cell justify-between text-[15px] text-primary" onclick={() => (all = false)}>
+      Show fewer<ChevronUp class="size-4 text-muted-foreground" aria-hidden="true" />
     </button>
   {/if}
 {/if}

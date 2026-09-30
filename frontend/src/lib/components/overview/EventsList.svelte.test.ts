@@ -109,6 +109,20 @@ describe("EventsList", () => {
       expect(screen.getAllByText(/^Bill \d$/)).toHaveLength(10);
       expect(screen.queryByRole("button", { name: /Show all/ })).not.toBeInTheDocument();
     });
+
+    it("collapses again with Show fewer", async () => {
+      show(many, { limit: 3 });
+      expect(screen.queryByRole("button", { name: "Show fewer" })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /Show all 10/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Show fewer" }));
+      expect(screen.getAllByText(/^Bill \d$/)).toHaveLength(3);
+      expect(screen.getByRole("button", { name: /Show all 10/ })).toBeInTheDocument();
+    });
+
+    it("has nothing to collapse when everything fits", () => {
+      show(many.slice(0, 2), { limit: 3 });
+      expect(screen.queryByRole("button", { name: "Show fewer" })).not.toBeInTheDocument();
+    });
   });
 
   describe("changing one occurrence", () => {
