@@ -59,7 +59,7 @@
   }
 </script>
 
-<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_20rem_11rem_7.5rem_1.75rem] lg:py-0",
+<div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_20rem_11rem_7.5rem_1.75rem] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
@@ -126,7 +126,7 @@
       <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
       <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors",
         t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
-        saving && "opacity-60")}>
+        "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
         {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
         <span class="truncate" title={t.category || undefined}>{t.category || "Choose category"}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />

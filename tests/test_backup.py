@@ -1,11 +1,15 @@
 import gzip
 import json
 import os
+import stat
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from datetime import date
 
-from runway import backup, db, networth
+from runway import backup, db, networth, server
 
 
 class BackupTests(unittest.TestCase):
@@ -85,3 +89,96 @@ class BackupTests(unittest.TestCase):
         backup.restore(dst, data)
         self.assertEqual(dst.execute("SELECT name, legacy_note FROM accounts").fetchall(), [("Checking", "kept")])
         src.close(); dst.close()
+
+    def test_preview_says_what_a_backup_holds(self):
+        src = self.fill(self.a)
+        src.execute("INSERT INTO budgets(category, amount) VALUES ('Shopping', 200)")
+        src.commit()
+        data = backup.load(backup.dump(src))
+        data["tables"]["table_from_the_future"] = {"columns": ["x"], "rows": [[1], [2]]}   # not counted: it isn't restored
+        p = backup.preview(data)
+        self.assertEqual((p["source"], p["version"]), ("sqlite", backup.VERSION))
+        self.assertEqual(p["created"], data["created"])
+        self.assertEqual({k: p["counts"][k] for k in backup.SUMMARY}, {"accounts": 1, "transactions": 20, "recurring": 0, "budgets": 1})
+        self.assertEqual(p["counts"]["total"], sum(len(t["rows"]) for n, t in data["tables"].items() if n != "table_from_the_future"))
+        self.assertEqual(backup.counts(src), p["counts"])                    # the live database, counted the same way
+        self.assertEqual(backup.counts(db.connect(self.b))["transactions"], 0)
+        src.close()
+
+    def test_safety_copy_keeps_what_was_here(self):
+        out = os.path.join(self.tmp.name, "copies")
+        os.mkdir(out)
+        empty = db.connect(self.b)
+        self.assertIsNone(backup.safety_copy(empty, out))                    # nothing to keep
+        self.assertEqual(os.listdir(out), [])
+        src = self.fill(self.a)
+        path = backup.safety_copy(src, out)
+        assert path is not None
+        self.assertEqual(os.path.dirname(path), out)
+        self.assertRegex(os.path.basename(path), r"^runway-before-restore-\d{4}-\d\d-\d\d-\d{6}\.json\.gz$")
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)         # it holds bank access: private
+        with open(path, "rb") as f:
+            kept = backup.load(f.read())
+        self.assertEqual(len(kept["tables"]["transactions"]["rows"]), 20)
+        backup.restore(empty, kept)                                          # and it restores like any backup
+        self.assertEqual(empty.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 20)
+        src.close(); empty.close()
+
+
+class BackupServerTests(unittest.TestCase):
+    """POST /api/backup/inspect, and the copy POST /api/restore keeps of what it replaces."""
+    HEADERS = {"X-Runway": "1", "Content-Type": "application/octet-stream"}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.saved = os.environ.get("RUNWAY_DATA")
+        os.environ["RUNWAY_DATA"] = cls.tmp.name
+        db.init()
+        cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown(); cls.httpd.server_close()
+        with db.session() as c:   # on Postgres the tests share one database: leave it as found
+            c.execute("DELETE FROM transactions WHERE id LIKE 'test:bk%'")
+            c.execute("DELETE FROM accounts WHERE id = 'test:bk'")
+        cls.tmp.cleanup()
+        if cls.saved is None:
+            os.environ.pop("RUNWAY_DATA", None)
+        else:
+            os.environ["RUNWAY_DATA"] = cls.saved
+
+    def post(self, path, body):
+        r = urllib.request.Request(self.base + path, method="POST", data=body, headers=self.HEADERS)
+        try:
+            with urllib.request.urlopen(r, timeout=10) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read())
+
+    def test_inspect_then_restore_keeps_a_copy(self):
+        with db.session() as c:
+            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('test:bk', 'Checking', 'checking', 10)")
+            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description) "
+                      "VALUES ('test:bk|1', 'test:bk', '2026-09-01', -5, 'COFFEE')")
+        with db.session() as c:
+            raw, here = backup.dump(c), backup.counts(c)
+        code, got = self.post("/api/backup/inspect", raw)
+        self.assertEqual(code, 200)
+        self.assertEqual(got["counts"], here)                                # this backup is of what's here
+        self.assertEqual(got["current"], here)
+        self.assertIn(got["database"], ("sqlite", "postgres"))
+        self.assertEqual(self.post("/api/backup/inspect", b"hello"), (400, {"error": "That file isn't a Runway backup."}))
+        self.assertFalse([f for f in os.listdir(self.tmp.name) if f.startswith("runway-before-restore-")])   # inspecting changes nothing
+
+        code, got = self.post("/api/restore", raw)
+        self.assertEqual(code, 200)
+        path = got["safety_copy"]
+        self.assertEqual(os.path.dirname(path), self.tmp.name)
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        with open(path, "rb") as f:
+            self.assertEqual(backup.preview(backup.load(f.read()))["counts"], here)

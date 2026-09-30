@@ -36,6 +36,8 @@ export interface RecurringItem {
 
 /** GET /api/recurring/suggestions: a payee that shows up on a schedule. */
 export interface Suggestion {
+  /** Stable across visits (account, merchant text, schedule); what "Not recurring" remembers. */
+  key: string;
   account_id: string;
   name: string;
   match: string;
@@ -51,10 +53,33 @@ export interface MatchedTx { id: string; posted: string; description: string; am
 export const FREQ_OPTIONS: [string, string][] = [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"],
   ["semimonthly", "Twice a month (set days)"], ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"],
   ["dates", "Specific dates each year"]];
-export const MODE_OPTIONS: [string, string][] = [["fixed", "Fixed amount"], ["last", "Same as last payment"], ["avg3", "Average of last 3"]];
+export const MODE_OPTIONS: [string, string][] = [["fixed", "Always the amount above"], ["last", "Same as the last payment"], ["avg3", "Average of the last 3 payments"]];
 /** How often, as the list says it: "every 2 weeks". */
 export const FREQ: Record<string, string> = { monthly: "monthly", biweekly: "every 2 weeks", weekly: "weekly", semimonthly: "twice a month",
   quarterly: "quarterly", semiannual: "every 6 months", yearly: "yearly", dates: "on set dates" };
 
 /** Schedules that need their dates (or days of the month) listed. */
 export const needsDates = (freq: string) => freq === "dates" || freq === "semimonthly";
+
+/** The fields that can be wrong, and what to tell you about each. */
+export type Errors = Partial<Record<"name" | "account_id" | "amount" | "dates" | "anchor_date", string>>;
+
+/** The stored amount for what you typed: negative for money out, positive for money in (the forecast relies on the sign). */
+export function signedAmount(magnitude: number | string | null, out: boolean): number | null {
+  if (magnitude === null || String(magnitude).trim() === "") return null;
+  const n = Math.abs(Number(magnitude));
+  return Number.isFinite(n) ? (out ? -n : n) : null;
+}
+
+/** What's missing or wrong with a recurring item's fields, before it goes to the server. */
+export function validate(v: RecurringValues): Errors {
+  const e: Errors = {};
+  if (!v.name.trim()) e.name = "Enter a name, like Paycheck or Rent.";
+  if (!v.account_id) e.account_id = "Choose an account.";
+  const amount = v.amount === null || String(v.amount).trim() === "" ? NaN : Number(v.amount);
+  if (Number.isNaN(amount)) e.amount = "Enter an amount, like 120.00.";
+  else if (amount === 0 && v.amount_mode === "fixed") e.amount = "Enter an amount above 0.";
+  if (needsDates(v.frequency) && !v.dates.trim()) e.dates = v.frequency === "semimonthly" ? "List the days of the month, like 1, 15." : "List the dates, like Apr 15, Oct 15.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v.anchor_date)) e.anchor_date = "Pick a date.";
+  return e;
+}

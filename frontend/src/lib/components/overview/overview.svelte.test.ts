@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
+vi.mock("$lib/api", async (orig) => ({ ...(await orig()), api: vi.fn().mockResolvedValue({}) }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
@@ -11,10 +11,11 @@ import { app } from "$lib/app.svelte";
 import type { CardSummary } from "$lib/types";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
+import { forecastSheet } from "./forecastSheet.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
 
 beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
-afterEach(() => { app.state = null; vi.useRealTimers(); });
+afterEach(() => { app.state = null; forecastSheet.open = false; vi.useRealTimers(); });
 
 describe("SetupChecklist", () => {
   const setup = (s: Partial<NonNullable<typeof app.state>["setup"]> = {}) => {
@@ -38,6 +39,22 @@ describe("SetupChecklist", () => {
     expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#budget/recurring");
     expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "#budget");
+  });
+
+  it("chooses the main account in the forecast settings, right there on Overview", async () => {
+    setup({ bank: true });
+    render(SetupChecklist);
+    expect(screen.queryByRole("link", { name: "Choose" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Choose" }));
+    expect(forecastSheet.open).toBe(true);
+  });
+
+  it("can't choose the main account before a bank is connected", () => {
+    setup();
+    render(SetupChecklist, { welcome: true });
+    const choose = screen.getByRole("button", { name: "Choose" });
+    expect(choose).toBeDisabled();
+    expect(choose).toHaveAccessibleDescription("after your bank connects");
   });
 
   it("welcomes a new user on its own, without a Dismiss button", () => {

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { app } from "$lib/app.svelte";
+  import NotConnected from "$lib/components/NotConnected.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import Breakdown from "$lib/components/reports/Breakdown.svelte";
   import Cashflow from "$lib/components/reports/Cashflow.svelte";
@@ -20,4 +22,9 @@
 
 <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
 <SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />
-<tab.view />
+{#if app.state?.connected}
+  <tab.view />
+{:else}
+  <NotConnected title="Connect a bank to see where your money goes"
+    text="Reports are built from your transactions: cash flow, trends, merchants and more. The first sync brings in months of history." />
+{/if}

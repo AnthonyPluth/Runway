@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
   import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
@@ -16,6 +18,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
@@ -51,14 +54,17 @@
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
   const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
 
+  async function setLeftOut(id: string, out: boolean) {
+    await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
+    await load();
+  }
   // Leave an account out of net worth (or bring it back). It stays everywhere else; only these totals and the history from
   // today on change.
   async function leaveOut(id: string, name: string, out: boolean) {
     try {
-      await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
-      await load();
-      toast(out ? `${name} is left out of net worth` : `${name} is counted again`,
-        out ? { action: { label: "Undo", onClick: () => leaveOut(id, name, false) } } : undefined);
+      await setLeftOut(id, out);
+      if (out) undoable(`${name} is left out of net worth`, async () => { await setLeftOut(id, false); });
+      else toast(`${name} is counted again`);
     } catch (err) { toast.error((err as Error).message); }
   }
 
@@ -161,6 +167,11 @@
 {:else if !d}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
+{#if !app.state?.connected && !hasAssetItems}
+  <NotConnected title="Connect a bank to track your net worth"
+    text="Runway adds up your accounts and keeps the history as it grows. The first sync brings in your balances."
+    secondary={{ label: "Add an asset by hand", onclick: () => openAdd("home") }} />
+{:else}
   <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
   <section class="mb-8">
     <div class="sr-only">Net worth</div>
@@ -240,6 +251,7 @@
       {/if}
     </Card.Content>
   </Card.Root>
+{/if}
 
   <AssetPanel bind:open={assetOpen} a={panelAsset} kind={addKind} {d} onchanged={load} />
   <AccountPanel bind:open={acctOpen} acct={panelAcct} onchange={(counted) => panelAcct && leaveOut(panelAcct.id, panelAcct.name, !counted)} />

@@ -3,15 +3,19 @@
   import { refreshState } from "$lib/app.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { fmt, fmtDate, plural } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import { restoreTx, type Was } from "./restore";
   import TxRow from "./TxRow.svelte";
   import type { RecurringItem, Tx } from "./types";
 
   // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
-  // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll.
+  // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll. Changing
+  // CONFIRM_AT or more asks first, saying how many; every change can be undone from its toast.
   // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
   let { items, total, review, recurring, selecting = $bindable(false), onsave, onchanged, onmore }: {
     items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; selecting?: boolean;
@@ -63,31 +67,52 @@
   }
   function all(checked: boolean) { for (const t of items) picked[t.id] = checked; }
 
-  async function send(body: Record<string, unknown>, what: string) {
+  // A change to many at once asks first from here up; fewer just happens (and can be undone).
+  const CONFIRM_AT = 10;
+  type Change = { body: Record<string, unknown>; what: string; ids: string[]; title: string; description: string; confirm: string; busy: string };
+  let asking = $state(false);
+  let pending = $state<Change | null>(null);
+  $effect(() => { if (!asking) bulkCat = ""; });   // backing out leaves "Set category…" showing, not the one that was asked about
+
+  async function send(c: Pick<Change, "body" | "what" | "ids">): Promise<boolean> {
     try {
-      const r = await api<{ updated: number }>("/api/transactions/bulk", { method: "POST", body: { ids, ...body } });
-      toast.success(`${what} · ${plural(r.updated, "transaction")}`);
-      picked = {};   // done with these; the list below updates where it is
+      const r = await api<{ updated: number; was: Was[] }>("/api/transactions/bulk", { method: "POST", body: { ids: c.ids, ...c.body } });
+      undoable(`${c.what} · ${plural(r.updated, "transaction")}`, async () => { await restoreTx(r.was); onchanged(); });
+      picked = {}; bulkCat = ""; rename = "";   // done with these; the list below updates where it is
       refreshState(); onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+      return true;
+    } catch (err) { toast.error((err as Error).message); return false; }
   }
-  function doRename() { const v = rename.trim(); if (v) send({ payee: v }, `Renamed to ${v}`); }
+  function change(c: Omit<Change, "ids" | "description" | "confirm" | "busy">, description: string, confirm: string, busy: string) {
+    const all = { ...c, ids: [...ids], description, confirm, busy };
+    if (all.ids.length < CONFIRM_AT) send(all);
+    else { pending = all; asking = true; }
+  }
+  const setCategory = (v: string) => change({ body: { category: v }, what: `Set to ${v}`, title: `Set ${v} on ${plural(ids.length, "transaction")}?` },
+    "They leave To review, and any split ones go back to a single category. You can undo it afterwards.", "Set category", "Setting…");
+  function doRename() {
+    const v = rename.trim();
+    if (v) change({ body: { payee: v }, what: `Renamed to ${v}`, title: `Rename ${plural(ids.length, "transaction")} to ${v}?` },
+      "Only the name shown here changes, not the bank’s own text. You can undo it afterwards.", "Rename", "Renaming…");
+  }
+  const markReviewed = () => change({ body: { reviewed: true }, what: "Marked reviewed", title: `Mark ${plural(ids.length, "transaction")} reviewed?` },
+    "They keep their categories and leave To review. You can undo it afterwards.", "Mark reviewed", "Marking…");
 </script>
 
 <div>
   {#if ids.length}
-    <div class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
+    <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
       <span class="tabular-nums"><b>{ids.length} selected</b> <span class="text-muted-foreground">{fmt(sum)}</span></span>
       <CategorySelect bind:value={bulkCat} blank="Set category…" label="Category for the selected transactions" class="w-48"
-        onchange={(v) => v && send({ category: v }, `Set to ${v}`)} />
+        onchange={(v) => v && setCategory(v)} />
       <span class="flex items-center gap-1.5">
         <Input bind:value={rename} placeholder="Rename merchant to…" aria-label="New merchant name" class="w-48"
           onkeydown={(e) => { if (e.key === "Enter") doRename(); }} />
         <Button variant="outline" size="sm" onclick={doRename}>Rename</Button>
       </span>
       <Button variant="outline" size="sm" title="Keep their categories and take them out of Review"
-        onclick={() => send({ reviewed: true }, "Marked reviewed")}>Mark reviewed</Button>
-      <Button variant="link" size="sm" onclick={() => all(false)}>Clear</Button>
+        onclick={markReviewed}>Mark reviewed</Button>
+      <Button variant="link" size="sm" onclick={() => all(false)}>Clear selection</Button>
     </div>
   {/if}
 
@@ -125,3 +150,8 @@
     </div>
   {/if}
 </div>
+
+{#if pending}
+  <ConfirmDialog bind:open={asking} title={pending.title} description={pending.description} confirmLabel={pending.confirm} busyLabel={pending.busy}
+    onconfirm={() => send(pending!)} />
+{/if}

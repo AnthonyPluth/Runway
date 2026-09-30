@@ -2,8 +2,9 @@
 and the general settings."""
 from __future__ import annotations
 
+import json
 import os
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy import delete, func, select
 
@@ -23,8 +24,9 @@ def api_state(conn, _q, _b):
         "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
         "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
         "llm_model": db.get_setting(conn, sk.LLM_MODEL) or categorize.DEFAULT_MODEL,
-        "last_sync_ok": db.get_setting(conn, sk.LAST_SYNC_OK),
-        "last_log": dict(last_log) if last_log else None,
+        "last_sync_ok": with_offset(db.get_setting(conn, sk.LAST_SYNC_OK)),
+        "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
+        "sync_warnings": json.loads(db.get_setting(conn, sk.LAST_SYNC_WARNINGS) or "[]"),   # what banks said on that sync
         "last_llm_error": db.get_setting(conn, sk.LAST_LLM_ERROR),
         "review_count": conn.execute(select(func.count()).select_from(Transaction)
                                      .where(Transaction.needs_review == 1, db.not_investment())).fetchone()[0],
@@ -43,6 +45,20 @@ def api_state(conn, _q, _b):
         "user": getattr(_current, "user", None),
         "setup": setup_steps(conn),
     }
+
+
+def with_offset(stamp: str | None, utc: bool = False) -> str | None:
+    """A stored timestamp with its UTC offset, so the browser shows it in its own time zone. Settings hold the server's
+    local time ("2026-09-30T07:02:00"), the sync log UTC ("2026-09-30 12:02:00"); one that has an offset keeps it."""
+    if not stamp:
+        return stamp
+    try:
+        t = datetime.fromisoformat(stamp)
+    except ValueError:
+        return stamp
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC) if utc else t.astimezone()
+    return t.isoformat(timespec="seconds")
 
 
 def owner_choices(conn) -> list[str]:
@@ -78,6 +94,9 @@ def api_overview(conn, q, _b):
     fc["all_accounts"] = db.rows(conn.execute(
         select(Account.id, name, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.hidden)
         .order_by(Account.kind, name)))
+    as_of = {a["id"]: a["balance_date"] for a in fc["all_accounts"]}
+    for a in fc["accounts"]:   # the day each forecast balance is from, for the Overview's "Balance as of"
+        a["balance_date"] = as_of.get(a["id"])
     return fc
 
 

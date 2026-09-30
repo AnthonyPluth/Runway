@@ -1,6 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app.svelte";
-  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { cn } from "$lib/utils";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -43,10 +43,17 @@
     {/if}
     <div class="flex min-w-0 flex-1 flex-col">
       {#if user}<span class="truncate text-sm font-medium" title={user.email ?? ""}>{userName}</span>{/if}
-      <span class="flex items-center gap-1.5 text-xs text-muted-foreground" title={sync.title} role="status">
-        <span class={cn("size-1.5 rounded-full bg-emerald-500", sync.tone === "busy" && "animate-pulse bg-muted-foreground", sync.tone === "bad" && "bg-destructive")}></span>
-        {sync.text}
-      </span>
+      <!-- A problem links to Settings › Connections, with the bank's message on a line of its own (not only on hover). -->
+      <div class="flex min-w-0 flex-col text-xs text-muted-foreground" title={sync.title} role="status">
+        {#if sync.href}
+          <a href={sync.href} class={cn("flex items-center gap-1.5 underline-offset-4 hover:underline", sync.tone === "warn" ? "text-amber-500" : "text-destructive")}>
+            <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
+          </a>
+        {:else}
+          <span class="flex items-center gap-1.5"><span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}</span>
+        {/if}
+        {#if sync.detail}<span class="truncate pl-3">{sync.detail}</span>{/if}
+      </div>
     </div>
     {#if user}
       <a href="/auth/logout" onclick={signOut} title="Sign out" aria-label="Sign out" class="text-muted-foreground hover:text-foreground">

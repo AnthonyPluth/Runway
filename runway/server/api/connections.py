@@ -134,7 +134,9 @@ def api_plaid_exchange(conn, _q, body):
         raise ApiError(str(e), 502) from e
     lock = _item_lock(conn, item_id)
     if not lock.acquire(timeout=LINK_SYNC_WAIT):   # a sync reading the same connection at once would clash with it
-        raise ApiError("Connected. A sync is running, so this connection's accounts come in with the next one.", 409)
+        # Connected all the same: only its first sync waits, so this is good news, not an error.
+        return {"ok": True, "connected": True, "sync_deferred": True, "item_id": item_id,
+                "message": "Connected. A sync is running, so this connection’s accounts come in with the next one."}
     try:
         return _sync_new_item(conn, item_id, body)
     finally:

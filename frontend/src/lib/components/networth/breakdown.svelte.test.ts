@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
-vi.mock("$lib/app.svelte", () => ({ app: { state: { brands: {} }, version: 0 }, refreshState: vi.fn(), reload: vi.fn() }));
+vi.mock("$lib/app.svelte", () => ({ app: { state: { brands: {}, connected: true }, version: 0 }, refreshState: vi.fn(), reload: vi.fn() }));
 
 import { api } from "$lib/api";
 import NetWorth from "../../../pages/NetWorth.svelte";
@@ -60,7 +60,10 @@ describe("the breakdown", () => {
     expect(within(dialog).getByRole("button", { name: "Update value" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Edit details" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
-    await user.click(await within(dialog).findByRole("button", { name: "Remove House?" }));
+    const confirm = await screen.findByRole("dialog", { name: "Remove House?" });
+    expect(confirm).toHaveTextContent("Its value history goes with it");
+    expect(calls("/api/assets/7/remove")).toHaveLength(0);   // nothing happens until it's confirmed
+    await user.click(within(confirm).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(calls("/api/assets/7/remove")).toHaveLength(1));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });

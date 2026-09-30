@@ -60,10 +60,13 @@ export function monthShort(m: string, withYear = false): string {
 /** This month as YYYY-MM. */
 export const thisMonth = () => isoDay().slice(0, 7);
 
+/** A server timestamp as a Date: ISO (with its UTC offset, or without one for local time), or "2026-09-28 17:54:18" in UTC. */
+export const serverTime = (s: string) => new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+
 /** A server timestamp ("2026-09-28 17:54:18" in UTC, or ISO) as "just now", "5 minutes ago", "3 hours ago" or a date. */
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return "";
-  const d = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z");
+  const d = serverTime(iso);
   const s = (Date.now() - d.getTime()) / 1000;
   if (s < 90) return "just now";
   if (s < 5400) return `${Math.round(s / 60)} minutes ago`;

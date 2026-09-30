@@ -173,7 +173,7 @@ class OIDCTests(unittest.TestCase):
         self.assertIn("runway_session", ck)
 
     def test_rejections(self):
-        for kwargs, words in (({"email": "stranger@example.com"}, b"allow-list"),
+        for kwargs, words in (({"email": "stranger@example.com"}, "isn’t allowed".encode()),
                               ({"tamper": True}, b"signature"),
                               ({"aud": "some-other-app"}, b"different app"),
                               ({"same_browser": False}, b"didn")):
@@ -181,6 +181,54 @@ class OIDCTests(unittest.TestCase):
             self.assertEqual(status, 403, kwargs)
             self.assertIn(words, body, kwargs)
             self.assertNotIn("runway_session", {k: v for k, v in ck.items() if v})
+
+    def test_someone_not_allowed_is_told_so_and_offered_another_account(self):
+        status, _, _, body = self.sign_in(email="stranger@example.com")
+        self.assertEqual(status, 403)
+        page = body.decode()
+        self.assertIn("Not authorized", page)
+        self.assertIn("stranger@example.com isn’t allowed to use this Runway. Ask whoever runs it to add you", page)
+        self.assertNotIn("OIDC_", page)                               # the fix is for the operator: it's in the log
+        self.assertIn('href="/auth/login?prompt=select_account"', page)   # not "Try again", which signs the same account back in
+        self.assertIn("Sign out of 127.0.0.1", page)
+        self.assertIn(f"http://127.0.0.1:{self.idp.server_port}/logout?client_id=runway", page)
+        status, loc, _, _ = self.req("/auth/login?prompt=select_account")
+        self.assertEqual(status, 302)
+        self.assertEqual(dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query))["prompt"], "select_account")
+        _, loc, _, _ = self.req("/auth/login?prompt=none")                # only that one prompt is passed on
+        self.assertNotIn("prompt", dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query)))
+
+    def test_refused_changes_say_why(self):
+        _, _, ck, _ = self.sign_in()
+        session = {"runway_session": ck["runway_session"]}
+        status, _, _, body = self.req("/api/categories", session, "POST", {"X-Runway": "1", "Origin": "https://evil.example"})
+        self.assertEqual(status, 403)
+        self.assertIn("RUNWAY_PUBLIC_URL and RUNWAY_ALLOWED_HOSTS", json.loads(body)["error"])
+        status, _, _, body = self.req("/api/categories", session, "POST")
+        self.assertEqual(status, 403)
+        self.assertIn("X-Runway header", json.loads(body)["error"])
+        status, _, _, body = self.req("/auth/logout", session)
+        self.assertEqual(status, 405)
+        self.assertIn(b"use the Sign out button in Runway", body)
+
+    def test_a_session_in_use_is_renewed_with_the_same_cookie(self):
+        _, _, ck, _ = self.sign_in()
+        token = ck["runway_session"]
+        session = {"runway_session": token}
+        self.assertNotIn("runway_session", self.req("/api/state", session)[2])   # just signed in: nothing to renew
+        with db.session() as conn:
+            conn.execute("UPDATE auth_sessions SET expires=? WHERE token_hash=?", (time.time() + 86400, oidc._hash(token)))
+        r = urllib.request.Request(self.base + "/api/state", headers={"Cookie": f"runway_session={token}"})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            cookies = resp.headers.get_all("Set-Cookie")
+        self.assertEqual(len(cookies), 1)
+        value, *attrs = cookies[0].split("; ")
+        self.assertEqual(value, f"runway_session={token}")
+        max_age = int(next(a for a in attrs if a.startswith("Max-Age="))[len("Max-Age="):])
+        self.assertAlmostEqual(max_age, 14 * 86400, delta=10)
+        self.assertEqual([a for a in attrs if not a.startswith("Max-Age=")], ["Path=/", "HttpOnly", "SameSite=Lax"])
+        self.assertNotIn("runway_session", self.req("/api/state", session)[2])   # once a day at most
+        self.assertNotIn("runway_session", self.req("/", session)[2])            # and never on a page that may be cached
 
     def test_login_state_cannot_be_replayed(self):
         _status, loc, ck, _ = self.req("/auth/login")

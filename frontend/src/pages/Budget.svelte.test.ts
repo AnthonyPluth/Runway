@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { app } from "$lib/app.svelte";
 import type { BudgetCategory, BudgetMonth } from "$lib/components/budget/types";
 import { toast } from "svelte-sonner";
 import Budget from "./Budget.svelte";
@@ -37,6 +38,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-03-15T12:00:00") });
   vi.mocked(api).mockReset();
   vi.mocked(toast.error).mockClear();
+  app.state = { connected: true };
 });
 
 afterEach(() => { vi.useRealTimers(); });
@@ -171,5 +173,20 @@ describe("Budget tabs", () => {
     expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("button", { name: "Add" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
+  });
+
+  it("asks you to connect a bank first on both tabs, keeping the heading and tabs", async () => {
+    app.state = { connected: false };
+    serve(month());
+    const { unmount } = render(Budget);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Budget");
+    expect(screen.getByText("Connect a bank to set a budget")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
+    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    expect(screen.queryByText("Budgeted")).not.toBeInTheDocument();
+    unmount();
+    render(Budget, { sub: "recurring" });
+    expect(screen.getByText("Connect a bank to track your bills and income")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
   });
 });

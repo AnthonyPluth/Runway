@@ -12,7 +12,11 @@
   const W = $derived(Math.max(320, width));
   const iw = $derived(W - m.left - m.right), ih = $derived(height - m.top - m.bottom);
   const n = $derived(p.years.length);
-  const ticks = $derived(niceTicks(0, Math.max(1, ...p.high), 4));
+  // An all-zero plan still gets a sensible axis ($0 to $1k), and no two ticks share a label ($1 $1 $1 $0 $0).
+  const ticks = $derived.by(() => {
+    const seen = new Set<string>();
+    return niceTicks(0, Math.max(1000, ...p.high), 4).filter((t) => !seen.has(shortMoney(t)) && !!seen.add(shortMoney(t)));
+  });
   const top = $derived(ticks[ticks.length - 1]);
   const x = (i: number) => m.left + (i / Math.max(1, n - 1)) * iw;
   const y = (v: number) => m.top + (1 - v / (top || 1)) * ih;

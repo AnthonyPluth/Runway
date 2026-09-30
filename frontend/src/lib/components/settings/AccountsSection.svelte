@@ -8,7 +8,8 @@
   import type { PlaidStatus, SettingsAccount } from "./types";
   import { linkCls } from "./ui";
 
-  // Settings → Accounts: every account grouped by type (the forecast's account and length are set on Overview).
+  // Settings → Accounts: every account grouped by type. The forecast's account can be chosen here or on Overview (its
+  // forecast settings, which also hold its length).
   let { accounts }: { accounts: SettingsAccount[] } = $props();
 
   const cash = $derived(accounts.filter((a) => a.kind === "checking" || a.kind === "savings"));
@@ -27,7 +28,8 @@
   const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind)));
 </script>
 
-<p class="text-sm text-muted-foreground">The forecast’s account and length are set on <a class={linkCls} href="#overview">Overview</a>.</p>
+<p class="text-sm text-muted-foreground">Choose the forecast’s account with “Use for the forecast” on a checking or savings account, or in
+  <a class={linkCls} href="#overview?forecast">Overview’s forecast settings</a>, which also set how far ahead it looks.</p>
 
 <NewFromPlaid {waiting} left={ignoredAccounts(plaid)} {mine} />
 

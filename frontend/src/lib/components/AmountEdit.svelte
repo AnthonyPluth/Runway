@@ -2,7 +2,8 @@
   import { cn } from "$lib/utils";
   import { fmt } from "$lib/format";
 
-  // An amount you can click to change. `save` gets the new (positive) number; the caller decides the sign.
+  // An amount you can click to change. `save` gets the new (positive) number; the caller decides the sign. A dotted
+  // underline says it can be changed, since a phone has no hover to show it.
   let { amount, label, title, signed = false, class: className, save }: {
     amount: number; label: string; title: string; signed?: boolean; class?: string; save: (value: number) => Promise<void>;
   } = $props();
@@ -29,7 +30,7 @@
     onblur={() => finish(true)} />
 {:else}
   <button type="button" {title} onclick={start}
-    class={cn("cursor-pointer rounded-md px-1 py-0.5 tabular-nums hover:bg-muted", signed && amount > 0 && "font-semibold text-emerald-500", className)}>
+    class={cn("cursor-pointer rounded-md px-1 py-0.5 tabular-nums underline decoration-muted-foreground/60 decoration-dotted underline-offset-4 hover:bg-muted", signed && amount > 0 && "font-semibold text-emerald-500", className)}>
     {signed ? (amount > 0 ? "+" : "−") + fmt(Math.abs(amount)) : fmt(amount)}
   </button>
 {/if}

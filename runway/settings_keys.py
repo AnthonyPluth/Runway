@@ -10,6 +10,7 @@ from datetime import date
 
 # Syncing: when each kind of sync last ran (ISO timestamps), for the schedule and for Settings.
 LAST_SYNC_OK = "last_sync_ok"                      # the last bank sync that worked
+LAST_SYNC_WARNINGS = "last_sync_warnings"          # JSON: what the banks said on that sync (a login to renew, say)
 LAST_AUTO_SYNC_ATTEMPT = "last_auto_sync_attempt"  # the last sync started by itself, worked or not
 LAST_INV_SYNC = "last_inv_sync"
 LAST_PLAID_BANK_SYNC = "last_plaid_bank_sync"
@@ -52,6 +53,9 @@ PRIMARY_ACCOUNT = "primary_account"
 HORIZON_DAYS = "horizon_days"
 SETUP_DISMISSED = "setup_dismissed"
 MIGRATED_DAILY_SPEND_OFF = "migrated_daily_spend_off"   # the v4 one-time switch-off in db.init has run
+
+# Recurring items
+RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"
 
 # Notifications
 NOTIFY_PREFS = "notify_prefs"             # JSON

@@ -10,11 +10,14 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api, newPage } from "./api";
 import { loadCategories } from "./categories.svelte";
 import { startMonitoring } from "./monitoring";
-import { app, boot, editing, refreshState, reload, route, syncOnVisit, whenBooted } from "./app.svelte";
+import { app, boot, checkIn, editing, refreshState, reload, route, syncOnVisit, whenBooted } from "./app.svelte";
 import type { AppState } from "./types";
 
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, ...extra });
-beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(newPage).mockClear(); app.state = null; app.bootError = ""; });
+beforeEach(() => {
+  vi.mocked(api).mockReset(); vi.mocked(newPage).mockClear();
+  app.state = null; app.bootError = ""; app.sessionExpired = false;
+});
 afterEach(() => { vi.useRealTimers(); document.body.innerHTML = ""; });
 
 describe("routing", () => {
@@ -73,12 +76,49 @@ describe("editing", () => {
   });
 });
 
+describe("session expiry", () => {
+  const signedOut = (background: boolean) =>
+    window.dispatchEvent(new CustomEvent("runway:signed-out", { cancelable: true, detail: { background } }));
+
+  it("lets api send you to sign in when nothing's being edited", () => {
+    expect(signedOut(false)).toBe(true);
+    expect(app.sessionExpired).toBe(false);
+  });
+
+  it("keeps you on the page, with the banner, while you're editing or when Runway was only checking in", () => {
+    expect(signedOut(true)).toBe(false);
+    expect(app.sessionExpired).toBe(true);
+    app.sessionExpired = false;
+    document.body.innerHTML = `<div data-editor></div>`;
+    expect(signedOut(false)).toBe(false);
+    expect(app.sessionExpired).toBe(true);
+  });
+
+  it("stops watching a sync once signed out", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    app.state = state({ last_sync_ok: "old" });
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === "/api/sync/auto") return { started: true } as never;
+      app.sessionExpired = true;   // what api's signed-out event does
+      throw new Error("Your session expired.");
+    });
+    await syncOnVisit();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(api).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(api).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("state and reload", () => {
   it("refreshState keeps the reply across page changes", async () => {
     vi.mocked(api).mockResolvedValue(state({ version: "1" }));
     await refreshState();
     expect(app.state?.version).toBe("1");
     expect(api).toHaveBeenCalledWith("/api/state", { keep: true });
+    await refreshState(true);   // Runway checking in on its own
+    expect(api).toHaveBeenLastCalledWith("/api/state", { keep: true, background: true });
   });
 
   it("reload cancels in-flight reads and bumps the version so the page loads again", () => {
@@ -106,7 +146,7 @@ describe("syncOnVisit", () => {
     vi.mocked(api).mockResolvedValue({ started: false });
     await syncOnVisit();
     expect(api).toHaveBeenCalledTimes(1);
-    expect(api).toHaveBeenCalledWith("/api/sync/auto", { method: "POST" });
+    expect(api).toHaveBeenCalledWith("/api/sync/auto", { method: "POST", background: true });
   });
 
   it("survives the server being unreachable", async () => {
@@ -169,5 +209,28 @@ describe("boot", () => {
     expect(late).toHaveBeenCalledOnce();
     await boot();       // a second boot only refreshes state
     expect(loadCategories).toHaveBeenCalledOnce();
+  });
+});
+
+// After "boot": these need Runway booted, which lasts for the rest of the file.
+describe("checking in", () => {
+  it("picks up changes every minute without sending you to sign in", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
+    await boot();
+    vi.mocked(api).mockClear();
+    checkIn();
+    expect(api).toHaveBeenCalledWith("/api/state", { keep: true, background: true });
+  });
+
+  it("stops, and doesn't sync on coming back to the tab, once signed out", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
+    await boot();
+    document.dispatchEvent(new Event("visibilitychange"));   // jsdom's tab is visible
+    expect(api).toHaveBeenCalledWith("/api/sync/auto", { method: "POST", background: true });
+    vi.mocked(api).mockClear();
+    app.sessionExpired = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+    checkIn();
+    expect(api).not.toHaveBeenCalled();
   });
 });

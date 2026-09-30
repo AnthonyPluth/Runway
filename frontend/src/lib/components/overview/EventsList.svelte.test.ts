@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
+vi.mock("$lib/api", async (orig) => ({ ...(await orig()), api: vi.fn().mockResolvedValue({}) }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
@@ -88,9 +88,14 @@ describe("EventsList", () => {
       expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
     });
 
-    it("marks recurring items with ↻", () => {
+    it("marks recurring items with ↻, which opens Bills & income to change every one", () => {
       show([ev()]);
-      expect(screen.getByLabelText("Recurring item")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Open in Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    });
+
+    it("has no Bills & income link on a card payment", () => {
+      show([ev({ kind: "card", key: undefined })]);
+      expect(screen.queryByRole("link", { name: "Open in Bills & income" })).not.toBeInTheDocument();
     });
   });
 
