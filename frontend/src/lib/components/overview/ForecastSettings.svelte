@@ -79,7 +79,7 @@
             </label>
           {/each}
           <p class={helpCls}>Card swipes, cash and other spending that isn’t a bill or a transfer, spread evenly over each day.{#if lately.length}
-            Over the last 90 days: {lately.join(", ")}.{/if}</p>
+            {" "}Over the last 90 days: {lately.join(", ")}.{/if}</p>
         </div>
       {/if}
       <label class={fieldCls}>Default forecast length (days)
