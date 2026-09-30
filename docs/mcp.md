@@ -11,7 +11,11 @@ Add Runway's address, `<RUNWAY_PUBLIC_URL>/mcp`, to the assistant. It's shown wi
 
 The assistant then sends you to Runway to approve it (sign in first if you aren't). The page names the app and the address it returns to; choose **Allow** or **Deny**. Each approval shows up under **Connected assistants** in the same card, with who approved it and when it was last used; **Revoke** disconnects it at once.
 
-Runway is its own OAuth authorization server (OAuth 2.1 with PKCE, dynamic client registration), and its issuer is `RUNWAY_PUBLIC_URL`. Without `RUNWAY_PUBLIC_URL`, assistants can connect only on a home-network address (`http://localhost:8765`, `http://nas.local:8765`, …). Requests from a web page on another origin are refused.
+Runway is its own OAuth authorization server (OAuth 2.1 with PKCE, dynamic client registration), and its issuer is `RUNWAY_PUBLIC_URL`. Without `RUNWAY_PUBLIC_URL`, assistants can connect only on a home-network address (`http://localhost:8765`, `http://nas.local:8765`, …).
+
+Clients that run OAuth inside a web page aren't supported: Runway sends no CORS headers, and `/mcp` refuses requests from a page on another origin. Claude Code and Claude on the web or desktop work; test with those, not the MCP Inspector's browser mode.
+
+An app that registers but is never approved is forgotten after a day (and at most 50 wait at once). If Runway says it doesn't know the app, remove Runway from the assistant and add it again.
 
 ## Letting it change churning (optional)
 
@@ -36,6 +40,8 @@ A connection approved read-only that tries a change is told to reconnect. The ch
 
 Access tokens last an hour and refresh tokens 90 days; refresh tokens rotate, and a used one sent again revokes the whole connection. Only hashes of tokens and codes are stored, and none of this goes into backups: reconnect assistants after a restore.
 
-## Behind a sign-in proxy
+## Behind a proxy
+
+Registration (`/oauth/register`) needs no sign-in, so anyone who can reach Runway can register apps (never more than 50 unapproved at once). Runway has no per-address rate limiting; put it at the reverse proxy (see [DOCKER.md](../DOCKER.md#putting-runway-on-the-internet)).
 
 With `RUNWAY_ALLOW_NO_AUTH=1` and a forward-auth proxy (Authelia, Cloudflare Access, oauth2-proxy), exempt these paths from the proxy's sign-in, since assistants call them without a browser: `/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke` and `/.well-known/oauth-*`. Keep `/oauth/authorize` behind it: that's where you approve.

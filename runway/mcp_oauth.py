@@ -42,7 +42,7 @@ ACCESS_TTL = 3600                 # seconds
 REFRESH_TTL = 90 * 86400
 CODE_TTL = 600
 CONSENT_TTL = 600
-UNCONSENTED_TTL = 3600            # a registered app nobody approved is dropped after this
+UNCONSENTED_TTL = 24 * 3600       # a registered app nobody approved is dropped after this (a day, to come back to it)
 MAX_UNCONSENTED = 50              # ... and at most this many are kept at once (the oldest go first)
 KEEP = 30 * 86400                 # spent tokens and revoked grants are kept this long, then deleted
 MAX_BODY = 8 * 1024               # bytes in a request to /oauth/register, /oauth/token or /oauth/revoke
@@ -59,6 +59,12 @@ _PUBLIC_URL = re.compile(r"https?://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~
 _HOST_HEADER = re.compile(r"(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[0-9a-f:.]+\])(?::\d{1,5})?")
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}")
 _CHALLENGE = re.compile(r"[A-Za-z0-9_-]{43}")
+
+
+# An app registered long ago and never approved is forgotten, but an assistant may keep its client_id and try again:
+# this page can't send it an error, so it tells the person how to start over.
+UNKNOWN_APP = ("Runway doesn't know this app any more (it was never approved, or it was removed). Remove Runway from "
+               "the assistant and add it again, then connect.")
 
 
 class OAuthError(Exception):
@@ -360,7 +366,7 @@ def check_authorize(conn, query: dict[str, list[str]], iss: str) -> AuthRequest:
     q = {k: v[0] for k, v in query.items()}
     client = get_client(conn, q.get("client_id"))
     if client is None:
-        raise PageError("Runway doesn't know this app (it may have been removed). Try connecting again from the app.")
+        raise PageError(UNKNOWN_APP)
     redirect = q.get("redirect_uri")
     if not isinstance(redirect, str) or not redirect_matches(json.loads(client["redirect_uris"]), redirect):
         raise PageError("The app asked to return to an address it didn't register, so Runway won't send you there.")

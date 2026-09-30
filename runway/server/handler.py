@@ -772,7 +772,7 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
                                   cookies=clear)
             client = mcp_oauth.get_client(conn, params["client_id"])
             if client is None or not mcp_oauth.redirect_matches(json.loads(client["redirect_uris"]), params["redirect_uri"]):
-                return self._page(400, "Can't connect this app", "Runway no longer knows this app. " + again, cookies=clear)
+                return self._page(400, "Can't connect this app", mcp_oauth.UNKNOWN_APP, cookies=clear)
             decision = form.get("decision")
             if decision == "allow":
                 scope = {"read"}

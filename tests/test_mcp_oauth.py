@@ -30,19 +30,20 @@ def clear(conn):
 
 
 class Db(unittest.TestCase):
+    """A database of its own (on Postgres, its own schema), so these tests may clear the OAuth tables and count their rows
+    while other test modules run alongside."""
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
+        cls.path = os.path.join(cls.tmp.name, "oauth.db")
+        db.init(cls.path)
 
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
-        os.environ.pop("RUNWAY_DATA", None)
 
     def setUp(self):
-        self.conn = db.connect()
+        self.conn = db.connect(self.path)
         clear(self.conn)
 
     def tearDown(self):
@@ -435,7 +436,8 @@ class HousekeepingTests(Db):
         live = mcp_oauth.register(self.conn, {"redirect_uris": ["https://a.example/cb"]}, now=now - 100 * day)
         self.tokens(live, now=now - 700)
         fresh = mcp_oauth.register(self.conn, {"redirect_uris": ["https://b.example/cb"]}, now=now - 60)
-        stale = mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=now - 2 * 3600)
+        waiting = mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=now - 20 * 3600)
+        stale = mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=now - 25 * 3600)
         unused_code, _ = self.code(fresh, now=now - 3600)                          # approved an hour ago, never exchanged
         mcp_oauth.start_consent(self.conn, {}, now=now - 3600)
         mcp_oauth.start_consent(self.conn, {}, now=now - 60)
@@ -444,8 +446,9 @@ class HousekeepingTests(Db):
         mcp_oauth.housekeeping(self.conn, now)
         ids = {r[0] for r in self.conn.execute("SELECT id FROM oauth_clients")}
         self.assertIn(live["client_id"], ids)
-        self.assertIn(fresh["client_id"], ids)                                    # under an hour old
-        self.assertNotIn(stale["client_id"], ids)                                 # never approved, over an hour old
+        self.assertIn(fresh["client_id"], ids)
+        self.assertIn(waiting["client_id"], ids)                                  # never approved, but under a day old: you can come back
+        self.assertNotIn(stale["client_id"], ids)                                 # never approved, over a day old
         self.assertEqual(self.count("oauth_codes"), 0)                            # the expired code
         self.assertEqual(self.count("oauth_consents"), 1)
         self.assertEqual(self.count("oauth_grants"), 2)                           # the live one; the old unexchanged one went (fresh's)
