@@ -191,6 +191,8 @@ def parse_ai_reply(text: str, categories: list[str], allow_new: bool = False) ->
 
 def call_llm(api_key: str, model: str, prompt: str) -> str:
     """Ask a model through OpenRouter's chat completions API."""
+    if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
+        raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
     body = json.dumps({
         "model": model,
         "max_tokens": 4096,

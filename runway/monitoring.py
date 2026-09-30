@@ -409,24 +409,47 @@ def mcp_result(s, reply) -> None:
 
 # ------------------------------------------------------------------------------------------------ crons
 
-@contextlib.contextmanager
-def cron(slug: str, schedule: str, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> Iterator[None]:
-    """A Cron Monitor check-in around a scheduled job (with SENTRY_CRONS): in progress, then ok or error. Sentry creates
-    the monitor on the first check-in, and alerts when one is missed or fails."""
+_IANA_ZONE = re.compile(r"(UTC|[A-Za-z]+(?:/[A-Za-z0-9_+-]+)+)")
+
+
+def local_timezone() -> str | None:
+    """The IANA name of the zone Runway's clock runs in (the daily sync's hour is local time): TZ if it's a name like
+    America/Chicago, else the system's (/etc/localtime, /etc/timezone). None when it can't be told, as with a POSIX
+    rule in TZ (EST5EDT, CST6CDT,M3.2.0,M11.1.0)."""
+    tz = (os.environ.get("TZ") or "").strip().lstrip(":")
+    if tz:
+        return tz if _IANA_ZONE.fullmatch(tz) else None
+    target = os.path.realpath("/etc/localtime")
+    if "/zoneinfo/" in target:
+        name = target.split("/zoneinfo/", 1)[1]
+        return name if _IANA_ZONE.fullmatch(name) else None
+    with contextlib.suppress(OSError):
+        with open("/etc/timezone") as f:
+            name = f.read().strip()
+        return name if _IANA_ZONE.fullmatch(name) else None
+    return None
+
+
+def cron_start(slug: str, schedule: str, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
+    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. Sentry creates
+    the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. When the zone can't be
+    told, the monitor isn't made here (its schedule would be off by hours): set it up in Sentry with the same slug."""
     if not (_enabled and _opts.get("crons")):
-        yield
+        return None
+    from sentry_sdk.crons import capture_checkin
+    zone = local_timezone()
+    config: Any = {"schedule": {"type": "crontab", "value": schedule}, "timezone": zone,
+                   "checkin_margin": margin_minutes, "max_runtime": max_runtime_minutes} if zone else None
+    check = {"slug": slug, "config": config, "started": time.monotonic()}
+    check["id"] = capture_checkin(slug, status="in_progress", monitor_config=config)
+    return check
+
+
+def cron_finish(check: dict | None, ok: bool) -> None:
+    if check is None:
         return
     from sentry_sdk.crons import capture_checkin
-    config: Any = {"schedule": {"type": "crontab", "value": schedule}, "timezone": os.environ.get("TZ") or "UTC",
-                   "checkin_margin": margin_minutes, "max_runtime": max_runtime_minutes}
-    started = time.monotonic()
-    check_in = capture_checkin(slug, status="in_progress", monitor_config=config)
-    status = "error"
-    try:
-        yield
-        status = "ok"
-    finally:
-        capture_checkin(slug, check_in, status, time.monotonic() - started, config)
+    capture_checkin(check["slug"], check["id"], "ok" if ok else "error", time.monotonic() - check["started"], check["config"])
 
 
 # ------------------------------------------------------------------------------------------------ the web app

@@ -10,7 +10,8 @@ from unittest import mock
 
 import sentry_sdk
 
-from runway import categorize, db, monitoring, server
+from runway import categorize, db, monitoring, server, simplefin
+from runway.server import sync
 from runway.server.handler import _traced, trace_name
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
@@ -130,9 +131,10 @@ class MonitoringTests(unittest.TestCase):
 
     def test_off_features_send_nothing(self):
         transport = start({"SENTRY_DSN": DSN})
-        with monitoring.request("GET", "/api/state", {}) as tx, monitoring.cron("x", "0 7 * * *"), mock.patch("builtins.print"):
+        with monitoring.request("GET", "/api/state", {}) as tx, mock.patch("builtins.print"):
             monitoring.log("hello")
             monitoring.metric("count", "runway.test", 1)
+            self.assertIsNone(monitoring.cron_start("x", "0 7 * * *"))
         self.assertIsNone(tx)
         self.assertEqual(monitoring.trace_meta(), "")
         sentry_sdk.flush()
@@ -210,17 +212,56 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(sentry_sdk.get_client().options["profile_session_sample_rate"], 0)
         self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
 
-    def test_the_daily_sync_checks_in(self):
-        transport = start()
-        with monitoring.cron("runway-bank-sync", "0 7 * * *"):
-            pass
-        with self.assertRaises(ValueError), monitoring.cron("runway-bank-sync", "0 7 * * *"):
-            raise ValueError("bank said no")
-        sentry_sdk.flush()
+    def test_a_bank_sync_checks_in_and_one_that_cant_start_doesnt(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, "TZ": "America/Chicago"}):
+            db.init()
+            transport = start({**ALL_ON, "TZ": "America/Chicago"})
+            with db.session() as conn:
+                db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
+            with mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
+                sync.run_sync()   # the Sync button's, or the daily one: either counts
+                self.assertTrue(sync._sync_lock.acquire(blocking=False))
+                try:   # another sync is running: this one doesn't start, so it's neither a success nor a failure
+                    with self.assertRaises(sync.ApiError):
+                        sync.run_sync()
+                finally:
+                    sync._sync_lock.release()
+            with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
+                    mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
+                sync.run_sync()
+            with db.session() as conn:   # nothing connected: nothing to check in
+                db.set_setting(conn, "simplefin_access_url", None)
+            with self.assertRaises(sync.ApiError):
+                sync.run_sync()
+            sentry_sdk.flush()
         checkins = transport.of("check_in")
         self.assertEqual([c["status"] for c in checkins], ["in_progress", "ok", "in_progress", "error"])
-        self.assertEqual(checkins[0]["monitor_config"]["schedule"], {"type": "crontab", "value": "0 7 * * *"})
+        self.assertEqual({c["monitor_slug"] for c in checkins}, {"runway-bank-sync"})
+        self.assertEqual(checkins[0]["monitor_config"]["schedule"], {"type": "crontab", "value": f"0 {sync.DAILY_SYNC_HOUR} * * *"})
+        self.assertEqual(checkins[0]["monitor_config"]["timezone"], "America/Chicago")
         self.assertEqual(checkins[0]["check_in_id"], checkins[1]["check_in_id"])
+
+    def test_the_monitor_uses_runways_own_time_zone(self):
+        for tz, zone in (("America/Chicago", "America/Chicago"), (":Europe/Berlin", "Europe/Berlin"), ("UTC", "UTC"),
+                         ("EST5EDT", None), ("CST6CDT,M3.2.0,M11.1.0", None), ("/usr/share/zoneinfo/Asia/Tokyo", None)):
+            with mock.patch.dict(os.environ, {"TZ": tz}):
+                self.assertEqual(monitoring.local_timezone(), zone, tz)
+        env = {k: v for k, v in os.environ.items() if k != "TZ"}
+        with mock.patch.dict(os.environ, env, clear=True):   # no TZ: the system's zone
+            with mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/America/Denver"):
+                self.assertEqual(monitoring.local_timezone(), "America/Denver")
+            with mock.patch("os.path.realpath", return_value="/etc/localtime"), \
+                    mock.patch("builtins.open", mock.mock_open(read_data="Australia/Perth\n")):
+                self.assertEqual(monitoring.local_timezone(), "Australia/Perth")
+        # A zone that can't be told: the check-in doesn't create the monitor (its schedule would be off by hours).
+        transport = start({**ALL_ON, "TZ": "EST5EDT"})
+        with mock.patch.dict(os.environ, {"TZ": "EST5EDT"}):
+            monitoring.cron_finish(monitoring.cron_start("runway-bank-sync", "0 7 * * *"), True)
+        sentry_sdk.flush()
+        self.assertTrue(all("monitor_config" not in c for c in transport.of("check_in")))
+        self.assertEqual(len(transport.of("check_in")), 2)
 
     def test_logs_are_scrubbed_and_can_say_less_than_the_console(self):
         transport = start()
@@ -273,6 +314,12 @@ class MonitoringTests(unittest.TestCase):
         for private in ("Whole Foods", "WHOLE FOODS", "87.12", "sk-or-key", "gen_ai.input.messages", "gen_ai.output.messages"):
             self.assertNotIn(private, everything)
         self.assertIn("runway.ai.tokens", everything)
+
+    def test_only_web_addresses_are_opened_for_the_ai(self):
+        with mock.patch.object(categorize, "OPENROUTER_URL", "file:///etc/passwd"), \
+                mock.patch("urllib.request.urlopen") as urlopen, self.assertRaisesRegex(RuntimeError, "http"):
+            categorize.call_llm("k", "m", "p")
+        urlopen.assert_not_called()
 
     def test_the_prompt_and_reply_only_when_asked(self):
         _, spans = self._categorize_once({**ALL_ON, "SENTRY_AI_CONTENT": "1"})
