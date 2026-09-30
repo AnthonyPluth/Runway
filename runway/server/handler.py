@@ -546,22 +546,38 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(e)
 
     def _mcp(self, method: str, url) -> None:
-        """A read-only call from Runway's MCP server (runway/mcp_server.py): GET /api/mcp/<page> answers like the web
-        app's /api/<page>, for the pages in mcp_access.READABLE only. It carries the key made under Settings →
-        Connections (a bearer token, which a web page can't send on your behalf)."""
+        """A call from Runway's MCP server (runway/mcp_server.py), carrying a key made under Settings → Connections (a bearer
+        token, which a web page can't send on your behalf). GET /api/mcp/<page> answers like the web app's /api/<page> for
+        the pages in mcp_access.READABLE (either key); POST /api/mcp/<path> makes one of the churning changes in
+        mcp_access.WRITABLE, for the write key only. Nothing else is reachable."""
         with db.session() as conn:
-            ok = mcp_access.check_token(conn, self.headers.get("Authorization"))
-        if not ok:
+            level = mcp_access.access(conn, self.headers.get("Authorization"))
+        if not level:
             self.close_connection = True
             return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Connections."})
         path = "/api/" + url.path[len("/api/mcp/"):]
-        if method != "GET" or path not in mcp_access.READABLE:
+        body: dict = {}
+        if method == "GET" and path in mcp_access.READABLE:
+            fn, params = next(fn for m, pattern, fn in ROUTES if m == "GET" and pattern == path), []
+        elif method == "POST" and (hit := next(((p, _match(p, path)) for p in mcp_access.WRITABLE if _match(p, path) is not None), None)):
+            if level != "write":
+                return self._json(403, {"error": "This key can only read. Make a write key under Settings → Connections to let an assistant change churning."})
+            fn, params = next(fn for m, pattern, fn in ROUTES if m == "POST" and pattern == hit[0]), hit[1]
+            n = self._body_length(MAX_JSON_BODY)
+            if n is None:
+                return
+            try:
+                body = json.loads(self._read_body(n).decode() or "{}") if n else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return self._json(400, {"error": "Bad JSON"})
+            if not isinstance(body, dict):
+                return self._json(400, {"error": "Bad JSON"})
+        else:
             return self._json(404, {"error": "Not found"})
-        fn = next(fn for m, pattern, fn in ROUTES if m == "GET" and pattern == path)
         _current.user = None
         try:
             with db.session() as conn:
-                result = fn(conn, urllib.parse.parse_qs(url.query), {})
+                result = fn(conn, urllib.parse.parse_qs(url.query), body, *params)
             return self._json(200, result)
         except ApiError as e:
             return self._json(e.status, {"error": str(e)})

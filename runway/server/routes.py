@@ -31,7 +31,7 @@ from .api.equity import (
 from .api.investments import (
     api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
 )
-from .api.mcp import api_mcp_key, api_mcp_key_new, api_mcp_key_remove
+from .api.mcp import api_mcp_key, api_mcp_key_new, api_mcp_key_remove, api_mcp_write_key_new, api_mcp_write_key_remove
 from .api.merchants import (
     api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo, api_merchant_logo_options
 )
@@ -182,6 +182,8 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/mcp-key", api_mcp_key),
     ("POST", "/api/mcp-key", api_mcp_key_new),
     ("POST", "/api/mcp-key/remove", api_mcp_key_remove),
+    ("POST", "/api/mcp-key/write", api_mcp_write_key_new),
+    ("POST", "/api/mcp-key/write/remove", api_mcp_write_key_remove),
     ("POST", "/api/retail/token", api_retail_token),
     ("POST", "/api/retail/token/remove", api_retail_token_remove),
     ("POST", "/api/retail/settings", api_retail_settings),
