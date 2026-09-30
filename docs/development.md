@@ -57,7 +57,7 @@ Runway applies it on its next start. Queries are plain SQL with `?` placeholders
 | `runway/networth.py`, `realie.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
-| `runway/mcp_server.py`, `mcp_access.py` | The MCP server, and what its key may read |
+| `runway/mcp_server.py`, `mcp_access.py`, `mcp_oauth.py` | The MCP server's tools, what an assistant may reach, and OAuth for connecting one |
 | `runway/db.py`, `schema.py`, `models.py`, `backup.py` | Database connections (SQLite or Postgres), the schema and its ORM models, backups |
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
 | `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |

@@ -1,22 +1,20 @@
-"""The MCP server's access to Runway: one key, and a switch for whether it may change churning.
+"""What an AI assistant connected to Runway's MCP endpoint (/mcp) may reach, and the switch for whether it may change churning.
 
-The key is a bearer token made under Settings → Advanced (only a hash of it is kept), separate from the browser
-extension's key and from signing in. It opens GET /api/mcp/<page> for the pages in READABLE and nothing else: no settings,
-connections, bank credentials or backups. Only while "Let assistants change churning" is switched on (allow_writes, off
-unless you turn it on) can it also POST the churning actions in WRITABLE: nothing else, and no deletes.
+An assistant connects with OAuth (runway/mcp_oauth.py) and gets a token for the scopes you approved: "read" opens the
+pages in READABLE and nothing else (no settings, connections, bank credentials or backups); "churning:write" also
+allows the churning changes in WRITABLE (nothing else, and no deletes), but only while "Let assistants change
+churning" is switched on (allow_writes, off unless you turn it on). The switch is read on every change, so turning it
+off takes effect at once for every connection, without revoking any.
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import re
-import secrets
-from datetime import datetime
+from dataclasses import dataclass
 
-from . import db
+from . import db, mcp_oauth
 from . import settings_keys as sk
 
-# The GET /api/... pages the key may read (each also has to be a route in server/routes.py).
+# The GET /api/... pages an assistant may read (each also has to be a route in server/routes.py).
 READABLE = frozenset({
     "/api/overview", "/api/accounts", "/api/transactions", "/api/budget", "/api/categories", "/api/cashflow",
     "/api/month_pace", "/api/reports/spending", "/api/reports/income", "/api/reports/merchants",
@@ -27,8 +25,8 @@ READABLE = frozenset({
 READABLE_PATTERNS = ("/api/retail/orders/{id}",)
 
 
-# The churning changes the key may make while they're switched on (POST /api/mcp/<the same path>): adding and changing, checking things off,
-# and undoing that; never removing anything, and nothing outside churning.
+# The churning changes an assistant may make with churning:write while they're switched on: adding and changing,
+# checking things off, and undoing that; never removing anything, and nothing outside churning.
 WRITABLE = (
     "/api/churning/cards", "/api/churning/cards/{id}", "/api/churning/cards/{id}/plan/done",
     "/api/churning/cards/{id}/plan/undo", "/api/churning/cards/{id}/benefits", "/api/churning/benefits/{id}",
@@ -37,29 +35,25 @@ WRITABLE = (
 )
 
 
-def new_token(conn) -> str:
-    """A new key for the MCP server (replacing any earlier one). Only a hash of it is kept."""
-    token = "rwm_" + secrets.token_urlsafe(32)
-    db.set_setting(conn, sk.MCP_TOKEN_HASH, hashlib.sha256(token.encode()).hexdigest())
-    db.set_setting(conn, sk.MCP_TOKEN_CREATED, datetime.now().isoformat(timespec="seconds"))
-    return token
+@dataclass(frozen=True)
+class Access:
+    """What one caller of /mcp may do: its scopes ("read", "churning:write"), the grant it came from and who approved
+    it. A change also needs allow_writes() on at that moment."""
+    scopes: frozenset[str]
+    grant_id: int | None
+    who: str | None
 
 
-def remove_token(conn) -> None:
-    db.set_setting(conn, sk.MCP_TOKEN_HASH, None)
-    db.set_setting(conn, sk.MCP_TOKEN_CREATED, None)
-
-
-def _matches(conn, key: str, authorization: str | None) -> bool:
-    want = db.get_setting(conn, key)
-    m = re.match(r"Bearer\s+(\S+)$", (authorization or "").strip())
-    if not want or not m:
-        return False
-    return hmac.compare_digest(hashlib.sha256(m.group(1).encode()).hexdigest(), want)
-
-
-def check_token(conn, authorization: str | None) -> bool:
-    return _matches(conn, sk.MCP_TOKEN_HASH, authorization)
+def resolve_bearer(conn, authorization: str | None, resource: str | None) -> Access | None:
+    """What an OAuth access token (Authorization: Bearer rwa_...) for this MCP endpoint (`resource`) may do: its grant's
+    scopes. None for anything else: no token, an unknown, expired or revoked one, or one for another resource."""
+    m = re.fullmatch(r"Bearer\s+(\S+)", (authorization or "").strip(), re.I)
+    if not m or not resource:
+        return None
+    grant = mcp_oauth.access_grant(conn, m.group(1), resource)
+    if grant is None:
+        return None
+    return Access(frozenset(grant["scope"].split()), grant["id"], grant["email"] or grant["sub"])
 
 
 def allow_writes(conn) -> bool:
@@ -70,7 +64,3 @@ def allow_writes(conn) -> bool:
 def set_allow_writes(conn, on: bool) -> None:
     db.set_setting(conn, sk.MCP_ALLOW_WRITES, "1" if on else "0")
 
-
-def status(conn) -> dict:
-    return {"token": bool(db.get_setting(conn, sk.MCP_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.MCP_TOKEN_CREATED),
-            "allow_writes": allow_writes(conn)}

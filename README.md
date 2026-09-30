@@ -42,7 +42,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **Net worth, investments and equity.** Accounts, homes and vehicles minus debts, recorded daily; brokerage performance with live prices; stock options, RSUs and Carta grants with vesting schedules.
 - **Churning.** Sign-up bonuses, 5/24, annual fees, card benefits, bank bonuses and a plan for the cards you want next.
 - **Notifications.** Web Push alerts for upcoming card payments, a low forecast, missed bills, large charges and more, with no third-party service involved.
-- **An assistant-ready API.** A read-only [MCP server](docs/mcp.md) lets Claude or another assistant answer questions about your money.
+- **An assistant-ready API.** An [MCP endpoint](docs/mcp.md) lets Claude or another assistant, once you approve it, answer questions about your money.
 - **Yours to keep.** Autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres.
 
 The full tour is in [docs/features.md](docs/features.md). Runway's pages are Overview, Transactions, Budget (with a Bills & income tab), Reports, Net worth (Summary, Investments, Equity and Retirement), Churning and Settings.
@@ -107,7 +107,7 @@ Open <http://localhost:8765>. Your data is stored in `data/runway.db`. To look a
 - [Features](docs/features.md): what each part of Runway does in detail.
 - [Configuration](docs/configuration.md): every environment variable.
 - [Deployment](docs/deployment.md): running on a server, your phone, Postgres, backups and migrations. See also [DOCKER.md](DOCKER.md).
-- [AI assistants (MCP)](docs/mcp.md): connecting Claude or another assistant, read-only.
+- [AI assistants (MCP)](docs/mcp.md): connecting Claude or another assistant.
 - [Architecture](docs/architecture.md): data sources, how the forecast works, the stack and its security model.
 - [Development](docs/development.md): running the tests, changing the database, the code layout and releases.
 - [Browser extension](extension/README.md) and [SECURITY.md](SECURITY.md) (reporting a vulnerability).

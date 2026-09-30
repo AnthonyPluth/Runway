@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import sqlalchemy.exc
 from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, finnhub, mcp_access, mcp_server, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, categories, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
 from .. import settings_keys as sk
 from . import mcp_http, sync
 from ..models import PlaidItem
@@ -40,6 +40,12 @@ STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 PUBLIC_FILES = {"/page.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
                 "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
+
+# OAuth for /mcp (runway/mcp_oauth.py) that works without a Runway session: an app calls these itself. The consent
+# page, /oauth/authorize, is the one OAuth path that needs you signed in.
+OAUTH_PUBLIC = {"/oauth/register", "/oauth/token", "/oauth/revoke"}
+OAUTH_METADATA = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp",
+                  "/.well-known/oauth-authorization-server"}
 
 MAX_JSON_BODY = 1024 * 1024          # API requests are small; anything bigger is refused before it's read
 MAX_RESTORE_BODY = 200 * 1024 * 1024
@@ -105,9 +111,9 @@ class Handler(BaseHTTPRequestHandler):
         ms = f" {int((time.monotonic() - started) * 1000)}ms" if started else ""
         print(f"{self.client_address[0]} {getattr(self, 'command', '-')} {path} {code}{ms}", flush=True)
 
-    def _security_headers(self, nonce: str | None = None) -> None:
+    def _security_headers(self, nonce: str | None = None, csp: str | None = None) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", content_security_policy(nonce))
+        self.send_header("Content-Security-Policy", csp or content_security_policy(nonce))
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
@@ -119,14 +125,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Strict-Transport-Security", "max-age=31536000")
 
     def _send(self, status: int, body: bytes, ctype: str = "application/json", cache: str = "no-store",
-              nonce: str | None = None, extra: dict[str, str] | None = None) -> None:
+              nonce: str | None = None, extra: dict[str, str] | None = None, csp: str | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache)
-        self._security_headers(nonce)
+        self._security_headers(nonce, csp)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -184,14 +190,21 @@ class Handler(BaseHTTPRequestHandler):
         self._security_headers()
         self.end_headers()
 
-    def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None) -> None:
-        body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    @staticmethod
+    def _page_html(title: str, inner: str, center: bool = True) -> bytes:
+        """One of the few pages the server draws itself: `inner` (already escaped) in a card, in the web app's look."""
+        return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)} · Runway</title><link rel="icon" href="/logo.svg"><link rel="stylesheet" href="/page.css"></head>
-<body><main style="max-width:520px;margin:12vh auto"><div class="card" style="text-align:center">
+<body><main style="max-width:520px;margin:12vh auto"><div class="card"{' style="text-align:center"' if center else ''}>
 <img src="/logo.svg" width="48" height="48" alt=""><h1 style="margin-top:12px">{html.escape(title)}</h1>
-<p class="help" style="margin:0 auto 16px">{html.escape(message)}</p>
-{f'<a class="btn primary" href="{html.escape(link[0])}">{html.escape(link[1])}</a>' if link else ''}</div></main></body></html>"""
-        self._send(status, body.encode(), "text/html; charset=utf-8")
+{inner}</div></main></body></html>""".encode()
+
+    def _page(self, status: int, title: str, message: str, link: tuple[str, str] | None = None,
+              cookies: list[str] | None = None) -> None:
+        inner = (f'<p class="help" style="margin:0 auto 16px">{html.escape(message)}</p>\n'
+                 + (f'<a class="btn primary" href="{html.escape(link[0])}">{html.escape(link[1])}</a>' if link else ''))
+        self._send(status, self._page_html(title, inner), "text/html; charset=utf-8",
+                   extra={"Set-Cookie": cookies[0]} if cookies else None)
 
     def _cookie_header(self, name: str, value: str, max_age: int, path: str = "/") -> str:
         secure = "; Secure" if oidc.config()["secure_cookie"] else ""
@@ -272,10 +285,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, b"Runway doesn't recognise this address. Add it to RUNWAY_ALLOWED_HOSTS.", "text/plain")
         if url.path.startswith("/api/ext/"):   # the browser extension: its own key instead of a sign-in
             return self._extension(method, url.path)
-        if url.path == "/mcp":   # MCP over HTTP, served here: the same key
+        if url.path == "/mcp":   # MCP over HTTP, served here: an OAuth access token instead of a sign-in
             return self._mcp_rpc(method)
-        if url.path.startswith("/api/mcp/"):   # the MCP server: its own read-only key instead of a sign-in
-            return self._mcp(method, url)
+        if url.path.startswith(("/.well-known/", "/oauth/")) and url.path != "/oauth/authorize":
+            return self._oauth(method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
         if method != "GET" and not self._same_site():
             return self._json(403, {"error": "forbidden"})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
@@ -292,6 +305,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})
                 back = (url.path or "/") + ("?" + url.query if url.query else "")   # e.g. /plaid/oauth?oauth_state_id=…
                 return self._redirect("/auth/login?next=" + urllib.parse.quote(back, safe=""))
+        if url.path == "/oauth/authorize":   # approving an assistant: you, signed in
+            return self._authorize(method, url)
         if url.path == "/carta/callback" and method == "GET":
             return self._carta_callback(url)
         if not url.path.startswith("/api/"):
@@ -421,6 +436,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(400, {"error": "Bad JSON"})
         q = urllib.parse.parse_qs(url.query)
         _current.user = getattr(self, "user", None)
+        _current.host = self.headers.get("Host")
         if method == "POST" and url.path == "/api/investments/sync":
             try:
                 bank = None
@@ -551,66 +567,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
             return self._error(e)
 
-    def _mcp(self, method: str, url) -> None:
-        """A call from Runway's MCP server (runway/mcp_server.py), carrying a key made under Settings → Advanced (a bearer
-        token, which a web page can't send on your behalf). GET /api/mcp/<page> answers like the web app's /api/<page> for
-        the pages in mcp_access.READABLE; POST /api/mcp/<path> makes one of the churning changes in mcp_access.WRITABLE, only
-        while "Let assistants change churning" is switched on in Settings. GET /api/mcp/access says whether it is. Nothing
-        else is reachable."""
-        with db.session() as conn:
-            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
-            writes = mcp_access.allow_writes(conn)
-        if not valid:
-            self.close_connection = True
-            return self._json(401, {"error": "Runway doesn't know this key. Make a new one under Settings → Advanced."})
-        path = "/api/" + url.path[len("/api/mcp/"):]
-        body: dict = {}
-        if method == "GET" and path == "/api/access":
-            return self._json(200, {"writes": writes})
-        hit = mcp_http.resolve(method, path)
-        if hit is None:
-            return self._json(404, {"error": "Not found"})
-        kind, fn, params = hit
-        if kind == "write":
-            if not writes:
-                return self._json(403, {"error": mcp_http.WRITES_OFF})
-            n = self._body_length(MAX_JSON_BODY)
-            if n is None:
-                return
-            try:
-                body = json.loads(self._read_body(n).decode() or "{}") if n else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                return self._json(400, {"error": "Bad JSON"})
-            if not isinstance(body, dict):
-                return self._json(400, {"error": "Bad JSON"})
-        try:
-            return self._json(200, mcp_http.run(fn, urllib.parse.parse_qs(url.query), body, params))
-        except ApiError as e:
-            return self._json(e.status, {"error": str(e)})
-        except sqlalchemy.exc.OperationalError as e:
-            if "locked" in str(e):
-                return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-            return self._error(e)
-        except (ValueError, TypeError, KeyError) as e:
-            ref = request_ref()
-            print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
-            return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
-
     def _mcp_rpc(self, method: str) -> None:
-        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process. Same
-        bearer key as /api/mcp/* (mcp_http.authorized), same allowlists and writes switch (mcp_http.local_fetch). One
-        JSON-RPC message per POST, answered with application/json; notifications get 202. There is no server-to-client
-        stream, so GET is 405."""
+        """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process, for an
+        OAuth access token issued for this address (mcp_http.authorized), within its scope, the allowlists and the writes
+        switch (mcp_http.local_fetch). One JSON-RPC message per POST, answered with application/json; notifications get
+        202. There is no server-to-client stream, so GET is 405."""
         if method != "POST":
             return self._send(405, b"", "text/plain", extra={"Allow": "POST"})
         if not self._mcp_origin_ok():   # a web page in a browser (DNS rebinding); real clients send no Origin
             return self._json(403, {"error": "Origin not allowed."})
+        iss = mcp_oauth.issuer(self.headers.get("Host"))
+        sent = self.headers.get("Authorization")
         with db.session() as conn:
-            valid = mcp_http.authorized(conn, self.headers.get("Authorization"))
-        if not valid:
+            access = mcp_http.authorized(conn, sent, mcp_oauth.resource(iss) if iss else None)
+        if access is None:
             self.close_connection = True
-            return self._send(401, json.dumps({"error": "Missing or unknown key. Make one under Settings → Advanced."}).encode(),
-                              extra={"WWW-Authenticate": "Bearer"})
+            # RFC 9728: where to find out how to get a token; invalid_token only when one was sent (RFC 6750 §3.1)
+            challenge = 'Bearer realm="Runway"' + (f', resource_metadata="{mcp_oauth.resource_metadata_url(iss)}"' if iss else "")
+            if sent:
+                challenge += ', error="invalid_token"'
+            why = ("Connect with OAuth: add this address to your assistant and approve it in Runway." if iss
+                   else mcp_oauth.unavailable_reason())
+            return self._send(401, json.dumps({"error": why}).encode(), extra={"WWW-Authenticate": challenge})
         n = self._body_length(MAX_JSON_BODY)
         if n is None:
             return
@@ -621,7 +599,7 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(msg, dict):   # a batch or something else: one message per POST
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
         try:
-            reply = mcp_server.handle(msg, mcp_http.local_fetch)
+            reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
         except sqlalchemy.exc.OperationalError as e:
             return self._error(e)
         if reply is None:
@@ -634,6 +612,180 @@ class Handler(BaseHTTPRequestHandler):
         if not origin:
             return True
         return origin != "null" and urllib.parse.urlsplit(origin).netloc.lower() == (self.headers.get("Host") or "").strip().lower()
+
+    # ------------------------------------------------------------------------------------------------ OAuth for /mcp
+
+    def _oauth_json(self, status: int, obj: dict | mcp_oauth.OAuthError, www: str | None = None) -> None:
+        """An OAuth answer: never cached (RFC 6749 §5.1), errors as {"error", "error_description"}."""
+        if isinstance(obj, mcp_oauth.OAuthError):
+            status, obj = obj.status, obj.body()
+        extra = {"Pragma": "no-cache", **({"WWW-Authenticate": www} if status == 401 and www else {})}
+        self._send(status, json.dumps(obj).encode(), extra=extra)
+
+    def _oauth_body(self) -> bytes | None:
+        n = self._body_length(mcp_oauth.MAX_BODY)
+        return None if n is None else self._read_body(n) if n else b""
+
+    @staticmethod
+    def _form(raw: bytes) -> dict[str, str] | None:
+        """An application/x-www-form-urlencoded body, or None if it can't be read or names a parameter twice."""
+        try:
+            pairs = urllib.parse.parse_qsl(raw.decode(), keep_blank_values=True, strict_parsing=bool(raw), max_num_fields=50)
+        except (UnicodeDecodeError, ValueError):
+            return None
+        form = dict(pairs)
+        return form if len(form) == len(pairs) else None
+
+    def _oauth(self, method: str, url) -> None:
+        """The OAuth endpoints an app calls itself (metadata, registration, tokens, revocation). No session and no CORS:
+        an app isn't a web page."""
+        iss = mcp_oauth.issuer(self.headers.get("Host"))
+        if url.path in OAUTH_METADATA:
+            if method != "GET":
+                return self._send(405, b"", "text/plain", extra={"Allow": "GET"})
+            if iss is None:
+                return self._json(404, {"error": mcp_oauth.unavailable_reason()})
+            if url.path == "/.well-known/oauth-authorization-server":
+                return self._json(200, mcp_oauth.authorization_server_metadata(iss))
+            return self._json(200, mcp_oauth.protected_resource_metadata(iss))
+        if url.path not in OAUTH_PUBLIC:
+            return self._json(404, {"error": "Not found"})
+        if method != "POST":
+            return self._send(405, b"", "text/plain", extra={"Allow": "POST"})
+        if iss is None:
+            return self._json(404, {"error": mcp_oauth.unavailable_reason()})
+        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        raw = self._oauth_body()
+        if raw is None:
+            return
+        result: dict | mcp_oauth.OAuthError
+        if url.path == "/oauth/register":
+            # JSON only: a form on another site can't send it without CORS approval, which Runway never gives.
+            try:
+                if ctype != "application/json":
+                    raise ValueError
+                meta = json.loads(raw.decode())
+            except ValueError:
+                return self._oauth_json(400, mcp_oauth.OAuthError("invalid_client_metadata", "Send the client metadata as JSON."))
+            with db.session() as conn:
+                try:
+                    result = mcp_oauth.register(conn, meta)
+                except mcp_oauth.OAuthError as e:
+                    result = e
+            return self._oauth_json(201, result)
+        form = self._form(raw) if ctype == "application/x-www-form-urlencoded" else None
+        if form is None:
+            return self._oauth_json(400, mcp_oauth.OAuthError(
+                "invalid_request", "Send the parameters as application/x-www-form-urlencoded, each once."))
+        authorization = self.headers.get("Authorization")
+        www = 'Basic realm="Runway"' if authorization else None
+        # Errors are caught inside the session, so what they wrote is kept (a replayed code or refresh token revokes its grant).
+        with db.session() as conn:
+            try:
+                client = mcp_oauth.authenticate_client(conn, form, authorization)
+                if url.path == "/oauth/token":
+                    result = mcp_oauth.token(conn, client, form, iss)
+                else:
+                    mcp_oauth.revoke(conn, client, form.get("token"))
+                    result = {}
+            except mcp_oauth.OAuthError as e:
+                result = e
+        return self._oauth_json(200, result, www)
+
+    def _authorize(self, method: str, url) -> None:
+        """/oauth/authorize: GET checks an app's request and asks you (the consent page); POST is your answer. Reached
+        only signed in (see _route). A request that can't be trusted to go back to the app is shown here instead."""
+        iss = mcp_oauth.issuer(self.headers.get("Host"))
+        if iss is None:
+            return self._page(404, "Assistants can't connect yet", mcp_oauth.unavailable_reason())
+        if method == "GET":
+            return self._consent_ask(url, iss)
+        if method == "POST":
+            return self._consent_answer(iss)
+        return self._send(405, b"", "text/plain", extra={"Allow": "GET, POST"})
+
+    def _consent_ask(self, url, iss: str) -> None:
+        user = getattr(self, "user", None) or {}
+        with db.session() as conn:
+            mcp_oauth.housekeeping(conn)
+            try:
+                req = mcp_oauth.check_authorize(conn, urllib.parse.parse_qs(url.query, keep_blank_values=True), iss)
+            except mcp_oauth.PageError as e:
+                return self._page(400, "Can't connect this app", str(e))
+            except mcp_oauth.RedirectError as e:
+                return self._redirect(mcp_oauth.with_params(e.redirect_uri, {
+                    "error": e.error, "error_description": e.description, "state": e.state, "iss": iss}))
+            writes_on = mcp_access.allow_writes(conn)
+            token = mcp_oauth.start_consent(conn, {**req.params(), "sub": user.get("sub")})
+        target = urllib.parse.urlsplit(req.redirect_uri)
+        who = user.get("email") or user.get("name") or user.get("sub")
+        signed_in = (f"You're signed in as <b>{html.escape(who)}</b>." if who else
+                     "This Runway has no sign-in of its own, so anyone who can open it can approve apps.")
+        asked = "churning:write" in req.scope
+        churning = ""
+        if asked:
+            state = ('name="churning" value="1" checked' if writes_on else "disabled")
+            note = ("Mark benefits used; add and update cards, benefits, to-dos and planned items; check off plans. Never deletes."
+                    if writes_on else "Turn on Let assistants change churning in Settings → Advanced first. Until then this "
+                                      "connection can only read.")
+            churning = (f'<label class="choice"><input type="checkbox" {state}><span><b>Change churning</b>'
+                        f'<span class="help">{html.escape(note)}</span></span></label>')
+        name = req.client_name or "An app"
+        inner = f"""<p class="help">{signed_in} Approving sends you back to <b>{html.escape(target.netloc)}</b>{
+            ' (this computer)' if target.scheme == 'http' else ''}.</p>
+<form method="post" action="/oauth/authorize">
+<input type="hidden" name="consent" value="{html.escape(token)}">
+<label class="choice"><input type="checkbox" checked disabled><span><b>Read your finances</b><span class="help">Accounts, transactions,
+budget, reports, net worth, orders and churning. Never your bank connections, settings or backups.</span></span></label>
+{churning}
+<div class="actions"><button class="btn primary" type="submit" name="decision" value="allow">Allow</button>
+<button class="btn" type="submit" name="decision" value="deny">Deny</button></div>
+</form>"""
+        # The form's answer redirects to the app, so the page may submit to Runway and on to the app's address.
+        if target.scheme == "https":
+            back = f"https://{target.netloc}"
+        else:
+            back = f"http://{target.hostname}:*" if target.hostname != "::1" else "http:"
+        csp = ("default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; "
+               f"form-action 'self' {back}; base-uri 'none'; frame-ancestors 'none'")
+        cookie = self._cookie_header("runway_consent", token, mcp_oauth.CONSENT_TTL, "/oauth")
+        self._send(200, self._page_html(f"{name} wants to connect to Runway", inner, center=False), "text/html; charset=utf-8",
+                   extra={"Set-Cookie": cookie}, csp=csp)
+
+    def _consent_answer(self, iss: str) -> None:
+        clear = [self._cookie_header("runway_consent", "", 0, "/oauth")]
+        again = "Start connecting again from the app."
+        if not self._same_site():
+            return self._page(403, "Can't connect this app", "The approval didn't come from Runway's page. " + again, cookies=clear)
+        raw = self._oauth_body()
+        if raw is None:
+            return
+        form = self._form(raw) or {}
+        sent, cookie = form.get("consent") or "", self._cookie("runway_consent") or ""
+        if not sent or not cookie or not secrets.compare_digest(sent, cookie):
+            return self._page(403, "Can't connect this app", "The approval didn't come from this browser. " + again, cookies=clear)
+        user = getattr(self, "user", None) or {}
+        with db.session() as conn:
+            params = mcp_oauth.take_consent(conn, sent)
+            if params is None or params.get("sub") != user.get("sub"):
+                return self._page(403, "Can't connect this app", "That approval page has expired or was already answered. " + again,
+                                  cookies=clear)
+            client = mcp_oauth.get_client(conn, params["client_id"])
+            if client is None or not mcp_oauth.redirect_matches(json.loads(client["redirect_uris"]), params["redirect_uri"]):
+                return self._page(400, "Can't connect this app", mcp_oauth.UNKNOWN_APP, cookies=clear)
+            decision = form.get("decision")
+            if decision == "allow":
+                scope = {"read"}
+                if ("churning:write" in params["scope"].split() and form.get("churning") == "1"
+                        and mcp_access.allow_writes(conn)):
+                    scope.add("churning:write")
+                code = mcp_oauth.approve(conn, params, frozenset(scope), user.get("sub"), user.get("email"))
+                back = {"code": code}
+            elif decision == "deny":
+                back = {"error": "access_denied", "error_description": "The person using Runway said no."}
+            else:
+                return self._page(400, "Can't connect this app", "Choose Allow or Deny. " + again, cookies=clear)
+        self._redirect(mcp_oauth.with_params(params["redirect_uri"], {**back, "state": params.get("state"), "iss": iss}), clear)
 
     def _static(self, path: str) -> None:
         if path == "/next" or path.startswith("/next/"):   # where the web app lived while it was being rebuilt

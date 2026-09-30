@@ -13,6 +13,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from runway import db, server
+from tests.shared import hold_mcp_switch
 
 # Routes that would reach out to another service even with an empty request; they're covered by their own tests.
 NETWORK = {"/api/push/test", "/api/investments/live", "/api/assets/{id}/refresh", "/api/carta/sync"}
@@ -21,6 +22,7 @@ NETWORK = {"/api/push/test", "/api/investments/live", "/api/assets/{id}/refresh"
 class RouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        hold_mcp_switch(cls)   # it posts to the assistants' switch, and removes the settings rows it added (tests/shared.py)
         cls.tmp = tempfile.TemporaryDirectory()
         os.environ["RUNWAY_DATA"] = cls.tmp.name
         db.init()
