@@ -70,7 +70,7 @@ def send(sub: dict, message: dict, vapid: py_vapid.Vapid02, subject: str, ttl: i
                     vapid_claims={"sub": subject}, ttl=ttl, timeout=timeout, headers={"Urgency": urgency},
                     requests_session=_session())
         return r.status_code
-    except requests.RequestException as e:   # a redirect (not followed): the endpoint isn't a push service's
+    except requests.TooManyRedirects as e:   # a redirect (not followed): the endpoint isn't a push service's
         raise RuntimeError("the push service redirected; not followed") from e
     except WebPushException as e:
         status = e.response.status_code if e.response is not None else None

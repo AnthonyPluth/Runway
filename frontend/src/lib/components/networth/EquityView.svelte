@@ -163,6 +163,7 @@
                         <span class="text-xs tabular-nums">{Math.round(p * 100)}%</span>
                       </div>
                       <div class="text-xs text-muted-foreground">{shares(g.vested)} of {shares(g.quantity)}{g.fully_vested_on && p < 1 ? ` · all by ${my(g.fully_vested_on)}` : ""}{g.exercised ? ` · ${shares(g.exercised)} exercised` : ""}</div>
+                      {#if g.problem}<div class="text-xs text-(--low)">{g.problem}</div>{/if}
                     </td>
                     <td class="text-right tabular-nums">{fmt(g.vested_value)}</td>
                     <td class="text-right text-muted-foreground tabular-nums max-[700px]:hidden">{fmt(g.unvested_value)}</td>

@@ -72,6 +72,7 @@ export interface Grant {
   vested: number;
   fully_vested_on: string | null;
   schedule: [string, number][];
+  problem?: string | null;   // why the schedule couldn't be worked out (a length or date past the limits), if it couldn't
   vested_value: number;
   unvested_value: number;
 }
