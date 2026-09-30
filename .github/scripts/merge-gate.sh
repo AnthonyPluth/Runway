@@ -53,6 +53,13 @@ echo "Pull request #$number by $author at $SHA"
 # Whether the author maintains the repository: then a P1 thread they resolved counts as resolved (see evaluate).
 role=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .role_name 2>/dev/null || echo none)
 case "$role" in admin|maintain) maintainer=true ;; *) maintainer=false ;; esac
+# CodeQL's default setup doesn't analyse Dependabot's pull requests (its check says the configurations "were not found"),
+# so none of its runs ever comes: waiting for one would keep the gate pending, and the merge below, forever. A run that
+# does come still counts, as for any workflow; the tests and the security scans are still required.
+if [ "$author" = "dependabot[bot]" ]; then
+  required=(); for w in "${REQUIRED_WORKFLOWS[@]}"; do [ "$w" = CodeQL ] || required+=("$w"); done
+  REQUIRED_WORKFLOWS=("${required[@]}")
+fi
 
 list() { local out="" x; for x in "$@"; do out+="${out:+, }$x"; done; echo "$out"; }
 
