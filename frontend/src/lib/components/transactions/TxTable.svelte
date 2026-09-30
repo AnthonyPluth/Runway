@@ -101,15 +101,16 @@
     <button type="button" class="ml-auto cursor-pointer text-[15px] text-primary md:hidden"
       onclick={() => { selecting = !selecting; if (!selecting) all(false); }}>{selecting ? "Done" : "Select"}</button>
   </div>
-  <!-- A grouped list per day, its heading staying in view while you scroll through that day. -->
-  <div data-tx-list class="flex flex-col gap-4">
+  <!-- A grouped list per day, its heading staying in view while you scroll through that day. From lg up it is one
+       container, the days thin sub-headers in it. -->
+  <div data-tx-list class="flex flex-col gap-4 lg:gap-0 lg:rounded-[0.875rem] lg:bg-card lg:[&>section:first-child>h3]:rounded-t-[0.875rem] lg:[&>section:last-child>div]:rounded-b-[0.875rem]">
     {#each days as d (d.day)}
       <section aria-label={dayLabel(d.day)}>
-        <h3 class="sticky top-0 z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur">
+        <h3 class="sticky top-0 z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:text-xs lg:backdrop-blur-none">
           <span>{dayLabel(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case">{fmt(d.net)}</span>{/if}
         </h3>
-        <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem]">
+        <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:3.75rem]">
           {#each d.rows as { t, i } (t.id)}
             <TxRow {t} {review} {recurring} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
               onsave={(c) => onsave(t, c)} {onchanged} />
