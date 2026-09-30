@@ -264,6 +264,26 @@ class DbTests(unittest.TestCase):
         with self.assertRaisesRegex(ChurnError, "Unknown"):
             churning.set_balance(self.c, "Alex", "nope", 1, TODAY)
 
+    def test_balance_as_of_a_day_and_estimated_since(self):
+        gold = churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Gold", "opened_on": "2026-01-01",
+                                           "account_id": "cc", "currency": "mr", "base_rate": 1})
+        churning.set_rate(self.c, gold, "Restaurants", 4)
+        self.tx("t0", "2026-08-30", -1000, "Groceries")     # on the day the balance was entered: already in it
+        self.tx("t1", "2026-09-05", -100, "Groceries")      # 1x
+        self.tx("t2", "2026-09-06", -50, "Takeout")         # its parent's rate: 4x
+        churning.set_balance(self.c, "Alex", "mr", 10000, TODAY, "2026-08-30")
+        mr = next(x for x in churning.overview(self.c, TODAY)["rewards"]["Alex"]["currencies"] if x["currency"] == "mr")
+        self.assertEqual((mr["balance"], mr["as_of"], mr["earned_since"]), (10000, "2026-08-30", 300))
+        self.assertEqual((mr["est_balance"], mr["est_value"]), (10300, round(10300 * mr["cents"] / 100, 2)))
+        self.assertEqual(mr["balance_value"], round(10000 * mr["cents"] / 100, 2))   # Worth stays the balance you entered
+        churning.set_balance(self.c, "Alex", "mr", 10300, TODAY)   # entered today: nothing to add
+        mr = next(x for x in churning.overview(self.c, TODAY)["rewards"]["Alex"]["currencies"] if x["currency"] == "mr")
+        self.assertEqual((mr["as_of"], mr["est_balance"]), ("2026-09-29", None))
+        with self.assertRaisesRegex(ChurnError, "future"):
+            churning.set_balance(self.c, "Alex", "mr", 1, TODAY, "2026-10-01")
+        with self.assertRaisesRegex(ChurnError, "date"):
+            churning.set_balance(self.c, "Alex", "mr", 1, TODAY, "yesterday")
+
     def test_push_alerts(self):
         churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Gold", "opened_on": "2025-10-20", "annual_fee": 325})
         churning.save_card(self.c, {"owner": "Sam", "issuer": "citi", "product": "Premier", "opened_on": "2026-07-05",

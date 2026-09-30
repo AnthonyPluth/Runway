@@ -113,7 +113,8 @@ def api_churn_currency_remove(conn, _q, _b, key):
 
 
 def api_churn_balance(conn, _q, body):
-    _churn(churning.set_balance, conn, body.get("owner"), str(body.get("currency") or ""), body.get("points"), date.today())
+    _churn(churning.set_balance, conn, body.get("owner"), str(body.get("currency") or ""), body.get("points"), date.today(),
+           body.get("as_of"))
     return {"ok": True}
 
 
