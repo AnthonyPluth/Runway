@@ -421,6 +421,24 @@ def still_allowed(email: str | None) -> bool:
     return bool(email and email.lower() in c["emails"])
 
 
+def access_lapsed(conn, sub: str | None, email: str | None, now: float | None = None) -> str | None:
+    """Why something a person made (an assistant's approval, the browser extension's key, a device's notifications) must
+    end because of who made it, or None. It lasts only as long as they may sign in, judged the way their browser
+    sessions are (still_allowed): taken off OIDC_ALLOWED_EMAILS, it ends at once ("user_removed"). With
+    OIDC_ALLOWED_GROUPS, where that can be known only at sign-in, it ends RUNWAY_SESSION_DAYS after they last signed
+    in, as a session would ("sign_in_lapsed"). Without sign-in (OIDC off) nothing ends."""
+    if not enabled():
+        return None
+    if not still_allowed(email):
+        return "user_removed"
+    if known_only_at_sign_in():
+        now = time.time() if now is None else now
+        seen = conn.execute(select(User.last_seen).where(User.sub == sub)).scalar() if sub else None
+        if seen is None or now - seen > config()["session_days"] * 86400:
+            return "sign_in_lapsed"
+    return None
+
+
 def provider_sign_out(c: dict | None = None) -> str | None:
     """The provider's sign-out page, if it has one, coming back to Runway's signed-out page afterwards."""
     c = c or config()

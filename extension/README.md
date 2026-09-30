@@ -29,6 +29,8 @@ happens in Runway (the extension just fetches them), so when a store changes its
 Chrome, Edge, Brave, Arc or any other Chromium browser:
 
 1. In Runway, open **Settings → Browser extension** (the card that makes the key) and click **Make a key**. Copy it.
+   A key works for 90 days (Settings shows when it runs out, and when the extension last used it), then you make a
+   new one; it also stops working if the person who made it can no longer sign in to Runway.
 2. Click **Download the extension** on that same card and unzip it. Go to `chrome://extensions`, turn on
    **Developer mode**, click **Load unpacked** and choose the unzipped `runway-orders` folder (or this `extension`
    folder, if you have the repository).
@@ -58,8 +60,10 @@ Chromium so far.
 ## If Runway is behind a sign-in proxy
 
 The extension signs its calls with the key rather than a sign-in, so a proxy in front of Runway (Authelia, Cloudflare
-Access, …) must let `/api/ext/*` through to Runway. Runway checks the key on every one of those calls, and they can
-only add orders.
+Access, …) must let `/api/ext/*` through to Runway. Runway checks the key on every one of those calls. What the key
+can do is what the extension does: bring in orders and Carta grants, which Runway then matches to your card
+transactions (setting their category and splits) and to your equity; it can't read your finances, settings or bank
+connections.
 
 ## When a store changes its site
 

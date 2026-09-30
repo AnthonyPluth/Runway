@@ -9,7 +9,7 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from unittest import mock
 
-from runway import db, retail, splits
+from runway import db, oidc, retail, splits
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "amazon")
 ORDER = "111-6778632-7354601"   # 4 items, $57.69 + $2.99 shipping + $3.19 tax - $2.99 free shipping = $60.88
@@ -385,6 +385,40 @@ class AppViewsTests(Base):
         self.assertEqual([retail.unmatched_count(self.c), retail.unmatched_count(self.c, "target"),
                           retail.unmatched_count(self.c, "amazon")], [1, 1, 0])
         self.assertEqual(retail.status(self.c)["recent"][0]["id"], "target:7777")   # no date yet: first
+
+
+class TokenTests(Base):
+    def test_the_key_is_the_persons_and_ends(self):
+        token = retail.new_token(self.c, {"sub": "u1", "email": "a@example.com", "name": "A"})
+        oidc.remember_user(self.c, "u1", "a@example.com", "A")
+        self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        self.assertEqual(retail.token_check(self.c, "Bearer rwx_other"), "unknown")
+        self.assertEqual(retail.token_check(self.c, None), "unknown")
+        status = retail.status(self.c)
+        self.assertIsNotNone(status["token_used"])                                  # noted on a working call
+        self.assertEqual(status["token_expires"][:10], (date.today() + timedelta(days=retail.TOKEN_DAYS)).isoformat())
+        self.assertIsNone(status["token_problem"])
+        # taken off the sign-in list, the key they made stops working (like their sessions)
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
+            self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "owner_gone")
+            self.assertEqual(retail.status(self.c)["token_problem"], "owner_gone")
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
+            self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
+        # and it expires
+        db.set_setting(self.c, "retail_token_created", (datetime.now() - timedelta(days=retail.TOKEN_DAYS)).isoformat(timespec="seconds"))
+        self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "expired")
+        self.assertFalse(retail.check_token(self.c, f"Bearer {token}"))
+        for reason in ("expired", "owner_gone", "unknown"):
+            self.assertIn("Settings", retail.REFUSALS[reason])
+        retail.remove_token(self.c)
+        self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "unknown")
+        self.assertEqual(retail.status(self.c)["token_expires"], None)
+
+    def test_a_key_made_without_sign_in_only_expires(self):
+        token = retail.new_token(self.c, {"name": None, "email": None, "local": True})
+        self.assertIsNone(db.get_setting(self.c, "retail_token_owner"))
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "b@example.com"}):
+            self.assertIsNone(retail.token_check(self.c, f"Bearer {token}"))
 
 
 class AllocateTests(unittest.TestCase):

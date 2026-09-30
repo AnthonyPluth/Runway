@@ -12,7 +12,7 @@ from sqlalchemy import select
 from ... import carta_web, categorize, db, monitoring, retail
 from ... import settings_keys as sk
 from ...models import RetailCharge
-from ..common import ApiError
+from ..common import ApiError, _current
 
 
 def api_retail(conn, _q, _b):
@@ -20,8 +20,8 @@ def api_retail(conn, _q, _b):
 
 
 def api_retail_token(conn, _q, _b):
-    """A new key for the browser extension; shown once."""
-    return {"token": retail.new_token(conn)}
+    """A new key for the browser extension; shown once. It's the signed-in person's: it ends with their access."""
+    return {"token": retail.new_token(conn, getattr(_current, "user", None))}
 
 
 def api_retail_token_remove(conn, _q, _b):
@@ -187,13 +187,29 @@ def ext_target_order(conn, body):
 _retail_categorize_lock = threading.Lock()
 
 
+_categorize_waiting: set[str] = set()   # retailers with a categorizing thread waiting for the lock (one is enough)
+_categorize_waiting_lock = threading.Lock()
+
+
 def _categorize_retail(retailer: str) -> None:
     with _retail_categorize_lock:   # one at a time ("Import both" finishes Amazon, then Target)
+        with _categorize_waiting_lock:
+            _categorize_waiting.discard(retailer)   # from here on, a new finish needs a run of its own
         try:
             with db.session() as conn:
                 retail.categorize_and_apply(conn, retailer)
         except Exception:
             monitoring.report()
+
+
+def _categorize_later(retailer: str) -> None:
+    """Start a categorizing thread for this retailer, unless one is already waiting its turn: it picks up everything
+    saved by then, so a burst of finishes doesn't pile up threads (and AI calls)."""
+    with _categorize_waiting_lock:
+        if retailer in _categorize_waiting:
+            return
+        _categorize_waiting.add(retailer)
+    threading.Thread(target=_categorize_retail, args=(retailer,), daemon=True).start()
 
 
 def ext_finish(conn, body):
@@ -202,7 +218,7 @@ def ext_finish(conn, body):
     retailer = body.get("retailer")
     out = retail.finish(conn, retailer, complete=body.get("complete", True) is not False, categorize_now=False)
     conn.commit()
-    threading.Thread(target=_categorize_retail, args=(retailer,), daemon=True).start()
+    _categorize_later(retailer)
     return out
 
 

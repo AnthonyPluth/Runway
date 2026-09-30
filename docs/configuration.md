@@ -7,7 +7,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_PUBLIC_URL` | | The address you open Runway at, e.g. `https://runway.example.com`. Required with sign-in; also the OAuth issuer AI assistants connect to ([MCP](mcp.md)). |
 | `OIDC_ISSUER` | | Your identity provider's issuer URL. Setting it turns sign-in on. |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | The client registered with your provider. Leave the secret empty for a public (PKCE-only) client. |
-| `OIDC_ALLOWED_EMAILS` | | Comma-separated emails allowed in. An email counts only if your provider marks it verified (`email_verified`). Taking an email off ends that person's sessions, and the AI assistants they approved ([MCP](mcp.md)). |
+| `OIDC_ALLOWED_EMAILS` | | Comma-separated emails allowed in. An email counts only if your provider marks it verified (`email_verified`). Taking an email off ends that person's sessions, the AI assistants they approved ([MCP](mcp.md)), the browser extension key they made and their devices' notifications. |
 | `OIDC_TRUST_UNVERIFIED_EMAIL` | | `1` lets `OIDC_ALLOWED_EMAILS` match an email your provider doesn't mark verified. Only for a provider where nobody can register or change their own email (Microsoft Entra ID never sends `email_verified`). |
 | `OIDC_ALLOWED_GROUPS` | | Comma-separated groups (from the `groups` claim) allowed in. Groups are checked at sign-in, so an AI assistant someone approved keeps working until `RUNWAY_SESSION_DAYS` after they last signed in. |
 | `OIDC_ALLOW_ANY_USER` | | `1` lets in anyone your provider signs in. Only for a provider you fully control. |

@@ -62,7 +62,8 @@ export interface RecentOrder {
 }
 /** GET /api/retail */
 export interface RetailStatus {
-  token: boolean; token_created?: string | null; ai: boolean; stores: Record<"amazon" | "target" | "costco", StoreStatus>; recent: RecentOrder[];
+  token: boolean; token_created?: string | null; token_used?: string | null; token_expires?: string | null;
+  token_problem?: "expired" | "owner_gone" | null; ai: boolean; stores: Record<"amazon" | "target" | "costco", StoreStatus>; recent: RecentOrder[];
 }
 
 /** GET /api/equity (only the Carta part) */

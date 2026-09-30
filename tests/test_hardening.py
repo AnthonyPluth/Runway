@@ -208,16 +208,48 @@ class SyncOnVisitTests(unittest.TestCase):
             self.assertIsNotNone(db.get_setting(c, "last_auto_sync_attempt"))
 
 
+class LimitsTests(unittest.TestCase):
+    def test_numbers_have_a_ceiling(self):
+        self.assertEqual(db.number("1e12"), 1e12)
+        for huge in ("1e13", "-1e300", 10 ** 15):
+            with self.assertRaises(ValueError):
+                db.number(huge)
+
+    def test_a_month_is_near_today(self):
+        from runway.server.common import ApiError, _month_range
+        start, end = _month_range({"month": ["2026-09"]})
+        self.assertEqual((start.isoformat(), end.isoformat()), ("2026-09-01", "2026-10-01"))
+        for far in ("9999-11", "1999-01"):   # a rollover budget would be added up month by month to get there
+            with self.assertRaises(ApiError):
+                _month_range({"month": [far]})
+
+    def test_the_answer_is_json(self):
+        # An overflowed sum (inf) would otherwise go out as `Infinity`, which no browser reads.
+        from runway.server import handler
+        h = handler.Handler.__new__(handler.Handler)
+        sent = []
+        h._send = lambda status, body, *a, **k: sent.append((status, body))
+        with self.assertRaises(ValueError):
+            h._json(200, {"total": float("inf")})
+        self.assertEqual(sent, [])
+
+
 class OutboundTests(unittest.TestCase):
     def test_push_hosts(self):
         for ok in ("https://fcm.googleapis.com/fcm/send/abc", "https://updates.push.services.mozilla.com/wpush/v2/x",
                    "https://web.push.apple.com/QG", "https://wns2-par02p.notify.windows.com/w/?token=x"):
             self.assertTrue(notify.push_host_allowed(ok), ok)
         for bad in ("https://169.254.169.254/latest", "https://evil.example/x", "https://fcm.googleapis.com.evil.example/",
-                    "https://localhost/x"):
+                    "https://localhost/x",
+                    # an address urllib and requests read differently: refused outright rather than read around
+                    "https://evil.example\\@fcm.googleapis.com/x", "https://user@fcm.googleapis.com/x",
+                    "https://fcm.googleapis.com/x y", "http://fcm.googleapis.com/x", "https://fcm.googleapis.com:x/",
+                    "https://fcm.googleapis.com\t/x"):
             self.assertFalse(notify.push_host_allowed(bad), bad)
         with mock.patch.dict(os.environ, {"RUNWAY_PUSH_HOSTS": "ntfy.example.org"}):
             self.assertTrue(notify.push_host_allowed("https://ntfy.example.org/up123"))
+            self.assertTrue(notify.push_host_allowed("http://ntfy.example.org:8080/up123"))   # yours: plain http and a port
+            self.assertFalse(notify.push_host_allowed("https://x@ntfy.example.org/up123"))
 
     def test_simplefin_addresses_must_be_public(self):
         for url in ("https://127.0.0.1/claim", "https://10.0.0.5/simplefin", "https://[::1]/x", "https://169.254.169.254/",

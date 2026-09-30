@@ -7,7 +7,7 @@ from datetime import date
 from http.server import HTTPServer
 from unittest import mock
 
-from runway import db, notify, webpush
+from runway import db, notify, oidc, webpush
 from tests.test_webpush import PushService, decrypt, receiver
 
 TODAY = date(2026, 9, 23)
@@ -90,16 +90,31 @@ class NotifyTests(unittest.TestCase):
             notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": webpush.b64u(b"\x04" + bytes(64)), "auth": "x"}}, "d", None)
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
         self.assertEqual(self.c.execute("SELECT device FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[0], "iPhone · app")
-        # subscribing again (new keys) updates the device, but keeps who it belongs to and when it was added
+        # subscribing again (new keys) updates the device and whose it is, but keeps when it was added
         created = self.c.execute("SELECT created FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[0]
         _ua2, p256dh2, _ = receiver()
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "", "u2")
         row = self.c.execute("SELECT p256dh, auth, device, user_sub, created FROM push_subscriptions "
                              "WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()
-        self.assertEqual(tuple(row), (p256dh2, "ZGVm", "This device", "u1", created))
+        self.assertEqual(tuple(row), (p256dh2, "ZGVm", "This device", "u2", created))   # whoever is signed in there now
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "This device"])   # oldest first
         notify.unsubscribe(self.c, "https://fcm.googleapis.com/fcm/send/1")
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone"])
+
+    def test_devices_end_with_the_person(self):
+        # A device's notifications last as long as the person who turned them on may sign in (like their sessions).
+        oidc.remember_user(self.c, "u1", "a@example.com", "A")
+        oidc.remember_user(self.c, "u2", "b@example.com", "B")
+        for who, n in (("u1", 2), ("u2", 3)):   # both on the test's push service (setUp), as "Test phone" is
+            self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?)",
+                           (f"http://127.0.0.1:{self.srv.server_port}/p/{n}", self.p256dh, webpush.b64u(b"0123456789abcdef"), f"{who}'s phone", who, n))
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
+            self.assertTrue(notify.lapsed(self.c, {"user_sub": "u2"}))
+            self.assertFalse(notify.lapsed(self.c, {"user_sub": "u1"}))
+            self.assertFalse(notify.lapsed(self.c, {"user_sub": None}))   # subscribed without sign-in: nobody to lose
+            self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "u1's phone"])
+            self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 2)
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0], 2)
 
     def test_delivery_is_recorded_on_the_device(self):
         notify.send_all(self.c, {"title": "x"})
@@ -141,7 +156,8 @@ class NotifyTests(unittest.TestCase):
         self.assertEqual(sorted(got), ["big:chk|1", "review:2026-09-23", "syncfail:2026-09-23"])
         self.assertEqual((got["big:chk|1"]["title"], got["big:chk|1"]["body"]), ("$812.50 at Best Buy", "On Checking (Sam)."))
         self.assertEqual(got["review:2026-09-23"]["title"], "3 transactions to review")   # not the brokerage's
-        self.assertEqual(got["syncfail:2026-09-23"]["body"], "The bank said no")
+        self.assertNotIn("The bank said no", got["syncfail:2026-09-23"]["body"])   # not on a lock screen: the app has it
+        self.assertIn("Settings", got["syncfail:2026-09-23"]["body"])
         self.c.execute("INSERT INTO sync_log(ok, message) VALUES (1, 'fine again')")
         self.assertNotIn("syncfail:2026-09-23", {a["key"] for a in notify.alerts(self.c, TODAY, p)})
 

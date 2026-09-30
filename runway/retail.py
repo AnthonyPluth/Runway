@@ -37,7 +37,7 @@ from typing import Any
 from dateutil import parser as dateparser
 from sqlalchemy import case, delete, func, insert, select, update
 
-from . import categorize, db, monitoring, splits
+from . import categorize, db, monitoring, oidc, splits
 from . import settings_keys as sk
 from .models import Account, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 
@@ -119,25 +119,82 @@ def item_key(title: str | None) -> str:
 
 # ------------------------------------------------------------------------------------------------ the extension's key
 
-def new_token(conn) -> str:
-    """A new key for the browser extension (replacing any earlier one). Only a hash of it is kept."""
+TOKEN_DAYS = 90     # a key works this long, then the extension needs a new one from Settings (like a refresh token)
+TOUCH_EVERY = 60    # seconds between notes of when the key was last used
+
+def new_token(conn, owner: dict | None = None) -> str:
+    """A new key for the browser extension (replacing any earlier one). Only a hash of it is kept, with who made it
+    (`owner`: the signed-in person, {sub, email}): the key ends when they can no longer sign in (oidc.access_lapsed),
+    as their sessions and the assistants they approved do, and TOKEN_DAYS after it was made in any case."""
     token = "rwx_" + secrets.token_urlsafe(32)
     db.set_setting(conn, sk.RETAIL_TOKEN_HASH, hashlib.sha256(token.encode()).hexdigest())
     db.set_setting(conn, sk.RETAIL_TOKEN_CREATED, datetime.now().isoformat(timespec="seconds"))
+    db.set_setting(conn, sk.RETAIL_TOKEN_OWNER,
+                   json.dumps({"sub": owner["sub"], "email": owner.get("email")}) if owner and owner.get("sub") else None)
+    db.set_setting(conn, sk.RETAIL_TOKEN_USED, None)
     return token
 
 
 def remove_token(conn) -> None:
-    db.set_setting(conn, sk.RETAIL_TOKEN_HASH, None)
-    db.set_setting(conn, sk.RETAIL_TOKEN_CREATED, None)
+    for key in (sk.RETAIL_TOKEN_HASH, sk.RETAIL_TOKEN_CREATED, sk.RETAIL_TOKEN_OWNER, sk.RETAIL_TOKEN_USED):
+        db.set_setting(conn, key, None)
+
+
+def _when(text: str | None) -> datetime | None:
+    try:
+        return datetime.fromisoformat(text) if text else None
+    except ValueError:
+        return None
+
+
+def token_expires(conn) -> str | None:
+    """When the key stops working (TOKEN_DAYS after it was made), or None without a key."""
+    made = _when(db.get_setting(conn, sk.RETAIL_TOKEN_CREATED))
+    return (made + timedelta(days=TOKEN_DAYS)).isoformat(timespec="seconds") if made else None
+
+
+def token_problem(conn, now: datetime | None = None) -> str | None:
+    """Why the key no longer works, or None: "expired", or "owner_gone" (the person who made it can no longer sign in).
+    A key made before owners were kept has none, and ends only by expiring."""
+    now = now or datetime.now()
+    made = _when(db.get_setting(conn, sk.RETAIL_TOKEN_CREATED))
+    if made and now - made >= timedelta(days=TOKEN_DAYS):
+        return "expired"
+    try:
+        owner = json.loads(db.get_setting(conn, sk.RETAIL_TOKEN_OWNER) or "null")
+    except ValueError:
+        owner = None
+    if isinstance(owner, dict) and oidc.access_lapsed(conn, owner.get("sub"), owner.get("email")):
+        return "owner_gone"
+    return None
+
+
+def token_check(conn, authorization: str | None) -> str | None:
+    """Why a call's key is refused, or None if it's the key and it still works: "unknown" (no key, or not this one),
+    else token_problem's reason. A working key's last use is noted (at most every TOUCH_EVERY seconds)."""
+    want = db.get_setting(conn, sk.RETAIL_TOKEN_HASH)
+    m = re.match(r"Bearer\s+(\S+)$", (authorization or "").strip())
+    if not want or not m or not hmac.compare_digest(hashlib.sha256(m.group(1).encode()).hexdigest(), want):
+        return "unknown"
+    now = datetime.now()
+    problem = token_problem(conn, now)
+    if problem:
+        return problem
+    used = _when(db.get_setting(conn, sk.RETAIL_TOKEN_USED))
+    if not used or now - used > timedelta(seconds=TOUCH_EVERY):
+        db.set_setting(conn, sk.RETAIL_TOKEN_USED, now.isoformat(timespec="seconds"))
+    return None
 
 
 def check_token(conn, authorization: str | None) -> bool:
-    want = db.get_setting(conn, sk.RETAIL_TOKEN_HASH)
-    m = re.match(r"Bearer\s+(\S+)$", (authorization or "").strip())
-    if not want or not m:
-        return False
-    return hmac.compare_digest(hashlib.sha256(m.group(1).encode()).hexdigest(), want)
+    return token_check(conn, authorization) is None
+
+
+REFUSALS = {
+    "expired": f"This key has expired (a key lasts {TOKEN_DAYS} days). Make a new one under Settings → Browser extension.",
+    "owner_gone": "The person who made this key can no longer sign in to Runway. Make a new one under Settings → Browser extension.",
+    "unknown": "Runway doesn't know this key. Make a new one under Settings → Browser extension.",
+}
 
 
 # ------------------------------------------------------------------------------------------------ storing orders
@@ -375,30 +432,38 @@ def _deep(d, keys, depth: int = 3):
     return None
 
 
-def _find_orders(data) -> list[dict]:
+MAX_DEPTH = 40       # how deep into a reply the searches below look (a store's replies are a few levels; a crafted one isn't)
+MAX_ORDERS = 500     # orders taken from one page of history (a real page has a few dozen)
+
+
+def _find_orders(data, depth: int = 0) -> list[dict]:
     """The order objects in a reply: the first list of objects that carry an order number."""
+    if depth > MAX_DEPTH:
+        return []
     if isinstance(data, list):
         if data and all(isinstance(x, dict) for x in data) and any(_first(x, _NUMBER, ()) for x in data):
             return data
         for x in data:
-            found = _find_orders(x)
+            found = _find_orders(x, depth + 1)
             if found:
                 return found
     elif isinstance(data, dict):
         for k in ("orders", "order_history", "orderHistory", "data", "result"):
             if k in data:
-                found = _find_orders(data[k])
+                found = _find_orders(data[k], depth + 1)
                 if found:
                     return found
         for v in data.values():
             if isinstance(v, (list, dict)):
-                found = _find_orders(v)
+                found = _find_orders(v, depth + 1)
                 if found:
                     return found
     return []
 
 
-def _find_lines(obj) -> list[dict]:
+def _find_lines(obj, depth: int = 0) -> list[dict]:
+    if depth > MAX_DEPTH:
+        return []
     if isinstance(obj, dict):
         for k in _LINES:
             v = obj.get(k)
@@ -406,12 +471,12 @@ def _find_lines(obj) -> list[dict]:
                 return v
         for v in obj.values():
             if isinstance(v, (dict, list)):
-                found = _find_lines(v)
+                found = _find_lines(v, depth + 1)
                 if found:
                     return found
     elif isinstance(obj, list):
         for x in obj:
-            found = _find_lines(x)
+            found = _find_lines(x, depth + 1)
             if found:
                 return found
     return []
@@ -496,7 +561,7 @@ def _target_order(conn, o: dict, channel: str | None) -> tuple[str | None, bool]
 def target_history(conn, data, purchase_type: str | None = None) -> dict:
     """A page of Target's order history (online or in store). Returns whether to read the next page, and which
     orders need their details read."""
-    orders = _find_orders(data)
+    orders = _find_orders(data)[:MAX_ORDERS]
     start = since(conn, "target")
     numbers, older = [], False
     for o in orders:
@@ -671,7 +736,7 @@ def costco_history(conn, data) -> dict:
     err = _costco_error(data)
     if err:
         raise err
-    receipts = _costco_receipts(data)
+    receipts = _costco_receipts(data)[:MAX_ORDERS]
     saved = sum(1 for r in receipts if _costco_receipt(conn, r))
     return {"more": False, "orders": [], "read": len(receipts), "saved": saved}
 
@@ -1247,6 +1312,8 @@ def candidates(conn, charge_id: str) -> list[dict]:
 
 def status(conn) -> dict:
     out: dict[str, Any] = {"token": bool(db.get_setting(conn, sk.RETAIL_TOKEN_HASH)), "token_created": db.get_setting(conn, sk.RETAIL_TOKEN_CREATED),
+           "token_used": db.get_setting(conn, sk.RETAIL_TOKEN_USED), "token_expires": token_expires(conn),
+           "token_problem": token_problem(conn) if db.get_setting(conn, sk.RETAIL_TOKEN_HASH) else None,
            "ai": (db.get_setting(conn, sk.RETAIL_AI, "1") or "1") == "1", "stores": {}}
     c, o = RetailCharge, RetailOrder
     for r in RETAILERS:
