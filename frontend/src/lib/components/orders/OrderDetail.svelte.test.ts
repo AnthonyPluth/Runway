@@ -10,7 +10,7 @@ vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {})
 import { api } from "$lib/api";
 import OrderDetail from "./OrderDetail.svelte";
 
-beforeEach(() => vi.mocked(api).mockReset());
+beforeEach(() => { vi.mocked(api).mockReset(); });
 
 describe("an order's link to the store", () => {
   it.each([["amazon", "amazon.com"], ["target", "target.com"], ["costco", "costco.com"]])("names the right site for %s", async (retailer, site) => {
@@ -29,7 +29,7 @@ describe("changing something in an order", () => {
     let reload: (v: unknown) => void = () => {};
     vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string }) => {
       if (opts?.method === "POST") return { ok: true };
-      if (String(path).startsWith("/api/retail/orders/")) return vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/retail/orders/")).length > 1
+      if (path.startsWith("/api/retail/orders/")) return vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/retail/orders/")).length > 1
         ? new Promise((res) => { reload = res; }) : order;
       return {};
     }) as never);
