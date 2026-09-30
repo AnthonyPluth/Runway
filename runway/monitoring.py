@@ -45,11 +45,6 @@ _agent: contextvars.ContextVar[str | None] = contextvars.ContextVar("runway_ai_a
 _USERINFO = re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^/\s@]+@", re.I)
 _QUERY = re.compile(r"(\b[a-z][a-z0-9+.-]*://[^\s?#]*)\?[^\s#]*", re.I)
 _PLAID_TOKEN = re.compile(r"\b(access|public|link|processor)-(sandbox|development|production)-[0-9a-f-]{8,}", re.I)
-# A database error's text carries the row it was writing (SQLAlchemy's "[parameters: ...]", Postgres's "Failing row
-# contains (...)" and "Key (...)=(...)"): the date, amount and merchant of a transaction, say. The SQL stays.
-_SQL_PARAMETERS = re.compile(r"\[parameters: .*?\](?=\s*(?:\(Background on this error|\[SQL|\Z))", re.S)
-_FAILING_ROW = re.compile(r"(Failing row contains) \(.*?\)(?=\.?\s*$)", re.M)
-_KEY_VALUE = re.compile(r"(Key \([^)]*\))=\(.*?\)(?= (?:already exists|is not present|is still referenced|conflicts))")
 
 # Nothing collected automatically beyond the error and its code: the SDK's own switches, all off (bound query values
 # included, which it would otherwise send once this option is given).
@@ -66,10 +61,24 @@ def scrub(text):
         return text
     text = _USERINFO.sub(r"\1[Filtered]@", text)
     text = _QUERY.sub(r"\1?[Filtered]", text)
-    text = _SQL_PARAMETERS.sub("[parameters: [Filtered]]", text)
-    text = _FAILING_ROW.sub(r"\1 ([Filtered])", text)
-    text = _KEY_VALUE.sub(r"\1=([Filtered])", text)
+    text = _database_values(text)
     return _PLAID_TOKEN.sub("[Filtered]", text)
+
+
+def _database_values(text: str) -> str:
+    """A database error's text names the row it was writing: SQLAlchemy's "[parameters: ...]", and Postgres's "Failing row
+    contains (...)" and "Key (...)=(...) already exists". Blank the values and keep the rest (the SQL helps). Plain string
+    scans, a line at a time: a regex here could take quadratic time on text that repeats one of the markers."""
+    lines = text.split("\n")
+    for n, line in enumerate(lines):
+        if (i := line.find("[parameters: ")) != -1:
+            lines[n] = line[:i] + "[parameters: [Filtered]]"
+        elif (i := line.find("Failing row contains (")) != -1:
+            lines[n] = line[:i] + "Failing row contains ([Filtered])."
+        elif (i := line.find("Key (")) != -1 and (j := line.find(")=(", i)) != -1:
+            end = line.rfind(") ")   # before "already exists", "is not present in table ..." and the like
+            lines[n] = line[:j] + ")=([Filtered])" + (line[end + 1:] if end > j else "")
+    return "\n".join(lines)
 
 
 def _path_only(url: str | None) -> str | None:

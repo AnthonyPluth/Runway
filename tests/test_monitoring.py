@@ -123,6 +123,12 @@ class MonitoringTests(unittest.TestCase):
         self.assertIn("Failing row contains ([Filtered])", out)
         self.assertIn("Key (plaid_account_id)=([Filtered]) already exists", out)
         self.assertIn("(Background on this error at: https://sqlalche.me/e/20/gkpj)", out)
+        # Text that repeats a marker is scrubbed in linear time (a regex could take minutes on it).
+        import time
+        for marker in ("[parameters: ", "Failing row contains (", "Key (", "Key ()=("):
+            started = time.monotonic()
+            monitoring.scrub(marker * 50_000)
+            self.assertLess(time.monotonic() - started, 1, marker)
 
     def test_request_details_are_trimmed(self):
         ev = monitoring._before_send({"request": {"method": "POST", "url": "https://runway.example/api/sync?x=1",
