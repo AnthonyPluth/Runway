@@ -98,18 +98,17 @@ export const KIND_LABEL: Record<UpcomingItem["kind"], string> = {
 };
 
 export const PLAN_LABEL: Record<Plan, string> = {
-  undecided: "Undecided", keep: "Keep it", downgrade: "Downgrade", close: "Close it", product_change: "Product change",
+  undecided: "Undecided", keep: "Keep it", close: "Close it", product_change: "Product change (downgrade or switch)",
 };
 /** Plans that mean doing something to the card, so they have a day and a reminder. */
-export const PLAN_ACTS: Plan[] = ["downgrade", "close", "product_change"];
+export const PLAN_ACTS: Plan[] = ["close", "product_change"];
 
-/** A card's plan in a few words for its row: "Keeping it", "Downgrade to Freedom by Oct 20", "Done Oct 3". */
+/** A card's plan in a few words for its row: "Keeping it", "Product change to Freedom by Oct 20", "Done Oct 3". */
 export function planLine(c: ChurnCard): string {
   if (c.plan_done_on) return `Done ${fullDate(c.plan_done_on)}`;
   const by = c.plan_due ? ` by ${fmtDate(c.plan_due)}` : "";
   switch (c.plan) {
     case "keep": return "Keeping it";
-    case "downgrade": return `Downgrade${c.plan_target ? ` to ${c.plan_target}` : ""}${by}`;
     case "product_change": return `Product change${c.plan_target ? ` to ${c.plan_target}` : ""}${by}`;
     case "close": return `Close it${by}`;
     default: return "";

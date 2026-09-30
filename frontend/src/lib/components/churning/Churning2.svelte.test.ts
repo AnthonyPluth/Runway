@@ -93,8 +93,8 @@ describe("card form", () => {
 
   it("saves a plan and a hidden card as you change them", async () => {
     setup(card());
-    await userEvent.selectOptions(screen.getByLabelText("What I'll do with it"), "downgrade");
-    await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ plan: "downgrade" }));
+    await userEvent.selectOptions(screen.getByLabelText("What I'll do with it"), "product_change");
+    await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ plan: "product_change" }));
     await userEvent.click(screen.getByLabelText("Don't show this card in Upcoming"));
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ hide_upcoming: true }));
     expect(screen.getByText(/the day before the next annual fee posts/)).toBeInTheDocument();
