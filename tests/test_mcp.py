@@ -32,7 +32,7 @@ class KeyAndPagesTests(unittest.TestCase):
     def tearDown(self):
         with db.session() as conn:
             mcp_access.remove_token(conn)
-            mcp_access.remove_write_token(conn)
+            mcp_access.set_allow_writes(conn, False)
 
     def get(self, path, key=None, method="GET"):
         headers = {"X-Runway": "1", **({"Authorization": f"Bearer {key}"} if key else {})}
@@ -49,7 +49,7 @@ class KeyAndPagesTests(unittest.TestCase):
 
     def test_key_lifecycle(self):
         with db.session() as conn:
-            self.assertEqual(mcp_access.status(conn), {"token": False, "token_created": None, "write_token": False, "write_token_created": None})
+            self.assertEqual(mcp_access.status(conn), {"token": False, "token_created": None, "allow_writes": False})
             self.assertFalse(mcp_access.check_token(conn, "Bearer rwm_x"))
             key = mcp_access.new_token(conn)
             self.assertTrue(key.startswith("rwm_"))
@@ -94,7 +94,7 @@ class KeyAndPagesTests(unittest.TestCase):
         # the read key can never change churning (nor anything else): it's told so, not just refused
         status, said = self.get("/api/mcp/churning/cards", key, "POST")
         self.assertEqual(status, 403)
-        self.assertIn("write key", said["error"])
+        self.assertIn("switched off", said["error"])
 
     def test_every_readable_page_is_a_get_route(self):
         gets = {p for m, p, _ in server.ROUTES if m == "GET"}
@@ -111,27 +111,33 @@ class KeyAndPagesTests(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read() or b"null")
 
-    def test_write_key_lifecycle(self):
+    def test_the_switch_for_changes_is_off_until_turned_on_and_checked_every_time(self):
         with db.session() as conn:
-            read, write = mcp_access.new_token(conn), mcp_access.new_write_token(conn)
-            self.assertTrue(write.startswith("rww_"))
-            self.assertEqual((mcp_access.access(conn, f"Bearer {read}"), mcp_access.access(conn, f"Bearer {write}")), ("read", "write"))
-            self.assertIsNone(mcp_access.access(conn, "Bearer rww_nope"))
-            self.assertIsNone(mcp_access.access(conn, None))
-            self.assertFalse(mcp_access.check_token(conn, f"Bearer {write}"))     # check_token is the read key only
-            self.assertNotIn(write, json.dumps([dict(r) for r in conn.execute("SELECT key, value FROM settings").fetchall()]))
-            mcp_access.remove_write_token(conn)
-            self.assertEqual(mcp_access.access(conn, f"Bearer {write}"), None)
-            self.assertEqual(mcp_access.access(conn, f"Bearer {read}"), "read")
-        made = self.get("/api/mcp-key/write", method="POST")[1]["token"]
-        self.assertTrue(self.get("/api/mcp-key")[1]["write_token"])
-        self.assertEqual(self.get("/api/mcp/accounts", made)[0], 200)             # the write key reads too
-        self.assertEqual(self.get("/api/mcp-key/write/remove", method="POST")[0], 200)
-        self.assertEqual(self.get("/api/mcp/accounts", made)[0], 401)
+            self.assertFalse(mcp_access.allow_writes(conn))                       # off by default
+        key = self.make_key()
+        self.assertEqual(self.get("/api/mcp/access", key)[1], {"writes": False})
+        self.assertEqual(self.get("/api/mcp/access")[0], 401)                      # needs the key
+        self.assertEqual(self.get("/api/mcp-key")[1]["allow_writes"], False)
+        status, said = self.post("/api/mcp/churning/cards", key, {"owner": "Alex", "issuer": "chase", "product": "X", "opened_on": "2025-01-15"})
+        self.assertEqual(status, 403)
+        self.assertIn("switched off", said["error"])
+        with db.session() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 0)   # nothing was made
+        self.assertEqual(self.get("/api/mcp-key/writes", method="POST")[1], {"allow_writes": False})   # no body: off
+        r = urllib.request.Request(self.base + "/api/mcp-key/writes", method="POST", data=b'{"allow": true}',
+                                   headers={"X-Runway": "1", "Content-Type": "application/json"})
+        self.assertEqual(json.load(urllib.request.urlopen(r, timeout=20)), {"allow_writes": True})
+        self.assertEqual(self.get("/api/mcp/access", key)[1], {"writes": True})
+        self.assertEqual(self.get("/api/mcp/accounts", key)[0], 200)
+        # and off again takes effect on the very next change
+        with db.session() as conn:
+            mcp_access.set_allow_writes(conn, False)
+        self.assertEqual(self.post("/api/mcp/churning/cards", key, {"owner": "Alex"})[0], 403)
 
-    def test_write_key_makes_the_listed_churning_changes_and_nothing_else(self):
+    def test_with_the_switch_on_the_key_makes_the_listed_churning_changes_and_nothing_else(self):
         with db.session() as conn:
-            key = mcp_access.new_write_token(conn)
+            key = mcp_access.new_token(conn)
+            mcp_access.set_allow_writes(conn, True)
         status, card = self.post("/api/mcp/churning/cards", key, {"owner": "Alex", "issuer": "chase", "product": "Sapphire Reserve", "opened_on": "2025-01-15",
                                                                     "annual_fee": 550})
         self.assertEqual(status, 200, card)
@@ -154,12 +160,12 @@ class KeyAndPagesTests(unittest.TestCase):
         # never a delete, and nothing outside the list
         for path in (f"/api/mcp/churning/cards/{cid}/remove", f"/api/mcp/churning/benefits/{bid}/remove", f"/api/mcp/churning/tasks/{task['id']}/remove",
                      f"/api/mcp/churning/wishlist/{wish['id']}/remove", "/api/mcp/churning/currencies", "/api/mcp/churning/balances",
-                     "/api/mcp/accounts/chk", "/api/mcp/transactions", "/api/mcp/mcp-key", "/api/mcp/mcp-key/write", "/api/mcp/settings", "/api/mcp/backup",
+                     "/api/mcp/accounts/chk", "/api/mcp/transactions", "/api/mcp/mcp-key", "/api/mcp/mcp-key/writes", "/api/mcp/settings", "/api/mcp/backup",
                      "/api/mcp/plaid/status", "/api/mcp/churning/cards/1/extra"):
             with self.subTest(path=path):
                 self.assertEqual(self.post(path, key, {})[0], 404)
         self.assertEqual(self.get(f"/api/mcp/churning/cards/{cid}", key, "DELETE")[0], 404)
-        self.assertEqual(self.post(f"/api/mcp/churning/cards/{cid}", "rww_wrong", {"notes": "x"})[0], 401)
+        self.assertEqual(self.post(f"/api/mcp/churning/cards/{cid}", "rwm_wrong", {"notes": "x"})[0], 401)
         # a body that isn't an object is refused
         r = urllib.request.Request(self.base + f"/api/mcp/churning/cards/{cid}", method="POST", data=b"[1]", headers={"Authorization": f"Bearer {key}"})
         with self.assertRaises(urllib.error.HTTPError) as cm:
@@ -179,7 +185,7 @@ class KeyAndPagesTests(unittest.TestCase):
             self.assertNotRegex(path, r"remove|delete|currenc|balance|score|bank")
 
     def test_settings_routes_make_and_remove_the_key(self):
-        self.assertEqual(self.get("/api/mcp-key")[1], {"token": False, "token_created": None, "write_token": False, "write_token_created": None})
+        self.assertEqual(self.get("/api/mcp-key")[1], {"token": False, "token_created": None, "allow_writes": False})
         status, made = self.get("/api/mcp-key", method="POST")
         self.assertEqual(status, 200)
         self.assertEqual(self.get("/api/mcp/accounts", made["token"])[0], 200)
@@ -259,9 +265,10 @@ class ProtocolTests(unittest.TestCase):
         fake = Fake()
         off = ask("tools/call", {"name": "mark_benefit_used", "arguments": {"benefit_id": 1}}, fake)
         self.assertTrue(off["result"]["isError"])
-        self.assertEqual(fake.calls, [])                                          # nothing was sent to Runway
-        with mock.patch.dict(os.environ, {"RUNWAY_MCP_ALLOW_WRITES": "1"}):
-            tools = {t["name"]: t for t in ask("tools/list")["result"]["tools"]}
+        self.assertEqual([c for c in fake.calls if len(c) == 3], [])              # no change was sent to Runway
+        on = Fake({"access": {"writes": True}})
+        with mock.patch.dict(os.environ, {}):
+            tools = {t["name"]: t for t in ask("tools/list", fake=on)["result"]["tools"]}
             self.assertEqual(set(tools), {t["name"] for t in mcp_server.ALL_TOOLS})
             for t in mcp_server.WRITE_TOOLS:
                 with self.subTest(tool=t["name"]):
@@ -288,13 +295,14 @@ class ProtocolTests(unittest.TestCase):
                  ("add_planned_item", {"fields": {"product": "Gold"}}, ("churning/wishlist", {}, {"product": "Gold"})),
                  ("update_planned_item", {"wish_id": 3, "fields": {"status": "dropped"}}, ("churning/wishlist/3", {}, {"status": "dropped"}))]
         self.assertEqual({c[0] for c in calls}, {t["name"] for t in mcp_server.WRITE_TOOLS})
-        with mock.patch.dict(os.environ, {"RUNWAY_MCP_ALLOW_WRITES": "1"}):
+        fake = Fake({"access": {"writes": True}})
+        with mock.patch.dict(os.environ, {}):
             for name, args, want in calls:
                 with self.subTest(tool=name):
                     fake.calls.clear()
                     r = ask("tools/call", {"name": name, "arguments": args}, fake)
                     self.assertNotIn("isError", r["result"], r)
-                    self.assertEqual(fake.calls, [want])
+                    self.assertEqual([c for c in fake.calls if len(c) == 3], [want])
             self.assertTrue(ask("tools/call", {"name": "update_card", "arguments": {"card_id": "x", "fields": {}}}, fake)["result"]["isError"])
         from runway.mcp_access import WRITABLE
         for _name, _args, want in calls:   # every path a tool posts to is one the write key may reach
