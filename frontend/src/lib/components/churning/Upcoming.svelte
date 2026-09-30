@@ -7,6 +7,17 @@
   import { fmtDate, relDay } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import AlarmClock from "@lucide/svelte/icons/alarm-clock";
+  import CalendarCheck from "@lucide/svelte/icons/calendar-check";
+  import CreditCard from "@lucide/svelte/icons/credit-card";
+  import FileCheck from "@lucide/svelte/icons/file-check";
+  import Flag from "@lucide/svelte/icons/flag";
+  import Landmark from "@lucide/svelte/icons/landmark";
+  import ListChecks from "@lucide/svelte/icons/list-checks";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Target from "@lucide/svelte/icons/target";
+  import Ticket from "@lucide/svelte/icons/ticket";
+  import { benefitUse, planDone, taskSnooze } from "./actions";
   import { KIND_LABEL, daysUntil } from "./churning";
   import type { ChurnCard, UpcomingItem } from "./types";
 
@@ -25,6 +36,15 @@
     try { await api(`/api/churning/tasks/${i.task_id}`, { method: "POST", body: { done: true } }); toast("Done"); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
+  // An icon per kind, so a plan, a credit or a chance to apply stands out from a fee.
+  const ICON = {
+    task: ListChecks, fee: CreditCard, plan: Flag, bonus: Target, benefit: Ticket, five24: CalendarCheck, eligible: RotateCcw,
+    apply: FileCheck, offer_ends: AlarmClock, bank_due: Landmark, bank_hold: Landmark, bank_post: Landmark, bank_close: Landmark,
+    bank_fee: Landmark, bank_eligible: RotateCcw,
+  } satisfies Record<UpcomingItem["kind"], unknown>;
+  let snoozing = $state<number | null>(null);
+  const SNOOZE = [{ days: 7, label: "1 week" }, { days: 14, label: "2 weeks" }, { days: 30, label: "1 month" }];
+  const seePlanned = () => document.getElementById("churning-planned")?.scrollIntoView({ behavior: "smooth", block: "start" });
   async function add() {
     try {
       await api("/api/churning/tasks", { method: "POST", body: { card_id: card, due_on: due, action } });
@@ -64,15 +84,31 @@
       <ul class="divide-y">
         {#each shown as i, n (`${i.kind}:${i.card_id ?? i.bank_id ?? i.owner}:${i.task_id ?? ""}:${i.date}:${n}`)}
           {@const late = daysUntil(i.date, today) < 0}
+          {@const Icon = ICON[i.kind]}
           <li class="flex items-start gap-3 py-2.5">
             <div class={cn("w-24 shrink-0 text-sm tabular-nums", late ? "font-medium text-red-500" : i.warn ? "font-medium text-[var(--warning)]" : "text-muted-foreground")}>{when(i.date)}</div>
             <div class="min-w-0 flex-1">
-              <div class="text-sm"><span class="mr-1.5 text-xs text-muted-foreground">{KIND_LABEL[i.kind]}</span>{i.title}</div>
+              <div class="text-sm"><span class={cn("mr-1.5 inline-flex items-center gap-1 text-xs", i.kind === "apply" ? "text-[var(--good)]" : "text-muted-foreground")}><Icon class="size-3.5" aria-hidden="true" />{KIND_LABEL[i.kind]}</span>{i.title}</div>
               <div class="text-xs text-muted-foreground">{i.detail}{showOwner && i.owner && !i.title.startsWith(i.owner) ? ` · ${i.owner}` : ""}</div>
+              {#if snoozing === i.task_id && i.task_id != null}
+                <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="Snooze for">
+                  Snooze for
+                  {#each SNOOZE as s (s.days)}<Button variant="outline" size="sm" class="h-6 px-2 text-xs" onclick={() => { snoozing = null; taskSnooze(i.task_id!, s.days, onchanged); }}>{s.label}</Button>{/each}
+                </div>
+              {/if}
             </div>
-            {#if i.kind === "task"}
-              <Button variant="outline" size="sm" onclick={() => done(i)} aria-label={`Mark "${i.title}" done`}>Done</Button>
-            {/if}
+            <div class="flex shrink-0 flex-wrap justify-end gap-1.5">
+              {#if i.kind === "task"}
+                <Button variant="ghost" size="sm" aria-expanded={snoozing === i.task_id} onclick={() => (snoozing = snoozing === i.task_id ? null : (i.task_id ?? null))} aria-label={`Snooze "${i.title}"`}>Snooze</Button>
+                <Button variant="outline" size="sm" onclick={() => done(i)} aria-label={`Mark "${i.title}" done`}>Done</Button>
+              {:else if i.kind === "plan" && i.card_id != null}
+                <Button variant="outline" size="sm" onclick={() => planDone(i.card_id!, onchanged)} aria-label={`Mark "${i.title}" done`}>Done</Button>
+              {:else if i.kind === "benefit" && i.benefit_id != null}
+                <Button variant="outline" size="sm" onclick={() => benefitUse(i.benefit_id!, i.title, null, onchanged)} aria-label={`Mark "${i.title}" used`}>Mark used</Button>
+              {:else if i.kind === "apply" || i.kind === "offer_ends"}
+                <Button variant="ghost" size="sm" onclick={seePlanned}>See planned</Button>
+              {/if}
+            </div>
           </li>
         {/each}
       </ul>

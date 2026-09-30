@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -54,10 +55,10 @@
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{b ? `Edit ${b.bank}` : "Add a bank bonus"}</h3>
-  <datalist id="churn-bank-people">{#each d.people as p (p)}<option value={p}></option>{/each}</datalist>
+  
 
   <div class="mt-3 flex flex-wrap items-end gap-3">
-    <label class={lbl}>Whose account<Input class="w-36" list="churn-bank-people" bind:value={v.owner} {@attach edit("owner")} placeholder="First name" /></label>
+    <label class={lbl}>Whose account<OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} /></label>
     <label class={`${lbl} min-w-40 flex-1`}>Bank<Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" /></label>
     <label class={lbl}>Account
       <NativeSelect bind:value={v.account_type} {@attach edit("account_type")}>
