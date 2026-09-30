@@ -4,16 +4,15 @@
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, nb } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import BankIcon from "./BankIcon.svelte";
-  import { matchPlaidAccount, openPlaidLink } from "./plaid.svelte";
-  import type { PlaidAccount, PlaidItem } from "./types";
-  import { linkCls, selectCls, warnText } from "./ui";
+  import { openPlaidLink } from "./plaid.svelte";
+  import type { PlaidItem } from "./types";
+  import { linkCls, warnText } from "./ui";
 
   // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Bank and card accounts
-  // are matched to yours under Settings → Accounts; an investment connection's accounts are still matched here.
+  // (bank, card and investment) are matched to yours under Settings → Accounts.
   let { it, items }: { it: PlaidItem; items: PlaidItem[] } = $props();
 
   const utc = (t: string) => new Date(t.replace(" ", "T") + "Z");
@@ -41,9 +40,9 @@
       : `${d.shared} of these accounts ${d.shared === 1 ? "is" : "are"} also in the other ${inst} connection`}, so ${d.shared === 1 ? "it's" : "they're"} counted twice. Remove one of the two.`;
   });
 
-  const bankAccounts = $derived(it.accounts.filter((p) => p.type !== "investment"));
-  const waiting = $derived(bankAccounts.filter((p) => !p.account_id && !p.ignored).length);
-  const selected = (p: PlaidAccount) => p.account_id || "";
+  // Bank and card accounts wait until matched or left out (ignored); an investment account is left out as account_id "ignore".
+  const accounts = $derived(it.bank ? it.accounts.filter((p) => p.type !== "investment") : it.accounts);
+  const waiting = $derived(accounts.filter((p) => !p.account_id && !p.ignored).length);
 
   let syncing = $state(false);
   async function sync() {
@@ -64,25 +63,6 @@
   }
 </script>
 
-{#snippet account(p: PlaidAccount, kind: string)}
-  {@const sel = selected(p)}
-  <div class="flex flex-wrap items-center gap-3 border-t py-2">
-    <span class="flex min-w-0 flex-1 flex-col text-sm">
-      <span>{p.name || p.official_name || "Account"}{#if p.mask}{" "}<span class="text-muted-foreground">••{p.mask}</span>{/if}</span>
-      <span class="text-xs text-muted-foreground">{nb(kind)} · {nb(fmt(p.balance))}</span>
-    </span>
-    <select class={cn(selectCls, "w-full sm:ml-auto sm:w-60", sel && sel !== "ignore" && "border-transparent shadow-none dark:bg-transparent hover:border-input")}
-      aria-label="Which of your accounts this is" value={sel.startsWith("pl:") ? "new" : sel} onchange={(e) => matchPlaidAccount(p.id, e.currentTarget.value, false)}>
-      <option value="">Choose…</option>
-      {#if sel.startsWith("pl:")}<option value="new">Its own account</option>{:else}<option value="new">Add as a new account</option>{/if}
-      {#each (it.candidates || []).filter((a) => !a.linked_to || a.linked_to === p.id) as a (a.id)}
-        <option value={a.id}>Same as {a.display_name || a.name} ({fmt(a.balance)})</option>
-      {/each}
-      <option value="ignore">Don't count it</option>
-    </select>
-  </div>
-{/snippet}
-
 <div class="rounded-xl border px-3 py-2.5">
   <div class="flex flex-wrap items-center gap-3">
     <BankIcon name={it.institution_name} />
@@ -100,11 +80,7 @@
   </div>
   {#if duplicate}<p class={cn("mt-2 text-sm sm:ml-10", warnText)}>{duplicate}</p>{/if}
   <div class="mt-1.5 sm:ml-10">
-    {#if it.bank}
-      <p class="border-t pt-2 text-sm text-muted-foreground">{bankAccounts.length === 1 ? "1 account" : `${bankAccounts.length} accounts`}{#if waiting}{" · "}<a class={linkCls}
-        href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}</p>
-    {:else}
-      {#each it.accounts as p (p.id)}{@render account(p, p.subtype || "investment")}{:else}<p class="text-xs text-muted-foreground">no accounts yet</p>{/each}
-    {/if}
+    <p class="border-t pt-2 text-sm text-muted-foreground">{#if !accounts.length}no accounts yet{:else}{accounts.length === 1 ? "1 account" : `${accounts.length} accounts`}{#if waiting}{" · "}<a class={linkCls}
+      href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}{/if}</p>
   </div>
 </div>

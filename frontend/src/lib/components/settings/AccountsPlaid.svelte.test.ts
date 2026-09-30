@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 vi.mock("$lib/app.svelte", () => ({
-  app: { state: { owners: [], primary_account: null, horizon_days: 90, plaid_undecided: 1 }, version: 0 },
+  app: { state: { owners: [], primary_account: null, horizon_days: 90 }, version: 0 },
   reload: vi.fn(), refreshState: vi.fn(),
 }));
 
@@ -80,13 +80,92 @@ describe("Settings → Accounts: New from Plaid", () => {
     expect(toast.success).toHaveBeenCalledWith("Left out");
   });
 
-  it("keeps the ones you left out reachable, and only warns about investments still waiting", async () => {
+  it("keeps the ones you left out reachable, and no longer warns about investments elsewhere", async () => {
     serve(status([item([unmatched, ignored])]));
     render(AccountsSection, { accounts: [acct()] });
     expect(await screen.findByText("1 Plaid account you're not using")).toBeInTheDocument();
     expect(screen.getByText("Old Savings")).toBeInTheDocument();
-    // plaid_undecided is 1 and that one is the card above, so no investment warning
     expect(screen.queryByText(/investment account/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Bank connections" })).toBeNull();
+  });
+});
+
+describe("Settings → Accounts: investment accounts from Plaid", () => {
+  const roth = { id: "iv1", name: "Roth IRA", subtype: "ira", mask: "0001", balance: 5000, account_id: null };
+  const cands = [{ id: "roth", name: "Roth", display_name: "My Roth", balance: 5000, linked_to: null }, { id: "taken", name: "Taken", balance: 10, linked_to: "iv9" }];
+  const invItem = (accounts: PlaidItem["accounts"]) => item(accounts, { item_id: "it2", institution_name: "Fidelity", bank: false, products: ["investments"], candidates: cands });
+  const inv = (over: Partial<SettingsAccount> = {}) => acct({ id: "roth", name: "Roth", display_name: "My Roth", kind: "investment", balance: 5000, ...over });
+
+  it("lists an unmatched investment account in New from Plaid with the investment choices", async () => {
+    serve(status([item([unmatched]), invItem([roth])]));
+    render(AccountsSection, { accounts: [acct(), inv()] });
+    const group = await screen.findByRole("region", { name: "New from Plaid" });
+    expect(within(group).getByText("Roth IRA")).toBeInTheDocument();
+    const selects = within(group).getAllByRole("combobox");
+    expect(selects).toHaveLength(2);
+    expect(within(selects[1]).getAllByRole("option").map((o) => o.textContent))
+      .toEqual(["Choose…", "Add as a new account", "Same as My Roth ($5,000.00)", "Don't count it"]);   // "Taken" is linked to another
+  });
+
+  it("matches it through POST /api/plaid/match with the investment toast", async () => {
+    serve(status([invItem([roth])]));
+    render(AccountsSection, { accounts: [inv()] });
+    const group = await screen.findByRole("region", { name: "New from Plaid" });
+    await userEvent.selectOptions(within(group).getByRole("combobox"), "roth");
+    await waitFor(() => expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "iv1", target: "roth" } }));
+    expect(toast.success).toHaveBeenCalledWith("Matched: it's counted once");
+    vi.mocked(api).mockClear();
+    await userEvent.selectOptions(within(group).getByRole("combobox"), "new");
+    await waitFor(() => expect(matchCall()![1]).toMatchObject({ body: { plaid_account_id: "iv1", target: "new" } }));
+    expect(toast.success).toHaveBeenCalledWith("Added to your accounts");
+    vi.mocked(api).mockClear();
+    await userEvent.selectOptions(within(group).getByRole("combobox"), "ignore");
+    await waitFor(() => expect(matchCall()![1]).toMatchObject({ body: { plaid_account_id: "iv1", target: "ignore" } }));
+    expect(toast.success).toHaveBeenCalledWith("Left out");
+  });
+
+  it("keeps an investment account you left out reachable, and doesn't list a decided one", async () => {
+    serve(status([invItem([{ ...roth, account_id: "ignore" }, { ...roth, id: "iv2", name: "Brokerage", account_id: "roth" }])]));
+    render(AccountsSection, { accounts: [inv()] });
+    expect(await screen.findByText("1 Plaid account you're not using")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "New from Plaid" })).toBeNull();
+    const select = within(document.querySelector("details")!).getByRole("combobox") as HTMLSelectElement;
+    expect(select.value).toBe("ignore");
+  });
+
+  it("shows an investment account's data source and unlinks it", async () => {
+    const st = status([invItem([{ ...roth, account_id: "roth" }])]);
+    render(AccountRow, { a: inv(), cash: [], byName: {}, plaid: st, mine: [] });
+    expect(screen.getByText("SimpleFIN + Plaid ••0001")).toBeInTheDocument();
+    const section = screen.getByRole("region", { name: "Data source" });
+    expect(within(section).getByText(/Linked to Fidelity Roth IRA ••0001/)).toBeInTheDocument();
+    expect(within(section).getByText(/Plaid synced Sep 30/)).toBeInTheDocument();
+    await userEvent.click(within(section).getByRole("button", { name: "Unlink" }));
+    await waitFor(() => expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "iv1", target: "" } }));
+    expect(toast.success).toHaveBeenCalledWith("Unmatched");
+  });
+
+  it("links an unlinked investment account to a Plaid account at its institution", async () => {
+    const st = status([invItem([roth, { ...roth, id: "iv3", name: "Other IRA", mask: "7", account_id: "elsewhere" }])]);
+    render(AccountRow, { a: inv(), cash: [], byName: {}, plaid: st, mine: [] });
+    const select = within(screen.getByRole("region", { name: "Data source" })).getByRole("combobox", { name: "Link to a Plaid account" });
+    expect(within(select).getAllByRole("option").map((o) => o.textContent))
+      .toEqual(["Choose…", "Fidelity Roth IRA ••0001 · $5,000.00", "Connect an investment account through Plaid…"]);
+    await userEvent.selectOptions(select, "iv1");
+    await waitFor(() => expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "iv1", target: "roth" } }));
+    expect(toast.success).toHaveBeenCalledWith("Matched: it's counted once");
+  });
+
+  it("lets an investment account added from Plaid be changed to one of yours", async () => {
+    const own = inv({ id: "pl:iv1", name: "Roth IRA", display_name: null, provider: "plaid" });
+    const st = status([invItem([{ ...roth, account_id: "pl:iv1" }])]);
+    render(AccountRow, { a: own, cash: [], byName: {}, plaid: st, mine: [] });
+    expect(screen.getByText("Plaid ••0001")).toBeInTheDocument();
+    const select = within(screen.getByRole("region", { name: "Data source" })).getByRole("combobox", { name: "Which of your accounts this is" });
+    expect((select as HTMLSelectElement).value).toBe("new");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toContain("Its own account");
+    await userEvent.selectOptions(select, "roth");
+    await waitFor(() => expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "iv1", target: "roth" } }));
   });
 });
 
@@ -168,12 +247,19 @@ describe("Settings → Bank connections: a Plaid connection", () => {
     expect(screen.getByRole("link", { name: "Manage in Accounts" })).toHaveAttribute("href", "#setup/accounts");
   });
 
-  it("still matches an investment connection's accounts here", async () => {
-    const inv = item([{ id: "iv1", name: "Roth IRA", subtype: "ira", mask: "0001", balance: 5000, account_id: null }],
-      { bank: false, products: ["investments"], candidates: [{ id: "roth", name: "Roth", balance: 5000, linked_to: null }] });
-    items(inv);
-    await userEvent.selectOptions(screen.getByRole("combobox"), "roth");
-    await waitFor(() => expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "iv1", target: "roth" } }));
-    expect(toast.success).toHaveBeenCalledWith("Matched: it's counted once");
+  it("has no per-account selects on an investment connection either", () => {
+    const iv = { id: "iv1", name: "Roth IRA", subtype: "ira", mask: "0001", balance: 5000, account_id: null };
+    items(item([iv, { ...iv, id: "iv2", account_id: "ignore" }, { ...iv, id: "iv3", account_id: "roth" }],
+      { bank: false, products: ["investments"], candidates: [{ id: "roth", name: "Roth", balance: 5000, linked_to: null }] }));
+    expect(screen.queryByRole("combobox")).toBeNull();
+    expect(screen.getByText(/3 accounts/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "1 needs a decision →" })).toHaveAttribute("href", "#setup/accounts");
+    expect(screen.getByRole("button", { name: "Sync" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("says when an investment connection has no accounts yet", () => {
+    items(item([], { bank: false, products: ["investments"] }));
+    expect(screen.getByText("no accounts yet")).toBeInTheDocument();
   });
 });
