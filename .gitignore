@@ -21,6 +21,6 @@ venv/
 frontend/node_modules/
 runway/static/app/
 
-# test coverage data (CI turns it into the Pages badge JSON)
+# test coverage data (CI sends it to Codecov)
 .coverage
-coverage.json
+coverage.xml

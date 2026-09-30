@@ -20,12 +20,12 @@ export default defineConfig({
     // Logic tests run in Node (fast). A component test opts into the DOM with a `// @vitest-environment jsdom` first line.
     setupFiles: ["src/test/setup.ts"],
     // `npm run coverage`: how much of the web app the tests run, components included (so the number is honest about
-    // what's untested). CI turns coverage/coverage-summary.json into the README's frontend badge.
+    // what's untested). CI sends coverage/lcov.info to Codecov (the README's frontend badge).
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,svelte}"],
       exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/main.ts", "src/test/**"],
-      reporter: ["text-summary", "json-summary"],
+      reporter: ["text-summary", "lcov"],
     },
   },
   server: {
