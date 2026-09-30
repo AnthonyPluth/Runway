@@ -69,7 +69,7 @@
 </script>
 
 <Card.Root>
-  <Card.Header><Card.Title>Amazon and Target orders{#if data}<span class={titleNote}>optional, via the Runway browser extension</span>{/if}</Card.Title></Card.Header>
+  <Card.Header><Card.Title>Amazon, Target and Costco orders{#if data}<span class={titleNote}>optional, via the Runway browser extension</span>{/if}</Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-3">
     {#if error}
       <p class="text-sm text-muted-foreground">{error}</p>
@@ -77,7 +77,7 @@
       <p class="text-sm text-muted-foreground">Loading…</p>
     {:else}
       {@const r = data}
-      <p class={helpCls}>Runway matches each Amazon or Target charge to its order (online, or in store with your Target account) and
+      <p class={helpCls}>Runway matches each Amazon, Target or Costco charge to its order (online, or in store with your Target account) and
         splits the transaction by what you bought. Neither store has an API for this, so a small extension in your browser reads your
         orders with the sign-in you already have there and sends them only to Runway.</p>
       <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
@@ -99,11 +99,11 @@
             </span>
           {/if}
         </li>
-        <li>Stay signed in to Amazon and Target in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
+        <li>Stay signed in to Amazon, Target and Costco in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
       </ol>
 
       <div class="flex flex-col">
-        {#each (["amazon", "target"] as const) as k (k)}
+        {#each (["amazon", "target", "costco"] as const) as k (k)}
           {@const s = r.stores[k]}
           <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-0.5 border-b py-1.5 last:border-b-0">
             <b class="text-sm">{s.name}</b>
