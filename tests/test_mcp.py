@@ -82,9 +82,31 @@ class KeyAndPagesTests(unittest.TestCase):
         self.assertEqual(self.get("/api/mcp/reports/spending?months=3", key)[0], 200)
         self.assertEqual(self.get("/api/mcp/budget?month=bad", key)[0], 400)      # a handler's own refusal comes through
 
+    def test_the_key_reads_orders_with_their_items_and_categories(self):
+        key = self.make_key()
+        with db.session() as conn:
+            conn.execute("INSERT INTO retail_orders(id, retailer, order_number, channel, placed, total, details) VALUES ('costco|9', 'costco', '9', 'store', '2026-09-26', 10, 1)")
+            conn.execute("INSERT INTO retail_items(order_id, title, amount, quantity, category, category_source) VALUES ('costco|9', 'BANANAS', 5, 1, 'Groceries', 'ai')")
+        try:
+            status, recent = self.get("/api/mcp/retail", key)
+            self.assertEqual(status, 200)
+            self.assertIn("costco|9", json.dumps(recent))
+            status, order = self.get("/api/mcp/retail/orders/costco%7C9", key)
+            self.assertEqual(status, 200, order)
+            self.assertEqual([(i["title"], i["category"], i["category_source"]) for i in order["items"]], [("BANANAS", "Groceries", "ai")])
+            self.assertEqual(self.get("/api/mcp/retail/orders/nope", key)[0], 404)         # the page's own refusal comes through
+            self.assertEqual(self.get("/api/mcp/retail/orders/costco%7C9", None)[0], 401)
+            for path in ("/api/mcp/retail/orders/costco%7C9/suggest", "/api/mcp/retail/items/1", "/api/mcp/retail/token", "/api/mcp/retail/extension.zip"):
+                with self.subTest(path=path):
+                    self.assertEqual(self.get(path, key)[0], 404)                          # only those two pages
+        finally:
+            with db.session() as conn:
+                conn.execute("DELETE FROM retail_items WHERE order_id='costco|9'")
+                conn.execute("DELETE FROM retail_orders WHERE id='costco|9'")
+
     def test_key_opens_nothing_else(self):
         key = self.make_key()
-        for path in ("/api/mcp/state", "/api/mcp/plaid/status", "/api/mcp/backup", "/api/mcp/retail", "/api/mcp/push",
+        for path in ("/api/mcp/state", "/api/mcp/plaid/status", "/api/mcp/backup", "/api/mcp/retail/token", "/api/mcp/push",
                      "/api/mcp/mcp-key", "/api/mcp/settings", "/api/mcp/", "/api/mcp/../accounts", "/api/mcp/accounts/x"):
             with self.subTest(path=path):
                 self.assertEqual(self.get(path, key)[0], 404)
@@ -313,18 +335,36 @@ class ProtocolTests(unittest.TestCase):
             with self.subTest(tool=t["name"]):
                 fake = Fake({p: {"items": [], "cards": [], "upcoming": [], "five24": {}, "today": "2026-09-30"}
                              for p in ("overview", "accounts", "transactions", "budget", "categories", "cashflow", "month_pace",
-                                       "reports/spending", "reports/income", "reports/merchants", "networth", "recurring",
-                                       "investments", "equity", "churning", "churning/best")})
-                r = ask("tools/call", {"name": t["name"], "arguments": {"amount": 20}}, fake)
+                                       "reports/spending", "reports/income", "reports/merchants", "reports/breakdown", "retail", "networth", "recurring",
+                                       "investments", "equity", "churning", "churning/best", "retail/orders/x")})
+                r = ask("tools/call", {"name": t["name"], "arguments": {"amount": 20, "order_id": "x"}}, fake)
                 self.assertNotIn("isError", r["result"], r)
-                for path, _ in fake.calls:
-                    self.assertIn("/api/" + path, mcp_access.READABLE)
+                for path, *_rest in fake.calls:
+                    self.assertTrue("/api/" + path in mcp_access.READABLE or any(mcp_access_match(p, "/api/" + path) for p in mcp_access.READABLE_PATTERNS), path)
 
     def test_arguments_become_the_query(self):
         fake = Fake({"transactions": {"items": [{"id": "a", "posted": "2026-09-01", "amount": -5, "payee": "Cafe", "logo": "x" * 100, "splits": []}], "total": 9}})
         r = ask("tools/call", {"name": "list_transactions", "arguments": {"month": "2026-09", "search": "cafe", "limit": 500}}, fake)
         self.assertEqual(fake.calls[0], ("transactions", {"month": "2026-09", "account": None, "category": None, "q": "cafe", "limit": 200, "offset": None}))
         self.assertEqual(text(r), {"transactions": [{"id": "a", "posted": "2026-09-01", "amount": -5, "payee": "Cafe"}], "total": 9})   # trimmed
+
+    def test_order_and_breakdown_tools(self):
+        pages = {"retail": {"stores": {"costco": {"name": "Costco", "orders": 2, "matched": 1, "unmatched": 1, "last": "x", "junk": 1}},
+                            "recent": [{"id": "costco|9", "retailer": "costco"}, {"id": "amazon|1", "retailer": "amazon"}], "token": True},
+                 "retail/orders/costco%7C9": {"id": "costco|9", "raw": "{big}", "retailer": "costco", "charges": [{"id": "c"}],
+                                              "items": [{"id": 1, "title": "BANANAS", "quantity": 1, "amount": 5, "category": "Groceries", "category_source": "ai", "junk": 1}]},
+                 "reports/breakdown": {"categories": [{"category": "Groceries", "total": 5}]}}
+        fake = Fake(pages)
+        out = text(ask("tools/call", {"name": "list_orders", "arguments": {"retailer": "costco"}}, fake))
+        self.assertEqual([o["id"] for o in out["orders"]], ["costco|9"])
+        self.assertEqual(out["stores"]["costco"], {"name": "Costco", "orders": 2, "matched": 1, "unmatched": 1, "last": "x"})
+        got = text(ask("tools/call", {"name": "get_order", "arguments": {"order_id": "costco|9"}}, fake))
+        self.assertEqual(got["items"], [{"id": 1, "title": "BANANAS", "quantity": 1, "amount": 5, "category": "Groceries", "category_source": "ai"}])
+        self.assertNotIn("raw", got)
+        self.assertEqual(fake.calls[-1][0], "retail/orders/costco%7C9")                # the id is quoted into the path
+        self.assertTrue(ask("tools/call", {"name": "get_order", "arguments": {}}, fake)["result"]["isError"])
+        text(ask("tools/call", {"name": "spending_breakdown", "arguments": {"start": "2026-09-01", "end": "2026-10-01"}}, fake))
+        self.assertEqual(fake.calls[-1], ("reports/breakdown", {"start": "2026-09-01", "end": "2026-10-01"}))
 
     def test_churning_tools(self):
         cards = text(ask("tools/call", {"name": "churning_cards", "arguments": {}}))

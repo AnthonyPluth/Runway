@@ -21,8 +21,10 @@ READABLE = frozenset({
     "/api/overview", "/api/accounts", "/api/transactions", "/api/budget", "/api/categories", "/api/cashflow",
     "/api/month_pace", "/api/reports/spending", "/api/reports/income", "/api/reports/merchants",
     "/api/reports/merchant", "/api/reports/breakdown", "/api/reports/transactions", "/api/recurring", "/api/networth",
-    "/api/investments", "/api/equity", "/api/churning", "/api/churning/best",
+    "/api/investments", "/api/equity", "/api/churning", "/api/churning/best", "/api/retail",
 })
+# Readable pages with an id in the path (an order, with its items and their categories).
+READABLE_PATTERNS = ("/api/retail/orders/{id}",)
 
 
 # The churning changes the key may make while they're switched on (POST /api/mcp/<the same path>): adding and changing, checking things off,
