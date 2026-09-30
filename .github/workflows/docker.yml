@@ -77,22 +77,24 @@ jobs:
         run: |
           poetry run pip install --quiet "unittest-parallel==1.8.6"
           poetry run unittest-parallel -t . -s tests -j 4
-      # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and on main
-      # the number becomes the README's badge (the coverage-badge job below).
+      # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and the
+      # report goes to Codecov (the README's backend badge).
       - name: Run tests (sqlite) and measure coverage
         if: matrix.database == 'sqlite'
         run: |
           poetry run pip install --quiet "coverage==7.16.2" "unittest-parallel==1.8.6"
           poetry run unittest-parallel -t . -s tests -j 4 --coverage --coverage-rcfile pyproject.toml
           poetry run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
-          poetry run coverage json -q -o coverage.json
-      - name: Keep the coverage report
+          poetry run coverage xml -q -o coverage.xml
+      - name: Upload coverage to Codecov
         if: matrix.database == 'sqlite'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
         with:
-          name: coverage
-          path: coverage.json
-          retention-days: 7
+          files: coverage.xml
+          flags: backend
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false   # a Codecov outage never holds up a release
       - name: Check dependencies for known vulnerabilities
         if: matrix.database == 'sqlite'
         run: poetry run pip install --quiet "pip-audit==2.10.1" && poetry run pip-audit
@@ -108,7 +110,7 @@ jobs:
           poetry run mypy
 
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
-  # coverage, and make sure it builds.
+  # coverage, and build it (reporting its bundle sizes to Codecov).
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -128,58 +130,18 @@ jobs:
         run: npm run lint
       - name: Unit tests (Vitest), measuring coverage
         run: npm run coverage
-      - name: Keep the frontend coverage report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
         with:
-          name: coverage-frontend
-          path: frontend/coverage/coverage-summary.json
-          retention-days: 7
-      - run: npm run build
-
-  # The README's coverage badges: shields.io endpoint JSON (coverage-backend.json, coverage-frontend.json) written from
-  # the tests' coverage on main and published on GitHub Pages, so a new number needs no commit. Needs Settings > Pages >
-  # Source: GitHub Actions, turned on once.
-  coverage-badge:
-    needs: [test, web]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write             # deploy to GitHub Pages
-      id-token: write          # ...which verifies the deploy came from this workflow
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
-        with:
-          sparse-checkout: .github/scripts
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
-        with:
-          name: coverage
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
-        with:
-          name: coverage-frontend
-      - name: Write the badges
-        run: |
-          mkdir site
-          be=$(python3 .github/scripts/coverage_badge.py coverage.json site/coverage-backend.json "backend coverage")
-          fe=$(python3 .github/scripts/coverage_badge.py coverage-summary.json site/coverage-frontend.json "frontend coverage")
-          echo "Coverage: backend ${be}%, frontend ${fe}%" >> "$GITHUB_STEP_SUMMARY"
-          cat > site/index.html <<HTML
-          <!doctype html>
-          <meta charset="utf-8">
-          <title>Runway coverage</title>
-          <h1>Runway test coverage</h1>
-          <ul>
-            <li><a href="coverage-backend.json">Backend: ${be}%</a></li>
-            <li><a href="coverage-frontend.json">Frontend: ${fe}%</a></li>
-          </ul>
-          HTML
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9   # v5.0.0
-        with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346   # v5.0.1
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+      - name: Build (and send its bundle sizes to Codecov)
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: npm run build
 
   # The image is built while the tests run, and published only once they (and the web app's checks) pass.
   # build: works out the version, builds the image for this runner and checks it starts, then builds it for Intel/AMD

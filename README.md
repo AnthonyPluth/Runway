@@ -11,8 +11,8 @@
 
 <p align="center">
   <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml/badge.svg" alt="Build"></a>
-  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fanthonypluth.github.io%2FRunway%2Fcoverage-backend.json" alt="Backend test coverage"></a>
-  <a href="https://github.com/AnthonyPluth/Runway/actions/workflows/docker.yml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fanthonypluth.github.io%2FRunway%2Fcoverage-frontend.json" alt="Frontend test coverage"></a>
+  <a href="https://codecov.io/gh/AnthonyPluth/Runway?flags[0]=backend"><img src="https://img.shields.io/codecov/c/github/AnthonyPluth/Runway/main?flag=backend&amp;label=backend%20coverage" alt="Backend test coverage"></a>
+  <a href="https://codecov.io/gh/AnthonyPluth/Runway?flags[0]=frontend"><img src="https://img.shields.io/codecov/c/github/AnthonyPluth/Runway/main?flag=frontend&amp;label=frontend%20coverage" alt="Frontend test coverage"></a>
   <img src="https://img.shields.io/badge/python-3.14-3776AB?logo=python&amp;logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/packaging-Poetry-60A5FA?logo=poetry&amp;logoColor=white" alt="Poetry">
   <img src="https://img.shields.io/badge/database-SQLite%20%7C%20Postgres-4cc38a" alt="SQLite or Postgres">
