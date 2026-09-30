@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { loadCategories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -26,6 +27,30 @@
       changed();
     } catch (err) { toast.error((err as Error).message); }
   }
+  // The AI's suggestions for items that have no category, from the button above the items: nothing is saved until you use
+  // one (a suggested new category is created then).
+  type Suggestion = { item_id: number; category: string | null; new_category: { name: string; parent: string | null } | null };
+  let suggestions = $state<Record<number, Suggestion>>({});
+  let asking = $state(false);
+  async function suggest() {
+    asking = true;
+    try {
+      const list = await api<Suggestion[]>(`/api/retail/orders/${encodeURIComponent(orderId)}/suggest`, { method: "POST" });
+      suggestions = Object.fromEntries(list.map((s) => [s.item_id, s]));
+      if (!list.length) toast("The AI had nothing to suggest");
+    } catch (err) { toast.error((err as Error).message); }
+    asking = false;
+  }
+  async function useSuggestion(s: Suggestion) {
+    try {
+      const r = await api<{ category: string; created: boolean; orders: number }>(`/api/retail/items/${s.item_id}`,
+        { method: "POST", body: s.new_category ? { new_category: s.new_category } : { category: s.category } });
+      if (r.created) await loadCategories();
+      toast.success(r.created ? `Created ${r.category} and saved` : "Saved");
+      delete suggestions[s.item_id];
+      changed();
+    } catch (err) { toast.error((err as Error).message); }
+  }
   const charge = (id: string, what: string) => `/api/retail/charges/${encodeURIComponent(id)}/${what}`;
   function pick(id: string) { picking[id] = api<Candidate[]>(charge(id, "candidates"), { keep: true }).catch(() => []); }
 </script>
@@ -46,6 +71,12 @@
     </div>
 
     {#if o.items.length}
+      {#if o.items.some((x) => !x.category)}
+        <div class="flex items-center gap-2">
+          <Button size="sm" variant="outline" disabled={asking} onclick={suggest}>{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
+          <span class="text-xs text-muted-foreground">for the items with no category; it can propose a new one</span>
+        </div>
+      {/if}
       <div class="flex flex-col">
         {#each o.items as i (i.id)}
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
@@ -53,7 +84,13 @@
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
             <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
               onchange={(v) => v && post(`/api/retail/items/${i.id}`, { category: v }, (r) => (r.orders > 1 ? `Saved · used in ${r.orders} orders` : "Saved"))} />
-            <span class="text-xs text-muted-foreground">{i.category ? ITEM_SOURCES[i.category_source ?? ""] ?? "" : "uses the transaction's category"}</span>
+            {#if !i.category && suggestions[i.id]}
+              {@const s = suggestions[i.id]}
+              <Button size="sm" variant="outline" class="h-auto justify-start py-1 whitespace-normal" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
+                onclick={() => useSuggestion(s)}>{s.new_category ? `New: ${s.new_category.name}` : `Use ${s.category}`}</Button>
+            {:else}
+              <span class="text-xs text-muted-foreground">{i.category ? ITEM_SOURCES[i.category_source ?? ""] ?? "" : "uses the transaction's category"}</span>
+            {/if}
           </div>
         {/each}
       </div>

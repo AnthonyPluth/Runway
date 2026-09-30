@@ -349,6 +349,28 @@ def group_by_merchant(txs: list[dict]) -> list[list[dict]]:
     return list(groups.values())
 
 
+def create_proposed(conn, new: dict, is_income: bool = False) -> tuple[str, bool]:
+    """Accept a category the AI proposed ({"name", "parent"}): create it unless one of that name exists by now.
+    Returns its name and whether it was created. A parent that's gone, or too deep, makes it a top-level one."""
+    name = " ".join(str(new.get("name") or "").split())
+    if not name:
+        raise ValueError("The suggested category has no name")
+    existing = conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(name))).fetchone()
+    if existing:
+        return existing["name"], False
+    parent = new.get("parent") or None
+    if parent and not conn.execute(select(Category.name).where(Category.name == parent)).fetchone():
+        parent = None
+    try:
+        catmod.add(conn, name, parent, is_income=is_income and not parent)
+    except catmod.CategoryError as e:
+        if parent and "levels deep" in str(e):
+            catmod.add(conn, name, None)
+        else:
+            raise ValueError(str(e)) from e
+    return name, True
+
+
 def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, message, reply):
     conn.execute(insert(AiLog).values(purpose=purpose, model=model, merchants=merchants, answered=answered, new_cats=new_cats,
                                       ok=1 if ok else 0, seconds=round(seconds, 1), message=message, reply=(reply or "")[:1500]))
