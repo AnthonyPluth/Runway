@@ -14,7 +14,7 @@ const row = (over: Partial<RewardRow>): RewardRow => ({
 });
 const setup = (rows: RewardRow[]) => {
   const d = {
-    people: ["Alex"], currencies: [], rewards: { Alex: { currencies: rows, value: rows.reduce((a, r) => a + r.value, 0),
+    people: ["Alex"], currencies: [], currency_groups: [], rewards: { Alex: { currencies: rows, value: rows.reduce((a, r) => a + r.value, 0),
       balance_value: rows.reduce((a, r) => a + (r.balance_value ?? 0), 0) } },
   } as unknown as Churning;
   render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });

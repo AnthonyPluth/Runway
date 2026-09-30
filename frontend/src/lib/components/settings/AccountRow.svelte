@@ -18,9 +18,11 @@
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
+  import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { fmt, nb } from "$lib/format";
   import { accountName } from "$lib/types";
+  import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import BankIcon from "./BankIcon.svelte";
@@ -45,11 +47,7 @@
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
-  const owners = $derived.by(() => {
-    const names = [...(app.state?.owners ?? [])];
-    if (a.owner && a.owner !== "Joint" && !names.includes(a.owner)) names.push(a.owner);
-    return names;
-  });
+  const owners = $derived(app.state?.owners ?? []);
   const link = $derived(a.plaid_link);
   // Where balances and transactions come from: a choice once the account is matched to a Plaid account.
   const canSwitch = $derived(!a.id.startsWith("pl:") && !!link?.transactions);
@@ -117,11 +115,7 @@
       {#if a.display_name}<span class="truncate text-xs" title={bank}>From the bank: {bank}</span>{/if}
     </label>
     <label class={fieldCls}>Owner
-      <select class={selectCls} bind:value={owner} use:autosave={() => save(true)}>
-        <option value="">—</option>
-        {#each owners as n (n)}<option>{n}</option>{/each}
-        <option>Joint</option>
-      </select>
+      <OwnerSelect bind:value={owner} {owners} joint blank="—" {@attach fromAction(autosave, () => () => save(true))} />
     </label>
     {#if a.kind === "credit"}
       <label class={fieldCls}>Paid from

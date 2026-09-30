@@ -128,22 +128,19 @@ export function ratesText(rates: ChurnRate[], portalName?: string | null): strin
   return rates.map((r) => `${r.multiplier}x ${r.category}${r.portal_only ? ` (${portalName ? `via ${portalName}` : "portal"})` : ""}`).join(", ");
 }
 
-export interface RateRow { category: string; multiplier: string; portal_only: boolean }
+// A number box gives a number, or null (or "") once emptied; a form's rows hold whichever it last had.
+export interface RateRow { category: string; multiplier: string | number | null; portal_only: boolean }
+
+const blank = (x: unknown) => x == null || x === "";
 
 /** The `rates` a form sends: the base rate first (as the "*" marker), then each row. A row without a category or a
  * multiplier goes as it is, and the server's message names the problem. */
-export function ratesPayload(base: string, rows: RateRow[], marker = "*"): { category: string; multiplier: number | null; portal_only: boolean }[] {
-  const out = rows.map((r) => ({ category: r.category, multiplier: r.multiplier === "" ? null : Number(r.multiplier), portal_only: r.portal_only }));
-  return base === "" ? out : [{ category: marker, multiplier: Number(base), portal_only: false }, ...out];
+export function ratesPayload(base: string | number | null, rows: RateRow[], marker = "*"): { category: string; multiplier: number | null; portal_only: boolean }[] {
+  const out = rows.map((r) => ({ category: r.category, multiplier: blank(r.multiplier) ? null : Number(r.multiplier), portal_only: r.portal_only }));
+  return blank(base) ? out : [{ category: marker, multiplier: Number(base), portal_only: false }, ...out];
 }
 
-/** The choices for whose it is: the people, plus whoever it's already set to (an old name isn't lost), and "Joint"
- * where that makes sense (an account, not a card). */
-export function ownerChoices(owners: string[], current: string | null | undefined, joint = false): string[] {
-  const names = owners.filter((n) => n !== "Joint");
-  if (current && current !== "Joint" && !names.includes(current)) names.push(current);
-  return joint ? [...names, "Joint"] : names;
-}
+export { ownerChoices } from "$lib/owners";
 
 /** Currencies in the groups the server sent (bank points, airlines, hotels, cash); any it left out go last, under
  * "Other". */

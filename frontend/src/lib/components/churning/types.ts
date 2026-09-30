@@ -202,6 +202,9 @@ export interface CurrencyGroup { kind: CurrencyKind; label: string; keys: string
 export interface RewardRow {
   currency: string; name: string; earned: number; bonuses: number; balance: number | null; as_of?: string | null;
   cents: number; value: number; balance_value: number | null;
+  // An estimate of the balance now: what you entered plus the points the cards earned since its day (null when
+  // they earned none since).
+  earned_since?: number; est_balance?: number | null; est_value?: number | null;
 }
 
 export interface Task {
