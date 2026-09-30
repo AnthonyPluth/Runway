@@ -263,7 +263,7 @@ class StreamableHttpTests(RunwayServer):
             with self.subTest(key=k):
                 status, headers, _ = self.rpc(ping, k)
                 self.assertEqual(status, 401)
-                self.assertEqual(headers["WWW-Authenticate"], "Bearer")
+                self.assertTrue(headers["WWW-Authenticate"].startswith('Bearer realm="Runway", resource_metadata="'))
         status, _, _ = self.rpc(ping, headers={"Authorization": key})              # not a bearer header
         self.assertEqual(status, 401)
         self.assertEqual(self.rpc(ping, key)[0], 200)
