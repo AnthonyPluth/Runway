@@ -9,7 +9,9 @@
   import { valueSource } from "$lib/components/networth/homeValues";
   import type { Asset, NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Card from "$lib/components/ui/card";
+  import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -26,7 +28,22 @@
   }
   load();
 
-  const ch = $derived(d?.change["30d"]);
+  // The hero's range: it sets both the change figure and how much of the history the chart shows. A range with no data
+  // (`change` is null) can't be picked; if the chosen one has none, the first that does stands in.
+  const RANGES = [["30d", "30 days", 30], ["90d", "90 days", 90], ["1y", "1 year", 365]] as const;
+  let picked = $state<"30d" | "90d" | "1y">("30d");
+  const range = $derived(d?.change[picked] != null ? picked : RANGES.find(([k]) => d?.change[k] != null)?.[0] ?? picked);
+  const ch = $derived(d?.change[range]);
+  const rangeLabel = $derived(RANGES.find(([k]) => k === range)![1]);
+  const points = $derived.by(() => {
+    if (!d) return [];
+    const days = RANGES.find(([k]) => k === range)![2];
+    const from = new Date(`${d.today}T00:00:00Z`);
+    from.setUTCDate(from.getUTCDate() - days);
+    const cutoff = from.toISOString().slice(0, 10);
+    const inRange = d.history.filter((h) => h.date >= cutoff);
+    return inRange.length >= 2 ? inRange : d.history;
+  });
   const since = $derived(d?.first_snapshot ? fmtDate(d.first_snapshot, { month: "short", day: "numeric", year: "numeric" }) : null);
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
   const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
@@ -92,34 +109,34 @@
 {:else}
   <h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
 
-  <div class="mb-6 grid gap-4 md:grid-cols-3">
-    {#each [
-      { label: "Net worth", value: d.net, sub: ch != null ? `${signed(ch)} in the last 30 days` : since ? `tracking since ${since}` : "" },
-      { label: "Assets", value: d.assets, sub: assetGroups.map((g) => g.label).join(" · ") },
-      { label: "Liabilities", value: d.liabilities, sub: liabilities.map((g) => nb(`${g.label} ${fmt0(g.total)}`)).join(" · ") || "nothing owed" },
-    ] as t (t.label)}
-      <Card.Root class="gap-2">
-        <Card.Header>
-          <Card.Description>{t.label}</Card.Description>
-          <Card.Title class="text-2xl tabular-nums">{fmt0(t.value)}</Card.Title>
-        </Card.Header>
-        <Card.Content class={cn("text-sm text-muted-foreground tabular-nums", t.label === "Net worth" && ch != null && ch > 0 && "text-emerald-500")}>{t.sub}</Card.Content>
-      </Card.Root>
-    {/each}
-  </div>
-
-  <Card.Root class="mb-6">
-    <Card.Header><Card.Title>Over time</Card.Title></Card.Header>
-    <Card.Content>
-      {#if d.history.length >= 2}
-        <LineChart xs={d.history.map((h) => h.date)} height={220} fmtY={shortMoney} fmtTip={fmt}
-          series={[{ name: "Net worth", values: d.history.map((h) => h.net), cls: "s-main", area: true }]} />
-      {:else}
-        <p class="py-6 text-center text-sm text-muted-foreground">Today: {fmt0(d.net)}</p>
-        <p class="text-sm text-muted-foreground">Fills in as the days go by.</p>
-      {/if}
-    </Card.Content>
-  </Card.Root>
+  <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
+  <section class="mb-8">
+    <div class="sr-only">Net worth</div>
+    <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt0(d.net)}</div>
+    {#if d.history.length >= 2}
+      <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p class={cn("text-[15px] tabular-nums", ch != null && ch > 0 ? "text-emerald-500" : "text-muted-foreground")}>
+          {ch != null ? `${signed(ch)} in the last ${rangeLabel}` : "Not enough history for a change yet"}
+        </p>
+        <Segmented label="Change over" value={range} onchange={(v) => (picked = v as typeof picked)}
+          options={RANGES.map(([value]) => ({ value, label: value, disabled: d!.change[value] == null }))} />
+      </div>
+    {:else}
+      <p class="mt-2 text-[15px] text-muted-foreground">
+        {since ? `Tracking since ${since}. ` : ""}The chart fills in as the days go by.
+      </p>
+    {/if}
+    <StatStrip class="mt-5" items={[
+      { label: "Assets", value: fmt0(d.assets), sub: assetGroups.map((g) => g.label).join(" · ") },
+      { label: "Liabilities", value: fmt0(d.liabilities), sub: liabilities.map((g) => nb(`${g.label} ${fmt0(g.total)}`)).join(" · ") || "nothing owed" },
+    ]} />
+    {#if d.history.length >= 2}
+      <div class="mt-5">
+        <LineChart xs={points.map((h) => h.date)} height={220} fmtY={shortMoney} fmtTip={fmt}
+          series={[{ name: "Net worth", values: points.map((h) => h.net), cls: "s-main", area: true }]} />
+      </div>
+    {/if}
+  </section>
 
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
