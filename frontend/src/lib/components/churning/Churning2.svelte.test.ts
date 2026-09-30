@@ -324,7 +324,7 @@ describe("the Churning page", () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [] }))) as never);
     render(Churning, { sub: "" });
     const value = await screen.findByText("0/24");
-    const tile = value.closest("[data-slot=card]");
+    const tile = value.closest<HTMLElement>("[data-slot=card]");
     expect(tile).toBeInTheDocument();
     expect(within(tile!).getByText("5/24")).toBeInTheDocument();
     expect(within(tile!).getByText("Add cards you've opened in the last 24 months")).toBeInTheDocument();
