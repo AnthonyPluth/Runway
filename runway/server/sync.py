@@ -52,7 +52,9 @@ def run_sync() -> dict:
                 # Every bank sync that starts checks in with Sentry's Cron Monitor (SENTRY_CRONS), yours from the Sync
                 # button too: the monitor is about the data being fresh each day. One that can't start (another is
                 # running, nothing is connected) doesn't.
-                check_in = monitoring.cron_start(CRON_SLUG, f"0 {DAILY_SYNC_HOUR} * * *")
+                # With automatic syncing off (--no-sync), there's no daily schedule to promise: the check-in goes to a
+                # monitor you set up, and doesn't create one that would report every day you don't press Sync as missed.
+                check_in = monitoring.cron_start(CRON_SLUG, f"0 {DAILY_SYNC_HOUR} * * *" if AUTO_SYNC else None)
                 use_plaid = has_plaid and plaid_due(db.get_setting(conn, sk.LAST_PLAID_BANK_SYNC))
                 if use_plaid:   # counted when asked, so a failing Plaid isn't asked again until tomorrow
                     db.set_setting(conn, sk.LAST_PLAID_BANK_SYNC, datetime.now().isoformat(timespec="seconds"))

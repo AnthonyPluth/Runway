@@ -45,6 +45,11 @@ _agent: contextvars.ContextVar[str | None] = contextvars.ContextVar("runway_ai_a
 _USERINFO = re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^/\s@]+@", re.I)
 _QUERY = re.compile(r"(\b[a-z][a-z0-9+.-]*://[^\s?#]*)\?[^\s#]*", re.I)
 _PLAID_TOKEN = re.compile(r"\b(access|public|link|processor)-(sandbox|development|production)-[0-9a-f-]{8,}", re.I)
+# A database error's text carries the row it was writing (SQLAlchemy's "[parameters: ...]", Postgres's "Failing row
+# contains (...)" and "Key (...)=(...)"): the date, amount and merchant of a transaction, say. The SQL stays.
+_SQL_PARAMETERS = re.compile(r"\[parameters: .*?\](?=\s*(?:\(Background on this error|\[SQL|\Z))", re.S)
+_FAILING_ROW = re.compile(r"(Failing row contains) \(.*?\)(?=\.?\s*$)", re.M)
+_KEY_VALUE = re.compile(r"(Key \([^)]*\))=\(.*?\)(?= (?:already exists|is not present|is still referenced|conflicts))")
 
 # Nothing collected automatically beyond the error and its code: the SDK's own switches, all off (bound query values
 # included, which it would otherwise send once this option is given).
@@ -61,6 +66,9 @@ def scrub(text):
         return text
     text = _USERINFO.sub(r"\1[Filtered]@", text)
     text = _QUERY.sub(r"\1?[Filtered]", text)
+    text = _SQL_PARAMETERS.sub("[parameters: [Filtered]]", text)
+    text = _FAILING_ROW.sub(r"\1 ([Filtered])", text)
+    text = _KEY_VALUE.sub(r"\1=([Filtered])", text)
     return _PLAID_TOKEN.sub("[Filtered]", text)
 
 
@@ -430,14 +438,15 @@ def local_timezone() -> str | None:
     return None
 
 
-def cron_start(slug: str, schedule: str, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
-    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. Sentry creates
-    the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. When the zone can't be
-    told, the monitor isn't made here (its schedule would be off by hours): set it up in Sentry with the same slug."""
+def cron_start(slug: str, schedule: str | None, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
+    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. With a schedule,
+    Sentry creates the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. Without
+    one (the job isn't on a schedule here), or when the zone can't be told (the schedule would be off by hours), the
+    check-in carries no monitor_config: it goes to a monitor set up in Sentry with the same slug, and makes none."""
     if not (_enabled and _opts.get("crons")):
         return None
     from sentry_sdk.crons import capture_checkin
-    zone = local_timezone()
+    zone = local_timezone() if schedule else None
     config: Any = {"schedule": {"type": "crontab", "value": schedule}, "timezone": zone,
                    "checkin_margin": margin_minutes, "max_runtime": max_runtime_minutes} if zone else None
     check = {"slug": slug, "config": config, "started": time.monotonic()}
