@@ -156,6 +156,26 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(errors, [])
             self.assertEqual(drift(path), [])
 
+    @unittest.skipUnless(db.using_postgres(), "Postgres only: the lock is Postgres's")
+    def test_a_tests_own_schema_migrates_without_waiting_for_another(self):
+        # Each test's own schema has its own lock, so parallel tests don't all queue on one (the whole Postgres run
+        # used to wait on it). Two migrations of the same schema still take turns (the test above).
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            held, free = os.path.join(tmp, "held.db"), os.path.join(tmp, "free.db")
+            db.migrate(held)
+            with db.engine(held).connect() as other:                            # hold held's lock, as a migration would
+                other.exec_driver_sql(f"SELECT pg_advisory_xact_lock({db.SCHEMA_LOCK}, hashtext(current_schema()))")
+                waiting = threading.Thread(target=db.migrate, args=(held,))
+                waiting.start()
+                db.migrate(free)                                                 # another schema: doesn't wait
+                self.assertEqual(drift(free), [])
+                waiting.join(1)
+                self.assertTrue(waiting.is_alive())                             # the same schema: waits for its turn
+                other.rollback()                                                  # the lock goes with the transaction
+            waiting.join(30)
+            self.assertFalse(waiting.is_alive())
+
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:
