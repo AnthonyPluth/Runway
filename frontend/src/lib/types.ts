@@ -5,7 +5,13 @@ export interface Brand { institution?: string; /** Logo.dev's logo for the insti
 export interface SyncLog { ok: boolean; message?: string }
 
 /** GET /api/state (runway/server.py api_state). */
-export interface SentryConfig { dsn: string; environment: string; release: string }
+export interface SentryConfig {
+  dsn: string; environment: string; release: string;
+  /** Shares (0 to 1) of visits to trace, to profile while tracing, and to record as a replay (always, or when there's an error). */
+  traces?: number; profiles?: number; replays?: number; replays_on_error?: number;
+  /** Console warnings and errors as Sentry Logs; "Send feedback" in Settings. */
+  logs?: boolean; feedback?: boolean;
+}
 
 export interface AppState {
   connected: boolean;

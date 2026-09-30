@@ -13,7 +13,7 @@ from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_co
 
 from . import categories as catmod
 from . import settings_keys as sk
-from . import db, rules as rulesmod, splits
+from . import db, monitoring, rules as rulesmod, splits
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
@@ -215,17 +215,20 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
         ctx.load_verify_locations(certifi.where())
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
-    try:
-        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
-            data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode(errors="replace")[:300]
-        raise RuntimeError(f"OpenRouter HTTP {e.code}: {detail}") from e
-    if data.get("error"):
-        raise RuntimeError(f"OpenRouter: {data['error']}")
-    content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-    if isinstance(content, list):  # some providers return content parts
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
+    with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0) as span:
+        try:
+            with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+                data = json.loads(resp.read().decode())
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode(errors="replace")[:300]
+            raise RuntimeError(f"OpenRouter HTTP {e.code}: {detail}") from e
+        if data.get("error"):
+            raise RuntimeError(f"OpenRouter: {data['error']}")
+        content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        if isinstance(content, list):  # some providers return content parts
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        monitoring.ai_result(span, data, model, content)
     return content
 
 
@@ -398,34 +401,36 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
         if len(examples) >= 60:
             break
     out: list[tuple[str | None, float]] = []
-    for start in range(0, len(groups), 40):
-        batch = groups[start : start + 40]
-        payload = [
-            {"i": i, "date": g[-1]["posted"], "amount": round(g[-1]["amount"], 2), "account_type": g[-1]["kind"],
-             "payee": g[-1]["payee"], "description": g[-1]["description"]}
-            for i, g in enumerate(batch)
-        ]
-        began, reply = time.time(), None
-        try:
-            reply = caller(api_key, model, build_prompt(categories, examples, payload, _subcategory_hints(conn), allow_new))
-            if extract_json_array(reply) is None:
-                snippet = " ".join((reply or "(empty reply)").split())[:160]
-                raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                 f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
-            results = parse_ai_reply(reply, categories, allow_new)
-            db.set_setting(conn, sk.LAST_LLM_ERROR, None)
-            answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
-            new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
-            _log(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
-                 f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
-                 reply)
-        except Exception as e:  # network or API error
-            db.set_setting(conn, sk.LAST_LLM_ERROR, str(e)[:300])
-            _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
+    # One agent run in Sentry's Agent Tracing (monitoring.py): its batches are the turns of one conversation.
+    with monitoring.ai_agent("Transaction categorizer", purpose):
+        for start in range(0, len(groups), 40):
+            batch = groups[start : start + 40]
+            payload = [
+                {"i": i, "date": g[-1]["posted"], "amount": round(g[-1]["amount"], 2), "account_type": g[-1]["kind"],
+                 "payee": g[-1]["payee"], "description": g[-1]["description"]}
+                for i, g in enumerate(batch)
+            ]
+            began, reply = time.time(), None
+            try:
+                reply = caller(api_key, model, build_prompt(categories, examples, payload, _subcategory_hints(conn), allow_new))
+                if extract_json_array(reply) is None:
+                    snippet = " ".join((reply or "(empty reply)").split())[:160]
+                    raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
+                                     f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
+                results = parse_ai_reply(reply, categories, allow_new)
+                db.set_setting(conn, sk.LAST_LLM_ERROR, None)
+                answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))
+                new_cats = sum(1 for r in results.values() if len(r) > 2 and r[2])
+                _log(conn, purpose, model, len(batch), answered, new_cats, True, time.time() - began,
+                     f"Suggested a category for {answered} of {len(batch)} merchants" + (f", including {new_cats} new categor{'y' if new_cats == 1 else 'ies'}" if new_cats else ""),
+                     reply)
+            except Exception as e:  # network or API error
+                db.set_setting(conn, sk.LAST_LLM_ERROR, str(e)[:300])
+                _log(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
+                conn.commit()
+                raise RuntimeError(f"The AI request failed: {e}") from e
             conn.commit()
-            raise RuntimeError(f"The AI request failed: {e}") from e
-        conn.commit()
-        out += [results.get(i, empty) for i in range(len(batch))]
+            out += [results.get(i, empty) for i in range(len(batch))]
     return out
 
 

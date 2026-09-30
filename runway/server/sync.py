@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import sys
 import threading
 import time
 from datetime import date, datetime, timedelta
@@ -82,6 +81,7 @@ def run_sync() -> dict:
                 networth.summary(conn)   # record today's net worth
                 conn.execute(insert(SyncLog).values(ok=1, message=msg))
                 db.set_setting(conn, sk.LAST_SYNC_OK, datetime.now().isoformat(timespec="seconds"))
+                monitoring.metric("count", "runway.sync.new_transactions", len(result["new"]))
                 return {"new": len(result["new"]), "categorized": counts, "bank_messages": result["errors"]}
         except ApiError:
             raise
@@ -179,19 +179,24 @@ def refresh_plaid() -> None:
                 return
             db.set_setting(conn, sk.LAST_PLAID_REFRESH, datetime.now().isoformat(timespec="seconds"))
             conn.commit()
-            for e in plaidbank.refresh_all(conn):
-                print(f"Plaid refresh: {e}", file=sys.stderr)
+            with monitoring.task("plaid refresh"):   # traced only when it's due, not on every check
+                for e in plaidbank.refresh_all(conn):
+                    monitoring.log(f"Plaid refresh: {e}", "warning", stderr=True)
     except Exception:
         monitoring.report()
 
 
 def _sync_everything(bank: bool, invest: bool) -> None:
+    """The syncs Runway starts itself (the daily one, and catching up when you open it), each a trace of its own. The
+    bank sync checks in with a Sentry Cron Monitor (SENTRY_CRONS), so a day it doesn't happen, or fails, alerts you."""
     if bank:
-        with contextlib.suppress(ApiError):
+        with contextlib.suppress(ApiError), monitoring.cron("runway-bank-sync", f"0 {DAILY_SYNC_HOUR} * * *"), \
+                monitoring.task("bank sync"):
             run_sync()
-        notify_now()
+        with monitoring.task("notifications"):
+            notify_now()
     if invest:
-        with contextlib.suppress(ApiError):
+        with contextlib.suppress(ApiError), monitoring.task("investment sync"):
             run_investment_sync()
 
 

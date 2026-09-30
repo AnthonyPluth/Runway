@@ -1,11 +1,17 @@
+import io
+import json
 import os
+import tempfile
+import threading
 import unittest
+import urllib.request
 from unittest import mock
 
 
 import sentry_sdk
 
-from runway import monitoring, server
+from runway import categorize, db, monitoring, server
+from runway.server.handler import _traced, trace_name
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
@@ -15,16 +21,33 @@ class Capture(sentry_sdk.transport.Transport):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.events = []
+        self.items: list[tuple[str, object]] = []   # everything else: transactions, check-ins, logs, metrics
 
     def capture_envelope(self, envelope):
         self.events += [i.payload.json for i in envelope.items if i.type == "event"]
+        self.items += [(i.type, i.payload.json) for i in envelope.items if i.type != "event"]
+
+    def of(self, kind):
+        return [p for t, p in self.items if t == kind]
+
+
+ALL_ON = {"SENTRY_DSN": DSN, "SENTRY_TRACES_SAMPLE_RATE": "1", "SENTRY_LOGS": "1", "SENTRY_METRICS": "1", "SENTRY_CRONS": "1"}
+
+
+def start(env=None) -> Capture:
+    """Reporting on (with everything in ALL_ON unless `env` says otherwise), sending to a Capture instead of Sentry."""
+    with mock.patch.dict(os.environ, env or ALL_ON), mock.patch("builtins.print"):
+        assert monitoring.init()
+    transport = Capture()
+    sentry_sdk.get_client().transport = transport
+    return transport
 
 
 class MonitoringTests(unittest.TestCase):
     def tearDown(self):
         sentry_sdk.get_client().close()
         sentry_sdk.init(dsn=None)
-        monitoring._enabled = False
+        monitoring._enabled, monitoring._opts = False, {}
 
     def test_off_without_a_dsn(self):
         with mock.patch.dict(os.environ, {"SENTRY_DSN": ""}):
@@ -88,6 +111,195 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"SENTRY_DSN": "http://k@evil.example/1"}):   # not https: never allowed
             self.assertIsNone(monitoring.browser_config())
             self.assertIsNone(monitoring.browser_origin())
+
+
+    def test_the_web_app_is_told_which_features_are_on(self):
+        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN}):
+            cfg = monitoring.browser_config()
+            self.assertEqual((cfg["traces"], cfg["profiles"], cfg["replays"], cfg["logs"], cfg["feedback"]), (0, 0, 0, False, False))
+            self.assertFalse(monitoring.browser_profiling())
+        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN, "SENTRY_TRACES_SAMPLE_RATE": "0.5",
+                                          "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1", "SENTRY_REPLAY_SAMPLE_RATE": "2",
+                                          "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE": "x", "SENTRY_LOGS": "1", "SENTRY_FEEDBACK": "true"}):
+            cfg = monitoring.browser_config()
+            self.assertEqual((cfg["traces"], cfg["profiles"], cfg["replays"], cfg["replays_on_error"], cfg["logs"], cfg["feedback"]),
+                             (0.5, 1.0, 1.0, 0.0, True, True))
+            self.assertTrue(monitoring.browser_profiling())
+        with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"}):
+            self.assertEqual(monitoring.browser_config()["profiles"], 0)   # profiling needs tracing
+
+    def test_off_features_send_nothing(self):
+        transport = start({"SENTRY_DSN": DSN})
+        with monitoring.request("GET", "/api/state", {}) as tx, monitoring.cron("x", "0 7 * * *"), mock.patch("builtins.print"):
+            monitoring.log("hello")
+            monitoring.metric("count", "runway.test", 1)
+        self.assertIsNone(tx)
+        self.assertEqual(monitoring.trace_meta(), "")
+        sentry_sdk.flush()
+        self.assertEqual([t for t, _ in transport.items if t != "sessions"], [])
+
+    def test_requests_are_named_by_route(self):
+        cases = {"/api/transactions/chk%7C0/category": "/api/transactions/{id}/category", "/api/state": "/api/state",
+                 "/api/merchants/starbucks/logo": "/api/merchants/{id}/logo", "/api/mcp/overview": "/api/mcp/*",
+                 "/api/sync": "/api/sync", "/api/ext/ping": "/api/ext/ping", "/api/nope/secret-name": "/api/*",
+                 "/": "/", "/plaid/oauth": "/", "/auth/callback": "/auth/callback", "/auth/whatever": "/"}
+        for path, name in cases.items():
+            self.assertEqual(trace_name(path), name, path)
+        for path in ("/healthz", "/api/investments/stream", "/assets/index-abc.js", "/sw.js", "/logo.svg"):
+            self.assertFalse(_traced(path), path)
+        for path in ("/", "/api/state", "/mcp", "/plaid/oauth"):
+            self.assertTrue(_traced(path), path)
+
+    def test_a_request_is_traced_without_its_query_or_values(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name}):
+            db.init()
+            transport = start()
+            httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            self.addCleanup(httpd.server_close)
+            self.addCleanup(httpd.shutdown)
+            trace_id = "abcdef0123456789abcdef0123456789"
+            req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/transactions?q=rent-money&limit=5",
+                                         headers={"sentry-trace": f"{trace_id}-1234567890abcdef-1"})
+            with mock.patch("builtins.print"):
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    self.assertEqual(r.status, 200)
+                urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
+            sentry_sdk.flush()
+        txs = transport.of("transaction")
+        self.assertEqual([t["transaction"] for t in txs], ["GET /api/transactions"])   # /healthz isn't traced
+        tx = txs[0]
+        self.assertEqual(tx["contexts"]["trace"]["trace_id"], trace_id)   # continues the web app's trace
+        self.assertEqual(tx["contexts"]["trace"]["data"]["http.response.status_code"], 200)
+        self.assertTrue(any(sp["op"] == "db" for sp in tx["spans"]))   # database queries, as spans
+        self.assertNotIn("rent-money", json.dumps(tx))
+        logs = json.dumps(transport.of("log"))
+        self.assertIn("GET /api/transactions 200", logs)
+        self.assertNotIn("127.0.0.1", logs)   # the access log line in Sentry has no address
+
+    def test_spans_lose_queries_and_credentials(self):
+        tx = monitoring._before_send_transaction({
+            "request": {"url": "https://runway.test/api/x?q=1", "headers": {"a": "b"}}, "user": {"id": "u"},
+            "spans": [{"op": "http.client", "description": f"GET {SIMPLEFIN}/accounts?start-date=1",
+                       "data": {"url": SIMPLEFIN + "/accounts", "http.query": "start-date=1", "db.params": [5]}}],
+        }, {})
+        text = json.dumps(tx)
+        for secret in ("secretpass", "start-date", "headers", '"user"', "db.params"):
+            self.assertNotIn(secret, text)
+        self.assertEqual(tx["spans"][0]["data"]["url"], "https://beta-bridge.simplefin.org/simplefin/accounts")
+
+    def test_background_work_is_traced_and_timed(self):
+        transport = start()
+        with monitoring.task("bank sync"), monitoring.span("db", "SELECT 1"):
+            pass
+        with self.assertRaises(RuntimeError), monitoring.task("bank sync"):
+            raise RuntimeError("no")
+        sentry_sdk.flush()
+        self.assertEqual([t["transaction"] for t in transport.of("transaction")][:1], ["bank sync"])
+        metrics = json.dumps(transport.items)
+        self.assertIn("runway.task.duration", metrics)
+        self.assertIn('"error"', metrics)
+
+    def test_profiling_runs_with_traces_only(self):
+        start({**ALL_ON, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "0.25"})
+        opts = sentry_sdk.get_client().options
+        self.assertEqual((opts["profile_session_sample_rate"], opts["profile_lifecycle"]), (0.25, "trace"))
+        start({"SENTRY_DSN": DSN, "SENTRY_PROFILE_SESSION_SAMPLE_RATE": "1"})   # no tracing: nothing to profile
+        self.assertEqual(sentry_sdk.get_client().options["profile_session_sample_rate"], 0)
+        self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
+
+    def test_the_daily_sync_checks_in(self):
+        transport = start()
+        with monitoring.cron("runway-bank-sync", "0 7 * * *"):
+            pass
+        with self.assertRaises(ValueError), monitoring.cron("runway-bank-sync", "0 7 * * *"):
+            raise ValueError("bank said no")
+        sentry_sdk.flush()
+        checkins = transport.of("check_in")
+        self.assertEqual([c["status"] for c in checkins], ["in_progress", "ok", "in_progress", "error"])
+        self.assertEqual(checkins[0]["monitor_config"]["schedule"], {"type": "crontab", "value": "0 7 * * *"})
+        self.assertEqual(checkins[0]["check_in_id"], checkins[1]["check_in_id"])
+
+    def test_logs_are_scrubbed_and_can_say_less_than_the_console(self):
+        transport = start()
+        with mock.patch("builtins.print") as printed:
+            monitoring.log(f"Couldn't reach {SIMPLEFIN}", "warning")
+            monitoring.log("bad value 1234.56", "warning", remote="bad value")
+        self.assertIn("secretpass", str(printed.call_args_list[0]))   # the local log is unchanged
+        sentry_sdk.flush()
+        sent = json.dumps(transport.of("log"))
+        self.assertIn("beta-bridge.simplefin.org", sent)
+        self.assertNotIn("secretpass", sent)
+        self.assertNotIn("1234.56", sent)
+
+    def _categorize_once(self, env=None):
+        """Ask the categorizer about one merchant (OpenRouter mocked); returns what reached Sentry, as spans' attributes."""
+        transport = start(env)
+        reply = {"id": "gen-1", "model": "anthropic/claude-haiku-4.5",
+                 "choices": [{"finish_reason": "stop", "message": {"content": '[{"i": 0, "category": "Groceries", "confidence": 0.9}]'}}],
+                 "usage": {"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128}}
+        resp = mock.MagicMock()
+        resp.__enter__.return_value = io.BytesIO(json.dumps(reply).encode())
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name}):
+            db.init()
+            with db.session() as conn:
+                db.set_setting(conn, "openrouter_api_key", "sk-or-key")
+                db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
+                conn.commit()
+                group = [{"posted": "2026-09-01", "amount": -87.12, "kind": "credit", "payee": "Whole Foods", "description": "WHOLE FOODS #123"}]
+                with monitoring.task("sync"), mock.patch("urllib.request.urlopen", return_value=resp):
+                    self.assertEqual(categorize.ask_model(conn, [group])[0][0], "Groceries")
+        sentry_sdk.flush()
+        spans = {sp["name"]: {k: v["value"] for k, v in sp["attributes"].items()} | {"trace_id": sp["trace_id"]}
+                 for batch in transport.of("span") for sp in batch["items"]}
+        return transport, spans
+
+    def test_the_categorizer_is_an_agent_without_its_prompt(self):
+        transport, spans = self._categorize_once()
+        agent, chat = spans["invoke_agent Transaction categorizer"], spans["chat anthropic/claude-haiku-4.5"]
+        self.assertEqual((agent["sentry.op"], agent["gen_ai.agent.name"], agent["gen_ai.pipeline.name"]),
+                         ("gen_ai.invoke_agent", "Transaction categorizer", "sync"))
+        self.assertEqual((chat["sentry.op"], chat["gen_ai.agent.name"], chat["gen_ai.provider.name"]),
+                         ("gen_ai.chat", "Transaction categorizer", "openrouter"))
+        self.assertEqual((chat["gen_ai.usage.input_tokens"], chat["gen_ai.usage.output_tokens"], chat["gen_ai.response.model"]),
+                         (120, 8, "anthropic/claude-haiku-4.5"))
+        self.assertTrue(chat["gen_ai.conversation.id"].startswith("transaction-categorizer-"))   # the run is one conversation
+        self.assertEqual(chat["trace_id"], transport.of("transaction")[0]["contexts"]["trace"]["trace_id"])
+        everything = json.dumps(transport.items)
+        for private in ("Whole Foods", "WHOLE FOODS", "87.12", "sk-or-key", "gen_ai.input.messages", "gen_ai.output.messages"):
+            self.assertNotIn(private, everything)
+        self.assertIn("runway.ai.tokens", everything)
+
+    def test_the_prompt_and_reply_only_when_asked(self):
+        _, spans = self._categorize_once({**ALL_ON, "SENTRY_AI_CONTENT": "1"})
+        chat = spans["chat anthropic/claude-haiku-4.5"]
+        sent = json.loads(chat["gen_ai.input.messages"])
+        self.assertEqual(sent[0]["role"], "user")
+        self.assertIn("WHOLE FOODS", sent[0]["parts"][0]["content"])
+        self.assertIn("Groceries", chat["gen_ai.output.messages"])
+        self.assertNotIn("sk-or-key", json.dumps(spans))
+
+    def test_mcp_calls_name_the_tool_not_its_arguments(self):
+        transport = start()
+        msg = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "transactions", "arguments": {"q": "my-landlord"}}}
+        with monitoring.task("mcp"), monitoring.mcp_call(msg) as sp:
+            monitoring.mcp_result(sp, {"result": {"isError": True}})
+        sentry_sdk.flush()
+        span = transport.of("transaction")[0]["spans"][0]
+        self.assertEqual((span["op"], span["description"]), ("mcp.server", "tools/call transactions"))
+        self.assertEqual((span["data"]["mcp.tool.name"], span["data"]["mcp.tool.result.is_error"]), ("transactions", True))
+        self.assertNotIn("my-landlord", json.dumps(span))
+
+    def test_the_page_carries_its_trace_to_the_browser(self):
+        start()
+        with monitoring.request("GET", "/", {}) as tx:
+            meta = monitoring.trace_meta()
+        self.assertIn(f'<meta name="sentry-trace" content="{tx.trace_id}-', meta)
+        self.assertIn('<meta name="baggage"', meta)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,16 @@ WORKDIR /web/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
-RUN npm run build
+# The release build uploads the web app's source maps to Sentry, so its errors show readable stack traces (see
+# frontend/vite.config.ts). The token is a build secret: it's never in the image or its layers. Without it (any other
+# build) nothing is uploaded and the build is the same as ever.
+ARG VERSION=dev
+ARG SENTRY_ORG=""
+ARG SENTRY_BROWSER_PROJECT=runway-web
+RUN --mount=type=secret,id=sentry_auth_token \
+    SENTRY_AUTH_TOKEN="$(cat /run/secrets/sentry_auth_token 2>/dev/null || true)" \
+    RUNWAY_VERSION="$VERSION" SENTRY_ORG="$SENTRY_ORG" SENTRY_BROWSER_PROJECT="$SENTRY_BROWSER_PROJECT" \
+    npm run build
 
 # 3. The image itself: Python, that virtualenv and Runway, without Poetry.
 FROM python:3.14-slim

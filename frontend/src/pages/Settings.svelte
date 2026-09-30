@@ -7,6 +7,7 @@
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
   import { loadCategories } from "$lib/categories.svelte";
+  import { openFeedback } from "$lib/monitoring";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AccountsSection from "$lib/components/settings/AccountsSection.svelte";
   import AdvancedSection from "$lib/components/settings/AdvancedSection.svelte";
@@ -68,5 +69,6 @@
 <p class="mt-8 text-center text-sm text-muted-foreground">
   Runway {version || "development build"}{#if version}{" · "}<a class={linkCls} target="_blank" rel="noopener"
     href={`https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(version)}`}>what's new</a>{/if}
+  {#if app.state?.sentry?.feedback}{" · "}<button type="button" class={linkCls} onclick={() => openFeedback()}>Send feedback</button>{/if}
 </p>
 {/if}
