@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, keepScroll, refreshState } from "$lib/app.svelte";
+  import { app, refreshState } from "$lib/app.svelte";
   import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
@@ -37,7 +37,7 @@
   let list = $state<TxList | null>(null);
   let listError = $state("");
   let count = $state(0);             // the count in the heading (in Review, goes down as you categorize)
-  let loads = $state(0);             // each load starts the table afresh (no leftover ticks)
+  let loads = $state(0);             // a new search starts the table afresh (no leftover ticks); a reload after a change keeps it
   let applied = $state<TxFilters>({ ...f });   // the filters the list (and Upcoming) was last loaded with
   let seq = 0;
 
@@ -50,9 +50,10 @@
     try {
       const data = await api<TxList>(`/api/transactions?${qs}`);
       if (mine !== seq) return;   // a newer search has been asked for meanwhile
-      const y = window.scrollY;
-      applied = now; list = data; count = data.total; listError = ""; loads++;
-      if (same) keepScroll(y);   // the list is drawn afresh; stay where you were in it
+      // The same search again (after a change): the rows are updated where they are, so nothing redraws or jumps. A new
+      // search starts the table afresh.
+      applied = now; list = data; count = data.total; listError = "";
+      if (!same) loads++;
     } catch (err) { if (mine === seq) listError = (err as Error).message; }
   }
   const PAGE = 100;
