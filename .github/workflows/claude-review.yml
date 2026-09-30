@@ -116,9 +116,17 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           OUTPUT: ${{ steps.review.outputs.structured_output }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          summary=$(jq -r '.summary // empty' <<<"${OUTPUT:-{\}}")
-          if [ -z "$summary" ]; then echo "::warning::The review didn't return a summary."; exit 0; fi
+          summary=$(jq -r '.summary // empty' <<<"${OUTPUT:-null}")
+          if [ -z "$summary" ]; then
+            # A review that ran out of turns or time returns nothing. Say so, rather than leave the last push's summary
+            # looking current.
+            echo "::warning::The review didn't return a summary."
+            summary=$(printf '%s\n\n%s' "**Claude review summary**" \
+              "The review of $HEAD_SHA didn't finish, so there's no summary for it ([the run]($RUN_URL)). Anything earlier on this pull request is about an older commit.")
+          fi
           marker='<!-- claude-review-summary -->'
           printf '%s\n%s\n' "$marker" "$summary" > "$RUNNER_TEMP/summary.md"
           id=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
