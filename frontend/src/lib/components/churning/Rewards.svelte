@@ -116,7 +116,7 @@
                         </label>
                         {#if row.est_balance != null}
                           <div class="mt-1 text-xs text-muted-foreground" title={`Your balance plus the ${points(row.earned_since)} points your linked cards earned since ${row.as_of ? fullDate(row.as_of) : "then"}, at their normal rates. An estimate: redemptions and portal bookings aren't counted.`}>
-                            Estimated now: <span class="tabular-nums">~{points(row.est_balance)}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>
+                            Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>
                           </div>
                         {/if}
                       {/if}

@@ -117,7 +117,7 @@
         </ul>
         {#if w.earliest_apply}<p class="mt-1 text-xs text-muted-foreground">Earliest you can apply: {fullDate(w.earliest_apply)}</p>{/if}
       {/if}
-      {#if sc && w.blockers.some((b) => b.kind === "score")}<p class="mt-1 text-xs font-medium">{sc}</p>{/if}
+      {#if sc && !w.blockers.some((b) => b.text.includes(sc))}<p class="mt-1 text-xs font-medium">{sc}</p>{/if}
       {#each w.hints as h (h)}<p class="mt-1 text-xs text-muted-foreground italic">{h}</p>{/each}
       {#if w.offer_expires_on}<p class="mt-1 text-xs text-muted-foreground">Offer ends {fullDate(w.offer_expires_on)}</p>{/if}
     {/if}

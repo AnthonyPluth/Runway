@@ -85,9 +85,9 @@
         {#each shown as i, n (`${i.kind}:${i.card_id ?? i.bank_id ?? i.owner}:${i.task_id ?? ""}:${i.date}:${n}`)}
           {@const late = daysUntil(i.date, today) < 0}
           {@const Icon = ICON[i.kind]}
-          <li class="flex items-start gap-3 py-2.5">
+          <li class="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">
             <div class={cn("w-24 shrink-0 text-sm tabular-nums", late ? "font-medium text-red-500" : i.warn ? "font-medium text-[var(--warning)]" : "text-muted-foreground")}>{when(i.date)}</div>
-            <div class="min-w-0 flex-1">
+            <div class="min-w-0 flex-1 max-sm:basis-[calc(100%-6.75rem)]">
               <div class="text-sm"><span class={cn("mr-1.5 inline-flex items-center gap-1 text-xs", i.kind === "apply" ? "text-[var(--good)]" : "text-muted-foreground")}><Icon class="size-3.5" aria-hidden="true" />{KIND_LABEL[i.kind]}</span>{i.title}</div>
               <div class="text-xs text-muted-foreground">{i.detail}{showOwner && i.owner && !i.title.startsWith(i.owner) ? ` · ${i.owner}` : ""}</div>
               {#if snoozing === i.task_id && i.task_id != null}
@@ -97,7 +97,7 @@
                 </div>
               {/if}
             </div>
-            <div class="flex shrink-0 flex-wrap justify-end gap-1.5">
+            <div class="flex shrink-0 flex-wrap justify-end gap-1.5 max-sm:basis-full max-sm:justify-start max-sm:pl-[6.75rem]">
               {#if i.kind === "task"}
                 <Button variant="ghost" size="sm" aria-expanded={snoozing === i.task_id} onclick={() => (snoozing = snoozing === i.task_id ? null : (i.task_id ?? null))} aria-label={`Snooze "${i.title}"`}>Snooze</Button>
                 <Button variant="outline" size="sm" onclick={() => done(i)} aria-label={`Mark "${i.title}" done`}>Done</Button>

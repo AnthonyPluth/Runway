@@ -41,7 +41,7 @@
     try { await api(`/api/churning/benefits/${b!.id}/remove`, { method: "POST" }); toast(`Removed ${b!.name}`); onclose(true); }
     catch (err) { toast.error((err as Error).message); }
   }
-  const lbl = "flex flex-col gap-1 text-sm";
+  const lbl = "flex max-w-full flex-col gap-1 text-sm";
 </script>
 
 <div class="my-2 rounded-lg border bg-background p-3" data-editor>

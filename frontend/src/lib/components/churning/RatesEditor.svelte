@@ -37,26 +37,26 @@
   <ul class="mt-2 space-y-2">
     <li class="flex flex-wrap items-center gap-2">
       <label class="flex items-center gap-2 text-sm"><span class="w-40">Everywhere else</span>
-        <Input type="number" min="0" step="0.25" class="w-20" bind:value={base} aria-label="Points per dollar everywhere else" {@attach auto} />
+        <Input type="number" min="0" step="0.25" class="w-20" bind:value={base} aria-label="Points per dollar everywhere else" {@attach save ? auto : undefined} />
         <span class="text-muted-foreground">x</span>
       </label>
     </li>
     {#each rows as r, i (i)}
       <li class="flex flex-wrap items-center gap-2">
-        <NativeSelect class="w-40" bind:value={r.category} aria-label={`Category of rate ${i + 1}`} {@attach auto}>
+        <NativeSelect class="w-40" bind:value={r.category} aria-label={`Category of rate ${i + 1}`} {@attach save ? auto : undefined}>
           <option value="">Category…</option>
           {#each d.categories as c (c.name)}<option value={c.name}>{label(c)}</option>{/each}
         </NativeSelect>
-        <Input type="number" min="0" step="0.25" class="w-20" bind:value={r.multiplier} aria-label={`Points per dollar on ${r.category || "the category"}`} placeholder="3" {@attach auto} />
+        <Input type="number" min="0" step="0.25" class="w-20" bind:value={r.multiplier} aria-label={`Points per dollar on ${r.category || "the category"}`} placeholder="3" {@attach save ? auto : undefined} />
         <span class="text-muted-foreground">x</span>
-        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" bind:checked={r.portal_only} {@attach auto} />Only through the issuer's travel portal</label>
+        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" bind:checked={r.portal_only} {@attach save ? auto : undefined} />Only through the issuer's travel portal</label>
         <button type="button" class="cursor-pointer px-1 text-muted-foreground hover:text-foreground" aria-label={`Remove the ${r.category || "new"} rate`} onclick={() => drop(i)}>×</button>
       </li>
     {/each}
   </ul>
   {#if anyPortal}
     <label class="mt-2 flex max-w-sm flex-col gap-1 text-sm">The portal's name
-      <Input bind:value={portalName} placeholder="e.g. Capital One Travel" {@attach auto} />
+      <Input bind:value={portalName} placeholder="e.g. Capital One Travel" {@attach save ? auto : undefined} />
     </label>
   {/if}
   <Button variant="outline" size="sm" class="mt-2" onclick={() => (rows = [...rows, { category: "", multiplier: "", portal_only: false }])}>Add a rate</Button>
