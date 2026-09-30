@@ -1,0 +1,134 @@
+name: Security scans
+
+# Static analysis, dependency, container, secret and workflow scans, on top of what docker.yml already runs (pip-audit).
+# Findings from Semgrep, Trivy, zizmor and Scorecard are uploaded to the Security tab (Code scanning) instead of failing
+# the build; Bandit and npm audit fail it. CodeQL and Dependabot alerts come from GitHub's own settings, not from here.
+# Runs weekly too, because new vulnerabilities are published for code that hasn't changed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Bandit and Semgrep
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Bandit (settings in pyproject.toml)
+        run: pipx run "bandit[toml]==1.9.4" -c pyproject.toml -r runway -ll
+      - name: Semgrep
+        run: >
+          pipx run "semgrep==1.146.0" scan --metrics=off --sarif --output semgrep.sarif
+          --config p/python --config p/security-audit --config p/owasp-top-ten --config p/javascript runway frontend/src extension
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() && hashFiles('semgrep.sarif') != '' }}
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  web:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Audit the web app's dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+  trivy:
+    name: Trivy (files and image)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Scan the repository (dependencies, secrets, Dockerfile and workflow settings)
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          scan-type: fs
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() && hashFiles('trivy-fs.sarif') != '' }}
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+      - name: Build the image (not published)
+        run: docker build -t runway:scan .
+      - name: Scan the image (OS packages and libraries)
+        uses: aquasecurity/trivy-action@v0.33.1
+        with:
+          image-ref: runway:scan
+          format: sarif
+          output: trivy-image.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() && hashFiles('trivy-image.sarif') != '' }}
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+  workflows:
+    name: zizmor (GitHub Actions)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Audit the workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run "zizmor==1.30.1" --format sarif . > zizmor.sarif
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ !cancelled() && hashFiles('zizmor.sarif') != '' }}
+        with:
+          sarif_file: zizmor.sarif
+          category: zizmor
+
+  scorecard:
+    name: OpenSSF Scorecard
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@v2.4.3
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          publish_results: true
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard

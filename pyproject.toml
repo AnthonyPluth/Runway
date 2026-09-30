@@ -42,6 +42,13 @@ ignore = [
     "SIM117",
 ]
 
+[tool.bandit]
+# Security lint for runway/ (`bandit -c pyproject.toml -r runway`, run in CI). Fails on anything medium or worse.
+# B310 (urlopen with a non-http scheme): every request goes to an https address Runway builds or a provider
+# publishes, and urlopen is how the code makes them. B105 also skipped: it takes settings-key names for passwords.
+skips = ["B310", "B105"]
+exclude_dirs = ["tests"]
+
 [tool.coverage.run]
 # CI measures how much of Runway the tests run (the README's coverage badge): `coverage run -m unittest discover tests`.
 source = ["runway"]
