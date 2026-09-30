@@ -698,7 +698,7 @@ def _department_category(dept: str | None, have: set[str]) -> str | None:
 
 
 def item_prompt(retailer_names: str, categories: list[str], subcategories: list[str], examples: list[dict],
-                items: list[dict]) -> str:
+                items: list[dict], allow_new: bool = False) -> str:
     lines = [
         f"You sort items from someone's {retailer_names} orders into their budget categories.",
         "Pick exactly one category for each item from this list:",
@@ -718,11 +718,17 @@ def item_prompt(retailer_names: str, categories: list[str], subcategories: list[
     if "Costco" in retailer_names:
         lines += ["- Costco receipts abbreviate item names: KS is Kirkland Signature (the store brand), ORG is organic, PK is a pack, "
                   "and the rest is often cut short (\"GRLCPEPWINGS\" is garlic pepper wings). Work out the product and categorize that."]
+    if allow_new:
+        lines += ["- If none of the categories is a good fit, you may propose a new one instead: set \"category\" to null and add",
+                  "  \"new_category\": \"<short name, Title Case>\" and optionally \"parent\": \"<an existing category it belongs under>\".",
+                  "  Only when nothing fits; never a near-duplicate of an existing category; reuse one new name for similar items."]
     if examples:
         lines += ["", "How this person has categorized items before:"]
         lines += [f"- {e['title']} -> {e['category']}" for e in examples]
     lines += ["", "Items (JSON):", json.dumps(items, ensure_ascii=False), "",
-              'Reply with only a JSON array, one object per item: [{"i": <i>, "category": "<category>", "confidence": <0-1>}]']
+              'Reply with only a JSON array, one object per item: [{"i": <i>, "category": "<category>", "confidence": <0-1>}]'
+              + (' (or {"i": <i>, "category": null, "new_category": "<name>", "parent": "<existing or null>", "confidence": <0-1>})'
+                 if allow_new else "")]
     return "\n".join(lines)
 
 
@@ -802,6 +808,46 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
                 it["done"] = True
         conn.commit()
     return done
+
+
+def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
+    """The AI's category for each item of an order that has none yet, proposing a new category where nothing fits.
+    Nothing is saved: you apply each one (see set_item_category and api_retail_item)."""
+    caller = caller or categorize.call_llm
+    api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
+    if not api_key:
+        raise RetailError("Add an OpenRouter key in Settings → Connections first")
+    i, o = RetailItem, RetailOrder
+    items = db.rows(conn.execute(
+        select(i.id, i.title, i.amount, i.department, o.retailer).join(o, o.id == i.order_id)
+        .where(i.order_id == order_id, i.category.is_(None)).order_by(i.id)))
+    if not items:
+        return []
+    spend = {r["name"] for r in conn.execute(select(Category.name).where(Category.is_transfer == 0, Category.is_income == 0))}
+    cats = sorted(spend)
+    subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
+    examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
+        select(RetailItem.title, RetailItem.category).where(RetailItem.category_source == "manual")
+        .order_by(RetailItem.id.desc()).limit(40))]
+    names = " and ".join(sorted({NAMES.get(it["retailer"], it["retailer"]) for it in items}))
+    model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    payload = [{"i": n, "item": ai_title(it["retailer"], it["title"])[:200], "price": round(it["amount"] or 0, 2),
+                **({"department": it["department"]} if it["department"] else {})} for n, it in enumerate(items[:AI_BATCH])]
+    conn.commit()   # don't hold the database while the model thinks
+    began, reply = time.time(), None
+    try:
+        reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload, allow_new=True))
+        answers = categorize.parse_ai_reply(reply, cats, allow_new=True)
+    except Exception as e:
+        categorize._log(conn, "orders", model, len(payload), 0, 0, False, time.time() - began, str(e)[:500], reply)
+        conn.commit()
+        raise RetailError(f"The AI request failed: {e}") from e
+    out = [{"item_id": it["id"], "category": ans[0], "new_category": ans[2], "confidence": round(ans[1], 2)}
+           for n, it in enumerate(items[:AI_BATCH]) if (ans := answers.get(n)) and (ans[0] or ans[2])]
+    new_cats = len({a["new_category"]["name"].lower() for a in out if a["new_category"]})
+    categorize._log(conn, "orders", model, len(payload), len(out), new_cats, True, time.time() - began,
+                    f"Suggested a category for {len(out)} of {len(payload)} items from {names} orders", reply)
+    return out
 
 
 def set_item_category(conn, item_id: int, category: str, remember: bool = True) -> dict:
