@@ -34,12 +34,14 @@ export function catLook(name: string | null | undefined): { icon: string; color:
 }
 /** The colors a category can wear (the server's categories.PALETTE). */
 export const CAT_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86"];
+/** Whether one grapheme is an emoji: a symbol, a flag, a keycap, or a character shown as an emoji by U+FE0F (▶️, ℹ️).
+ * ASCII only as a keycap's base. The same rule as the server's categories.is_emoji, so what's picked up here is saved. */
+const isEmoji = (g: string) => (g.includes("\u20e3") || ![...g].some((ch) => ch.charCodeAt(0) < 0x80)) && /\p{So}|\ufe0f|\u20e3/u.test(g);
 /** The last emoji in some typed or pasted text (one whole emoji: skin tones, flags, keycaps and ZWJ sequences included),
  * or null when there's none: letters, digits and punctuation on their own aren't emoji. */
 export function lastEmoji(text: string): string | null {
-  const emoji = /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20e3/u;
   const parts = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map((s) => s.segment);
-  return parts.reverse().find((g) => emoji.test(g)) ?? null;
+  return parts.reverse().find(isEmoji) ?? null;
 }
 /** Emoji offered when picking one (any emoji can be typed too). */
 export const CAT_EMOJI = ["🛒", "🍽️", "☕", "🍔", "🍷", "🛍️", "👕", "✈️", "🚆", "🚕", "⛽", "🅿️", "🚗", "💡", "📱", "🔁", "💻",

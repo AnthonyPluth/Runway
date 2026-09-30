@@ -61,14 +61,14 @@ def default_look(name: str, parent_color: str | None = None) -> tuple[str, str]:
 
 def is_emoji(text: str) -> bool:
     """Whether `text` is an emoji, as the phone's emoji keyboard or the computer's emoji panel types one: a symbol
-    (with any skin tone, variation or joined parts), a flag, or a keycap (1️⃣, #️⃣). Not letters, digits or punctuation
-    on their own, and not something long."""
+    (with any skin tone, variation or joined parts), a flag, a keycap (1️⃣, #️⃣), or a character shown as an emoji by
+    U+FE0F (▶️, ℹ️, ‼️). Not letters, digits or punctuation on their own, and not something long. The web app's
+    lastEmoji (frontend/src/lib/categories.svelte.ts) uses the same rule."""
     if not text or len(text) > 16:
         return False
-    keycap = "\u20e3" in text
-    if any(ch.isascii() and (ch.isalnum() or ch in "#*") for ch in text) and not keycap:
+    if any(ch.isascii() for ch in text) and "\u20e3" not in text:   # ASCII only as a keycap's base
         return False
-    return keycap or any(unicodedata.category(ch) == "So" for ch in text)
+    return any(unicodedata.category(ch) == "So" or ch in "\ufe0f\u20e3" for ch in text)
 
 
 def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
