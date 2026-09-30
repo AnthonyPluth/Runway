@@ -44,4 +44,12 @@ describe("Rewards", () => {
     setup([row({ balance: 100, balance_value: 1.5 })]);
     expect(screen.getByLabelText("Alex's Chase Ultimate Rewards balance")).toHaveAttribute("step", "1");
   });
+
+  it("takes a balance off the list, even one that is 0", async () => {
+    vi.mocked(api).mockResolvedValue({});
+    setup([row({ currency: "airline", name: "Other airline miles", balance: 0, balance_value: 0, as_of: "2026-09-01" })]);
+    screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }).click();
+    await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/churning/balances",
+      { method: "POST", body: { owner: "Alex", currency: "airline", points: null } }));
+  });
 });
