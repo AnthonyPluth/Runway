@@ -106,6 +106,7 @@ describe("churning 2 helpers", () => {
     const g = currencyGroups(d as never);
     expect(g.map((x) => [x.label, x.currencies.map((c) => c.key)])).toEqual([["Bank points", ["ur"]], ["Airlines", ["aa", "ua"]], ["Other", ["mine"]]]);
     expect(sp(valueSource(cur("ur"), "2026-06-15"))).toBe("estimate (as of Jun 2026)");
+    expect(sp(valueSource(cur("ur"), "2026-09"))).toBe("estimate (as of Sep 2026)");   // the server dates them by month
     expect(valueSource(cur("ur", { overridden: true }), "2026-06-15")).toBe("your value");
     expect(valueSource(cur("mine", { custom: true }), "2026-06-15")).toBe("your currency");
   });
