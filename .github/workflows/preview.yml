@@ -2,7 +2,8 @@ name: Preview
 
 # A live copy of Runway for a pull request, filled with made-up sample data (runway/demo.py), for about an hour.
 # Start it by adding the "needs_preview" label to a pull request, at any time (or run this workflow by hand on a
-# branch). A comment on the pull request gives the address and a one-off password, and the label comes off again.
+# branch). A comment on the pull request gives the address (the one-off password is in the run's summary), and the
+# label comes off again.
 # Adding it again builds a fresh preview from the pull request's latest commit, replacing the one that's up.
 #
 # How: the image is built and run on the Actions runner, behind nginx with a password, and reached through a
@@ -45,6 +46,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069   # v4.4.1
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
@@ -127,8 +130,10 @@ jobs:
       - name: Post the address
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          MINUTES_INPUT: ${{ github.event.inputs.minutes || '60' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          minutes="${{ github.event.inputs.minutes || '60' }}"
+          minutes="$MINUTES_INPUT"
           case "$minutes" in ''|*[!0-9]*) minutes=60;; esac
           [ "$minutes" -gt 120 ] && minutes=120
           echo "MINUTES=$minutes" >> "$GITHUB_ENV"
@@ -136,11 +141,18 @@ jobs:
           body=$(printf '%s\n' \
             "**Preview is up** until about $until: $URL" \
             "" \
-            "User \`preview\`, password \`$PASSWORD\`" \
+            "User \`preview\`; the password is in this workflow run's summary: $RUN_URL" \
             "" \
             "Sample data only (made-up accounts and transactions); nothing here is real, and bank sync is off." \
             "Built from ${HEAD_SHA::7}. Add \`needs_preview\` again for a fresh one.")
-          echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          # The password goes only in the run's summary, never in the pull request's comment. On a public repository
+          # anyone can open the summary too: the preview holds made-up demo data only, and the password keeps crawlers
+          # out, not people.
+          {
+            echo "$body"
+            echo ""
+            echo "Password: \`$PASSWORD\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$PR" ]; then
             gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"
             # Done with the label, so adding it again later asks for a new preview. (Changes made with this token

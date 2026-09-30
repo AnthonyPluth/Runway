@@ -42,11 +42,18 @@ $("#save").addEventListener("click", async () => {
   // Permission to talk to your Runway (and nowhere else besides the two stores).
   const granted = await chrome.permissions.request({ origins: [`${origin}/*`] }).catch(() => false);
   if (!granted) return show("The extension needs permission to reach your Runway to send it your orders.", false);
+  const { runwayUrl: oldUrl } = await chrome.storage.local.get("runwayUrl");
   await chrome.storage.local.set({ runwayUrl: origin + url.pathname.replace(/\/+$/, ""), token, auto: $("#auto").checked, cartaEvery: Number($("#carta").value) });
+  // Moved to another address: the old one no longer needs the extension's access (best effort; a store's stays).
+  try {
+    const oldOrigin = oldUrl && new URL(oldUrl).origin;
+    if (oldOrigin && oldOrigin !== origin) await chrome.permissions.remove({ origins: [`${oldOrigin}/*`] });
+  } catch (_) { /* not granted, or one the extension always has */ }
   await chrome.runtime.sendMessage({ type: "settings-changed" });
   try {
     const res = await fetch(`${origin}${url.pathname.replace(/\/+$/, "")}/api/ext/ping`, {
       method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}",
+      redirect: "error",   // the key goes only to the address entered, never wherever it points
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return show(data.error || `Runway answered ${res.status}.`, false);

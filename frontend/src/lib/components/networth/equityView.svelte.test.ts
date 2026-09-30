@@ -48,6 +48,19 @@ describe("Net worth summary", () => {
 });
 
 describe("#networth/equity", () => {
+  it("says why a grant's vesting couldn't be worked out, instead of a silent zero", async () => {
+    const broken = { ...grant, id: "g2", label: "ES-2", vested: 0, fully_vested_on: null, vested_value: 0, unvested_value: 0,
+                     problem: "This grant’s vesting can’t be worked out: check its dates and vesting length." };
+    vi.mocked(api).mockImplementation((async (path: string) => {
+      if (path === "/api/networth") return nw;
+      if (path === "/api/equity") return { ...equity, companies: [{ ...equity.companies[0], grants: [grant, broken] }] };
+      return { ok: true };
+    }) as never);
+    render(NetWorth, { sub: "equity" });
+    expect(await screen.findByText("This grant’s vesting can’t be worked out: check its dates and vesting length.")).toBeInTheDocument();
+    expect(screen.getAllByText(/of 40,000/)).toHaveLength(2);   // both grants are still listed
+  });
+
   it("shows vested and still-to-vest figures, the companies and the tab bar as the way back", async () => {
     render(NetWorth, { sub: "equity" });
     expect(await screen.findByRole("heading", { name: "Equity" })).toBeInTheDocument();

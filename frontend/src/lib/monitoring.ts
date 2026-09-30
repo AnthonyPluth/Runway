@@ -117,6 +117,12 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
     beforeSend(event) {
       if (event.request) event.request = { url: pathOnly(event.request.url) };
       delete event.user;
+      // An error's text can name an address or a row (a failed fetch says where), so it's cleaned like the server's.
+      if (event.message) event.message = scrubText(event.message);
+      const entry: { message?: string; formatted?: string } | undefined = event.logentry;   // "formatted" isn't in the SDK's type
+      if (entry?.message) entry.message = scrubText(entry.message);
+      if (entry?.formatted) entry.formatted = scrubText(entry.formatted);
+      for (const exc of event.exception?.values ?? []) if (exc.value) exc.value = scrubText(exc.value);
       return event;
     },
     // Spans are streamed (SDK 11's default), so they're cleaned here; beforeSendTransaction would never run.

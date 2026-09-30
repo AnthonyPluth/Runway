@@ -62,6 +62,14 @@ class MonitoringTests(unittest.TestCase):
                 with mock.patch("traceback.print_exc"):
                     monitoring.report()   # just logged
 
+    def test_what_a_service_said_is_kept_safe(self):
+        # A bank's message (through SimpleFIN or Plaid) or an API's error is kept and shown: no account numbers in it.
+        self.assertEqual(monitoring.public_text("Chase: account 123456789 needs a new login (HTTP 401)"),
+                         "Chase: account [number] needs a new login (HTTP 401)")
+        self.assertEqual(monitoring.public_text(f"refused at {SIMPLEFIN}/accounts?x=1"),
+                         monitoring.scrub(f"refused at {SIMPLEFIN}/accounts?x=1"))
+        self.assertIsNone(monitoring.public_text(None))
+
     def test_secrets_are_blanked(self):
         text = f"Couldn't reach {SIMPLEFIN}/accounts?start-date=1 with access-production-1234abcd-9f00-4c1e"
         out = monitoring.scrub(text)

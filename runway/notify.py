@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.parse
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import churning, db, forecast, recurring, webpush
+from . import churning, db, forecast, oidc, recurring, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
@@ -60,7 +61,30 @@ def save_prefs(conn, body: dict) -> dict:
 # ------------------------------------------------------------------------------------------------ devices
 
 def subscriptions(conn) -> list[dict]:
+    """Every device, oldest first (after dropping those whose person was taken off the sign-in list: see lapsed)."""
+    prune_lapsed(conn)
     return db.rows(conn.execute(select(PushSubscription).order_by(PushSubscription.created)))
+
+
+def lapsed(conn, sub: dict, now: float | None = None) -> str | None:
+    """Why a device gets nothing for now, or None: the person who turned notifications on can no longer sign in
+    (oidc.access_lapsed), as with their sessions. "user_removed" (taken off OIDC_ALLOWED_EMAILS) is for good, and the
+    device is dropped (prune_lapsed). "sign_in_lapsed" (with OIDC_ALLOWED_GROUPS, nobody has seen them sign in for
+    RUNWAY_SESSION_DAYS) may be someone who just hasn't opened Runway lately: the device is kept and only skipped,
+    and their alerts come back on their own when they next sign in. A device subscribed without sign-in has no person
+    and never lapses."""
+    if not sub.get("user_sub"):
+        return None
+    email = conn.execute(select(User.email).where(User.sub == sub["user_sub"])).scalar()
+    return oidc.access_lapsed(conn, sub["user_sub"], email, now)
+
+
+def prune_lapsed(conn, now: float | None = None) -> int:
+    """Remove the devices whose person was taken off the sign-in list. Returns how many."""
+    gone = [s["endpoint"] for s in db.rows(conn.execute(select(PushSubscription))) if lapsed(conn, s, now) == "user_removed"]
+    for endpoint in gone:
+        unsubscribe(conn, endpoint)
+    return len(gone)
 
 
 def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
@@ -72,9 +96,10 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
         raise ValueError("That push service isn't one Runway knows. Add its host to RUNWAY_PUSH_HOSTS if you trust it.")
     if not webpush.valid_public_key(keys["p256dh"]):
         raise ValueError("That isn't a push subscription.")
+    # The same browser subscribing again is whoever is signed in there now: the device becomes theirs.
     db.upsert(conn, PushSubscription, {"endpoint": endpoint, "p256dh": keys["p256dh"], "auth": keys["auth"],
                                        "device": (device or "This device")[:80], "user_sub": user_sub, "created": time.time()},
-              key=["endpoint"], update=["p256dh", "auth", "device"])
+              key=["endpoint"], update=["p256dh", "auth", "device", "user_sub"])
 
 
 # The browsers' push services (Chrome and Edge through Google or Windows, Firefox through Mozilla, Safari through Apple).
@@ -82,10 +107,27 @@ PUSH_HOSTS = ("fcm.googleapis.com", "android.googleapis.com", "push.services.moz
               "notify.windows.com")
 
 
+_AUTHORITY = re.compile(r"([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*)(?::\d{1,5})?")
+
+
 def push_host_allowed(endpoint: str) -> bool:
-    host = (urllib.parse.urlsplit(endpoint).hostname or "").lower()
+    """Whether an endpoint is on a push service Runway knows: the browsers' (PUSH_HOSTS, https only) or one you named
+    in RUNWAY_PUSH_HOSTS (yours: http and a port are allowed, as in a test). The address has to be a plain one,
+    scheme://host[:port]/path, with no user name, backslash or stray character before the path: the host is read
+    here with urllib, and pywebpush connects with requests, whose parser reads a trickier address differently
+    (`https://evil\@fcm.googleapis.com/` names fcm.googleapis.com to one and evil to the other). A plain address
+    reads the same to both."""
+    if not isinstance(endpoint, str) or not endpoint.isascii() or "\\" in endpoint or any(ord(ch) <= 32 or ord(ch) == 127 for ch in endpoint):
+        return False
+    p = urllib.parse.urlsplit(endpoint)
+    m = _AUTHORITY.fullmatch(p.netloc.lower())   # the whole authority: anything else in it is refused, not read around
+    if not m:
+        return False
+    host = m.group(1)
     extra = tuple(h.strip().lower() for h in (os.environ.get("RUNWAY_PUSH_HOSTS") or "").split(",") if h.strip())
-    return bool(host) and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS + extra)
+    if p.scheme == "https" and any(host == h or host.endswith("." + h) for h in PUSH_HOSTS):
+        return True
+    return p.scheme in ("https", "http") and any(host == h or host.endswith("." + h) for h in extra)
 
 
 def unsubscribe(conn, endpoint: str) -> None:
@@ -110,6 +152,12 @@ def send_all(conn, message: dict, only: str | None = None) -> dict:
             continue
         if not push_host_allowed(s["endpoint"]):   # from a restored backup, never checked when it was saved
             unsubscribe(conn, s["endpoint"])
+            continue
+        why = lapsed(conn, s)
+        if why == "user_removed":   # subscriptions() pruned these, but a person may have been taken off since
+            unsubscribe(conn, s["endpoint"])
+            continue
+        if why:   # not seen signing in lately: kept, and skipped until they do
             continue
         try:
             webpush.send(s, message, vapid, subject(conn))
@@ -194,8 +242,9 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         log = conn.execute(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
         stale = not last_ok or (date.today() - date.fromisoformat(last_ok[:10])).days >= 1
         if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
+            # Not what the bank said: a notification shows on a lock screen, and goes through a push service.
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
-                        "body": (log["message"] or "The last sync failed.")[:160], "url": "/#setup/connections"})
+                        "body": "The last sync failed. Open Settings → Bank connections to see what it said.", "url": "/#setup/connections"})
     out += churning.alerts(conn, today, p["churn_fee"], p["churn_bonus"], p["churn_plan"], p["churn_benefit"],
                             p["churn_apply"])
     return out

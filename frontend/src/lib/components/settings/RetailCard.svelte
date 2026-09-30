@@ -87,7 +87,10 @@
           <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
         <li>Give it Runway's address ({location.origin}) and a key:
           {#if r.token}
-            <span>key made {relTime(r.token_created)}</span>
+            <span>key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
+            {#if r.token_problem}
+              <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
+            {/if}
             <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
             <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>
           {:else}

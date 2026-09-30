@@ -212,11 +212,24 @@ class RegistrationTests(Db):
         self.conn.execute("INSERT INTO oauth_grants(client_id, scope, resource, created) VALUES (?, 'read', ?, 1001)",
                           (approved["client_id"], RES))
         self.conn.execute("INSERT INTO oauth_tokens(token_hash, kind, grant_id, created, expires) SELECT 'h', 'refresh', id, 1001, 9e12 FROM oauth_grants")
+        # A burst of registrations while an app is connecting (registered, waiting for the consent page) can't push
+        # it out: apps registered within CONSENT_TTL are all kept.
+        burst = 1000 + mcp_oauth.CONSENT_TTL + 10
         for i in range(60):
-            mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=1002 + i / 100)
-        self.assertEqual(self.count("oauth_clients"), 51)                         # 50 waiting, and the approved one
+            mcp_oauth.register(self.conn, {"redirect_uris": ["https://c.example/cb"]}, now=burst + i / 100)
+        self.assertEqual(self.count("oauth_clients"), 62)
+        self.assertIsNotNone(mcp_oauth.get_client(self.conn, first["client_id"]))
+        # Once they've had their chance, at most fifty of them stay.
+        later = burst + mcp_oauth.CONSENT_TTL + 10
+        mcp_oauth.register(self.conn, {"redirect_uris": ["https://d.example/cb"]}, now=later)
+        self.assertEqual(self.count("oauth_clients"), 51)                         # 50 waiting (the new one among them), and the approved one
         self.assertIsNone(mcp_oauth.get_client(self.conn, first["client_id"]))    # the oldest went first
         self.assertIsNotNone(mcp_oauth.get_client(self.conn, approved["client_id"]))
+        # ... and the burst itself is bounded, however fresh.
+        with mock.patch.object(mcp_oauth, "MAX_UNCONSENTED_ALL", 70):
+            for i in range(30):
+                mcp_oauth.register(self.conn, {"redirect_uris": ["https://e.example/cb"]}, now=later + 1 + i / 100)
+        self.assertEqual(self.count("oauth_clients"), 71)
 
 
 class ClientAuthTests(Db):

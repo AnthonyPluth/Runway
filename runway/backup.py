@@ -1,8 +1,12 @@
 """Backups that work across databases: one gzip'd JSON file with every table's rows.
 
-Use it to move Runway (Mac -> server, SQLite -> Postgres) or just to keep a copy. It includes your settings, so
-it holds your SimpleFIN access, API keys and Plaid tokens: keep backup files private. Sign-in sessions and assistants
-connected with OAuth aren't included, so you sign in (and reconnect them) again after restoring.
+Use it to move Runway (Mac -> server, SQLite -> Postgres) or just to keep a copy. It includes your settings, and so
+your SimpleFIN access, API keys and Plaid tokens: those stay encrypted in the file, as they are in the database
+(runway/secretbox.py), so a backup on its own doesn't give them away. Restoring on a machine with the same
+RUNWAY_SECRET_KEY (or a copy of secret.key) reads them again; under another key they can't be read (the restore says
+which): set the key the backup was made with as RUNWAY_SECRET_KEY_OLD for one start, and they're re-encrypted with the
+current one, or enter them again in Settings. Sign-in sessions and assistants connected with OAuth aren't included, so
+you sign in (and reconnect them) again after restoring.
 """
 from __future__ import annotations
 
@@ -16,6 +20,7 @@ from typing import Any
 from sqlalchemy import column, delete, false, func, insert, inspect, select, table
 
 from . import db, schema, secretbox
+from .models import PlaidItem, Setting
 
 FORMAT = "runway-backup"
 VERSION = 1
@@ -60,22 +65,16 @@ def _convert(table: str, cols: list[str], rows: list[list], fn) -> list[list]:
 
 
 def export(conn) -> dict:
-    """Secrets are written decrypted, so the backup restores under any key (on another machine, say)."""
+    """Secrets are written as they're stored, encrypted (a value saved by a version before encryption is encrypted on
+    the way out), so the file holds nothing readable without the key."""
     out: dict[str, Any] = {"format": FORMAT, "version": VERSION, "created": datetime.now().isoformat(timespec="seconds"),
            "source": "postgres" if db.using_postgres() else "sqlite", "tables": {}}
     for t in tables():
         cols = table_columns(conn, t)
         src = _table(t, cols)
         rows = [list(r) for r in conn.execute(select(*(src.c[c] for c in cols)))]
-        out["tables"][t] = {"columns": cols, "rows": _convert(t, cols, rows, _decrypt_or_drop)}
+        out["tables"][t] = {"columns": cols, "rows": _convert(t, cols, rows, secretbox.encrypt)}
     return out
-
-
-def _decrypt_or_drop(value):
-    try:
-        return secretbox.decrypt(value)
-    except secretbox.SecretError:
-        return value   # unreadable under the current key: kept as it is rather than failing the whole backup
 
 
 def dump(conn) -> bytes:
@@ -151,8 +150,28 @@ def safety_copy(conn, directory: str | None = None) -> str | None:
     return path
 
 
+def unreadable_secrets(conn) -> list[str]:
+    """The settings that hold a secret this Runway's key can't read (a backup from a machine with another key): what
+    to enter again in Settings, by name, then Plaid connections (one entry each)."""
+    out = []
+    for r in conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(sorted(secretbox.SECRET_SETTINGS)))
+                          .order_by(Setting.key)).fetchall():
+        try:
+            secretbox.decrypt(r["value"])
+        except secretbox.SecretError:
+            out.append(r["key"])
+    for r in conn.execute(select(PlaidItem.item_id, PlaidItem.access_token).order_by(PlaidItem.item_id)).fetchall():
+        try:
+            secretbox.decrypt(r["access_token"])
+        except secretbox.SecretError:
+            out.append(f"plaid:{r['item_id']}")
+    return out
+
+
 def restore(conn, data: dict) -> dict:
-    """Replace everything with the backup's contents (in one transaction). Returns rows restored per table."""
+    """Replace everything with the backup's contents (in one transaction). Returns rows restored per table. Secrets
+    the backup holds encrypted are kept as they are (see unreadable_secrets for the ones this key can't read); a
+    plaintext one from an old backup is encrypted."""
     known = set(tables())
     counts = {}
     for t in tables():

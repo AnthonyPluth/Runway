@@ -50,12 +50,13 @@ ENV RUNWAY_VERSION=$VERSION \
 RUN useradd --uid 1000 --create-home --shell /usr/sbin/nologin runway \
  && mkdir -p /data && chown runway:runway /data
 
+# The code stays owned by root, so it's read-only for the user it runs as; the app writes only to /data.
 WORKDIR /app
 COPY --from=deps /app/.venv ./.venv
-COPY --chown=runway:runway run.py alembic.ini ./
-COPY --chown=runway:runway runway ./runway
-COPY --from=web --chown=runway:runway /web/runway/static/app ./runway/static/app
-COPY --chown=runway:runway extension ./extension
+COPY run.py alembic.ini ./
+COPY runway ./runway
+COPY --from=web /web/runway/static/app ./runway/static/app
+COPY extension ./extension
 
 USER runway
 VOLUME ["/data"]

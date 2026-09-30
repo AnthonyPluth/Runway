@@ -33,10 +33,10 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import delete, exists, insert, or_, select, update
+from sqlalchemy import delete, exists, insert, or_, select, true, update
 
 from . import oidc
-from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
+from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken
 
 SCOPES = ("read", "churning:write", "categorize:write")
 ACCESS_TTL = 3600                 # seconds
@@ -44,7 +44,8 @@ REFRESH_TTL = 90 * 86400
 CODE_TTL = 600
 CONSENT_TTL = 600
 UNCONSENTED_TTL = 24 * 3600       # a registered app nobody approved is dropped after this (a day, to come back to it)
-MAX_UNCONSENTED = 50              # ... and at most this many are kept at once (the oldest go first)
+MAX_UNCONSENTED = 50              # ... and at most this many are kept once they're older than CONSENT_TTL (the oldest go first):
+MAX_UNCONSENTED_ALL = 1000        # a burst of registrations can't push out an app that's connecting right now; this bounds the burst
 KEEP = 30 * 86400                 # spent tokens and revoked grants are kept this long, then deleted
 MAX_BODY = 8 * 1024               # bytes in a request to /oauth/register, /oauth/token or /oauth/revoke
 MAX_NAME = 100
@@ -278,9 +279,10 @@ def register(conn, meta: Any, now: float | None = None) -> dict:
 
     housekeeping(conn, now)
     unapproved = ~exists().where(OAuthGrant.client_id == OAuthClient.id)
-    conn.execute(delete(OAuthClient).where(OAuthClient.id.in_(
-        select(OAuthClient.id).where(unapproved).order_by(OAuthClient.created.desc(), OAuthClient.id)
-        .offset(MAX_UNCONSENTED - 1))))
+    for limit, cond in ((MAX_UNCONSENTED, OAuthClient.created < now - CONSENT_TTL), (MAX_UNCONSENTED_ALL, true())):
+        conn.execute(delete(OAuthClient).where(OAuthClient.id.in_(
+            select(OAuthClient.id).where(unapproved, cond).order_by(OAuthClient.created.desc(), OAuthClient.id)
+            .offset(limit - 1))))
     client_id = "rwc_" + secrets.token_urlsafe(24)
     secret = secrets.token_urlsafe(32) if method != "none" else None
     conn.execute(insert(OAuthClient).values(id=client_id, name=name, redirect_uris=json.dumps(uris), auth_method=method,
@@ -435,15 +437,7 @@ def cut_off_reason(conn, grant, now: float) -> str | None:
     sign in, judged the way their browser sessions are (oidc.still_allowed): taken off OIDC_ALLOWED_EMAILS, it ends at
     once ("user_removed"). With OIDC_ALLOWED_GROUPS, where that can be known only at sign-in, it ends RUNWAY_SESSION_DAYS
     after the approver last signed in, as a session would ("sign_in_lapsed"). Without sign-in (OIDC off) nothing ends."""
-    if not oidc.enabled():
-        return None
-    if not oidc.still_allowed(grant["email"]):
-        return "user_removed"
-    if oidc.known_only_at_sign_in():
-        seen = conn.execute(select(User.last_seen).where(User.sub == grant["sub"])).scalar() if grant["sub"] else None
-        if seen is None or now - seen > oidc.config()["session_days"] * 86400:
-            return "sign_in_lapsed"
-    return None
+    return oidc.access_lapsed(conn, grant["sub"], grant["email"], now)
 
 
 def _cut_off(conn, grant, now: float) -> bool:

@@ -64,6 +64,9 @@ def run_sync() -> dict:
                     pb = plaidbank.sync_all(conn)
                     result["new"] += pb["new"]
                     result["errors"] += pb["errors"]
+                # What the banks said is kept and shown (the log, Settings, the sidebar), so nothing in it may be an
+                # account number or the like.
+                result["errors"] = [monitoring.public_text(x) for x in result["errors"]]
                 try:   # logos: Plaid's new ones, and big brands' (a nice-to-have; never fail the sync)
                     merchants.note_sites(conn)
                     merchants.fetch_logos(conn)
@@ -101,8 +104,9 @@ def run_sync() -> dict:
             raise
         except simplefin.SimpleFinError as e:
             monitoring.cron_finish(check_in, False)
-            _record_failed_sync(str(e))
-            raise ApiError(str(e), 502) from e
+            said = monitoring.public_text(str(e))   # it quotes the bridge's answer
+            _record_failed_sync(said)
+            raise ApiError(said, 502) from e
         except Exception as e:
             monitoring.cron_finish(check_in, False)
             monitoring.report()

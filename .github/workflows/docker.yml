@@ -52,6 +52,8 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
         id: python
         with:
@@ -124,8 +126,10 @@ jobs:
         shell: bash
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -166,6 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0       # full history and tags, to find the last version
+          persist-credentials: false
 
       - name: Work out the next version
         id: next
@@ -272,12 +277,13 @@ jobs:
     if: needs.build.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write          # push the tag and create the release
+      contents: write          # create the tag and the release
       packages: write          # publish to ghcr.io
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0       # the commits since the last release, for Sentry's release (below)
+          persist-credentials: false
 
       - name: Image name (registry names must be lowercase)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/runway" >> "$GITHUB_ENV"
@@ -337,9 +343,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          git tag "$VERSION" "$GITHUB_SHA"
-          git push origin "$VERSION"
-          gh release create "$VERSION" --title "Runway $VERSION" --generate-notes --verify-tag
+          # --target makes GitHub create the tag v1.2.3 on this commit (through the API, so the checkout needs no
+          # credentials); a tag that already exists is used as it is.
+          gh release create "$VERSION" --target "$GITHUB_SHA" --title "Runway $VERSION" --generate-notes
 
       # The version as a Sentry release in both projects (the server's and the web app's), with the commits it brings,
       # so an issue shows the release that brought it and its suspect commits. The server and the web app tag what they

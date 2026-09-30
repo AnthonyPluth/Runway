@@ -62,8 +62,11 @@ If a setting is missing, the container stops with a message saying which one (se
 2. Start the container on the server, sign in, and go to Settings → Advanced → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
-The backup holds your bank access and API keys; delete stray copies once you've restored it. The server encrypts them
-again with its own key as they're restored.
+The backup holds your bank access and API keys encrypted with your key: set the same `RUNWAY_SECRET_KEY` on the
+server (or copy `secret.key` into its `./data`) before restoring. Restored under another key, they can't be read (the
+restore says which): put the key the backup was made with in `RUNWAY_SECRET_KEY_OLD` and restart once, and Runway
+re-encrypts them with the current key; or enter them again in Settings. Delete stray copies of the file once you've
+restored it.
 
 ## Using Postgres (optional)
 
@@ -81,13 +84,17 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
    address. If the proxy runs on the same machine, publish the port on localhost only
    (`"127.0.0.1:8765:8765"` in `docker-compose.yml`) so nothing reaches Runway around it.
 2. **Sign-in limited to you.** `OIDC_ALLOWED_EMAILS` and/or `OIDC_ALLOWED_GROUPS`; avoid `OIDC_ALLOW_ANY_USER`.
-   Turn on two-factor sign-in at your identity provider: it guards everything behind it.
+   Turn on two-factor sign-in at your identity provider: it guards everything behind it. Everyone you let in shares
+   one Runway: they see the same accounts and can change the same settings, connect and disconnect banks, download
+   the backup and restore one (see [SECURITY.md](SECURITY.md)). Let in only people you'd hand your finances to.
 3. **A secret key.** Set `RUNWAY_SECRET_KEY` (`openssl rand -base64 32`) and keep a copy in your password manager.
    It encrypts your saved bank access and API keys. (Without it, the key is `./data/secret.key`: back it up with the
-   database.)
+   database.) Changing it: put the old one in `RUNWAY_SECRET_KEY_OLD` for one start, and keep it as long as you keep
+   backups made with it (a backup's secrets are under the key of the time).
 4. **Rate limiting at the proxy** (optional but good): Runway caps how many requests it handles at once, and the proxy
    can limit requests per address, e.g. Caddy's `rate_limit` or Traefik's `RateLimit` middleware.
-5. **Backups kept private.** They contain your bank access in the clear so they restore anywhere.
+5. **Backups kept private.** They contain your transactions, and your bank access and API keys encrypted with your
+   `RUNWAY_SECRET_KEY` (restoring elsewhere needs the same key).
 6. **Updates.** Pull new images regularly; each release is tested, and its dependencies are checked for known
    vulnerabilities.
 7. **AI assistants** connect with OAuth at `<RUNWAY_PUBLIC_URL>/mcp` ([docs/mcp.md](docs/mcp.md)). If a forward-auth
@@ -150,6 +157,7 @@ Also in Sentry, without a variable:
   `<RUNWAY_PUBLIC_URL>/plaid/oauth`. Add that address under **Allowed redirect URIs** in the Plaid Dashboard (Runway
   shows it in Settings → Bank connections); it's what makes those banks work from a phone or the installed app.
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
+  Everyone who gets in shares everything: it's one household's Runway, not one account per person.
 - A session ends after 14 days without using Runway (`RUNWAY_SESSION_DAYS`); using it keeps you signed in, for up to
   90 days after you signed in. (If you're let in by `OIDC_ALLOWED_GROUPS` rather than by email, it ends 14 days after
   signing in, so leaving the group takes effect.) Signing out ends the Runway session and your provider session.

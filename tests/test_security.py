@@ -74,20 +74,36 @@ class SecretsTests(unittest.TestCase):
         self.assertEqual(secretbox.decrypt(tok), "access-plain")
         self.assertEqual(secretbox.encrypt_stored(self.c), 0)              # nothing left to do
 
-    def test_backups_carry_secrets_decrypted_and_restore_encrypted(self):
+    def test_backups_carry_secrets_encrypted(self):
         db.set_setting(self.c, "realie_api_key", "rl-key")
         self.c.execute("INSERT INTO plaid_items(item_id, access_token) VALUES ('i1', ?)", (secretbox.encrypt("access-1"),))
-        data = backup.load(backup.dump(self.c))
-        rows = data["tables"]["settings"]["rows"]
-        self.assertIn(["realie_api_key", "rl-key"], [r[:2] for r in rows])
-        self.assertIn("access-1", data["tables"]["plaid_items"]["rows"][0])
+        # a value saved by a version before encryption goes out encrypted too
+        self.c.execute("INSERT INTO settings(key, value) VALUES ('finnhub_api_key', 'fh-plain')")
+        raw = backup.dump(self.c)
+        for secret in (b"rl-key", b"access-1", b"fh-plain"):
+            self.assertNotIn(secret, gzip.decompress(raw))
+        data = backup.load(raw)
+        settings = {r[0]: r[1] for r in data["tables"]["settings"]["rows"]}
+        self.assertTrue(settings["realie_api_key"].startswith("enc:v1:"))
+        self.assertTrue(settings["finnhub_api_key"].startswith("enc:v1:"))
+        self.assertTrue(data["tables"]["plaid_items"]["rows"][0][1].startswith("enc:v1:"))
+        # restored under the same key, they read as before
         other = os.path.join(self.tmp.name, "o.db")
         db.init(other)
         with db.session(other) as c2:
             backup.restore(c2, data)
+            self.assertEqual(backup.unreadable_secrets(c2), [])
         with db.session(other) as c2:
             self.assertTrue(c2.execute("SELECT value FROM settings WHERE key='realie_api_key'").fetchone()[0].startswith("enc:v1:"))
             self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
+        # under another key they can't be read, and the restore says which
+        elsewhere = os.path.join(self.tmp.name, "e.db")
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machine-key-abcdefghijklmnopqrstuv"}):
+            db.init(elsewhere)
+            with db.session(elsewhere) as c3:
+                backup.restore(c3, data)
+                self.assertEqual(backup.unreadable_secrets(c3), ["finnhub_api_key", "realie_api_key", "plaid:i1"])
+                self.assertIsNone(db.get_setting(c3, "realie_api_key"))
 
     def test_key_rotation_and_a_wrong_key(self):
         db.set_setting(self.c, "openrouter_api_key", "sk-1")

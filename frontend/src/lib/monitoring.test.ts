@@ -108,6 +108,19 @@ describe("startMonitoring", () => {
       expect(e.message).toBe("boom");
     });
 
+    it("cleans addresses in an error's message and exception text", () => {
+      const e = opts.beforeSend({
+        message: "load https://u:p@x.test/a?q=rent failed",
+        logentry: { message: "GET /api/tx?q=rent", formatted: "GET /api/tx?q=rent 500", params: [] },
+        exception: { values: [{ type: "TypeError", value: "NetworkError: https://u:p@runway.test/api/transactions?q=starbucks" }, { type: "Error" }] },
+      });
+      const { exception, logentry } = e as { exception: { values: unknown[] }; logentry: { formatted: string } };
+      expect(JSON.stringify(e)).not.toMatch(/rent|starbucks|u:p/);
+      expect(exception.values[0]).toEqual({ type: "TypeError", value: "NetworkError: https://[Filtered]@runway.test/api/transactions?[Filtered]" });
+      expect(exception.values[1]).toEqual({ type: "Error" });
+      expect(logentry.formatted).toBe("GET /api/tx?[Filtered] 500");
+    });
+
     it("leaves an event without a request alone", () => {
       expect(opts.beforeSend({ message: "x" })).toEqual({ message: "x" });
     });

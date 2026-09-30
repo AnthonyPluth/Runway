@@ -85,9 +85,20 @@ class ModelTests(Base):
                          ({"kind": "rsu", "quantity": 0}, "number of shares"),
                          ({"kind": "rsu", "quantity": 10, "vest_months": 12, "cliff_months": 24}, "cliff"),
                          ({"kind": "iso", "quantity": 10, "strike": 1, "exercised": 11}, "More exercised"),
-                         ({"kind": "rsu", "quantity": 10, "vest_start": "soon"}, "date")]:
+                         ({"kind": "rsu", "quantity": 10, "vest_start": "soon"}, "date"),
+                         # a length or date that runs off the calendar would stop every net-worth snapshot (the sync)
+                         ({"kind": "rsu", "quantity": 10, "vest_months": 100000}, "600 months"),
+                         ({"kind": "rsu", "quantity": 10, "vest_months": 12, "vest_every": 601}, "600 months"),
+                         ({"kind": "rsu", "quantity": 10, "vest_start": "9999-01-01"}, "between 1900 and 2200")]:
             with self.assertRaisesRegex(equity.EquityError, msg):
                 equity.save_grant(self.c, cid, bad)
+        # one saved before the limits doesn't take the page (or the sync) down with it
+        gid = equity.save_grant(self.c, cid, {"kind": "rsu", "quantity": 10, "vest_start": "2024-01-01", "vest_months": 12})
+        self.c.execute("UPDATE equity_grants SET vest_months=200000 WHERE id=?", (gid,))
+        self.c.commit()
+        g = equity.overview(self.c, TODAY)["companies"][0]["grants"][0]
+        self.assertEqual((g["vested"], g["fully_vested_on"], g["schedule"]), (0.0, None, []))
+        self.assertIn("vesting", g["problem"])
         with self.assertRaises(equity.EquityError):
             equity.save_company(self.c, {"name": ""})
 
