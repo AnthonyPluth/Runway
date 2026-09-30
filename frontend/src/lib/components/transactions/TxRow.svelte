@@ -59,7 +59,7 @@
   }
 </script>
 
-<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_15rem_11rem_7.5rem_1.75rem] lg:py-0",
+<div role="listitem" class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(0,1fr)_17rem_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(0,1fr)_20rem_11rem_7.5rem_1.75rem] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
@@ -81,7 +81,7 @@
 
   <div class="col-start-3 row-start-1 min-w-0 pr-3">
     <div class="flex min-w-0 items-center gap-1.5">
-      <span class="truncate font-medium">{name}</span>
+      <span class="truncate font-medium" title={name}>{name}</span>
       {#if t.pending}<Badge variant="secondary" class="shrink-0">pending</Badge>{/if}
       {#if !review && t.needs_review}<Badge variant="outline" class="shrink-0 border-amber-500/50 text-amber-500">review</Badge>{/if}
       {#if picking}
@@ -107,7 +107,7 @@
   <!-- Account (and the bank's own text): under the merchant on a tablet, its own column from lg up (where the bank's text
        is in the details instead). -->
   <div class="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    <span class="min-w-0 lg:col-start-5 lg:row-start-1 lg:truncate lg:pr-3"><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" /></span>
+    <span class="min-w-0 lg:col-start-5 lg:row-start-1 lg:truncate lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" /></span>
     {#if detail}<span aria-hidden="true" class="lg:hidden">·</span><span class="truncate lg:hidden" title={detail}>{detail}</span>{/if}
   </div>
 
@@ -128,7 +128,7 @@
         t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
         saving && "opacity-60")}>
         {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
-        <span class="truncate">{t.category || "Choose category"}</span>
+        <span class="truncate" title={t.category || undefined}>{t.category || "Choose category"}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
         <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
           class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />

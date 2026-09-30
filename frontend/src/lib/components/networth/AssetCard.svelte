@@ -2,16 +2,15 @@
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { fmt, fmt0, fmtDate, parseDate } from "$lib/format";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { tick } from "svelte";
   import { toast } from "svelte-sonner";
   import { HOME_VALUES, valueSource } from "./homeValues";
-  import { ASSET_KIND_LABEL, type Asset, type NetWorth } from "./types";
+  import type { Asset, NetWorth } from "./types";
 
-  // A home, vehicle or other asset as the side panel shows it: its value and where it came from, with a quick way to update
+  // A home, vehicle or other asset as the side panel shows it: where its value came from (the panel header has the value), with a quick way to update
   // it, the value link, and removing it. `onremoved` runs after Remove goes through (the panel closes).
   let { a, d, onedit, onchanged, onremoved }: { a: Asset; d: NetWorth; onedit: () => void; onchanged: () => void; onremoved: () => void } = $props();
 
@@ -51,9 +50,8 @@
 </script>
 
 <div>
-  <div class="flex items-start justify-between gap-4 max-sm:flex-col max-sm:gap-1">
+  <div>
     <div class="min-w-0">
-      <div class="mb-0.5"><Badge variant="secondary">{ASSET_KIND_LABEL[a.kind] ?? a.kind}</Badge></div>
       <div class="text-sm text-muted-foreground">
         {valueSource(a.source)}{a.source !== "manual" && a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}
         · set {a.as_of ? fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" }) : "—"}{a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year since` : ""}
@@ -62,7 +60,6 @@
       {#if a.address}<div class="text-sm text-muted-foreground">{a.address}</div>{/if}
       {#if loan}<div class="text-sm">{fmt(item?.equity ?? 0)} equity after {loan.name} ({fmt0(item?.loan?.owed ?? 0)} owed)</div>{/if}
     </div>
-    <div class="text-xl font-semibold whitespace-nowrap tabular-nums">{fmt0(a.current_value)}</div>
   </div>
   <div class="mt-3 flex flex-wrap items-center gap-2">
     <Button variant="outline" size="sm" onclick={openQuick} aria-expanded={quick}>Update value</Button>
