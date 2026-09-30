@@ -56,11 +56,11 @@ from .api.reports import (
     api_report_spending, api_report_transactions
 )
 from .api.retail import (
-    EXTENSION_DIR, EXT_ROUTES, MAX_EXT_BODY, TARGET_DETAIL_URLS, TARGET_ORDER_PAGES, _retail_categorize_lock,
+    COSTCO_GRAPHQL_CONFIG, EXTENSION_DIR, EXT_ROUTES, MAX_EXT_BODY, TARGET_DETAIL_URLS, TARGET_HISTORY, TARGET_ORDER_PAGES, _retail_categorize_lock,
     api_retail, api_retail_apply, api_retail_candidates, api_retail_item, api_retail_link, api_retail_match,
     api_retail_order, api_retail_settings, api_retail_token, api_retail_token_remove, api_retail_unlink,
     ext_amazon_order, ext_amazon_transactions, ext_carta_data, ext_finish, ext_start, ext_target_history,
-    ext_target_order, extension_zip
+    ext_target_order, ext_costco_history, extension_zip
 )
 from .api.state import (
     api_override_delete, api_override_set, api_overview, api_settings, api_state, owner_choices, setup_steps
