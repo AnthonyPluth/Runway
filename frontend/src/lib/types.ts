@@ -2,7 +2,8 @@
 
 export interface User { name?: string; email?: string; local?: boolean }
 export interface Brand { institution?: string; /** Logo.dev's logo for the institution, once Runway has fetched it. */ src?: string | null; initial?: string }
-export interface SyncLog { ok: boolean; message?: string }
+/** The last sync's log line; `at` is when it ran, ISO with its UTC offset. */
+export interface SyncLog { ok: boolean; message?: string; at?: string }
 
 /** GET /api/state (runway/server.py api_state). */
 export interface SentryConfig { dsn: string; environment: string; release: string }
@@ -13,8 +14,11 @@ export interface AppState {
   simplefin?: boolean;
   has_api_key?: boolean;
   llm_model?: string;
+  /** When the banks last synced without an error, ISO with its UTC offset. */
   last_sync_ok?: string | null;
   last_log?: SyncLog | null;
+  /** What banks said on that sync (an expired login, say): it still worked, but they need you. */
+  sync_warnings?: string[];
   last_llm_error?: string | null;
   review_count?: number;
   plaid_undecided?: number;
@@ -109,7 +113,7 @@ export interface Overview {
   total: number[];
   low: { date: string; balance: number };
   /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on). */
-  accounts: { id: string; name: string; kind: string; balance: number; daily_spend?: number }[];
+  accounts: { id: string; name: string; kind: string; balance: number; daily_spend?: number; balance_date?: string | null }[];
   events: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];

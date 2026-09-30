@@ -4,7 +4,7 @@ import { render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
+vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn(), session: {} }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
 
 import { app, route } from "$lib/app.svelte";
@@ -12,7 +12,8 @@ import type { AppState } from "$lib/types";
 import MobileNav from "./MobileNav.svelte";
 import Sidebar from "./Sidebar.svelte";
 
-const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: "2020-01-05T09:00:00", ...extra });
+// A sync an hour ago: up to date.
+const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString(), ...extra });
 beforeEach(() => { app.state = null; route.page = "overview"; route.sub = ""; });
 
 describe("Sidebar", () => {
@@ -63,7 +64,8 @@ describe("Sidebar", () => {
     app.state = state({ version: "1.4.0" });
     render(Sidebar);
     expect(screen.getByText("1.4.0")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Up to date · Jan 5");
+    expect(screen.getByRole("status")).toHaveTextContent(/^Up to date · /);
+    expect(within(screen.getByRole("status")).queryByRole("link")).toBeNull();
   });
 
   it("shows who's signed in, with initials and a sign-out link, but nothing for the local user", () => {
@@ -89,6 +91,24 @@ describe("Sidebar", () => {
     render(Sidebar);
     expect(screen.getByRole("status")).toHaveTextContent("Last sync failed");
     expect(screen.getByRole("status")).toHaveAttribute("title", "Bank said no");
+    // The reason is in view (not only on hover), and the status links to where it can be fixed.
+    expect(screen.getByText("Bank said no")).toBeInTheDocument();
+    expect(within(screen.getByRole("status")).getByRole("link", { name: "Last sync failed" })).toHaveAttribute("href", "#setup/connections");
+  });
+
+  it("warns, in view, when a bank needs attention after a sync that worked", () => {
+    app.state = state({ sync_warnings: ["Chase: log in again"] });
+    render(Sidebar);
+    const link = within(screen.getByRole("status")).getByRole("link", { name: "Synced · 1 bank needs attention" });
+    expect(link).toHaveAttribute("href", "#setup/connections");
+    expect(link).toHaveClass("text-amber-500");
+    expect(screen.getByText("Chase: log in again")).toHaveClass("truncate");
+  });
+
+  it("says how old a sync from days ago is", () => {
+    app.state = state({ last_sync_ok: new Date(Date.now() - 3 * 864e5).toISOString() });
+    render(Sidebar);
+    expect(within(screen.getByRole("status")).getByRole("link", { name: "Updated 3 days ago" })).toBeInTheDocument();
   });
 });
 
@@ -99,6 +119,27 @@ describe("MobileNav", () => {
     const bar = screen.getByRole("navigation", { name: "Main" });
     expect(within(bar).getAllByRole("link").map((l) => l.textContent!.trim())).toEqual(["Overview", "Transactions", "Budget", "Reports"]);
     expect(within(bar).getByRole("button", { name: "More" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("dots More when the sync needs attention, so it's seen without opening the sheet", async () => {
+    app.state = state();
+    const { unmount } = render(MobileNav);
+    expect(screen.queryByTestId("sync-dot")).toBeNull();
+    unmount();
+    app.state = state({ sync_warnings: ["Chase: log in again"] });
+    render(MobileNav);
+    expect(screen.getByTestId("sync-dot")).toHaveClass("bg-amber-500");
+    const more = screen.getByRole("button", { name: "More, Synced · 1 bank needs attention" });
+    await userEvent.click(more);
+    const sheet = screen.getByRole("dialog", { name: "More pages" });
+    expect(within(sheet).getByRole("link", { name: "Synced · 1 bank needs attention" })).toHaveAttribute("href", "#setup/connections");
+    expect(within(sheet).getByText("Chase: log in again")).toBeInTheDocument();
+  });
+
+  it("dots More in red when the last sync failed", () => {
+    app.state = state({ last_log: { ok: false, message: "Down" } });
+    render(MobileNav);
+    expect(screen.getByTestId("sync-dot")).toHaveClass("bg-destructive");
   });
 
   it("caps the review badge at 99+", () => {

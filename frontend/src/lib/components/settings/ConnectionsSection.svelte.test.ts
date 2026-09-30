@@ -33,7 +33,7 @@ const settled = () => waitFor(() => expect(document.body.style.pointerEvents).no
 
 beforeEach(() => {
   vi.mocked(api).mockReset(); vi.mocked(reload).mockClear(); vi.mocked(connectPlaid).mockClear();
-  state.simplefin = false; state.last_log = null;
+  state.simplefin = false; state.last_log = null; state.sync_warnings = [];
 });
 
 describe("Settings → Bank connections", () => {
@@ -46,18 +46,34 @@ describe("Settings → Bank connections", () => {
   });
 
   it("lists SimpleFIN and each Plaid connection as compact rows, with one Connect a bank button", async () => {
-    state.simplefin = true; state.last_log = { at: "2026-09-30 14:00", message: "12 new" };
+    state.simplefin = true; state.last_log = { at: "2026-09-30T14:00:00+00:00", ok: true, message: "12 new" };
     serve(status([item(), item({ item_id: "it2", institution_name: "Fidelity", bank: false, products: ["investments"], accounts: [] })]));
     render(ConnectionsSection);
     expect(await screen.findByText("Chase")).toBeInTheDocument();
     expect(screen.getByText("SimpleFIN")).toBeInTheDocument();
-    expect(screen.getByText(/Last sync: 2026-09-30 14:00 UTC — 12 new/)).toBeInTheDocument();
+    expect(screen.getByText(/^Last sync Sep 30, 10:00\sAM · 12 new$/)).toBeInTheDocument();   // in this browser's time zone
+    expect(screen.getByText("connected")).toBeInTheDocument();
     expect(screen.getByText("Fidelity")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Sync" })).toHaveLength(2);
     expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Replace the connection" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Connect a bank" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Connect an investment account" })).toBeNull();
+  });
+
+  it("shows SimpleFIN in amber, with what was said, when the last sync failed or a bank needs attention", async () => {
+    state.simplefin = true; state.last_log = { at: "2026-09-30 14:00:00", ok: false, message: "SimpleFIN is down" };
+    serve(status());
+    const { unmount } = render(ConnectionsSection);
+    expect(await screen.findByText("SimpleFIN is down")).toHaveClass("text-amber-500");
+    expect(screen.getByText("needs attention")).toBeInTheDocument();
+    expect(screen.getByText(/^Last sync Sep 30, 10:00\sAM$/)).toBeInTheDocument();   // the old UTC form reads as UTC
+    unmount();
+    state.last_log = { at: "2026-09-30T14:00:00+00:00", ok: true, message: "2 new transactions · bank messages: Chase: log in again" };
+    state.sync_warnings = ["Chase: log in again"];
+    render(ConnectionsSection);
+    expect(await screen.findByText("Chase: log in again")).toHaveClass("text-amber-500");
+    expect(screen.getByText(/^Last sync Sep 30, 10:00\sAM · 2 new transactions$/)).toBeInTheDocument();
   });
 
   it("offers Reconnect for a connection that needs it, and Replace opens the SimpleFIN token form", async () => {

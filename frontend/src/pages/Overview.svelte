@@ -19,6 +19,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
+  import { balanceAsOf } from "$lib/nav.svelte";
   import type { Overview } from "$lib/types";
   import { cn } from "$lib/utils";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
@@ -80,6 +81,7 @@
     {@const what = fc.accounts.length === 1 ? (allChecking ? "Checking" : fc.accounts[0].name) : "Your cash"}
     {@const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount)}
     {@const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date)}
+    {@const asOf = balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok)}
     {@const alerts = fc.warnings.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
 
     <header class="mb-5">
@@ -103,6 +105,7 @@
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} onhorizon={(d) => setDays(String(d))} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
+      {#if asOf}<p class={cn("mt-1.5 text-[13px]", asOf.stale ? "text-amber-500" : "text-muted-foreground")}>{asOf.text}</p>{/if}
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
