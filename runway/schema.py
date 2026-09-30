@@ -391,6 +391,69 @@ auth_sessions = Table(
     info={'doc': 'signed-in browsers (only a hash of each session token is kept)'},
 )
 
+oauth_clients = Table(
+    'oauth_clients', metadata,
+    Column('id', Text, primary_key=True, doc='rwc_...'),
+    Column('name', Text),
+    Column('redirect_uris', Text, nullable=False, doc='JSON list'),
+    Column('auth_method', Text, nullable=False, doc='none | client_secret_post | client_secret_basic'),
+    Column('secret_hash', Text, doc='sha256 of the client secret, for the two secret methods'),
+    Column('kind', Text, nullable=False, server_default=text("'dcr'"), doc='dcr: registered at /oauth/register'),
+    Column('metadata_url', Text, doc='reserved for client ID metadata documents; unused'),
+    Column('created', Float, nullable=False),
+    Column('last_used', Float),
+    info={'doc': 'apps registered to connect to /mcp with OAuth'},
+)
+
+oauth_grants = Table(
+    'oauth_grants', metadata,
+    Column('id', Integer, primary_key=True, autoincrement=True),
+    Column('client_id', Text, nullable=False),
+    Column('sub', Text, doc='who approved it'),
+    Column('email', Text),
+    Column('scope', Text, nullable=False, doc='space-separated: read, churning:write'),
+    Column('resource', Text, nullable=False, doc='the /mcp address its tokens are for'),
+    Column('created', Float, nullable=False),
+    Column('last_used', Float),
+    Column('revoked', Float),
+    Column('revoked_reason', Text),
+    sqlite_autoincrement=True,
+    info={'doc': 'one approval of an app on the consent page; its codes and tokens die with it'},
+)
+
+oauth_codes = Table(
+    'oauth_codes', metadata,
+    Column('code_hash', Text, primary_key=True),
+    Column('client_id', Text, nullable=False),
+    Column('grant_id', Integer, nullable=False),
+    Column('redirect_uri', Text, nullable=False),
+    Column('code_challenge', Text, nullable=False, doc='PKCE, S256'),
+    Column('resource', Text, nullable=False),
+    Column('created', Float, nullable=False),
+    Column('used', Float),
+    info={'doc': 'authorization codes (only a hash of each is kept), single use, for 10 minutes'},
+)
+
+oauth_tokens = Table(
+    'oauth_tokens', metadata,
+    Column('token_hash', Text, primary_key=True),
+    Column('kind', Text, nullable=False, doc='access | refresh'),
+    Column('grant_id', Integer, nullable=False),
+    Column('created', Float, nullable=False),
+    Column('expires', Float, nullable=False),
+    Column('consumed', Float, doc='refresh: when it was traded for a new one'),
+    Column('replaced_by', Text, doc='refresh: the hash of the one it was traded for'),
+    info={'doc': 'access and refresh tokens (only a hash of each is kept)'},
+)
+
+oauth_consents = Table(
+    'oauth_consents', metadata,
+    Column('token_hash', Text, primary_key=True),
+    Column('params', Text, nullable=False, doc='JSON: the checked authorization request, and who was signed in'),
+    Column('created', Float, nullable=False),
+    info={'doc': 'consent pages shown and not yet answered (10 minutes)'},
+)
+
 push_subscriptions = Table(
     'push_subscriptions', metadata,
     Column('endpoint', Text, primary_key=True),
@@ -778,6 +841,9 @@ Index('retail_charges_tx', retail_charges.c.tx_id)
 Index('churn_tasks_card', churn_tasks.c.card_id)
 Index('churn_benefits_card', churn_benefits.c.card_id)
 Index('churn_benefit_uses_benefit', churn_benefit_uses.c.benefit_id)
+Index('oauth_grants_client', oauth_grants.c.client_id)
+Index('oauth_tokens_grant', oauth_tokens.c.grant_id)
+Index('oauth_codes_grant', oauth_codes.c.grant_id)
 Index('accounts_plaid_account', accounts.c.plaid_account_id, unique=True)   # a Plaid account is one of your accounts, never two
 
 # Tables whose integer id is assigned by the database.

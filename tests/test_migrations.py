@@ -114,6 +114,20 @@ class MigrationTests(unittest.TestCase):
             plans = [r[0] for r in conn.execute("SELECT plan FROM churn_cards ORDER BY id")]
         self.assertEqual(plans, ["product_change", "close"])
 
+    def test_0024_adds_the_oauth_tables(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0023")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("oauth_grants", sa.inspect(c).get_table_names())
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.engine(self.path).begin() as c:
+            self.assertLessEqual({"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"},
+                                 set(sa.inspect(c).get_table_names()))
+        self.assertEqual(drift(self.path), [])
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating
