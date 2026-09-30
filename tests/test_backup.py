@@ -97,7 +97,7 @@ class BackupTests(unittest.TestCase):
         data = backup.load(backup.dump(src))
         data["tables"]["table_from_the_future"] = {"columns": ["x"], "rows": [[1], [2]]}   # not counted: it isn't restored
         p = backup.preview(data)
-        self.assertEqual((p["source"], p["version"]), ("sqlite", backup.VERSION))
+        self.assertEqual((p["source"], p["version"]), ("postgres" if db.using_postgres() else "sqlite", backup.VERSION))
         self.assertEqual(p["created"], data["created"])
         self.assertEqual({k: p["counts"][k] for k in backup.SUMMARY}, {"accounts": 1, "transactions": 20, "recurring": 0, "budgets": 1})
         self.assertEqual(p["counts"]["total"], sum(len(t["rows"]) for n, t in data["tables"].items() if n != "table_from_the_future"))
