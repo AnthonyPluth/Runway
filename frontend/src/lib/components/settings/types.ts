@@ -7,6 +7,7 @@ export interface SettingsAccount extends Account {
   pay_from?: string | null;
   owed_positive?: number;
   daily_spend?: number;
+  networth_hidden?: number;
   provider?: string | null;
   plaid_account_id?: string | null;
   plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: boolean | number;
