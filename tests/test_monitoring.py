@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import tempfile
 import threading
 import unittest
 import urllib.request
@@ -13,6 +12,8 @@ import sentry_sdk
 from runway import categorize, db, monitoring, server, simplefin
 from runway.server import sync
 from runway.server.handler import _traced, trace_name
+
+from tests.shared import own_database
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
@@ -45,22 +46,6 @@ def start(env=None) -> Capture:
 
 
 class MonitoringTests(unittest.TestCase):
-    def own_db(self, **env):
-        """A database of this test's own, with db.session() pointed at it. On Postgres every module shares one schema
-        unless it names its own (by path), and CI runs modules in parallel: a sync here would otherwise write the
-        settings other modules' tests read (last_sync_ok, the SimpleFIN address, the AI key)."""
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        patched = mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp.name, **env})
-        patched.start()
-        self.addCleanup(patched.stop)
-        path = os.path.join(tmp.name, "runway.db")
-        db.init(path)
-        opened = db.session
-        session = mock.patch.object(db, "session", lambda p=None: opened(p or path))
-        session.start()
-        self.addCleanup(session.stop)
-
     def tearDown(self):
         sentry_sdk.get_client().close()
         sentry_sdk.init(dsn=None)
@@ -204,7 +189,7 @@ class MonitoringTests(unittest.TestCase):
             self.assertTrue(_traced(path), path)
 
     def test_a_request_is_traced_without_its_query_or_values(self):
-        self.own_db()
+        own_database(self)
         transport = start()
         httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -261,7 +246,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(sentry_sdk.get_client().options["trace_propagation_targets"], [])   # no headers to banks
 
     def test_a_bank_sync_checks_in_and_one_that_cant_start_doesnt(self):
-        self.own_db(TZ="America/Chicago")
+        own_database(self, TZ="America/Chicago")
         transport = start({**ALL_ON, "TZ": "America/Chicago"})
         with db.session() as conn:
             db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
@@ -333,7 +318,7 @@ class MonitoringTests(unittest.TestCase):
                  "usage": {"prompt_tokens": 120, "completion_tokens": 8, "total_tokens": 128}}
         resp = mock.MagicMock()
         resp.__enter__.return_value = io.BytesIO(json.dumps(reply).encode())
-        self.own_db()
+        own_database(self)
         with db.session() as conn:
             db.set_setting(conn, "openrouter_api_key", "sk-or-key")
             db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
