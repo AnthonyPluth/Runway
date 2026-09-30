@@ -2,7 +2,7 @@
 
 The [README](../README.md) has the short list. This is what each part does and where its settings live.
 
-Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget** (Budget and Bills & income), **Reports**, then **Net worth** (Summary, Investments and Equity) and **Churning**, and **Settings** at the bottom.
+Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget** (Budget and Bills & income), **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
 Settings has eight tabs: **Accounts**, **Bank connections** (SimpleFIN and Plaid), **Categories**, **Rules**, **Browser extension** (Amazon, Target, Costco and Carta), **Services** (OpenRouter, Realie, Finnhub and Logo.dev), **Notifications**, and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Bank connections.
 
@@ -53,10 +53,16 @@ On Budget → Bills & income.
 
 On Net worth → Investments.
 
-- Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a comparison with the S&P 500, gain per holding, allocation and a financial-independence calculator whose assumptions (spending, saving, return, withdrawal rate) start from your own numbers and keep whatever you change.
+- Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a comparison with the S&P 500, gain per holding and allocation.
 - **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Services) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
 - Positions from SimpleFIN, or optionally from Plaid for accounts SimpleFIN only knows the balance of. Accounts that neither can see into, like some 401(k)s, can be **tracked by hand**: enter shares and your contribution split, and Runway invests each new deposit accordingly.
 - Editable cost basis, per share.
+
+## Retirement
+
+On Net worth → Retirement.
+
+- A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, inflation, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** goes back to Runway's figures.
 
 ## Net worth and equity
 

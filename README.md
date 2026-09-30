@@ -45,7 +45,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **An assistant-ready API.** A read-only [MCP server](docs/mcp.md) lets Claude or another assistant answer questions about your money.
 - **Yours to keep.** Autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres.
 
-The full tour is in [docs/features.md](docs/features.md). Runway's pages are Overview, Transactions, Budget (with a Bills & income tab), Reports, Net worth (Summary, Investments and Equity), Churning and Settings.
+The full tour is in [docs/features.md](docs/features.md). Runway's pages are Overview, Transactions, Budget (with a Bills & income tab), Reports, Net worth (Summary, Investments, Equity and Retirement), Churning and Settings.
 
 <table>
   <tr>
@@ -111,6 +111,10 @@ Open <http://localhost:8765>. Your data is stored in `data/runway.db`. To look a
 - [Architecture](docs/architecture.md): data sources, how the forecast works, the stack and its security model.
 - [Development](docs/development.md): running the tests, changing the database, the code layout and releases.
 - [Browser extension](extension/README.md) and [SECURITY.md](SECURITY.md) (reporting a vulnerability).
+
+## How it's built
+
+Runway is developed with AI coding assistants, under my direction. Every change goes through a pull request with review, and CI runs the full backend and frontend test suites (coverage in the badges above), type-checking, linting and a dependency audit before anything ships. Changes that touch bank connections, encryption or sign-in get extra scrutiny; see [SECURITY.md](SECURITY.md). The conventions the assistants follow are in [AGENTS.md](AGENTS.md).
 
 ## Security and privacy
 
