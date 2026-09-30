@@ -369,6 +369,20 @@ class Handler(BaseHTTPRequestHandler):
             if self.command != "HEAD":
                 self.wfile.write(zipped)
             return
+        if method == "POST" and url.path == "/api/backup/inspect":
+            # What a backup file holds, and what's here now, shown before you restore it. The file goes up as for a restore.
+            n = self._body_length(MAX_RESTORE_BODY)
+            if n is None:
+                return
+            if not n:
+                return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
+            try:
+                held_in = backup.preview(backup.load(self._read_body(n)))
+            except ValueError as e:
+                return self._json(400, {"error": str(e)})
+            with db.session() as conn:
+                here = backup.counts(conn)
+            return self._json(200, {**held_in, "current": here, "database": "postgres" if db.using_postgres() else "sqlite"})
         if method == "POST" and url.path == "/api/restore":
             n = self._body_length(MAX_RESTORE_BODY)
             if n is None:
@@ -389,24 +403,29 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(409, {"error": "A sync is running. Restore once it has finished."})
                 held.append(lock)
             failed = None   # the locks are let go before answering, so a sync can start as soon as you have the answer
+            copy = None
             try:
                 with db.session() as conn:
+                    copy = backup.safety_copy(conn)   # what's here now, in the data directory, in case the backup was the wrong one
                     counts = backup.restore(conn, restored)
                 with db.session() as conn:
                     sfinvest.repair_stored(conn)
-            except (ValueError, sqlalchemy.exc.OperationalError) as e:
+            except (ValueError, OSError, sqlalchemy.exc.OperationalError) as e:
                 failed = e
             finally:
                 for lock in held:
                     lock.release()
             if isinstance(failed, ValueError):
                 return self._json(400, {"error": str(failed)})
+            if isinstance(failed, OSError):
+                return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({failed.strerror or failed}), so nothing was restored."})
             if failed is not None:
                 if "locked" in str(failed):
                     return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
                 return self._error(failed)
             return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
-                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0)})
+                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0),
+                                    "safety_copy": copy})
         body = {}
         if method in ("POST", "DELETE"):
             n = self._body_length(MAX_JSON_BODY)

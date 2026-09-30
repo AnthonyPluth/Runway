@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import zlib
 from datetime import datetime
 from typing import Any
@@ -110,6 +111,43 @@ def load(raw: bytes) -> dict:
     if data.get("version", 0) > VERSION:
         raise ValueError("That backup is from a newer version of Runway. Update Runway first.")
     return data
+
+
+SUMMARY = ("accounts", "transactions", "recurring", "budgets")   # what a person recognises their data by
+
+
+def _summary_counts(rows: dict[str, int]) -> dict[str, int]:
+    return {**{t: rows.get(t, 0) for t in SUMMARY}, "total": sum(rows.values())}
+
+
+def preview(data: dict) -> dict:
+    """What a loaded backup holds, shown before restoring it: when and where it was made, and how many rows (the tables
+    you'd recognise, and all rows in the tables this version restores)."""
+    known = set(tables())
+    rows = {t: len(p.get("rows") or []) for t, p in data["tables"].items() if t in known and isinstance(p, dict)}
+    return {"created": data.get("created"), "source": data.get("source"), "version": data.get("version", 0),
+            "counts": _summary_counts(rows)}
+
+
+def counts(conn) -> dict[str, int]:
+    """The same counts for the database as it is now: what a restore would replace."""
+    return _summary_counts({t: conn.execute(select(func.count()).select_from(schema.metadata.tables[t])).scalar() or 0
+                            for t in tables()})
+
+
+def safety_copy(conn, directory: str | None = None) -> str | None:
+    """Before a restore replaces everything: a backup of what's here now, saved next to the database (the data
+    directory) as runway-before-restore-<time>.json.gz, private to Runway's user. None when there's nothing to keep
+    (no accounts, transactions, recurring or budgets). Returns the file's path."""
+    if not any(v for k, v in counts(conn).items() if k != "total"):
+        return None
+    directory = directory or db.data_dir()
+    path = os.path.join(directory, f"runway-before-restore-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.json.gz")
+    data = dump(conn)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
 
 
 def restore(conn, data: dict) -> dict:

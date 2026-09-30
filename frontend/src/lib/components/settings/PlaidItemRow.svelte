@@ -1,13 +1,14 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import BankIcon from "./BankIcon.svelte";
   import { openPlaidLink } from "./plaid.svelte";
+  import { plaidProblem } from "./plaidErrors";
   import type { PlaidItem } from "./types";
   import { linkCls, warnText } from "./ui";
 
@@ -43,6 +44,15 @@
   // Bank and card accounts wait until matched or left out (ignored); an investment account is left out as account_id "ignore".
   const accounts = $derived(it.bank ? it.accounts.filter((p) => p.type !== "investment") : it.accounts);
   const waiting = $derived(accounts.filter((p) => !p.account_id && !p.ignored).length);
+  const problem = $derived(it.error ? plaidProblem(it.error) : null);
+
+  // What Remove does (plaid.remove_item): an investment connection's accounts go with their holdings and activity; a bank
+  // connection's accounts that SimpleFIN also has go back to it, and the ones only Plaid had keep their history.
+  const n = (k: number, one: string, many: string) => `${k} ${k === 1 ? one : many}`;
+  const investments = $derived(it.bank ? 0 : it.accounts.length);
+  const viaSimplefin = $derived(it.bank ? accounts.filter((p) => p.account_id && !p.account_id.startsWith("pl:")).length : 0);
+  const plaidOnly = $derived(it.bank ? accounts.filter((p) => p.account_id?.startsWith("pl:")).length : 0);
+  let removing = $state(false);
 
   let syncing = $state(false);
   async function sync() {
@@ -59,7 +69,7 @@
   }
   async function remove() {
     try { await api(`/api/plaid/items/${encodeURIComponent(it.item_id)}/remove`, { method: "POST" }); toast.success("Connection removed"); reload(); }
-    catch (err) { toast.error((err as Error).message); }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
 </script>
 
@@ -70,12 +80,13 @@
       <span class="flex flex-wrap items-center gap-1.5 font-medium">{it.institution_name || "Connection"}
         {#if it.env === "sandbox"}<Badge variant="secondary">sandbox</Badge>{/if}
         <Badge variant="secondary">{it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</Badge></span>
-      <span class="text-xs text-muted-foreground">{connectedOn}{#if it.error}<span class={warnText}>{it.error === "ITEM_LOGIN_REQUIRED" ? "Login expired; reconnect to fix" : it.error}</span>{:else}{synced}{/if}</span>
+      <span class="text-xs text-muted-foreground">{connectedOn}{#if !problem?.reconnect}{synced}{/if}{#if problem}{problem.reconnect ? "" : " · "}<span
+        class={warnText}>{problem.text}</span>{/if}</span>
     </span>
     <span class="flex items-center gap-1 whitespace-nowrap">
-      {#if it.error}<Button size="sm" onclick={reconnect}>Reconnect</Button>
+      {#if problem?.reconnect}<Button size="sm" onclick={reconnect}>Reconnect</Button>
       {:else}<Button variant="outline" size="sm" disabled={syncing} onclick={sync}>{syncing ? "Syncing…" : "Sync"}</Button>{/if}
-      <ConfirmButton confirm="Remove this connection?" onconfirm={remove}>Remove</ConfirmButton>
+      <Button variant="link" size="sm" onclick={() => (removing = true)}>Remove</Button>
     </span>
   </div>
   {#if duplicate}<p class={cn("mt-2 text-sm sm:ml-10", warnText)}>{duplicate}</p>{/if}
@@ -84,3 +95,18 @@
       href="#setup/accounts">{waiting} {waiting === 1 ? "needs" : "need"} a decision →</a>{:else}{" · "}<a class={linkCls} href="#setup/accounts">Manage in Accounts</a>{/if}{/if}</p>
   </div>
 </div>
+
+<ConfirmDialog bind:open={removing} title={`Remove ${it.institution_name || "this connection"}?`} confirmLabel="Remove" busyLabel="Removing…"
+  destructive onconfirm={remove}>
+  {#snippet description()}
+    <p>Revokes Runway’s access at Plaid. You’d have to connect it again from scratch.</p>
+    {#if investments || viaSimplefin || plaidOnly}
+      <ul class="list-disc space-y-1 pl-5">
+        {#if investments}<li>Deletes {n(investments, "investment account", "investment accounts")} with {investments === 1 ? "its" : "their"} holdings and activity.</li>{/if}
+        {#if viaSimplefin}<li>{n(viaSimplefin, "account that also comes", "accounts that also come")} through SimpleFIN {viaSimplefin === 1 ? "keeps" : "keep"} syncing there.</li>{/if}
+        {#if plaidOnly}<li>{n(plaidOnly, "account only Plaid had keeps its", "accounts only Plaid had keep their")} history but {plaidOnly === 1 ? "stops" : "stop"} updating.</li>{/if}
+      </ul>
+    {/if}
+    <p><a class={linkCls} href="#setup/advanced" onclick={() => (removing = false)}>Download a backup first</a></p>
+  {/snippet}
+</ConfirmDialog>
