@@ -568,6 +568,43 @@ class CostcoTests(Base):
         # what's stored is the receipt's own wording
         self.assertIn("CLOROX WAND P=120", [r["title"] for r in self.c.execute("SELECT title FROM retail_items")])
 
+    def test_the_ai_suggests_categories_for_an_order_and_a_new_one_when_nothing_fits(self):
+        from runway import server
+        retail.costco_history(self.c, {"data": {"receiptsWithCounts": {"receipts": [self.RECEIPT]}}})
+        oid = self.c.execute("SELECT id FROM retail_orders").fetchone()[0]
+        with self.assertRaisesRegex(retail.RetailError, "OpenRouter key"):
+            retail.suggest_for_order(self.c, oid)
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        asked = []
+
+        def model(key, name, prompt):
+            asked.append(prompt)
+            items = json.loads(prompt.split("Items (JSON):\n", 1)[1].split("\n", 1)[0])
+            return json.dumps([{"i": it["i"], "category": "Groceries", "confidence": 0.9} if "chicken" in it["item"].lower() or "banana" in it["item"].lower()
+                               else {"i": it["i"], "category": None, "new_category": "Paper Goods", "parent": "Groceries", "confidence": 0.7}
+                               for it in items])
+        out = retail.suggest_for_order(self.c, oid, caller=model)
+        self.assertIn("propose a new one", asked[0])
+        by = {self.c.execute("SELECT title FROM retail_items WHERE id=?", (r["item_id"],)).fetchone()[0]: r for r in out}
+        self.assertEqual(by["BANANAS"]["category"], "Groceries")
+        self.assertEqual(by["KS PAPER TOWEL"]["new_category"], {"name": "Paper Goods", "parent": "Groceries"})
+        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM retail_items WHERE category IS NOT NULL").fetchone()[0], 0)   # nothing saved
+        # accepting the new one creates it and uses it for the item
+        item = by["KS PAPER TOWEL"]["item_id"]
+        got = server.api_retail_item(self.c, {}, {"new_category": by["KS PAPER TOWEL"]["new_category"]}, str(item))
+        self.assertEqual((got["category"], got["created"]), ("Paper Goods", True))
+        self.assertEqual(self.c.execute("SELECT parent FROM categories WHERE name='Paper Goods'").fetchone()["parent"], "Groceries")
+        self.assertEqual(self.c.execute("SELECT category, category_source FROM retail_items WHERE id=?", (item,)).fetchone()[:], ("Paper Goods", "manual"))
+        again = server.api_retail_item(self.c, {}, {"new_category": {"name": "paper goods"}}, str(by["ROTISSERIE CHICKEN"]["item_id"]))
+        self.assertEqual((again["category"], again["created"]), ("Paper Goods", False))   # it exists now: used, not made twice
+        # only items without a category are asked about
+        self.assertEqual(len(retail.suggest_for_order(self.c, oid, caller=model)), 1)
+        # a failed request is an error, not silence
+        def broken(*_a):
+            raise RuntimeError("down")
+        with self.assertRaisesRegex(retail.RetailError, "AI request failed"):
+            retail.suggest_for_order(self.c, oid, caller=broken)
+
     def test_only_costco_titles_are_cleaned(self):
         self.assertEqual(retail.ai_title("amazon", "Widget P=120 #12"), "Widget P=120 #12")
         self.assertEqual(retail.ai_title("costco", "P=120"), "P=120")   # never left empty
