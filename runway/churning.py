@@ -108,7 +108,7 @@ ESTIMATE_NOTE = (f"Estimate as of {VALUES_AS_OF}: roughly what travelers commonl
 STATUSES = ("open", "closed", "product_changed")
 # What you mean to do about a card before its annual fee. undecided: Upcoming asks (keep, downgrade or close?);
 # keep: the fee date is shown, without the question; the others: a reminder to do it, with a Done action.
-PLANS = ("undecided", "keep", "downgrade", "close", "product_change")
+PLANS = ("undecided", "keep", "close", "product_change")
 PLAN_REMIND_DAYS = 14
 PLAN_WARN_DAYS = 7        # a plan's reminder turns urgent this close to its day
 BASE_MARKER = "*"         # in a card's rates list: its base rate (everything without a rate of its own)
@@ -367,8 +367,8 @@ def load(conn) -> dict:
 # ------------------------------------------------------------------------------------------------ plans
 
 def plan_active(card: dict) -> bool:
-    """A plan to act on (downgrade, close, product change), not yet done, for a card still open."""
-    return (card.get("plan") in ("downgrade", "close", "product_change") and not card.get("plan_done_on")
+    """A plan to act on (close, product change, which includes a downgrade), not yet done, for a card still open."""
+    return (card.get("plan") in ("close", "product_change") and not card.get("plan_done_on")
             and (card.get("status") or "open") == "open")
 
 
@@ -383,7 +383,7 @@ def plan_day(card: dict, today: date) -> date | None:
 
 def plan_title(card: dict) -> str:
     target = f" to {card['plan_target']}" if card.get("plan_target") else ""
-    return {"downgrade": f"Downgrade {card['product']}{target}", "close": f"Close {card['product']}",
+    return {"close": f"Close {card['product']}",
             "product_change": f"Product change {card['product']}{target}"}.get(card.get("plan") or "", card["product"])
 
 
@@ -843,7 +843,7 @@ def save_card(conn, body: dict, card_id: int | None = None) -> int:
     if "plan" in body or new:
         plan = str(body.get("plan") or "undecided")
         if plan not in PLANS:
-            raise ChurnError("The plan is undecided, keep, downgrade, close or product change")
+            raise ChurnError("The plan is undecided, keep, close or product change")
         fields["plan"] = plan
     if "plan_remind_days" in body:
         n = _int(body.get("plan_remind_days"), "days ahead to remind you", 0, 365)
@@ -1032,7 +1032,7 @@ def _plan_result(card: ChurnCard, changes: list[str]) -> dict:
 
 
 def plan_done(conn, card_id: int, today: date, on=None) -> dict:
-    """Check a card's plan off. Close: the card is closed that day. Downgrade or product change: the card is marked
+    """Check a card's plan off. Close: the card is closed that day. Product change (a downgrade or any other switch): the card is marked
     product-changed that day and, when you named what it becomes, that card is added (changed from this one, so
     the same account: it doesn't count toward 5/24). Keep: just noted. Returns what changed."""
     card = conn.orm.get(ChurnCard, card_id)
@@ -1048,7 +1048,7 @@ def plan_done(conn, card_id: int, today: date, on=None) -> dict:
         raise ChurnError("It can't be done before the card was opened")
     card.plan_done_on = day
     changes = []
-    if plan in ("close", "downgrade", "product_change") and (card.status or "open") == "open":
+    if plan in ("close", "product_change") and (card.status or "open") == "open":
         card.status = "closed" if plan == "close" else "product_changed"
         card.closed_on = day
         changes.append(f"{card.product} is marked closed on {day}" if plan == "close" else
@@ -1076,7 +1076,7 @@ def plan_undo(conn, card_id: int) -> dict:
     if not card.plan_done_on:
         raise ChurnError("It isn't checked off")
     changes = []
-    if card.plan in ("close", "downgrade", "product_change") and card.status in ("closed", "product_changed") \
+    if card.plan in ("close", "product_change") and card.status in ("closed", "product_changed") \
             and card.closed_on == card.plan_done_on:
         card.status, card.closed_on = "open", None
         changes.append(f"{card.product} is open again")
