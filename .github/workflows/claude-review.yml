@@ -62,7 +62,7 @@ jobs:
             gh api --paginate "repos/$REPO/pulls/$PR/comments" \
               --jq '.[] | "\n## \(.path):\(.line // .original_line) (\(.user.login), \(.created_at))\n\(.body)"'
           } > .claude-earlier-comments.md
-      - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
+      - uses: anthropics/claude-code-action@fd1c128679612beff4ca259c78021c506e8aa7a7   # v1.0.237
         if: steps.auth.outputs.ready == 'true'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

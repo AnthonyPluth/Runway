@@ -68,7 +68,7 @@ jobs:
           poetry run pip install --quiet "ruff==0.16.9" "mypy==2.3.1" "types-python-dateutil==2.9.0.20260807"
           (cd frontend && npm ci --no-audit --no-fund)
 
-      - uses: anthropics/claude-code-action@fccf022fdf80a6c41253d57e99293f208e484626   # v1.0.237
+      - uses: anthropics/claude-code-action@fd1c128679612beff4ca259c78021c506e8aa7a7   # v1.0.237
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
