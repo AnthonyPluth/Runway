@@ -16,12 +16,12 @@ from unittest import mock
 
 from runway import db, mcp_access, mcp_oauth, mcp_server, oidc, server
 from runway.server import common
+from tests.shared import forget_oauth, hold_mcp_switch, tag
 from tests.test_server import NoRedirect, Provider
 
 VERIFIER = "correct-horse-battery-staple-" + "x" * 30
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).rstrip(b"=").decode()
 CALLBACK = "http://127.0.0.1:43210/callback"
-TABLES = ("oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents")
 
 
 class Reply:
@@ -49,7 +49,9 @@ class Reply:
 
 
 class OAuthServer(unittest.TestCase):
-    """A real Runway on a temporary database, with no sign-in (so you're "signed in" on this computer)."""
+    """A real Runway on a temporary database, with no sign-in (so you're "signed in" on this computer). On Postgres the
+    database is shared with test modules running alongside (tests/shared.py): each test removes only what it made, and
+    holds the churning switch."""
     env: dict = {}
 
     @classmethod
@@ -75,12 +77,26 @@ class OAuthServer(unittest.TestCase):
         for k, v in cls.saved.items():
             os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
-    def tearDown(self):
+    def setUp(self):
+        hold_mcp_switch(self)
+        self.tag = tag()
+        self.owner = "Alex " + self.tag                                           # the churning cards this test makes
+        self.card = {"owner": self.owner, "issuer": "chase", "product": "Sapphire", "opened_on": "2025-01-15"}
+        self.clients: list[str] = []
+        self.addCleanup(self.forget)
+
+    def forget(self):
         with db.session() as conn:
-            for t in TABLES:
-                conn.execute(f"DELETE FROM {t}")
-            conn.execute("DELETE FROM churn_cards")
+            forget_oauth(conn, self.clients)
+            conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
             mcp_access.set_allow_writes(conn, False)
+
+    def mine(self, sql, *params):
+        """The first column of this SQL's first row (put {mine} in it for "this test's clients")."""
+        marks = ", ".join("?" * len(self.clients)) or "NULL"
+        with db.session() as conn:
+            row = conn.execute(sql.format(mine=f"({marks})"), (*self.clients, *params)).fetchone()
+        return row[0] if row else None
 
     def http(self, method, path, body=None, headers=None, cookies=None):
         h = dict(headers or {})
@@ -100,7 +116,10 @@ class OAuthServer(unittest.TestCase):
 
     def register(self, **meta):
         body = {"client_name": "Claude Code", "redirect_uris": [CALLBACK], **meta}
-        return self.http("POST", "/oauth/register", json.dumps(body).encode(), {"Content-Type": "application/json"})
+        r = self.http("POST", "/oauth/register", json.dumps(body).encode(), {"Content-Type": "application/json"})
+        if r.status == 201:
+            self.clients.append(r.json["client_id"])
+        return r
 
     def client(self, **meta):
         r = self.register(**meta)
@@ -160,9 +179,6 @@ class OAuthServer(unittest.TestCase):
     def switch(self, on):
         with db.session() as conn:
             mcp_access.set_allow_writes(conn, on)
-
-
-CARD = {"owner": "Alex", "issuer": "chase", "product": "Sapphire", "opened_on": "2025-01-15"}
 
 
 class MetadataTests(OAuthServer):
@@ -226,21 +242,23 @@ class RegistrationTests(OAuthServer):
         self.assertTrue(secret["client_secret"])
 
     def test_refusals(self):
-        r = self.register(redirect_uris=["myapp://callback"])
+        name = "Refused " + self.tag
+        r = self.register(client_name=name, redirect_uris=["myapp://callback"])
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_redirect_uri"))
         r = self.register(client_name="x" * 101)
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_client_metadata"))
-        r = self.http("POST", "/oauth/register", json.dumps({"redirect_uris": [CALLBACK]}).encode(),
+        r = self.http("POST", "/oauth/register", json.dumps({"client_name": name, "redirect_uris": [CALLBACK]}).encode(),
                       {"Content-Type": "application/x-www-form-urlencoded"})   # what a form on another site could send
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_client_metadata"))
         r = self.http("POST", "/oauth/register", b"{nope", {"Content-Type": "application/json"})
         self.assertEqual(r.status, 400)
-        r = self.http("POST", "/oauth/register", json.dumps({"redirect_uris": [CALLBACK], "x": "y" * 9000}).encode(),
+        r = self.http("POST", "/oauth/register", json.dumps({"client_name": name, "redirect_uris": [CALLBACK], "x": "y" * 9000}).encode(),
                       {"Content-Type": "application/json"})
         self.assertEqual(r.status, 413)                                           # over 8 KB
         self.assertEqual(self.http("GET", "/oauth/register").status, 405)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM oauth_clients").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM oauth_clients WHERE name=?", (name,)).fetchone()[0], 0)
+        self.assertEqual(self.clients, [])
 
 
 class ConsentTests(OAuthServer):
@@ -253,6 +271,7 @@ class ConsentTests(OAuthServer):
                 self.assertEqual(r.status, 400)
                 self.assertIsNone(r.location)
                 self.assertIn(b"Can&#x27;t connect this app", r.body)
+        self.assertIn(b"Remove Runway from the assistant and add it again", self.authorize(c, client_id="rwc_nope").body)
 
     def test_other_mistakes_are_sent_back_with_the_state(self):
         c = self.client()
@@ -373,7 +392,7 @@ class TokenTests(OAuthServer):
         c = self.client()
         code = self.code(c)
         with db.session() as conn:
-            conn.execute("UPDATE oauth_codes SET created = created - 601")
+            conn.execute("UPDATE oauth_codes SET created = created - 601 WHERE client_id=?", (c["client_id"],))
         self.assertEqual(self.exchange(c, code).json["error"], "invalid_grant")
 
     def test_a_confidential_client(self):
@@ -400,8 +419,7 @@ class TokenTests(OAuthServer):
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         r = self.form("/oauth/token", {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": c["client_id"]})
         self.assertEqual(r.json["error"], "invalid_grant")
-        with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT revoked_reason FROM oauth_grants").fetchone()[0], "revoked_by_client")
+        self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "revoked_by_client")
 
 
 class McpTests(OAuthServer):
@@ -419,10 +437,12 @@ class McpTests(OAuthServer):
         t = self.tokens()
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
         with db.session() as conn:
-            conn.execute("UPDATE oauth_tokens SET expires = 1 WHERE kind = 'access'")
+            conn.execute("UPDATE oauth_tokens SET expires = 1 WHERE kind = 'access' AND grant_id IN "
+                         "(SELECT id FROM oauth_grants WHERE client_id=?)", (self.clients[-1],))
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         with db.session() as conn:   # a token Runway issued at another address (another RUNWAY_PUBLIC_URL)
             c = mcp_oauth.register(conn, {"redirect_uris": [CALLBACK]})
+            self.clients.append(c["client_id"])
             params = {"client_id": c["client_id"], "redirect_uri": CALLBACK, "code_challenge": CHALLENGE,
                       "resource": "https://elsewhere.example/mcp"}
             code = mcp_oauth.approve(conn, params, frozenset({"read"}), None, None)
@@ -435,7 +455,7 @@ class McpTests(OAuthServer):
         t = self.tokens()
         self.switch(True)
         self.assertEqual(self.tool_names(t["access_token"]), {x["name"] for x in mcp_server.TOOLS})
-        result = self.call(t["access_token"], "add_card", {"fields": CARD})
+        result = self.call(t["access_token"], "add_card", {"fields": self.card})
         self.assertTrue(result["isError"])
         self.assertIn("reconnect", result["content"][0]["text"])
         self.assertNotIn("isError", self.call(t["access_token"], "list_accounts"))
@@ -446,15 +466,15 @@ class McpTests(OAuthServer):
         self.assertEqual(t["scope"], "read churning:write")
         token = t["access_token"]
         self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.ALL_TOOLS})
-        self.assertNotIn("isError", self.call(token, "add_card", {"fields": CARD}))
+        self.assertNotIn("isError", self.call(token, "add_card", {"fields": self.card}))
         self.switch(False)                                                        # off: at once, without revoking
         self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.TOOLS})
-        result = self.call(token, "add_card", {"fields": CARD})
+        result = self.call(token, "add_card", {"fields": self.card})
         self.assertTrue(result["isError"])
         self.assertIn("switched off", result["content"][0]["text"])
         self.assertEqual(self.rpc(token, "ping").status, 200)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards WHERE owner=?", (self.owner,)).fetchone()[0], 1)
 
 
 class EndToEndTests(OAuthServer):
@@ -466,6 +486,7 @@ class EndToEndTests(OAuthServer):
         asm = self.http("GET", prm["authorization_servers"][0] + "/.well-known/oauth-authorization-server").json
         reg = self.http("POST", asm["registration_endpoint"], json.dumps({"client_name": "Claude", "redirect_uris": [CALLBACK]}).encode(),
                         {"Content-Type": "application/json"}).json
+        self.clients.append(reg["client_id"])
         self.switch(True)
         q = {"response_type": "code", "client_id": reg["client_id"], "redirect_uri": CALLBACK, "scope": "read churning:write",
              "state": "s1", "code_challenge": CHALLENGE, "code_challenge_method": "S256", "resource": prm["resource"]}
@@ -478,9 +499,9 @@ class EndToEndTests(OAuthServer):
                                               "code_verifier": VERIFIER, "client_id": reg["client_id"], "resource": prm["resource"]}).json
         self.assertEqual(self.rpc(t["access_token"], "initialize", {"protocolVersion": "2025-06-18"}).json["result"]["serverInfo"]["name"], "runway")
         self.assertIn("add_card", self.tool_names(t["access_token"]))
-        self.assertNotIn("isError", self.call(t["access_token"], "add_card", {"fields": CARD}))
+        self.assertNotIn("isError", self.call(t["access_token"], "add_card", {"fields": self.card}))
         self.switch(False)
-        self.assertTrue(self.call(t["access_token"], "add_card", {"fields": CARD})["isError"])
+        self.assertTrue(self.call(t["access_token"], "add_card", {"fields": self.card})["isError"])
         self.switch(True)
         # Refresh: a new pair; the old refresh token is spent.
         r = self.form(asm["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": reg["client_id"]})
@@ -495,8 +516,7 @@ class EndToEndTests(OAuthServer):
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         r = self.form(asm["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": t2["refresh_token"], "client_id": reg["client_id"]})
         self.assertEqual(r.json["error"], "invalid_grant")
-        with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT revoked_reason FROM oauth_grants").fetchone()[0], "refresh_reuse")
+        self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "refresh_reuse")
 
 
 class SignInTests(OAuthServer):
@@ -543,7 +563,8 @@ class SignInTests(OAuthServer):
         self.assertEqual(r.status, 302)
         t = self.exchange(c, r.query()["code"]).json
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT sub, email FROM oauth_grants").fetchone()[:], ("user-1", "me@example.com"))
+            self.assertEqual(conn.execute("SELECT sub, email FROM oauth_grants WHERE client_id=?", (c["client_id"],)).fetchone()[:],
+                             ("user-1", "me@example.com"))
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)       # /mcp needs no session
         # The answer must come from the person who was shown the page
         page = self.http("GET", done.location, cookies=self.session)

@@ -126,7 +126,8 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.engine(self.path).begin() as c:
-            left = dict(c.exec_driver_sql("SELECT key, value FROM settings WHERE key LIKE 'mcp%'").fetchall())
+            left = dict(c.exec_driver_sql("SELECT key, value FROM settings WHERE key IN "
+                                          "('mcp_token_hash', 'mcp_token_created', 'mcp_allow_writes')").fetchall())
             self.assertEqual(left, {"mcp_allow_writes": "1"})                     # the old key is gone; the switch stays
             self.assertLessEqual({"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"},
                                  set(sa.inspect(c).get_table_names()))

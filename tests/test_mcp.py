@@ -13,6 +13,7 @@ import urllib.request
 
 from runway import db, mcp_access, mcp_oauth, mcp_server, server
 from runway.server import mcp_http
+from tests.shared import forget_oauth, hold_mcp_switch, tag
 
 VERIFIER = "v" * 50
 CALLBACK = "http://127.0.0.1:1/cb"
@@ -21,7 +22,8 @@ WRITE = mcp_access.Access(frozenset({"read", "churning:write"}), None, None)
 
 
 class RunwayServer(unittest.TestCase):
-    """A real Runway on a temporary database, and OAuth tokens for it."""
+    """A real Runway on a temporary database, and OAuth tokens for it. On Postgres the database is shared with test
+    modules running alongside (tests/shared.py): each test removes only what it made, and holds the churning switch."""
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
@@ -39,16 +41,28 @@ class RunwayServer(unittest.TestCase):
         cls.tmp.cleanup()
         os.environ.pop("RUNWAY_DATA", None)
 
-    def tearDown(self):
+    def setUp(self):
+        hold_mcp_switch(self)
+        self.tag = tag()
+        self.owner = "Alex " + self.tag                                           # the churning cards this test makes
+        self.clients: list[str] = []
+        self.addCleanup(self.forget)
+
+    def forget(self):
         with db.session() as conn:
-            for t in ("oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"):
-                conn.execute(f"DELETE FROM {t}")
+            forget_oauth(conn, self.clients)
+            conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
             mcp_access.set_allow_writes(conn, False)
+
+    def cards(self):
+        with db.session() as conn:
+            return conn.execute("SELECT COUNT(*) FROM churn_cards WHERE owner=?", (self.owner,)).fetchone()[0]
 
     def make_token(self, *scopes, name="Claude", who=None):
         """An access token for this Runway's /mcp, as if an assistant had connected and you had approved `scopes`."""
         with db.session() as conn:
             c = mcp_oauth.register(conn, {"client_name": name, "redirect_uris": [CALLBACK]})
+            self.clients.append(c["client_id"])
             challenge = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).rstrip(b"=").decode()
             params = {"client_id": c["client_id"], "redirect_uri": CALLBACK, "code_challenge": challenge, "resource": self.base + "/mcp"}
             code = mcp_oauth.approve(conn, params, frozenset(scopes or ("read",)), who and "sub-" + who, who)
@@ -115,7 +129,7 @@ class PagesTests(RunwayServer):
     def test_changes_need_the_scope_and_the_switch_every_time(self):
         with db.session() as conn:
             self.assertFalse(mcp_access.allow_writes(conn))                       # off by default
-        card = {"owner": "Alex", "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}
+        card = {"owner": self.owner, "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}
         with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):
             mcp_http.local_fetch("churning/cards", {}, card, WRITE)
         self.assertEqual(mcp_http.local_fetch("access", {}, None, WRITE), {"writes": False, "why": mcp_http.WRITES_OFF})
@@ -125,8 +139,8 @@ class PagesTests(RunwayServer):
         self.assertEqual(mcp_http.local_fetch("access", {}, None, READ), {"writes": False, "why": mcp_http.READ_ONLY})
         with self.assertRaisesRegex(mcp_server.ToolError, "reconnect"):
             mcp_http.local_fetch("churning/cards", {}, card, READ)
+        self.assertEqual(self.cards(), 0)                                         # nothing was made
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 0)   # nothing was made
             mcp_access.set_allow_writes(conn, False)
         with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):       # off again applies to the very next change
             mcp_http.local_fetch("churning/cards", {}, card, WRITE)
@@ -137,7 +151,7 @@ class PagesTests(RunwayServer):
 
         def post(path, body):
             return mcp_http.local_fetch(path, {}, body, WRITE)
-        card = post("churning/cards", {"owner": "Alex", "issuer": "chase", "product": "Sapphire Reserve", "opened_on": "2025-01-15", "annual_fee": 550})
+        card = post("churning/cards", {"owner": self.owner, "issuer": "chase", "product": "Sapphire Reserve", "opened_on": "2025-01-15", "annual_fee": 550})
         cid = card["id"]
         post(f"churning/cards/{cid}", {"notes": "from an assistant"})
         benefit = post(f"churning/cards/{cid}/benefits", {"name": "Travel credit", "kind": "credit", "amount": 300, "period": "annual"})
@@ -179,26 +193,31 @@ class SettingsTests(RunwayServer):
     def test_the_address_and_the_switch(self):
         status, got = self.api("/api/mcp-settings")
         self.assertEqual(status, 200)
-        self.assertEqual(got, {"allow_writes": False, "oauth": True, "url": self.base + "/mcp", "reason": None, "connections": []})
+        self.assertEqual({k: v for k, v in got.items() if k != "connections"},
+                         {"allow_writes": False, "oauth": True, "url": self.base + "/mcp", "reason": None})
+        self.assertIsInstance(got["connections"], list)                          # (listed in the next test)
         self.assertEqual(self.api("/api/mcp-settings/writes", {"allow": True})[1], {"allow_writes": True})
         self.assertTrue(self.api("/api/mcp-settings")[1]["allow_writes"])
         self.assertEqual(self.api("/api/mcp-settings/writes", {})[1], {"allow_writes": False})   # no value: off
 
     def test_connections_are_listed_and_revoked(self):
-        token = self.make_token("read", "churning:write", name="Claude Code", who="me@example.com")
-        self.make_token(name="Other")
-        _, got = self.api("/api/mcp-settings")
-        rows = got["connections"]
+        mine, other = "Claude Code " + self.tag, "Other " + self.tag   # other tests' connections may be listed too
+        token = self.make_token("read", "churning:write", name=mine, who="me@example.com")
+        self.make_token(name=other)
+
+        def listed():
+            return [r for r in self.api("/api/mcp-settings")[1]["connections"] if r["client"] in (mine, other)]
+        rows = listed()
         self.assertEqual([(r["client"], r["who"], r["scope"]) for r in rows],
-                         [("Other", None, ["read"]), ("Claude Code", "me@example.com", ["read", "churning:write"])])
+                         [(other, None, ["read"]), (mine, "me@example.com", ["read", "churning:write"])])   # newest first
         self.assertIsNone(rows[1]["last_used"])
         ping = urllib.request.Request(self.base + "/mcp", method="POST", data=b'{"jsonrpc": "2.0", "id": 1, "method": "ping"}',
                                       headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         with urllib.request.urlopen(ping, timeout=20) as r:
             self.assertEqual(r.status, 200)
-        self.assertTrue(self.api("/api/mcp-settings")[1]["connections"][1]["last_used"])
+        self.assertTrue(listed()[1]["last_used"])
         self.assertEqual(self.api(f"/api/mcp-settings/connections/{rows[1]['id']}/revoke", {}), (200, {"ok": True}))
-        self.assertEqual([r["client"] for r in self.api("/api/mcp-settings")[1]["connections"]], ["Other"])
+        self.assertEqual([r["client"] for r in listed()], [other])
         with self.assertRaises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(ping, timeout=20)
         self.assertEqual(e.exception.code, 401)
@@ -274,27 +293,23 @@ class StreamableHttpTests(RunwayServer):
 
     def test_a_write_tool_needs_the_scope_and_the_switch(self):
         key, read_only = self.make_token("read", "churning:write"), self.make_token("read")
-        fields = {"owner": "Alex", "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}
+        fields = {"owner": self.owner, "issuer": "chase", "product": "X", "opened_on": "2025-01-15"}
         result = self.call(key, "add_card", {"fields": fields})
         self.assertTrue(result["isError"])
         self.assertIn("switched off", result["content"][0]["text"])
+        self.assertEqual(self.cards(), 0)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 0)
             mcp_access.set_allow_writes(conn, True)
-        try:
-            listed = json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, key)[2])["result"]["tools"]
-            self.assertIn("add_card", [t["name"] for t in listed])
-            listed = json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, read_only)[2])["result"]["tools"]
-            self.assertNotIn("add_card", [t["name"] for t in listed])
-            self.assertIn("reconnect", self.call(read_only, "add_card", {"fields": fields})["content"][0]["text"])
-            self.assertNotIn("isError", self.call(key, "add_card", {"fields": fields}))
-            with db.session() as conn:
-                self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards").fetchone()[0], 1)
-                mcp_access.set_allow_writes(conn, False)                           # and off again applies to the next change
-            self.assertTrue(self.call(key, "add_card", {"fields": fields})["isError"])
-        finally:
-            with db.session() as conn:
-                conn.execute("DELETE FROM churn_cards")
+        listed = json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, key)[2])["result"]["tools"]
+        self.assertIn("add_card", [t["name"] for t in listed])
+        listed = json.loads(self.rpc({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, read_only)[2])["result"]["tools"]
+        self.assertNotIn("add_card", [t["name"] for t in listed])
+        self.assertIn("reconnect", self.call(read_only, "add_card", {"fields": fields})["content"][0]["text"])
+        self.assertNotIn("isError", self.call(key, "add_card", {"fields": fields}))
+        self.assertEqual(self.cards(), 1)
+        with db.session() as conn:
+            mcp_access.set_allow_writes(conn, False)                           # and off again applies to the next change
+        self.assertTrue(self.call(key, "add_card", {"fields": fields})["isError"])
 
     def test_the_tools_reach_only_the_allowlists(self):
         key = self.make_token()
