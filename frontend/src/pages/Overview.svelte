@@ -12,6 +12,8 @@
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
   import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
+  import { assumptions } from "$lib/components/overview/assumptions";
+  import { openForecastSettings } from "$lib/components/overview/forecastSheet.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
@@ -22,6 +24,7 @@
   import { balanceAsOf } from "$lib/nav.svelte";
   import type { Overview } from "$lib/types";
   import { cn } from "$lib/utils";
+  import { toast } from "svelte-sonner";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Group from "$lib/components/ui/group/Group.svelte";
@@ -34,8 +37,16 @@
   let days = $state(initial);
 
   const load = (d: number) => api<Overview>(`/api/overview?days=${d}`);
-  let data = $state<Promise<Overview>>(load(initial));
-  function setDays(v: string) { days = horizon = Number(v); data = load(days); }
+  let data = $state<Promise<Overview> | Overview>(load(initial));
+  // Another length, or a forecast setting changed: the figures load in place, so the page stays drawn (and the forecast
+  // settings sheet open) until they arrive. Only the latest request counts.
+  let asked = 0;
+  async function refresh() {
+    const n = ++asked;
+    try { const fc = await load(days); if (n === asked) data = fc; }
+    catch (err) { if (n === asked) toast.error((err as Error).message); }
+  }
+  function setDays(v: string) { days = horizon = Number(v); refresh(); }
 
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
@@ -82,7 +93,8 @@
     {@const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount)}
     {@const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date)}
     {@const asOf = balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok)}
-    {@const alerts = fc.warnings.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
+    {@const alerts = fc.warning_links.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
+    {@const assumed = assumptions(fc)}
 
     <header class="mb-5">
       <div class="text-[13px] font-semibold tracking-wide text-muted-foreground uppercase">
@@ -93,9 +105,9 @@
 
     {#if alerts}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
-        {#each fc.warnings as w (w)}{@render attention(w, "/#setup/accounts")}{/each}
+        {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
-        {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your primary checking account in Settings.", "/#setup/accounts")}{/if}
+        {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
       </Group>
     {/if}
     {#if setupLeft}<SetupChecklist />{/if}
@@ -103,7 +115,8 @@
     <!-- The hero: today's balance, whether it holds up, and the forecast under it. The chart is green while the
          balance stays above zero and red when it dips below. -->
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
-      <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} onhorizon={(d) => setDays(String(d))} />
+      <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} accounts={fc.accounts}
+        onhorizon={(d) => setDays(String(d))} onchange={refresh} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
       {#if asOf}<p class={cn("mt-1.5 text-[13px]", asOf.stale ? "text-amber-500" : "text-muted-foreground")}>{asOf.text}</p>{/if}
       {#if low && fc.accounts.length}
@@ -117,9 +130,13 @@
           {:else}The tightest moment is {lowWhen(fc)}{#if lowEvents.length}, when {lowEvents[0].kind === "card" ? `the ${nb(lowEvents[0].name.replace(/ statement$/, ""))} payment` : lowEvents[0].name} goes out{/if}.{/if}
           {#if nextIn}Next money in: {nb(nextIn.name + ",")} {fmt0(nextIn.amount)} on {nb(relDay(nextIn.date, fc.today))}.{/if}
         </p>
+        <!-- What that verdict counts, and what it leaves out (everyday spending, unless it's turned on). -->
+        <p class="mt-1 max-w-3xl text-[13px] text-muted-foreground">{assumed.text} ·
+          <button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>{assumed.action}</button></p>
       {/if}
       {#if fc.accounts.length > 1}
-        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined · choose one account by clicking the name above</p>
+        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined ·
+          <button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>choose one account</button></p>
       {/if}
 
       <div class="mt-5">

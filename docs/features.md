@@ -10,11 +10,13 @@ Settings has eight tabs: **Accounts**, **Bank connections** (SimpleFIN and Plaid
 
 On the Overview page.
 
-- **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain language ("Checking stays above $2,084 for the next 120 days").
+- **Day-by-day projection** of your primary account for 30 days to 6 months, with the lowest point called out in plain language ("Checking stays above $2,084 for the next 120 days"), and a line under it saying what the forecast counts ("Includes 7 paychecks and bills and 2 card payments (1 estimated). Everyday spending isn’t included").
+- **Forecast settings:** click the account name above the balance to choose the account, turn on **everyday spending** (the account’s recent card swipes, cash and other non-recurring spending, spread evenly over each day; it shows what that comes to a day) and set the default length. The account can also be chosen with “Use for the forecast” in Settings → Accounts, and everyday spending turned on there per account.
 - **Credit cards paid the way you pay them:** each card's statement balance comes out of checking on its due date. Statement balances, closing dates, due dates and minimum payments come straight from the card issuer through Plaid (Liabilities), so there's nothing to set up by hand. You can still correct a statement figure.
 - **Future statements** are estimated from each card's average spending over its last three statements.
 - **Business days:** a payment due on a weekend or bank holiday lands on the next business day, and a paycheck on the business day before (Federal Reserve holiday calendar).
-- **One-off edits:** click any upcoming amount to change it for that date only.
+- **One-off edits:** click any upcoming amount (dotted underline) to change it for that date only; a recurring item’s ↻ opens Bills & income to change every one.
+- **Warnings link to their fix:** a card that isn’t linked, has no paying account or is missing a statement opens the Settings tab where that’s put right.
 - **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions.
 
 ## Bank connections

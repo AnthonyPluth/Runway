@@ -137,6 +137,9 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual({a["id"]: a["balance_date"] for a in fc["accounts"]},
                          {a["id"]: a["balance_date"] for a in fc["all_accounts"] if a["id"] in {b["id"] for b in fc["accounts"]}})
         self.assertTrue(all(a["balance_date"] for a in fc["accounts"]))
+        # what the Overview's assumptions line and forecast settings read: whether everyday spending is taken out, and how much it'd be
+        self.assertTrue(all({"daily_spend", "daily_spend_on", "daily_spend_estimate"} <= set(a) for a in fc["accounts"]))
+        self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])
 
     def test_overview_names_sort_by_display_name(self):
         self.c.execute("INSERT INTO accounts(id, name, display_name, kind) VALUES ('c2', 'AAA', 'ZZZ', 'checking')")

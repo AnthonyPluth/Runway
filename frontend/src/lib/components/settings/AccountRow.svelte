@@ -16,7 +16,7 @@
 
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, reload } from "$lib/app.svelte";
+  import { app, refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -81,9 +81,13 @@
   });
 
   // The line under the name: "primary · Anthony · paid from Checking · via Plaid", with what needs a look in orange.
+  // Another checking or savings account offers "Use for the forecast" there instead of "primary". With no choice made,
+  // a lone checking account is the one the forecast uses.
+  const primary = $derived(a.id === app.state?.primary_account
+    || (!app.state?.primary_account && a.kind === "checking" && cash.filter((c) => c.kind === "checking" && !c.hidden).length === 1));
   const summary = $derived.by(() => {
-    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean }[] = [];
-    if (a.id === app.state?.primary_account) bits.push({ text: "primary", tag: true });
+    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean; primary?: boolean }[] = [];
+    if (primary) bits.push({ text: "primary", tag: true });
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
@@ -92,8 +96,20 @@
     }
     if (a.networth_hidden) bits.push({ text: "not in net worth", title: "Left out of the Net worth page; still counted everywhere else" });
     bits.push({ text: source, title: a.provider === "plaid" || own ? "Balances and transactions come from Plaid" : "Balances and transactions come from SimpleFIN" });
+    if ((a.kind === "checking" || a.kind === "savings") && !a.hidden && !primary)
+      bits.push({ text: "Use for the forecast", primary: true });
     return bits;
   });
+
+  // The same setting as the account picker in Overview's forecast settings.
+  async function makePrimary(e: Event) {
+    e.preventDefault(); e.stopPropagation();
+    try {
+      await api("/api/settings", { method: "POST", body: { primary_account: a.id } });
+      toast.success(`Overview now forecasts ${name.trim() || a.name}`);
+      await refreshState();
+    } catch (err) { toast.error((err as Error).message); }
+  }
 
   function toggled(e: Event) {
     open = (e.currentTarget as HTMLDetailsElement).open;
@@ -150,7 +166,8 @@
       <span class="truncate font-medium">{name.trim() || a.name}</span>
       <span class="text-xs text-muted-foreground">
         {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else if bit.link}<button
-          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openSource}>{bit.text}</button>{:else}<span
+          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openSource}>{bit.text}</button>{:else if bit.primary}<button
+          type="button" class="font-medium text-primary" onclick={makePrimary}>{bit.text}</button>{:else}<span
           class={bit.warn ? warnText : ""} title={bit.title}>{nb(bit.text)}</span>{/if}{/each}
       </span>
     </span>

@@ -87,6 +87,8 @@ export interface ForecastEvent {
   logo?: string | null;
   /** A card statement's card. */
   card_id?: string;
+  /** A recurring item's id (in Bills & income). */
+  recurring_id?: number;
 }
 
 export interface CardSummary {
@@ -112,12 +114,18 @@ export interface Overview {
   dates: string[];
   total: number[];
   low: { date: string; balance: number };
-  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on). */
-  accounts: { id: string; name: string; kind: string; balance: number; daily_spend?: number; balance_date?: string | null }[];
+  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on, which
+   *  daily_spend_on says); daily_spend_estimate: what that would be, on or off. */
+  accounts: {
+    id: string; name: string; kind: string; balance: number; balance_date?: string | null;
+    daily_spend?: number; daily_spend_on?: boolean; daily_spend_estimate?: number;
+  }[];
   events: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];
   warnings: string[];
+  /** The same warnings, each with the page where it's put right. */
+  warning_links: { text: string; href: string }[];
   missed?: Missed[];
   budget?: {
     monthly: number;

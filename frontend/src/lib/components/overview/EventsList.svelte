@@ -12,7 +12,8 @@
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
 
-  // What's coming up. Click an amount to change just that one occurrence. `limit` is how many show before
+  // What's coming up. Click an amount to change just that one occurrence; a recurring item's ↻ opens Bills & income, to
+  // change every one. `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together).
   let { events, limit = 8, accounts = false, all = $bindable(false) }: {
     events: (ForecastEvent & { late_from?: string | null })[];
@@ -51,7 +52,10 @@
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           <span class="truncate">{e.name}</span>
-          {#if e.kind === "recurring"}<span class="text-xs text-muted-foreground" title="Recurring item" aria-label="Recurring item">↻</span>{/if}
+          {#if e.kind === "recurring"}
+            <a class="-my-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href="#budget/recurring"
+              title="Recurring item: change every one in Bills & income" aria-label="Open in Bills & income">↻</a>
+          {/if}
           {#if e.estimated}
             <Badge variant="secondary" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
           {/if}
