@@ -67,6 +67,7 @@
     try {
       const r = await api<{ updated: number }>("/api/transactions/bulk", { method: "POST", body: { ids, ...body } });
       toast.success(`${what} · ${plural(r.updated, "transaction")}`);
+      picked = {};   // done with these; the list below updates where it is
       refreshState(); onchanged();
     } catch (err) { toast.error((err as Error).message); }
   }
