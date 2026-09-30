@@ -17,7 +17,7 @@ export interface RetailOrder {
 /** A transaction's order, as /api/transactions sends it (and a line of /api/retail's recent orders). */
 export interface OrderSummary { order_id?: string; id?: string; retailer: string; channel?: string | null; items?: number }
 
-export const STORES: Record<string, string> = { amazon: "Amazon", target: "Target" };
+export const STORES: Record<string, string> = { amazon: "Amazon", target: "Target", costco: "Costco" };
 export const ITEM_SOURCES: Record<string, string> = { manual: "you picked", memory: "as before", ai: "AI", department: "store's department" };
 
 /** "Amazon · 3 items", "Target in store · 1 item" */
