@@ -359,14 +359,29 @@ describe("Recurring page", () => {
       expect(screen.getByText("monthly · next May 1 · 3 matched")).toBeInTheDocument();
     });
 
-    it("removes an item after a second click, then reloads the page", async () => {
-      serve([item()]);
+    it("removes an item after a confirmation that says what it does, then reloads the page", async () => {
+      serve([item({ matched_count: 14 })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
       await userEvent.click(screen.getByRole("button", { name: "Remove" }));
-      await userEvent.click(screen.getByRole("button", { name: "Remove?" }));
-      expect(api).toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" });
+      const confirm = await screen.findByRole("dialog", { name: "Remove Rent?" });
+      expect(confirm).toHaveTextContent("This unlinks 14 matched transactions; they stay in your history.");
+      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" });
+      await userEvent.click(within(confirm).getByRole("button", { name: "Remove" }));
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" }));
       await waitFor(() => expect(toast).toHaveBeenCalledWith("Removed"));
+    });
+
+    it("keeps the item when the confirmation is cancelled, and says so when nothing is linked", async () => {
+      serve([item({ matched_count: 0 })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+      const confirm = await screen.findByRole("dialog", { name: "Remove Rent?" });
+      expect(confirm).toHaveTextContent("No transactions are linked to it.");
+      await userEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", { method: "DELETE" });
     });
 
     it("shows the transactions it matched, and hides them again", async () => {

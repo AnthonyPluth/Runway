@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 
 from ... import categories, categorize, db, merchants, retail, splits
 from ... import settings_keys as sk
-from ...models import Account, AiLog, Recurring, Transaction, TxSplit
+from ...models import Account, AiLog, Category, Recurring, Transaction, TxSplit
 from ..common import ApiError, _month_range
 
 
@@ -70,7 +70,54 @@ def api_transactions(conn, q, _b):
     return {"items": items, "total": total}
 
 
+# What Undo needs to put transactions back as they were: the fields a category, rename, review mark or rule can change.
+_WAS = ("id", "category", "category_source", "confidence", "needs_review", "payee")
+
+
+def snapshot(conn, ids: list[str]) -> list[dict]:
+    """These transactions as they are now (before a change), for `restore`. A split one carries its parts."""
+    t = Transaction
+    out: list[dict] = []
+    for i in range(0, len(ids), 500):
+        chunk = [str(x) for x in ids[i:i + 500]]
+        rows = db.rows(conn.execute(select(*(getattr(t, c) for c in _WAS), t.is_split).where(t.id.in_(chunk))))
+        parts = splits.of(conn, [r["id"] for r in rows if r["is_split"]])
+        for r in rows:
+            r["splits"] = [{"amount": p["amount"], "category": p["category"], "note": p["note"]} for p in parts.get(r["id"], [])]
+            r["is_split"] = 1 if r["is_split"] else 0
+        out += rows
+    return out
+
+
+def restore(conn, rows: list) -> int:
+    """Put transactions back from a `snapshot`. Returns how many were restored; anything gone or no longer valid is skipped."""
+    t = Transaction
+    done = 0
+    for r in rows:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), str):
+            continue
+        cat = r.get("category") or None
+        if cat and not conn.execute(select(Category.name).where(Category.name == cat)).fetchone():
+            cat = None
+        payee = " ".join(str(r.get("payee") or "").split())[:80] or None
+        cur = conn.execute(update(t).where(t.id == r["id"]).values(
+            category=cat, category_source=r.get("category_source") or None, confidence=r.get("confidence"),
+            needs_review=1 if r.get("needs_review") else 0, payee=payee))
+        if not cur.rowcount:
+            continue
+        if not r.get("is_split"):   # it wasn't split before (a split made since goes away)
+            splits.clear(conn, r["id"])
+        elif r.get("splits"):   # it was: the parts a category change removed come back
+            try:
+                splits.set_splits(conn, r["id"], r["splits"])
+            except splits.SplitError:   # the amount or a category changed since: it stays whole
+                splits.clear(conn, r["id"])
+        done += 1
+    return done
+
+
 def api_tx_category(conn, _q, body, tx_id):
+    was = snapshot(conn, [tx_id])
     try:
         remember = bool(body.get("remember"))
         n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
@@ -78,7 +125,7 @@ def api_tx_category(conn, _q, body, tx_id):
         raise ApiError(str(e)) from e
     # Not remembered yet: the app asks whether to use this category for the merchant from now on.
     offer = None if remember else categorize.rule_offer(conn, tx_id, body.get("category", ""))
-    return {"ok": True, "also_updated": n, "offer_rule": offer}
+    return {"ok": True, "also_updated": n, "offer_rule": offer, "was": was}
 
 
 def api_tx_split(conn, _q, body, tx_id):
@@ -95,15 +142,18 @@ def api_tx_split(conn, _q, body, tx_id):
 
 def api_tx_bulk(conn, _q, body, *_):
     """Change many transactions at once (the checkboxes on Transactions)."""
+    if isinstance(body.get("restore"), list):   # Undo: the `was` an earlier change sent back
+        return {"ok": True, "updated": restore(conn, body["restore"])}
     ids = body.get("ids")
     if not isinstance(ids, list):
         raise ApiError("Select some transactions first")
+    was = snapshot(conn, ids)
     try:
         n = categorize.bulk_update(conn, ids, body.get("category") or None, body.get("payee") or None,
                                    bool(body.get("reviewed")))
     except ValueError as e:
         raise ApiError(str(e)) from e
-    return {"ok": True, "updated": n}
+    return {"ok": True, "updated": n, "was": was}
 
 
 def api_tx_accept(conn, _q, _b, tx_id):
@@ -135,13 +185,14 @@ def api_ai_apply(conn, _q, body):
         except ValueError as e:
             raise ApiError(str(e)) from e
     remember = bool(body.get("remember"))
+    was = snapshot(conn, ids)
     try:
         n = categorize.apply_to_group(conn, ids, category, remember)
     except ValueError as e:
         raise ApiError(str(e)) from e
     # Applying a suggestion categorizes; the app then asks whether this merchant should always be this category.
     offer = None if remember or not ids else categorize.rule_offer(conn, ids[0], category)
-    return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer}
+    return {"ok": True, "updated": n, "category": category, "created": created, "offer_rule": offer, "was": was}
 
 
 def api_recategorize(conn, _q, _b):

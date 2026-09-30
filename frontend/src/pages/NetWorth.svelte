@@ -16,6 +16,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
@@ -51,14 +52,17 @@
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
   const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
 
+  async function setLeftOut(id: string, out: boolean) {
+    await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
+    await load();
+  }
   // Leave an account out of net worth (or bring it back). It stays everywhere else; only these totals and the history from
   // today on change.
   async function leaveOut(id: string, name: string, out: boolean) {
     try {
-      await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
-      await load();
-      toast(out ? `${name} is left out of net worth` : `${name} is counted again`,
-        out ? { action: { label: "Undo", onClick: () => leaveOut(id, name, false) } } : undefined);
+      await setLeftOut(id, out);
+      if (out) undoable(`${name} is left out of net worth`, async () => { await setLeftOut(id, false); });
+      else toast(`${name} is counted again`);
     } catch (err) { toast.error((err as Error).message); }
   }
 

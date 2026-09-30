@@ -35,7 +35,7 @@ const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filt
 beforeEach(() => {
   closeRemember();   // the "always use this category" question is module state and would leak between tests
   vi.mocked(api).mockReset();
-  vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
+  vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
   app.state = { connected: true, review_count: 3 };
   categories.list = [];
   Object.assign(txFilters.transactions, { q: "", account: "", category: "", month: "", scope: "" });
@@ -114,7 +114,7 @@ describe("Transactions page", () => {
     await screen.findByText("Alpha");
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
     expect(api).toHaveBeenCalledWith("/api/transactions/a/category", { method: "POST", body: { category: "Groceries" } });
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Saved"));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Coffee → Groceries", expect.objectContaining({ description: "Alpha", action: expect.objectContaining({ label: "Undo" }) })));
   });
 
   it("offers to remember the category for the merchant when the server suggests a rule", async () => {
@@ -176,6 +176,55 @@ describe("Transactions page", () => {
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
       await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
       expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("1 to go");
+    });
+
+    // A server that remembers: categorizing takes a transaction out of Review, restoring puts it back.
+    const queue = (list: Tx[]) => {
+      let open = list;
+      serve(list, list.length, (path, o) => {
+        if (path.startsWith("/api/transactions?")) return { items: open, total: open.length };
+        if (path.endsWith("/category") && o?.method === "POST") {
+          const id = path.split("/")[3];
+          const was = open.filter((t) => t.id === id).map((t) => ({ id, category: t.category, category_source: "ai", confidence: 0.6, needs_review: 1, payee: t.payee, is_split: 0 }));
+          open = open.filter((t) => t.id !== id);
+          return { also_updated: 0, offer_rule: null, was };
+        }
+        if (path === "/api/transactions/bulk") { open = list; return { updated: 1 }; }
+        return undefined;
+      });
+    };
+    const undo = () => (vi.mocked(toast).mock.calls.at(-1)![1] as unknown as { action: { onClick: () => Promise<void> } }).action.onClick();
+
+    it("undoes a category change: sends what it was and puts the transaction back in the queue", async () => {
+      queue(rows());
+      render(Transactions, { page: "review" });
+      await screen.findByText("Alpha");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
+      expect(toast).toHaveBeenLastCalledWith("Coffee → Groceries", expect.objectContaining({ description: "Alpha" }));
+      await undo();
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: [
+        { id: "a", category: "Coffee", category_source: "ai", confidence: 0.6, needs_review: 1, payee: "Alpha", is_split: 0 }] } });
+      expect(await screen.findByText("Alpha")).toBeInTheDocument();
+      expect(toast).toHaveBeenLastCalledWith("Undone", undefined);
+    });
+
+    it("moves focus to the next row's category when one leaves the queue", async () => {
+      queue(rows());
+      render(Transactions, { page: "review" });
+      await screen.findByText("Alpha");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Category for Bravo" })).toHaveFocus());
+    });
+
+    it("moves focus to the row before when the last one is done, and to 'All caught up' when none are left", async () => {
+      queue(rows());
+      render(Transactions, { page: "review" });
+      await screen.findByText("Alpha");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Bravo" }), "Coffee");
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Category for Alpha" })).toHaveFocus());
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+      await waitFor(() => expect(screen.getByText(/All caught up/)).toHaveFocus());
     });
 
     it("celebrates an empty queue, but not an empty search", async () => {

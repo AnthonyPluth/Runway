@@ -21,12 +21,18 @@
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
+  import { fromRule, restoreTx, type RuleWas } from "$lib/components/transactions/restore";
+  import { plural } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import RuleEditor from "./RuleEditor.svelte";
+  import type { RulePreview } from "./types";
   import { helpCls, inputCls } from "./ui";
 
   // Settings → Rules: what each rule matches → what it does, with Edit / Apply / Remove, and a new-rule editor
-  // (already open when there are no rules yet).
+  // (already open when there are no rules yet). Apply says how many past transactions it would change (the editor's
+  // preview) and asks first; afterwards its toast can undo it.
   let { rules, accounts }: { rules: Rule[]; accounts: SettingsAccount[] } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -37,11 +43,28 @@
   $effect(() => { rulesFilter = q; });
   const hay = (r: Rule) => (r.summary + " " + ruleActions(r)).toLowerCase();
 
-  async function apply(id: number) {
+  let asking = $state(false);
+  let pending = $state<{ rule: Rule; changes: number } | null>(null);
+
+  async function apply(r: Rule) {
     try {
-      const r = await api<{ updated: number }>(`/api/rules/${id}/apply`, { method: "POST" });
-      toast.success(`${r.updated} transaction${r.updated === 1 ? "" : "s"} updated`); refreshState();
+      const p = await api<RulePreview>("/api/rules/preview", { method: "POST", body: {
+        match: r.match, match_mode: r.match_mode, amount_min: r.amount_min, amount_max: r.amount_max, direction: r.direction,
+        account_id: r.account_id, category: r.category, rename: r.rename, review: r.review, split: r.split } });
+      if (p.error) toast.error(p.error);
+      else if (!p.changes) toast(p.matches ? `Nothing to change: the ${plural(p.matches, "past transaction")} it matches already ${p.matches === 1 ? "has" : "have"} what it does` : "No past transactions match this rule");
+      else { pending = { rule: r, changes: p.changes }; asking = true; }
     } catch (err) { toast.error((err as Error).message); }
+  }
+  async function run(r: Rule): Promise<boolean> {
+    try {
+      const res = await api<{ updated: number; changed: RuleWas[]; undoable: boolean }>(`/api/rules/${r.id}/apply`, { method: "POST" });
+      const said = `${plural(res.updated, "transaction")} updated`;
+      if (res.undoable && res.changed.length) undoable(said, async () => { await restoreTx(res.changed.map(fromRule)); });
+      else toast.success(said, res.updated ? { description: "That’s too many to undo from here." } : undefined);
+      refreshState();
+      return true;
+    } catch (err) { toast.error((err as Error).message); return false; }
   }
   async function remove(id: number) {
     try { await api(`/api/rules/${id}`, { method: "DELETE" }); toast.success("Rule removed"); reload(); }
@@ -70,7 +93,7 @@
                 <span class="min-w-0 text-sm">{ruleActions(r)}</span>
                 <span class="ml-auto flex shrink-0 items-center md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                   <Button variant="link" size="sm" aria-expanded={editing === r.id} onclick={() => (editing = editing === r.id ? null : r.id!)}>Edit</Button>
-                  <Button variant="link" size="sm" title="Run this rule over past transactions (not ones you categorized yourself)" onclick={() => apply(r.id!)}>Apply</Button>
+                  <Button variant="link" size="sm" title="Run this rule over past transactions (not ones you categorized yourself)" onclick={() => apply(r)}>Apply</Button>
                   <ConfirmButton confirm="Remove?" onconfirm={() => remove(r.id!)}>Remove</ConfirmButton>
                 </span>
               </div>
@@ -82,3 +105,9 @@
     {/if}
   </Card.Content>
 </Card.Root>
+
+{#if pending}
+  <ConfirmDialog bind:open={asking} title="Apply this rule to past transactions?" confirmLabel={`Change ${plural(pending.changes, "transaction")}`} busyLabel="Applying…"
+    description={`This changes ${plural(pending.changes, "transaction")}: ${pending.rule.summary || "any transaction"} → ${ruleActions(pending.rule)}. Categories you picked yourself stay as they are. You can undo it afterwards.`}
+    onconfirm={() => run(pending!.rule)} />
+{/if}

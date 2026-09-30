@@ -2,11 +2,11 @@
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDate, nb } from "$lib/format";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
+  import { fmt, fmtDate, nb, plural } from "$lib/format";
   import type { Account } from "$lib/types";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -57,9 +57,12 @@
       catch { /* saved; the summary catches up on the next load */ }
     }
   }
-  async function remove() {
-    try { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); }
-    catch (err) { toast.error((err as Error).message); }
+  // Removing says what it does first: the matched transactions are unlinked (they stay in your history) and its one-off
+  // changes to single dates go.
+  let removing = $state(false);
+  async function remove(): Promise<boolean> {
+    try { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
   async function showMatches() {
     if (matches) { matches = null; return; }
@@ -92,7 +95,7 @@
           {matches ? "Hide matched transactions" : "Show matched transactions"}
         </Button>
       {/if}
-      <ConfirmButton class="ml-auto h-auto px-0" confirm="Remove?" onconfirm={remove}>Remove</ConfirmButton>
+      <Button variant="link" size="sm" class="ml-auto h-auto px-0" onclick={() => (removing = true)}>Remove</Button>
     </div>
     {#if matches}
       {#if matches.length}
@@ -115,3 +118,6 @@
     {/if}
   </div>
 </details>
+
+<ConfirmDialog bind:open={removing} destructive title={`Remove ${r.name}?`} confirmLabel="Remove" busyLabel="Removing…" onconfirm={remove}
+  description={`${r.matched_count ? `This unlinks ${plural(r.matched_count, "matched transaction")}; they stay in your history.` : "No transactions are linked to it."} Any one-off changes you made to its dates are cleared too.`} />

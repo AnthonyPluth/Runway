@@ -9,6 +9,7 @@
   import TxTable from "$lib/components/transactions/TxTable.svelte";
   import Upcoming from "$lib/components/transactions/Upcoming.svelte";
   import { askRemember } from "$lib/components/transactions/remember.svelte";
+  import { restoreTx, type Was } from "$lib/components/transactions/restore";
   import type { RecurringItem, RuleOffer, Tx, TxList, UpcomingEvent } from "$lib/components/transactions/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
@@ -16,7 +17,9 @@
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { txFilters, type TxFilters } from "$lib/filters.svelte";
   import { monthLabel } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { accountName, type Account, type Overview } from "$lib/types";
+  import { tick } from "svelte";
   import { toast } from "svelte-sonner";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -89,19 +92,34 @@
       (!a.month || e.date.startsWith(a.month)));
   };
 
+  // After a transaction leaves the list, keyboard focus goes to the next row's category (else the row before it), or,
+  // with none left, to "All caught up": without this it falls to the page and you start again from the top.
+  let heading = $state<HTMLElement>(), caughtUp = $state<HTMLElement>();
+  async function focusAfter(id: string | undefined) {
+    await tick();
+    const row = id ? [...document.querySelectorAll<HTMLElement>("[data-tx]")].find((r) => r.dataset.tx === id) : undefined;
+    (row?.querySelector<HTMLElement>("select") ?? caughtUp ?? heading)?.focus();
+  }
+
   async function save(t: Tx, category: string) {
+    const prev = t.category ?? "";
+    const at = list?.items.findIndex((x) => x.id === t.id) ?? -1;
+    const next = at < 0 ? undefined : (list!.items[at + 1] ?? list!.items[at - 1])?.id;
     try {
-      const r = await api<{ also_updated: number; offer_rule: RuleOffer | null }>(
+      const r = await api<{ also_updated: number; offer_rule: RuleOffer | null; was: Was[] }>(
         `/api/transactions/${encodeURIComponent(t.id)}/category`, { method: "POST", body: { category } });
       if (r.offer_rule) askRemember(t.id, category, r.offer_rule, load);
-      else toast.success("Saved");
+      // Not a plain "Saved": what it was, so a wrong pick (or a slip of the keyboard) can be taken back.
+      undoable(prev === category ? `Kept ${category}` : `${prev || "Uncategorized"} → ${category}`,
+        async () => { await restoreTx(r.was); await load(); }, { description: t.payee || t.description || undefined });
       refreshState();
       if (r.also_updated) return load();
       if (review && list) {
         list.items = list.items.filter((x) => x.id !== t.id);
-        if (!list.items.length) return load();
+        if (!list.items.length) { await load(); return focusAfter(undefined); }
         if (count > 0) count--;
         if (list.total > 0) list.total--;
+        focusAfter(next);
       } else {
         t.category = category; t.needs_review = 0; t.category_source = "manual";
       }
@@ -114,7 +132,7 @@
 </script>
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">
+  <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-tight font-bold tracking-tight outline-none">
     Transactions
     <span class="text-base font-normal text-muted-foreground tabular-nums">{list ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
   </h1>
@@ -176,7 +194,7 @@
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">Loading…</Card.Content></Card.Root>
   {:else if !list.items.length}
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">
-      {review && !filtered ? "All caught up. New transactions that need a decision will show up here." : "No transactions match."}
+      <p bind:this={caughtUp} tabindex="-1" class="outline-none">{review && !filtered ? "All caught up. New transactions that need a decision will show up here." : "No transactions match."}</p>
     </Card.Content></Card.Root>
   {:else}
     {#key loads}

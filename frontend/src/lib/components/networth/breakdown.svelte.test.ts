@@ -60,7 +60,10 @@ describe("the breakdown", () => {
     expect(within(dialog).getByRole("button", { name: "Update value" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Edit details" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
-    await user.click(await within(dialog).findByRole("button", { name: "Remove House?" }));
+    const confirm = await screen.findByRole("dialog", { name: "Remove House?" });
+    expect(confirm).toHaveTextContent("Its value history goes with it");
+    expect(calls("/api/assets/7/remove")).toHaveLength(0);   // nothing happens until it's confirmed
+    await user.click(within(confirm).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(calls("/api/assets/7/remove")).toHaveLength(1));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
