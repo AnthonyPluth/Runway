@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
-import { openPlaidLink, plaidSession, resumePlaidOAuth, runPlaidLink } from "./plaid.svelte";
+import { connectPlaid, openPlaidLink, plaidSession, resumePlaidOAuth, runPlaidLink } from "./plaid.svelte";
 
 type Opts = Parameters<NonNullable<Window["Plaid"]>["create"]>[0];
 let opts: Opts;
@@ -121,5 +121,35 @@ describe("resumePlaidOAuth", () => {
     vi.mocked(api).mockRejectedValue(new Error("Expired"));
     expect(await resumePlaidOAuth()).toBe(false);
     expect(toast.error).toHaveBeenCalledWith("Expired");
+  });
+});
+
+describe("connectPlaid", () => {
+  it("lands on Accounts after connecting a bank, where its accounts wait for a decision", async () => {
+    location.hash = "#setup/connections";
+    vi.mocked(api).mockResolvedValue({ link_token: "tok-1" });
+    const p = connectPlaid("bank");
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    opts.onSuccess("public", {});
+    await p;
+    expect(location.hash).toBe("#setup/accounts");
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("stays put after connecting an investment account, and when Link is closed", async () => {
+    location.hash = "#setup/connections";
+    vi.mocked(api).mockResolvedValue({ link_token: "tok-1" });
+    const inv = connectPlaid("investments");
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    opts.onSuccess("public", {});
+    await inv;
+    expect(location.hash).toBe("#setup/connections");
+    open.mockClear(); vi.mocked(reload).mockClear();
+    const closed = connectPlaid("bank");
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    opts.onExit(null, {});
+    await closed;
+    expect(location.hash).toBe("#setup/connections");
+    expect(reload).not.toHaveBeenCalled();
   });
 });

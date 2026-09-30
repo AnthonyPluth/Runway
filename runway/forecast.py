@@ -407,8 +407,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         one = len(not_linked) == 1
         warnings.append(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
                         f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
-                        + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Connections, "
-                           f"choose “Same as …” for each." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."))
+                        + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
+                           f"choose “Same as …” for each under “New from Plaid”." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."))
     if no_statement:
         one = len(no_statement) == 1
         warnings.append(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
