@@ -7,10 +7,11 @@
   import BestCard from "$lib/components/churning/BestCard.svelte";
   import CardForm from "$lib/components/churning/CardForm.svelte";
   import CardList from "$lib/components/churning/CardList.svelte";
+  import Planned from "$lib/components/churning/Planned.svelte";
   import Rewards from "$lib/components/churning/Rewards.svelte";
   import Upcoming from "$lib/components/churning/Upcoming.svelte";
   import { BOTH, bankOrder, cardOrder, feesDue, five24Line, mine } from "$lib/components/churning/churning";
-  import type { BankBonus, ChurnCard, Churning } from "$lib/components/churning/types";
+  import type { Churning, Wish } from "$lib/components/churning/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
@@ -49,9 +50,20 @@
   const bankThisYear = $derived(d ? people.reduce((s, p) => s + (d!.bank_income[p]?.[year] ?? 0), 0) : 0);
   const incomeYears = $derived(d ? [...new Set(people.flatMap((p) => Object.keys(d!.bank_income[p] ?? {})))].sort().reverse() : []);
 
-  let form = $state<ChurnCard | "new" | null>(null);
-  let bankForm = $state<BankBonus | "new" | null>(null);
-  const closeForm = (changed: boolean) => { form = null; bankForm = null; if (changed) load(); };
+  // The open form is remembered by id, so it keeps its place when the data behind it is reloaded (a benefit was marked
+  // used, a plan checked off) and shows the card's new figures.
+  let formId = $state<number | "new" | null>(null);
+  let bankFormId = $state<number | "new" | null>(null);
+  const form = $derived(formId === "new" ? "new" : (d?.cards.find((c) => c.id === formId) ?? null));
+  const bankForm = $derived(bankFormId === "new" ? "new" : (d?.bank.find((b) => b.id === bankFormId) ?? null));
+  const closeForm = (changed: boolean) => { formId = null; bankFormId = null; if (changed) load(); };
+  // "I applied" on a planned item: the new card or bank bonus opens in its form, in its tab, to fill in the rest.
+  async function applied(kind: Wish["kind"], id: number) {
+    await load();
+    showClosed = false;
+    if (kind === "card") { bankFormId = null; formId = id; location.hash = "#churning"; }
+    else { formId = null; bankFormId = id; location.hash = "#churning/bank"; }
+  }
 </script>
 
 {#snippet tile(label: string, value: string, sub: string, tone = "")}
@@ -109,6 +121,10 @@
 
   <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
 
+  <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
+  <BestCard {person} {version} showOwner={people.length > 1} />
+  <Rewards {d} {people} onchanged={load} />
+
   <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
       tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
@@ -119,12 +135,12 @@
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title>Cards</Card.Title>
-        <Card.Action><Button size="sm" onclick={() => (form = "new")}>Add a card</Button></Card.Action>
+        <Card.Action><Button size="sm" onclick={() => (formId = "new")}>Add a card</Button></Card.Action>
       </Card.Header>
       <Card.Content>
-        {#if form}{#key form}<CardForm c={form === "new" ? null : form} {d} {person} onclose={closeForm} />{/key}{/if}
+        {#if form}{#key formId}<CardForm c={form === "new" ? null : form} {d} {person} onclose={closeForm} onchanged={load} />{/key}{/if}
         {#if visibleCards.length}
-          <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => (form = c)} />
+          <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => (formId = c.id)} onchanged={load} />
         {:else}
           <p class="py-6 text-center text-sm text-muted-foreground">{cards.length ? "No open cards. Tick Show closed to see the rest." : "No cards yet. Add the cards you've opened in the last few years: 5/24 and the bonus rules need them."}</p>
         {/if}
@@ -136,18 +152,16 @@
         </details>
       </Card.Content>
     </Card.Root>
-    <BestCard {person} {version} showOwner={people.length > 1} />
-    <Rewards {d} {people} onchanged={load} />
   {:else}
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title>Bank bonuses</Card.Title>
-        <Card.Action><Button size="sm" onclick={() => (bankForm = "new")}>Add a bank bonus</Button></Card.Action>
+        <Card.Action><Button size="sm" onclick={() => (bankFormId = "new")}>Add a bank bonus</Button></Card.Action>
       </Card.Header>
       <Card.Content>
-        {#if bankForm}{#key bankForm}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
+        {#if bankForm}{#key bankFormId}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
         {#if visibleBank.length}
-          <BankList bonuses={visibleBank} {d} showOwner={people.length > 1} onedit={(b) => (bankForm = b)} />
+          <BankList bonuses={visibleBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
         {:else}
           <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing open. Tick Show closed to see the rest." : "No bank bonuses yet."}</p>
         {/if}

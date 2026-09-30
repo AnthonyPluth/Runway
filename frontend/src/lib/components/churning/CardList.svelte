@@ -3,12 +3,16 @@
   import { Button } from "$lib/components/ui/button";
   import { fmt0, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
-  import { STATUS_LABEL, bonusLabel, daysUntil, eligibilityText, fullDate, spendProgress } from "./churning";
+  import { planDone, planUndo } from "./actions";
+  import { STATUS_LABEL, benefitSummary, bonusLabel, daysUntil, eligibilityText, fullDate, planLine, ratesText, spendProgress } from "./churning";
   import type { ChurnCard, Churning } from "./types";
 
   // The cards, one row each: the bank and card, its annual fee, the bonus and its spending, when the bonus can be
-  // earned again. A table's columns on a computer; stacked on a phone.
-  let { cards, d, showOwner, onedit }: { cards: ChurnCard[]; d: Churning; showOwner: boolean; onedit: (c: ChurnCard) => void } = $props();
+  // earned again, then a line under it with what it earns (portal-only rates marked), its benefits net of the fee, and
+  // your plan for it. A table's columns on a computer; stacked on a phone.
+  let { cards, d, showOwner, onedit, onchanged }: {
+    cards: ChurnCard[]; d: Churning; showOwner: boolean; onedit: (c: ChurnCard) => void; onchanged: () => void;
+  } = $props();
   const issuer = (k: string) => d.issuers.find((i) => i.key === k)?.name ?? k;
   const cols = "md:grid md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1.1fr)_auto] md:items-center md:gap-4";
 </script>
@@ -21,6 +25,8 @@
     {@const p = spendProgress(c.spent, c.bonus_spend)}
     {@const feeSoon = c.fee_due && daysUntil(c.fee_due, d.today) <= 30}
     {@const bonus = bonusLabel(c.bonus, c.currency, c.currency_name)}
+    {@const perks = benefitSummary(c)}
+    {@const plan = planLine(c)}
     <li class={cn("relative flex flex-col gap-2 py-3", cols, c.status !== "open" && "text-muted-foreground")}>
       <div class="min-w-0 max-md:pr-12">
         <div class="flex flex-wrap items-center gap-1.5 font-medium text-foreground">
@@ -60,6 +66,20 @@
         <span class={cn(c.eligibility.status === "now" && "text-[var(--good)]")}>{eligibilityText(c.eligibility, d.today)}</span>
       </div>
       <div class="max-md:absolute max-md:top-2 max-md:right-0 md:text-right"><Button variant="link" size="sm" class="h-auto px-0" onclick={() => onedit(c)} aria-label={`Edit ${c.product}`}>Edit</Button></div>
+      {#if c.rates.length || perks || plan || c.hide_upcoming}
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground md:col-span-full">
+          {#if c.rates.length}<span>Earns {ratesText(c.rates, c.portal_name)}</span>{/if}
+          {#if perks}<span>{perks}</span>{/if}
+          {#if plan}
+            <span class="inline-flex items-center gap-1.5">
+              Plan: <span class={cn(c.plan_active && "font-medium text-foreground")}>{plan}</span>
+              {#if c.plan_done_on}<Button variant="link" size="sm" class="h-auto px-0 text-xs" aria-label={`Undo the plan for ${c.product}`} onclick={() => planUndo(c.id, onchanged)}>Undo</Button>
+              {:else if c.plan_active}<Button variant="outline" size="sm" class="h-6 px-2 text-xs" aria-label={`Mark the plan for ${c.product} done`} onclick={() => planDone(c.id, onchanged)}>Done</Button>{/if}
+            </span>
+          {/if}
+          {#if c.hide_upcoming}<Badge variant="outline">Hidden from Upcoming</Badge>{/if}
+        </div>
+      {/if}
     </li>
   {/each}
 </ul>
