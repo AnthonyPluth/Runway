@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
@@ -23,21 +24,43 @@ const setup = (rows: RewardRow[]) => {
 beforeEach(() => { vi.mocked(api).mockReset(); });
 
 describe("Rewards", () => {
-  it("values only the balance you entered, not the points earned this year", () => {
-    // ~4,183 points earned (worth $63 at 1.5¢) but no balance entered: nothing to value.
+  it("keeps this year's earnings out of the balances view", () => {
+    // ~4,183 points earned (worth $63 at 1.5¢) but no balance entered: nothing to value in Balances.
     setup([row({ currency: "amex_mr", name: "Amex Membership Rewards", earned: 4183, value: 62.75 })]);
     const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
-    expect(within(r).getByText("~4,183")).toBeInTheDocument();
-    expect(within(r).queryByText("$63")).not.toBeInTheDocument();
+    expect(within(r).queryByText("~4,183")).not.toBeInTheDocument();
+    expect(within(r).queryByText("~$63")).not.toBeInTheDocument();
     expect(within(r).getByText("—", { selector: "td" })).toBeInTheDocument();
   });
 
-  it("shows the worth of the balance alone when there's also a year's earnings", () => {
+  it("shows what was earned this year, and what it's worth, in its own view", async () => {
+    setup([row({ currency: "amex_mr", name: "Amex Membership Rewards", earned: 4183, bonuses: 60000, value: 962.75 }),
+      row({ currency: "airline", name: "Other airline miles", balance: 10, balance_value: 0.1 })]);
+    await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
+    const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
+    expect(within(r).getByText("~4,183")).toBeInTheDocument();         // spending
+    expect(within(r).getByText("60k")).toBeInTheDocument();            // bonuses
+    expect(within(r).getByText("~$963")).toBeInTheDocument();          // what that's worth
+    expect(screen.queryByText("Other airline miles")).not.toBeInTheDocument();   // earned nothing this year
+    expect(screen.queryByLabelText("Alex's Amex Membership Rewards balance")).not.toBeInTheDocument();   // no balances here
+    await userEvent.click(screen.getByRole("radio", { name: "Balances" }));
+    expect(screen.getByLabelText("Alex's Amex Membership Rewards balance")).toBeInTheDocument();
+  });
+
+  it("says so when nothing was earned this year", async () => {
+    setup([row({ balance: 5, balance_value: 0.08 })]);
+    await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
+    expect(screen.getByText("Nothing earned yet this year.")).toBeInTheDocument();
+  });
+
+  it("shows the worth of the balance alone when there's also a year's earnings", async () => {
     setup([row({ earned: 5000, bonuses: 60000, value: 975, balance: 142000, balance_value: 2130 })]);
     const r = screen.getByText("Chase Ultimate Rewards").closest("tr")!;
     expect(within(r).getByText("$2,130")).toBeInTheDocument();
     expect(screen.queryByText("$3,105")).not.toBeInTheDocument();   // balance + earnings
     expect(screen.getByTitle("What the balances you entered are worth")).toHaveTextContent("$2,130");
+    await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
+    expect(screen.getByTitle(/What this year's points and bonuses are worth/)).toHaveTextContent("$975");
   });
 
   it("lets a balance change by one point", () => {
