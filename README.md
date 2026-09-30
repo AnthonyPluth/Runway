@@ -229,7 +229,13 @@ API keys or backups.
 claude mcp add runway -e RUNWAY_URL=https://runway.example.com -e RUNWAY_MCP_KEY=rwm_... -- python -m runway.mcp_server
 ```
 
-The key opens only `/api/mcp/<page>`, and only for the pages listed in `runway/mcp_access.py` (GET requests, no writes). Like
+**Letting it change churning (optional).** The key above never changes anything. To let an assistant mark a benefit used, add or
+update cards, benefits, to-dos and planned items, and check off a plan, make a second **write key** in the same place and
+give the server both `RUNWAY_MCP_KEY=rww_...` (the write key also reads) and `RUNWAY_MCP_ALLOW_WRITES=1`. Without both, the
+changing tools aren't even offered. They can't delete anything or touch accounts, transactions or settings (the list is
+`WRITABLE` in `runway/mcp_access.py`), and they're marked as changing data so assistants like Claude ask before running them.
+
+The read key opens only `/api/mcp/<page>`, and only for the pages listed in `runway/mcp_access.py` (GET requests). Like
 the rest of Runway's API it needs your Runway to be reachable from the computer running the assistant, so on the internet
 put it behind HTTPS (see [Running on a server](#running-on-a-server)).
 

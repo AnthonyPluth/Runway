@@ -14,6 +14,16 @@ def api_mcp_key_new(conn, _q, _b):
     return {"token": mcp_access.new_token(conn)}
 
 
+def api_mcp_write_key_new(conn, _q, _b):
+    """A new write key, which can also change churning data (see mcp_access.WRITABLE); shown once."""
+    return {"token": mcp_access.new_write_token(conn)}
+
+
+def api_mcp_write_key_remove(conn, _q, _b):
+    mcp_access.remove_write_token(conn)
+    return {"ok": True}
+
+
 def api_mcp_key_remove(conn, _q, _b):
     mcp_access.remove_token(conn)
     return {"ok": True}
