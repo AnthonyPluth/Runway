@@ -76,6 +76,7 @@ async function runway(path, body) {
       headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
       signal: AbortSignal.timeout(RUNWAY_CALL_MS),
+      redirect: "error",   // the key and the body only ever go to the address that was saved, never wherever it points
     });
   } catch (e) {
     throw new Error(`Couldn't reach Runway at ${runwayUrl} (${e.message}).`, { cause: e });
@@ -164,6 +165,8 @@ class TabPage {
 const frameHost = typeof document !== "undefined" ? {
   async open(name, url) {
     const f = document.createElement("iframe");
+    // Sandboxed, so a store's page can't navigate the page that holds it (the store keeps its own origin and scripts).
+    f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
     Object.assign(f, { name, id: name, src: url, width: 1280, height: 900 });
     document.body.append(f);
   },
@@ -178,10 +181,14 @@ const frameHost = typeof document !== "undefined" ? {
       if (!/single offscreen|already/i.test(String(e && e.message))) throw new HiddenUnavailable(`offscreen: ${e.message}`);
     }
     for (let i = 0; ; i++) {
-      try { return await chrome.runtime.sendMessage({ to: "offscreen", cmd: "open", name, url }); } catch (e) {
+      let res;
+      try { res = await chrome.runtime.sendMessage({ to: "offscreen", cmd: "open", name, url }); } catch (e) {
         if (i >= 10) throw new HiddenUnavailable(`offscreen: ${e.message}`);
         await sleep(100);
+        continue;
       }
+      if (res && res.ok === false) throw new HiddenUnavailable("offscreen: it refused the address");
+      return res;
     }
   },
   async close(name) { await chrome.runtime.sendMessage({ to: "offscreen", cmd: "close", name }).catch(() => {}); },
@@ -891,7 +898,8 @@ async function refreshUnmatched() {
   if (changed) await store.set({ results });
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (sender.id !== chrome.runtime.id) return;   // only the extension's own pages (popup, options)
   if (msg && msg.type === "refresh") refreshUnmatched().catch(() => {}).finally(() => reply({ ok: true }));
   if (msg && msg.type === "import" && (msg.retailer === "all" || RETAILERS[msg.retailer])) {
     run(msg.retailer);

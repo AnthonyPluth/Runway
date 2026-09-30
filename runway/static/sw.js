@@ -1,10 +1,13 @@
 // Runway's service worker: shows push notifications, and keeps the app's shell around so it opens without a
 // connection (with the last-loaded page). Data always comes fresh from the server; nothing from /api is cached.
-const CACHE = "runway-shell-v3";
+const CACHE = "runway-shell-v4";
 // The app's page and Runway's own files. The app's built files (/assets/…) are kept as the page loads them: their
 // names change with every build, so the list can't name them.
 const SHELL = ["/", "/logo.svg", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
 const isShell = (path) => SHELL.includes(path) || path.startsWith("/assets/");
+// The pages that are the app itself (main.ts picks the screen from the hash, and /plaid/oauth resumes a bank link).
+// Any other page (the OAuth consent screen, Carta's callback) is not the shell, so it never replaces the cached one.
+const APP_PAGES = ["/", "/plaid/oauth"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}).then(() => self.skipWaiting()));
@@ -22,8 +25,9 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/auth/")) return;
-  const key = event.request.mode === "navigate" ? "/" : url.pathname;
-  if (event.request.mode !== "navigate" && !isShell(key)) return;
+  const navigate = event.request.mode === "navigate";
+  if (navigate ? !APP_PAGES.includes(url.pathname) : !isShell(url.pathname)) return;
+  const key = navigate ? "/" : url.pathname;
   event.respondWith((async () => {
     try {
       const res = await fetch(event.request);
