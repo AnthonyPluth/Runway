@@ -20,6 +20,12 @@ on:
 permissions:
   contents: read
 
+# bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
+# the last command in a pipeline counts, and a failed gh or curl passes silently).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   preview:
     if: github.event_name == 'workflow_dispatch' || (github.event.label.name == 'needs_preview' && github.event.pull_request.head.repo.full_name == github.repository)
@@ -115,7 +121,8 @@ jobs:
             sleep 2
           done
           [ "$code" = 401 ] || { echo "Expected 401 without the password, got $code"; cat cloudflared.log; exit 1; }
-          curl -fsS -u "preview:$password" -H 'X-Runway: 1' "$URL/api/accounts" | grep -q demo-checking
+          accounts=$(curl -fsS -u "preview:$password" -H 'X-Runway: 1' "$URL/api/accounts")
+          grep -q demo-checking <<< "$accounts"
 
       - name: Post the address
         env:
@@ -145,7 +152,7 @@ jobs:
         run: |
           end=$(( $(date +%s) + MINUTES * 60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
-            docker inspect -f '{{.State.Running}}' runway | grep -q true || { docker logs runway; exit 1; }
+            [ "$(docker inspect -f '{{.State.Running}}' runway)" = true ] || { docker logs runway; exit 1; }
             pgrep -x cloudflared >/dev/null || { cat cloudflared.log; exit 1; }
             sleep 30
           done
