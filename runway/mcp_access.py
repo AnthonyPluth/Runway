@@ -14,7 +14,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime
 
-from . import db
+from . import db, mcp_oauth
 from . import settings_keys as sk
 
 # The GET /api/... pages the key may read (each also has to be a route in server/routes.py).
@@ -80,6 +80,18 @@ def check_token(conn, authorization: str | None) -> bool:
 
 def key_access(conn, authorization: str | None, _resource: str | None = None) -> Access | None:
     return KEY_ACCESS if check_token(conn, authorization) else None
+
+
+def resolve_bearer(conn, authorization: str | None, resource: str | None) -> Access | None:
+    """What an OAuth access token (Authorization: Bearer rwa_...) for this MCP endpoint (`resource`) may do: its grant's
+    scopes. None for anything else: no token, an unknown, expired or revoked one, or one for another resource."""
+    m = re.fullmatch(r"Bearer\s+(\S+)", (authorization or "").strip(), re.I)
+    if not m or not resource:
+        return None
+    grant = mcp_oauth.access_grant(conn, m.group(1), resource)
+    if grant is None:
+        return None
+    return Access(frozenset(grant["scope"].split()), grant["id"], grant["email"] or grant["sub"])
 
 
 def allow_writes(conn) -> bool:

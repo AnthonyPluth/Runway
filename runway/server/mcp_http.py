@@ -15,7 +15,7 @@ from .routes import ROUTES, _match
 
 # The ways to prove a caller may use the MCP server: each takes (conn, Authorization header, this server's resource)
 # and answers what the caller may do (mcp_access.Access), or None.
-CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.key_access,)
+CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.resolve_bearer, mcp_access.key_access)
 
 WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
 READ_ONLY = ("This connection can only read. To let the assistant change churning, reconnect Runway in the assistant and "
