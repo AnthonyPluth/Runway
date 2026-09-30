@@ -34,7 +34,8 @@
   async function setHorizon(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     const days = Number(f.value);
     await api("/api/settings", { method: "POST", body: { horizon_days: days } });
-    await refreshState(); onhorizon?.(days); reload();
+    // Overview loads the new length in place, so the sheet stays open and the page isn't drawn afresh.
+    await refreshState(); onhorizon?.(days);
   }
 </script>
 
