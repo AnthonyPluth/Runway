@@ -196,4 +196,20 @@ describe("TxRow", () => {
       expect(toggle).toHaveAttribute("aria-expanded", "false");
     });
   });
+
+  describe("details (from lg up)", () => {
+    it("opens the details, with the account, its institution and the bank's text, and closes them again", async () => {
+      app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
+      render(TxRow, props(tx()));
+      const toggle = screen.getByRole("button", { name: "Details for Blue Bottle" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("SimpleFIN Bridge")).not.toBeInTheDocument();
+      await userEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByText("SimpleFIN Bridge")).toBeInTheDocument();
+      expect(screen.getByText("BLUE BOTTLE #123", { selector: "dd" })).toBeInTheDocument();
+      await userEvent.click(toggle);
+      expect(screen.queryByText("SimpleFIN Bridge")).not.toBeInTheDocument();
+    });
+  });
 });
