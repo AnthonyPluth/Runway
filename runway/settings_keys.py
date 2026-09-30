@@ -108,6 +108,10 @@ RETAIL_TOKEN_HASH = "retail_token_hash"
 RETAIL_TOKEN_CREATED = "retail_token_created"
 RETAIL_AI = "retail_ai"   # "1"/"0"; on unless switched off
 
+# MCP server (runway/mcp_server.py): its read-only key
+MCP_TOKEN_HASH = "mcp_token_hash"
+MCP_TOKEN_CREATED = "mcp_token_created"
+
 
 def retail_last(retailer: str) -> str:
     return f"retail_last_{retailer}"

@@ -670,6 +670,7 @@ class ChurnWish(Base):
     min_score: Mapped[int | None]
     assume_prior_planned: Mapped[int | None]
     notes: Mapped[str | None]
+    apply_url: Mapped[str | None]
     applied_on: Mapped[str | None]
     applied_id: Mapped[int | None]
     created_at: Mapped[str | None]

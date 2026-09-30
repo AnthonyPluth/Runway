@@ -250,6 +250,15 @@ describe("planned", () => {
     expect(onapplied).toHaveBeenCalledWith("card", 12);
   });
 
+  it("links to where to apply, in a new tab, only when a link was entered", () => {
+    setup([wish({ id: 1, apply_url: "https://creditcards.chase.com/apply" }), wish({ id: 2, product: "Gold" })]);
+    const link = screen.getByRole("link", { name: "Open the application for Sapphire Preferred" });
+    expect(link).toHaveAttribute("href", "https://creditcards.chase.com/apply");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+    expect(screen.queryByRole("link", { name: "Open the application for Gold" })).not.toBeInTheDocument();
+  });
+
   it("collapses applied and dropped items under a toggle", async () => {
     setup([wish(), wish({ id: 2, product: "Old one", status: "dropped" }), wish({ id: 3, product: "Got it", status: "applied", applied_on: "2026-09-01" })]);
     expect(screen.queryByText("Old one")).not.toBeInTheDocument();
@@ -311,6 +320,17 @@ describe("rewards", () => {
 });
 
 describe("the Churning page", () => {
+  it("keeps its data and place when you switch tabs (no reload)", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
+    const { rerender } = render(Churning, { sub: "" });
+    await screen.findByRole("button", { name: "Add a card" });
+    const before = calls("/api/churning").length;
+    await rerender({ sub: "benefits" });
+    expect(await screen.findByText("Worth a year")).toBeInTheDocument();
+    expect(calls("/api/churning").length).toBe(before);   // the same data, not fetched again
+  });
+
+
   it("puts the Cards section last, after Upcoming, Planned, Best card and Rewards", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
     render(Churning);

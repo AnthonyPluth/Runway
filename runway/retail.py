@@ -100,6 +100,19 @@ def _day(v) -> str | None:
         return None
 
 
+# What a Costco receipt adds to an item's name that says nothing about what it is: its price-code and the warehouse's
+# shelf and sale codes ("P=120", "P432", "#00123", "SL60", "DOM120", "T6H7P504", "CU38").
+_COSTCO_CODES = re.compile(r"\bP=?\d{2,4}\b|#\d+|\b(?:SL|DOM|CU)\d+\b|\b[A-Z]\d{1,2}[A-Z]\d[A-Z]?\d*\b")
+
+
+def ai_title(retailer: str, title: str | None) -> str:
+    """An item's name as the AI model reads it: Costco's receipt codes taken off (the rest is left as it is)."""
+    s = title or ""
+    if retailer == "costco":
+        s = " ".join(_COSTCO_CODES.sub(" ", s).split()) or s
+    return s
+
+
 def item_key(title: str | None) -> str:
     return " ".join((title or "").lower().split())[:160]
 
@@ -702,6 +715,9 @@ def item_prompt(retailer_names: str, categories: list[str], subcategories: list[
         "- Never pick a transfer, card payment, income or refund category.",
         "- confidence is 0 to 1: how sure you are that a careful person would pick the same category.",
     ]
+    if "Costco" in retailer_names:
+        lines += ["- Costco receipts abbreviate item names: KS is Kirkland Signature (the store brand), ORG is organic, PK is a pack, "
+                  "and the rest is often cut short (\"GRLCPEPWINGS\" is garlic pepper wings). Work out the product and categorize that."]
     if examples:
         lines += ["", "How this person has categorized items before:"]
         lines += [f"- {e['title']} -> {e['category']}" for e in examples]
@@ -764,7 +780,7 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
     done = 0
     for start in range(0, len(left), AI_BATCH):
         batch = left[start:start + AI_BATCH]
-        payload = [{"i": i, "item": it["title"][:200], "price": round(it["amount"] or 0, 2),
+        payload = [{"i": i, "item": ai_title(it["retailer"], it["title"])[:200], "price": round(it["amount"] or 0, 2),
                     **({"department": it["department"]} if it["department"] else {})} for i, it in enumerate(batch)]
         began, reply = time.time(), None
         try:

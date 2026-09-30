@@ -16,6 +16,8 @@ toward 5/24 or rank as a best card: only opened ones do. Scores are what you typ
 """
 from __future__ import annotations
 
+import re
+import urllib.parse
 from datetime import date
 from typing import Any
 
@@ -221,6 +223,16 @@ def alerts(wishlist: list[dict], today: date) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ changes
 
+def _link(v) -> str | None:
+    """The address to apply at: a web address (https, or http), nothing that a link could run (javascript:, data:)."""
+    s = churning._text(v, "link", 500)
+    if s is None:
+        return None
+    if not re.fullmatch(r"https?://[^\s<>\"']+", s, re.IGNORECASE) or not urllib.parse.urlsplit(s).hostname:
+        raise churning.ChurnError("The link must be a web address starting with https://")
+    return s
+
+
 def save(conn, body: dict, wish_id: int | None = None) -> int:
     """Add a planned card or bank bonus, or change the fields given of one."""
     new = wish_id is None
@@ -250,6 +262,8 @@ def save(conn, body: dict, wish_id: int | None = None) -> int:
     for key, label, limit in (("family", "family", 60), ("requirements", "requirements", 300), ("notes", "notes", 2000)):
         if key in body:
             f[key] = churning._text(body.get(key), label, limit)
+    if "apply_url" in body:
+        f["apply_url"] = _link(body.get("apply_url"))
     for key in ("business", "once_per_lifetime", "assume_prior_planned"):
         if key in body or new:
             f[key] = churning._flag(body.get(key))

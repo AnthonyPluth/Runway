@@ -7,6 +7,7 @@
   import { fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import { toast } from "svelte-sonner";
@@ -99,6 +100,7 @@
         {#if open}
           <Button variant="ghost" size="icon" class="size-8" disabled={n === 0} aria-label={`Move ${wishName(w)} up`} onclick={() => move(w, -1)}><ArrowUp class="size-4" /></Button>
           <Button variant="ghost" size="icon" class="size-8" disabled={n === count - 1} aria-label={`Move ${wishName(w)} down`} onclick={() => move(w, 1)}><ArrowDown class="size-4" /></Button>
+          {#if w.apply_url}<Button size="sm" variant="outline" href={w.apply_url} target="_blank" rel="noopener noreferrer" aria-label={`Open the application for ${wishName(w)}`}>Apply<ExternalLink class="size-3.5" aria-hidden="true" /></Button>{/if}
           <Button size="sm" variant={w.ready ? "default" : "outline"} aria-label={`I applied for ${wishName(w)}`} onclick={() => applied(w)}>I applied</Button>
           <Button size="sm" variant="link" class="px-1" aria-label={`Edit ${wishName(w)}`} onclick={() => (form = w)}>Edit</Button>
           <Button size="sm" variant="link" class="px-1" aria-label={`Drop ${wishName(w)}`} onclick={() => setStatus(w, "dropped")}>Drop</Button>

@@ -9,6 +9,8 @@
   <label>Key <span class="muted">(Runway → Settings → Connections → Amazon, Target and Costco)</span>
     <input type="password" id="token" placeholder="rwx_…" autocomplete="off" spellcheck="false"></label>
   <label class="inline"><input type="checkbox" id="auto"> Import once a day while this browser is open</label>
+  <label>Read Carta <span class="muted">(in that daily import; Carta signs you out often, so less often means fewer sign-ins. The Carta button always reads it now.)</span>
+    <select id="carta"><option value="1">Every daily import</option><option value="7">About once a week</option><option value="30">About once a month</option></select></label>
   <div class="row"><button class="primary" id="save">Save and test</button></div>
   <p id="result" class="muted"></p>
 </main><script src="options.js"></script></body></html>

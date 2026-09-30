@@ -52,7 +52,8 @@
           <Card.Content><Button variant="outline" onclick={() => location.reload()}>Try again</Button></Card.Content>
         </Card.Root>
       {:else if app.state && loaded[current]}
-        {#key `${route.page}/${route.sub}/${app.version}`}
+        <!-- Churning's tabs (cards, benefits, bank bonuses) are one page's views of the same data, so they aren't redrawn. -->
+        {#key `${route.page}/${route.page === "churning" ? "" : route.sub}/${app.version}`}
           {@const Page = loaded[current]}
           <Page page={route.page} sub={route.sub} />
         {/key}
