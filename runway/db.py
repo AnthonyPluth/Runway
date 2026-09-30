@@ -475,9 +475,15 @@ def _upgrade_legacy(sa_conn) -> None:
         sa_conn.exec_driver_sql(schema.POSTGRES_INSTR)
 
 
+MIGRATE_LOCK = 0x52554E574159   # "RUNWAY": Postgres advisory lock key, held while one process migrates
+
+
 def migrate(path: str | None = None) -> None:
-    """Bring the database's schema up to date."""
+    """Bring the database's schema up to date. On Postgres, processes starting together (several copies of Runway, or the
+    tests running in parallel) take turns: the others wait for the first to finish, then find nothing left to do."""
     with engine(path).begin() as sa_conn:
+        if sa_conn.dialect.name == "postgresql":
+            sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({MIGRATE_LOCK})")   # released when this transaction ends
         tables = set(inspect(sa_conn).get_table_names())
         cfg = alembic_config(sa_conn)
         if tables and "alembic_version" not in tables:
