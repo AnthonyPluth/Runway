@@ -53,7 +53,7 @@ describe("the AI's suggestions for an order's items", () => {
 
   it("offers each suggestion and creates a proposed new category when you use it", async () => {
     let items = [item(1, "BANANAS", null), item(2, "KS PAPER TOWEL", null), item(3, "MILK", "Groceries")];
-    vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string; body?: Record<string, unknown> }) => {
+    vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/retail/orders/x/suggest") return [{ item_id: 1, category: "Groceries", new_category: null }, { item_id: 2, category: null, new_category: { name: "Paper Goods", parent: "Groceries" } }];
       if (path.startsWith("/api/retail/items/")) { items = items.map((x) => (x.id === 2 ? { ...x, category: "Paper Goods" } : x)); return { category: "Paper Goods", created: true, orders: 1 }; }
       if (path.startsWith("/api/retail/orders/")) return order(items);
