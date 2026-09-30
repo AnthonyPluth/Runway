@@ -1,8 +1,8 @@
-"""Which institution an account belongs to, for showing its logo (runway/static/banks/<slug>.svg), and which big
-merchant a transaction is from (its website, for its logo from Logo.dev: runway/merchants.py).
+"""Which institution an account belongs to, for showing its logo (from Logo.dev, by the institution's name), which
+institution a name is (PATTERNS, for telling whether two accounts are the same one), and which big merchant a transaction
+is from (its website, for its logo from Logo.dev: runway/merchants.py).
 
-Matched from the institution's name (SimpleFIN's org, or the Plaid connection's institution) and, failing that, the
-account's own name ("Venture X" is Capital One). Accounts without a match get a letter badge instead.
+Accounts whose logo Runway doesn't have (no Logo.dev key, or not fetched yet) get a letter badge instead.
 """
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ from sqlalchemy import select
 
 from .models import Account, PlaidAccount, PlaidItem
 
-# (pattern, logo): checked in order against the lowercased institution and account names.
+# (pattern, institution): checked in order against the lowercased institution and account names. Not for logos: which
+# institution a name is (plaidbank uses it to tell whether two accounts are the same one).
 PATTERNS = [
     (r"\bchase\b|sapphire|\bcs[pr]\b|freedom (flex|unlimited)|\bjpmorgan", "chase"),
     (r"capital ?one|venture ?x?\b|quicksilver|savor", "capital-one"),
@@ -41,7 +42,7 @@ _compiled = [(re.compile(p), slug) for p, slug in PATTERNS]
 
 
 def brand(*names: str | None) -> str | None:
-    """The logo for the first name that matches (institution names first, then the account's own)."""
+    """The institution for the first name that matches (institution names first, then the account's own)."""
     for name in names:
         text = (name or "").lower()
         if not text:
@@ -53,17 +54,34 @@ def brand(*names: str | None) -> str | None:
 
 
 def account_brands(conn) -> dict[str, dict]:
-    """{account_id: {"logo": slug or None, "initial": "C", "institution": "Chase"}} for every account."""
-    out = {}
+    """{account_id: {"src": image address or None, "initial": "C", "institution": "Chase"}} for every account.
+
+    The logo is Logo.dev's, by the institution's name (Settings → Connections → Logo.dev), fetched by a sync and served by
+    Runway like a merchant's: nothing is bundled, so a new bank needs nothing added to the app. `src` is None (a letter
+    badge) without a Logo.dev key, or until the logo has been fetched. The institution's name is the connection's (Plaid)
+    or the bank's own (SimpleFIN's org); the connected institutions' names are noted too, for Settings → Connections."""
+    from . import merchants   # imports this module too
+    out: dict[str, dict] = {}
+    names: dict[str, str] = {}   # institution key -> name
     rows = conn.execute(
         select(Account.id, Account.name, Account.display_name, Account.org, PlaidItem.institution_name)
         .outerjoin(PlaidAccount, PlaidAccount.plaid_account_id == Account.plaid_account_id)
         .outerjoin(PlaidItem, PlaidItem.item_id == PlaidAccount.item_id)).fetchall()
     for r in rows:
         inst = r["institution_name"] or r["org"]
-        logo = brand(r["institution_name"], r["org"], r["display_name"], r["name"])
         label = inst or r["display_name"] or r["name"] or "?"
-        out[r["id"]] = {"logo": logo, "institution": inst, "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
+        out[r["id"]] = {"src": None, "institution": inst, "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
+        if inst and len(re.findall(r"[A-Za-z]", inst)) >= 3:
+            names[merchants.key(inst)] = inst
+    for r in conn.execute(select(PlaidItem.institution_name).where(PlaidItem.institution_name.is_not(None))):
+        if len(re.findall(r"[A-Za-z]", r["institution_name"])) >= 3:
+            names[merchants.key(r["institution_name"])] = r["institution_name"]
+    if names and merchants.configured(conn):
+        have = merchants.brand_logos(conn, list(names.items()))   # notes the ones never asked about, for the next fetch
+        for r in rows:
+            k = merchants.key(r["institution_name"] or r["org"])
+            if k in have:
+                out[r["id"]]["src"] = merchants.logo_path(k)
     return out
 
 
