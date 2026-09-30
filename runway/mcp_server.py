@@ -4,7 +4,7 @@ switch it on in Runway, make a short list of churning changes.
     RUNWAY_URL=https://runway.example.com RUNWAY_MCP_KEY=rwm_... python -m runway.mcp_server
 
 It speaks MCP over stdio (one JSON message per line) and talks to a running Runway over HTTP with the key made under
-Settings → Connections. It never opens the database itself. The key only opens the pages in mcp_access.READABLE: no
+Settings → Advanced. It never opens the database itself. The key only opens the pages in mcp_access.READABLE: no
 settings, bank connections or backups. While "Let assistants change churning" is on in Settings (it's off until you turn
 it on) the server also offers the tools below that add and change churning data (mcp_access.WRITABLE: nothing else, and
 never a delete). Runway checks that switch on every change, so turning it off takes effect at once. Standard library only.
@@ -38,7 +38,7 @@ def http_fetch(path: str, params: dict[str, Any], body: dict | None = None) -> A
     base = (os.environ.get("RUNWAY_URL") or "http://127.0.0.1:8765").rstrip("/")
     key = os.environ.get("RUNWAY_MCP_KEY") or ""
     if not key:
-        raise ToolError("RUNWAY_MCP_KEY isn't set. Make a key under Settings → Connections in Runway and set it in the "
+        raise ToolError("RUNWAY_MCP_KEY isn't set. Make a key under Settings → Advanced in Runway and set it in the "
                         "server's environment.")
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, "")})
     headers = {"Authorization": f"Bearer {key}", "Accept": "application/json", **({"Content-Type": "application/json"} if body is not None else {})}
@@ -301,7 +301,7 @@ def call_tool(name: str, args: dict, fetch: Fetch) -> str:
     if not tool:
         raise ToolError(f"Unknown tool {name}.")
     if tool.get("write") and not writes_allowed(fetch):
-        raise ToolError("Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Connections.")
+        raise ToolError("Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced.")
     text = json.dumps(tool["run"](fetch, args or {}), ensure_ascii=False, separators=(",", ":"))
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT] + f'… (cut at {MAX_TEXT:,} characters: narrow it with a month, account or category)'
