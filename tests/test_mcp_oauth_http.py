@@ -332,7 +332,8 @@ class ConsentTests(OAuthServer):
         page = self.authorize(c)
         token = self.consent_token(page)
         for kwargs in ({"token": ""}, {"cookies": {}}, {"cookies": {"runway_consent": "other"}}, {"token": "other"},
-                       {"headers": {"Sec-Fetch-Site": "cross-site"}}, {"headers": {"Origin": "https://evil.example"}}):
+                       {"headers": {"Sec-Fetch-Site": "cross-site"}}, {"headers": {"Origin": "https://evil.example"}},
+                       {"headers": {"Origin": "null"}}, {"headers": {"Origin": "null", "Sec-Fetch-Site": "cross-site"}}):
             with self.subTest(kwargs=kwargs):
                 r = self.answer(page, **kwargs)
                 self.assertEqual(r.status, 403)
@@ -341,6 +342,14 @@ class ConsentTests(OAuthServer):
         self.assertEqual(r.status, 302)
         again = self.answer(page, token=token)
         self.assertEqual((again.status, again.location), (403, None))
+
+    def test_a_browsers_own_form_post_is_accepted(self):
+        """Under Referrer-Policy: no-referrer a browser sends a page's form post with Origin "null"; it's Runway's own
+        page when the browser also says same-origin."""
+        c = self.client()
+        r = self.answer(self.authorize(c), headers={"Origin": "null", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(r.status, 302)
+        self.assertTrue(r.query()["code"].startswith("rwo_"))
 
     def test_the_switch_is_read_again_when_you_answer(self):
         c = self.client()
