@@ -7,8 +7,10 @@ name: Docker image
 #
 # Versions: each push bumps the patch number (v1.0.0 -> v1.0.1). Put "#minor" in a commit message (or start it with
 # "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
-# Pull requests (including Dependabot's) only run the tests. Only main is ever released: a manual run from another
-# branch just runs the tests, and re-running an old build never moves :latest back to it.
+# Pull requests (including Dependabot's) only run the tests, and only the ones the change can affect: a pull request
+# that touches only the web app skips the Python tests, one that touches only the backend skips the web app's checks
+# (see `changes`). Only main is ever released: a manual run from another branch just runs the tests, and re-running an
+# old build never moves :latest back to it.
 on:
   push:
     branches: [main]
@@ -32,14 +34,59 @@ defaults:
     shell: bash
 
 jobs:
+  # What a pull request changes, so the jobs it can't affect are skipped (a skipped job counts as passed, for the merge
+  # gate too). Anything not listed as the web app's alone, or the backend's alone (the workflows, the Dockerfile, ...),
+  # runs everything, and so does every push to main and every manual run.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read      # the pull request's list of changed files
+    outputs:
+      backend: ${{ steps.what.outputs.backend }}
+      web: ${{ steps.what.outputs.web }}
+    steps:
+      - name: Which parts the change touches
+        id: what
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            { echo "backend=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # A rename counts for both its old and its new path.
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          # The files API lists at most 3,000; a pull request that big runs everything.
+          if [ "$(grep -c . <<< "$files" || true)" -ge 3000 ]; then files="(too many to list)"; fi
+          # Only the web app, the extension or docs: the Python tests can't be affected.
+          web_only='^(frontend/|extension/|docs/|[^/]+\.md$)'
+          # Only the backend, its tests or docs: the web app's checks can't be affected (ESLint also reads runway/static/).
+          backend_only='^(runway/|tests/|docs/|[^/]+\.md$|pyproject\.toml$|poetry\.lock$)'
+          backend=false web=false
+          if grep -vqE "$web_only" <<< "$files"; then backend=true; fi
+          if grep -vqE "$backend_only" <<< "$files" || grep -qE '^runway/static/' <<< "$files"; then web=true; fi
+          { echo "backend=$backend"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
+          echo "Python tests: $backend; web app checks: $web"
+
+  # The Python tests, on SQLite (with coverage, lint and type-check) and on Postgres. The Postgres tests are split in
+  # three, each with its own Postgres (tests/shard.py): on one runner they mostly wait on each other.
   test:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     env:
       POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
+      fail-fast: false         # one shard failing still shows what the others found
       matrix:
-        python: ["3.14"]       # the only Python Runway supports: what the image runs (see the Dockerfile)
-        database: [sqlite, postgres]
+        # 3.14 is the only Python Runway supports: what the image runs (see the Dockerfile).
+        include:
+          - {python: "3.14", database: sqlite}
+          - {python: "3.14", database: postgres, shard: 1/3}
+          - {python: "3.14", database: postgres, shard: 2/3}
+          - {python: "3.14", database: postgres, shard: 3/3}
     services:
       postgres:                # used by the postgres run; the sqlite run ignores it
         image: postgres:16
@@ -57,7 +104,13 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh.
+      # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh. The
+      # runner's pipx installs into /opt/pipx, outside the cached paths (so the cache was never saved), so point it here.
+      - name: Keep pipx's tools in the home directory
+        run: |
+          echo "PIPX_HOME=$HOME/.local/pipx" >> "$GITHUB_ENV"
+          echo "PIPX_BIN_DIR=$HOME/.local/bin" >> "$GITHUB_ENV"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Cache Poetry
         id: poetry-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
@@ -76,13 +129,15 @@ jobs:
           key: venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ matrix.database }}-${{ hashFiles('poetry.lock') }}
       - name: Install dependencies
         run: poetry install --no-root --no-interaction
-      - name: Run tests (postgres)
+      - name: Run tests (postgres, one shard)
         if: matrix.database == 'postgres'
         env:
           DATABASE_URL: postgresql://runway:runway@localhost:5432/runway
+          SHARD: ${{ matrix.shard }}
         run: |
           poetry run pip install --quiet "unittest-parallel==1.8.6"
-          poetry run unittest-parallel -t . -s tests -j 4
+          # shellcheck disable=SC2046   # one -k argument per module
+          poetry run unittest-parallel -t . -s tests -j 4 $(python tests/shard.py "$SHARD")
       # The SQLite run also measures how much of Runway the tests run: the table goes in the run's summary, and the
       # report goes to Codecov (the README's backend badge).
       - name: Run tests (sqlite) and measure coverage
@@ -118,6 +173,8 @@ jobs:
   # The web app (frontend/): type-check and lint it (the lint covers the extension too), run its unit tests with
   # coverage, and build it (reporting its bundle sizes to Codecov).
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

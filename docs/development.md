@@ -23,6 +23,8 @@ DATABASE_URL=postgresql://runway:runway@127.0.0.1:5432/runway poetry run unittes
 docker stop runway-test-pg
 ```
 
+To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
+
 `make check` runs everything CI does before you push: ruff, mypy, the Python tests, and the web app's type-check, ESLint, tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## The web app

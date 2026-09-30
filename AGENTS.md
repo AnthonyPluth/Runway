@@ -46,6 +46,7 @@ Review findings on agents' pull requests here fall into the same few kinds. Chec
 
 - Work on the branch you were given; don't push to `main`.
 - Keep commits focused, with a clear message.
+- Before pushing to a PR, run `make check` and the `pre-review` skill (`.claude/skills/pre-review/`), which reviews the branch the way the "Claude review" check will. Each finding that check leaves costs another push and a full CI round, so fix them here first.
 - Open a PR only when asked, and summarize what changed and why.
 - A PR's title decides the next version when it's merged: `feat: …` releases a minor version, `fix: …` or anything else a patch, and `feat!: …` (or a `BREAKING CHANGE:` line) a major one, for a change that breaks an existing setup.
 - A PR is ready when its "Merge gate" check passes: every check green and no unresolved **P1** review finding (`.github/scripts/merge-gate.sh`). Dependabot's updates merge themselves through it. Labelling an issue `claude` has an agent open a PR for it (`.github/workflows/claude-issue.yml`).
