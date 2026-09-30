@@ -4,6 +4,7 @@
   import SubTabs from "$lib/components/SubTabs.svelte";
   import BankForm from "$lib/components/churning/BankForm.svelte";
   import BankList from "$lib/components/churning/BankList.svelte";
+  import Benefits from "$lib/components/churning/Benefits.svelte";
   import BestCard from "$lib/components/churning/BestCard.svelte";
   import CardForm from "$lib/components/churning/CardForm.svelte";
   import CardList from "$lib/components/churning/CardList.svelte";
@@ -19,9 +20,9 @@
   import { cn } from "$lib/utils";
 
   // Churning: credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. #churning
-  // shows the cards, #churning/bank the bank account bonuses; the tiles and Upcoming cover both.
+  // shows the cards, #churning/bank the bank account bonuses, #churning/benefits the card benefits; the tiles and Upcoming cover both.
   let { sub = "" }: { sub?: string } = $props();
-  const tab = $derived(sub === "bank" ? "bank" : "cards");
+  const tab = $derived(sub === "bank" ? "bank" : sub === "benefits" ? "benefits" : "cards");
 
   let d = $state.raw<Churning | null>(null);
   let error = $state<string | null>(null);
@@ -127,8 +128,8 @@
 
   <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
-      tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
-    <label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>
+      tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
+    {#if tab !== "benefits"}<label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>{/if}
   </div>
 
   {#if tab === "cards"}
@@ -152,6 +153,8 @@
         </details>
       </Card.Content>
     </Card.Root>
+  {:else if tab === "benefits"}
+    <Benefits {cards} showOwner={people.length > 1} onchanged={load} />
   {:else}
     <Card.Root class="mb-6">
       <Card.Header>
