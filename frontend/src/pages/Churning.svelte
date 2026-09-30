@@ -44,6 +44,14 @@
   const visibleCards = $derived(showClosed ? cards : cards.filter((c) => c.status === "open"));
   const visibleBank = $derived(showClosed ? bank : bank.filter((b) => b.state !== "closed"));
 
+  // A brand-new page: no cards, bank bonuses or plans yet. Upcoming, Planned, Best card and Rewards give way to one block.
+  const noData = $derived(!!d && !d.cards.length && !d.bank.length && !d.wishlist.length && !d.tasks.length);
+  // Best card ranks open cards, and Rewards shows what linked cards earned or a balance you entered: with neither they'd be empty.
+  const hasOpenCards = $derived(cards.some((c) => c.status === "open"));
+  const hasRewards = $derived(people.some((p) => d?.rewards[p]?.currencies.some((r) => r.earned + r.bonuses > 0 || r.balance != null)));
+  const startCard = () => { bankFormId = null; formId = "new"; location.hash = "#churning"; };
+  const startBank = () => { formId = null; bankFormId = "new"; location.hash = "#churning/bank"; };
+
   // Over 5/24 is a warning; someone with no cards on file isn't.
   const five24Tone = (p: string) => (d?.five24[p] && !d.five24[p].under ? ("warn" as const) : undefined);
   const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0 });
@@ -100,11 +108,22 @@
     { label: `Bank bonuses in ${year}`, value: fmt0(bankThisYear), sub: "Received so far; usually reported as taxable interest" },
   ]} />
 
-  <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
-
-  <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
-  <BestCard {person} {version} showOwner={people.length > 1} />
-  <Rewards {d} {people} onchanged={load} />
+  {#if noData}
+    <Card.Root class="mb-6" data-testid="getting-started">
+      <Card.Content class="flex flex-col gap-3">
+        <p class="text-sm text-muted-foreground">Track the credit cards and bank accounts you open for sign-up bonuses: your 5/24 count, annual fees, bonus spending and when you can apply again, for you and your partner.</p>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" onclick={startCard}>Add a card you’ve opened</Button>
+          <Button size="sm" variant="outline" onclick={startBank}>Add a bank bonus</Button>
+        </div>
+      </Card.Content>
+    </Card.Root>
+  {:else}
+    <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
+    <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
+    {#if hasOpenCards}<BestCard {person} {version} showOwner={people.length > 1} />{/if}
+    {#if hasRewards}<Rewards {d} {people} onchanged={load} />{/if}
+  {/if}
 
   <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
