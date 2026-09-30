@@ -10,7 +10,7 @@
   import type { Asset, NetWorth, NwGroup } from "$lib/components/networth/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { fmt, fmt0, fmtDate, nb, shortMoney } from "$lib/format";
+  import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
 
@@ -116,7 +116,7 @@
     <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
     <Card.Content>
       <div class="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted" role="img"
-        aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${((g.total / d!.assets) * 100).toFixed(0)}%`).join(", ")}`}>
+        aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${pct(g.total / d!.assets)}`).join(", ")}`}>
         {#each assetGroups as g, i (g.key)}
           <span class="block h-full min-w-0.5" style:width={`${((g.total / d.assets) * 100).toFixed(2)}%`} style:background={`var(--nw-${(i % 6) + 1})`}
             title={`${g.label} ${fmt0(g.total)}`}></span>
@@ -124,7 +124,7 @@
       </div>
       <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
         {#each assetGroups as g, i (g.key)}
-          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {((g.total / d.assets) * 100).toFixed(0)}%</span>
+          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {pct(g.total / d.assets)}</span>
         {/each}
       </div>
       <div class="mt-4 grid gap-6 lg:grid-cols-2">

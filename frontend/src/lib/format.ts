@@ -39,6 +39,14 @@ export function relDay(s: string, today: string): string {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** A share (0–1) as a whole percentage that never rounds a real amount to "0%" or "100%": 0.003 → "<1%", 0.997 → ">99%". */
+export function pct(share: number): string {
+  if (share === 0) return "0%";
+  if (share < 0.005) return "<1%";
+  if (share >= 0.995 && share < 1) return ">99%";
+  return `${Math.round(share * 100)}%`;
+}
+
 /** "2026-09" → "September 2026". */
 export function monthLabel(m: string): string {
   const [y, mo] = m.split("-").map(Number);
