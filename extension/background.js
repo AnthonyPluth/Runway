@@ -48,9 +48,12 @@ async function inParallel(items, width, fn) {
 }
 const store = chrome.storage.local;
 
+// How often the daily import reads Carta, in days (Options): 1 = every daily import, 7 = weekly, 30 = monthly. Carta signs you
+// out often, so reading it less often means fewer times you need to sign in again.
+const cartaDays = (v) => ([1, 7, 30].includes(Number(v)) ? Number(v) : 1);
 async function settings() {
-  const s = await store.get(["runwayUrl", "token", "auto"]);
-  return { runwayUrl: (s.runwayUrl || "").replace(/\/+$/, ""), token: s.token || "", auto: !!s.auto };
+  const s = await store.get(["runwayUrl", "token", "auto", "cartaEvery"]);
+  return { runwayUrl: (s.runwayUrl || "").replace(/\/+$/, ""), token: s.token || "", auto: !!s.auto, cartaEvery: cartaDays(s.cartaEvery) };
 }
 
 // One write at a time, in order, so a late progress message can't land after "done" and leave the popup "running".
@@ -846,7 +849,10 @@ async function run(which) {
     try {
       const joined = (r) => !!results[r]?.ok;
       // "Import all": Amazon and Target, and Costco once it has worked; the daily import adds Carta too.
-      const everyday = which === "daily" ? [...EVERYDAY, ...JOINS_ONCE_WORKED.filter(joined)]
+      const { cartaEvery } = await settings();
+      // A little under the whole period, so the alarm's timing can't push a weekly read to the eighth day.
+      const cartaDue = () => !results.carta?.at || Date.now() - Date.parse(results.carta.at) >= (cartaEvery * 24 - 2) * 3600e3;
+      const everyday = which === "daily" ? [...EVERYDAY, ...JOINS_ONCE_WORKED.filter((r) => joined(r) && (r !== "carta" || cartaDue()))]
         : [...EVERYDAY, ...(joined("costco") ? ["costco"] : [])];
       for (const retailer of which === "all" || which === "daily" ? everyday : [which]) {
         const progress = (message) => { if (live) setStatus({ running: true, retailer, message }); };

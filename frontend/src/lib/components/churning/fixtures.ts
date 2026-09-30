@@ -23,7 +23,7 @@ export const wish = (over: Partial<Wish> = {}): Wish => ({
   id: 1, owner: "Alex", kind: "card", issuer: "chase", bank: null, product: "Sapphire Preferred", family: null, business: 0, annual_fee: 95,
   bonus: 75000, currency: "ur", bonus_spend: 5000, bonus_months: 3, account_type: null, requirements: null, repeat_months: null,
   once_per_lifetime: 0, offer_expires_on: null, priority: 1, status: "wanted", wait_until: null, min_score: null, assume_prior_planned: 0,
-  notes: null, applied_on: null, applied_id: null, blockers: [], hints: [], earliest_apply: null, ready: false, ...over,
+  notes: null, apply_url: null, applied_on: null, applied_id: null, blockers: [], hints: [], earliest_apply: null, ready: false, ...over,
 });
 
 export const churning = (over: Partial<Churning> = {}): Churning => ({
