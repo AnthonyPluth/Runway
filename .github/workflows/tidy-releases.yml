@@ -8,7 +8,9 @@ name: Tidy releases
 # v2.0.4 below v2.3.21 (docker.yml now steps from the highest version ever tagged, so that can't happen again).
 #
 # It never deletes the newest version, nor an image still tagged latest or with a floating tag it wasn't asked to move.
-# It waits for a release in progress (it shares docker.yml's group on main).
+# It waits for a release in progress (it shares docker.yml's group on main). A group holds only one waiting run, and a
+# newer one cancels it: before running this, check Actions that no Docker image run is queued on main (this would
+# cancel it, and its commits would wait for the next push), and don't push to main while this waits (that cancels it).
 on:
   workflow_dispatch:
     inputs:
@@ -24,6 +26,10 @@ on:
         required: true
 
 permissions: {}
+
+defaults:
+  run:
+    shell: bash                # -eo pipefail: a failed gh call fails the step instead of passing an empty result on
 
 concurrency:
   group: docker-image-refs/heads/main
@@ -47,6 +53,7 @@ jobs:
         run: |
           [ "$CONFIRM" = delete ] || { echo "::error::Type delete in the confirm box."; exit 1; }
           highest=$(gh api --paginate "repos/$GH_REPO/tags" --jq '.[].name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          [ -n "$highest" ] || { echo "::error::Couldn't find the newest version."; exit 1; }
           for v in $VERSIONS; do
             [[ "$v" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$v isn't a version like v1.2.3."; exit 1; }
             [ "v${v#v}" != "$highest" ] || { echo "::error::$v is the newest version, which is never deleted."; exit 1; }
@@ -76,9 +83,11 @@ jobs:
           for v in $VERSIONS; do
             v="v${v#v}"
             if gh release view "$v" >/dev/null 2>&1; then
-              gh release delete "$v" --cleanup-tag --yes && echo "Deleted the release and tag $v"
+              gh release delete "$v" --cleanup-tag --yes
+              echo "Deleted the release and tag $v"
             elif gh api "repos/$GH_REPO/git/ref/tags/$v" >/dev/null 2>&1; then
-              gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$v" && echo "Deleted the tag $v (it had no release)"
+              gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$v"
+              echo "Deleted the tag $v (it had no release)"
             else
               echo "Nothing named $v"
             fi
@@ -100,5 +109,6 @@ jobs:
               echo "::warning::Kept the image for $v: it's also tagged $(tr '\n' ' ' <<< "$others")(move those first)."
               continue
             fi
-            gh api -X DELETE "users/$OWNER/packages/container/runway/versions/$id" && echo "Deleted the image for $v"
+            gh api -X DELETE "users/$OWNER/packages/container/runway/versions/$id"
+            echo "Deleted the image for $v"
           done
