@@ -43,8 +43,8 @@
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}
         <Logo src={e.logo} />
-      {:else if bank?.logo}
-        <img class="size-8 shrink-0 rounded-lg object-contain" src={`/banks/${bank.logo}.svg`} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
+      {:else if bank?.src}
+        <img class="size-8 shrink-0 rounded-lg object-contain" src={bank.src} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
       {:else}
         <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
       {/if}

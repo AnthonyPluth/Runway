@@ -90,6 +90,11 @@ def key(name: str | None) -> str:
     return " ".join((name or "").lower().split())
 
 
+def logo_path(k: str) -> str:
+    """Where Runway serves the Logo.dev logo it fetched for a name (key(name))."""
+    return f"/api/merchants/{urllib.parse.quote(BRAND + k, safe='')}/logo"
+
+
 def note(conn, t: dict) -> str | None:
     """Remember the merchant of a Plaid transaction. Returns its id (for transactions.merchant_id), or None."""
     cp: dict[str, Any] = next((c for c in t.get("counterparties") or [] if (c.get("type") or "merchant") == "merchant"), {}) or {}

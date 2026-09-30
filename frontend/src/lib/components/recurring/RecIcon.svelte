@@ -7,8 +7,8 @@
   const box = "flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-muted-foreground";
 </script>
 
-{#if b?.logo}
-  <img class="size-7 shrink-0 rounded-md" src={`/banks/${b.logo}.svg`} alt="" title={b.institution ?? ""} width="28" height="28" loading="lazy" />
+{#if b?.src}
+  <img class="size-7 shrink-0 rounded-md" src={b.src} alt="" title={b.institution ?? ""} width="28" height="28" loading="lazy" />
 {:else if b}
   <span class={box} title={b.institution ?? ""} aria-hidden="true">{b.initial}</span>
 {:else}
