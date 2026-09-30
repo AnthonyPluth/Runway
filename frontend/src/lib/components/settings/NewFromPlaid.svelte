@@ -6,7 +6,7 @@
   import type { PlaidBankAccount } from "./plaidAccounts";
   import type { SettingsAccount } from "./types";
 
-  // Plaid accounts nobody has decided about yet, at the top of Accounts: each is added as its own account, matched to
+  // Plaid bank, card and investment accounts nobody has decided about yet, at the top of Accounts: each is added as its own account, matched to
   // one you already have, or left out. Once chosen it moves into its type group below. Ones you left out stay reachable.
   let { waiting, left, mine }: { waiting: PlaidBankAccount[]; left: PlaidBankAccount[]; mine: SettingsAccount[] } = $props();
 </script>
@@ -18,7 +18,7 @@
       <span class="truncate font-medium">{p.name || p.official_name || "Account"}{#if p.mask}{" "}<span class="font-normal text-muted-foreground">••{p.mask}</span>{/if}</span>
       <span class="text-xs text-muted-foreground">{nb(`${it.institution_name || "Plaid"} · ${p.subtype || p.type || "account"} · ${fmt(p.balance)}`)}</span>
     </span>
-    <PlaidChoice {p} {mine} class="sm:ml-auto" />
+    <PlaidChoice {p} {it} {mine} class="sm:ml-auto" />
   </div>
 {/snippet}
 

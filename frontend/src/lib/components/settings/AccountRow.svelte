@@ -28,7 +28,7 @@
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import BankIcon from "./BankIcon.svelte";
-  import { linkable, plaidFor, plaidLabel } from "./plaidAccounts";
+  import { linkable, linkableInvestments, plaidFor, plaidLabel } from "./plaidAccounts";
   import { connectPlaid, matchPlaidAccount } from "./plaid.svelte";
   import PlaidChoice from "./PlaidChoice.svelte";
   import type { PlaidStatus, SettingsAccount } from "./types";
@@ -65,10 +65,14 @@
   const behind = $derived(plaidFor(plaid, a.id));
   const options = $derived(linkable(plaid));
   const linkKind = $derived(["checking", "savings", "credit", "loan"].includes(a.kind));
+  // An investment account has no plaid_link: a Plaid account is tied to it by that account's own choice (among its connection's candidates).
+  const invKind = $derived(a.kind === "investment");
+  const invOptions = $derived(linkableInvestments(plaid, a.id));
+  const invLinked = $derived(invKind && !own ? behind : undefined);
   // Shown once Plaid is set up, or this account already uses it.
-  const showSource = $derived(!!link || own || (linkKind && !!plaid && (plaid.configured || plaid.items.length > 0)));
-  const mask = $derived(link?.mask ? ` ••${link.mask}` : "");
-  const source = $derived(own ? `Plaid${mask}` : link ? `SimpleFIN + Plaid${mask}` : "SimpleFIN");
+  const showSource = $derived(!!link || own || !!invLinked || ((linkKind || invKind) && !!plaid && (plaid.configured || plaid.items.length > 0)));
+  const mask = $derived(link?.mask ? ` ••${link.mask}` : behind?.p.mask && (own || invLinked) ? ` ••${behind.p.mask}` : "");
+  const source = $derived(own ? `Plaid${mask}` : link || invLinked ? `SimpleFIN + Plaid${mask}` : "SimpleFIN");
   const plaidSynced = $derived.by(() => {
     const t = behind?.it.last_sync;
     if (!t) return "";
@@ -133,8 +137,8 @@
     const v = el.value;
     if (!v) return;
     linking = v;
-    if (v === "__connect") await connectPlaid("bank");
-    else await matchPlaidAccount(v, a.id);
+    if (v === "__connect") await connectPlaid(invKind ? "investments" : "bank");
+    else await matchPlaidAccount(v, a.id, !invKind);
     linking = ""; el.value = "";
   }
 </script>
@@ -186,11 +190,22 @@
           {/if}
           {#if own && behind}
             <label class={fieldCls}>Which of your accounts this is
-              <PlaidChoice p={behind.p} {mine} />
+              <PlaidChoice p={behind.p} it={behind.it} {mine} />
             </label>
+          {:else if invLinked}
+            <span class="flex items-center gap-2 text-sm">Linked to {plaidLabel(invLinked)}
+              <Button variant="outline" size="sm" onclick={() => matchPlaidAccount(invLinked.p.id, "", false)}>Unlink</Button></span>
           {:else if link && a.plaid_account_id}
             <span class="flex items-center gap-2 text-sm">Linked to {where}
               <Button variant="outline" size="sm" onclick={() => matchPlaidAccount(a.plaid_account_id!, "")}>Unlink</Button></span>
+          {:else if invKind}
+            <label class={fieldCls}>Link to a Plaid account
+              <select class={`${selectCls} w-full sm:w-72`} disabled={!!linking} onchange={linkTo}>
+                <option value="">Choose…</option>
+                {#each invOptions as o (o.p.id)}<option value={o.p.id}>{plaidLabel(o)} · {fmt(o.p.balance)}</option>{/each}
+                {#if plaid?.configured}<option value="__connect">Connect an investment account through Plaid…</option>{/if}
+              </select>
+            </label>
           {:else if !link && linkKind}
             <label class={fieldCls}>Link to a Plaid account
               <select class={`${selectCls} w-full sm:w-72`} disabled={!!linking} onchange={linkTo}>
