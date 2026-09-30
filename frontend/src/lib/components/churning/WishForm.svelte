@@ -26,7 +26,7 @@
       currency: s?.currency ?? "cash", bonus_spend: str(s?.bonus_spend), bonus_months: str(s?.bonus_months),
       account_type: s?.account_type ?? "checking", requirements: str(s?.requirements), repeat_months: str(s?.repeat_months),
       once_per_lifetime: !!s?.once_per_lifetime, offer_expires_on: str(s?.offer_expires_on), wait_until: str(s?.wait_until),
-      min_score: str(s?.min_score), assume_prior_planned: !!s?.assume_prior_planned, notes: str(s?.notes),
+      min_score: str(s?.min_score), assume_prior_planned: !!s?.assume_prior_planned, notes: str(s?.notes), apply_url: str(s?.apply_url),
       status: s?.status === "dropped" ? "dropped" : "wanted",
     };
   };
@@ -48,7 +48,7 @@
   async function add() {
     const own = v.kind === "card" ? CARD : BANK;
     const body: Record<string, unknown> = { owner: v.owner, kind: v.kind, bonus: v.bonus, offer_expires_on: v.offer_expires_on, wait_until: v.wait_until,
-      min_score: v.min_score, assume_prior_planned: v.assume_prior_planned, notes: v.notes };
+      min_score: v.min_score, assume_prior_planned: v.assume_prior_planned, notes: v.notes, apply_url: v.apply_url };
     for (const k of own) body[k] = v[k as keyof typeof v];
     try { await api("/api/churning/wishlist", { method: "POST", body }); toast(`Planned ${wishName({ ...v, kind: v.kind as Wish["kind"] })}`); onclose(true); }
     catch (err) { error = (err as Error).message; toast.error(error); }
@@ -120,6 +120,7 @@
       </label>
     {/if}
   </div>
+  <label class={`${lbl} mt-3`}><span>Application link <span class="text-muted-foreground">(optional)</span></span><Input type="url" bind:value={v.apply_url} {@attach edit("apply_url")} placeholder="https://…" /></label>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
   <div class="mt-4 flex flex-wrap items-center gap-2">

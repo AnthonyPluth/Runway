@@ -240,6 +240,7 @@ export interface Wish {
   min_score: number | null;
   assume_prior_planned: number;
   notes: string | null;
+  apply_url: string | null;        // where to apply (http or https)
   applied_on: string | null;
   applied_id: number | null;       // churn card or bank bonus id, by kind
   blockers: Blocker[];
