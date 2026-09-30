@@ -12,6 +12,7 @@
   import * as Card from "$lib/components/ui/card";
   import { fmt, fmt0, fmtDate, nb, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
+  import { toast } from "svelte-sonner";
 
   let { sub: _sub = "" }: { sub?: string } = $props();
 
@@ -30,6 +31,17 @@
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
   const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
 
+  // Leave an account out of net worth (or bring it back). It stays everywhere else; only these totals and the history from
+  // today on change.
+  async function leaveOut(id: string, name: string, out: boolean) {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
+      await load();
+      toast(out ? `${name} is left out of net worth` : `${name} is counted again`,
+        out ? { action: { label: "Undo", onClick: () => leaveOut(id, name, false) } } : undefined);
+    } catch (err) { toast.error((err as Error).message); }
+  }
+
   // The asset form: null when closed, "new" to add one, or the asset being edited.
   let form = $state<Asset | "new" | null>(null);
   const closeForm = (changed: boolean) => { form = null; if (changed) load(); };
@@ -45,7 +57,8 @@
             <td class="py-1.5 pr-3 pl-6">
               {#if i.type === "account"}<AcctLabel id={String(i.id)} name={i.name} />{:else}{i.name}{/if}
               <div class="text-xs text-muted-foreground">
-                {#if i.type === "account"}{i.org ?? ""}
+                {#if i.type === "account"}{i.org ?? ""}{#if i.org} · {/if}<button type="button" class="cursor-pointer underline underline-offset-2 hover:text-foreground"
+                  aria-label={`Leave ${i.name} out of net worth`} onclick={() => leaveOut(String(i.id), i.name, true)}>Leave out</button>
                 {:else if i.type === "equity"}Vested{i.as_of ? ` · share price as of ${fmtDate(i.as_of)}` : ""}{i.source === "carta" ? " · from Carta" : ""}
                 {:else}{valueSource(i.source)} · {i.as_of ? fmtDate(i.as_of) : ""}{/if}{#if i.equity != null && i.loan} · {fmt(i.equity)} equity after {i.loan.name}{/if}
               </div>
@@ -122,6 +135,25 @@
       </div>
     </Card.Content>
   </Card.Root>
+
+  {#if d.excluded.length}
+    <Card.Root class="mb-6">
+      <Card.Header>
+        <Card.Title>Left out of net worth</Card.Title>
+        <Card.Description>These accounts stay in the rest of Runway (transactions, the forecast, Investments) but aren't counted here.</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <ul class="divide-y text-sm">
+          {#each d.excluded as a (a.id)}
+            <li class="flex items-center justify-between gap-3 py-2">
+              <span><AcctLabel id={a.id} name={a.name} /><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
+              <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>
+            </li>
+          {/each}
+        </ul>
+      </Card.Content>
+    </Card.Root>
+  {/if}
 
   <EquityCard {version} refresh={load} />
 

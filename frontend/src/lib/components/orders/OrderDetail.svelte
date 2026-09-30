@@ -13,12 +13,18 @@
   // Call loadCategories() before showing it.
   let { orderId, onchange }: { orderId: string; onchange?: () => void } = $props();
 
-  let order = $state<Promise<RetailOrder>>(load());
+  // The order stays on screen while it loads again after a change, so its rows update where they are.
+  let order = $state<RetailOrder | null>(null);
+  let failed = $state("");
   let picking = $state<Record<string, Promise<Candidate[]> | undefined>>({});
   type Candidate = { id: string; posted: string; amount: number; payee?: string; description?: string; account_name?: string };
 
-  function load() { return api<RetailOrder>(`/api/retail/orders/${encodeURIComponent(orderId)}`, { keep: true }); }
-  function changed() { onchange?.(); picking = {}; order = load(); }
+  async function load() {
+    try { order = await api<RetailOrder>(`/api/retail/orders/${encodeURIComponent(orderId)}`, { keep: true }); failed = ""; }
+    catch (err) { failed = (err as Error).message; }
+  }
+  load();
+  function changed() { onchange?.(); picking = {}; load(); }
 
   async function post(path: string, body: unknown, msg: string | ((r: any) => string)) {   // eslint-disable-line @typescript-eslint/no-explicit-any
     try {
@@ -56,9 +62,12 @@
 </script>
 
 <div class="flex flex-col gap-3 rounded-lg bg-muted/40 p-4 text-sm">
-  {#await order}
+  {#if failed && !order}
+    <p class="text-muted-foreground">{failed}</p>
+  {:else if !order}
     <p class="text-muted-foreground">Loading…</p>
-  {:then o}
+  {:else}
+    {@const o = order}
     {@const totals = [o.subtotal != null ? `items ${fmt(o.subtotal)}` : "", o.shipping ? `shipping ${fmt(o.shipping)}` : "",
       o.tax != null ? `tax ${fmt(o.tax)}` : ""].filter(Boolean).join(" · ")}
     <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -136,7 +145,5 @@
         <p class="text-xs text-muted-foreground">No card charges for this order yet.</p>
       {/each}
     </div>
-  {:catch err}
-    <p class="text-muted-foreground">{err.message}</p>
-  {/await}
+  {/if}
 </div>
