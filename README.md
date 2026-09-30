@@ -448,6 +448,10 @@ The running version is shown at the bottom of **Settings**.
 [Dependabot](.github/dependabot.yml) opens weekly pull requests to keep the GitHub Actions and the Python base image
 up to date; each one runs the tests before it can be merged.
 
+## License
+
+Runway is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
 ---
 
 <sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.
