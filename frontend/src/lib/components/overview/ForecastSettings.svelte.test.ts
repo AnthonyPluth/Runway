@@ -52,8 +52,9 @@ describe("ForecastSettings", () => {
     await waitFor(() => expect(app.state?.primary_account).toBe("sav"));
   });
 
-  it("saves the forecast length and tells Overview", async () => {
+  it("saves the forecast length and tells Overview, which loads it without drawing the page afresh", async () => {
     const onhorizon = vi.fn();
+    const version = app.version;
     const user = userEvent.setup();
     render(ForecastSettings, { label: "Everyday Checking", onhorizon });
     await user.click(screen.getByRole("button", { name: "Forecast settings" }));
@@ -63,6 +64,8 @@ describe("ForecastSettings", () => {
     await user.tab();
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { horizon_days: 60 } }));
     await waitFor(() => expect(onhorizon).toHaveBeenCalledWith(60));
+    expect(app.version).toBe(version);
+    expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 
   it("opens from elsewhere on Overview, with its accounts", async () => {

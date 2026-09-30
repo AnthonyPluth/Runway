@@ -1,26 +1,33 @@
+<script lang="ts" module>
+  import type { BudgetMonth } from "$lib/components/budget/types";
+  import type { TxList } from "$lib/components/transactions/types";
+
+  // This month so far: spending against the same point last month, the budgets closest to their limit, and the
+  // latest transactions.
+  interface Pace { month: string; prev_month: string; this: number[]; last: number[]; spent: number; last_same_point: number; last_total: number }
+  // What was last on screen, drawn at once when Overview is drawn afresh (after a change) until the new numbers arrive.
+  let last: [Pace, BudgetMonth, TxList] | null = null;
+</script>
+
 <script lang="ts">
   import { api } from "$lib/api";
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import Logo from "$lib/components/Logo.svelte";
-  import type { BudgetMonth } from "$lib/components/budget/types";
   import LineChart from "$lib/components/investments/LineChart.svelte";
-  import type { TxList } from "$lib/components/transactions/types";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { fmt, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
 
-  // This month so far: spending against the same point last month, the budgets closest to their limit, and the
-  // latest transactions.
-  interface Pace { month: string; prev_month: string; this: number[]; last: number[]; spent: number; last_same_point: number; last_total: number }
-
   const month = thisMonth();
-  const data = Promise.all([
+  const fresh = Promise.all([
     api<Pace>("/api/month_pace"),
     api<BudgetMonth>(`/api/budget?month=${month}`),
     api<TxList>("/api/transactions?limit=5"),
   ]);
+  let data = $state.raw(last ?? fresh);
+  fresh.then((r) => { data = last = r; }, () => {});
   const chart = (p: Pace) => {
     const [y, m] = p.month.split("-").map(Number);
     const n = new Date(y, m, 0).getDate();   // this month's days (a longer last month's final day isn't drawn)

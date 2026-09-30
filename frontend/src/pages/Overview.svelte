@@ -2,6 +2,8 @@
   // Survives redraws (a sync, an edited amount), like the classic app.
   let horizon: number | null = null;
   let comingAll = $state(false);   // Coming up's "Show all"
+  // The forecast last on screen, drawn at once when the page is drawn afresh (after a change) until the new one arrives.
+  let last: { fc: Overview; days: number } | null = null;
 </script>
 
 <script lang="ts">
@@ -36,17 +38,19 @@
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
-  const load = (d: number) => api<Overview>(`/api/overview?days=${d}`);
-  let data = $state<Promise<Overview> | Overview>(load(initial));
-  // Another length, or a forecast setting changed: the figures load in place, so the page stays drawn (and the forecast
-  // settings sheet open) until they arrive. Only the latest request counts.
-  let asked = 0;
-  async function refresh() {
-    const n = ++asked;
-    try { const fc = await load(days); if (n === asked) data = fc; }
-    catch (err) { if (n === asked) toast.error((err as Error).message); }
+  // Another length (or a change) keeps the forecast on screen until the new one arrives, and only the latest request
+  // draws, if you click through lengths quickly.
+  let shown = $state.raw(last);
+  let error = $state<Error | null>(null);
+  let seq = 0;
+  function load(d: number) {
+    const n = ++seq;
+    api<Overview>(`/api/overview?days=${d}`).then(
+      (fc) => { if (n === seq) { shown = last = { fc, days: d }; error = null; } },
+      (e: Error) => { if (n !== seq) return; if (shown) toast.error(e.message); else error = e; });
   }
-  function setDays(v: string) { days = horizon = Number(v); refresh(); }
+  load(initial);
+  function setDays(v: string) { days = horizon = Number(v); load(days); }
 
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
@@ -78,9 +82,15 @@
 {#if !connected}
   <SetupChecklist welcome />
 {:else}
-  {#await data}
+  {#if error && !shown}
+    <div class="rounded-2xl bg-card p-5">
+      <p class="text-sm">Something went wrong: {error.message}</p>
+      <Button class="mt-3" variant="outline" onclick={reload}>Try again</Button>
+    </div>
+  {:else if !shown}
     <div class="space-y-4" aria-busy="true"><div class="h-24 w-72 animate-pulse rounded-2xl bg-card"></div><div class="h-64 animate-pulse rounded-2xl bg-card"></div></div>
-  {:then fc}
+  {:else}
+    {@const fc = shown.fc}
     {@const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0)}
     {@const low = fc.low}
     {@const lowBad = !!low && low.balance < 0}
@@ -116,14 +126,14 @@
          balance stays above zero and red when it dips below. -->
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} accounts={fc.accounts}
-        onhorizon={(d) => setDays(String(d))} onchange={refresh} />
+        onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
       {#if asOf}<p class={cn("mt-1.5 text-[13px]", asOf.stale ? "text-amber-500" : "text-muted-foreground")}>{asOf.text}</p>{/if}
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
           {#if lowBad}Heads up · {what} dips to {fmt0(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
-          {:else}On track · {what} stays above {fmt0(low.balance)} for {nb(span(days))}{/if}
+          {:else}On track · {what} stays above {fmt0(low.balance)} for {nb(span(shown.days))}{/if}
         </p>
         <p class="mt-1 max-w-3xl text-[15px] leading-relaxed text-muted-foreground">
           {#if low.date === fc.today}Today is the tightest point in the forecast.
@@ -162,7 +172,7 @@
 
     <StatStrip class="mb-8" items={[
       { label: `${lowBad ? "Goes negative" : "Lowest"} · ${low ? fmtDow(low.date) : "—"}`, value: low ? fmt(low.balance) : "—", tone: lowBad ? "bad" : undefined },
-      { label: `In ${span(days)}`, value: fmt(end), sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`,
+      { label: `In ${span(shown.days)}`, value: fmt(end), sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`,
         subTone: end - cashNow >= 0 ? "good" : "bad" },
       { label: "Owed on cards", value: fmt(owed), sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}` },
     ]} />
@@ -174,10 +184,5 @@
       </div>
       <ThisMonth />
     </div>
-  {:catch err}
-    <div class="rounded-2xl bg-card p-5">
-      <p class="text-sm">Something went wrong: {err.message}</p>
-      <Button class="mt-3" variant="outline" onclick={reload}>Try again</Button>
-    </div>
-  {/await}
+  {/if}
 {/if}

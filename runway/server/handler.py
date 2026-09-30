@@ -78,6 +78,38 @@ def content_security_policy(nonce: str | None = None) -> str:
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
+# The API's own paths that aren't in ROUTES (they're answered in _route itself), by name in traces and logs.
+SPECIAL_API_PATHS = {"/api/backup", "/api/carta/capture", "/api/retail/extension.zip", "/api/restore",
+                     "/api/investments/sync", "/api/investments/stream", "/api/sync/auto", "/api/sync"}
+AUTH_PATHS = {"/auth/login", "/auth/callback", "/auth/logout", "/auth/signed-out"}
+
+
+def trace_name(path: str) -> str:
+    """A request's name in Sentry: its route (/api/transactions/{id}/category), never the ids, names or searches in the
+    address, so requests group together and nothing of yours is in the name."""
+    if path.startswith("/api/"):
+        if path in SPECIAL_API_PATHS or path in EXT_ROUTES:
+            return path
+        if path.startswith("/api/merchants/") and path.endswith("/logo"):
+            return "/api/merchants/{id}/logo"
+        for _m, pattern, _fn in ROUTES:
+            if _match(pattern, path) is not None:
+                return pattern
+        return "/api/*"   # nothing answers it (a 404)
+    if path in AUTH_PATHS or path in OAUTH_PUBLIC or path in OAUTH_METADATA or path in ("/mcp", "/oauth/authorize", "/carta/callback"):
+        return path
+    if path.startswith(("/.well-known/", "/oauth/")):
+        return path[:path.index("/", 1)] + "/*"   # nothing answers it (a 404)
+    return "/"   # the web app's page (and its own routes, like /plaid/oauth)
+
+
+def _traced(path: str) -> bool:
+    """Requests worth a trace: not the health check, the live-prices stream (open for minutes), or plain files."""
+    if path in ("/healthz", "/api/investments/stream") or path in PUBLIC_FILES:
+        return False
+    return path.startswith(("/api/", "/auth/", "/mcp", "/carta/", "/oauth/", "/.well-known/")) or "." not in path.rsplit("/", 1)[-1]
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "Runway"
     sys_version = ""                  # don't advertise the Python version
@@ -117,6 +149,11 @@ class Handler(BaseHTTPRequestHandler):
         started = getattr(self, "_started", None)
         ms = f" {int((time.monotonic() - started) * 1000)}ms" if started else ""
         print(f"{self.client_address[0]} {getattr(self, 'command', '-')} {path} {code}{ms}", flush=True)
+        if _traced(path):   # Sentry Logs get the route (no ids, no address), not files or the health check
+            method, route = getattr(self, "command", "-"), trace_name(path)
+            monitoring.send_log(f"{method} {route} {code}{ms}", "info", **{
+                "http.request.method": method, "http.route": route, "http.response.status_code": str(code),
+                **({"duration_ms": int((time.monotonic() - started) * 1000)} if started else {})})
 
     def _security_headers(self, nonce: str | None = None, csp: str | None = None) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -147,7 +184,8 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, e: BaseException) -> None:
         """An unexpected failure: log the details, show only a reference to them."""
         ref = request_ref()
-        print(f"[error {ref}] {self.command} {urllib.parse.urlsplit(self.path).path}", flush=True)
+        path = urllib.parse.urlsplit(self.path).path
+        monitoring.log(f"[error {ref}] {self.command} {path}", "error", remote=f"[error {ref}] {self.command} {trace_name(path)}", ref=ref)
         monitoring.report(e, ref=ref)
         self._json(500, {"error": f"Something went wrong on Runway's side (reference {ref}; the details are in its log)."})
 
@@ -275,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                    (end, f"Sign out of {provider}") if end else None)
 
     def send_response(self, code, message=None):
-        self._responded = True
+        self._responded, self._status = True, code
         super().send_response(code, message)
 
     def _dispatch(self, method: str) -> None:
@@ -283,6 +321,15 @@ class Handler(BaseHTTPRequestHandler):
         self._started, self._responded = time.monotonic(), False
         self._set_cookies = []
         self._ext_call = False
+        path = urllib.parse.urlsplit(self.path).path
+        if not _traced(path):
+            return self._handle(method)
+        with monitoring.request(method, trace_name(path), self.headers) as tx:
+            self._handle(method)
+            if tx is not None and getattr(self, "_status", None):
+                tx.set_http_status(self._status)
+
+    def _handle(self, method: str) -> None:
         try:
             self._route(method)
         except Exception as e:   # never show internals; never leave the browser hanging
@@ -532,7 +579,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(e)
             except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
                 ref = request_ref()
-                print(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", flush=True)
+                monitoring.log(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}: {e}", "warning",
+                               remote=f"[bad request {ref}] {method} {pattern}: {type(e).__name__}", ref=ref)
                 return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
         return self._json(404, {"error": "Not found"})
 
@@ -655,7 +703,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(msg, dict):   # a batch or something else: one message per POST
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
         try:
-            reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
+            with monitoring.mcp_call(msg) as span:
+                reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
+                monitoring.mcp_result(span, reply)
         except sqlalchemy.exc.OperationalError as e:
             return self._error(e)
         if reply is None:
@@ -866,7 +916,11 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
             nonce = secrets.token_urlsafe(16)
             with open(full, "rb") as f:
                 data = f.read().replace(b"<script ", f'<script nonce="{nonce}" '.encode())
-            return self._send_file(data, ctype, "no-store", None, gz_ok, nonce)
+            if meta := monitoring.trace_meta():   # the page-load trace in the browser continues this one
+                data = data.replace(b"</head>", meta.encode() + b"</head>", 1)
+            # The browser's JS profiler only runs on a page that asks for it (with SENTRY_PROFILE_SESSION_SAMPLE_RATE).
+            extra = {"Document-Policy": "js-profiling"} if monitoring.browser_profiling() else None
+            return self._send_file(data, ctype, "no-store", None, gz_ok, nonce, extra=extra)
         entry = _static_entry(full)
         if self.headers.get("If-None-Match") == entry["etag"]:
             self.send_response(304)
@@ -881,7 +935,7 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
         self._send_file(entry["data"], ctype, cache, entry["etag"], gz_ok, None, entry.get("gz"))
 
     def _send_file(self, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
-                   gz: bytes | None = None) -> None:
+                   gz: bytes | None = None, extra: dict[str, str] | None = None) -> None:
         if gz_ok and _compressible(ctype) and len(data) > 1024:
             data, encoded = gz or gzip.compress(data, 6), True
         else:
@@ -895,6 +949,8 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
             self.send_header("ETag", etag)
         if encoded:
             self.send_header("Content-Encoding", "gzip")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self._security_headers(nonce)
         self.end_headers()
         if self.command != "HEAD":
@@ -1002,13 +1058,13 @@ class Server(ThreadingHTTPServer):
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> None:
-    monitoring.init()   # error reports to Sentry, when SENTRY_DSN is set
+    monitoring.init()   # reports to Sentry, when SENTRY_DSN is set
     problems = secretbox.check_config()
     if problems:
         raise SystemExit("\n".join(problems))
     if db.using_postgres() and not os.environ.get("RUNWAY_SECRET_KEY"):
-        print(f"Note: set RUNWAY_SECRET_KEY. Without it, the key that encrypts your saved bank access and API keys is "
-              f"{secretbox.key_file_path()}, and losing that file means reconnecting them.", flush=True)
+        monitoring.log(f"Note: set RUNWAY_SECRET_KEY. Without it, the key that encrypts your saved bank access and API keys is "
+              f"{secretbox.key_file_path()}, and losing that file means reconnecting them.", "warning")
     if oidc.enabled():
         problems = oidc.check_config()
         if problems:
@@ -1032,7 +1088,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         threading.Thread(target=background_sync, daemon=True).start()
     httpd = Server((host, port), Handler)
     where = f"http://localhost:{port}" if host in ("127.0.0.1", "localhost") else f"port {port} on all network addresses"
-    print(f"Runway is running at {where}  (data: {db.describe()})"
-          f"{'  · sign-in via ' + oidc.config()['issuer'] if oidc.enabled() else ''}", flush=True)
+    monitoring.log(f"Runway is running at {where}  (data: {db.describe()})"
+                   f"{'  · sign-in via ' + oidc.config()['issuer'] if oidc.enabled() else ''}")
     with contextlib.suppress(KeyboardInterrupt):
         httpd.serve_forever()
