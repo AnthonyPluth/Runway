@@ -67,8 +67,11 @@
     { k: "big_charge", label: "A large charge posts", num: ["big_charge_over", "over $", "", 50] },
     { k: "review", label: "Transactions are waiting for a category (at most once a day)" },
     { k: "sync_failed", label: "Syncing with your bank has been failing for a day" },
-    { k: "churn_fee", label: "A churning card's annual fee is due within 30 days" },
+    { k: "churn_fee", label: "A churning card's annual fee is due within 30 days (unless you're keeping it or have a plan for it)" },
     { k: "churn_bonus", label: "A sign-up bonus deadline (card or bank) is within 14 days, with requirements left" },
+    { k: "churn_plan", label: "It's time to downgrade, close or change a card, as you planned" },
+    { k: "churn_benefit", label: "A card credit with money left is about to reset" },
+    { k: "churn_apply", label: "A card or bank bonus you planned has nothing in the way now, or its offer ends within 14 days" },
   ];
   const b = "font-medium text-foreground";
 </script>

@@ -229,7 +229,7 @@ def save(conn, body: dict, bonus_id: int | None = None) -> int:
     new = bonus_id is None
     f: dict[str, Any] = {}
     if new or "owner" in body:
-        f["owner"] = churning._owner(body.get("owner"))
+        f["owner"] = churning._owner(body.get("owner"), conn)
     if new or "bank" in body:
         f["bank"] = churning._text(body.get("bank"), "bank", 60, required=True)
     if new or "account_type" in body:

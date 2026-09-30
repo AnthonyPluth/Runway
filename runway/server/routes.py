@@ -12,9 +12,12 @@ from .api.categories import (
     api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
 )
 from .api.churning import (
-    api_bank_bonus_add, api_bank_bonus_remove, api_bank_bonus_update, api_churn_balance, api_churn_card_add,
-    api_churn_card_remove, api_churn_card_update, api_churn_currency, api_churn_currency_remove, api_churn_rate,
-    api_churn_task_add, api_churn_task_remove, api_churn_task_update, api_churning, api_churning_best
+    api_bank_bonus_add, api_bank_bonus_remove, api_bank_bonus_update, api_churn_balance, api_churn_benefit_add,
+    api_churn_benefit_remove, api_churn_benefit_unuse, api_churn_benefit_update, api_churn_benefit_use,
+    api_churn_card_add, api_churn_card_remove, api_churn_card_update, api_churn_currency, api_churn_currency_remove,
+    api_churn_plan_done, api_churn_plan_undo, api_churn_rate, api_churn_task_add, api_churn_task_remove,
+    api_churn_score, api_churn_task_snooze, api_churn_task_update, api_churn_wish_add, api_churn_wish_applied,
+    api_churn_wish_remove, api_churn_wish_update, api_churning, api_churning_best
 )
 from .api.connections import (
     api_connect, api_inv_account, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
@@ -148,12 +151,25 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/churning/cards/{id}", api_churn_card_update),
     ("POST", "/api/churning/cards/{id}/remove", api_churn_card_remove),
     ("POST", "/api/churning/cards/{id}/rates", api_churn_rate),
+    ("POST", "/api/churning/cards/{id}/plan/done", api_churn_plan_done),
+    ("POST", "/api/churning/cards/{id}/plan/undo", api_churn_plan_undo),
+    ("POST", "/api/churning/cards/{id}/benefits", api_churn_benefit_add),
+    ("POST", "/api/churning/benefits/{id}", api_churn_benefit_update),
+    ("POST", "/api/churning/benefits/{id}/remove", api_churn_benefit_remove),
+    ("POST", "/api/churning/benefits/{id}/use", api_churn_benefit_use),
+    ("POST", "/api/churning/benefits/{id}/unuse", api_churn_benefit_unuse),
     ("POST", "/api/churning/currencies", api_churn_currency),
     ("POST", "/api/churning/currencies/{id}/remove", api_churn_currency_remove),
     ("POST", "/api/churning/balances", api_churn_balance),
     ("POST", "/api/churning/tasks", api_churn_task_add),
     ("POST", "/api/churning/tasks/{id}", api_churn_task_update),
     ("POST", "/api/churning/tasks/{id}/remove", api_churn_task_remove),
+    ("POST", "/api/churning/tasks/{id}/snooze", api_churn_task_snooze),
+    ("POST", "/api/churning/wishlist", api_churn_wish_add),
+    ("POST", "/api/churning/wishlist/{id}", api_churn_wish_update),
+    ("POST", "/api/churning/wishlist/{id}/remove", api_churn_wish_remove),
+    ("POST", "/api/churning/wishlist/{id}/applied", api_churn_wish_applied),
+    ("POST", "/api/churning/scores", api_churn_score),
     ("POST", "/api/churning/bank", api_bank_bonus_add),
     ("POST", "/api/churning/bank/{id}", api_bank_bonus_update),
     ("POST", "/api/churning/bank/{id}/remove", api_bank_bonus_remove),

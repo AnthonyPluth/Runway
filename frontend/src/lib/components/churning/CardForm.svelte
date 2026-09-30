@@ -1,19 +1,26 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
-  import CategorySelect from "$lib/components/CategorySelect.svelte";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
-  import { MONTHS } from "./churning";
+  import { planDone, planUndo } from "./actions";
+  import CardBenefits from "./CardBenefits.svelte";
+  import { MONTHS, PLAN_ACTS, PLAN_LABEL, fullDate, ratesPayload, type RateRow } from "./churning";
+  import CurrencySelect from "./CurrencySelect.svelte";
+  import RatesEditor from "./RatesEditor.svelte";
   import type { ChurnCard, Churning } from "./types";
 
   // Adding a card, or editing one (each field saves as you change it, as elsewhere in Runway; Done redraws the page).
-  let { c, d, person, onclose }: { c: ChurnCard | null; d: Churning; person: string; onclose: (changed: boolean) => void } = $props();
+  // `onchanged` redraws the page's data without closing the form (a benefit was used, a plan checked off).
+  let { c, d, person, onclose, onchanged }: {
+    c: ChurnCard | null; d: Churning; person: string; onclose: (changed: boolean) => void; onchanged: () => void | Promise<void>;
+  } = $props();
 
   const str = (x: unknown) => (x == null ? "" : String(x));
   // The fields as they start (the form is drawn afresh for each card).
@@ -28,6 +35,8 @@
       account_id: str(start?.account_id), bonus: str(start?.bonus), bonus_spend: str(start?.bonus_spend),
       bonus_months: str(start?.bonus_months ?? 3), bonus_deadline: str(start?.bonus_deadline), manual_spend: str(start?.manual_spend),
       bonus_earned_on: str(start?.bonus_earned_on), eligible_on: str(start?.eligible_on), notes: str(start?.notes),
+      plan: start?.plan ?? "undecided", plan_target: str(start?.plan_target), plan_date: str(start?.plan_date),
+      plan_remind_days: str(start?.plan_remind_days), hide_upcoming: !!start?.hide_upcoming,
     };
   };
   const v = $state(initial());
@@ -42,48 +51,40 @@
     changed = true;
   };
   const edit = (key: string) => (c ? fromAction(autosave, () => save(key)) : null);
+  // The base rate travels inside `rates` (as the "*" category), so it isn't sent twice.
+  const ratesBody = () => ({ rates: ratesPayload(v.base_rate, rateRows), portal_name: portalName });
+  let addError = $state("");
   async function add() {
-    try { await api("/api/churning/cards", { method: "POST", body: v }); toast(`Added ${v.product}`); onclose(true); }
-    catch (err) { toast.error((err as Error).message); }
+    const { base_rate: _base, ...rest } = v;
+    try { await api("/api/churning/cards", { method: "POST", body: { ...rest, ...ratesBody() } }); toast(`Added ${v.product}`); onclose(true); }
+    catch (err) { addError = (err as Error).message; toast.error(addError); }
   }
   async function remove() {
     try { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Removed ${c!.product}`); onclose(true); }
     catch (err) { toast.error((err as Error).message); }
   }
 
-  // Earning rates (once the card exists): one per category; an empty multiplier removes it.
-  const initialRates = () => (c ? [...c.rates] : []);
-  let rates = $state(initialRates());
-  let newCat = $state(""), newMult = $state("");
-  async function setRate(category: string, multiplier: string) {
-    await api(`/api/churning/cards/${c!.id}/rates`, { method: "POST", body: { category, multiplier } });
+  // Earning rates: kept in the form and sent with the card when adding; when editing, each change saves the whole list.
+  // svelte-ignore state_referenced_locally
+  const start = c;   // the form is drawn afresh for each card, so what it starts with is all it needs
+  let rateRows = $state<RateRow[]>((start?.rates ?? []).map((r) => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only })));
+  let portalName = $state(str(start?.portal_name));
+  async function saveRates() {
+    await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: ratesBody() });
     changed = true;
-  }
-  async function addRate() {
-    if (!newCat || !newMult) { toast.error("Pick a category and enter the points per dollar"); return; }
-    try {
-      await setRate(newCat, newMult);
-      rates = [...rates.filter((r) => r.category !== newCat), { category: newCat, multiplier: Number(newMult) }];
-      newCat = ""; newMult = "";
-    } catch (err) { toast.error((err as Error).message); }
-  }
-  async function dropRate(category: string) {
-    try { await setRate(category, ""); rates = rates.filter((r) => r.category !== category); }
-    catch (err) { toast.error((err as Error).message); }
   }
 
   const sameOwner = $derived(d.cards.filter((x) => x.owner === v.owner && x.id !== c?.id));
-  const lbl = "flex flex-col gap-1 text-sm";
+  const lbl = "flex max-w-full flex-col gap-1 text-sm";
   const h = "mt-4 mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase";
 </script>
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{c ? `Edit ${c.product}` : "Add a card"}</h3>
-  <datalist id="churn-people">{#each d.people as p (p)}<option value={p}></option>{/each}</datalist>
 
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <label class={lbl}>Whose card
-      <Input class="w-36" list="churn-people" bind:value={v.owner} {@attach edit("owner")} placeholder="First name" />
+      <OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} />
     </label>
     <label class={lbl}>Bank
       <NativeSelect bind:value={v.issuer} {@attach edit("issuer")}>
@@ -119,34 +120,11 @@
       </NativeSelect>
     </label>
     <label class={lbl}>Earns
-      <NativeSelect bind:value={v.currency} {@attach edit("currency")}>
-        {#each d.currencies as cur (cur.key)}<option value={cur.key}>{cur.name}</option>{/each}
-      </NativeSelect>
+      <CurrencySelect {d} bind:value={v.currency} {@attach edit("currency")} />
     </label>
-    <label class={lbl}>Everywhere else<span class="flex items-center gap-1"><Input type="number" min="0" step="0.25" class="w-20" bind:value={v.base_rate} {@attach edit("base_rate")} /><span class="text-muted-foreground">x</span></span></label>
     <label class={`${lbl} min-w-48 flex-1`}>Rotating or other earning<Input bind:value={v.earn_note} {@attach edit("earn_note")} placeholder="e.g. 5x quarterly categories" /></label>
   </div>
-  {#if c}
-    <div class="mt-3">
-      <div class="text-sm">Points per dollar by category <span class="text-muted-foreground">(a category's rate covers its subcategories)</span></div>
-      <div class="mt-2 flex flex-wrap gap-2">
-        {#each rates as r (r.category)}
-          <span class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm">
-            {r.category}
-            <input type="number" min="0" step="0.25" value={r.multiplier} aria-label={`Points per dollar on ${r.category}`}
-              class="h-7 w-14 rounded-md border border-input bg-transparent px-1.5 text-sm tabular-nums"
-              use:autosave={async (f) => { await setRate(r.category, f.value); }} />x
-            <button type="button" class="cursor-pointer text-muted-foreground hover:text-foreground" aria-label={`Remove the ${r.category} rate`} onclick={() => dropRate(r.category)}>×</button>
-          </span>
-        {/each}
-      </div>
-      <div class="mt-2 flex flex-wrap items-center gap-2">
-        <CategorySelect bind:value={newCat} blank="Add a category…" label="Category for a new rate" exclude={(x) => !!x.is_transfer || !!x.is_income} />
-        <Input type="number" min="0" step="0.25" class="w-20" bind:value={newMult} aria-label="Points per dollar" placeholder="3" />
-        <Button variant="outline" size="sm" onclick={addRate}>Add rate</Button>
-      </div>
-    </div>
-  {/if}
+  <RatesEditor {d} bind:base={v.base_rate} bind:rows={rateRows} bind:portalName save={c ? saveRates : undefined} />
 
   <h4 class={h}>Sign-up bonus</h4>
   <div class="flex flex-wrap items-end gap-3">
@@ -167,6 +145,40 @@
       <label class={lbl}>Spent so far<Input type="number" min="0" step="10" class="w-28" bind:value={v.manual_spend} {@attach edit("manual_spend")} placeholder="$" /></label>
     {/if}
   </div>
+
+  <h4 class={h}>Plan</h4>
+  <div class="flex flex-wrap items-end gap-3">
+    <label class={lbl}>What I'll do with it
+      <NativeSelect bind:value={v.plan} {@attach edit("plan")}>
+        {#each d.plans as p (p)}<option value={p}>{PLAN_LABEL[p]}</option>{/each}
+      </NativeSelect>
+    </label>
+    {#if v.plan === "downgrade" || v.plan === "product_change"}
+      <label class={`${lbl} min-w-48`}>Change it to<Input bind:value={v.plan_target} {@attach edit("plan_target")} placeholder="e.g. Freedom Unlimited" /></label>
+    {/if}
+    {#if PLAN_ACTS.includes(v.plan)}
+      <label class={lbl}>By<Input type="date" class="w-40" bind:value={v.plan_date} {@attach edit("plan_date")} /></label>
+      <label class={lbl}>Remind me (days ahead)<Input type="number" min="0" max="365" class="w-24" bind:value={v.plan_remind_days} {@attach edit("plan_remind_days")} /></label>
+    {/if}
+    <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.hide_upcoming} {@attach edit("hide_upcoming")} />Don't show this card in Upcoming</label>
+  </div>
+  {#if PLAN_ACTS.includes(v.plan)}
+    <p class="mt-1 text-xs text-muted-foreground">Left blank, the day is the day before the next annual fee posts{c?.plan_due && !v.plan_date ? ` (${fullDate(c.plan_due)})` : ""}. Keeping a card, or hiding it here, stops its fee reminders.</p>
+  {:else if v.plan === "keep"}
+    <p class="mt-1 text-xs text-muted-foreground">Keeping it: no annual-fee reminder for this card.</p>
+  {/if}
+  {#if c && c.plan_done_on}
+    <p class="mt-2 flex items-center gap-2 text-sm">Done {fullDate(c.plan_done_on)}<Button variant="link" size="sm" class="h-auto px-0" onclick={async () => { await planUndo(c.id, onchanged); changed = true; }}>Undo</Button></p>
+  {:else if c?.plan_active}
+    <Button variant="outline" size="sm" class="mt-2" onclick={async () => { await planDone(c.id, onchanged); changed = true; }}>Mark the plan done</Button>
+  {/if}
+
+  <h4 class={h}>Benefits</h4>
+  {#if c}
+    <CardBenefits card={c} {d} {onchanged} />
+  {:else}
+    <p class="text-sm text-muted-foreground">Add the card first, then its benefits (lounge access, travel and hotel credits) from Edit.</p>
+  {/if}
 
   <h4 class={h}>More</h4>
   <div class="flex flex-wrap items-end gap-3">
@@ -190,4 +202,5 @@
       <Button size="sm" onclick={add}>Add</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
   </div>
+  {#if addError}<p class="mt-2 text-sm text-red-500" role="alert">{addError}</p>{/if}
 </div>
