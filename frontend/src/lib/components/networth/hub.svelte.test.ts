@@ -51,13 +51,14 @@ describe("the Net worth tabs", () => {
     expect(screen.queryByRole("link", { name: /← Net worth/ })).not.toBeInTheDocument();
   });
 
-  it("opens Retirement on #networth/retirement with the planner, even with no investment accounts", async () => {
+  it("opens Retirement on #networth/retirement, pointing at Investments when there's nothing invested yet", async () => {
     render(NetWorth, { sub: "retirement" });
     expect(screen.getByRole("link", { name: "Retirement" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Summary" })).not.toHaveAttribute("aria-current");
     expect(await screen.findByText("Retirement planner")).toBeInTheDocument();
-    expect(screen.getByText("Chance your money lasts")).toBeInTheDocument();
-    expect(screen.getByText(/Starting from Runway's figures/)).toBeInTheDocument();
+    expect(screen.getByText("Nothing to plan from yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Go to Investments" })).toHaveAttribute("href", "#networth/investments");
+    expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
     expect(api).toHaveBeenCalledWith("/api/investments?period=1Y");
   });
 
