@@ -148,14 +148,6 @@ def all_categories(conn) -> list[dict]:
     return out
 
 
-def top_level(conn, name: str | None) -> str | None:
-    """The top-level category a category rolls up into (itself if it has no parent)."""
-    if name is None:
-        return None
-    p = path(conn, name)
-    return p[0] if p else name
-
-
 def add(conn, name: str, parent: str | None = None, is_transfer: bool = False, is_income: bool = False) -> None:
     name = (name or "").strip()
     if not name:

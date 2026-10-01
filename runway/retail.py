@@ -186,10 +186,6 @@ def token_check(conn, authorization: str | None) -> str | None:
     return None
 
 
-def check_token(conn, authorization: str | None) -> bool:
-    return token_check(conn, authorization) is None
-
-
 REFUSALS = {
     "expired": f"This key has expired (a key lasts {TOKEN_DAYS} days). Make a new one under Settings → Connections.",
     "owner_gone": "The person who made this key can no longer sign in to Runway. Make a new one under Settings → Connections.",
@@ -944,10 +940,6 @@ def set_item_category(conn, item_id: int, category: str, remember: bool = True) 
 
 
 # ------------------------------------------------------------------------------------------------ matching
-
-def _unlink(conn, ch) -> None:
-    conn.execute(update(RetailCharge).where(RetailCharge.id == ch["id"]).values(tx_id=None, match_source=None))
-
 
 def match(conn) -> int:
     """Pair each store charge with its bank transaction. Returns how many new pairs were made.

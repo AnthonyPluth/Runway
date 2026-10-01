@@ -24,7 +24,6 @@ from .models import InvAccount, ManualContribution, ManualPosition, ManualState,
 
 MIN_CONTRIBUTION = 5.0         # dollars
 MIN_CONTRIBUTION_SHARE = 0.003  # of the balance: below this, differences are treated as noise
-DRIFT_WARN = 0.02
 
 
 def positions_for(conn, account_id: str) -> list[dict]:

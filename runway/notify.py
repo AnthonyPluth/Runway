@@ -139,7 +139,7 @@ _AUTHORITY = re.compile(r"([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-
 
 
 def push_host_allowed(endpoint: str) -> bool:
-    """Whether an endpoint is on a push service Runway knows: the browsers' (PUSH_HOSTS, https only) or one you named
+    r"""Whether an endpoint is on a push service Runway knows: the browsers' (PUSH_HOSTS, https only) or one you named
     in RUNWAY_PUSH_HOSTS (yours: http and a port are allowed, as in a test). The address has to be a plain one,
     scheme://host[:port]/path, with no user name, backslash or stray character before the path: the host is read
     here with urllib, and pywebpush connects with requests, whose parser reads a trickier address differently

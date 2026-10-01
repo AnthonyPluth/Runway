@@ -403,7 +403,6 @@ class TokenTests(Base):
         # and it expires
         db.set_setting(self.c, "retail_token_created", (datetime.now() - timedelta(days=retail.TOKEN_DAYS)).isoformat(timespec="seconds"))
         self.assertEqual(retail.token_check(self.c, f"Bearer {token}"), "expired")
-        self.assertFalse(retail.check_token(self.c, f"Bearer {token}"))
         for reason in ("expired", "owner_gone", "unknown"):
             self.assertIn("Settings", retail.REFUSALS[reason])
         retail.remove_token(self.c)
