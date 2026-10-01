@@ -606,20 +606,31 @@ def monthly_spending(conn, today: date) -> float:
     """Average monthly spending from Runway's own transactions over the last 6 full months. Counted as Reports counts
     it: every category that isn't a transfer or income, and money out with no category. A month with more money back
     than out (a big refund) is a month of no spending, not one left out."""
+    t, counted = _spending(today)
+    # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
+    month = func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("m")
+    rows = conn.execute(counted.with_only_columns(month, func.sum(t.c.amount).label("s")).group_by(month)).fetchall()
+    months = [max(0.0, -(r["s"] or 0)) for r in rows]
+    return round(statistics.mean(months), 2) if months else 0.0
+
+
+def _spending(today: date):
+    """The transactions monthly_spending counts (the last 6 full months), as (the parts subquery, a select of them)."""
     start = date(today.year, today.month, 1) - relativedelta(months=6)
     end = date(today.year, today.month, 1)
     t = splits.parts()
-    # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
-    month = func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("m")
     spending = or_(and_(Category.is_transfer == 0, Category.is_income == 0), and_(Category.name.is_(None), t.c.amount < 0))
-    rows = conn.execute(
-        select(month, func.sum(t.c.amount).label("s")).select_from(t)
-        .join(Account, Account.id == t.c.account_id).outerjoin(Category, Category.name == t.c.category)
-        .where(spending, Account.hidden == 0,
-               Account.kind.in_(["checking", "savings", "credit"]), t.c.posted >= start.isoformat(), t.c.posted < end.isoformat())
-        .group_by(month)).fetchall()
-    months = [max(0.0, -(r["s"] or 0)) for r in rows]
-    return round(statistics.mean(months), 2) if months else 0.0
+    return t, (select(t.c.amount).select_from(t)
+               .join(Account, Account.id == t.c.account_id).outerjoin(Category, Category.name == t.c.category)
+               .where(spending, Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
+                      t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
+
+
+def spent_amounts(conn, today: date) -> list[float]:
+    """Each amount of money out that monthly_spending counts, as a positive number: to tell whether a loan's payment
+    is in the spending figure, or was left out as a transfer."""
+    t, counted = _spending(today)
+    return [-r[0] for r in conn.execute(counted.where(t.c.amount < 0))]
 
 
 def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[dict]:

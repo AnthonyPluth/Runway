@@ -78,13 +78,14 @@ export function saleProceeds(a: PlanAsset, year: number, thisYear: number, infla
 }
 
 /** Each loan's yearly payment and the first year it's no longer spent (once per loan, however many assets it's
- *  against: the soonest). Only loans whose payment is known and ends. */
+ *  against: the soonest). Only loans whose payment is known, ends, and was counted in the spending the plan starts
+ *  from: one categorized as a transfer was never in it, so there's nothing to take off. */
 export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): { yearly: number; from: number }[] {
   const sold = new Map(plan.assets.map((s) => [s.key, s.sell_year]));
   const byLoan = new Map<string, { yearly: number; from: number }>();
   for (const a of assets) {
     const from = paymentEnds(a, sold.get(a.key) ?? null);
-    if (from == null || !a.loan_id || !a.loan_payment) continue;
+    if (from == null || !a.loan_id || !a.loan_payment || !a.payment_counted) continue;
     const had = byLoan.get(a.loan_id);
     if (!had || from < had.from) byLoan.set(a.loan_id, { yearly: 12 * a.loan_payment, from });
   }
@@ -100,8 +101,8 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
   const ages = people.map((p) => years.map((y) => y - p.birth_year));
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const retireYear = Math.max(...people.map((p) => p.birth_year + p.retire_age));
-  // Spending (from your history) includes the payments on loans; once a loan is paid off or its asset sold, its
-  // payment comes off. The plan's own spending figure stays as you entered it.
+  // Spending (from your history) includes the payments on loans counted as spending; once such a loan is paid off or
+  // its asset sold, its payment comes off. The plan's own spending figure stays as you entered it.
   const ending = endingPayments(plan, assets);
   const spending = (y: number) => Math.max(0, plan.spending - ending.reduce((s, e) => s + (y >= e.from ? e.yearly : 0), 0));
   const net = years.map((y, t) => {

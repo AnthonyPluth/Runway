@@ -24,7 +24,7 @@ const data = (extra: Partial<PlanData> = {}, p: Partial<RetirementPlan> = {}): P
 const setup = (d = data()) => render(RetirementPlanner, { data: d });
 const homeAsset = (over: Partial<PlanAsset> = {}): PlanAsset => ({
   key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0, owed_as_of: "2026-10-01",
-  loan_id: null, loan_rate: null, loan_payment: null, ...over,
+  loan_id: null, loan_rate: null, loan_payment: null, payment_counted: true, ...over,
 });
 
 // Every edit schedules a save 700ms later. On real timers a test that edits and ends leaves that save pending, and it
@@ -260,6 +260,12 @@ describe("RetirementPlanner", () => {
       await userEvent.clear(year);
       await userEvent.type(year, "2040");
       expect(screen.getByText("Its $1,500/month loan payment stops when it's sold, and comes off your spending from 2040.")).toBeInTheDocument();
+    });
+
+    it("says when a loan's payment isn't in spending, so nothing comes off", () => {
+      setup(data({ assets: [{ ...home, loan_rate: 0.06, loan_payment: 1500, payment_counted: false }] }));
+      expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It isn't in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
     });
 
     it("says when a loan's payment never pays it down", () => {

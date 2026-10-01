@@ -241,6 +241,24 @@ class FireTests(Base):
         self.c.execute(update(Account).where(Account.id == "mtg").values(loan_rate=None))   # a payment and no rate: 0%
         self.assertEqual(next(a for a in self.plan()["assets"] if a["name"] == "House")["loan_rate"], 0.0)
 
+    def test_says_whether_a_loans_payment_is_in_spending(self):
+        self.c.execute(insert(Account), [{"id": "mtg", "name": "Mortgage", "kind": "loan", "balance": -200000, "loan_payment": 1850},
+                                         {"id": "chk", "name": "Checking", "kind": "checking", "balance": 0, "loan_payment": None}])
+        self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(), loan_account_id="mtg"))
+        counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["payment_counted"]
+        pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
+            id=id, account_id="chk", posted=posted, amount=amount, category=category))
+        pay("p1", "2026-08-01", -1850, "Transfer")   # paid, but as a transfer: not in spending
+        pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
+        pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
+        self.assertFalse(counted())
+        pay("p4", "2026-07-01", -1900, "Mortgage")   # within 10% of it, in a spending category
+        self.assertTrue(counted())
+        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category=None))   # uncategorized counts too
+        self.assertTrue(counted())
+        self.c.execute(update(Account).where(Account.id == "mtg").values(loan_payment=None))   # no payment: nothing to match
+        self.assertFalse(counted())
+
     def test_yearly_savings_says_what_it_is(self):
         p = self.plan()["computed"]
         self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))   # a year of history: the last 12 months

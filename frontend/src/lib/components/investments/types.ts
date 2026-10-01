@@ -106,10 +106,11 @@ export interface RetirementPlan {
 }
 /** A home, vehicle or company equity from Net worth that can be sold into the plan. `owed` is the loan against it on
  *  `owed_as_of` (today), in dollars of then; with its monthly payment known (`loan_rate` a yearly fraction, 0 when
- *  you've entered none) the planner pays it down. */
+ *  you've entered none) the planner pays it down. `payment_counted`: the payment is in the spending figure the plan
+ *  starts from (not left out as a transfer), so it comes off spending once it ends. */
 export interface PlanAsset {
   key: string; name: string; kind: string; value: number; yearly_change: number; owed: number; owed_as_of: string;
-  loan_id: string | null; loan_rate: number | null; loan_payment: number | null;
+  loan_id: string | null; loan_rate: number | null; loan_payment: number | null; payment_counted: boolean;
 }
 export interface PlanData {
   plan: RetirementPlan;

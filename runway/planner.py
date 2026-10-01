@@ -19,6 +19,7 @@ from . import settings_keys as sk
 from .models import Account
 
 MAX_ROWS = 20   # incomes, events or assets: plenty for one household, and a cap on what's stored
+PAYMENT_MATCH = 0.1   # money out within 10% of a loan's payment is taken to be that payment
 
 # Numbers the plan keeps: (lowest, highest).
 RATES = {"return_before": (-0.2, 0.2), "return_after": (-0.2, 0.2), "volatility": (0.0, 0.5), "inflation": (-0.05, 0.2)}
@@ -137,23 +138,32 @@ def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
     them), and vested company equity. A loan comes with what's owed on it today (paid down since its last balance, as
     on the Net worth page) and, when you've entered them, its rate and monthly payment, so the page can pay it down to
-    the year of the sale and stop charging the payment once it's gone. `owed` is in dollars of `owed_as_of`."""
+    the year of the sale and stop charging the payment once it's gone. `owed` is in dollars of `owed_as_of`.
+    `payment_counted` says whether the payment is in the spending figure the plan starts from: some money out in
+    those months within PAYMENT_MATCH of it. One categorized as a transfer (common when the loan account is synced
+    too) wasn't, so there's nothing to take off when it ends."""
+    from . import portfolio   # imported here: portfolio imports this module
     loans = {a["id"]: a for a in db.rows(conn.execute(
         select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.loan_rate,
                Account.loan_payment).where(Account.kind.in_(["credit", "loan"]))))}
+    spent: list[float] | None = None
     out = []
     for a in networth.assets(conn, today):
         loan = loans.get(a["loan_account_id"])
+        counted = False
+        if loan and loan["loan_payment"]:
+            spent = portfolio.spent_amounts(conn, today) if spent is None else spent
+            counted = any(abs(s - loan["loan_payment"]) <= PAYMENT_MATCH * loan["loan_payment"] for s in spent)
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
                     "yearly_change": (a["yearly_change"] or 0) / 100.0,
                     "owed": networth.loan_balance(loan, today) if loan else 0.0, "owed_as_of": today.isoformat(),
                     "loan_id": loan["id"] if loan else None,
                     "loan_rate": (loan["loan_rate"] or 0.0) / 100.0 if loan and loan["loan_payment"] else None,
-                    "loan_payment": (loan["loan_payment"] or None) if loan else None})
+                    "loan_payment": (loan["loan_payment"] or None) if loan else None, "payment_counted": counted})
     for c in equity.networth_items(conn, today):
         out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": c["value"],
                     "yearly_change": 0.0, "owed": 0.0, "owed_as_of": today.isoformat(), "loan_id": None,
-                    "loan_rate": None, "loan_payment": None})
+                    "loan_rate": None, "loan_payment": None, "payment_counted": False})
     return out
 
 

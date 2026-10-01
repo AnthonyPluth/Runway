@@ -24,7 +24,7 @@ function plan(over: Partial<RetirementPlan> = {}): RetirementPlan {
 // A loan whose payment isn't known: today's balance is the guess.
 const house: PlanAsset = {
   key: "home:1", name: "House", kind: "home", value: 300_000, yearly_change: 0.04, owed: 50_000, owed_as_of: `${Y}-10-01`,
-  loan_id: "mtg", loan_rate: null, loan_payment: null,
+  loan_id: "mtg", loan_rate: null, loan_payment: null, payment_counted: true,
 };
 // The same with its payment: $50,000 at 6% and $1,000 a month is 58 payments, the last in August 2031.
 const paying: PlanAsset = { ...house, loan_rate: 0.06, loan_payment: 1_000 };
@@ -153,6 +153,12 @@ describe("flows", () => {
     // no payment known, or a payment that never pays it down: spending as entered
     expect(flows(plan(), Y, [house]).net.slice(5)).toEqual(Array(6).fill(-20_000));
     expect(flows(plan(), Y, [{ ...paying, loan_payment: 200 }]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("leaves spending alone when the payment wasn't counted in it (a transfer)", () => {
+    const transfer = { ...paying, payment_counted: false };
+    expect(flows(plan(), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
   });
 
   it("or from the year its asset is sold, if that's sooner", () => {

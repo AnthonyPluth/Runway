@@ -282,8 +282,9 @@
               {@const ends = paymentEnds(a, s ? num(s.sell_year) : null)}
               <p class="basis-full pl-6 text-sm text-muted-foreground">
                 {#if ends == null}Its {fmt0(a.loan_payment)}/month loan payment doesn't pay the loan down, so it stays in your spending.
-                {:else if paid == null || ends <= paid}Its {fmt0(a.loan_payment)}/month loan payment stops when it's sold, and comes off your spending from {ends}.
-                {:else}Its {fmt0(a.loan_payment)}/month loan payment ends in {paid}, and comes off your spending from {ends}.{/if}
+                {:else}Its {fmt0(a.loan_payment)}/month loan payment {paid == null || ends <= paid ? "stops when it's sold" : `ends in ${paid}`}{#if a.payment_counted},
+                  and comes off your spending from {ends}.{:else}. It isn't in your spending (no payment like it was counted as spending in the last
+                  6 months; a transfer isn't), so nothing comes off.{/if}{/if}
               </p>
             {/if}
           </li>
@@ -296,7 +297,7 @@
           <Input type="number" step="0.5" class="h-7 pr-6 text-sm" aria-label="Inflation" value={pctIn(plan.inflation)} oninput={(e) => setPct("inflation", e.currentTarget.value)} />
         </span> a year of inflation. A loan against it is paid down to the year of the sale when its monthly payment is set in
         Settings → Accounts (otherwise today's balance is taken off), and its payment comes off your spending once it's paid off or
-        sold. Proceeds are before selling costs (often 6–8% of a home's price) and tax.</p>
+        sold, if it was counted as spending rather than as a transfer. Proceeds are before selling costs (often 6–8% of a home's price) and tax.</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}
