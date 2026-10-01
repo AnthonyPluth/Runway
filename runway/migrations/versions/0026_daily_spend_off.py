@@ -12,12 +12,12 @@ down_revision = '0025'
 branch_labels = None
 depends_on = None
 
-# db.get_setting's test: a value that's there and not empty
-DONE = "SELECT 1 FROM settings WHERE key='migrated_daily_spend_off' AND value IS NOT NULL AND value <> ''"
 
 
 def upgrade() -> None:
-    op.execute(f"UPDATE accounts SET daily_spend=0 WHERE NOT EXISTS ({DONE})")
+    # Done already when the note is there and not empty (db.get_setting's test)
+    op.execute("UPDATE accounts SET daily_spend=0 WHERE NOT EXISTS (SELECT 1 FROM settings "
+               "WHERE key='migrated_daily_spend_off' AND value IS NOT NULL AND value <> '')")
     op.execute("DELETE FROM settings WHERE key='migrated_daily_spend_off'")
 
 
