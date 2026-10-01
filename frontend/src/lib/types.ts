@@ -102,6 +102,8 @@ export interface ForecastEvent {
   card_id?: string;
   /** A recurring item's id (in Bills & income). */
   recurring_id?: number;
+  /** A recurring payment that's partly come (in parts): what has, signed like amount; amount is the rest. */
+  paid_so_far?: number;
 }
 
 export interface CardSummary {

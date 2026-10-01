@@ -1,10 +1,11 @@
 """Recurring items: matching them to real transactions, and working out what the next one will be."""
 from __future__ import annotations
 
+import math
 import statistics
 from datetime import date, timedelta
 
-from sqlalchemy import func, insert, or_, select, update
+from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
 from . import db
 from .models import Account, Recurring, RecurringDismissed, Transaction
@@ -13,65 +14,114 @@ from .models import Account, Recurring, RecurringDismissed, Transaction
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
                      "semiannual": 12, "yearly": 12, "dates": 12}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
-# How far a payment's amount can be from the item's and still be linked to it automatically: a fixed bill barely
-# moves; one that varies (electricity) can swing more. Linking one Amazon charge to Prime shouldn't link every order.
-AMOUNT_TOLERANCE = {"fixed": 0.3}
-DEFAULT_TOLERANCE = 0.6
+CENT = 0.005
+# The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than this share away from it
+# (the same way, and within this share of each other).
+STALE_TOLERANCE = 0.3
+RECENT_PAYMENTS = 3
+# Paid within this share of an occurrence's amount, it's done (a paycheck a few dollars off); further short, the rest is
+# still expected while its matching window is open (a paycheck that came in two parts). Only for money in, or money out
+# paid less than half (a $15 charge near a $139 renewal): a bill that just came in cheaper is done, and so is anything
+# whose amount is learned from the payments (it varies by design).
+SHORTFALL = 0.1
 
 
-def match_text(item: dict) -> str:
-    return (item.get("match") or item.get("name") or "").strip().lower()
+def match_texts(item: dict) -> list[str]:
+    """The texts a transaction's payee or description can have to belong to this item, one per line of its merchant
+    text (its name when it has none), lowercased."""
+    out: list[str] = []
+    for line in (item.get("match") or item.get("name") or "").splitlines():
+        if (m := line.strip().lower()) and m not in out:
+            out.append(m)
+    return out
 
 
-def amount_range(item: dict) -> tuple[float, float] | None:
-    """The amounts (as positive dollars) a payment can have and still be linked to this item on its own."""
-    amount = abs(item.get("amount") or 0)
-    if amount < 0.005:
-        return None
-    tol = AMOUNT_TOLERANCE.get(item.get("amount_mode") or "fixed", DEFAULT_TOLERANCE)
-    return round(amount * (1 - tol), 2), round(amount * (1 + tol), 2)
+def clean_texts(value) -> str | None:
+    """Merchant texts as they're stored: one per line, lowercased, without blanks or repeats (None for none). Takes the
+    text as typed, or a list of texts."""
+    lines = value if isinstance(value, list) else str(value or "").splitlines()
+    return "\n".join(match_texts({"match": "\n".join(str(x) for x in lines)})) or None
+
+
+def has_text(texts: list[str]):
+    """SQL: the transaction's payee or description has one of these texts (none of them, with no texts)."""
+    t = Transaction
+    return or_(false(), *(db.instr(func.lower(func.coalesce(col, "")), m) > 0 for m in texts for col in (t.payee, t.description)))
+
+
+def fits_amount(item: dict, amount: float) -> bool:
+    """Whether a payment of `amount` is within the item's amount range (amount_min to amount_max, either may be unset)."""
+    lo, hi, a = item.get("amount_min"), item.get("amount_max"), abs(amount)
+    return (lo is None or a >= lo - CENT) and (hi is None or a <= hi + CENT)
+
+
+def amount_fits(item: dict):
+    """SQL: the transaction's amount is within the item's amount range (fits_amount)."""
+    t, lo, hi = Transaction, item.get("amount_min"), item.get("amount_max")
+    return and_(true(), *([func.abs(t.amount) >= lo - CENT] if lo is not None else []),
+                *([func.abs(t.amount) <= hi + CENT] if hi is not None else []))
 
 
 def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
-    """Link unlinked transactions to recurring items by merchant text, when the amount is close to the item's (see
-    amount_range). Money-in items only match money in, and money-out items only match money out.
+    """Link unlinked transactions to recurring items by merchant text: any of the item's texts, on its account, the
+    same way the money moves (money-in items only match money in, money-out items money out), and within the item's
+    amount range when it has one (so a "Prime" item matching "amazon" can leave the other orders alone).
     Transactions marked 'never match' (recurring_id = 0) and ones already linked are left alone."""
     q = select(Recurring).where(Recurring.active == 1)
     if recurring_ids:
         q = q.where(Recurring.id.in_(list(recurring_ids)))
-    items = sorted(db.rows(conn.execute(q)), key=lambda r: -len(match_text(r)))  # most specific first
+    items = sorted(db.rows(conn.execute(q)), key=lambda r: -max(map(len, match_texts(r)), default=0))  # most specific first
     linked = 0
     t = Transaction
     for item in items:
-        m = match_text(item)
-        if len(m) < 3:
+        texts = [m for m in match_texts(item) if len(m) >= 3]
+        if not texts:
             continue
-        span = amount_range(item)
         where = [t.recurring_id.is_(None), t.account_id == item["account_id"], t.amount > 0 if item["amount"] > 0 else t.amount < 0,
-                 or_(db.instr(func.lower(t.payee), m) > 0, db.instr(func.lower(t.description), m) > 0)]
-        if span:
-            where += [func.abs(t.amount) >= span[0], func.abs(t.amount) <= span[1]]
-        linked += conn.execute(update(t).where(*where).values(recurring_id=item["id"])).rowcount
+                 has_text(texts), amount_fits(item)]
+        linked += conn.execute(update(t).where(*where).values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
     return linked
 
 
-def link(conn, tx_id: str, recurring_id: int | None) -> None:
-    """Link a transaction to a recurring item (None = mark as not recurring). The item learns the merchant
-    text from the transaction if it doesn't have one, so future payments match on their own."""
+def link(conn, tx_id: str, recurring_id: int | None) -> str | None:
+    """Link a transaction to a recurring item (None = mark as not recurring). The item learns the merchant text from
+    the transaction if it doesn't have one, so future payments match on their own. When it has some and none is on this
+    transaction, and it's on the item's account, returns the transaction's text to offer as another (add_text); None
+    otherwise."""
     tx = _transaction(conn, tx_id)
     if not tx:
         raise ValueError("Transaction not found")
     if recurring_id is None:
-        conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=0))
-        return
+        conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=0, recurring_linked_by="you"))
+        return None
     item = conn.execute(select(Recurring).where(Recurring.id == recurring_id)).fetchone()
     if not item:
         raise ValueError("Recurring item not found")
-    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=recurring_id))
-    if not item["match"] and (tx["payee"] or tx["description"]):
-        conn.execute(update(Recurring).where(Recurring.id == recurring_id)
-                     .values(match=(tx["payee"] or tx["description"]).lower()))
-        auto_match(conn, [recurring_id])
+    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=recurring_id, recurring_linked_by="you"))
+    text = " ".join((tx["payee"] or tx["description"] or "").lower().split())
+    if not item["match"]:
+        if text:
+            conn.execute(update(Recurring).where(Recurring.id == recurring_id).values(match=text))
+            auto_match(conn, [recurring_id])
+        return None
+    if tx["account_id"] != item["account_id"]:
+        return None   # matching only looks on the item's own account, so the text wouldn't match anything there
+    hay = f"{tx['payee'] or ''} {tx['description'] or ''}".lower()
+    return text if len(text) >= 3 and not any(m in hay for m in match_texts(dict(item))) else None
+
+
+def add_text(conn, recurring_id: int, text: str) -> int:
+    """Add another merchant text to an item ("also match this from now on"), and link what it matches now. Returns how
+    many were linked."""
+    item = conn.execute(select(Recurring).where(Recurring.id == recurring_id)).fetchone()
+    if not item:
+        raise ValueError("Recurring item not found")
+    m = " ".join(str(text or "").lower().split())
+    if len(m) < 3:
+        raise ValueError("Use at least three letters of text")
+    texts = match_texts({"match": item["match"]}) if item["match"] else []
+    conn.execute(update(Recurring).where(Recurring.id == recurring_id).values(match=clean_texts([*texts, m])))
+    return auto_match(conn, [recurring_id])
 
 
 def _transaction(conn, tx_id: str):
@@ -85,8 +135,8 @@ def create_from_transaction(conn, tx_id: str, frequency: str = "monthly") -> int
     name = tx["payee"] or tx["description"] or "Recurring item"
     rid = conn.execute(insert(Recurring).values(
         name=name, account_id=tx["account_id"], amount=tx["amount"], frequency=frequency, anchor_date=tx["posted"],
-        match=name.lower(), amount_mode="fixed")).lastrowid
-    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=rid))
+        match=name.lower(), amount_mode="fixed", amount_since=date.today().isoformat())).lastrowid
+    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(recurring_id=rid, recurring_linked_by="you"))
     auto_match(conn, [rid])
     return rid
 
@@ -104,26 +154,91 @@ def with_account_name():
             .outerjoin(Account, Account.id == Recurring.account_id))
 
 
+def _same_way(item: dict, payments: list[dict]) -> list[dict]:
+    """The payments that move money the item's way (money in for a paycheck, out for a bill); all of them for an item
+    without an amount, which learns even its direction from them."""
+    if abs(item["amount"] or 0) < CENT:
+        return payments
+    return [p for p in payments if (p["amount"] > 0) == (item["amount"] > 0)]
+
+
+def by_occurrence(item: dict, payments: list[dict]) -> list[tuple[date | None, list[dict]]]:
+    """Payments (posted, amount) grouped by the occurrence each was for: the scheduled date nearest it within the
+    matching window (the earlier on a tie, so two windows that overlap don't both count it). One outside every window
+    is a group of its own, with no date. Newest group first."""
+    from . import forecast   # forecast imports this module
+
+    if not payments:
+        return []
+    window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
+    days = [date.fromisoformat(p["posted"]) for p in payments]
+    occs = forecast.occurrences(item, min(days) - timedelta(days=window + 1), max(days) + timedelta(days=window))
+    groups: dict[date | int, list[dict]] = {}
+    for i, (p, d) in enumerate(zip(payments, days, strict=True)):
+        near = min(occs, key=lambda o: (abs((o - d).days), o), default=None)
+        groups.setdefault(near if near is not None and abs((near - d).days) <= window else i, []).append(p)
+    out = [(k if isinstance(k, date) else None, ps) for k, ps in groups.items()]
+    return sorted(out, key=lambda g: max(p["posted"] for p in g[1]), reverse=True)
+
+
+def paid_by_occurrence(item: dict, history: list[dict]) -> dict[date, float]:
+    """What's been paid toward each occurrence (signed like the item's amount; pending payments count): the item's
+    linked payments that move money its way, grouped by by_occurrence."""
+    return {occ: round(sum(p["amount"] for p in ps), 2) for occ, ps in by_occurrence(item, _same_way(item, history)) if occ}
+
+
+def still_due(item: dict, occurrence: date, paid: dict[date, float], today: date, amount: float,
+              edited: bool = False) -> float | None:
+    """What's still expected for an occurrence: `amount` until something's been paid toward it (`paid`, from
+    paid_by_occurrence), then what's left, while its matching window is open, for a fixed amount or one you `edited`
+    (see SHORTFALL). Paid to within SHORTFALL of the amount, or once the window has closed, nothing is (None): money
+    that came up short isn't expected late."""
+    window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
+    if today > occurrence + timedelta(days=window):
+        return None
+    got = paid.get(occurrence, 0.0)
+    if abs(got) < CENT:
+        return amount
+    if not edited and (item.get("amount_mode") or "fixed") != "fixed":
+        return None   # a learned amount varies: whatever came is this time's
+    if amount < 0 and abs(got) >= abs(amount) / 2:
+        return None   # a bill that came in cheaper, not a first part
+    left = round(amount - got, 2)
+    return left if left * amount > 0 and abs(left) > SHORTFALL * abs(amount) else None
+
+
 def expected_amount(item: dict, history: list[dict]) -> float:
-    """Fixed amount, or learn it from recent real payments (handy for bills that vary)."""
-    posted = [t["amount"] for t in history if not t["pending"]]
+    """Fixed amount, or learn it from recent real payments (handy for bills that vary): what the last occurrence came
+    to, or the average of the last three, counting one paid in parts as its total."""
     mode = item.get("amount_mode") or "fixed"
-    if mode == "last" and posted:
-        return round(posted[0], 2)
-    if mode == "avg3" and posted:
-        return round(statistics.mean(posted[:3]), 2)
+    if mode in ("last", "avg3"):
+        posted = [sum(p["amount"] for p in ps) for _, ps in by_occurrence(item, _same_way(item, [t for t in history if not t["pending"]]))]
+        if posted:
+            return round(posted[0] if mode == "last" else statistics.mean(posted[:3]), 2)
     return round(item["amount"], 2)
 
 
-def already_happened(item: dict, occurrence: date, history: list[dict], today: date) -> bool:
-    """True if a real payment for this occurrence has already shown up (early, on time or a little late): one within its
-    matching window either side of the date. A payment from after the window belongs to a later occurrence."""
-    window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
-    if occurrence - timedelta(days=window) > today:
-        return False  # too far out for anything to have posted yet
-    lo = (occurrence - timedelta(days=window)).isoformat()
-    hi = min(today, occurrence + timedelta(days=window)).isoformat()
-    return any(lo <= t["posted"] <= hi for t in history)
+def stale_amount(item: dict, history: list[dict], today: date | None = None) -> float | None:
+    """For a fixed-amount item whose latest payments all came to something else (a raise, a new rate), what they came to
+    on average: the amount to suggest instead. It looks at the last RECENT_PAYMENTS occurrences paid since the amount was
+    last set (each one's total, when it came in parts; not one whose window is still open, which may have more to come):
+    at least two, all more than STALE_TOLERANCE off the amount the same way, and close to each other. None otherwise."""
+    amount = abs(item["amount"] or 0)
+    if (item.get("amount_mode") or "fixed") != "fixed" or amount < CENT:
+        return None
+    today = today or date.today()
+    window = timedelta(days=MATCH_WINDOW_DAYS.get(item["frequency"], 6))
+    since = item.get("amount_since") or ""
+    payments = _same_way(item, [t for t in history if not t["pending"] and t["posted"] >= since])
+    totals = [abs(sum(p["amount"] for p in ps)) for occ, ps in by_occurrence(item, payments)
+              if occ is None or occ + window < today][:RECENT_PAYMENTS]
+    lo, hi = amount * (1 - STALE_TOLERANCE), amount * (1 + STALE_TOLERANCE)
+    if len(totals) < 2 or not (all(t < lo for t in totals) or all(t > hi for t in totals)):
+        return None
+    level = statistics.mean(totals)
+    if any(abs(t - level) > STALE_TOLERANCE * level for t in totals):
+        return None   # all over the place: no one amount to offer
+    return math.copysign(round(level, 2), item["amount"])
 
 
 LOOKBACK_DAYS = 60
@@ -133,7 +248,8 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     """Scheduled occurrences in the last `lookback` days with no matching transaction by now.
 
     An occurrence counts as missed once its matching window has passed (e.g. 6 days for a monthly bill) without a
-    linked transaction within that window either side of the date. Occurrences before the item's start date, before
+    linked transaction within that window either side of the date (one that came in short, or in parts, isn't missed:
+    something arrived). Occurrences before the item's start date, before
     the account's synced history begins, or that you've dismissed are skipped."""
     from . import forecast   # forecast imports this module
 

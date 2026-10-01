@@ -23,7 +23,9 @@
 
   async function change(e: ForecastEvent, value: number) {
     try {
-      await api("/api/overrides", { method: "POST", body: { key: e.key, amount: (e.amount < 0 ? -1 : 1) * value } });
+      // An edit is what the occurrence comes to in all: on "the rest" of one paid in parts, what's paid so far is added.
+      const total = value + Math.abs(e.paid_so_far ?? 0);
+      await api("/api/overrides", { method: "POST", body: { key: e.key, amount: (e.amount < 0 ? -1 : 1) * total } });
       toast.success("Updated for this date only");
       reload();
     } catch (err) { toast.error((err as Error).message); }
@@ -59,7 +61,8 @@
           {#if e.estimated}
             <Badge variant="secondary" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
           {/if}
-          {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and hasn't shown up yet`}>late</Badge>{/if}
+          {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
+          {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
         </div>
         <div class="truncate text-[13px] text-muted-foreground tabular-nums">

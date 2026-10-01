@@ -167,14 +167,14 @@ def owed(account: dict, balance: float | None = None) -> float:
 
 def paid_by_recurring(items: list[dict]):
     """A test for whether a transaction looks like a payment for one of these recurring items without being linked to
-    it: its payee or description has the item's match text and its amount is close to the item's (recurring.amount_range,
-    the tolerance linking uses; any amount for an item without one). So a "Prime" item matching "amazon" leaves the rest
-    of the Amazon orders alone."""
-    rules = [(m, rec.amount_range(r)) for r in items if (m := rec.match_text(r))]
+    it: its payee or description has one of the item's texts and its amount is within the item's amount range, if it has
+    one (recurring.fits_amount, as matching does). So a "Prime" item matching "amazon" with a range leaves the rest of the
+    Amazon orders alone."""
+    rules = [(texts, r) for r in items if (texts := rec.match_texts(r))]
 
     def test(t: dict) -> bool:
         hay = f"{t['payee'] or ''} {t['description'] or ''}".lower()
-        return any(m in hay and (span is None or span[0] <= abs(t["amount"]) <= span[1]) for m, span in rules)
+        return any(any(m in hay for m in texts) and rec.fits_amount(r, t["amount"]) for texts, r in rules)
     return test
 
 
@@ -483,6 +483,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         edit = overrides.get(key, overrides.get(old_key))
         return abs(edit) if shown and info["pay_mode"] != "full" and edit is not None else planned
 
+    rec_overrides = {k: v for k, v in overrides.items() if k.startswith("rec:")}
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
@@ -492,23 +493,33 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
-            like = "%" + (item["match"] or item["name"] or "").lower().replace("%", "").replace("_", "") + "%"
+            like = "%" + next(iter(rec.match_texts(item)), "").replace("%", "").replace("_", "") + "%"
             cat_row = conn.execute(
                 select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None), func.length(like) > 4,
                                          or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
                 .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
+        # One that's partly paid (a paycheck in two deposits, early or on time) leaves the rest expected the same way,
+        # until the window closes; what's paid is in the balance already (see recurring.still_due).
         window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
         first_tx = conn.execute(select(func.min(T.posted)).where(T.account_id == item["account_id"])).fetchone()[0]
         since = max(today - timedelta(days=window + 1), _d(first_tx) + timedelta(days=window) if first_tx else today)
+        paid = rec.paid_by_occurrence(item, history)
         for d in occurrences(item, min(since, today - timedelta(days=1)), end):
-            if rec.already_happened(item, d, history, today):
+            key = f"rec:{item['id']}:{d.isoformat()}"
+            # A one-off edit is what this occurrence comes to in all, so what's paid toward it comes off the edit too.
+            edited = rec_overrides.get(key)
+            left = rec.still_due(item, d, paid, today, amount if edited is None else round(edited, 2), edited is not None)
+            if left is None:
                 continue  # this one already posted (possibly early), don't count it twice
+            usual_left = rec.still_due(item, d, paid, today, amount)
             events.append({"date": max(d, today).isoformat(), "account_id": item["account_id"], "name": item["name"],
-                           "amount": amount, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
-                           "recurring_id": item["id"], "key": f"rec:{item['id']}:{d.isoformat()}",
-                           "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {})})
+                           "amount": left, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
+                           "recurring_id": item["id"], "key": key,
+                           "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {}),
+                           **({"paid_so_far": paid[d]} if abs(paid.get(d, 0.0)) >= rec.CENT else {}),
+                           **({"original_amount": usual_left if usual_left is not None else 0.0, "overridden": True} if edited is not None else {})})
 
     for card in cards:
         label = db.account_label(card)
@@ -647,7 +658,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         except OperationalError:
             pass
     for e in events:
-        if e.get("key") in overrides:
+        if e.get("key") in overrides and not e.get("overridden"):   # recurring items' edits are applied above
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
     # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
@@ -893,7 +904,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
-    known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute(select(Recurring))]
+    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) for m in rec.match_texts(r)]
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)

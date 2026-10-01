@@ -145,7 +145,7 @@ describe("Recurring page", () => {
     it("keeps account, amount to forecast and merchant text under More options, with a line of help each", async () => {
       await open();
       expect(screen.getByText("More options")).toBeInTheDocument();
-      expect(screen.getByText("Text that appears on the bank statement, e.g. COMED. Leave blank to use the name.")).toBeInTheDocument();
+      expect(screen.getByText("Text on the bank statement, e.g. COMED. One per line to match any of them; blank uses the name.")).toBeInTheDocument();
       expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveDescription(/Use the recent payments/);
       expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
     });
@@ -359,6 +359,94 @@ describe("Recurring page", () => {
       expect(screen.getByText("monthly · next May 1 · 3 matched")).toBeInTheDocument();
     });
 
+    it("offers the recent payments' amount when they all missed a fixed amount, and saves it when you take it", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47 })], [], { "/api/recurring/1": { linked: 0 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      expect(screen.getByText("The last payments were about $2,100, not $5,000.")).toBeInTheDocument();
+      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());   // nothing changes until you say so
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ method: "POST", body: expect.objectContaining({ amount: 2100, amount_mode: "fixed" }) })));
+      expect(screen.getAllByRole("spinbutton", { name: /Amount/ })[0]).toHaveValue(2100);
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
+    });
+
+    it("shows the range where the server moved it with the new amount", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47, amount_min: 3500, amount_max: 6500 })],
+        [], { "/api/recurring/1": { linked: 1, amount_min: 1470, amount_max: 2730 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      expect(screen.getByLabelText("Smallest amount")).toHaveValue(3500);
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
+      await waitFor(() => expect(screen.getByLabelText("Smallest amount")).toHaveValue(1470));
+      expect(screen.getByLabelText("Largest amount")).toHaveValue(2730);
+    });
+
+    it("stops offering the amount once you type your own", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47 })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      const amount = screen.getAllByRole("spinbutton", { name: /Amount/ })[0];
+      await userEvent.clear(amount);
+      await userEvent.type(amount, "2500");
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();   // not "about $2,100, not $2,500"
+      await userEvent.clear(amount);
+      await userEvent.type(amount, "5000");
+      expect(screen.getByText("The last payments were about $2,100, not $5,000.")).toBeInTheDocument();
+    });
+
+    it("keeps offering the amount when saving it fails, with the old amount back", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47 })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
+      expect(screen.getAllByRole("spinbutton", { name: /Amount/ })[0]).toHaveValue(5000);
+      expect(screen.getByRole("button", { name: "Use $2,100" })).toBeInTheDocument();
+    });
+
+    it("saves an amount range, and says when its ends are the wrong way round", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, amount_min: 3500, amount_max: 6500 })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      const lo = screen.getAllByRole("spinbutton", { name: "Smallest amount" })[0], hi = screen.getAllByRole("spinbutton", { name: "Largest amount" })[0];
+      expect(lo).toHaveValue(3500);
+      expect(hi).toHaveAccessibleDescription("Leave blank to match any amount with the text.");
+      await userEvent.clear(lo);
+      await userEvent.type(lo, "1500");
+      await userEvent.tab();
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ body: expect.objectContaining({ amount_min: 1500, amount_max: 6500 }) })));
+      vi.mocked(api).mockClear();
+      await userEvent.clear(hi);
+      await userEvent.type(hi, "1000");
+      await userEvent.tab();
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not saved yet. The largest amount is smaller than the smallest."));
+      expect(hi).toHaveAttribute("aria-invalid", "true");
+      expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());
+      await userEvent.clear(hi);
+      await userEvent.tab();   // blank: any amount up from $1,500
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ body: expect.objectContaining({ amount_min: 1500, amount_max: null }) })));
+    });
+
+    it("keeps several merchant texts, one per line", async () => {
+      serve([item({ name: "Paycheck", amount: 5000, match: "acme" })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Paycheck"));
+      const texts = screen.getAllByRole("textbox", { name: "Merchant text" })[0];
+      await userEvent.type(texts, "{Enter}online transfer from savings");
+      await userEvent.tab();
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ body: expect.objectContaining({ match: "acme\nonline transfer from savings" }) })));
+    });
+
+    it("doesn't offer an amount when there's no suggestion, or the amount already follows the payments", async () => {
+      serve([item(), item({ id: 2, name: "Electric", amount_mode: "avg3", suggested_amount: -80 })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByText("Electric"));
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
+    });
+
     it("removes an item after a confirmation that says what it does, then reloads the page", async () => {
       serve([item({ matched_count: 14 })]);
       render(Recurring);
@@ -385,11 +473,18 @@ describe("Recurring page", () => {
     });
 
     it("shows the transactions it matched, and hides them again", async () => {
-      serve([item({ matched_count: 2 })], [], { "/api/transactions?recurring=1&limit=50": { items: [{ id: "t1", posted: "2026-03-01", description: "RENT PAYMENT", amount: -1500 }] } });
+      serve([item({ matched_count: 3 })], [], { "/api/transactions?recurring=1&limit=50": { items: [
+        { id: "t1", posted: "2026-03-01", description: "RENT PAYMENT", amount: -1500, recurring_linked_by: "you" },
+        { id: "t2", posted: "2026-02-01", description: "RENT PMT", amount: -1500, recurring_linked_by: "auto" },
+        { id: "t3", posted: "2026-01-01", description: "OLD RENT", amount: -1500, recurring_linked_by: null }] } });
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
       await userEvent.click(screen.getByRole("button", { name: "Show matched transactions" }));
       expect(await screen.findByText("RENT PAYMENT")).toBeInTheDocument();
+      // How each got linked (nothing for one from before Runway kept it).
+      const rows = screen.getAllByRole("row");
+      expect(rows.map((r) => r.textContent)).toEqual([expect.stringContaining("RENT PAYMENTlinked by you"),
+        expect.stringContaining("RENT PMTmatched automatically"), expect.stringMatching(/OLD RENT-?\$1,500/)]);
       await userEvent.click(screen.getByRole("button", { name: "Hide matched transactions" }));
       expect(screen.queryByText("RENT PAYMENT")).not.toBeInTheDocument();
     });

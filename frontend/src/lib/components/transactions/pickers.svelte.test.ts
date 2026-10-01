@@ -13,7 +13,7 @@ import { tx } from "../../../test/fixtures";
 import LogoPicker from "./LogoPicker.svelte";
 import RecurringPicker from "./RecurringPicker.svelte";
 import RememberBar from "./RememberBar.svelte";
-import { askRemember, closeRemember, remember } from "./remember.svelte";
+import { askAlsoMatch, askRemember, closeRemember, remember } from "./remember.svelte";
 import Upcoming from "./Upcoming.svelte";
 import { createRawSnippet } from "svelte";
 
@@ -65,6 +65,15 @@ describe("RecurringPicker", () => {
     await userEvent.selectOptions(select(), "new:weekly");
     expect(api).toHaveBeenCalledWith("/api/transactions/t1/recurring", { method: "POST", body: { new: "weekly" } });
     expect(toast.success).toHaveBeenCalledWith("Recurring item created; edit it on the Recurring tab");
+  });
+
+  it("offers to match the transaction's text from now on when none of the item's is on it", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, suggest_text: "online transfer from savings" });
+    const { onchanged } = setup();
+    await userEvent.selectOptions(select(), "1");
+    expect(remember.match).toEqual({ recurringId: 1, name: "Coffee club", text: "online transfer from savings", reload: onchanged });
+    expect(toast.success).not.toHaveBeenCalled();   // the question says it's linked
+    closeRemember();
   });
 
   it("marks a transaction as not recurring", async () => {
@@ -120,6 +129,31 @@ describe("RememberBar", () => {
     askRemember("t1", "Coffee", { merchant: "Blue Bottle" }, vi.fn());
     await userEvent.click(await screen.findByRole("button", { name: "Always" }));
     expect(api).toHaveBeenCalledWith("/api/transactions/t1/category", { method: "POST", body: { category: "Coffee", remember: true } });
+  });
+
+  it("asks whether to match a linked transaction's text from now on, and adds it when you say so", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true, linked: 2 });
+    const reload = vi.fn();
+    render(RememberBar);
+    askAlsoMatch(1, "Paycheck", "online transfer from savings", reload);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Linked to Paycheck. Also match “online transfer from savings” from now on?");
+    await userEvent.click(screen.getByRole("button", { name: "Also match" }));
+    expect(api).toHaveBeenCalledWith("/api/recurring/1/match", { method: "POST", body: { text: "online transfer from savings" } });
+    expect(toast.success).toHaveBeenCalledWith("Paycheck also matches “online transfer from savings” now · 2 more linked");
+    expect(reload).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("'Just this one' leaves the item's texts alone; a failure to add says so", async () => {
+    render(RememberBar);
+    askAlsoMatch(1, "Paycheck", "churn", vi.fn());
+    await userEvent.click(await screen.findByRole("button", { name: "Just this one" }));
+    expect(remember.match).toBeNull();
+    expect(api).not.toHaveBeenCalled();
+    vi.mocked(api).mockRejectedValue(new Error("Use at least three letters of text"));
+    askAlsoMatch(1, "Paycheck", "churn", vi.fn());
+    await userEvent.click(await screen.findByRole("button", { name: "Also match" }));
+    expect(toast.error).toHaveBeenCalledWith("Use at least three letters of text");
   });
 
   it("closes on Escape", async () => {
