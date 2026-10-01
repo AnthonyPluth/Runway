@@ -217,14 +217,12 @@
         ondblclick={() => (view = null)}
         use:sideways={move} />
     </svg>
-    <div class="mt-1 flex min-h-7 items-center justify-between gap-3 text-xs text-muted-foreground">
-      {#if view}
+    {#if view}
+      <div class="mt-1 flex min-h-7 items-center justify-between gap-3 text-xs text-muted-foreground">
         <span class="tabular-nums">Showing {zoomLabel}</span>
         <button type="button" class="cursor-pointer rounded-full bg-muted px-3 py-1 font-medium text-foreground hover:bg-accent" onclick={() => (view = null)}>Reset zoom</button>
-      {:else}
-        <span><span class="[@media(hover:none)]:hidden">Drag across the chart to zoom in</span><span class="hidden [@media(hover:none)]:inline">Touch and hold, then drag, to zoom in</span></span>
-      {/if}
-    </div>
+      </div>
+    {/if}
     {#if hover != null}
       <div bind:this={tipEl} class="pointer-events-none absolute z-10 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
         style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>

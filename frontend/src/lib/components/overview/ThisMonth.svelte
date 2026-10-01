@@ -63,6 +63,7 @@
       </div>
     </Group>
 
+    {#if budgets.length}
     <Group title="Budgets" inset="3.75rem">
       {#snippet action()}<a href="#budget" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each budgets as b (b.name)}
@@ -81,11 +82,11 @@
               {b.pct > 1 ? `${fmt0(b.spent - (b.available ?? b.budget!))} over` : `${fmt0((b.available ?? b.budget!) - b.spent)} left`} of {fmt0(b.available ?? b.budget)}</span>
           </span>
         </button>
-      {:else}
-        <p class="cell text-sm text-muted-foreground">No budgets yet.&nbsp;<a class="font-medium text-primary" href="#budget">Set one</a>&nbsp;to see how you're tracking.</p>
       {/each}
     </Group>
+    {/if}
 
+    {#if latest.items.length}
     <Group title="Recent" inset="3.75rem">
       {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each latest.items as t (t.id)}
@@ -99,10 +100,9 @@
           </span>
           <span class={cn("text-[15px] tabular-nums", t.amount > 0 && "text-emerald-400")}>{fmt(t.amount)}</span>
         </div>
-      {:else}
-        <p class="cell text-sm text-muted-foreground">Nothing yet.</p>
       {/each}
     </Group>
+    {/if}
   </div>
 {:catch}
   <!-- The forecast is the main thing; if this part can't load, it just isn't shown. -->

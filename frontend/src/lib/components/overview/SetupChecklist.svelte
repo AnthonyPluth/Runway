@@ -55,8 +55,7 @@
             {#if step.done}<Check class="size-4" aria-label="Done" />{:else}{i + 1}{/if}
           </span>
           <div class="min-w-0 flex-1">
-            <div class={cn("text-sm font-medium", step.done && "text-muted-foreground line-through decoration-muted-foreground/50")}>{step.title}</div>
-            {#if !step.done}<p class="text-xs text-muted-foreground">{step.text}</p>{/if}
+            <div class={cn("text-sm font-medium", step.done && "text-muted-foreground line-through decoration-muted-foreground/50")} title={step.done ? undefined : step.text}>{step.title}</div>
           </div>
           {#if !step.done && step.hint}
             <span class="flex shrink-0 flex-col items-end gap-1">
