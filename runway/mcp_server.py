@@ -297,7 +297,7 @@ _CATEGORY = {"type": "string", "description": "An existing category's name, exac
 
 CATEGORIZE_TOOLS: list[dict[str, Any]] = [
     _write_tool("set_transaction_category", "Set a transaction's category (it's then marked reviewed). With remember, also use "
-                "it for this merchant from now on, and for its other transactions still to review. A split transaction is "
+                "it for this merchant from now on, and for its other transactions still to review. If it paid for an order, every item of the order gets the category too. A split transaction is "
                 "refused: it's changed in Runway itself. The reply's `was` is what it had before (for telling the person, "
                 "not a full undo).",
                 _categorize("transactions/{id}/category", "transaction_id", text_id=True),
