@@ -38,7 +38,7 @@ export default defineConfig({
       // The release itself (its commits, when it's done) is made by the release workflow, for the server's project too.
       release: { name: process.env.RUNWAY_VERSION || undefined, create: false, finalize: false, setCommits: false },
       sourcemaps: { filesToDeleteAfterUpload: ["../runway/static/app/**/*.map"] },
-      bundleSizeOptimizations: { excludeDebugStatements: true, excludeReplayWorker: true },   // the worker isn't used (monitoring.ts)
+      bundleSizeOptimizations: { excludeDebugStatements: true, excludeReplayWorker: true },   // Session Replay is never used (monitoring.ts)
     }),
   ],
   resolve: { alias: { $lib: path.resolve("./src/lib") } },

@@ -7,9 +7,9 @@ sent to the AI only on its own spans: its prompts and replies); credentials in a
 them) and Plaid tokens are blanked wherever they turn up.
 
 Once SENTRY_DSN is set, everything is on, at full rate (it's your own Sentry project, for your own household): errors,
-tracing, profiling, session replays (text, inputs and images masked), Sentry Logs, metrics (sync durations, new
-transactions, AI tokens), a Cron Monitor for the daily bank sync, a "Send feedback" link in Settings, who's signed in
-(as a stable code that doesn't say who; see user_id) and the AI's prompts and replies on its spans. The settings:
+tracing, profiling, Sentry Logs, metrics (sync durations, new transactions, AI tokens), a Cron Monitor for the daily
+bank sync, a "Send feedback" link in Settings, who's signed in (as a stable code that doesn't say who; see user_id) and
+the AI's prompts and replies on its spans. Runway never records sessions or sends replays. The settings:
 
   SENTRY_DSN           the server's reports (from your Sentry project's Client Keys)
   SENTRY_BROWSER_DSN   the web app's reports; defaults to SENTRY_DSN (RUNWAY_SENTRY_BROWSER=0 turns them off)
@@ -169,11 +169,16 @@ def _before_send_log(entry, _hint):
 RETIRED = ("SENTRY_TRACES_SAMPLE_RATE", "SENTRY_PROFILE_SESSION_SAMPLE_RATE", "SENTRY_REPLAY_SAMPLE_RATE",
            "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE", "SENTRY_LOGS", "SENTRY_METRICS", "SENTRY_CRONS", "SENTRY_FEEDBACK",
            "SENTRY_USER", "SENTRY_AI_CONTENT")
+# Session Replay isn't something Runway does at all: it never records sessions or sends replays. So these are warned
+# about whatever they're set to, on included, rather than quietly doing nothing.
+NEVER = ("SENTRY_REPLAY_SAMPLE_RATE", "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE")
 
 
 def retired_off() -> list[str]:
-    """The retired settings set to something other than on (0, false, off, 0.5, ...)."""
-    return [k for k in RETIRED if (v := (os.environ.get(k) or "").strip().lower()) and v not in ("1", "1.0", "true", "yes", "on")]
+    """The retired settings that are set: the replay ones to anything, the rest to something other than on (0, false,
+    off, 0.5, ...)."""
+    return [k for k in RETIRED if (v := (os.environ.get(k) or "").strip().lower())
+            and (k in NEVER or v not in ("1", "1.0", "true", "yes", "on"))]
 
 
 def init() -> bool:
@@ -182,9 +187,9 @@ def init() -> bool:
     dsn = (os.environ.get("SENTRY_DSN") or "").strip()
     if (dsn or browser_dsn()) and (off := retired_off()):   # the web app can report with its own DSN alone
         sys.stderr.write(f"Warning: {', '.join(off)} {'is' if len(off) == 1 else 'are'} no longer read. With a Sentry DSN "
-                         "set, Runway sends everything to Sentry: traces, profiles, replays, logs, metrics, crons, feedback, "
-                         "who's signed in (as a code) and the AI's prompts and replies. Unset SENTRY_DSN and "
-                         "SENTRY_BROWSER_DSN to send nothing.\n")
+                         "set, Runway sends everything to Sentry: traces, profiles, logs, metrics, crons, feedback, "
+                         "who's signed in (as a code) and the AI's prompts and replies. It never records sessions or "
+                         "sends replays. Unset SENTRY_DSN and SENTRY_BROWSER_DSN to send nothing.\n")
         sys.stderr.flush()
     if not dsn:
         return False
