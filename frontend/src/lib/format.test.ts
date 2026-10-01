@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmt, fmt0, fmtDate, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
+import { barWidth, fmt, fmt0, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
@@ -116,5 +116,28 @@ describe("pct", () => {
     expect(pct(0.995)).toBe(">99%");
     expect(pct(0.999)).toBe(">99%");
     expect(pct(1)).toBe("100%");
+  });
+});
+
+describe("barWidth", () => {
+  it("turns a share into a width clamped to 0–100% and rounded to a tenth", () => {
+    expect(barWidth(0)).toBe("0%");
+    expect(barWidth(1 / 3)).toBe("33.3%");
+    expect(barWidth(1)).toBe("100%");
+    expect(barWidth(1.5)).toBe("100%");
+    expect(barWidth(-1)).toBe("0%");
+    expect(barWidth(Infinity)).toBe("100%");   // spent something against nothing: full
+  });
+  it("is an empty bar with no share", () => {
+    expect(barWidth(NaN)).toBe("0%");
+    expect(barWidth(null)).toBe("0%");
+    expect(barWidth(undefined)).toBe("0%");
+  });
+});
+
+describe("fmtDateTime", () => {
+  it("shows the day and time in the local zone", () => {
+    // 21:54 UTC is 5:54 PM in New York, the zone `npm test` runs in.
+    expect(fmtDateTime(new Date("2026-09-28T21:54:00Z"))).toBe("Sep 28, 5:54 PM");
   });
 });

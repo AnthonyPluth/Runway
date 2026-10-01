@@ -17,7 +17,7 @@
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { fmt, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
 
   const month = thisMonth();
@@ -74,7 +74,7 @@
               <span class={cn("tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{Math.round(b.pct * 100)}%</span>
             </span>
             <span class="mt-1.5 block h-1 overflow-hidden rounded-full bg-muted">
-              <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={`${Math.min(100, b.pct * 100)}%`}
+              <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={barWidth(b.pct)}
                 style:background={b.pct > 1 ? undefined : catLook(b.name).color}></span>
             </span>
             <span class="mt-1 block text-[13px] text-muted-foreground tabular-nums">
