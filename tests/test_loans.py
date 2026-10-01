@@ -173,7 +173,7 @@ class SellableTests(LedgerCase):
                                            "cliff_months": 12})
         e = self.sellable("equity:")
         self.assertEqual(e["value_by_year"], [12_000, 24_000, 36_000, 48_000])
-        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, 0))
+        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, None))   # keeps pace with inflation
 
     def test_equity_with_nothing_vested_yet_is_offered_if_it_will_vest(self):
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})

@@ -137,7 +137,7 @@ describe("RetirementPlanner", () => {
 
     it("keeps inflation with the assumptions, with or without homes to sell (it also gives future dollars)", () => {
       setup(data({ assets: [homeAsset()] }));
-      expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("section")).toHaveTextContent("Assumptions");
+      expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("details")).toHaveTextContent("Assumptions");
       expect(screen.getByText(/taking off inflation \(2\.5% a year, under Assumptions\)/)).toBeInTheDocument();
       cleanup();
       setup();
@@ -287,7 +287,7 @@ describe("RetirementPlanner", () => {
     });
 
     it("shows equity vested by the year it's sold", () => {
-      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: 0, owed: 0,
+      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: null, owed: 0,
         value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
       setup(data({ assets: [acme] }, { inflation: 0, assets: [{ key: "equity:acme", sell_year: 2030 }] }));
       expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
@@ -301,32 +301,31 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
     });
 
-    it("says when a loan's payment ends and comes off spending", async () => {
+    it("says in plain words when a loan's payment in spending ends, and when the plan takes it off", async () => {
       // $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045
       setup(data({ assets: [repaying()] }));
-      expect(screen.getByText("Its $1,500/month loan payment ends in 2045, and comes off your spending from 2046.")).toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2045; from 2046 the plan takes it off."))
+        .toBeInTheDocument();
       await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));   // sold in 2051: paid off before then
-      expect(screen.getByText(/ends in 2045, and comes off your spending from 2046/)).toBeInTheDocument();
+      expect(screen.getByText(/until it’s paid off in 2045; from 2046 the plan takes it off/)).toBeInTheDocument();
       const year = screen.getByDisplayValue("2051");
       await userEvent.clear(year);
       await userEvent.type(year, "2040");
-      expect(screen.getByText("Its $1,500/month loan payment stops when it’s sold, and comes off your spending from 2040.")).toBeInTheDocument();
-    });
-
-    it("under spending, says Runway's figure is less a loan's payment once it's paid off", () => {
-      setup(data({ assets: [repaying()] }));
-      expect(screen.getByText("Runway's figure, from your last six months; less $18,000 a year once the loan on Home is paid off in 2045."))
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s sold in 2040; from 2040 the plan takes it off."))
         .toBeInTheDocument();
     });
 
-    it("in future dollars, says what comes off spending in that year's dollars; the projection doesn't change", async () => {
+    it("under spending, says Runway's figure includes a loan's payment until it ends", () => {
+      setup(data({ assets: [repaying()] }));
+      expect(screen.getByText(/^Runway's figure, from your last six months\. It includes the \$1,500\/month payment on Home, until it’s paid off in 2045: the plan takes it off once it ends\.$/))
+        .toBeInTheDocument();
+    });
+
+    it("in future dollars, says the same about loan payments; the projection's odds don't change", async () => {
       setup(data({ assets: [repaying()] }));
       const odds = screen.getByText(/^\d+%$/).textContent;
       await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
-      // $18,000 a year in today's dollars is $29,495 in 2046's, at 2.5% a year
-      expect(screen.getByText("Runway's figure, from your last six months; less $29,495 a year (2046 dollars) once the loan on Home is paid off in 2045."))
-        .toBeInTheDocument();
-      expect(screen.getByText("Its $1,500/month loan payment ends in 2045, and comes off your spending from 2046.")).toBeInTheDocument();
+      expect(screen.getByText(/It includes the \$1,500\/month payment on Home, until it’s paid off in 2045/)).toBeInTheDocument();
       expect(screen.getByText(/^\d+%$/).textContent).toBe(odds);
     });
 
@@ -336,14 +335,15 @@ describe("RetirementPlanner", () => {
       const field = screen.getByRole("spinbutton", { name: "Yearly spending in retirement" });
       await user.clear(field);
       await user.type(field, "48000");
-      expect(screen.getByText(/^Your own figure, so loan payments aren't taken off it when they end/)).toBeInTheDocument();
-      expect(screen.getByText(/ends in 2045\. Your own spending figure is taken as it is, so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.getByText(/^Your own figure, taken as it is: loan payments aren't added to it or taken off it\./)).toBeInTheDocument();
+      expect(screen.getByText(/goes on until it’s paid off in 2045\. Your own spending figure is taken as it is, so make sure it has the payment in for those years\.$/))
+        .toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(800);
       let body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
       expect([body.spending, body.spending_own]).toEqual([48000, true]);
       await user.click(screen.getByRole("button", { name: "Use Runway's figure" }));
       expect(field).toHaveValue(55000);
-      expect(screen.getByText(/^Runway's figure, from your last six months; less \$18,000 a year/)).toBeInTheDocument();
+      expect(screen.getByText(/^Runway's figure, from your last six months\. It includes the \$1,500\/month payment/)).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(800);
       body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
       expect([body.spending, body.spending_own]).toEqual([55000, false]);
@@ -352,35 +352,64 @@ describe("RetirementPlanner", () => {
     it("keeps a saved plan's own spending figure as it is", () => {
       setup(data({ assets: [repaying()] }, { spending_own: true }));
       expect(screen.getByRole("button", { name: "Use Runway's figure" })).toBeInTheDocument();
-      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
     });
 
-    it("says when a loan's payment isn't in spending, so nothing comes off", () => {
+    it("says when a loan's payment isn't in spending, so the plan adds it until it ends", () => {
       setup(data({ assets: [repaying({ payment_counted: false })] }));
-      expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
-      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
+      expect(screen.getByText(/^Its \$1,500\/month loan payment isn’t in your spending: Runway didn’t find it in what you spent over the last six months \(a payment categorized as a transfer isn’t counted as spending\)\. So the plan adds it to your spending in retirement until it’s paid off in 2045\.$/))
+        .toBeInTheDocument();
+      expect(screen.getByText(/It's missing the \$1,500\/month payment on Home, until it’s paid off in 2045, which the plan adds while it's still paid\./)).toBeInTheDocument();
+      expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
     });
 
-    it("says when a loan's payment never pays it down, and only that it stays in spending when it was counted", () => {
+    it("says when a loan's payment never pays it down, and whether it's in spending or added to it", () => {
       const below = { payment: 900, note: "payment_below_interest" as const, payoff_year: null };
       const { unmount } = setup(data({ assets: [repaying(below)] }));
-      expect(screen.getByText("Its $900/month loan payment doesn’t cover the interest, so it doesn’t pay the loan down. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.getByText("Its $900/month loan payment is already in your spending, and stays in it. It doesn’t cover the interest, so it never pays the loan down."))
+        .toBeInTheDocument();
       unmount();
       setup(data({ assets: [repaying({ ...below, payment_counted: false })] }));
-      expect(screen.getByText(/doesn’t pay the loan down\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
-      expect(screen.queryByText(/stays in your spending/)).not.toBeInTheDocument();
+      expect(screen.getByText(/adds it to your spending in retirement for as long as the plan runs\. It doesn’t cover the interest, so it never pays the loan down\.$/))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/stays in it/)).not.toBeInTheDocument();
     });
 
     it("asks for the rate when there's a payment but no rate", () => {
       setup(data({ assets: [repaying({ rate: null, note: "no_rate", payoff_year: null })] }));
-      expect(screen.getByText("Add the loan’s interest rate in Settings → Accounts to see when its $1,500/month payment ends. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, and stays in it. Add the loan’s interest rate in Settings → Accounts to see when it ends."))
+        .toBeInTheDocument();
       expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
     });
 
-    it("says a payment that outlasts the plan goes on past it", () => {
+    it("says a payment that outlasts the plan stays in spending", () => {
       setup(data({ assets: [repaying({ payoff_year: null })] }));   // projected, but not paid off within the plan's reach
-      expect(screen.getByText("Its $1,500/month loan payment goes on past the end of the plan. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, and stays in it.")).toBeInTheDocument();
       expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
+    });
+
+    it("lists a vehicle only for its loan's payment: it isn't counted or sold", () => {
+      const car = repaying({ account_id: "auto", payoff_year: 2029 });
+      setup(data({ assets: [{ ...car, key: "asset:car", name: "Car", kind: "vehicle", value: 30000 }] }));
+      expect(screen.getByText("Vehicle")).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox", { name: /Car/ })).not.toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();   // nothing to sell
+    });
+
+    it("won't take a sale year before this one, and says when a kept one has passed", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup(data({ assets: [home] }, { assets: [{ key: "home1", sell_year: 2026, was: 2024 }] }));
+      const year = screen.getByDisplayValue("2026");
+      expect(year).toHaveAttribute("min", "2026");
+      expect(screen.getByText("Was 2024, now past: counted as sold in 2026.")).toBeInTheDocument();
+      await user.clear(year);
+      await user.type(year, "2025");
+      expect(screen.queryByText(/now past/)).not.toBeInTheDocument();
+      expect(screen.getByText("Sell in 2026 or later.")).toBeInTheDocument();
+      expect(year).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");   // counted this year: today's value less today's loan
     });
 
     describe("in future dollars", () => {
@@ -406,14 +435,15 @@ describe("RetirementPlanner", () => {
         expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less the \$200,000 owed on the loan today \(\$256,017 in 2036 dollars\)\. In 2036 dollars/);
       });
 
-      it("shows equity at today's share price, as vested", async () => {
-        const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: 0, owed: 0,
+      it("shows equity at today's share price grown with inflation, as vested", async () => {
+        const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: null, owed: 0,
           value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
         setup(data({ assets: [acme] }, { assets: [{ key: "equity:acme", sell_year: 2030 }] }));
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $36,238");   // 40k / 1.025^4
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");   // level in today's dollars, not shrinking
         await future();
-        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
-        expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In 2030 dollars, at 2.5% a year inflation.");
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $44,153");   // 40k × 1.025^4
+        expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title",
+          "Acme: $44,153 vested by 2030, at today’s share price grown with inflation. In 2030 dollars, at 2.5% a year inflation.");
       });
     });
   });
@@ -481,6 +511,61 @@ describe("RetirementPlanner", () => {
       await userEvent.type(infl, "3");
       expect(screen.getByRole("button", { name: "3% a year" })).toBeInTheDocument();
       expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(p.atRetirement * 1.03 ** 25));
+    });
+  });
+
+  describe("assumptions", () => {
+    const details = () => screen.getByText("Assumptions", { selector: "summary span" }).closest("details")!;
+
+    it("folds the set-once figures away once they're in, with a one-line summary", () => {
+      setup(data({}, { income: [{ name: "Social Security", amount: 28800, person: 0, start_age: 67, end_age: null }] }));
+      expect(details().open).toBe(false);
+      expect(details().querySelector("[data-summary]")).toHaveTextContent(
+        "Born 1986 · to age 95 · Social Security $28,800 a year at 67 · 5% returns (4% retired), 2.5% inflation");
+      for (const name of ["Born in", "Plan until age", "Inflation", "Return while saving", "Social Security a year"]) {
+        expect(details()).toContainElement(screen.getByLabelText(name));
+      }
+      expect(details()).not.toContainElement(screen.getByLabelText("Retires at · age"));   // changed more often: left out
+    });
+
+    it("is open while something's missing: Runway's sample plan, or a birth year that isn't one", () => {
+      setup(data({ is_default: true }));
+      expect(details().open).toBe(true);
+      cleanup();
+      setup(data({}, { people: [{ name: "Ann", birth_year: 0, retire_age: 65, savings: 0 }] }));
+      expect(details().open).toBe(true);
+    });
+
+    it("names each person's birth year with two, and says when there's no income yet", () => {
+      setup(data({}, { people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 0 }, { name: "Bo", birth_year: 1988, retire_age: 63, savings: 0 }] }));
+      expect(details().querySelector("[data-summary]")).toHaveTextContent(/^Ann born 1986, Bo born 1988 · to age 95 · no retirement income yet · /);
+    });
+
+    it("opens to show a new partner's birth year, and to the inflation from the dollars switch", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
+      expect(details().open).toBe(true);
+      cleanup();
+      setup();
+      await userEvent.click(screen.getByRole("button", { name: "2.5% a year" }));
+      expect(details().open).toBe(true);
+      expect(screen.getByRole("spinbutton", { name: "Inflation" })).toHaveFocus();
+    });
+  });
+
+  describe("home equity and equity comp in the chart", () => {
+    it("stacks a home's equity on the investments until it's sold, with a key", async () => {
+      setup(data({ assets: [homeAsset({ owed: 200000 })] }));
+      expect(screen.getByRole("list", { name: "Chart key" })).toHaveTextContent("Home equity");
+      expect(screen.getByRole("img", { name: /with home equity$/ })).toBeInTheDocument();
+      await userEvent.click(screen.getByText("Show as table"));
+      expect(screen.getByRole("columnheader", { name: "Home equity" })).toBeInTheDocument();
+      expect(within(screen.getAllByRole("row")[1]).getByText("$300,000")).toBeInTheDocument();   // this year: 500k less 200k owed
+    });
+
+    it("leaves vehicles out of it", () => {
+      setup(data({ assets: [homeAsset({ key: "asset:car", name: "Car", kind: "vehicle" })] }));
+      expect(screen.queryByRole("list", { name: "Chart key" })).not.toBeInTheDocument();
     });
   });
 

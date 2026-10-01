@@ -3,8 +3,8 @@
 The plan is kept whole as JSON (setting "retirement_plan") and the projection itself runs in the browser (a Monte
 Carlo simulation, instant as you type: frontend/src/lib/components/investments/planner.ts). Everything is in today's
 dollars, so returns are after inflation. Runway fills in what it knows: the investments you have, what you've been
-saving and spending, and the homes and equity on the Net worth page, which can be sold into the plan in a year you
-choose.
+saving and spending, and the homes and equity on the Net worth page, shown alongside the investments until you sell
+them into the plan in a year you choose (vehicles lose value, so they aren't counted; their loans' payments are).
 """
 from __future__ import annotations
 
@@ -21,16 +21,20 @@ from .models import Account
 MAX_ROWS = 20   # incomes, events or assets: plenty for one household, and a cap on what's stored
 PAYMENT_MATCH = 0.1   # money out within 10% of a loan's payment can be that payment...
 PAYMENT_MONTHS = 4    # ... when it's there in at least this many of the 6 months spending is averaged over
+PAYMENT_ESCROW = 1.5  # one that names the loan can be up to this much of its payment: a mortgage payment often carries
+                      # escrow (property tax and insurance) on top of the principal and interest the lender reports
 
 
 def payment_counted(spent: list[dict], payment: float, names: list[str]) -> bool:
     """Whether a loan's monthly payment is in the spending figure: money out within PAYMENT_MATCH of it (from
     portfolio.spent_outflows) in at least PAYMENT_MONTHS different months, as a real payment repeats. When some of
     those name the loan (its lender or account name in the payee), only they count, so a grocery run that happens to
-    be the size of a car payment doesn't."""
-    near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
+    be the size of a car payment doesn't; and one that names it can be more than the payment, up to PAYMENT_ESCROW
+    times it, as a mortgage paid with its escrow is."""
     names = [n.lower() for n in names if n and len(n.strip()) >= 3]
-    named = [s for s in near if any(n in s["text"] for n in names)]
+    low = (1 - PAYMENT_MATCH) * payment
+    named = [s for s in spent if low <= s["amount"] <= PAYMENT_ESCROW * payment and any(n in s["text"] for n in names)]
+    near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
     return len({s["month"] for s in (named or near)}) >= PAYMENT_MONTHS
 
 # Numbers the plan keeps: (lowest, highest).
@@ -114,7 +118,12 @@ def clean(body: dict, today: date) -> dict:
         if not key.startswith(("asset:", "equity:")) or key in seen:
             raise PlanError("Unknown asset")
         seen.add(key)
-        plan["assets"].append({"key": key, "sell_year": _int(r.get("sell_year"), "The year it's sold", year, year + 100)})
+        sell_year = _int(r.get("sell_year"), "The year it's sold", -10_000, 10_000)
+        if sell_year < year:
+            raise PlanError(f"A sale can’t be in the past: sell in {year} or later")
+        if sell_year > year + 100:
+            raise PlanError(f"A sale can be at most 100 years out, in {year + 100} at the latest")
+        plan["assets"].append({"key": key, "sell_year": sell_year})
     return plan
 
 
@@ -134,7 +143,11 @@ def save(conn, body: dict | None, today: date | None = None) -> dict | None:
     if body is None:
         db.set_setting(conn, sk.RETIREMENT_PLAN, None)
         return None
-    plan = clean(body, today or date.today())
+    today = today or date.today()
+    plan = clean(body, today)
+    vehicles = {f"asset:{a['id']}" for a in networth.assets(conn, today) if a["kind"] == "vehicle"}
+    if any(s["key"] in vehicles for s in plan["assets"]):
+        raise PlanError("Vehicles aren’t sold into the plan: they lose value, so the plan leaves them out")
     db.set_setting(conn, sk.RETIREMENT_PLAN, json.dumps(plan, separators=(",", ":")))
     return plan
 
@@ -150,16 +163,19 @@ def default(computed: dict, today: date) -> dict:
 
 
 def sellable(conn, today: date) -> list[dict]:
-    """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
-    them), and company equity (what will have vested by then). Each says what it's worth and owes today (`value`,
-    `owed`, a loan paid down since its last balance as on the Net worth page) and how that changes: `owed_by_year`
-    (the loan paid down on its terms, see loans.py) and, for equity, `value_by_year` (what will have vested), each
-    indexed by years from today and ending once it stops changing.
+    """What on the Net worth page the plan counts: homes and other assets (less the loan against them) and company
+    equity (what will have vested by then), held until you sell them into the plan. Vehicles are listed too, but only
+    for their loan's payment: they lose value, so the page neither counts nor sells them. Each says what it's worth and
+    owes today (`value`, `owed`, a loan paid down since its last balance as on the Net worth page) and how that
+    changes: `yearly_change` (a fraction; None when it's not set, and for equity, which the page takes as keeping pace
+    with inflation), `owed_by_year` (the loan paid down on its terms, see loans.py) and, for equity, `value_by_year`
+    (what will have vested, at today's share price), each indexed by years from today and ending once it stops
+    changing.
     A loan's `loan` also says which account it is (`account_id`), the calendar year of its last payment when it's
     projected (`payoff_year`), and whether its payment is in the spending figure the plan starts from
     (`payment_counted`, see payment_counted()), so the page can take the payment
     off spending once it's paid off or sold. One categorized as a transfer (common when the loan account is synced
-    too) wasn't in it, so there's nothing to take off when it ends."""
+    too) wasn't in it, so the page adds it to spending instead, for as long as it's still being paid."""
     from . import portfolio   # imported here: portfolio imports this module
     accts = {a["id"]: a for a in db.rows(conn.execute(
         select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.org, Account.name)
@@ -184,8 +200,10 @@ def sellable(conn, today: date) -> list[dict]:
         else:   # none, or a card: what's owed today
             owed = round(forecast.owed({**acct, "balance": acct["balance"] or 0.0}), 2) if acct else 0.0
             by_year = [owed]
+        yearly = a["yearly_change"]
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
-                    "yearly_change": (a["yearly_change"] or 0) / 100.0, "owed": owed, "owed_by_year": by_year, "loan": loan})
+                    "yearly_change": None if yearly is None else yearly / 100.0, "owed": owed, "owed_by_year": by_year,
+                    "loan": loan})
     for c in equity.overview(conn, today)["companies"]:
         if not c["in_networth"]:
             continue
@@ -193,15 +211,28 @@ def sellable(conn, today: date) -> list[dict]:
         if not any(by_year):   # nothing vested now or ever (or no share price)
             continue
         out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": by_year[0],
-                    "value_by_year": by_year, "yearly_change": 0.0, "owed": 0.0, "owed_by_year": [0.0], "loan": None})
+                    "value_by_year": by_year, "yearly_change": None, "owed": 0.0, "owed_by_year": [0.0], "loan": None})
     return out
 
 
 def overview(conn, current: float, computed: dict, today: date) -> dict:
     plan = saved(conn)
+    assets = sellable(conn, today)
     if plan is not None:
         # A plan kept before this was recorded is taken as Runway's figure: it was saved whole whenever anything
         # changed, so its spending can't tell a typed figure from Runway's. The page records a real edit from now on.
         plan["spending_own"] = bool(plan.get("spending_own"))
+        # A sale kept for a year that's now past is counted this year (`was` says when it was set for, so the page can
+        # say so), and a vehicle's sale (from before vehicles were left out) isn't counted at all. Only what's shown
+        # changes: the plan is written back as it is next time you change something.
+        vehicles = {a["key"] for a in assets if a["kind"] == "vehicle"}
+        sales = []
+        for s in plan.get("assets") or []:
+            if not isinstance(s, dict) or s.get("key") in vehicles:
+                continue
+            if isinstance(s.get("sell_year"), (int, float)) and s["sell_year"] < today.year:
+                s = {**s, "sell_year": today.year, "was": s["sell_year"]}
+            sales.append(s)
+        plan["assets"] = sales
     return {"plan": plan or default(computed, today), "is_default": plan is None, "current": round(current, 2),
-            "computed": computed, "assets": sellable(conn, today), "year": today.year}
+            "computed": computed, "assets": assets, "year": today.year}

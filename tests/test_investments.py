@@ -282,6 +282,53 @@ class FireTests(Base):
         self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
         self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
 
+    def test_a_mortgage_paid_with_its_escrow_is_still_its_payment(self):
+        # The lender reports $1,850 of principal and interest; the bank shows $2,450 going out, taxes and insurance in
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        escrowed = [out(m, 2450, "rocket mortgage payment") for m in (3, 4, 5, 6)]
+        self.assertTrue(planner.payment_counted(escrowed, 1850, ["Rocket Mortgage", "Home loan"]))
+        self.assertFalse(planner.payment_counted(escrowed, 1850, ["Other Bank"]))   # not named: the amount alone is too far off
+        self.assertFalse(planner.payment_counted([out(m, 2900, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
+        self.assertFalse(planner.payment_counted([out(m, 1500, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
+
+    def test_a_sale_cant_be_in_the_past(self):
+        good = self.plan()["plan"]
+        with self.assertRaisesRegex(planner.PlanError, r"^A sale can’t be in the past: sell in 2026 or later$"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2025}]}, TODAY)
+        with self.assertRaisesRegex(planner.PlanError, r"at most 100 years out, in 2126"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2127}]}, TODAY)
+        with self.assertRaisesRegex(planner.PlanError, r"^The year it's sold must be a number$"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": "soon"}]}, TODAY)
+        self.assertEqual(planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2026}]}, TODAY)["assets"],
+                         [{"key": "asset:1", "sell_year": 2026}])
+
+    def test_a_sale_kept_for_a_year_now_past_counts_this_year(self):
+        self.c.execute(insert(Asset).values(id=7, name="House", kind="home", value=450000, as_of=TODAY.isoformat()))
+        raw = json.dumps({**planner.clean(self.plan()["plan"], date(2024, 1, 1)), "assets": [{"key": "asset:7", "sell_year": 2025}]})
+        db.set_setting(self.c, "retirement_plan", raw)
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026, "was": 2025}])
+        self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)   # shown, not written back
+        planner.save(self.c, self.plan()["plan"], TODAY)   # the next change keeps this year (and drops `was`)
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026}])
+
+    def test_vehicles_are_listed_for_their_loan_but_never_sold_into_the_plan(self):
+        self.c.execute(insert(Account).values(id="auto", name="Car loan", kind="loan", balance=-20000, interest_rate=5,
+                                              monthly_payment=600))
+        self.c.execute(insert(Asset), [{"id": 8, "name": "Car", "kind": "vehicle", "value": 30000, "as_of": TODAY.isoformat(),
+                                        "yearly_change": -15, "loan_account_id": "auto"},
+                                       {"id": 9, "name": "Cabin", "kind": "other", "value": 90000, "as_of": TODAY.isoformat(),
+                                        "yearly_change": None, "loan_account_id": None}])
+        assets = {a["name"]: a for a in self.plan()["assets"]}
+        self.assertEqual((assets["Car"]["kind"], assets["Car"]["loan"]["payment"]), ("vehicle", 600))
+        self.assertIsNone(assets["Cabin"]["yearly_change"])   # not set: the page keeps it level with inflation
+        good = self.plan()["plan"]
+        with self.assertRaisesRegex(planner.PlanError, "Vehicles aren’t sold into the plan"):
+            planner.save(self.c, {**good, "assets": [{"key": "asset:8", "sell_year": 2030}]}, TODAY)
+        # one kept from before vehicles were left out isn't counted
+        db.set_setting(self.c, "retirement_plan", json.dumps({**planner.clean(good, TODAY), "assets": [
+            {"key": "asset:8", "sell_year": 2030}, {"key": "asset:9", "sell_year": 2031}]}))
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:9", "sell_year": 2031}])
+
     def test_the_plan_knows_whether_spending_is_runways_figure_or_yours(self):
         p = self.plan()
         self.assertFalse(p["plan"]["spending_own"])   # the default: Runway's figure

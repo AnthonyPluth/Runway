@@ -105,23 +105,28 @@ export interface RetirementPlan {
   inflation: number;
   income: PlanIncome[];
   events: PlanEvent[];
-  assets: { key: string; sell_year: number }[];
+  /** Assets sold into the plan, and the year. `was` (from the server, never saved back) is the year a sale was kept
+   *  for when that's now past: it's counted this year instead. */
+  assets: { key: string; sell_year: number; was?: number }[];
 }
 /** What a loan's projection is based on (runway/loans.py): the annual rate in percent, the monthly payment, where
  *  the payment came from, and why it couldn't be projected (today's balance is then used). `account_id` is the loan
  *  account (one loan against two assets is the same loan); `payoff_year` the calendar year of its last payment when
  *  it's projected; `payment_counted` whether its payment is in the spending figure the plan starts from (not left
- *  out as a transfer), so it comes off spending once the loan is paid off or sold. */
+ *  out as a transfer), so it comes off spending once the loan is paid off or sold; one that isn't is added to it
+ *  until then. */
 export interface PlanLoan {
   rate: number | null; payment: number | null; source: "plaid" | "manual" | "inferred" | null;
   note: "no_rate" | "no_payment" | "payment_below_interest" | null;
   account_id?: string; payoff_year?: number | null; payment_counted?: boolean;
 }
-/** A home, vehicle or company equity from Net worth that can be sold into the plan. `owed` is what's owed on it
- *  today (a loan paid down since its last balance, as on Net worth). `owed_by_year` and `value_by_year` are indexed
- *  by years from today (0 is today) and stop once they stop changing: the last entry holds from then on. */
+/** A home, other asset or company equity from Net worth, which the plan holds until it's sold into it; a vehicle is
+ *  listed only for its loan's payment (it loses value, so it isn't counted). `owed` is what's owed on it today (a
+ *  loan paid down since its last balance, as on Net worth). `yearly_change` is a fraction, or null when none is set
+ *  (and for equity): it then keeps pace with inflation. `owed_by_year` and `value_by_year` are indexed by years from
+ *  today (0 is today) and stop once they stop changing: the last entry holds from then on. */
 export interface PlanAsset {
-  key: string; name: string; kind: string; value: number; yearly_change: number; owed: number;
+  key: string; name: string; kind: string; value: number; yearly_change: number | null; owed: number;
   owed_by_year?: number[]; value_by_year?: number[]; loan?: PlanLoan | null;
 }
 export interface PlanData {
