@@ -31,7 +31,7 @@ const serve = (list: Tx[] = rows(), total = list.length, extra: Handler = () => 
     if (path.startsWith("/api/transactions?")) return { items: list, total };
     return {};
   }) as never);
-const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("category=Ignore")).at(-1)!;
+const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("ignored=only")).at(-1)!;
 
 beforeEach(() => {
   closeRemember();   // the "always use this category" question is module state and would leak between tests
@@ -56,7 +56,7 @@ describe("Transactions page", () => {
   });
 
   it("hides what's marked Ignore behind an \"N ignored · Show\" line, which Clear filters leaves alone", async () => {
-    serve(rows(), 2, (path) => (path.startsWith("/api/transactions?") && path.includes("category=Ignore") ? { items: [], total: 4 } : undefined));
+    serve(rows(), 2, (path) => (path.startsWith("/api/transactions?") && path.includes("ignored=only") ? { items: [], total: 4 } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
     expect(lastList()).toContain("ignored=0");
@@ -72,14 +72,14 @@ describe("Transactions page", () => {
   });
 
   it("shows no ignored line when nothing is ignored", async () => {
-    serve(rows(), 2, (path) => (path.includes("category=Ignore") ? { items: [], total: 0 } : undefined));
+    serve(rows(), 2, (path) => (path.includes("ignored=only") ? { items: [], total: 0 } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
     expect(screen.queryByText(/ignored/)).not.toBeInTheDocument();
   });
 
   it("still offers to show ignored transactions when they couldn't be counted", async () => {
-    serve(rows(), 2, (path) => (path.includes("category=Ignore") ? Promise.reject(new Error("offline")) : undefined));
+    serve(rows(), 2, (path) => (path.includes("ignored=only") ? Promise.reject(new Error("offline")) : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
     expect(await screen.findByText(/^Ignored ·/)).toBeInTheDocument();
@@ -205,9 +205,9 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 4, offer_rule: null } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
-    const before = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("category=Ignore")).length;
+    const before = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("ignored=only")).length;
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
-    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("category=Ignore")).length).toBe(before + 1));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("ignored=only")).length).toBe(before + 1));
   });
 
   it("shows the error when saving a category fails", async () => {

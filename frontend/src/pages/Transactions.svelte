@@ -56,7 +56,7 @@
   async function countIgnored(mine: number, now: TxFilters) {
     if (review) return;
     if (now.category) { ignoredCount = 0; return; }
-    const qs = new URLSearchParams({ q: now.q, account: now.account, category: "Ignore", month: now.month, scope: now.scope, limit: "1", offset: "0" });
+    const qs = new URLSearchParams({ q: now.q, account: now.account, ignored: "only", month: now.month, scope: now.scope, limit: "1", offset: "0" });
     try {
       const r = await api<TxList>(`/api/transactions?${qs}`);
       if (mine === seq) ignoredCount = r.total;
