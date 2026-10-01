@@ -41,7 +41,7 @@ def api_state(conn, _q, _b):
         "logodev_configured": merchants.configured(conn),
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
-        "sentry": monitoring.browser_config(),   # the web app's error reports (runway/monitoring.py), or None
+        "sentry": monitoring.browser_config(getattr(_current, "user", None)),   # the web app's error reports (runway/monitoring.py), or None
         "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
         "setup": setup_steps(conn),

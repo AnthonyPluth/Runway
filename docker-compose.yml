@@ -37,6 +37,7 @@ services:
       SENTRY_METRICS: ${SENTRY_METRICS:-}
       SENTRY_CRONS: ${SENTRY_CRONS:-}
       SENTRY_FEEDBACK: ${SENTRY_FEEDBACK:-}
+      SENTRY_USER: ${SENTRY_USER:-}
       SENTRY_AI_CONTENT: ${SENTRY_AI_CONTENT:-}
       # Optional: use Postgres instead of the built-in database (see DOCKER.md for moving your data over).
       DATABASE_URL: ${DATABASE_URL:-}
