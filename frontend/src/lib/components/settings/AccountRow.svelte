@@ -21,7 +21,7 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDateTime, nb } from "$lib/format";
+  import { fmt, fmtDate, fmtDateTime, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -58,7 +58,13 @@
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
   // A loan's terms, for the retirement planner: the lender's through Plaid when it shares them, else yours.
   const loan = $derived(a.kind === "loan" ? a.loan : undefined);
-  const hint = $derived(loan?.inferred_payment ? `${Math.round(loan.inferred_payment).toLocaleString("en-US")} from recent payments` : "e.g. 1,850");
+  // What an empty payment means: the one that pays the loan off by Plaid's payoff date, else what recent payments suggest.
+  const byPayoff = $derived(!!loan && loan.source === "plaid" && !loan.plaid_payment && loan.payment != null && loan.set_payment == null);
+  const dollars = (n: number) => Math.round(n).toLocaleString("en-US");
+  const hint = $derived(byPayoff ? `${dollars(loan!.payment!)} to pay it off by ${fmtDate(loan!.maturity!, { month: "short", day: "numeric", year: "numeric" })}`
+    : loan?.inferred_payment ? `${dollars(loan.inferred_payment)} from recent payments` : "e.g. 1,850");
+  const hintTitle = $derived(byPayoff ? "Left empty, it’s the payment that pays the loan off by the date the lender gives, through Plaid"
+    : "Left empty, it’s worked out from the payments into this account lately");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
@@ -233,7 +239,7 @@
           <span class="flex h-9 items-center gap-2 text-foreground">{fmt(loan.payment)}<span class="text-xs text-muted-foreground">from Plaid</span></span>
         </div>
       {:else}
-        <label class={fieldCls} title="Left empty, it’s worked out from the payments into this account lately">Monthly payment
+        <label class={fieldCls} title={hintTitle}>Monthly payment
           <span class="relative">
             <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-xs" aria-hidden="true">$</span>
             <input class={`${inputCls} w-full pl-6`} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />

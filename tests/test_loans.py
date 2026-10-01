@@ -174,6 +174,15 @@ class SellableTests(LedgerCase):
         equity.save_company(self.conn, {"name": "Unpriced"})
         self.assertFalse(any(a["key"].startswith("equity:") for a in planner.sellable(self.conn, TODAY)))
 
+    def test_options_past_their_expiration_count_only_what_was_exercised(self):
+        # 1,000 options at $0.50, all vested by TODAY; 200 exercised; they expire in 2028.
+        cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
+        equity.save_grant(self.conn, cid, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2022-01-01",
+                                           "vest_months": 48, "exercised": 200, "expires_on": "2028-06-30"})
+        e = self.sellable("equity:")
+        # Today and next year: 800 × $1.50 spread + 200 shares × $2; from 2028-09 on, only the 200 exercised shares.
+        self.assertEqual(e["value_by_year"], [1_600, 1_600, 400])
+
     def test_a_grant_whose_schedule_cant_be_worked_out_stays_at_today(self):
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})
         gid = equity.save_grant(self.conn, cid, {"kind": "rsu", "quantity": 10, "vest_start": "2024-01-01", "vest_months": 12})

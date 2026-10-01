@@ -113,6 +113,13 @@ describe("a loan's terms, for the retirement planner", () => {
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg", { method: "POST", body: { monthly_payment: "325" } }));
   });
 
+  it("says an empty payment pays the loan off by Plaid's payoff date, when that's what's used", () => {
+    show(loan({ plaid: true, rate: 6, payment: 2775.5, source: "plaid", maturity: "2036-09-01", inferred_payment: 1850 }));
+    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
+    expect(payment.getAttribute("placeholder")).toMatch(/^2,776 to pay it off by Sep\s1,\s2036$/);
+    expect(payment.closest("label")).toHaveAttribute("title", expect.stringContaining("pays the loan off by the date the lender gives"));
+  });
+
   it("isn't asked of other accounts", () => {
     show(acct({ id: "cc", kind: "credit" }));
     expect(screen.queryByText(/Interest rate/)).toBeNull();
