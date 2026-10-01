@@ -19,6 +19,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Nothing by default: the job asks for what it needs.
+permissions: {}
+
 # A new push to the pull request replaces a review still running on the old one.
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
