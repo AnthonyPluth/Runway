@@ -156,8 +156,10 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
         _retire_own_account(conn, plaid_account_id, target if target not in ("ignore", "") else None)
     if target in ("ignore", ""):
         return {"ok": True}
-    # Used again: an account you'd deleted that it belonged to isn't kept deleted any more (deleted_accounts.py).
-    conn.execute(delete(DeletedAccount).where(DeletedAccount.plaid_account_id == plaid_account_id))
+    # Used again (deleted_accounts.py): its own account, if you'd deleted that, isn't kept deleted any more; another
+    # account you deleted that it was linked to stays deleted, but no longer holds on to it (its statements count again).
+    conn.execute(delete(DeletedAccount).where(DeletedAccount.id == "pl:" + plaid_account_id))
+    conn.execute(update(DeletedAccount).where(DeletedAccount.plaid_account_id == plaid_account_id).values(plaid_account_id=None))
     if target == "new":
         kind = runway_kind(pa) or "checking"
         aid = "pl:" + plaid_account_id

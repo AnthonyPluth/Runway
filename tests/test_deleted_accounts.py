@@ -88,6 +88,14 @@ class DeleteAccountTests(LedgerCase):
             api.api_account_remove(c, {}, {}, "cc")
         self.assertEqual(e.exception.status, 404)
 
+    def test_its_plaid_account_linked_to_another_account_leaves_it_deleted(self):
+        api.api_account_remove(self.conn, {}, {}, "cc")
+        plaidbank.match(self.conn, "p-cc", "cc2", TODAY)   # you chose to use the Plaid card for another account
+        tomb = self.conn.execute(select(DeletedAccount.id, DeletedAccount.plaid_account_id)).fetchone()
+        self.assertEqual(tuple(tomb), ("cc", None))         # still deleted, but its statements aren't held back
+        self.assertEqual(deleted_accounts.plaid_ids(self.conn), set())
+        self.assertEqual(self.conn.execute(select(PlaidAccount.ignored)).scalar(), 0)
+
     def test_what_pointed_at_it_lets_go(self):
         api.api_account_remove(self.conn, {}, {}, "chk")
         c = self.conn
