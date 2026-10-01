@@ -4,10 +4,15 @@ import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
 
+from sqlalchemy import delete, func, insert, select, update
+
 from runway import categories, db, demo, splits
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
+from runway.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction,
+                           ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring, Security, SyncLog,
+                           Transaction, User)
 from tests.shared import DbCase
 
 TODAY = date.today()
@@ -22,19 +27,20 @@ class HandlerTests(DbCase):
         super().setUp()
         demo.seed(self.c, TODAY)
 
-    def one(self, sql, *args):
-        return self.c.execute(sql, args).fetchone()
+    def one(self, stmt):
+        return self.c.execute(stmt).fetchone()
 
     # ------------------------------------------------------------------------------------------ accounts
 
     def test_accounts_list(self):
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
-                       "VALUES ('it1', 'x', 'Card Bank', 'transactions,liabilities')")
-        self.c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, mask) VALUES ('pa1', 'it1', '1234')")
-        self.c.execute("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_date, next_due_date) "
-                       "VALUES ('pa1', 'it1', '2026-09-01', '2026-09-25')")
-        self.c.execute("UPDATE accounts SET plaid_account_id='pa1', display_name='Zed Card' WHERE id='demo-card'")
-        self.c.execute("INSERT INTO accounts(id, name, kind, hidden) VALUES ('gone', 'Aardvark', 'checking', 1)")
+        self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank",
+                                                products="transactions,liabilities"))
+        self.c.execute(insert(PlaidAccount).values(plaid_account_id="pa1", item_id="it1", mask="1234"))
+        self.c.execute(insert(CardStatement).values(plaid_account_id="pa1", item_id="it1",
+                                                    last_statement_date="2026-09-01", next_due_date="2026-09-25"))
+        self.c.execute(update(Account).where(Account.id == "demo-card")
+                       .values(plaid_account_id="pa1", display_name="Zed Card"))
+        self.c.execute(insert(Account).values(id="gone", name="Aardvark", kind="checking", hidden=1))
         out = accounts.api_accounts(self.c, {}, {})
         self.assertEqual([a["id"] for a in out], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings", "gone"])
         cols = [c.name for c in db.schema.accounts.columns]
@@ -50,7 +56,8 @@ class HandlerTests(DbCase):
             accounts.api_account_update(self.c, {}, {"kind": "boat"}, "demo-card")
         accounts.api_account_update(self.c, {}, {"display_name": "  Daily  ", "hidden": "1", "owner": "", "name": "sneaky",
                                                  "in_forecast": 0}, "demo-checking")
-        row = self.one("SELECT name, display_name, hidden, owner, in_forecast FROM accounts WHERE id='demo-checking'")
+        row = self.one(select(Account.name, Account.display_name, Account.hidden, Account.owner, Account.in_forecast)
+                       .where(Account.id == "demo-checking"))
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
 
@@ -58,7 +65,7 @@ class HandlerTests(DbCase):
 
     def test_push_recent(self):
         for i in range(10):
-            self.c.execute("INSERT INTO notify_log(key, sent, title) VALUES (?,?,?)", (f"k{i}", float(i), f"t{i}"))
+            self.c.execute(insert(NotifyLog).values(key=f"k{i}", sent=float(i), title=f"t{i}"))
         out = notifications.api_push(self.c, {}, {})
         self.assertEqual(out["recent"], [{"title": f"t{i}", "sent": float(i)} for i in range(9, 1, -1)])
         self.assertEqual(out["devices"], [])
@@ -66,10 +73,12 @@ class HandlerTests(DbCase):
     # ------------------------------------------------------------------------------------------ state
 
     def test_state(self):
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('inv', 'Brokerage', 'investment')")
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, needs_review) VALUES "
-                       "('inv|1', 'inv', '2026-01-01', -5, 1), ('x|1', 'demo-card', '2026-01-01', -5, 1)")
-        self.c.execute("INSERT INTO sync_log(ok, message) VALUES (0, 'Latest')")
+        self.c.execute(insert(Account).values(id="inv", name="Brokerage", kind="investment"))
+        self.c.execute(insert(Transaction), [{"id": "inv|1", "account_id": "inv", "posted": "2026-01-01", "amount": -5,
+                                              "needs_review": 1},
+                                             {"id": "x|1", "account_id": "demo-card", "posted": "2026-01-01",
+                                              "amount": -5, "needs_review": 1}])
+        self.c.execute(insert(SyncLog).values(ok=0, message="Latest"))
         st = state.api_state(self.c, {}, {})
         self.assertEqual(st["review_count"], 1)
         self.assertEqual({k: st["last_log"][k] for k in ("ok", "message")}, {"ok": 0, "message": "Latest"})
@@ -80,7 +89,7 @@ class HandlerTests(DbCase):
         # The setting is the server's local time, the log's `at` UTC: both go out with an offset, so the browser shows
         # its own time zone and not the server's.
         db.set_setting(self.c, "last_sync_ok", "2026-09-30T07:02:00")
-        self.c.execute("INSERT INTO sync_log(at, ok, message) VALUES ('2026-09-30 12:02:00', 1, '3 new transactions')")
+        self.c.execute(insert(SyncLog).values(at="2026-09-30 12:02:00", ok=1, message="3 new transactions"))
         st = state.api_state(self.c, {}, {})
         self.assertEqual(datetime.fromisoformat(st["last_sync_ok"]), datetime(2026, 9, 30, 7, 2).astimezone())
         self.assertEqual(st["last_log"]["at"], "2026-09-30T12:02:00+00:00")
@@ -91,24 +100,26 @@ class HandlerTests(DbCase):
         self.assertEqual(state.with_offset("garbled"), "garbled")
 
     def test_owner_choices(self):
-        self.c.execute("INSERT INTO users(sub, first_name, last_seen) VALUES ('a', 'Zoe', 2), ('b', 'Adam', 1), ('c', NULL, 0), "
-                       "('d', 'Joint', 3)")
-        self.c.execute("UPDATE accounts SET owner='Adam' WHERE id='demo-card'")
-        self.c.execute("UPDATE accounts SET owner='Pat' WHERE id='demo-savings'")
-        self.c.execute("UPDATE accounts SET owner='' WHERE id='demo-checking'")
+        self.c.execute(insert(User), [{"sub": "a", "first_name": "Zoe", "last_seen": 2},
+                                      {"sub": "b", "first_name": "Adam", "last_seen": 1},
+                                      {"sub": "c", "first_name": None, "last_seen": 0},
+                                      {"sub": "d", "first_name": "Joint", "last_seen": 3}])
+        self.c.execute(update(Account).where(Account.id == "demo-card").values(owner="Adam"))
+        self.c.execute(update(Account).where(Account.id == "demo-savings").values(owner="Pat"))
+        self.c.execute(update(Account).where(Account.id == "demo-checking").values(owner=""))
         self.assertEqual(state.owner_choices(self.c), ["Adam", "Zoe", "Pat"])
 
     def test_setup_steps(self):
-        self.c.execute("DELETE FROM recurring")
-        self.c.execute("UPDATE budgets SET amount=0")
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('chk2', 'Second', 'checking')")
+        self.c.execute(delete(Recurring))
+        self.c.execute(update(Budget).values(amount=0))
+        self.c.execute(insert(Account).values(id="chk2", name="Second", kind="checking"))
         self.assertEqual(state.setup_steps(self.c), {"bank": True, "primary": False, "recurring": False, "budgets": False,
                                                       "dismissed": False})
-        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='chk2'")
+        self.c.execute(update(Account).where(Account.id == "chk2").values(hidden=1))
         self.assertTrue(state.setup_steps(self.c)["primary"])
 
     def test_overview(self):
-        self.c.execute("UPDATE accounts SET display_name='A Savings' WHERE id='demo-savings'")
+        self.c.execute(update(Account).where(Account.id == "demo-savings").values(display_name="A Savings"))
         fc = state.api_overview(self.c, q(days=30), {})
         self.assertEqual([a["id"] for a in fc["all_accounts"]], ["demo-checking", "demo-card", "demo-mortgage", "demo-savings"])
         self.assertEqual(list(fc["all_accounts"][0]), ["id", "name", "kind", "balance", "balance_date", "owed_positive", "hidden"])
@@ -125,8 +136,8 @@ class HandlerTests(DbCase):
         self.assertEqual([w["text"] for w in fc["warning_links"]], fc["warnings"])
 
     def test_overview_names_sort_by_display_name(self):
-        self.c.execute("INSERT INTO accounts(id, name, display_name, kind) VALUES ('c2', 'AAA', 'ZZZ', 'checking')")
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('c3', 'MMM', 'checking')")
+        self.c.execute(insert(Account).values(id="c2", name="AAA", display_name="ZZZ", kind="checking"))
+        self.c.execute(insert(Account).values(id="c3", name="MMM", kind="checking"))
         fc = state.api_overview(self.c, q(days=14), {})
         self.assertEqual([a["id"] for a in fc["all_accounts"] if a["kind"] == "checking"], ["demo-checking", "c3", "c2"])
 
@@ -137,9 +148,9 @@ class HandlerTests(DbCase):
             state.api_override_set(self.c, {}, {"key": "rec:1:2026-09-01", "amount": "lots"})
         state.api_override_set(self.c, {}, {"key": "rec:1:2026-09-01", "amount": "12.5"})
         state.api_override_set(self.c, {}, {"key": "rec:1:2026-09-01", "amount": -20})
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT key, amount FROM overrides")], [("rec:1:2026-09-01", -20.0)])
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Override.key, Override.amount))], [("rec:1:2026-09-01", -20.0)])
         state.api_override_delete(self.c, {}, {"key": "rec:1:2026-09-01"})
-        self.assertIsNone(self.one("SELECT 1 FROM overrides"))
+        self.assertIsNone(self.one(select(Override.key)))
 
     def test_settings_primary_account(self):
         with self.assertRaises(ApiError):
@@ -154,8 +165,8 @@ class HandlerTests(DbCase):
     # ------------------------------------------------------------------------------------------ budget
 
     def test_budget(self):
-        self.c.execute("INSERT INTO accounts(id, name, display_name, kind) VALUES ('c2', 'Zeta', 'Alpha Card', 'credit')")
-        self.c.execute("INSERT INTO accounts(id, name, kind, hidden) VALUES ('c3', 'Hidden Card', 'credit', 1)")
+        self.c.execute(insert(Account).values(id="c2", name="Zeta", display_name="Alpha Card", kind="credit"))
+        self.c.execute(insert(Account).values(id="c3", name="Hidden Card", kind="credit", hidden=1))
         start = TODAY.replace(day=1)
         b = budget.api_budget(self.c, {}, {})
         self.assertEqual(b["pay_accounts"], [{"id": "c2", "name": "Alpha Card", "kind": "credit"},
@@ -163,15 +174,18 @@ class HandlerTests(DbCase):
                                              {"id": "demo-checking", "name": "Everyday Checking", "kind": "checking"},
                                              {"id": "demo-savings", "name": "High-Yield Savings", "kind": "savings"}])
         groceries = sum(r[0] for r in self.c.execute(
-            "SELECT amount FROM transactions WHERE category='Groceries' AND posted>=?", (start.isoformat(),)))
+            select(Transaction.amount)
+            .where(Transaction.category == "Groceries", Transaction.posted >= start.isoformat())))
         g = next(c for c in b["categories"] if c["name"] == "Groceries")
         self.assertEqual((g["budget"], g["spent"], g["pay_with"], g["usual_account"]), (600, round(-groceries, 2), "demo-card", "demo-card"))
 
     def test_budget_rollover_carries_unspent(self):
         last = (TODAY.replace(day=1) - timedelta(days=1)).replace(day=1)
-        self.c.execute("UPDATE budgets SET rollover_from=? WHERE category='Coffee & Snacks'", (f"{last:%Y-%m}",))
-        spent = sum(r[0] for r in self.c.execute("SELECT amount FROM transactions WHERE category='Coffee & Snacks' AND posted>=? "
-                                                 "AND posted<?", (last.isoformat(), TODAY.replace(day=1).isoformat())))
+        self.c.execute(update(Budget).where(Budget.category == "Coffee & Snacks").values(rollover_from=f"{last:%Y-%m}"))
+        spent = sum(r[0] for r in self.c.execute(select(Transaction.amount)
+                                                 .where(Transaction.category == "Coffee & Snacks",
+                                                        Transaction.posted >= last.isoformat(),
+                                                        Transaction.posted < TODAY.replace(day=1).isoformat())))
         b = budget.api_budget(self.c, {}, {})
         c = next(c for c in b["categories"] if c["name"] == "Coffee & Snacks")
         self.assertEqual(c["carried"], max(0.0, round(60 + spent, 2)))
@@ -187,13 +201,14 @@ class HandlerTests(DbCase):
         budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": True})
         budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": "demo-checking"})
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": 300})
-        row = self.one("SELECT amount, pay_with, rollover_from FROM budgets WHERE category='Travel'")
+        row = self.one(select(Budget.amount, Budget.pay_with, Budget.rollover_from).where(Budget.category == "Travel"))
         self.assertEqual(tuple(row), (300.0, "demo-checking", f"{TODAY:%Y-%m}"))
         budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": False})
         budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": ""})
-        self.assertEqual(tuple(self.one("SELECT pay_with, rollover_from FROM budgets WHERE category='Travel'")), (None, None))
+        self.assertEqual(tuple(self.one(select(Budget.pay_with, Budget.rollover_from)
+                                        .where(Budget.category == "Travel"))), (None, None))
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": "0"})
-        self.assertIsNone(self.one("SELECT 1 FROM budgets WHERE category='Travel'"))
+        self.assertIsNone(self.one(select(Budget.category).where(Budget.category == "Travel")))
 
     # ------------------------------------------------------------------------------------------ transactions
 
@@ -202,7 +217,7 @@ class HandlerTests(DbCase):
 
     def test_transaction_filters(self):
         all_ = transactions.api_transactions(self.c, {}, {})
-        self.assertEqual(all_["total"], self.one("SELECT COUNT(*) FROM transactions")[0])
+        self.assertEqual(all_["total"], self.one(select(func.count()).select_from(Transaction))[0])
         items = all_["items"]
         self.assertEqual([(t["posted"], t["id"]) for t in items],
                          sorted(((t["posted"], t["id"]) for t in items), key=lambda x: (-date.fromisoformat(x[0]).toordinal(), x[1])))
@@ -210,32 +225,38 @@ class HandlerTests(DbCase):
         for k in ("account_name", "account_kind", "recurring_name", "splits", "retail", "logo"):
             self.assertIn(k, t0)
         self.assertEqual(list(t0)[:len(db.schema.transactions.columns)], [c.name for c in db.schema.transactions.columns])
-        self.c.execute("UPDATE accounts SET owner='Sam' WHERE id='demo-card'")
+        self.c.execute(update(Account).where(Account.id == "demo-card").values(owner="Sam"))
         card = transactions.api_transactions(self.c, q(account="demo-card", limit=3, offset=1), {})
         self.assertEqual(len(card["items"]), 3)
         self.assertEqual({t["account_name"] for t in card["items"]}, {"Rewards Visa (Sam)"})
-        self.assertEqual(card["total"], self.one("SELECT COUNT(*) FROM transactions WHERE account_id='demo-card'")[0])
-        rid = self.one("SELECT id FROM recurring WHERE name='Gym'")[0]
-        self.c.execute("UPDATE transactions SET recurring_id=? WHERE payee='Fit Club'", (rid,))
+        self.assertEqual(card["total"], self.one(select(func.count())
+                                                 .select_from(Transaction)
+                                                 .where(Transaction.account_id == "demo-card"))[0])
+        rid = self.one(select(Recurring.id).where(Recurring.name == "Gym"))[0]
+        self.c.execute(update(Transaction).where(Transaction.payee == "Fit Club").values(recurring_id=rid))
         gym = transactions.api_transactions(self.c, q(recurring=rid), {})["items"]
         self.assertTrue(gym)
         self.assertEqual({t["recurring_name"] for t in gym}, {"Gym"})
-        self.assertEqual(set(self.ids(q="PIZZA")), {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE payee='Pizza Palace'")})
+        self.assertEqual(set(self.ids(q="PIZZA")),
+                         {r[0] for r in self.c.execute(select(Transaction.id).where(Transaction.payee == "Pizza Palace"))})
         month = f"{TODAY:%Y-%m}"
         self.assertEqual(set(self.ids(month=month, limit=1000)),
-                         {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE posted>=?", (TODAY.replace(day=1).isoformat(),))})
+                         {r[0] for r in self.c.execute(select(Transaction.id)
+                                                       .where(Transaction.posted >= TODAY.replace(day=1).isoformat()))})
         self.assertEqual(set(self.ids(scope="budget", limit=1000)),
-                         {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE account_id<>'demo-mortgage'")})
+                         {r[0] for r in self.c.execute(select(Transaction.id)
+                                                       .where(Transaction.account_id != "demo-mortgage"))})
 
     def test_transaction_category_filters(self):
         categories.add(self.c, "Farmers Market", "Groceries")
-        tid = self.one("SELECT id FROM transactions WHERE category='Shopping' ORDER BY id")[0]
-        amount = self.one("SELECT amount FROM transactions WHERE id=?", tid)[0]
+        tid = self.one(select(Transaction.id).where(Transaction.category == "Shopping").order_by(Transaction.id))[0]
+        amount = self.one(select(Transaction.amount).where(Transaction.id == tid))[0]
         splits.set_splits(self.c, tid, [{"amount": amount / 2, "category": "Farmers Market"},
                                         {"amount": amount - amount / 2, "category": "Pharmacy"}])
-        other = self.one("SELECT id FROM transactions WHERE category='Restaurants' ORDER BY id")[0]
-        self.c.execute("UPDATE transactions SET category=NULL, needs_review=1 WHERE id=?", (other,))
-        groceries = {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE category='Groceries'")}
+        other = self.one(select(Transaction.id).where(Transaction.category == "Restaurants")
+                         .order_by(Transaction.id))[0]
+        self.c.execute(update(Transaction).where(Transaction.id == other).values(category=None, needs_review=1))
+        groceries = {r[0] for r in self.c.execute(select(Transaction.id).where(Transaction.category == "Groceries"))}
         self.assertEqual(set(self.ids(category="Groceries", limit=1000)), groceries | {tid})
         self.assertNotIn(tid, self.ids(category="Shopping", limit=1000))
         self.assertEqual(self.ids(category="__none__"), [other])
@@ -243,32 +264,35 @@ class HandlerTests(DbCase):
 
     def test_ai_log_and_apply(self):
         for i in range(30):
-            self.c.execute("INSERT INTO ai_log(at, purpose) VALUES (?, 'categorize')", (f"2026-09-{i % 28 + 1:02d}",))
+            self.c.execute(insert(AiLog).values(at=f"2026-09-{i % 28 + 1:02d}", purpose="categorize"))
         log = transactions.api_ai_log(self.c, {}, {})
         self.assertEqual(len(log), 25)
         self.assertEqual([r["id"] for r in log], sorted((r["id"] for r in log), reverse=True))
         self.assertEqual(list(log[0]), [c.name for c in db.schema.ai_log.columns])
-        tid = self.one("SELECT id FROM transactions WHERE category='Shopping' ORDER BY id")[0]
+        tid = self.one(select(Transaction.id).where(Transaction.category == "Shopping").order_by(Transaction.id))[0]
         out = transactions.api_ai_apply(self.c, {}, {"tx_ids": [tid], "new_category": {"name": "  groceries "}, "remember": True})
         self.assertEqual((out["category"], out["created"]), ("Groceries", False))
         out = transactions.api_ai_apply(self.c, {}, {"tx_ids": [tid], "new_category": {"name": "Pet Food", "parent": "No Such"},
                                                      "remember": True})
         self.assertEqual((out["category"], out["created"]), ("Pet Food", True))
-        self.assertIsNone(self.one("SELECT parent FROM categories WHERE name='Pet Food'")[0])
+        self.assertIsNone(self.one(select(Category.parent).where(Category.name == "Pet Food"))[0])
         out = transactions.api_ai_apply(self.c, {}, {"tx_ids": [tid], "new_category": {"name": "Dog Food", "parent": "Groceries"},
                                                      "remember": True})
-        self.assertEqual(self.one("SELECT parent FROM categories WHERE name='Dog Food'")[0], "Groceries")
+        self.assertEqual(self.one(select(Category.parent).where(Category.name == "Dog Food"))[0], "Groceries")
 
     def test_recategorize(self):
-        a, b, c, d = [r[0] for r in self.c.execute("SELECT id FROM transactions WHERE category='Shopping' ORDER BY id LIMIT 4")]
-        self.c.execute("UPDATE transactions SET needs_review=1 WHERE id IN (?,?,?)", (a, b, c))
-        self.c.execute("UPDATE transactions SET category_source='manual' WHERE id=?", (b,))
-        self.c.execute("UPDATE transactions SET category=NULL, category_source=NULL WHERE id=?", (d,))
+        a, b, c, d = [r[0] for r in self.c.execute(select(Transaction.id)
+                                                   .where(Transaction.category == "Shopping")
+                                                   .order_by(Transaction.id).limit(4))]
+        self.c.execute(update(Transaction).where(Transaction.id.in_([a, b, c])).values(needs_review=1))
+        self.c.execute(update(Transaction).where(Transaction.id == b).values(category_source="manual"))
+        self.c.execute(update(Transaction).where(Transaction.id == d).values(category=None, category_source=None))
         with mock.patch.object(transactions.categorize, "categorize", return_value={"rules": 0}) as cat:
             transactions.api_recategorize(self.c, {}, {})
         self.assertEqual(sorted(cat.call_args[0][1]), sorted([a, c, d]))
         rows = {r[0]: tuple(r)[1:] for r in self.c.execute(
-            "SELECT id, category, category_source, confidence FROM transactions WHERE id IN (?,?,?)", (a, b, c))}
+            select(Transaction.id, Transaction.category, Transaction.category_source, Transaction.confidence)
+            .where(Transaction.id.in_([a, b, c])))}
         self.assertEqual(rows[a], (None, None, None))
         self.assertEqual(rows[b], ("Shopping", "manual", None))
 
@@ -277,17 +301,25 @@ class HandlerTests(DbCase):
     def test_plaid_banks(self):
         with mock.patch.object(sync.plaid, "configured", return_value=True):
             self.assertFalse(sync.plaid_banks(self.c))
-            self.c.execute("INSERT INTO plaid_items(item_id, access_token, products) VALUES ('i', 'x', 'investments')")
+            self.c.execute(insert(PlaidItem).values(item_id="i", access_token="x", products="investments"))
             self.assertFalse(sync.plaid_banks(self.c))
-            self.c.execute("INSERT INTO plaid_items(item_id, access_token, products) VALUES ('j', 'x', 'transactions')")
+            self.c.execute(insert(PlaidItem).values(item_id="j", access_token="x", products="transactions"))
             self.assertTrue(sync.plaid_banks(self.c))
 
     def test_refresh_prices_asks_for_the_securities_held(self):
-        self.c.execute("INSERT INTO securities(id, ticker, is_cash) VALUES ('s1','AAA',0), ('s2','BBB',0), ('s3','CCC',0), "
-                       "('s4','CASH',1), ('s5',NULL,0), ('s6','ZZZ',0), ('s7','AAA',0)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id) VALUES ('a','s1'), ('a','s4'), ('a','s5'), ('a','s7')")
-        self.c.execute("INSERT INTO inv_transactions(id, account_id, security_id, date) VALUES ('t','a','s2','2026-01-01')")
-        self.c.execute("INSERT INTO manual_positions(account_id, security_id) VALUES ('a','s3')")
+        self.c.execute(insert(Security), [{"id": "s1", "ticker": "AAA", "is_cash": 0},
+                                          {"id": "s2", "ticker": "BBB", "is_cash": 0},
+                                          {"id": "s3", "ticker": "CCC", "is_cash": 0},
+                                          {"id": "s4", "ticker": "CASH", "is_cash": 1},
+                                          {"id": "s5", "ticker": None, "is_cash": 0},
+                                          {"id": "s6", "ticker": "ZZZ", "is_cash": 0},
+                                          {"id": "s7", "ticker": "AAA", "is_cash": 0}])
+        self.c.execute(insert(Holding), [{"account_id": "a", "security_id": "s1"},
+                                         {"account_id": "a", "security_id": "s4"},
+                                         {"account_id": "a", "security_id": "s5"},
+                                         {"account_id": "a", "security_id": "s7"}])
+        self.c.execute(insert(InvTransaction).values(id="t", account_id="a", security_id="s2", date="2026-01-01"))
+        self.c.execute(insert(ManualPosition).values(account_id="a", security_id="s3"))
         with mock.patch.object(sync.prices, "refresh", return_value={}) as refresh, \
                 mock.patch.object(sync.sfinvest, "recapture_all"), mock.patch.object(sync.prices, "fill_security_types"):
             sync.refresh_prices(self.c)
@@ -298,23 +330,23 @@ class HandlerTests(DbCase):
         with mock.patch.object(sync, "refresh_prices", return_value={"AAA": 1}) as rp:
             self.assertEqual(sync.run_investment_sync(), {"items": 0, "errors": [], "prices": {}})
             rp.assert_not_called()
-            self.c.execute("INSERT INTO inv_accounts(id, item_id) VALUES ('ia', 'x')")
+            self.c.execute(insert(InvAccount).values(id="ia", item_id="x"))
             self.c.commit()
             self.assertEqual(sync.run_investment_sync()["prices"], {"AAA": 1})
 
     def test_bank_sync_logs_and_refreshes_simplefin_investments(self):
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, source) VALUES ('ia', 'x', 'plaid')")
+        self.c.execute(insert(InvAccount).values(id="ia", item_id="x", source="plaid"))
         self.c.commit()
         with mock.patch.object(sync.simplefin, "sync", return_value={"new": [], "errors": ["Bank note"]}), \
                 mock.patch.object(sync.merchants, "fetch_logos"), mock.patch.object(sync.realie, "refresh_due"), \
                 mock.patch.object(sync, "refresh_prices") as rp:
             self.assertEqual(sync.run_sync(), {"new": 0, "categorized": mock.ANY, "bank_messages": ["Bank note"]})
             rp.assert_not_called()
-            self.c.execute("UPDATE inv_accounts SET source='simplefin'")
+            self.c.execute(update(InvAccount).values(source="simplefin"))
             self.c.commit()
             sync.run_sync()
             rp.assert_called_once()
-        log = self.one("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1")
+        log = self.one(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1))
         self.assertEqual(tuple(log), (1, "0 new transactions · bank messages: Bank note"))
         # It worked, so it counts as a good sync; what the bank said is kept apart for the sidebar, until a clean sync.
         self.assertTrue(db.get_setting(self.c, "last_sync_ok"))
