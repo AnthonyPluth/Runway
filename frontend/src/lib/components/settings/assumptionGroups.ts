@@ -93,7 +93,8 @@ export const ASSUMPTION_GROUPS: AssumptionGroup[] = [
   },
   {
     id: "ai", title: "AI", items: [
-      "AI categorization goes through OpenRouter. Only the date, amount, merchant and account type of each transaction are sent, and every request is logged under AI activity. Categorizing an order’s items sends only their names and prices.",
+      "AI categorization goes through OpenRouter. Only the date, amount, merchant and account type of each transaction are sent, and every request is logged under AI activity. Categorizing an order’s items sends only their names and prices. Categorizing uses OpenRouter’s free-models router (openrouter/free) unless you pick another model; free models sometimes answer in a format Runway can’t read, and then the error says so and a paid model fixes it.",
+      "Card lookups use their own model, Claude Haiku 4.5 by default, because it calls OpenRouter’s web search reliably and costs little. Change either model under Settings → Connections → AI.",
       "Nothing changes until you apply a suggestion, except that confident answers can be applied during sync if you turn that on.",
       "“Fill in the rest with AI” on a card searches the web first by default, preferring the bank’s own page, and lists the pages it used; only the bank and the card’s name are searched for. The search costs extra on top of the model: about $4 per 1,000 results with OpenRouter’s own engine, at most 10 results a card (up to about 4¢), plus the model’s tokens. Turned off, it answers from the model’s memory, which costs less but is often out of date. Check what it suggests before saving.",
       "Assistants connected over MCP read your accounts, transactions, budget, reports, net worth, orders and churning, and never see your bank connections, settings or backups. They can change churning or categorize only if you turn that on, can’t delete or touch accounts or settings, and stop at once when you turn it off.",

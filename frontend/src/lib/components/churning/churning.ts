@@ -80,11 +80,10 @@ export function bankOrder(a: BankBonus, b: BankBonus): number {
   return rank[a.state] - rank[b.state] || b.opened_on.localeCompare(a.opened_on) || a.id - b.id;
 }
 
-/** Annual fees due in the next `days` days: the total, how many, and how many of those have no plan yet (a card you're
- * keeping, or plan to close or change, is decided; only an undecided one needs asking about). */
-export function feesDue(cards: ChurnCard[], today: string, days = 90): { total: number; count: number; undecided: number } {
+/** Annual fees due in the next `days` days: the total and how many. */
+export function feesDue(cards: ChurnCard[], today: string, days = 90): { total: number; count: number } {
   const due = cards.filter((c) => c.fee_due && daysUntil(c.fee_due, today) <= days);
-  return { total: due.reduce((s, c) => s + (c.annual_fee || 0), 0), count: due.length, undecided: due.filter((c) => (c.plan ?? "undecided") === "undecided").length };
+  return { total: due.reduce((s, c) => s + (c.annual_fee || 0), 0), count: due.length };
 }
 
 /** Bank bonus requirements that aren't met yet, in words: "$200 more direct deposits · 3 more debit purchases". */

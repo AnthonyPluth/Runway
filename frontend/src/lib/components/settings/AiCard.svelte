@@ -9,7 +9,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { checkCls, fieldCls, inputCls, rowCls } from "./ui";
 
-  // AI categorization through OpenRouter: the key, the model, and whether new merchants get categorized during syncs.
+  // AI categorization through OpenRouter: the key, the two models, and whether new merchants get categorized during syncs.
   const st = $derived(app.state!);
   type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
@@ -21,6 +21,9 @@
   }
   async function saveModel(f: Field) {
     await api("/api/settings", { method: "POST", body: { llm_model: f.value.trim() } }); await refreshState();
+  }
+  async function saveCardModel(f: Field) {
+    await api("/api/settings", { method: "POST", body: { card_ai_model: f.value.trim() } }); await refreshState();
   }
   async function clearKey() {
     try { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); reload(); }
@@ -38,8 +41,10 @@
   <div class={rowCls}>
     <label class={`${fieldCls} w-full sm:w-64`}>OpenRouter API key
       <input class={inputCls} type="password" placeholder={st.has_api_key ? "•••••••• saved" : "sk-or-…"} autocomplete="off" use:autosave={saveKey} /></label>
-    <label class={`${fieldCls} w-full sm:w-60`}>Model
+    <label class={`${fieldCls} w-full sm:w-60`}>Categorization model
       <input class={inputCls} value={st.llm_model ?? ""} spellcheck="false" use:autosave={saveModel} /></label>
+    <label class={`${fieldCls} w-full sm:w-60`}>Card lookup model
+      <input class={inputCls} value={st.card_ai_model ?? ""} spellcheck="false" use:autosave={saveCardModel} /></label>
     {#if st.has_api_key}<Button variant="outline" onclick={clearKey}>Remove key</Button>{/if}
   </div>
   <label class={checkCls}><input type="checkbox" checked={!!st.auto_ai_on_sync} onchange={(e) => setFlag("auto_ai_on_sync", e)} />

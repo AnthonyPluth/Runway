@@ -17,7 +17,9 @@ from . import db, monitoring, payees, rules as rulesmod, splits
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
-DEFAULT_MODEL = "anthropic/claude-haiku-4.5"  # any OpenRouter model id works
+DEFAULT_MODEL = "openrouter/free"  # OpenRouter's free-models router; any OpenRouter model id works
+DEFAULT_CARD_MODEL = "anthropic/claude-haiku-4.5"  # card lookups use OpenRouter's web-search tool, which it calls reliably; cheap
+PAID_HINT_MODEL = "anthropic/claude-haiku-4.5"   # what to suggest when a free model's reply is unusable
 OPENROUTER_URL = os.environ.get("RUNWAY_OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 
 # Processor prefixes that hide the real merchant name.
@@ -446,6 +448,16 @@ def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, messa
     conn.execute(delete(AiLog).where(AiLog.id.not_in(newest)))
 
 
+def llm_model(conn) -> str:
+    """The model for categorizing (transactions and order items): the one set in Settings, else the free router."""
+    return db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
+
+
+def card_ai_model(conn) -> str:
+    """The model for Churning's card lookups: the one set in Settings, else a small paid model that searches the web reliably."""
+    return db.get_setting(conn, sk.CARD_AI_MODEL, DEFAULT_CARD_MODEL) or DEFAULT_CARD_MODEL
+
+
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:
     """Ask the model for one category per group. Doesn't write anything except the last error message.
     Call with no write transaction open: requests can take a while."""
@@ -453,7 +465,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
     empty = (None, 0.0, None) if allow_new else (None, 0.0)
     if not api_key or not groups:
         return [empty] * len(groups)
-    model = db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
+    model = llm_model(conn)
     categories = _category_names(conn)
     # The latest choice for each merchant (newest first), as examples for the model.
     examples, seen = [], set()
@@ -481,7 +493,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 if extract_json_array(reply) is None:
                     snippet = " ".join((reply or "(empty reply)").split())[:160]
                     raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                     f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
+                                     f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings.")
                 results = parse_ai_reply(reply, categories, allow_new)
                 db.set_setting(conn, sk.LAST_LLM_ERROR, None)
                 answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))

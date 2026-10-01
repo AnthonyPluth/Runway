@@ -27,6 +27,7 @@ export interface AppState {
   simplefin?: boolean;
   has_api_key?: boolean;
   llm_model?: string;
+  card_ai_model?: string;
   /** When the banks last synced without an error, ISO with its UTC offset. */
   last_sync_ok?: string | null;
   last_log?: SyncLog | null;

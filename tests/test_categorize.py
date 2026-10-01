@@ -86,12 +86,22 @@ class CategorizeTests(LedgerCase):
         counts = categorize.categorize(self.conn, None, caller=fake)
         self.assertEqual(counts, {"auto": 3, "rule": 1, "history": 0, "ai": 0, "review": 1})
         self.assertIn("MYSTERY MERCHANT", seen["prompt"])
-        self.assertEqual(seen["model"], categorize.DEFAULT_MODEL)
+        self.assertEqual(seen["model"], "openrouter/free")
+        self.assertEqual(categorize.DEFAULT_MODEL, "openrouter/free")
         row = self.conn.execute(select(Transaction).where(Transaction.description.like("MYSTERY%"))).fetchone()
         self.assertEqual((row["category"], row["needs_review"], row["category_source"]), ("Shopping", 1, "ai"))
         cats = dict(self.conn.execute(select(Transaction.description, Transaction.category)).fetchall())
         self.assertEqual(cats["DIRECT DEBIT CITI AUTOPAY PAYMENT"], "Credit Card Payment")
         self.assertEqual(cats["AUTOPAY PAYMENT THANK YOU"], "Credit Card Payment")
+
+    def test_a_model_you_set_is_used_for_categorizing(self):
+        self.tx("cc", "2026-09-04", -40.0, "MYSTERY MERCHANT 123")
+        db.set_setting(self.conn, "openrouter_api_key", "k")
+        db.set_setting(self.conn, "llm_model", "openai/gpt-4o-mini")
+        db.set_setting(self.conn, "card_ai_model", "some/card-model")   # not used for categorizing
+        seen = []
+        categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append(m) or "[]")
+        self.assertEqual(seen, ["openai/gpt-4o-mini"])
 
     def test_one_question_per_merchant_and_history_reuse(self):
         for d in range(5):

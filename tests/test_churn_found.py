@@ -323,6 +323,19 @@ class ChatRequestTests(DbCase):
         self.assertNotIn("tools", body)
         self.assertEqual(out["annual_fee"], 95.0)
 
+    def test_card_lookups_use_their_own_model(self):
+        models = []
+
+        def call(api_key, model, prompt, web=None):
+            models.append(model)
+            return "{}", []
+        db.set_setting(self.c, sk.LLM_MODEL, "openai/gpt-4o-mini")   # the categorizer's: not the card lookup's
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
+        db.set_setting(self.c, sk.CARD_AI_MODEL, "google/gemini-2.5-flash")
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
+        self.assertEqual(models, ["anthropic/claude-haiku-4.5", "google/gemini-2.5-flash"])
+        self.assertEqual(categorize.DEFAULT_CARD_MODEL, "anthropic/claude-haiku-4.5")
+
     def test_switched_off_and_categorizing_send_no_web_search(self):
         db.set_setting(self.c, sk.CHURN_AI_WEB, "0")
         with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:

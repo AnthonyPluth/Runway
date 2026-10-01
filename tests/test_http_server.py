@@ -101,6 +101,13 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(st["has_api_key"])
         self.assertEqual(st["llm_model"], "openai/gpt-4o-mini")
         self.assertNotIn("sk-or-x", json.dumps(st))  # key never sent back to the page
+        self.assertEqual(st["card_ai_model"], "anthropic/claude-haiku-4.5")   # each model has its own default
+        self.assertEqual(self.req("POST", "/api/settings", {"card_ai_model": " google/gemini-2.5-flash "})[0], 200)
+        _, st = self.req("GET", "/api/state")
+        self.assertEqual((st["llm_model"], st["card_ai_model"]), ("openai/gpt-4o-mini", "google/gemini-2.5-flash"))
+        self.req("POST", "/api/settings", {"llm_model": "", "card_ai_model": ""})
+        _, st = self.req("GET", "/api/state")
+        self.assertEqual((st["llm_model"], st["card_ai_model"]), ("openrouter/free", "anthropic/claude-haiku-4.5"))
         code, fc = self.req("GET", "/api/overview?days=30")
         self.assertEqual(code, 200)
         self.assertEqual(len(fc["dates"]), 31)

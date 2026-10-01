@@ -45,6 +45,7 @@ def plaid_stmt_note(item_id: str) -> str:
 # AI categorizing (OpenRouter)
 OPENROUTER_API_KEY = "openrouter_api_key"
 LLM_MODEL = "llm_model"
+CARD_AI_MODEL = "card_ai_model"   # Churning's card lookups; unset means categorize.DEFAULT_CARD_MODEL
 LAST_LLM_ERROR = "last_llm_error"
 AUTO_AI_ON_SYNC = "auto_ai_on_sync"   # "1"/"0"; on unless switched off
 
