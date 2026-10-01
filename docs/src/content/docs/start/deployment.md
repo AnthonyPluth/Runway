@@ -37,4 +37,4 @@ In Settings, choosing a file first shows what it holds (when it was made, from w
 
 To use **Postgres**, set `DATABASE_URL` (the driver is already installed). Runway creates its tables on first start; restore a backup to bring your data along.
 
-Runway keeps its schema up to date by itself: on every start it applies any new [Alembic](https://alembic.sqlalchemy.org) migrations, on SQLite and Postgres alike. Databases from before migrations were added are upgraded in place.
+Runway keeps its schema up to date by itself: on every start it applies any new [Alembic](https://alembic.sqlalchemy.org) migrations, on SQLite and Postgres alike.

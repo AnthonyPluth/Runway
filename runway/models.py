@@ -9,7 +9,7 @@ run with `conn.execute(...)`), or load objects through the connection's ORM sess
 docs/src/content/docs/contributing/orm.md has the conventions.
 
 Relationships: the schema has no foreign keys, so each one spells out its join. They're all `viewonly` (writes go
-through the columns, as before: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one
+through the columns: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one
 that wasn't loaded up front fails loudly rather than running a query per row: load them with
 `options(selectinload(RetailOrder.items))`, or join on them (`select(...).join(Account.transactions)`).
 """
