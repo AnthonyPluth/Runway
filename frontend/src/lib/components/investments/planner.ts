@@ -33,11 +33,62 @@ function rng(seed: number) {
 
 const quantile = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
+/** What's left of a loan after `months` monthly payments, at `rate` a year (0: straight-line), as runway/networth.py
+ *  works it out. A payment that doesn't cover the interest leaves it where it is, and it never goes below zero. */
+export function amortize(owed: number, rate: number, payment: number, months: number): number {
+  if (owed <= 0 || !payment || months <= 0) return owed;
+  const r = rate / 12;
+  if (payment <= owed * r) return owed;
+  if (r === 0) return Math.max(0, owed - payment * months);
+  const growth = Math.pow(1 + r, months);
+  return Math.max(0, owed * growth - (payment * (growth - 1)) / r);
+}
+
+/** The calendar year of the last payment on the loan against an asset, counting a payment a month from `owed_as_of`;
+ *  null when its payment isn't known or doesn't pay it down. */
+export function payoffYear(a: PlanAsset): number | null {
+  if (!a.loan_payment) return null;
+  const [y, m] = a.owed_as_of.split("-").map(Number);
+  if (a.owed <= 0) return y;
+  const r = (a.loan_rate ?? 0) / 12;
+  if (a.loan_payment <= a.owed * r) return null;
+  // Payments until nothing's left; the tiny allowance keeps an exact fit from rounding up a month.
+  const n = r === 0 ? a.owed / a.loan_payment : -Math.log(1 - (a.owed * r) / a.loan_payment) / Math.log(1 + r);
+  return y + Math.floor((m - 1 + Math.ceil(n - 1e-9)) / 12);
+}
+
+/** The first year the loan's monthly payment is no longer spent: the year after it's paid off, or the year the asset
+ *  is sold if that's sooner. null when there's no payment known, or it never ends. */
+export function paymentEnds(a: PlanAsset, sellYear: number | null): number | null {
+  if (!a.loan_payment) return null;
+  const paid = payoffYear(a);
+  const ends = [paid == null ? null : paid + 1, sellYear].filter((y): y is number => y != null);
+  return ends.length ? Math.min(...ends) : null;
+}
+
 /** What selling an asset in `year` brings in, in today's dollars: its value grown by its own yearly change less
- *  inflation, minus what's owed on it today (a conservative guess: the loan will usually be smaller by then). */
+ *  inflation, minus the loan against it. With its monthly payment known the loan is paid down to the sale (a year
+ *  of payments for each year from now); without, today's balance is the guess. Either way the balance is in dollars of
+ *  that year, so it's taken back to today's by inflation like everything else. */
 export function saleProceeds(a: PlanAsset, year: number, thisYear: number, inflation: number): number {
+  const t = year - thisYear;
   const real = (1 + a.yearly_change) / (1 + inflation) - 1;
-  return Math.max(0, a.value * Math.pow(1 + real, year - thisYear) - a.owed);
+  const owed = a.loan_payment ? amortize(a.owed, a.loan_rate ?? 0, a.loan_payment, 12 * t) : a.owed;
+  return Math.max(0, a.value * Math.pow(1 + real, t) - owed / Math.pow(1 + inflation, t));
+}
+
+/** Each loan's yearly payment and the first year it's no longer spent (once per loan, however many assets it's
+ *  against: the soonest). Only loans whose payment is known and ends. */
+export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): { yearly: number; from: number }[] {
+  const sold = new Map(plan.assets.map((s) => [s.key, s.sell_year]));
+  const byLoan = new Map<string, { yearly: number; from: number }>();
+  for (const a of assets) {
+    const from = paymentEnds(a, sold.get(a.key) ?? null);
+    if (from == null || !a.loan_id || !a.loan_payment) continue;
+    const had = byLoan.get(a.loan_id);
+    if (!had || from < had.from) byLoan.set(a.loan_id, { yearly: 12 * a.loan_payment, from });
+  }
+  return [...byLoan.values()];
 }
 
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */
@@ -49,6 +100,10 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
   const ages = people.map((p) => years.map((y) => y - p.birth_year));
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const retireYear = Math.max(...people.map((p) => p.birth_year + p.retire_age));
+  // Spending (from your history) includes the payments on loans; once a loan is paid off or its asset sold, its
+  // payment comes off. The plan's own spending figure stays as you entered it.
+  const ending = endingPayments(plan, assets);
+  const spending = (y: number) => Math.max(0, plan.spending - ending.reduce((s, e) => s + (y >= e.from ? e.yearly : 0), 0));
   const net = years.map((y, t) => {
     let f = 0;
     people.forEach((p, i) => { if (ages[i][t] < p.retire_age) f += p.savings; });
@@ -56,7 +111,7 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
       const age = ages[inc.person]?.[t];
       if (age != null && age >= inc.start_age && (inc.end_age == null || age < inc.end_age)) f += inc.amount;
     }
-    if (y >= retireYear) f -= plan.spending;   // until everyone's retired, pay covers living costs
+    if (y >= retireYear) f -= spending(y);   // until everyone's retired, pay covers living costs
     for (const e of plan.events) if (e.year === y) f += e.amount;
     for (const s of plan.assets) {
       const a = byKey.get(s.key);

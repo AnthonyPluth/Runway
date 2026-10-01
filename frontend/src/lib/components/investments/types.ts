@@ -104,13 +104,24 @@ export interface RetirementPlan {
   events: PlanEvent[];
   assets: { key: string; sell_year: number }[];
 }
-/** A home, vehicle or company equity from Net worth that can be sold into the plan. */
-export interface PlanAsset { key: string; name: string; kind: string; value: number; yearly_change: number; owed: number }
+/** A home, vehicle or company equity from Net worth that can be sold into the plan. `owed` is the loan against it on
+ *  `owed_as_of` (today), in dollars of then; with its monthly payment known (`loan_rate` a yearly fraction, 0 when
+ *  you've entered none) the planner pays it down. */
+export interface PlanAsset {
+  key: string; name: string; kind: string; value: number; yearly_change: number; owed: number; owed_as_of: string;
+  loan_id: string | null; loan_rate: number | null; loan_payment: number | null;
+}
 export interface PlanData {
   plan: RetirementPlan;
   is_default: boolean;
   current: number;
-  computed: { annual_spending: number; yearly_savings: number; expected_return: number };
+  computed: {
+    annual_spending: number; yearly_savings: number; expected_return: number;
+    /** Yearly savings is what went into your investments in the last 12 months (false: a figure typed on the old card). */
+    savings_measured?: boolean;
+    /** The day the investment history starts, when that's less than a year ago. */
+    savings_since?: string | null;
+  };
   assets: PlanAsset[];
   year: number;
 }

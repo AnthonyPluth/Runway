@@ -61,6 +61,17 @@ class HandlerTests(DbCase):
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
 
+    def test_a_loans_rate_and_payment(self):
+        terms = lambda: tuple(self.one(select(Account.loan_rate, Account.loan_payment).where(Account.id == "demo-mortgage")))
+        accounts.api_account_update(self.c, {}, {"loan_rate": "6.5%", "loan_payment": "$1,850.25"}, "demo-mortgage")
+        self.assertEqual(terms(), (6.5, 1850.25))
+        for bad in ({"loan_rate": "lots"}, {"loan_rate": -1}, {"loan_rate": 101}, {"loan_payment": "-5"}, {"loan_payment": "nan"}):
+            with self.assertRaises(ApiError):
+                accounts.api_account_update(self.c, {}, bad, "demo-mortgage")
+        self.assertEqual(terms(), (6.5, 1850.25))   # a refused change leaves what was there
+        accounts.api_account_update(self.c, {}, {"loan_rate": "", "loan_payment": None}, "demo-mortgage")
+        self.assertEqual(terms(), (None, None))
+
     # ------------------------------------------------------------------------------------------ push
 
     def test_push_recent(self):

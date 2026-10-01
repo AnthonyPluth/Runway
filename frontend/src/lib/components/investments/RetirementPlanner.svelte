@@ -4,12 +4,12 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { fmt0 } from "$lib/format";
+  import { fmt0, fmtDate } from "$lib/format";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { project, saleProceeds } from "./planner";
+  import { paymentEnds, payoffYear, project, saleProceeds } from "./planner";
   import type { PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
@@ -183,7 +183,14 @@
     {:else}
       <Button variant="ghost" size="sm" onclick={removePartner}><X /> Remove {names[1]}</Button>
     {/if}
-    <p class="mt-2 text-sm text-muted-foreground">Savings stop at each person's retirement. Spending comes from the investments once everyone has retired.</p>
+    <p class="mt-2 text-sm text-muted-foreground">Savings stop at each person's retirement. Spending comes from the investments once everyone has
+      retired{#if plan.people.length > 1}; until then, the pay of whoever's still working is assumed to cover your living costs{/if}.</p>
+    {#if data.computed.savings_measured !== false}
+      <p class="mt-2 text-sm text-muted-foreground">Runway's figure for saving, {fmt0(data.computed.yearly_savings)} a year, is what went into your
+        investments in the last 12 months{#if data.computed.savings_since}, and your investment history only goes back to
+        {fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}{/if}. A rollover or a one-off lump sum counts too, so
+        change it if that isn't how much you usually save.</p>
+    {/if}
   </section>
 
   <section>
@@ -270,6 +277,15 @@
               <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
               <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums">≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
             {/if}
+            {#if a.loan_payment}
+              {@const paid = payoffYear(a)}
+              {@const ends = paymentEnds(a, s ? num(s.sell_year) : null)}
+              <p class="basis-full pl-6 text-sm text-muted-foreground">
+                {#if ends == null}Its {fmt0(a.loan_payment)}/month loan payment doesn't pay the loan down, so it stays in your spending.
+                {:else if paid == null || ends <= paid}Its {fmt0(a.loan_payment)}/month loan payment stops when it's sold, and comes off your spending from {ends}.
+                {:else}Its {fmt0(a.loan_payment)}/month loan payment ends in {paid}, and comes off your spending from {ends}.{/if}
+              </p>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -278,7 +294,9 @@
         <span class="relative inline-block w-20">
           <span class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
           <Input type="number" step="0.5" class="h-7 pr-6 text-sm" aria-label="Inflation" value={pctIn(plan.inflation)} oninput={(e) => setPct("inflation", e.currentTarget.value)} />
-        </span> a year of inflation.</p>
+        </span> a year of inflation. A loan against it is paid down to the year of the sale when its monthly payment is set in
+        Settings → Accounts (otherwise today's balance is taken off), and its payment comes off your spending once it's paid off or
+        sold. Proceeds are before selling costs (often 6–8% of a home's price) and tax.</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}

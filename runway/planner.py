@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from . import db, equity, forecast, networth, validate
+from . import db, equity, networth, validate
 from . import settings_keys as sk
 from .models import Account
 
@@ -135,16 +135,25 @@ def default(computed: dict, today: date) -> dict:
 
 def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
-    them), and vested company equity."""
-    owed = {a["id"]: forecast.owed(a) for a in db.rows(conn.execute(
-        select(Account.id, Account.kind, Account.balance, Account.owed_positive).where(Account.kind.in_(["credit", "loan"]))))}
+    them), and vested company equity. A loan comes with what's owed on it today (paid down since its last balance, as
+    on the Net worth page) and, when you've entered them, its rate and monthly payment, so the page can pay it down to
+    the year of the sale and stop charging the payment once it's gone. `owed` is in dollars of `owed_as_of`."""
+    loans = {a["id"]: a for a in db.rows(conn.execute(
+        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.loan_rate,
+               Account.loan_payment).where(Account.kind.in_(["credit", "loan"]))))}
     out = []
     for a in networth.assets(conn, today):
+        loan = loans.get(a["loan_account_id"])
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
-                    "yearly_change": (a["yearly_change"] or 0) / 100.0, "owed": round(owed.get(a["loan_account_id"], 0.0), 2)})
+                    "yearly_change": (a["yearly_change"] or 0) / 100.0,
+                    "owed": networth.loan_balance(loan, today) if loan else 0.0, "owed_as_of": today.isoformat(),
+                    "loan_id": loan["id"] if loan else None,
+                    "loan_rate": (loan["loan_rate"] or 0.0) / 100.0 if loan and loan["loan_payment"] else None,
+                    "loan_payment": (loan["loan_payment"] or None) if loan else None})
     for c in equity.networth_items(conn, today):
         out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": c["value"],
-                    "yearly_change": 0.0, "owed": 0.0})
+                    "yearly_change": 0.0, "owed": 0.0, "owed_as_of": today.isoformat(), "loan_id": None,
+                    "loan_rate": None, "loan_payment": None})
     return out
 
 

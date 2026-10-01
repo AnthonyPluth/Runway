@@ -1,9 +1,9 @@
-"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo)."""
+"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo, a loan's rate and payment)."""
 from __future__ import annotations
 
 from sqlalchemy import func, select, update
 
-from ... import brands, db, merchants, plaidbank
+from ... import brands, db, merchants, plaidbank, validate
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, PlaidAccount, PlaidItem
 from ..common import ApiError
@@ -12,8 +12,12 @@ from ..common import ApiError
 ACCOUNT_FIELDS = {
     "display_name": str, "kind": str, "pay_from": str,
     "in_forecast": int, "daily_spend": int, "hidden": int, "networth_hidden": int, "owed_positive": int, "owner": str,
+    "loan_rate": float, "loan_payment": float,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
+# A loan's terms as typed (a pasted "6.5%" or "$1,850"): their labels and highest values.
+LOAN_TERMS = {"loan_rate": ("interest rate", 100.0), "loan_payment": ("monthly payment", 1e7)}
+_v = validate.Validator(ApiError, drop=",$%")
 
 
 def api_accounts(conn, _q, _b):
@@ -44,6 +48,9 @@ def api_account_update(conn, _q, body, acct_id):
             v = None
         elif ACCOUNT_FIELDS[k] is int:
             v = int(v)
+        elif ACCOUNT_FIELDS[k] is float:
+            label, high = LOAN_TERMS[k]
+            v = _v.number(v, label, 0, high)
         else:
             v = str(v).strip()
         if k == "kind" and v not in KINDS:

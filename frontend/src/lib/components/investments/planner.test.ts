@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flows, project, RUNS, saleProceeds } from "./planner";
+import { amortize, flows, paymentEnds, payoffYear, project, RUNS, saleProceeds } from "./planner";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
@@ -21,7 +21,14 @@ function plan(over: Partial<RetirementPlan> = {}): RetirementPlan {
   };
 }
 
-const house: PlanAsset = { key: "home:1", name: "House", kind: "home", value: 300_000, yearly_change: 0.04, owed: 50_000 };
+// A loan whose payment isn't known: today's balance is the guess.
+const house: PlanAsset = {
+  key: "home:1", name: "House", kind: "home", value: 300_000, yearly_change: 0.04, owed: 50_000, owed_as_of: `${Y}-10-01`,
+  loan_id: "mtg", loan_rate: null, loan_payment: null,
+};
+// The same with its payment: $50,000 at 6% and $1,000 a month is 58 payments, the last in August 2031.
+const paying: PlanAsset = { ...house, loan_rate: 0.06, loan_payment: 1_000 };
+const byHand = (owed: number, months: number) => { for (let i = 0; i < months; i++) owed = Math.max(0, owed * 1.005 - 1_000); return owed; };
 
 describe("project", () => {
   it("gives the same picture for the same plan", () => {
@@ -136,8 +143,26 @@ describe("flows", () => {
     const p = plan({ spending: 0, people: [{ name: "Alex", birth_year: Y - 60, retire_age: 60, savings: 0 }],
       assets: [{ key: "home:1", sell_year: Y + 4 }, { key: "gone", sell_year: Y + 1 }] });
     const net = flows(p, Y, [house]).net;
-    expect(net[4]).toBeCloseTo(261_821.25, 2);
+    expect(net[4]).toBeCloseTo(267_396.90, 2);
     expect(net.filter((_, i) => i !== 4)).toEqual(Array(10).fill(0));   // an asset no longer on Net worth is skipped
+  });
+
+  it("takes a loan's payment off spending from the year after it's paid off", () => {
+    // Retires in Y+5 (2031), the year of the last payment: $20,000 then, $8,000 from 2032 on.
+    expect(flows(plan(), Y, [paying]).net).toEqual([10_000, 10_000, 10_000, 10_000, 10_000, -20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
+    // no payment known, or a payment that never pays it down: spending as entered
+    expect(flows(plan(), Y, [house]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan(), Y, [{ ...paying, loan_payment: 200 }]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("or from the year its asset is sold, if that's sooner", () => {
+    const p = plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] });
+    const net = flows(p, Y, [paying]).net;
+    expect(net.slice(5)).toEqual(Array(6).fill(-8_000));
+    expect(net[3]).toBeCloseTo(10_000 + saleProceeds(paying, Y + 3, Y, 0.03), 6);
+    // never charges less than nothing, and a loan against two assets comes off once
+    expect(flows(plan(), Y, [{ ...paying, loan_payment: 3_000 }]).net.slice(5)).toEqual(Array(6).fill(0));   // paid off in 2028
+    expect(flows(plan(), Y, [paying, { ...paying, key: "home:2" }]).net.slice(6)).toEqual(Array(5).fill(-8_000));
   });
 
   it("still has this year when the plan's end age has passed", () => {
@@ -147,18 +172,53 @@ describe("flows", () => {
   });
 });
 
+describe("loans", () => {
+  it("amortize month by month, as by hand", () => {
+    expect(amortize(50_000, 0.06, 1_000, 12)).toBeCloseTo(byHand(50_000, 12), 6);
+    expect(amortize(50_000, 0.06, 1_000, 0)).toBe(50_000);
+    expect(amortize(50_000, 0.06, 1_000, 600)).toBe(0);           // never below zero
+    expect(amortize(50_000, 0, 1_000, 12)).toBe(38_000);          // no rate: straight-line
+    expect(amortize(50_000, 0.06, 250, 12)).toBe(50_000);         // only the interest: it doesn't shrink, or grow
+  });
+
+  it("know the year of the last payment", () => {
+    expect(payoffYear(paying)).toBe(2031);
+    // from October 1: the first payment on November 1
+    expect(payoffYear({ ...paying, loan_rate: 0, owed: 2_000 })).toBe(2026);    // 2 payments: the last in December 2026
+    expect(payoffYear({ ...paying, loan_rate: 0, owed: 14_000 })).toBe(2027);   // 14: December 2027
+    expect(payoffYear({ ...paying, loan_rate: 0, owed: 14_001 })).toBe(2028);   // 15: January 2028
+    expect(payoffYear(house)).toBeNull();                                        // no payment known
+    expect(payoffYear({ ...paying, loan_payment: 250 })).toBeNull();             // never paid down
+  });
+
+  it("stop being spent the year after the last payment, or when the asset is sold", () => {
+    expect(paymentEnds(paying, null)).toBe(2032);
+    expect(paymentEnds(paying, Y + 2)).toBe(Y + 2);
+    expect(paymentEnds(paying, Y + 9)).toBe(2032);
+    expect(paymentEnds({ ...paying, loan_payment: 250 }, null)).toBeNull();
+    expect(paymentEnds({ ...paying, loan_payment: 250 }, Y + 9)).toBe(Y + 9);
+    expect(paymentEnds(house, Y + 2)).toBeNull();
+  });
+});
+
 describe("saleProceeds", () => {
-  it("grows the value by its yearly change less inflation, then takes off the loan", () => {
-    // 300k × (1.04 / 1.03)^4 − 50k
-    expect(saleProceeds(house, Y + 4, Y, 0.03)).toBeCloseTo(261_821.25, 2);
+  it("grows the value by its yearly change less inflation, then takes off the loan in today's dollars", () => {
+    // 300k × (1.04 / 1.03)^4 − 50k / 1.03^4: the balance is in dollars of then
+    expect(saleProceeds(house, Y + 4, Y, 0.03)).toBeCloseTo(267_396.90, 2);
+  });
+
+  it("pays the loan down to the sale when its payment is known", () => {
+    expect(saleProceeds(paying, Y + 4, Y, 0.03)).toBeCloseTo(311_821.25 - byHand(50_000, 48) / Math.pow(1.03, 4), 2);
+    expect(saleProceeds(paying, Y + 6, Y, 0.03)).toBeCloseTo(300_000 * Math.pow(1.04 / 1.03, 6), 6);   // paid off by then
   });
 
   it("is today's equity when sold this year", () => {
     expect(saleProceeds(house, Y, Y, 0.03)).toBe(250_000);
+    expect(saleProceeds(paying, Y, Y, 0.03)).toBe(250_000);
   });
 
   it("keeps pace exactly when it rises with inflation", () => {
-    expect(saleProceeds({ ...house, yearly_change: 0.03 }, Y + 10, Y, 0.03)).toBeCloseTo(250_000, 6);
+    expect(saleProceeds({ ...house, yearly_change: 0.03, owed: 0 }, Y + 10, Y, 0.03)).toBeCloseTo(300_000, 6);
   });
 
   it("never brings in less than nothing", () => {

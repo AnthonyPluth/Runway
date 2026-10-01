@@ -10,6 +10,9 @@ export interface SettingsAccount extends Account {
   networth_hidden?: number;
   provider?: string | null;
   plaid_account_id?: string | null;
+  /** Loans: the yearly rate (APR, percent) and monthly payment you entered, if any. */
+  loan_rate?: number | null;
+  loan_payment?: number | null;
   plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: boolean | number;
     statement_note?: string | null } | null;
 }

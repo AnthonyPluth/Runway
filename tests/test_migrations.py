@@ -199,6 +199,21 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(tuple(conn.execute(select(ChurnBenefit.name, ChurnBenefit.guests)).fetchone()), ("Lounge access", None))
         self.assertEqual(drift(self.path), [])
 
+    def test_0028_adds_loan_terms(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0027")
+        with db.engine(self.path).begin() as c:
+            self.assertFalse({"loan_rate", "loan_payment"} & {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind, balance) VALUES ('mtg', 'Mortgage', 'loan', -250000)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(tuple(conn.execute(select(Account.balance, Account.loan_rate, Account.loan_payment)).fetchone()),
+                             (-250000.0, None, None))
+        self.assertEqual(drift(self.path), [])
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating

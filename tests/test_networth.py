@@ -85,12 +85,68 @@ class NetWorthTests(Base):
         api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
         self.assertEqual(networth.summary(self.c, TODAY, save=False)["net"], before["net"])
 
+    def test_change_says_which_snapshot_it_is_measured_from(self):
+        # opened 44 days ago and not since: "30 days" is really since then, and the page is told so
+        self.c.execute(insert(NetworthSnapshot).values(date="2026-08-10", assets=0, liabilities=0, net=100000))
+        s = networth.summary(self.c, TODAY, save=False)
+        self.assertEqual(s["change"]["30d"], round(s["net"] - 100000, 2))   # still a number, as before
+        self.assertEqual(s["change_since"], {"30d": "2026-08-10", "90d": None, "1y": None})
+        self.assertEqual(s["change"]["90d"], None)
+
     def test_validation(self):
         for bad in ({"name": "", "kind": "home", "value": 1}, {"name": "X", "kind": "boat", "value": 1},
                     {"name": "X", "kind": "home", "value": "abc"}, {"name": "X", "kind": "home", "value": -5},
                     {"name": "X", "kind": "home", "value": 1, "loan_account_id": "chk"}):
             with self.assertRaises(ValueError):
                 networth.save_asset(self.c, bad, today=TODAY)
+
+
+class LoanTests(Base):
+    """A loan whose payment you've entered is paid down month by month from its last balance, synced or not."""
+
+    @staticmethod
+    def by_hand(owed: float, rate: float, payment: float, months: int) -> float:
+        for _ in range(months):
+            owed = max(0.0, owed * (1 + rate / 1200) - payment)
+        return owed
+
+    def loan(self, **kw):
+        return {"kind": "loan", "balance": -200000.0, "owed_positive": 0, "balance_date": "2025-09-23", **kw}
+
+    def test_amortizes_from_the_balance_date(self):
+        a = self.loan(loan_rate=6.0, loan_payment=1199.10)
+        self.assertAlmostEqual(networth.loan_balance(a, TODAY), self.by_hand(200000, 6.0, 1199.10, 12), delta=0.01)
+        self.assertEqual(networth.loan_balance(a, date(2025, 9, 23)), 200000.0)        # nothing paid yet
+        self.assertAlmostEqual(networth.loan_balance(a, date(2025, 10, 22)), 200000.0)   # the first payment is on the 23rd
+        self.assertAlmostEqual(networth.loan_balance(a, date(2025, 10, 23)), self.by_hand(200000, 6.0, 1199.10, 1), delta=0.01)
+        self.assertEqual(networth.loan_balance(a, date(2056, 1, 1)), 0.0)              # paid off, never below zero
+        self.assertEqual(networth.loan_balance(a, date(2025, 1, 1)), 200000.0)         # before the balance: as it is
+
+    def test_without_a_rate_or_payment(self):
+        self.assertEqual(networth.loan_balance(self.loan(loan_payment=1000), TODAY), 188000.0)   # no rate: straight-line
+        self.assertEqual(networth.loan_balance(self.loan(loan_rate=6.0), TODAY), 200000.0)        # no payment: as it is
+        self.assertEqual(networth.loan_balance(self.loan(loan_rate=6.0, loan_payment=1000, balance_date=None), TODAY), 200000.0)
+        # a payment that doesn’t cover the interest ($900 a month; $200,000 at 6% is $1,000 of interest) doesn’t shrink it, or grow it
+        self.assertEqual(networth.loan_balance(self.loan(loan_rate=6.0, loan_payment=900), TODAY), 200000.0)
+        self.assertEqual(networth.loan_balance(self.loan(balance=12000.0, owed_positive=1, loan_payment=500), TODAY), 6000.0)
+        # a card's balance is never paid down
+        self.assertEqual(networth.loan_balance({**self.loan(loan_payment=500), "kind": "credit"}, TODAY), 200000.0)
+
+    def test_net_worth_and_equity_use_the_paid_down_balance(self):
+        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-03-23", loan_rate=6.0, loan_payment=1500))
+        networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000, "loan_account_id": "mtg"}, today=TODAY)
+        s = networth.summary(self.c, TODAY, save=False)
+        g = {x["key"]: x for x in s["groups"]}
+        owed = round(self.by_hand(250000, 6.0, 1500, 6), 2)
+        mtg = next(i for i in g["loan"]["items"] if i["id"] == "mtg")
+        self.assertEqual((mtg["value"], mtg["synced"]), (owed, 250000.0))
+        self.assertNotIn("synced", next(i for i in g["loan"]["items"] if i["id"] == "auto"))   # no payment: as synced
+        self.assertEqual(g["home"]["items"][0]["equity"], round(425000 - owed, 2))
+        self.assertEqual(g["loan"]["total"], round(owed + 12000, 2))
+        from runway.server.api.accounts import api_account_update
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "mtg")
+        left_out = networth.summary(self.c, TODAY, save=False)["excluded"]
+        self.assertEqual(next(a["balance"] for a in left_out if a["id"] == "mtg"), owed)
 
 
 class MockRealie(BaseHTTPRequestHandler):

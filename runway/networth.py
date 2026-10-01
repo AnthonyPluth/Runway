@@ -2,7 +2,8 @@
 
 Account balances come from SimpleFIN. Homes, vehicles and other assets are entered by hand (a home can also be
 valued by Realie, see realie.py). An asset can carry a yearly change (say -15% for a car) so its value drifts
-between your updates, and can be linked to the loan against it to show equity. A snapshot is saved each day the
+between your updates, and can be linked to the loan against it to show equity. A loan whose monthly payment you've
+entered (Settings → Accounts) is paid down month by month from its last balance, synced or not. A snapshot is saved each day the
 numbers are looked at, which builds the history chart going forward.
 """
 from __future__ import annotations
@@ -43,9 +44,44 @@ def assets(conn, today: date | None = None) -> list[dict]:
     return out
 
 
-def _presented(a: dict) -> float:
-    """An account's value the way the groups show it: credit and loan accounts as a positive amount owed."""
-    if a["kind"] in ("credit", "loan"):
+def months_between(start: date, end: date) -> int:
+    """Monthly payments made after `start` up to `end` (one a month, on start's day of the month); 0 if end is earlier."""
+    return max(0, (end.year - start.year) * 12 + end.month - start.month - (1 if end.day < start.day else 0))
+
+
+def amortize(owed: float, rate: float | None, payment: float | None, months: int) -> float:
+    """What's left of `owed` after `months` monthly payments, at `rate` percent a year (none: straight-line). A
+    payment that doesn't cover the interest leaves it where it is, and it never goes below zero."""
+    if owed <= 0 or not payment or months <= 0:
+        return owed
+    r = (rate or 0) / 1200
+    if payment <= owed * r:
+        return owed
+    if r == 0:
+        return max(0.0, owed - payment * months)
+    growth = (1 + r) ** months
+    return max(0.0, owed * growth - payment * (growth - 1) / r)
+
+
+def loan_balance(account: dict, on: date) -> float:
+    """What's owed on a loan account on `on`, as a positive amount: its balance, paid down month by month since the
+    balance's date when you've entered its monthly payment. Without a payment (or a date), the balance as it is."""
+    owed = forecast.owed({**account, "balance": account.get("balance") or 0.0})
+    if account.get("kind") != "loan" or not account.get("loan_payment") or not account.get("balance_date"):
+        return round(owed, 2)
+    try:
+        start = date.fromisoformat(str(account["balance_date"])[:10])
+    except ValueError:
+        return round(owed, 2)
+    return round(amortize(owed, account.get("loan_rate"), account["loan_payment"], months_between(start, on)), 2)
+
+
+def _presented(a: dict, today: date) -> float:
+    """An account's value the way the groups show it: credit and loan accounts as a positive amount owed, a loan paid
+    down to today when its payment is known."""
+    if a["kind"] == "loan":
+        return loan_balance(a, today)
+    if a["kind"] == "credit":
         return round(forecast.owed({**a, "balance": a["balance"] or 0.0}), 2)
     return round(a["balance"] or 0.0, 2)
 
@@ -54,7 +90,8 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     today = today or date.today()
     accts = db.rows(conn.execute(
         select(Account.id, db.account_label_expr(Account).label("name"), Account.org, Account.kind, Account.balance,
-               Account.balance_date, Account.owed_positive, Account.owner, Account.networth_hidden).where(Account.hidden == 0)))
+               Account.balance_date, Account.owed_positive, Account.owner, Account.networth_hidden, Account.loan_rate,
+               Account.loan_payment).where(Account.hidden == 0)))
     left_out = [a for a in accts if a["networth_hidden"]]   # you left these out of Net worth: listed at the bottom, to bring back
     accts = [a for a in accts if not a["networth_hidden"]]
     groups: dict[str, dict[str, Any]] = {
@@ -70,9 +107,12 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     owed_by_account = {}
     for a in accts:
         item = {"type": "account", "id": a["id"], "name": a["name"], "org": a["org"], "as_of": a["balance_date"], "owner": a["owner"]}
-        value = _presented(a)
+        value = _presented(a, today)
         if a["kind"] in ("credit", "loan"):
             owed_by_account[a["id"]] = value
+            synced = round(forecast.owed({**a, "balance": a["balance"] or 0.0}), 2)
+            if value != synced:   # paid down since the balance's date: what it was then, too
+                item["synced"] = synced
             groups[a["kind"]]["items"].append({**item, "value": value})
         else:
             groups["investments" if a["kind"] == "investment" else "cash"]["items"].append({**item, "value": value})
@@ -100,17 +140,22 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     for h in hist:
         h["detail"] = json.loads(h["detail"] or "{}")
 
-    def change_since(days: int):
+    def change_since(days: int) -> tuple[float | None, str | None]:
+        """The change since the latest snapshot at least `days` old, and that snapshot's date: snapshots are only saved
+        on days the numbers are looked at, so "30 days" can really be longer."""
         cutoff = (today - timedelta(days=days)).isoformat()
         older = [h for h in hist if h["date"] <= cutoff]
-        return round(net - older[-1]["net"], 2) if older else None
+        return (round(net - older[-1]["net"], 2), older[-1]["date"]) if older else (None, None)
+
+    changes = {k: change_since(days) for k, days in (("30d", 30), ("90d", 90), ("1y", 365))}
 
     return {
         "today": today.isoformat(), "net": net, "assets": total_assets, "liabilities": total_liab,
         "groups": [g for g in groups.values() if g["items"]],
-        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a)} for a in left_out],
+        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a, today)} for a in left_out],
         "history": hist, "first_snapshot": hist[0]["date"] if hist else None,
-        "change": {"30d": change_since(30), "90d": change_since(90), "1y": change_since(365)},
+        "change": {k: amount for k, (amount, _) in changes.items()},
+        "change_since": {k: since for k, (_, since) in changes.items()},   # the snapshot each change is measured from
     }
 
 

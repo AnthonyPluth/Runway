@@ -50,6 +50,8 @@
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
   let spend = $state(!!init.daily_spend);
+  let loanRate = $state(init.loan_rate == null ? "" : String(init.loan_rate));
+  let loanPayment = $state(init.loan_payment == null ? "" : String(init.loan_payment));
   let changingType = $state(false);
   let open = $state(openAccounts.has(init.id));
 
@@ -123,6 +125,7 @@
     if (a.kind === "credit") body.pay_from = payFrom;
     if (owes) body.owed_positive = sign ? 1 : 0;
     if (a.kind === "checking" || a.kind === "savings") body.daily_spend = spend ? 1 : 0;
+    if (a.kind === "loan") Object.assign(body, { loan_rate: loanRate.trim(), loan_payment: loanPayment.trim() });   // as typed ("6.5%", "$1,850")
     try {
       await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
       if (rerender) { toast.success("Saved"); reload(); }
@@ -199,6 +202,18 @@
           {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
         </select>
       </label>
+    {/if}
+    {#if a.kind === "loan"}
+      <label class={fieldCls}>Interest rate (APR)
+        <input class={inputCls} inputmode="decimal" placeholder="6.5%" bind:value={loanRate} use:autosave={() => save(false)} />
+      </label>
+      <label class={fieldCls}>Monthly payment
+        <input class={inputCls} inputmode="decimal" placeholder="$1,850" bind:value={loanPayment} use:autosave={() => save(false)} />
+      </label>
+      <p class="text-xs text-muted-foreground sm:col-span-2 lg:col-span-3">
+        With the payment (principal and interest, not escrow), Net worth and the retirement planner pay this loan down month by
+        month from its last balance, so it goes down even when the bank doesn't update it. Without a rate, all of the payment
+        goes to the balance.</p>
     {/if}
     {#if showSource}
       <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source" bind:this={sourceBox}>

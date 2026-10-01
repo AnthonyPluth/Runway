@@ -10,7 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from sqlalchemy import func, insert, select, update
 
 from runway import db, plaid, planner, portfolio, prices
-from runway.models import Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security
+from runway.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security,
+                           Transaction)
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -227,6 +228,45 @@ class FireTests(Base):
                                             yearly_change=3, loan_account_id="mtg"))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
+        self.assertEqual((house["loan_id"], house["loan_rate"], house["loan_payment"], house["owed_as_of"]),
+                         ("mtg", None, None, TODAY.isoformat()))   # no payment known: the page keeps it as it is
+        # with its payment entered, what's owed is paid down to today (as on Net worth), and the terms come along
+        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", loan_rate=6, loan_payment=1500))
+        house = next(a for a in self.plan()["assets"] if a["name"] == "House")
+        owed = 200000.0
+        for _ in range(2):
+            owed = owed * 1.005 - 1500
+        self.assertAlmostEqual(house["owed"], owed, delta=0.01)
+        self.assertEqual((house["loan_rate"], house["loan_payment"]), (0.06, 1500.0))
+        self.c.execute(update(Account).where(Account.id == "mtg").values(loan_rate=None))   # a payment and no rate: 0%
+        self.assertEqual(next(a for a in self.plan()["assets"] if a["name"] == "House")["loan_rate"], 0.0)
+
+    def test_yearly_savings_says_what_it_is(self):
+        p = self.plan()["computed"]
+        self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))   # a year of history: the last 12 months
+        self.tx("dep", "2026-06-01", "cash", "deposit", -3000)
+        p = self.plan()["computed"]
+        self.assertEqual((p["yearly_savings"], p["savings_since"]), (3000.0, "2026-05-31"))   # history starts then
+        db.set_setting(self.c, "fire_yearly_savings", "20000")   # typed on the old card: not a measurement
+        p = self.plan()["computed"]
+        self.assertEqual((p["yearly_savings"], p["savings_measured"], p["savings_since"]), (20000.0, False, None))
+
+
+class MonthlySpendingTests(DbCase):
+    """Retirement spending and the emergency-fund rule count spending the way Reports does."""
+
+    def test_uncategorized_counts_and_a_month_of_money_back_is_zero(self):
+        self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0},
+                                         {"id": "brk", "name": "Brokerage", "kind": "investment", "balance": 0}])
+        rows = [("2026-03-05", -1000, "Groceries"), ("2026-03-06", -500, None),   # uncategorized money out is spending
+                ("2026-03-07", -2000, "Transfer"), ("2026-03-08", 5000, "Income"), ("2026-03-09", 300, None),
+                ("2026-04-05", -400, "Groceries"), ("2026-04-06", -100, "No such category"),   # unknown: uncategorized
+                ("2026-05-05", -200, "Shopping"), ("2026-05-06", 700, "Shopping"),   # more back than out: a month of none
+                ("2026-02-27", -9999, "Groceries"), ("2026-09-01", -9999, "Groceries")]   # outside the 6 full months
+        self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "chk", "posted": d, "amount": a, "category": c}
+                                             for i, (d, a, c) in enumerate(rows)])
+        self.c.execute(insert(Transaction).values(id="inv", account_id="brk", posted="2026-03-10", amount=-750))
+        self.assertEqual(portfolio.monthly_spending(self.c, TODAY), round((1500 + 500 + 0) / 3, 2))
 
 
 # ---------------------------------------------------------------------------------------------- mock servers

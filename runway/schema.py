@@ -47,6 +47,8 @@ accounts = Table(
     Column('plaid_account_id', Text, doc='the same account in a Plaid connection, if any'),
     Column('provider_since', Text, doc='when the provider last changed (YYYY-MM-DD); overlapping history is matched up'),
     Column('logo', Text, doc='the logo you chose: a website ("citi.com"), "none" for a letter, or NULL for its institution\'s'),
+    Column('loan_rate', Float, doc='loans: the yearly interest rate (APR) in percent, if you entered it'),
+    Column('loan_payment', Float, doc='loans: the monthly payment, if you entered it; with it the balance goes down month by month'),
 )
 
 transactions = Table(

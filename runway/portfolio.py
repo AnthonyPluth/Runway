@@ -19,7 +19,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import case, func, literal_column, select
+from sqlalchemy import and_, case, func, literal_column, or_, select
 
 from . import db, plaid, planner, prices, splits
 from . import settings_keys as sk
@@ -603,19 +603,22 @@ def performance(hist: dict, bench: list, period: str, today: date) -> dict:
 # ------------------------------------------------------------------------------------------------ X-ray & FIRE
 
 def monthly_spending(conn, today: date) -> float:
-    """Average monthly spending from Runway's own transactions over the last 6 full months."""
+    """Average monthly spending from Runway's own transactions over the last 6 full months. Counted as Reports counts
+    it: every category that isn't a transfer or income, and money out with no category. A month with more money back
+    than out (a big refund) is a month of no spending, not one left out."""
     start = date(today.year, today.month, 1) - relativedelta(months=6)
     end = date(today.year, today.month, 1)
     t = splits.parts()
     # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
     month = func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("m")
+    spending = or_(and_(Category.is_transfer == 0, Category.is_income == 0), and_(Category.name.is_(None), t.c.amount < 0))
     rows = conn.execute(
         select(month, func.sum(t.c.amount).label("s")).select_from(t)
-        .join(Account, Account.id == t.c.account_id).join(Category, Category.name == t.c.category)
-        .where(Category.is_transfer == 0, Category.is_income == 0, Account.hidden == 0,
+        .join(Account, Account.id == t.c.account_id).outerjoin(Category, Category.name == t.c.category)
+        .where(spending, Account.hidden == 0,
                Account.kind.in_(["checking", "savings", "credit"]), t.c.posted >= start.isoformat(), t.c.posted < end.isoformat())
         .group_by(month)).fetchall()
-    months = [-(r["s"] or 0) for r in rows if (r["s"] or 0) < 0]
+    months = [max(0.0, -(r["s"] or 0)) for r in rows]
     return round(statistics.mean(months), 2) if months else 0.0
 
 
@@ -686,7 +689,10 @@ def fire_saved(conn) -> dict:
 
 
 def plan_figures(conn, hist: dict, today: date) -> dict:
-    """What the retirement plan starts from: a year's spending and saving from your own accounts, and a return."""
+    """What the retirement plan starts from: a year's spending and saving from your own accounts, and a return.
+    Yearly savings is what went into your investments in the last 12 months, rollovers and lump sums included
+    (`savings_measured`, false when it's a figure you'd typed on the old card); `savings_since` is the day the
+    investment history starts when that's less than a year ago, else None."""
     spend = monthly_spending(conn, today)
     flows = hist.get("flows") or []
     dates = hist.get("dates") or []
@@ -694,7 +700,10 @@ def plan_figures(conn, hist: dict, today: date) -> dict:
     yearly_savings = sum(f for d, f in zip(dates, flows, strict=True) if d > cutoff)
     computed = {"annual_spending": round(spend * 12, 2), "yearly_savings": round(max(0.0, yearly_savings), 2),
                 "expected_return": 0.05}
-    return {**computed, **fire_saved(conn)}
+    saved = fire_saved(conn)
+    measured = "yearly_savings" not in saved
+    since = dates[0] if measured and dates and dates[0] > cutoff else None
+    return {**computed, **saved, "savings_measured": measured, "savings_since": since}
 
 
 # ------------------------------------------------------------------------------------------------ everything for the page

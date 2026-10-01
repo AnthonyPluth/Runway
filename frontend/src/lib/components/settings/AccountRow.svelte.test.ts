@@ -64,6 +64,26 @@ describe("choosing the forecast's account, from Settings", () => {
   });
 });
 
+describe("a loan's rate and payment, from Settings", () => {
+  it("are offered on a loan, and saved as typed", async () => {
+    show(acct({ id: "mtg", name: "Mortgage", kind: "loan", balance: -250000, loan_rate: 6.5, loan_payment: null }));
+    expect(screen.getByRole("textbox", { name: "Interest rate (APR)" })).toHaveValue("6.5");
+    await userEvent.type(screen.getByRole("textbox", { name: "Monthly payment" }), "$1,850{Enter}");
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { method: string; body: Record<string, unknown> }];
+    expect(path).toBe("/api/accounts/mtg");
+    expect(opts.body).toMatchObject({ loan_rate: "6.5", loan_payment: "$1,850" });
+  });
+
+  it("aren't on other accounts, which don't send them", async () => {
+    show(acct());
+    expect(screen.queryByRole("textbox", { name: "Monthly payment" })).toBeNull();
+    await userEvent.click(screen.getByRole("checkbox", { name: "Count in net worth" }));
+    await waitFor(() => expect(api).toHaveBeenCalled());
+    expect((vi.mocked(api).mock.calls[0][1] as { body: Record<string, unknown> }).body).not.toHaveProperty("loan_payment");
+  });
+});
+
 describe("an account's logo, from Settings", () => {
   it("opens the logo picker for this account, and refreshes the state after a change", async () => {
     vi.mocked(api).mockResolvedValueOnce({ choice: null, searchable: false, configured: true, candidates: [], error: null } as never);
