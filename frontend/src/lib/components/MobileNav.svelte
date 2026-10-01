@@ -1,7 +1,6 @@
 <script lang="ts">
   import { app, route } from "$lib/app.svelte";
-  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncNow, syncStatus, type NavItem } from "$lib/nav.svelte";
-  import { Button } from "$lib/components/ui/button";
+  import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
   import { cn } from "$lib/utils";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -9,7 +8,7 @@
   import X from "@lucide/svelte/icons/x";
 
   // On a phone (lib/phone.svelte.ts): a tab bar along the bottom with the four pages you use most, and More for the rest
-  // (which opens a sheet from the bottom, with Sync now). Every page here is one a phone can use; what's only for a
+  // (which opens a sheet from the bottom). Every page here is one a phone can use; what's only for a
   // computer says so where you'd look for it. Hidden on a computer, where the sidebar shows instead.
   const TABS = MAIN_NAV;
   const MORE: NavItem[] = [...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
@@ -20,8 +19,6 @@
   const sync = $derived(syncStatus(s));
   const inMore = $derived(MORE.some((x) => x.page === current));
   let open = $state(false);
-  let syncing = $state(false);
-  async function runSync() { syncing = true; try { await syncNow(); } finally { syncing = false; } }
   // Going to a page closes the sheet.
   $effect(() => { void route.page; open = false; });
 </script>
@@ -57,9 +54,6 @@
       </div>
       {#if s?.version}<span class="shrink-0">Runway {s.version}</span>{/if}
     </div>
-    {#if s?.connected}
-      <Button variant="outline" size="sm" class="mt-3" disabled={syncing || !!s.syncing} onclick={runSync}>{syncing || s.syncing ? "Syncing…" : "Sync now"}</Button>
-    {/if}
     {#if user}
       <a href="/auth/logout" onclick={signOut} class="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LogOut class="size-4" />Sign out {user.email ?? ""}</a>
     {/if}

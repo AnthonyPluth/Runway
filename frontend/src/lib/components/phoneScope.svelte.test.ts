@@ -107,36 +107,12 @@ describe("a budget's row", () => {
   });
 });
 
-describe("Sync now", () => {
-  const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString(), ...extra });
-  beforeEach(() => { app.state = state(); route.page = "overview"; route.sub = ""; });
-  const open = async () => { render(MobileNav); await userEvent.click(screen.getByRole("button", { name: "More" })); };
-
-  it("is in the More sheet, and syncs", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/sync" ? { new: 3 } : state())) as never);
-    await open();
-    await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
-    expect(api).toHaveBeenCalledWith("/api/sync", { method: "POST" });
-    const { toast } = await import("svelte-sonner");
-    expect(toast.success).toHaveBeenCalledWith("Synced · 3 new transactions");
-  });
-
-  it("says why when the sync fails", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => { if (path === "/api/sync") throw new Error("SimpleFIN said no"); return state(); }) as never);
-    await open();
-    await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
-    const { toast } = await import("svelte-sonner");
-    expect(toast.error).toHaveBeenCalledWith("SimpleFIN said no");
-  });
-
-  it("isn't offered before a bank is connected", async () => {
-    app.state = state({ connected: false });
-    await open();
-    expect(screen.queryByRole("button", { name: "Sync now" })).not.toBeInTheDocument();
-  });
+describe("the More sheet", () => {
+  beforeEach(() => { app.state = { connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString() } as AppState; route.page = "overview"; route.sub = ""; });
 
   it("only lists pages a phone can use: Net worth, Churning and Settings", async () => {
-    await open();
+    render(MobileNav);
+    await userEvent.click(screen.getByRole("button", { name: "More" }));
     const sheet = screen.getByRole("dialog", { name: "More pages" });
     expect(Array.from(sheet.querySelectorAll("nav a")).map((a) => a.textContent!.trim())).toEqual(["Net worth", "Churning", "Settings"]);
   });

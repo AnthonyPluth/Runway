@@ -9,6 +9,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
@@ -124,7 +125,11 @@
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
         {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
-        {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
+        {#if !fc.accounts.length}
+          {#if isPhone()}
+            <div class="cell"><span class="min-w-0 flex-1 text-sm">No account to forecast yet. <DesktopOnly what="choose your main checking account" class="inline" /></span></div>
+          {:else}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
+        {/if}
       </Group>
     {/if}
     {#if setupLeft}<SetupChecklist />{/if}

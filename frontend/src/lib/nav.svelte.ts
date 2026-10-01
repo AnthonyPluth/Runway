@@ -1,6 +1,6 @@
 // Where you can go (the sidebar on a computer, the tab bar on a phone), and what both say about you and syncing.
 import { api } from "./api";
-import { refreshState, reload, route } from "./app.svelte";
+import { route } from "./app.svelte";
 import { isoDay, parseDate, relDay } from "./format";
 import type { AppState } from "./types";
 import { toast } from "svelte-sonner";
@@ -91,17 +91,4 @@ export async function signOut(e: Event): Promise<void> {
     const r = await api<{ redirect?: string }>("/auth/logout", { method: "POST" });
     location.href = r.redirect || "/auth/signed-out";
   } catch (err) { toast.error((err as Error).message); }
-}
-
-/** Sync now, from the tab bar's More sheet (the one place a phone can ask for it). The page loads again with what came in; a
- * failed sync is said, and the sync line catches up with it (the server keeps what went wrong). */
-export async function syncNow(): Promise<void> {
-  try {
-    const r = await api<{ new: number }>("/api/sync", { method: "POST" });
-    toast.success(`Synced · ${r.new} new ${r.new === 1 ? "transaction" : "transactions"}`);
-    await refreshState(); reload();
-  } catch (err) {
-    toast.error((err as Error).message);
-    refreshState(true).catch(() => {});
-  }
 }

@@ -8,6 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
+import { viewport } from "$lib/phone.svelte";
 import { forecastSheet } from "$lib/components/overview/forecastSheet.svelte";
 import type { Overview as OverviewData } from "$lib/types";
 import Overview from "./Overview.svelte";
@@ -111,5 +112,18 @@ describe("Overview", () => {
 
     answer(forecast(30, 2000));
     expect(await screen.findByText(/stays above \$2,000 for 30\sdays/)).toBeInTheDocument();
+  });
+});
+
+describe("Overview on a phone", () => {
+  afterEach(() => { cleanup(); viewport.phone = false; });
+
+  it("says there's no account to forecast without a link to the forecast settings a phone doesn't have", async () => {
+    viewport.phone = true;
+    serve(() => fc({ accounts: [], total: [], events: [] }));
+    render(Overview);
+    expect(await screen.findByText(/No account to forecast yet/)).toBeInTheDocument();
+    expect(screen.getByText("Open Runway on a computer to choose your main checking account.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /No account to forecast/ })).not.toBeInTheDocument();
   });
 });
