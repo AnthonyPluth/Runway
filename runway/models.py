@@ -6,7 +6,7 @@ readers and type checkers; they must match schema.py (tests/test_models.py check
 
 Use the classes' attributes in SQLAlchemy statements (`select(Account.id, Account.name).where(Account.hidden == 0)`,
 run with `conn.execute(...)`), or load objects through the connection's ORM session (`conn.orm.get(Asset, 3)`).
-docs/orm.md has the conventions.
+docs/src/content/docs/contributing/orm.md has the conventions.
 
 Relationships: the schema has no foreign keys, so each one spells out its join. They're all `viewonly` (writes go
 through the columns, as before: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one

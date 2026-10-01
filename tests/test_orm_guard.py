@@ -1,6 +1,6 @@
-"""Runway is moving from SQL text to SQLAlchemy statements built from runway/models.py (docs/orm.md). This counts the
-SQL text still passed to `execute()`/`executemany()` in each module and fails if any module has more than
-tests/orm_allowlist.json allows, so the counts only go down (to 0).
+"""Runway is moving from SQL text to SQLAlchemy statements built from runway/models.py
+(docs/src/content/docs/contributing/orm.md). This counts the SQL text still passed to `execute()`/`executemany()` in
+each module and fails if any module has more than tests/orm_allowlist.json allows, so the counts only go down (to 0).
 
 What counts as SQL text: a string, f-string, string concatenation or formatting (`"..." + x`, `"..." % x`,
 `"...".format()`, `", ".join()`), or a variable assigned one in the same function, as the first argument. Also any
@@ -111,7 +111,7 @@ class OrmGuardTests(unittest.TestCase):
         now = counts()
         over = {m: (c, allowed.get(m, 0)) for m, c in now.items() if c > allowed.get(m, 0)}
         self.assertEqual(over, {}, "SQL text passed to execute() went up (module: (now, allowed)). Write the query with "
-                                   "SQLAlchemy and the models instead: see docs/orm.md.")
+                                   "SQLAlchemy and the models instead: see docs/src/content/docs/contributing/orm.md.")
 
     def test_counter(self):
         src = '''

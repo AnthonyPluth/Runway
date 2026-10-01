@@ -14,7 +14,7 @@ Only the latest release gets security fixes. Update with `docker compose pull &&
 
 ## Running Runway safely
 
-See [Putting Runway on the internet](DOCKER.md#putting-runway-on-the-internet) in DOCKER.md: HTTPS in front, sign-in
+See [Putting Runway on the internet](https://anthonypluth.github.io/Runway/start/docker/#putting-runway-on-the-internet) in the docs: HTTPS in front, sign-in
 limited to you, a `RUNWAY_SECRET_KEY`, and private backups.
 
 ## One household, not one account per person
