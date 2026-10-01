@@ -9,7 +9,8 @@ name: Docker image
 # "feat:") for v1.1.0, and "#major" (or "BREAKING CHANGE") for v2.0.0.
 # Pull requests (including Dependabot's) only run the tests, and only the ones the change can affect: a pull request
 # that touches only the web app skips the Python tests, one that touches only the backend skips the web app's checks
-# (see `changes`). Only main is ever released: a manual run from another branch just runs the tests, and re-running an
+# (see `changes`), and one that changes only the web app's source runs just the web app tests that import what it
+# changed. Only main is ever released: a manual run from another branch just runs the tests, and re-running an
 # old build never moves :latest back to it.
 on:
   push:
@@ -45,6 +46,7 @@ jobs:
     outputs:
       backend: ${{ steps.what.outputs.backend }}
       web: ${{ steps.what.outputs.web }}
+      web_tests: ${{ steps.what.outputs.web_tests }}
     steps:
       - name: Which parts the change touches
         id: what
@@ -54,10 +56,11 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           if [ -z "$PR" ]; then
-            { echo "backend=true"; echo "web=true"; } >> "$GITHUB_OUTPUT"; exit 0
+            { echo "backend=true"; echo "web=true"; echo "web_tests=all"; } >> "$GITHUB_OUTPUT"; exit 0
           fi
+          listing=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[] | [.status, .filename, (.previous_filename // "")] | @tsv')
           # A rename counts for both its old and its new path.
-          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          files=$(cut -f2,3 <<< "$listing" | tr '\t' '\n' | grep . || true)
           # The files API lists at most 3,000; a pull request that big runs everything.
           if [ "$(grep -c . <<< "$files" || true)" -ge 3000 ]; then files="(too many to list)"; fi
           # Only the web app or docs: the Python tests can't be affected. (Not extension/: the backend serves it as a zip,
@@ -68,8 +71,20 @@ jobs:
           backend=false web=false
           if grep -vqE "$web_only" <<< "$files"; then backend=true; fi
           if grep -vqE "$backend_only" <<< "$files" || grep -qE '^runway/static/' <<< "$files"; then web=true; fi
-          { echo "backend=$backend"; echo "web=$web"; } >> "$GITHUB_OUTPUT"
-          echo "Python tests: $backend; web app checks: $web"
+          # Which Vitest tests to run: only those whose imports reach a changed file under frontend/src/ (`vitest related`),
+          # unless the change could reach every test: anything else in frontend/ (package.json, the lockfile, Vite's or
+          # TypeScript's settings), the workflows or anything else not known to be outside the tests' reach (the tests
+          # only import from frontend/src/), the tests' shared setup (src/test/), or a file deleted or renamed (whose
+          # importers no longer import it, so `related` wouldn't find them). Every push to main runs them all.
+          web_tests=$(grep -E '^frontend/src/' <<< "$files" | sed 's|^frontend/||' || true)
+          beyond_tests='^(frontend/src/|runway/|tests/|extension/|docs/|[^/]+\.md$|pyproject\.toml$|poetry\.lock$)'
+          if [ "$files" = "(too many to list)" ] || grep -qvE "$beyond_tests" <<< "$files" \
+             || grep -qE '^frontend/src/test/' <<< "$files" \
+             || awk -F'\t' '$1 == "removed" || $1 == "renamed"' <<< "$listing" | cut -f2,3 | grep -q 'frontend/'; then
+            web_tests=all
+          fi
+          { echo "backend=$backend"; echo "web=$web"; echo "web_tests<<END_OF_FILES"; echo "$web_tests"; echo "END_OF_FILES"; } >> "$GITHUB_OUTPUT"
+          echo "Python tests: $backend; web app checks: $web; web app tests: $([ "$web_tests" = all ] && echo all || echo "related to $(grep -c . <<< "$web_tests" || true) changed file(s)")"
 
   # The Python tests, on SQLite (with coverage, lint and type-check) and on Postgres. The Postgres tests are split in
   # three, each with its own Postgres (tests/shard.py): on one runner they mostly wait on each other.
@@ -197,8 +212,20 @@ jobs:
       - name: Lint (ESLint, also over extension/ and runway/static/)
         run: npm run lint
       - name: Unit tests (Vitest), measuring coverage
+        if: needs.changes.outputs.web_tests == 'all'
         run: npm run coverage
+      # A pull request that changes only files under src/ runs just the tests that import them (see `changes`), without
+      # coverage: a share of the tests would report most of the app as untested.
+      - name: Unit tests (Vitest), only those the change can affect
+        if: needs.changes.outputs.web_tests != 'all'
+        env:
+          CHANGED: ${{ needs.changes.outputs.web_tests }}
+        run: |
+          mapfile -t changed < <(grep . <<< "$CHANGED" || true)
+          if [ "${#changed[@]}" -eq 0 ]; then echo "No file under frontend/src/ changed."; exit 0; fi
+          npx vitest related --run --passWithNoTests "${changed[@]}"   # every path starts with src/, never with -
       - name: Upload coverage to Codecov
+        if: needs.changes.outputs.web_tests == 'all'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5   # v7.1.1
         with:
           files: frontend/coverage/lcov.info
