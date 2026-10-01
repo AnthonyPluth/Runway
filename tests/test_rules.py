@@ -66,9 +66,13 @@ class MatchingTests(Base):
         c = self.tx(-698.38, "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)")
         d = self.tx(-12, "TARGETED ADS LLC")                      # not Target
         e = self.tx(-20, "FIFTH THIRD MORTGAGE")                  # Fifth Third, but not the merchant the rule was for
-        self.assertEqual(self.row(a)["payee"], "Target")
+        self.rule(match="paypal ach transfer", category="Transfer")
+        f = self.tx(-100, "PAYPAL ACH TRANSFER")
+        g = self.tx(-25, "PAYPAL")                                # a purchase, not the transfers the rule is for
+        self.assertEqual((self.row(a)["payee"], self.row(g)["payee"]), ("Target", "Paypal"))
         categorize.categorize(self.c, use_ai=False)
-        self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e)], ["Shopping", "Shopping", "Loans", None, None])
+        self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e, f, g)],
+                         ["Shopping", "Shopping", "Loans", None, None, "Transfer", None])
 
     def test_rename_feeds_history(self):
         self.rule(match="sq *joes", rename="Joe's Coffee")

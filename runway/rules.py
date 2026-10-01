@@ -58,9 +58,12 @@ def _text_matches(r: dict, tx: dict) -> bool:
         f = " ".join((field or "").lower().split())
         if (mode == "exact" and f == m) or (mode == "starts" and f.startswith(m)) or (mode == "contains" and m in f):
             return True
-    # A rule made from a long payee ("target cach tran cash") still knows that merchant by its shorter name ("Target").
+    # A rule made from a long payee ("target cach tran cash") still knows that merchant by its shorter name ("Target"),
+    # but only on transactions whose bank text had transfer words cut too: not every purchase from that merchant (a
+    # "paypal ach transfer" rule isn't one for PayPal purchases).
     short = payees.short_match(m)
-    return bool(short) and " ".join((tx.get("payee") or "").lower().split()) == short
+    return (bool(short) and " ".join((tx.get("payee") or "").lower().split()) == short
+            and payees.bank_tailed(tx.get("description")))
 
 
 def matches(r: dict, tx: dict) -> bool:

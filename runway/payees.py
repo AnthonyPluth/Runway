@@ -61,6 +61,12 @@ def from_bank(payee: str | None, description: str | None) -> bool:
     return bool(desc) and all(_plain(w) in desc for w in (payee or "").split())
 
 
+def bank_tailed(text: str | None) -> bool:
+    """Whether a bank's text ends in its transfer words (so a payee made from it was shortened)."""
+    s = " ".join((text or "").split())
+    return bool(s) and shorten(s) != s
+
+
 @functools.lru_cache(maxsize=4096)
 def short_match(text: str) -> str | None:
     """For a rule's text made from a long payee ("target cach tran cash"): the shorter name that payee has now
