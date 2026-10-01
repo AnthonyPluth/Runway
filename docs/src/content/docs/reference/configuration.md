@@ -28,7 +28,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_DATA` | `./data` (`/data` in Docker) | Where the SQLite database lives. |
 | `RUNWAY_HOST` / `RUNWAY_PORT` | `127.0.0.1` / `8765` | Address and port to listen on (`0.0.0.0` in Docker). |
 | `RUNWAY_NO_SYNC` | | `1` turns off the automatic background sync. |
-| `TZ` | system | Decides what "today" is for forecasts and budgets, and when the daily sync runs. |
+| `TZ` | America/New_York (Docker image); the system's otherwise | Decides what "today" is for forecasts and budgets, and when the daily sync runs. Images before October 2026 defaulted to America/Chicago: if you never set `TZ` and are in Central time, set `TZ=America/Chicago` to keep your sync time and dates as they were. |
 
 Reporting to Sentry is off unless you set `SENTRY_DSN`: then errors, tracing, profiling, replays, logs, metrics, cron monitoring, feedback and Agent Tracing (with the AI's prompts), each of which you can turn off. See [Error reports](/Runway/start/docker/#error-reports-optional) for the variables.
 
