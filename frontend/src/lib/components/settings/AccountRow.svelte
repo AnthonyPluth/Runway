@@ -240,9 +240,13 @@
         </label>
       {/if}
       {#if payMode !== "full"}
-        <label class={fieldCls} title="For the interest on what carries over; without it, the forecast leaves interest out">APR (%)
-          <input type="number" inputmode="decimal" min="0" max="100" step="0.01" class={inputCls} bind:value={apr} use:autosave={() => save(false)} />
-        </label>
+        <!-- Yours wins; without one, the issuer's purchase APR (through Plaid) is used, and shown as the placeholder. -->
+        <div class={fieldCls} title="For the interest on what carries over; without one, the forecast leaves interest out">
+          <label for={`apr-${a.id}`}>APR (%)</label>
+          <input id={`apr-${a.id}`} type="number" inputmode="decimal" min="0" max="100" step="0.01" class={inputCls} bind:value={apr}
+            placeholder={a.issuer_apr != null ? String(a.issuer_apr) : undefined} use:autosave={() => save(false)} />
+          {#if apr == null && a.issuer_apr != null}<span class="text-xs">{a.issuer_apr}% from the issuer</span>{/if}
+        </div>
       {/if}
     {/if}
     {#if loan}

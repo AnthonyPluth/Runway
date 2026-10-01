@@ -783,7 +783,12 @@ class PaymentModeTests(LedgerCase):
         return next(c for c in fc["cards"] if c["id"] == "cc")
 
     def interest_warned(self, fc):
-        return any("interest" in w for w in fc["warnings"])
+        return any("doesn’t count the interest" in w for w in fc["warnings"])
+
+    @staticmethod
+    def minimum(statement, interest=0.0):
+        """The minimum without one from the issuer: the larger of $25 and 1% of the statement plus its interest."""
+        return round(min(statement, max(25.0, statement * 0.01 + interest)), 2)
 
     def test_paid_in_full_by_default(self):
         fc = forecast.build(self.conn, TODAY, 90)
@@ -804,8 +809,9 @@ class PaymentModeTests(LedgerCase):
         self.assertEqual((c["pay_mode"], c["remaining"], c["payment"], c["carried"], c["minimum_estimated"]),
                          ("minimum", 600.0, 50.0, 550.0, False))
         s1 = 550 + self.EST1                 # Oct 10: the $550 carried plus the cycle's charges (no APR: no interest)
-        s2 = s1 * 0.98 + self.EST2           # Nov 10: what the 2% minimum left, plus that cycle's charges
-        self.assertEqual(self.payments(fc), {"2026-10-05": 50.0, "2026-11-05": round(s1 * 0.02, 2), "2026-12-07": round(s2 * 0.02, 2)})
+        s2 = s1 - self.minimum(s1) + self.EST2   # Nov 10: what the minimum left, plus that cycle's charges
+        self.assertEqual(self.payments(fc), {"2026-10-05": 50.0, "2026-11-05": self.minimum(s1), "2026-12-07": self.minimum(s2)})
+        self.assertGreater(s2, s1)   # paying the minimum, the balance grows
         self.assertTrue(all(e["estimated"] for e in fc["events"] if e["kind"] == "card" and e["date"] > "2026-10-05"))
         self.assertTrue(self.interest_warned(fc))
         self.assertIn({"text": next(w for w in fc["warnings"] if "interest" in w), "href": "#setup/accounts"}, fc["warning_links"])
@@ -819,16 +825,43 @@ class PaymentModeTests(LedgerCase):
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
         self.pay("minimum", apr="24")
         fc = forecast.build(self.conn, TODAY, 90)
-        s1 = 550 * 1.02 + self.EST1          # 24% a year: 2% a month on what was carried
-        s2 = s1 * 0.98 * 1.02 + self.EST2
-        self.assertEqual(self.payments(fc), {"2026-10-05": 50.0, "2026-11-05": round(s1 * 0.02, 2), "2026-12-07": round(s2 * 0.02, 2)})
+        # 24% a year, 2% a month: on what was carried, and (no grace period while a balance carries) on the cycle's new
+        # charges, as if they posted evenly through it
+        i1 = (550 + self.EST1 / 2) * 0.02
+        s1 = 550 + i1 + self.EST1
+        p1 = self.minimum(s1, i1)
+        i2 = (s1 - p1 + self.EST2 / 2) * 0.02
+        s2 = s1 - p1 + i2 + self.EST2
+        self.assertEqual(self.payments(fc), {"2026-10-05": 50.0, "2026-11-05": p1, "2026-12-07": self.minimum(s2, i2)})
+        self.assertEqual(p1, round(s1 * 0.01 + i1, 2))   # above the $25 floor: the interest is in it
         self.assertFalse(self.interest_warned(fc))
-        self.assertEqual(self.card(fc)["apr"], 24.0)
+        self.assertEqual((self.card(fc)["apr"], self.card(fc)["apr_source"]), (24.0, "you"))
+        # nothing carried, nothing charged on the new purchases: the grace period
+        self.assertEqual(forecast.interest({"apr": 24.0}, 0.0, 1000.0), 0.0)
+        self.assertEqual(forecast.interest({"apr": 24.0}, -50.0, 1000.0), 0.0)
+        self.assertAlmostEqual(forecast.interest({"apr": 24.0}, 100.0, 1000.0), (100 + 500) * 0.02)
         # a 0% APR (a promotion) is an APR: no interest, and no warning
         self.pay("minimum", apr="0")
         fc = forecast.build(self.conn, TODAY, 90)
-        self.assertEqual(self.payments(fc)["2026-11-05"], round((550 + self.EST1) * 0.02, 2))
+        self.assertEqual(self.payments(fc)["2026-11-05"], self.minimum(550 + self.EST1))
         self.assertFalse(self.interest_warned(fc))
+
+    def test_the_issuers_apr_unless_you_entered_one(self):
+        self.conn.execute(update(CardStatement).where(CardStatement.plaid_account_id == "p-cc").values(purchase_apr=29.99))
+        self.pay("minimum")
+        c = self.card(fc := forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["apr"], c["apr_source"]), (29.99, "issuer"))
+        self.assertFalse(self.interest_warned(fc))
+        self.pay("minimum", apr="18")
+        self.assertEqual((self.card(forecast.build(self.conn, TODAY, 90))["apr"], self.card(forecast.build(self.conn, TODAY, 90))["apr_source"]),
+                         (18.0, "you"))
+        # neither: no APR, and the warning
+        self.conn.execute(update(CardStatement).where(CardStatement.plaid_account_id == "p-cc").values(purchase_apr=None))
+        self.pay("minimum")
+        c = self.card(fc := forecast.build(self.conn, TODAY, 90))
+        self.assertEqual((c["apr"], c["apr_source"]), (None, None))
+        self.assertTrue(self.interest_warned(fc))
+        self.assertEqual(forecast.payment_plan(self.conn, "cc", 21.5)["apr_source"], "issuer")
 
     def test_minimum_without_one_from_the_bank(self):
         self.conn.execute(delete(Transaction).where(Transaction.description == "PAYMENT THANK YOU"))
@@ -836,11 +869,13 @@ class PaymentModeTests(LedgerCase):
         self.pay("minimum")
         fc = forecast.build(self.conn, TODAY, 90)
         c = self.card(fc)
-        self.assertEqual((c["payment"], c["carried"], c["minimum_estimated"]), (40.0, 1960.0, True))   # 2% of $2,000
-        self.assertIn("cc: the bank didn’t report a minimum payment, so the forecast pays the larger of $25 and 2% of the "
-                      "statement.", fc["warnings"])
+        self.assertEqual((c["payment"], c["carried"], c["minimum_estimated"]), (25.0, 1975.0, True))   # 1% of $2,000 is $20
+        self.assertIn("cc: the bank didn’t report a minimum payment, so the forecast pays the larger of $25 and 1% of the "
+                      "statement plus its interest.", fc["warnings"])
         plan = {"pay_mode": "minimum", "pay_amount": None, "apr": None}
-        self.assertEqual([forecast.statement_payment(plan, s) for s in (10.0, 300.0, 2000.0)], [10.0, 25.0, 40.0])
+        self.assertEqual([forecast.statement_payment(plan, s) for s in (10.0, 300.0, 2000.0, 5000.0)], [10.0, 25.0, 25.0, 50.0])
+        # $5,000 at 30%: $125 of interest a month, which the minimum covers (2% alone would be $100, and the balance grows)
+        self.assertEqual(forecast.statement_payment(plan, 5000.0, charged=5000 * 0.30 / 12), 175.0)
         self.assertEqual(forecast.statement_payment(plan, 300.0, 0.0), 0.0)   # the issuer says nothing is due
 
     def test_fixed_amount(self):
@@ -869,7 +904,7 @@ class PaymentModeTests(LedgerCase):
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=-500.0))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (500.0, 100.0))
-        self.assertEqual(self.payments(fc)["2026-11-05"], 25.0)   # 2% of $100 + EST1 is under the $25 floor
+        self.assertEqual(self.payments(fc)["2026-11-05"], 25.0)   # 1% of $100 + EST1 is under the $25 floor
         # paid in full, an edit changes that payment only, as before
         self.pay("full")
         fc = forecast.build(self.conn, TODAY, 90)
@@ -921,13 +956,13 @@ class PaymentModeTests(LedgerCase):
         e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-09-10")
         self.assertEqual((e["amount"], e["overridden"], e["original_amount"]), (0.0, True, -50.0))
         self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (0.0, 600.0))
-        self.assertEqual(self.payments(fc)["2026-11-05"], round((600 + self.EST1) * 0.02, 2))
+        self.assertEqual(self.payments(fc)["2026-11-05"], self.minimum(600 + self.EST1))
         # an edited estimate too: it keeps the plan's amount as its original
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=0.0))
         fc = forecast.build(self.conn, TODAY, 90)
         e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-10-10")
-        self.assertEqual((e["amount"], e["original_amount"]), (0.0, -round((600 + self.EST1) * 0.02, 2)))
-        self.assertEqual(self.payments(fc)["2026-12-07"], round((600 + self.EST1 + self.EST2) * 0.02, 2))
+        self.assertEqual((e["amount"], e["original_amount"]), (0.0, -self.minimum(600 + self.EST1)))
+        self.assertEqual(self.payments(fc)["2026-12-07"], self.minimum(600 + self.EST1 + self.EST2))
 
     def test_an_edited_payment_above_the_statement_comes_off_the_next_one(self):
         # Paying the minimum, but $1,000 entered for the $600 left on the statement (to clear the current balance): the
@@ -943,7 +978,7 @@ class PaymentModeTests(LedgerCase):
         s1 = -400 + self.EST1   # Oct 10's statement: $400 lower than the cycle's charges ($504.45, so the $25 floor)
         self.assertEqual(payments["2026-10-05"], 1000.0)
         self.assertEqual(payments["2026-11-05"], 25.0)
-        self.assertEqual(payments["2026-12-07"], round((s1 - 25 + self.EST2) * 0.02, 2))
+        self.assertEqual(payments["2026-12-07"], self.minimum(s1 - 25 + self.EST2))
         self.assertTrue(all(e["amount"] < 0 for e in fc["events"] if e["kind"] == "card"))   # never a negative payment
 
     def test_the_budget_scenario_pays_the_same_way(self):
@@ -956,9 +991,15 @@ class PaymentModeTests(LedgerCase):
         charged = 300 + 300 + 500 / 31 * 10   # as in test_sticking_to_the_budget
         s1 = 550 + charged
         card = {c["date"]: c for c in fc["budget"]["changes"] if c["kind"] == "card"}
-        self.assertAlmostEqual(-card["2026-11-05"]["amount"], s1 * 0.02, places=1)
-        s2 = s1 * 0.98 + 500 / 31 * 21 + 500 / 30 * 10
-        self.assertAlmostEqual(-card["2026-12-07"]["amount"], s2 * 0.02, places=1)
+        self.assertAlmostEqual(-card["2026-11-05"]["amount"], self.minimum(s1), places=1)
+        s2 = s1 - self.minimum(s1) + 500 / 31 * 21 + 500 / 30 * 10
+        self.assertAlmostEqual(-card["2026-12-07"]["amount"], self.minimum(s2), places=1)
+        # with an APR, the budget line charges the same interest as the forecast
+        self.pay("minimum", apr="24")
+        fc = forecast.build(self.conn, TODAY, 90)
+        card = {c["date"]: c for c in fc["budget"]["changes"] if c["kind"] == "card"}
+        i1 = (550 + charged / 2) * 0.02
+        self.assertAlmostEqual(-card["2026-11-05"]["amount"], self.minimum(550 + i1 + charged, i1), places=1)
 
 
 if __name__ == "__main__":

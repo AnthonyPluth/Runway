@@ -123,6 +123,9 @@ export interface CardSummary {
   carried?: number;
   /** More refunds (or overpayment) than charges since the close: a credit that comes off the next statement. */
   credit?: number;
+  /** The APR the forecast charges interest at, and whose it is: the one you entered, or the issuer's (through Plaid). */
+  apr?: number | null;
+  apr_source?: "you" | "issuer" | null;
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;

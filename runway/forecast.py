@@ -41,8 +41,8 @@ AVG_CYCLES = 3           # statement cycles averaged to estimate a card's future
 ONE_OFF_LIMIT = 1000.0   # single outflows larger than this are treated as one-offs, not everyday spending
 EVERY_MONTH = ("weekly", "biweekly", "semimonthly", "monthly")   # recurring frequencies a card's monthly average has
 PAY_MODES = ("full", "minimum", "fixed")   # how a card's statements are paid (payment_plan)
-MIN_PAYMENT_FLOOR = 25.0   # without the issuer's minimum: the larger of this and MIN_PAYMENT_RATE of the statement
-MIN_PAYMENT_RATE = 0.02
+MIN_PAYMENT_FLOOR = 25.0   # without the issuer's minimum: the larger of this and MIN_PAYMENT_RATE of the statement plus
+MIN_PAYMENT_RATE = 0.01    # its interest, as issuers work it out (so paying the minimum never lets the balance grow)
 
 
 # ------------------------------------------------------------------------------------------------ dates
@@ -337,22 +337,25 @@ def _amount(value: str | None) -> float | None:
         return None
 
 
-def payment_plan(conn, card_id: str) -> dict:
+def payment_plan(conn, card_id: str, issuer_apr: float | None = None) -> dict:
     """How a card's statements are paid, as set in Settings → Accounts: pay_mode "full" (the default), "minimum" (the
-    issuer's minimum payment) or "fixed" (pay_amount toward each statement), and the card's APR in percent (None if it
-    hasn't been entered)."""
+    issuer's minimum payment) or "fixed" (pay_amount toward each statement), and the card's APR in percent: the one you
+    entered, else the issuer's purchase APR (`issuer_apr`, through Plaid), else None. apr_source says which ("you",
+    "issuer" or None)."""
     mode = db.get_setting(conn, sk.card_pay_mode(card_id)) or "full"
+    yours = _amount(db.get_setting(conn, sk.card_apr(card_id)))
+    apr, source = (yours, "you") if yours is not None else (issuer_apr, "issuer") if issuer_apr is not None else (None, None)
     return {"pay_mode": mode if mode in PAY_MODES else "full",
             "pay_amount": _amount(db.get_setting(conn, sk.card_pay_amount(card_id))),
-            "apr": _amount(db.get_setting(conn, sk.card_apr(card_id)))}
+            "apr": apr, "apr_source": source}
 
 
-def statement_payment(plan: dict, statement: float, minimum: float | None = None) -> float:
+def statement_payment(plan: dict, statement: float, minimum: float | None = None, charged: float = 0.0) -> float:
     """What a payment plan (payment_plan) pays toward a statement: all of it; the minimum (the issuer's, else the larger
-    of MIN_PAYMENT_FLOOR and MIN_PAYMENT_RATE of the statement); or the fixed amount (all of it until one is entered).
-    Never more than the statement."""
+    of MIN_PAYMENT_FLOOR and MIN_PAYMENT_RATE of the statement plus the interest `charged` on it); or the fixed amount
+    (all of it until one is entered). Never more than the statement."""
     if plan["pay_mode"] == "minimum":
-        due = minimum if minimum is not None else max(MIN_PAYMENT_FLOOR, statement * MIN_PAYMENT_RATE)
+        due = minimum if minimum is not None else max(MIN_PAYMENT_FLOOR, statement * MIN_PAYMENT_RATE + charged)
     elif plan["pay_mode"] == "fixed" and plan["pay_amount"] is not None:
         due = plan["pay_amount"]
     else:
@@ -360,9 +363,13 @@ def statement_payment(plan: dict, statement: float, minimum: float | None = None
     return max(0.0, min(statement, due))
 
 
-def interest(plan: dict, carried: float) -> float:
-    """A statement cycle's interest on a balance carried from the one before, at the card's APR (none without one)."""
-    return carried * plan["apr"] / 100 / 12 if plan["apr"] and carried > 0 else 0.0
+def interest(plan: dict, carried: float, charges: float = 0.0) -> float:
+    """A statement cycle's interest at the card's APR (none without one), while it carries a balance from the one before:
+    a month's on that balance, and, since carrying one ends the grace period, on the cycle's new charges too, as if they
+    posted evenly through it (half a month's). Nothing carried, nothing charged: purchases are interest-free until due."""
+    if not plan["apr"] or carried <= 0:
+        return 0.0
+    return (carried + max(0.0, charges) / 2) * plan["apr"] / 100 / 12
 
 
 def card_cycle(conn, card: dict, today: date, bank) -> dict:
@@ -387,7 +394,7 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
     remaining = max(0.0, statement - paid)
-    plan = payment_plan(conn, card["id"])
+    plan = payment_plan(conn, card["id"], bank["purchase_apr"])
     # What the plan pays toward this statement, less what's been paid since it closed; the rest carries into the next.
     payment = min(remaining, max(0.0, statement_payment(plan, statement, bank["minimum_payment"]) - paid))
     return {
@@ -517,7 +524,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             warn(f"{label}: no amount entered for its fixed payment, so the forecast pays each statement in full.", "#setup/accounts")
         if info["minimum_estimated"] and info["remaining"] > 0.005:
             warn(f"{label}: the bank didn’t report a minimum payment, so the forecast pays the larger of "
-                 f"${MIN_PAYMENT_FLOOR:,.0f} and {MIN_PAYMENT_RATE:.0%} of the statement.", "#setup/accounts")
+                 f"${MIN_PAYMENT_FLOOR:,.0f} and {MIN_PAYMENT_RATE:.0%} of the statement plus its interest.", "#setup/accounts")
         if pays >= today and planned > 0.005:
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -planned, "kind": "card", "estimated": False,
@@ -557,11 +564,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 # The recent daily rate leaves out recurring charges on the card, so add all of them.
                 est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle \
                     + max(0.0, -sum(e["amount"] for e in upcoming))
-            statement = carried + interest(info, carried) + est
+            owed_interest = interest(info, carried, est)
+            statement = carried + owed_interest + est
             key = f"cardclose:{card['id']}:{close.isoformat()}"
             old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
             pays_k = bankdays.next_business_day(due_k)
-            planned = statement_payment(info, statement)
+            planned = statement_payment(info, statement, charged=owed_interest)
             pay = paying(info, planned, pays_k >= today and planned > 0.005, key, old_keys[key])
             carried = statement - pay
             carries = carries or carried > 0.005
@@ -813,8 +821,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             if due.isoformat() > dates[-1]:
                 break
             amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
-            statement = carried + interest(info, carried) + amt
-            pay = statement_payment(info, statement)
+            owed_interest = interest(info, carried, amt)
+            statement = carried + owed_interest + amt
+            pay = statement_payment(info, statement, charged=owed_interest)
             carried = statement - pay
             if pay > 0.005:
                 paid = bankdays.next_business_day(due).isoformat()

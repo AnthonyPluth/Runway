@@ -81,7 +81,17 @@ class HandlerTests(DbCase):
         self.assertEqual(plan(), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
         # which is what the forecast reads
         from runway import forecast
-        self.assertEqual(forecast.payment_plan(self.c, "demo-card"), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
+        self.assertEqual(forecast.payment_plan(self.c, "demo-card", 24.99),
+                         {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0, "apr_source": "you"})
+        # with no APR of yours, the list has the issuer's alongside (Settings shows it as the field's placeholder)
+        self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank", products="liabilities"))
+        self.c.execute(insert(PlaidAccount).values(plaid_account_id="pa1", item_id="it1", mask="1234"))
+        self.c.execute(insert(CardStatement).values(plaid_account_id="pa1", item_id="it1", last_statement_date="2026-09-01",
+                                                    purchase_apr=24.99))
+        self.c.execute(update(Account).where(Account.id == "demo-card").values(plaid_account_id="pa1"))
+        accounts.api_account_update(self.c, {}, {"apr": ""}, "demo-card")
+        card = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-card")
+        self.assertEqual((card["apr"], card["issuer_apr"]), (None, 24.99))
 
     def test_loan_terms(self):
         terms = lambda: tuple(self.one(select(Account.interest_rate, Account.monthly_payment).where(Account.id == "demo-mortgage")))

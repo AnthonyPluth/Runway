@@ -100,6 +100,17 @@ describe("how a card is paid, from Settings", () => {
     await waitFor(() => expect(lastBody()).toMatchObject({ pay_mode: "fixed", pay_amount: 450, apr: 19.5 }));
   });
 
+  it("shows the issuer's APR when you haven't entered one, and yours when you have", () => {
+    const { unmount } = show(card({ pay_mode: "minimum", issuer_apr: 24.99 }));
+    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveAttribute("placeholder", "24.99");
+    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(null);
+    expect(screen.getByText("24.99% from the issuer")).toBeInTheDocument();
+    unmount();
+    show(card({ pay_mode: "minimum", apr: 18, issuer_apr: 24.99 }));
+    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(18);
+    expect(screen.queryByText(/from the issuer/)).toBeNull();
+  });
+
   it("flags a fixed payment with no amount", () => {
     show(card({ pay_mode: "fixed", pay_amount: null }));
     expect(screen.getByText("no fixed amount")).toHaveAttribute("title", "Paid in full until you enter one");

@@ -30,7 +30,7 @@ def api_accounts(conn, _q, _b):
     p, s = PlaidAccount, CardStatement
     items = {r["plaid_account_id"]: r for r in db.rows(conn.execute(
         select(p.plaid_account_id, p.mask, p.item_id, PlaidItem.products, PlaidItem.institution_name, s.last_statement_date,
-               s.next_due_date)
+               s.next_due_date, s.purchase_apr)
         .join(PlaidItem, PlaidItem.item_id == p.item_id).outerjoin(s, s.plaid_account_id == p.plaid_account_id)))}
     for a in accts:   # which providers this account can use, and (cards) its latest statement dates
         it = items.get(a.get("plaid_account_id") or "")
@@ -38,8 +38,10 @@ def api_accounts(conn, _q, _b):
                             "transactions": "transactions" in (it["products"] or ""),
                             "closed": it["last_statement_date"], "due": it["next_due_date"],
                             "statement_note": db.get_setting(conn, sk.plaid_stmt_note(it['item_id']))} if it else None)
-        if a["kind"] == "credit":
-            a.update(forecast.payment_plan(conn, a["id"]))
+        if a["kind"] == "credit":   # how it's paid, as you set it, and the issuer's APR (used when you haven't set one)
+            plan = forecast.payment_plan(conn, a["id"])
+            a.update(pay_mode=plan["pay_mode"], pay_amount=plan["pay_amount"], apr=plan["apr"],
+                     issuer_apr=it["purchase_apr"] if it else None)
     terms = loans.terms(conn, date.today())
     for a in accts:   # loans: the terms the retirement planner projects with (Plaid's, yours, or a payment from history)
         if a["id"] in terms:
