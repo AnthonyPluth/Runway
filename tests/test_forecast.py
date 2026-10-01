@@ -389,6 +389,15 @@ class ForecastEdgeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertTrue(all(e["date"] >= TODAY.isoformat() for e in fc["events"]))
         self.assertTrue(any("hasn't sent the statement after Jun 10" in w for w in fc["warnings"]), fc["warnings"])
+        # Nothing to change in Settings: the bank's still to send it (so a phone doesn't send you to a computer).
+        stale = next(w for w in fc["warning_links"] if "hasn't sent the statement" in w["text"])
+        self.assertEqual((stale["href"], stale["setting"]), ("#setup/connections", False))
+
+    def test_a_late_payment_is_flagged_as_not_a_setting(self):
+        self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")   # due Sat Sep 5, paid Tue Sep 8 (Labor Day): nothing came
+        fc = forecast.build(self.conn, date(2026, 9, 10), 30)
+        late = next(w for w in fc["warning_links"] if "no payment has shown up yet" in w["text"])
+        self.assertEqual((late["href"], late["setting"]), ("#setup/accounts", False))   # paying the card puts it right
 
     def test_a_payment_due_today_is_in_todays_balance(self):
         today = date(2026, 10, 5)   # the $600 left on the September statement is due today
