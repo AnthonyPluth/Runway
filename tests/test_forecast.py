@@ -1,10 +1,11 @@
 """The forecast: dates and schedules, card payments, and the balance chart."""
 import unittest
 from datetime import date, timedelta
+from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import db, forecast, recurring
+from runway import db, forecast, plaidapi, recurring
 from runway.models import Account, Budget, CardStatement, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
 
@@ -243,17 +244,20 @@ class ForecastTests(LedgerCase):
     def test_card_without_bank_statements_warns(self):
         self.conn.execute(delete(CardStatement))
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("Plaid hasn’t sent a statement for cc yet", fc["warnings"][0])     # linked, statement not in yet
+        self.assertEqual(fc["warnings"], ["Plaid hasn’t sent a statement for cc yet. Enter its latest statement so its "
+                                          "payment is in the forecast."])                  # linked, statement not in yet
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
-        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/connections"}])
+        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc"}])   # the card's row
         self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))                  # not linked at all
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
-        self.assertEqual(fc["warning_links"][0]["href"], "#setup/connections")   # nothing from Plaid to match: connect the bank
+        self.assertEqual(fc["warnings"], ["Enter cc’s latest statement so its payment is in the forecast."])   # no Plaid: not mentioned
+        self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts?account=cc")
         self.conn.execute(insert(PlaidAccount).values(plaid_account_id="pcc", item_id="it", name="Visa", type="credit"))
-        fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][0])
-        self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts")      # matched under “New from Plaid”
+        with mock.patch.object(plaidapi, "configured", return_value=True):   # with Plaid set up, it's offered too
+            fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual(fc["warnings"][0], "Enter cc’s latest statement (or link it through Plaid) so its payment is in the forecast.")
+        self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][1])
+        self.assertEqual(fc["warning_links"][1]["href"], "#setup/accounts")      # matched under “New from Plaid”
 
     def test_warnings_link_to_where_they_are_fixed(self):
         self.conn.execute(update(Account).where(Account.id == "cc").values(pay_from=None))

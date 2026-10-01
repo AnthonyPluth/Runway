@@ -305,6 +305,26 @@ class CardStatement(Base):
     updated: Mapped[str | None]
 
 
+class ManualStatement(Base):
+    __table__ = schema.manual_statements
+    account_id: Mapped[str]
+    statement_date: Mapped[str]
+    balance: Mapped[float]
+    due_date: Mapped[str]
+    minimum_payment: Mapped[float | None]
+    entered_at: Mapped[str | None]
+
+
+class DeletedAccount(Base):
+    __table__ = schema.deleted_accounts
+    id: Mapped[str]
+    name: Mapped[str | None]
+    kind: Mapped[str | None]
+    plaid_account_id: Mapped[str | None]
+    inv_ids: Mapped[str | None]
+    deleted_at: Mapped[str | None]
+
+
 class InvAccount(Base):
     __table__ = schema.inv_accounts
     id: Mapped[str]

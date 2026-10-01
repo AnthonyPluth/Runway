@@ -11,7 +11,7 @@ from sqlalchemy import func, insert, select
 
 from runway import db, schema
 from runway.models import (Account, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask, ChurnWish,
-                           Rule, Setting)
+                           DeletedAccount, ManualStatement, Rule, Setting)
 
 
 def drift(path):
@@ -198,6 +198,29 @@ class MigrationTests(unittest.TestCase):
         with db.session(self.path) as conn:
             self.assertEqual(tuple(conn.execute(select(ChurnBenefit.name, ChurnBenefit.guests)).fetchone()), ("Lounge access", None))
         self.assertEqual(drift(self.path), [])
+
+    def test_0028_adds_manual_statements_and_deleted_accounts(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0027")
+        with db.engine(self.path).begin() as c:
+            self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Visa', 'credit')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            conn.execute(insert(ManualStatement).values(account_id="cc", statement_date="2026-09-10", balance=812.4, due_date="2026-10-05"))
+            conn.execute(insert(DeletedAccount).values(id="old", name="Old card"))
+            row = conn.execute(select(ManualStatement.balance, ManualStatement.minimum_payment, ManualStatement.entered_at)).fetchone()
+            self.assertEqual((row["balance"], row["minimum_payment"]), (812.4, None))
+            self.assertTrue(row["entered_at"])
+            self.assertTrue(conn.execute(select(DeletedAccount.deleted_at)).scalar())
+            self.assertEqual(conn.execute(select(Account.name)).scalar(), "Visa")
+        self.assertEqual(drift(self.path), [])
+        with db.engine(self.path).begin() as c:   # and back down
+            command.downgrade(db.alembic_config(c), "0027")
+            self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

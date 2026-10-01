@@ -18,6 +18,7 @@ import itertools
 import json
 from collections import defaultdict
 import statistics
+import urllib.parse
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -25,7 +26,7 @@ from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import func, or_, select
 
-from . import bankdays, db, plaidbank, splits
+from . import bankdays, db, plaidapi, plaidbank, splits, statements
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -210,10 +211,15 @@ def statement_override(conn, card_id: str, close: date) -> float | None:
     return abs(r["amount"]) if r else None
 
 
-def bank_statement(conn, card: dict, today: date):
-    """The card's latest statement from its issuer (Plaid Liabilities). The card's billing cycle follows it:
-    card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
-    st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+STATEMENT_FIELDS = ("last_statement_balance", "last_statement_date", "next_due_date", "minimum_payment")
+
+
+def bank_statement(conn, card: dict, today: date) -> dict | None:
+    """The card's latest statement: the issuer's, through Plaid Liabilities (source "plaid"), else the latest one you
+    entered (source "manual"; see statements.py, which also says when one is stale). The card's billing cycle follows
+    it: card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
+    plaid = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+    st = {**{k: plaid[k] for k in STATEMENT_FIELDS}, "source": "plaid"} if plaid else statements.latest(conn, card["id"], today)
     if not st:
         return None
     close = _d(st["last_statement_date"])
@@ -254,7 +260,7 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     return total
 
 
-def card_cycle(conn, card: dict, today: date, bank) -> dict:
+def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
     last_close = _d(bank["last_statement_date"])
@@ -274,6 +280,8 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
     spend = card_monthly_spend(conn, card, last_close)
     return {
         "last_close": last_close.isoformat(),
+        "statement_source": bank.get("source", "plaid"),   # plaid | manual (entered by you)
+        "statement_stale": bool(bank.get("stale")),         # manual only: a newer one should have been entered by now
         "statement_balance": round(statement, 2),
         "statement_reported": round(reported, 2),
         "statement_set": known is not None,
@@ -287,6 +295,11 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         "new_charges": round(new_charges, 2),
         "daily_rate": round(daily_spend_rate(conn, card["id"], today), 2),
     }
+
+
+def statement_href(card_id: str) -> str:
+    """Where a card's statement is entered: its row in Settings → Accounts, opened at its Statement section."""
+    return "#setup/accounts?account=" + urllib.parse.quote(card_id, safe="")
 
 
 # ------------------------------------------------------------------------------------------------ forecast
@@ -312,7 +325,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     events: list[dict] = []
     warnings: list[dict] = []   # {"text", "href"}: what's wrong, and the page where it's put right
     card_status: list[dict] = []
-    unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
+    unlinked: list[dict] = []   # cards without a statement: none from Plaid, and none entered
 
     def warn(text: str, href: str) -> None:
         warnings.append({"text": text, "href": href})
@@ -354,6 +367,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
         card_status.append(info)
+        if info["statement_stale"]:
+            warn(f"Enter {label}’s latest statement so its payment stays in the forecast.", statement_href(card["id"]))
         payer = by_id.get(card["pay_from"] or "")
         if not payer:
             warn(f"{label}: choose which account pays it in Settings.", "#setup/accounts")
@@ -368,6 +383,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["remaining"] > 0.005:
             warn(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
+        if info["statement_stale"]:
+            continue   # a statement you entered a while ago: its own payment, but nothing estimated from it
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle
         # in progress, at least what's been charged already). Without enough history, the recent daily rate.
         close = next_after(_d(info["last_close"]), card["closing_day"])
@@ -399,26 +416,24 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
                  "payment isn't in the forecast.", "#setup/connections")
 
-    def listed(names):
-        return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    not_linked = [c["name"] for c in unlinked if not c["linked"]]
-    no_statement = [c["name"] for c in unlinked if c["linked"]]
-    if not_linked:
+    # Cards without a statement: you enter the latest one by hand (Settings → Accounts, the card's row), unless Plaid
+    # can send it. Plaid is only mentioned when it's set up.
+    plaid_on = plaidapi.configured(conn)
+    for c in unlinked:
+        if c["linked"]:
+            warn(f"Plaid hasn’t sent a statement for {c['name']} yet. Enter its latest statement so its payment is in "
+                 "the forecast.", statement_href(c["id"]))
+        else:
+            warn(f"Enter {c['name']}’s latest statement{' (or link it through Plaid)' if plaid_on else ''} so its payment "
+                 "is in the forecast.", statement_href(c["id"]))
+    if plaid_on and any(not c["linked"] for c in unlinked):
         waiting = conn.execute(
             select(func.count()).select_from(PlaidAccount)
             .where(PlaidAccount.type == "credit", PlaidAccount.ignored == 0, PlaidAccount.plaid_account_id.not_in(
                 select(Account.plaid_account_id).where(Account.plaid_account_id.is_not(None))))).fetchone()[0]
-        one = len(not_linked) == 1
-        # Cards Plaid already has are matched in Settings → Accounts; otherwise the bank needs connecting first.
-        warn(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
-             f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
-             + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
-                f"choose “Same as …” for each under “New from Plaid”." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."),
-             "#setup/accounts" if waiting else "#setup/connections")
-    if no_statement:
-        one = len(no_statement) == 1
-        warn(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
-             "in the forecast. It usually arrives with the next sync.", "#setup/connections")
+        if waiting:   # cards Plaid already has are matched in Settings → Accounts, and then send their statements
+            warn(f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
+                 "choose “Same as …” for each under “New from Plaid”.", "#setup/accounts")
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
@@ -590,8 +605,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     for cid, info in cards.items():
         card = by_id[cid]
         payer = card["pay_from"]
-        if payer not in cash_ids:
-            continue
+        if payer not in cash_ids or info.get("statement_stale"):
+            continue   # (a stale statement you entered: nothing is estimated from it; see statements.py)
         days = spend.get(cid, {})
         prev = _d(info["last_close"])
         close, first = next_after(prev, card["closing_day"]), True

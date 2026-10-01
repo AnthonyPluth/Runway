@@ -249,7 +249,7 @@ budgets = Table(
 
 overrides = Table(
     'overrides', metadata,
-    Column('key', Text, primary_key=True, doc='rec:<id>:<date> or card:<account id>:<date>'),
+    Column('key', Text, primary_key=True, doc='rec:<id>:<date>, card:<account id>:<date> or stmt:<account id>:<close date>'),
     Column('amount', Float, nullable=False, doc='replaces the forecast amount for that one occurrence'),
 )
 
@@ -295,6 +295,29 @@ card_statements = Table(
     Column('is_overdue', Integer),
     Column('updated', Text),
     info={'doc': "credit card statements from the bank, via Plaid Liabilities"},
+)
+
+manual_statements = Table(
+    'manual_statements', metadata,
+    Column('account_id', Text, nullable=False),
+    Column('statement_date', Text, nullable=False, doc='the day the statement closed (YYYY-MM-DD)'),
+    Column('balance', Float, nullable=False, doc='the statement balance, positive = owed'),
+    Column('due_date', Text, nullable=False),
+    Column('minimum_payment', Float),
+    Column('entered_at', Text, server_default=now_text()),
+    PrimaryKeyConstraint('account_id', 'statement_date'),
+    info={'doc': "credit card statements you entered, one per statement, for a card Plaid has none for (statements.py)"},
+)
+
+deleted_accounts = Table(
+    'deleted_accounts', metadata,
+    Column('id', Text, primary_key=True, doc='the account you deleted (accounts.id); syncs leave it out'),
+    Column('name', Text, doc='what it was called, for Settings'),
+    Column('kind', Text),
+    Column('plaid_account_id', Text, doc='the Plaid account it was linked to (set ignored)'),
+    Column('inv_ids', Text, doc='JSON list: its investment accounts (inv_accounts.id), which syncs leave out too'),
+    Column('deleted_at', Text, server_default=now_text()),
+    info={'doc': "accounts you deleted, so a sync doesn't bring them back (restoring one removes its row)"},
 )
 
 inv_accounts = Table(
