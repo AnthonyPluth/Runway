@@ -25,7 +25,7 @@ from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import func, or_, select, update
 
-from . import bankdays, budgets, db, plaidbank, splits
+from . import bankdays, budgets, db, plaidbank, simplefin, splits
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -209,15 +209,18 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
     return [t for t in txs if t["category"] not in transfers and not tests[t["account_id"]](t)]
 
 
-def pending_total(conn, account: dict) -> float:
-    """What's pending on an account (money out negative) that its balance doesn't have yet. Most banks' balance leaves
+def pending_total(conn, account: dict, today: date) -> float:
+    """What's pending on an account (money out negative) that its balance doesn't have yet, from the last
+    simplefin.REFRESH_DAYS: older pending rows aren't re-read by a sync, so one that dropped off or posted under a new
+    id could linger. Most banks' balance leaves
     pending out, but some include it. Banks take pending debits out of the available balance (not pending credits,
     which are always added), so when it's at or below the balance and doesn't reflect the debits, the balance has them
     already and they aren't added. An available balance above the balance (one with an overdraft line in it) says
     nothing about them: they're added, as they are without one."""
     T = Transaction
     out, came_in = (conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
-                                 .where(T.account_id == account["id"], T.pending == 1, cond)).scalar() or 0.0
+                                 .where(T.account_id == account["id"], T.pending == 1, cond,
+                                        T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())).scalar() or 0.0
                     for cond in (T.amount < 0, T.amount > 0))
     available, balance = account.get("available"), account["balance"]
     if available is not None and available <= balance + 0.005 and available > balance + out + 0.005:
@@ -355,7 +358,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     # and out (see pending_total). A pending payment
     # already linked to a recurring item counts as having happened (see below), so it's in the balance and not again
     # as an event.
-    pending = {a["id"]: round(pending_total(conn, a), 2) for a in cash}
+    pending = {a["id"]: round(pending_total(conn, a, today), 2) for a in cash}
     cash = [dict(a, balance=a["balance"] + pending[a["id"]]) for a in cash]
     by_id.update({a["id"]: a for a in cash})
     cards = [a for a in accounts if a["kind"] == "credit"]
