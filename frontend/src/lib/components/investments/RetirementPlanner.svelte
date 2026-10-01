@@ -6,13 +6,14 @@
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt0 } from "$lib/format";
+  import { fmt0, fmtDate } from "$lib/format";
   import { isPhone } from "$lib/phone.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { type Dollars, inDollars, loanProjected, project, projectionIn, sale as saleAt, saleProceeds } from "./planner";
+  import { type Dollars, endingPayments, type EndingPayment, inDollars, loanProjected, paymentEnds, project, projectionIn,
+    sale as saleAt, saleProceeds } from "./planner";
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
@@ -57,7 +58,7 @@
   // Runway's own starting figures (what planner.default() gives).
   const defaults = (): Partial<RetirementPlan> => ({
     people: [{ name: "You", birth_year: year - 40, retire_age: 65, savings: data.computed.yearly_savings }],
-    plan_to_age: 95, spending: data.computed.annual_spending, return_before: data.computed.expected_return,
+    plan_to_age: 95, spending: data.computed.annual_spending, spending_own: false, return_before: data.computed.expected_return,
     return_after: 0.04, volatility: 0.12, inflation: 0.025, income: [], events: [], assets: [],
   });
 
@@ -146,6 +147,34 @@
     no_rate: "add the loan’s interest rate", no_payment: "add the loan’s monthly payment",
     payment_below_interest: "its payment doesn’t cover the interest: check the loan’s terms",
   } as const;
+
+  // Loan payments that end during the plan. They come off Runway's spending figure (from your history, so it has them
+  // in); a figure you typed is taken as it is, as it probably leaves them out already.
+  const ending = $derived(endingPayments($state.snapshot(plan) as RetirementPlan, data.assets));
+  // The plan takes it off in today's dollars; in future dollars it's shown in those of the year it starts.
+  const endingText = (e: EndingPayment) =>
+    `${fmt0(shownIn(e.yearly, e.from))} a year${dollars === "future" ? ` (${e.from} dollars)` : ""} once ${
+      e.sold ? `${e.name} is sold in ${e.from}` : `the loan on ${e.name} is paid off in ${e.from - 1}`}`;
+  function useRunwaySpending() { plan.spending = data.computed.annual_spending; plan.spending_own = false; keep(); }
+
+  // What happens to a loan's monthly payment in the plan: when it ends and comes off spending, or why it doesn't. Only
+  // a payment counted in the spending the plan starts from can come off it; one left out as a transfer never was in it.
+  function paymentLine(a: PlanAsset, sellYear: number | null): string {
+    const l = a.loan!;
+    const pay = `${fmt0(l.payment ?? 0)}/month`;
+    const ends = paymentEnds(a, sellYear);
+    const notIn = "It was never in your spending (no payment like it was counted as spending in the last 6 months; a transfer isn’t), so nothing comes off.";
+    if (ends != null) {
+      const when = l.payoff_year == null || ends <= l.payoff_year ? "stops when it’s sold" : `ends in ${l.payoff_year}`;
+      if (!l.payment_counted) return `Its ${pay} loan payment ${when}. ${notIn}`;
+      return plan.spending_own ? `Its ${pay} loan payment ${when}. Your own spending figure is taken as it is, so nothing comes off.`
+        : `Its ${pay} loan payment ${when}, and comes off your spending from ${ends}.`;
+    }
+    const stays = l.payment_counted ? " It stays in your spending." : ` ${notIn}`;
+    if (l.note === "payment_below_interest") return `Its ${pay} loan payment doesn’t cover the interest, so it doesn’t pay the loan down.${stays}`;
+    if (l.note === "no_rate") return `Add the loan’s interest rate in Settings → Accounts to see when its ${pay} payment ends.${stays}`;
+    return `Its ${pay} loan payment goes on past the end of the plan.${stays}`;
+  }
 
   // An event is typed as money in or out plus a positive amount; it's kept signed.
   const setEventSign = (i: number, out: boolean) => { plan.events[i].amount = (out ? -1 : 1) * Math.abs(num(plan.events[i].amount)); keep(); };
@@ -247,17 +276,32 @@
     {:else}
       <Button variant="ghost" size="sm" onclick={removePartner}><X /> Remove {names[1]}</Button>
     {/if}
-    <p class="mt-2 text-sm text-muted-foreground">Savings stop at each person's retirement. Spending comes from the investments once everyone has retired.</p>
+    <p class="mt-2 text-sm text-muted-foreground">Savings stop at each person's retirement. Spending comes from the investments once everyone has
+      retired{#if plan.people.length > 1}; until then, the pay of whoever's still working is assumed to cover your living costs{/if}.</p>
+    {#if data.computed.savings_measured !== false}
+      <p class="mt-2 text-sm text-muted-foreground">Runway's figure for saving, {fmt0(data.computed.yearly_savings)} a year, is what went into your
+        investments in the last 12 months{#if data.computed.savings_since}, and your investment history only goes back to
+        {fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}{/if}. A rollover or a one-off lump sum counts too, so
+        change it if that isn't how much you usually save.</p>
+    {/if}
   </section>
 
   <section>
     <h3 class="mb-2 font-medium">In retirement</h3>
     <div class="grid grid-cols-2 gap-3">
       <label class="flex flex-col gap-1">{@render field("Spending a year", "today’s dollars")}
-        {@render money(plan.spending, (v) => (plan.spending = v), "Yearly spending in retirement")}</label>
+        {@render money(plan.spending, (v) => { plan.spending = v; plan.spending_own = true; }, "Yearly spending in retirement")}</label>
       <label class="flex flex-col gap-1">{@render field("Plan until age")}
         <Input type="number" step="1" value={plan.plan_to_age} oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
     </div>
+    {#if ending.length}
+      <p class="mt-2 text-sm text-muted-foreground">
+        {#if plan.spending_own}Your own figure, so loan payments aren't taken off it when they end: it probably leaves them out already.
+          <button type="button" class="font-medium text-foreground underline underline-offset-4" onclick={useRunwaySpending}>Use Runway's figure</button>
+          ({fmt0(data.computed.annual_spending)}, which has them in).
+        {:else}Runway's figure, from your last six months; less {ending.map(endingText).join(", and ")}.{/if}
+      </p>
+    {/if}
   </section>
 
   <section class="lg:col-span-2">
@@ -339,12 +383,17 @@
                   <a class="font-medium whitespace-nowrap text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to project it.</p>
               {/if}
             {/if}
+            {#if a.loan?.payment}
+              <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? num(s.sell_year) : null)}</p>
+            {/if}
           </li>
         {/each}
       </ul>
       <p class="mt-2 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say downsizing. Its value grows
         by the yearly change set on the Net worth page, a loan is paid down on its terms and equity keeps vesting until then. The
-        plan counts the sale in today’s dollars, taking off inflation ({inflationPct} a year, under Assumptions).</p>
+        plan counts the sale in today’s dollars, taking off inflation ({inflationPct} a year, under Assumptions). A loan’s payment
+        comes off your spending once it’s paid off or sold, if it was counted as spending rather than as a transfer. Proceeds are
+        before selling costs (often 6–8% of a home’s price) and tax.</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}

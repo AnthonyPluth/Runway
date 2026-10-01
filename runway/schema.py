@@ -296,6 +296,7 @@ card_statements = Table(
     Column('last_payment_date', Text),
     Column('is_overdue', Integer),
     Column('updated', Text),
+    Column('purchase_apr', Float, doc="the card's APR on purchases, in percent (Plaid's purchase_apr)"),
     info={'doc': "credit card statements from the bank, via Plaid Liabilities"},
 )
 

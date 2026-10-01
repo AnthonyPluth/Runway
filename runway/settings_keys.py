@@ -53,8 +53,28 @@ PRIMARY_ACCOUNT = "primary_account"
 HORIZON_DAYS = "horizon_days"
 SETUP_DISMISSED = "setup_dismissed"
 
+
+# How each credit card's statements are paid, for the forecast (runway/forecast.py's payment_plan)
+def card_pay_mode(card_id: str) -> str:
+    """How the card is paid: "full" (the default: every statement paid in full), "minimum" or "fixed"."""
+    return f"card_pay_mode:{card_id}"
+
+
+def card_pay_amount(card_id: str) -> str:
+    """With "fixed": what's paid toward each statement, in dollars."""
+    return f"card_pay_amount:{card_id}"
+
+
+def card_apr(card_id: str) -> str:
+    """The card's APR, in percent, for the interest on a balance carried from one statement to the next."""
+    return f"card_apr:{card_id}"
+
+
 # Recurring items
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"
+
+# Churning
+CHURN_FOUND_DISMISSED = "churn_found_dismissed"   # JSON: ids of credit card accounts marked "not a churning card" (found on your accounts)
 
 # Notifications
 NOTIFY_PREFS = "notify_prefs"             # JSON: without sign-in, and where a person who hasn't chosen yet starts from

@@ -10,7 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from sqlalchemy import func, insert, select, update
 
 from runway import db, plaid, planner, portfolio, prices
-from runway.models import Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security
+from runway.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security,
+                           Transaction)
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -227,6 +228,106 @@ class FireTests(Base):
                                             yearly_change=3, loan_account_id="mtg"))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
+        self.assertEqual(house["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "mtg",
+                                         "payment_counted": False, "payoff_year": None})   # no terms: kept as it is
+        # with its terms set, what's owed is paid down to today (as on Net worth), projected on from there
+        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", interest_rate=6, monthly_payment=1500))
+        house = next(a for a in self.plan()["assets"] if a["name"] == "House")
+        owed = 200000.0
+        for _ in range(2):
+            owed = owed * 1.005 - 1500
+        self.assertAlmostEqual(house["owed"], owed, delta=0.01)
+        self.assertEqual(house["owed_by_year"][0], house["owed"])
+        self.assertEqual({k: house["loan"][k] for k in ("rate", "payment", "source", "note", "account_id")},
+                         {"rate": 6, "payment": 1500, "source": "manual", "note": None, "account_id": "mtg"})
+        self.assertEqual(house["loan"]["payoff_year"], 2044)   # 219 more payments from October 2026: the last in December 2044
+        # a payment and no rate: nothing is guessed (loans.py), so neither paid down nor projected
+        self.c.execute(update(Account).where(Account.id == "mtg").values(interest_rate=None))
+        house = next(a for a in self.plan()["assets"] if a["name"] == "House")
+        self.assertEqual((house["owed"], house["loan"]["note"], house["loan"]["payoff_year"]), (200000.0, "no_rate", None))
+
+    def test_says_whether_a_loans_payment_is_in_spending(self):
+        self.c.execute(insert(Account), [{"id": "mtg", "name": "Mortgage", "kind": "loan", "balance": -200000, "interest_rate": 6,
+                                          "monthly_payment": 1850},
+                                         {"id": "chk", "name": "Checking", "kind": "checking", "balance": 0, "interest_rate": None,
+                                          "monthly_payment": None}])
+        self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(), loan_account_id="mtg"))
+        counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
+        pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
+            id=id, account_id="chk", posted=posted, amount=amount, category=category))
+        for m in range(3, 9):   # paid every month, but as a transfer: not in spending
+            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer")
+        pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
+        pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
+        pay("p4", "2026-07-15", -1900, "Groceries")  # within 10% of it once: a one-off, not a payment
+        self.assertFalse(counted())
+        for m in (3, 4, 5):   # with July, four months of it: a payment that repeats
+            pay(f"m{m}", f"2026-{m:02}-02", -1850, "Mortgage")
+        self.assertTrue(counted())
+        self.c.execute(update(Transaction).where(Transaction.id == "p3").values(category=None))   # this month's still doesn't
+        self.c.execute(update(Transaction).where(Transaction.id == "m5").values(category=None))   # uncategorized counts too
+        self.assertTrue(counted())
+        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))   # three months left
+        self.assertFalse(counted())
+        self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
+        self.assertFalse(counted())
+
+    def test_a_payment_that_names_the_lender_wins_over_lookalikes(self):
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        lookalikes = [out(m, 352, "whole foods") for m in (3, 4, 5, 6)]
+        self.assertTrue(planner.payment_counted(lookalikes, 350, ["Ally", "Car loan"]))   # nothing names it: amounts alone
+        named = [out(m, 350, "ally auto payment") for m in (3, 4)]
+        self.assertFalse(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))   # only two months of it
+        named += [out(m, 350, "ally auto payment") for m in (5, 6)]
+        self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
+        self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
+
+    def test_the_plan_knows_whether_spending_is_runways_figure_or_yours(self):
+        p = self.plan()
+        self.assertFalse(p["plan"]["spending_own"])   # the default: Runway's figure
+        planner.save(self.c, {**p["plan"], "spending": 48000, "spending_own": True}, TODAY)
+        self.assertTrue(self.plan()["plan"]["spending_own"])
+        planner.save(self.c, {**p["plan"], "spending_own": "0"}, TODAY)
+        self.assertFalse(self.plan()["plan"]["spending_own"])
+        self.assertFalse(planner.clean({**p["plan"], "spending_own": None}, TODAY)["spending_own"])   # left out: Runway's
+
+    def test_a_plan_kept_before_the_flag_is_runways_figure(self):
+        # Saved whole on every change, its spending can't tell a typed figure from Runway's: taken as Runway's,
+        # however far it is from today's figure, and nothing is written back on reading it
+        computed = self.plan()["computed"]
+        old = {k: v for k, v in planner.clean(self.plan()["plan"], TODAY).items() if k != "spending_own"}
+        for spending in (computed["annual_spending"], computed["annual_spending"] + 2400):
+            raw = json.dumps({**old, "spending": spending})
+            db.set_setting(self.c, "retirement_plan", raw)
+            self.assertFalse(self.plan()["plan"]["spending_own"])
+            self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)
+
+    def test_yearly_savings_says_what_it_is(self):
+        p = self.plan()["computed"]
+        self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))   # a year of history: the last 12 months
+        self.tx("dep", "2026-06-01", "cash", "deposit", -3000)
+        p = self.plan()["computed"]
+        self.assertEqual((p["yearly_savings"], p["savings_since"]), (3000.0, "2026-05-31"))   # history starts then
+        db.set_setting(self.c, "fire_yearly_savings", "20000")   # typed on the old card: not a measurement
+        p = self.plan()["computed"]
+        self.assertEqual((p["yearly_savings"], p["savings_measured"], p["savings_since"]), (20000.0, False, None))
+
+
+class MonthlySpendingTests(DbCase):
+    """Retirement spending and the emergency-fund rule count spending the way Reports does."""
+
+    def test_uncategorized_counts_and_a_month_of_money_back_is_zero(self):
+        self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0},
+                                         {"id": "brk", "name": "Brokerage", "kind": "investment", "balance": 0}])
+        rows = [("2026-03-05", -1000, "Groceries"), ("2026-03-06", -500, None),   # uncategorized money out is spending
+                ("2026-03-07", -2000, "Transfer"), ("2026-03-08", 5000, "Income"), ("2026-03-09", 300, None),
+                ("2026-04-05", -400, "Groceries"), ("2026-04-06", -100, "No such category"),   # unknown: uncategorized
+                ("2026-05-05", -200, "Shopping"), ("2026-05-06", 700, "Shopping"),   # more back than out: a month of none
+                ("2026-02-27", -9999, "Groceries"), ("2026-09-01", -9999, "Groceries")]   # outside the 6 full months
+        self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "chk", "posted": d, "amount": a, "category": c}
+                                             for i, (d, a, c) in enumerate(rows)])
+        self.c.execute(insert(Transaction).values(id="inv", account_id="brk", posted="2026-03-10", amount=-750))
+        self.assertEqual(portfolio.monthly_spending(self.c, TODAY), round((1500 + 500 + 0) / 3, 2))
 
 
 # ---------------------------------------------------------------------------------------------- mock servers

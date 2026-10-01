@@ -45,6 +45,15 @@
   const range = $derived(d?.change[picked] != null ? picked : RANGES.find(([k]) => d?.change[k] != null)?.[0] ?? picked);
   const ch = $derived(d?.change[range]);
   const rangeLabel = $derived(RANGES.find(([k]) => k === range)![1]);
+  // The change is measured from the latest snapshot at least that old, and snapshots are only saved on days the page is
+  // opened: when that one is more than a few days older than the range, say since when it really is.
+  const changeFrom = $derived.by(() => {
+    const s = d?.change_since?.[range];
+    if (!d || !s) return null;
+    const span = Math.round((Date.parse(`${d.today}T00:00:00Z`) - Date.parse(`${s}T00:00:00Z`)) / 864e5);
+    if (span - RANGES.find(([k]) => k === range)![2] <= 3) return null;
+    return fmtDate(s, s.slice(0, 4) === d.today.slice(0, 4) ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+  });
   const points = $derived.by(() => {
     if (!d) return [];
     const days = RANGES.find(([k]) => k === range)![2];
@@ -90,7 +99,7 @@
     if (!d || acctId == null) return null;
     for (const g of d.groups) {
       const i = g.items.find((it) => it.type === "account" && String(it.id) === acctId);
-      if (i) return { id: acctId, name: i.name, org: i.org ?? null, balance: i.value, as_of: i.as_of, counted: true };
+      if (i) return { id: acctId, name: i.name, org: i.org ?? null, balance: i.value, as_of: i.as_of, synced: i.synced, counted: true };
     }
     const x = d.excluded.find((a) => a.id === acctId);
     return x ? { id: x.id, name: x.name, org: x.org, balance: x.balance, counted: false } : null;
@@ -184,7 +193,7 @@
     {#if d.history.length >= 2}
       <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p class={cn("text-[15px] tabular-nums", ch != null && ch > 0 ? "text-emerald-500" : "text-muted-foreground")}>
-          {ch != null ? `${signed(ch)} in the last ${rangeLabel}` : "Not enough history for a change yet"}
+          {ch != null ? `${signed(ch)} ${changeFrom ? `since ${changeFrom}` : `in the last ${rangeLabel}`}` : "Not enough history for a change yet"}
         </p>
         <Segmented label="Change over" value={range} onchange={(v) => (picked = v as typeof picked)}
           options={RANGES.map(([value]) => ({ value, label: value, disabled: d!.change[value] == null }))} />
