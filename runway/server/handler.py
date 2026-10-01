@@ -231,13 +231,15 @@ class Handler(BaseHTTPRequestHandler):
         return user
 
     def end_headers(self):
-        for ck in getattr(self, "_set_cookies", None) or []:   # a renewed session (_user), on whatever this request answers
+        # A renewed session (_user), on whatever this request answers. Taken before sending, so a cookie send_header
+        # refuses isn't sent again on the error that follows.
+        cookies, self._set_cookies = getattr(self, "_set_cookies", None) or [], []
+        for ck in cookies:
             self.send_header("Set-Cookie", ck)
-        self._set_cookies = []
         super().end_headers()
 
     def _redirect(self, location: str, cookies: list[str] | None = None) -> None:
-        if "\r" in location or "\n" in location:   # never let a header line be split
+        if "\r" in location or "\n" in location:   # a redirect somewhere odd goes home instead of failing (see send_header)
             location = "/"
         self.send_response(302)
         self.send_header("Location", location)
@@ -317,6 +319,16 @@ class Handler(BaseHTTPRequestHandler):
     def send_response(self, code, message=None):
         self._responded, self._status = True, code
         super().send_response(code, message)
+
+    def send_header(self, keyword, value):
+        # Python's server writes a header as given, so a line break in one would end it and start a header (or a body)
+        # of someone else's choosing: response splitting. Every header goes through here and none may carry one. The
+        # answer so far is dropped, so the request fails as any bug does (_handle answers 500), never half-sent.
+        if any(c in f"{keyword}{value}" for c in "\r\n"):
+            self._headers_buffer = []
+            self._responded = False
+            raise ValueError("A response header can't contain a line break")
+        super().send_header(keyword, value)
 
     def _dispatch(self, method: str) -> None:
         self._deadline(None)   # the headers are in
