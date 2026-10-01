@@ -203,6 +203,53 @@ describe("TxRow", () => {
     });
   });
 
+  // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
+  describe("narrow rows", () => {
+    it("hides the account name, chip text and recurring name in phone landscape only below lg, not on short desktop windows", () => {
+      const landscape = "max-lg:[@media(max-height:500px)]";
+      render(TxRow, props(tx({ account_name: "Shared Checking", recurring_id: 2, recurring_name: "Rent",
+        retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
+      const chipText = within(screen.getByRole("button", { name: "Target in store · 3 items" })).getByText("Target in store · 3 items");
+      expect(chipText).toHaveClass(`${landscape}:hidden!`);
+      expect(within(row()).getByText("Rent")).toHaveClass(`${landscape}:hidden!`);
+      for (const e of within(row()).getAllByText("Shared Checking")) expect(e.className).not.toMatch(/(^|\s)\[@media\(max-height:500px\)\]/);
+    });
+
+    it("shows the order chip as just its icon unless the cell has room for its text", () => {
+      render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
+      const chip = screen.getByRole("button", { name: "Target in store · 3 items" });
+      expect(chip).toHaveClass("@sm/title:shrink-[8]", "@sm/title:overflow-hidden", "@sm/title:bg-secondary");
+      expect(within(chip).getByText("Target in store · 3 items")).toHaveClass("truncate", "hidden", "@sm/title:inline");
+      expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[6ch]", "truncate");
+    });
+
+    it("shows the pending and review badges as an icon (labelled) unless the cell has room for the word", () => {
+      render(TxRow, props(tx({ pending: 1, needs_review: 1 })));
+      for (const word of ["pending", "review"]) {
+        const badge = within(row()).getByTitle(word);
+        expect(within(badge).getByLabelText(word)).toHaveClass("@sm/title:hidden");
+        expect(within(badge).getByText(word)).toHaveClass("hidden", "@sm/title:inline");
+        expect(badge).toHaveClass("shrink-0");
+      }
+    });
+
+    it("lets the account and the bank's text share a line, hiding the text until its cell has room", () => {
+      render(TxRow, props(tx({ account_name: "Shared Checking" })));
+      const account = within(row()).getAllByText("Shared Checking")[0].parentElement!.parentElement!;
+      expect(account).toHaveClass("min-w-0", "shrink-[4]");
+      const bankText = within(row()).getByTitle("BLUE BOTTLE #123");
+      expect(bankText).toHaveClass("hidden", "min-w-0", "truncate", "@sm/acct:block");
+      expect(bankText.parentElement).toHaveClass("@container/acct", "min-w-0");
+    });
+
+    it("shows only the account's logo on a phone", () => {
+      app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
+      render(TxRow, props(tx({ account_name: "Shared Checking" })));
+      const logo = within(row()).getAllByTitle("Shared Checking").find((e) => e.classList.contains("md:hidden"))!;
+      expect(within(logo).getByText("Shared Checking")).toHaveClass("hidden");
+    });
+  });
+
   describe("details (from lg up)", () => {
     it("opens the details, with the account, its institution and the bank's text, and closes them again", async () => {
       app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };

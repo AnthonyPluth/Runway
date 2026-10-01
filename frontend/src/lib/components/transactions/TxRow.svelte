@@ -18,6 +18,8 @@
   import type { Tx } from "./types";
   import { openOrders } from "./expanded.svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Clock from "@lucide/svelte/icons/clock";
+  import Flag from "@lucide/svelte/icons/flag";
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
   // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
@@ -80,40 +82,47 @@
     </LogoPicker>
   </div>
 
-  <div class="col-start-3 row-start-1 min-w-0 pr-3">
-    <div class="flex min-w-0 items-center gap-1.5">
-      <span class="truncate font-medium" title={name}>{name}</span>
-      {#if t.pending}<Badge variant="secondary" class="shrink-0">pending</Badge>{/if}
-      {#if !review && t.needs_review}<Badge variant="outline" class="shrink-0 border-amber-500/50 text-amber-500">review</Badge>{/if}
+  <div class="@container/title col-start-3 row-start-1 min-w-0 pr-3">
+    <!-- The merchant keeps at least 6 characters. Beside it, the badges, the recurring name and the order chip are their full
+         text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
+    <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
+      <span class="min-w-[6ch] truncate font-medium max-sm:max-w-full" title={name}>{name}</span>
+      {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
+        <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="pending" /><span class="hidden @sm/title:inline max-sm:inline">pending</span></Badge>{/if}
+      {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-amber-500/50 px-1.5 text-amber-500 @sm/title:px-2 max-sm:px-2">
+        <Flag class="size-3 @sm/title:hidden max-sm:hidden" aria-label="review" /><span class="hidden @sm/title:inline max-sm:inline">review</span></Badge>{/if}
       {#if picking}
         <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
       {:else}
         <button type="button" onclick={() => (picking = true)}
           title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
-          class={cn("shrink-0 cursor-pointer rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
-            linked ? "bg-primary/15 font-semibold text-primary" : onHover)}>
-          ↻{#if linked}<span class="ml-1 text-xs font-normal max-sm:hidden">{t.recurring_name}</span>{/if}
+          class={cn("inline-flex shrink-0 cursor-pointer items-center rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
+            linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!" : onHover)}>
+          ↻{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{t.recurring_name}</span>{/if}
         </button>
       {/if}
       {#if t.retail}
-        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} onclick={toggleOrder}
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={orderLabel(t.retail)} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
-          class="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
-          <ChevronRight class={cn("size-3.5 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
-          {orderLabel(t.retail)}</button>
+          class="inline-flex max-w-full shrink-0 cursor-pointer items-center gap-0.5 rounded-md py-0.5 pl-0.5 text-xs font-medium text-muted-foreground hover:text-primary @sm/title:min-w-7 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-secondary @sm/title:pl-1 @sm/title:pr-2 @sm/title:text-secondary-foreground @sm/title:hover:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!">
+          <ChevronRight class={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
+          <span class="hidden truncate @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{orderLabel(t.retail)}</span></button>
       {/if}
     </div>
   </div>
   <!-- Account (and the bank's own text): under the merchant on a tablet, its own column from lg up (where the bank's text
-       is in the details instead). -->
-  <div class="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    <span class="min-w-0 lg:col-start-5 lg:row-start-1 lg:truncate lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" /></span>
-    {#if detail}<span aria-hidden="true" class="lg:hidden">·</span><span class="truncate lg:hidden" title={detail}>{detail}</span>{/if}
+       is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
+       text only shows once the cell is 24rem wide, so it never lands on the account. -->
+  <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
+    <span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>
+    {#if detail}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span><span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
-  <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
+  <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
+    <!-- On a phone the account is only its bank's logo, ahead of the category. -->
+    <span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>
     {#if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <Badge class="bg-primary/15 text-primary">split</Badge>
@@ -129,7 +138,7 @@
         t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
         "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
         {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
-        <span class="truncate" title={t.category || undefined}>{t.category || "Choose category"}</span>
+        <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
         <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
           class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />

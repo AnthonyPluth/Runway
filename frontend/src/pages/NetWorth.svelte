@@ -234,12 +234,12 @@
         <DesktopOnly class="mt-4" what="see and change the accounts and assets behind it" />
       {:else}
       <div class="mt-4 grid gap-6 lg:grid-cols-2">
-        <div><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}
+        <div class="min-w-0"><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}
           {#if !hasAssetItems}
             <p class="mt-2 text-sm text-muted-foreground">Add a home, vehicle or other asset · <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-2" onclick={() => openAdd("home")}>Add an asset</button></p>
           {/if}
         </div>
-        <div><h3 class="mb-1 font-semibold">Liabilities</h3>
+        <div class="min-w-0"><h3 class="mb-1 font-semibold">Liabilities</h3>
           {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
         </div>
       </div>
