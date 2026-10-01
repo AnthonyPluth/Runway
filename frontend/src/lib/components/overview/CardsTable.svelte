@@ -49,7 +49,7 @@
           {#if c.remaining > 0}
             <span class={soon ? "font-medium text-amber-400" : ""}>due {fmtDate(c.due_date)}</span>
             {#if c.pay_mode && c.pay_mode !== "full"}
-              · <span title={`The rest, ${fmt(c.carried ?? 0)}, carries into the next statement`}>{nb(`pays ${fmt(c.payment ?? 0)} of ${fmt(c.remaining)}`)}</span>
+              · <span title={(c.carried ?? 0) < 0 ? `The extra ${fmt(-(c.carried ?? 0))} comes off the next statement` : `The rest, ${fmt(c.carried ?? 0)}, carries into the next statement`}>{nb(`pays ${fmt(c.payment ?? 0)} of ${fmt(c.remaining)}`)}</span>
             {:else}{c.remaining < c.statement_balance - 0.005 ? ` · ${fmt(c.remaining)} left` : ""}{/if}{#if c.minimum_payment} · {nb(`min ${fmt(c.minimum_payment)}`)}{/if}
           {:else}<span class="text-emerald-400">Paid ✓</span>{/if}
           {#if c.statement_set} · <Button variant="link" size="sm" class="h-auto p-0 text-xs" title={`Go back to the bank's figure (${fmt(c.statement_reported)})`} onclick={() => reset(c)}>reset</Button>{/if}

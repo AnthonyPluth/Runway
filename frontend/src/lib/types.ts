@@ -120,7 +120,8 @@ export interface CardSummary {
   remaining: number;
   minimum_payment?: number | null;
   /** How the forecast pays the statement (Settings → Accounts): what it pays on the due date out of what's left
-   *  (remaining), and what that leaves to carry into the next statement. */
+   *  (remaining), and what that leaves to carry into the next statement (below zero when a payment you edited is more
+   *  than what's left: the extra comes off the next one). */
   pay_mode?: "full" | "minimum" | "fixed";
   payment?: number;
   carried?: number;

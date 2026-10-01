@@ -831,11 +831,27 @@ class PaymentModeTests(LedgerCase):
         s1 = -700 + 300 + 500 / 31 * 10
         self.assertNotIn("2026-11-05", card)
         self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
-        # not paying in full, an edit to the payment on a statement below zero doesn't turn the credit into a balance
+        # not paying in full, $50 entered as the payment on a statement below zero goes out, and adds to the credit
         self.pay("fixed", amount="5000")
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-50.0))
         fc = forecast.build(self.conn, TODAY, 90)
-        self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 + self.EST2, 2))
+        self.assertEqual(self.payments(fc)["2026-11-05"], 50.0)
+        self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 - 50 + self.EST2, 2))
+
+    def test_an_edited_payment_above_the_statement_comes_off_the_next_one(self):
+        # Paying the minimum, but $1,000 entered for the $600 left on the statement (to clear the current balance): the
+        # $400 over is a credit on the next statement, not counted again there
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        self.pay("minimum")
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=-1000.0))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (1000.0, -400.0))
+        payments = self.payments(fc)
+        s1 = -400 + self.EST1   # Oct 10's statement: $400 lower than the cycle's charges ($504.45, so the $25 floor)
+        self.assertEqual(payments["2026-10-05"], 1000.0)
+        self.assertEqual(payments["2026-11-05"], 25.0)
+        self.assertEqual(payments["2026-12-07"], round((s1 - 25 + self.EST2) * 0.02, 2))
+        self.assertTrue(all(e["amount"] < 0 for e in fc["events"] if e["kind"] == "card"))   # never a negative payment
 
     def test_the_budget_scenario_pays_the_same_way(self):
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)

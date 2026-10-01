@@ -440,11 +440,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
 
     def paying(info: dict, owes: float, planned: float, key: str, old_key: str) -> float:
-        """What's paid toward a card statement that still owes `owes`, for what carries into the next one: what its
-        payment plan pays (`planned`), or, when you've edited that payment on the Overview, what you entered, up to what's
-        owed. A card paid in full carries nothing either way, as before."""
+        """What's paid toward a card statement that still owes `owes`, for what carries into the next one (owes − this):
+        what its payment plan pays (`planned`), or, when you've edited that payment on the Overview, what you entered.
+        An edit above what's owed (clearing the current balance, say) leaves a credit, which comes off the next statement
+        like any other. A card paid in full carries nothing either way, as before."""
         edit = overrides.get(key, overrides.get(old_key))
-        return max(0.0, min(owes, abs(edit))) if info["pay_mode"] != "full" and edit is not None else planned
+        return abs(edit) if info["pay_mode"] != "full" and edit is not None else planned
 
     def not_averaged(item_id: int, since: str) -> bool:
         """Whether a card's spending average (over cycles from the one closing on `since`) leaves out this recurring
