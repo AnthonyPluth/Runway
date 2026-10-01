@@ -182,7 +182,7 @@ class ChurningApiTests(unittest.TestCase):
     def test_bank_bonuses(self):
         opened = (TODAY - timedelta(days=10)).isoformat()
         bid = api.api_bank_bonus_add(self.c, {}, {"owner": "Sam", "bank": "Chase", "opened_on": opened, "bonus": 300,
-                                                  "account_id": "demo-checking", "dd_total": 500})["id"]
+                                                  "account_id": "demo-checking", "dd_total": 1_000_000})["id"]   # never met by the demo payroll
         out = api.api_churning(self.c, {}, {})
         self.assertEqual(out["people"], ["Alex", "Sam"])
         b = out["bank"][0]

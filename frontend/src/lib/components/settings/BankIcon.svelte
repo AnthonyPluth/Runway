@@ -6,12 +6,14 @@
 <script lang="ts">
   import { app } from "$lib/app.svelte";
 
-  // An institution's logo (Logo.dev's, by name): by account id (the brands in /api/state, which have one once Runway has
-  // fetched it), or by institution name (a Plaid connection). Falls back to the first letter, or "?" when there's no name.
+  // An institution's logo (Logo.dev's): by account id (the brands in /api/state, which have one once Runway has
+  // fetched it, or the one you chose), or by institution name (a Plaid connection: the state's connection_logos, else
+  // asked for by name). Falls back to the first letter, or "?" when there's no name.
   let { id, name }: { id?: string; name?: string | null } = $props();
   let failed = $state(false);   // a name's logo may not have been fetched yet
   const brand = $derived(id ? app.state?.brands?.[id] : undefined);
-  const src = $derived(id ? brand?.src : name && app.state?.logodev_configured ? logoFor(name) : null);
+  const known = $derived(name ? app.state?.connection_logos?.[name] : undefined);
+  const src = $derived(id ? brand?.src : !name || !app.state?.logodev_configured ? null : known !== undefined ? known : logoFor(name));
   const letter = $derived(id ? brand?.initial || "?" : (name || "?").replace(/[^A-Za-z0-9]/g, "").slice(0, 1).toUpperCase() || "?");
   const title = $derived(id ? brand?.institution ?? "" : "");
 </script>

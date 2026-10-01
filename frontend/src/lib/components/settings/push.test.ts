@@ -63,4 +63,18 @@ describe("push support", () => {
     expect(await currentSubscription()).toEqual({ reg: null, sub: null });
     delete (navigator as unknown as Record<string, unknown>).serviceWorker;
   });
+
+  it("uses the app's registration, once its worker is ready", async () => {
+    const sub = { endpoint: "https://push/1" };
+    const starting = { active: null, pushManager: { getSubscription: vi.fn().mockResolvedValue(null) } };
+    const ready = { active: {}, pushManager: { getSubscription: vi.fn().mockResolvedValue(sub) } };
+    vi.stubGlobal("PushManager", class {});
+    vi.stubGlobal("Notification", class {});
+    vi.stubGlobal("isSecureContext", true);
+    const register = vi.fn();
+    Object.defineProperty(navigator, "serviceWorker", { value: { getRegistration: vi.fn().mockResolvedValue(starting), register, ready: Promise.resolve(ready) }, configurable: true });
+    expect(await currentSubscription()).toEqual({ reg: ready, sub });
+    expect(register).not.toHaveBeenCalled();
+    delete (navigator as unknown as Record<string, unknown>).serviceWorker;
+  });
 });

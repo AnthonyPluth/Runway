@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from ... import bank_bonuses, churn_benefits, churn_wishlist, churning, db, notify
 from ...models import Category
-from ..common import ApiError
+from ..common import ApiError, _current
 from .state import owner_choices
 
 
@@ -29,7 +29,7 @@ def _id(value) -> int:
 def api_churning(conn, _q, _b):
     out = churning.overview(conn, date.today(), owner_choices(conn))
     # Churning's push alerts, with whether each is on, so the page can offer their switches.
-    prefs = notify.prefs(conn)
+    prefs = notify.prefs(conn, notify.person(getattr(_current, "user", None)))
     out["alert_prefs"] = [{**a, "on": bool(prefs.get(a["key"]))} for a in churning.ALERT_PREFS]
     return out
 

@@ -27,6 +27,7 @@
   import { tick } from "svelte";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import LogoPicker from "$lib/components/transactions/LogoPicker.svelte";
   import BankIcon from "./BankIcon.svelte";
   import { linkable, linkableInvestments, plaidFor, plaidLabel } from "./plaidAccounts";
   import { connectPlaid, matchPlaidAccount } from "./plaid.svelte";
@@ -180,6 +181,12 @@
       <input class={`${inputCls} sm:max-w-md`} bind:value={name} placeholder={a.name} use:autosave={() => save(false)} />
       {#if a.display_name}<span class="truncate text-xs" title={bank}>From the bank: {bank}</span>{/if}
     </label>
+    <div class={fieldCls}>Logo
+      <!-- the institution's, or one you chose (a website's, or its letter), wherever the account shows -->
+      <LogoPicker account={a.id} name={name.trim() || a.name} onchanged={() => refreshState()}>
+        <span class="flex h-9 items-center gap-2 text-foreground"><BankIcon id={a.id} /><span class="text-sm underline-offset-4 hover:underline">Change</span></span>
+      </LogoPicker>
+    </div>
     <label class={fieldCls}>Owner
       <OwnerSelect bind:value={owner} {owners} joint blank="—" {@attach fromAction(autosave, () => () => save(true))} />
     </label>

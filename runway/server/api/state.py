@@ -21,6 +21,7 @@ def api_state(conn, _q, _b):
     return {
         "connected": bank_configured(conn),
         "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
+        "connection_logos": brands.connection_logos(conn),   # each bank connection's, by its institution's name
         "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
         "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
         "llm_model": db.get_setting(conn, sk.LLM_MODEL) or categorize.DEFAULT_MODEL,
