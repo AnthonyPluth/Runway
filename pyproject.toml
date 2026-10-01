@@ -20,6 +20,18 @@ dependencies = [
 [tool.poetry]
 package-mode = false   # an application, not a library: `poetry install` just installs the dependencies
 
+# The tools CI runs (docker.yml, security.yml) and `make check` runs, pinned so every run uses the same versions;
+# Dependabot updates them here. `poetry install` adds them; the Docker image installs only the main dependencies.
+[tool.poetry.group.dev.dependencies]
+ruff = "0.16.9"
+mypy = "2.3.1"
+types-python-dateutil = "2.9.0.20260807"
+coverage = "7.16.2"
+unittest-parallel = "1.8.6"
+pip-audit = "2.10.1"
+bandit = {version = "1.9.4", extras = ["toml"]}
+zizmor = "1.30.1"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"

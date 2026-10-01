@@ -3,12 +3,9 @@
 
 PYTHON ?= poetry run python
 NPM ?= npm
-# Ruff isn't one of Runway's dependencies, so use the one in the Poetry environment if you installed it there, else
-# the one on your PATH, else pipx's copy of the version CI pins.
-RUFF ?= $(shell if poetry run ruff --version >/dev/null 2>&1; then echo "poetry run ruff"; \
-	elif command -v ruff >/dev/null 2>&1; then echo ruff; else echo "pipx run ruff==0.16.9"; fi)
-# mypy has to see Runway's dependencies, so it runs in the Poetry environment; install it there once with
-# `poetry run pip install mypy types-python-dateutil` (CI pins the versions).
+# The tools come from the Poetry environment (pyproject.toml's dev group, which `poetry install` adds), at the
+# versions CI runs. mypy has to run there anyway, to see Runway's dependencies.
+RUFF ?= poetry run ruff
 MYPY ?= poetry run mypy
 
 .PHONY: check lint test fix frontend-check
