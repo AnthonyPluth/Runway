@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
-from . import db
+from . import brands, db
 from .models import Account, Recurring, RecurringDismissed, Transaction
 
 # How far a real payment can land from its expected date and still count as that occurrence.
@@ -77,9 +77,21 @@ def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
         texts = [m for m in match_texts(item) if len(m) >= 3]
         if not texts:
             continue
-        where = [t.recurring_id.is_(None), t.account_id == item["account_id"], t.amount > 0 if item["amount"] > 0 else t.amount < 0,
-                 has_text(texts), amount_fits(item)]
-        linked += conn.execute(update(t).where(*where).values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
+        common = [t.recurring_id.is_(None), t.account_id == item["account_id"], t.amount > 0 if item["amount"] > 0 else t.amount < 0,
+                  amount_fits(item)]
+        linked += conn.execute(update(t).where(*common, has_text(texts)).values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
+        # A text that's a brand's name ("amazon") also finds that brand's transactions you've given the bank's name
+        # ("Amzn Mktp Us"), by the brand their bank text gives.
+        named = {m for m in texts if m in brands.BRAND_NAMES}
+        if named:
+            from .categorize import bank_payee   # here, not at the top: categorize imports this module's importers
+            key = lambda s: " ".join((s or "").lower().split())
+            ids = [r["id"] for r in conn.execute(select(t.id, t.payee, t.description).where(*common))
+                   if key(r["payee"]) == key(bank_payee(r["description"]))   # still the bank's name, not one you gave it
+                   and (brands.merchant_name(bank_payee(r["description"])) or "").lower() in named]
+            if ids:
+                linked += conn.execute(update(t).where(t.id.in_(ids), t.recurring_id.is_(None))
+                                       .values(recurring_id=item["id"], recurring_linked_by="auto")).rowcount
     return linked
 
 

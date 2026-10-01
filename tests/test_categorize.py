@@ -144,6 +144,23 @@ class BrandNameApiTests(LedgerCase):
         self.assertEqual(items["chk|0"], {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "brand"})
         self.assertIsNone(items["chk|5"])
 
+    def test_rules_and_recurring_items_made_from_the_brands_name_keep_working_with_the_banks_name(self):
+        from runway import recurring, rules
+        self.call("chk|0", use="bank", all=True)   # every Amazon transaction back to the bank's name, from now on
+        self.assertEqual(self.payees()["chk|0"], "Amzn Mktp Us")
+        rule = {"match": "amazon", "match_mode": "exact"}
+        self.assertTrue(rules._text_matches(rule, {"payee": "Amzn Mktp Us", "description": "AMZN Mktp US*2K3AB1"}))
+        self.assertFalse(rules._text_matches(rule, {"payee": "Walmart", "description": "WM SUPERCENTER #1"}))
+        self.assertFalse(rules._text_matches(rule, {"payee": "Gift For Sam", "description": "AMZN Mktp US*2K3AB1"}))   # yours
+        self.assertFalse(rules._text_matches({"match": "walmart", "match_mode": "exact"},
+                                             {"payee": "Amzn Mktp Us", "description": "AMZN Mktp US*2K3AB1"}))
+        self.conn.execute(insert(Recurring).values(name="Amazon", account_id="chk", amount=-10.0, frequency="monthly",
+                                                   anchor_date="2026-09-01", active=1, match="amazon"))
+        rid = self.conn.execute(select(Recurring.id)).scalar()
+        recurring.auto_match(self.conn, [rid])
+        linked = {r[0] for r in self.conn.execute(select(Transaction.id).where(Transaction.recurring_id == rid))}
+        self.assertEqual(linked, {"chk|0", "chk|1", "chk|2", "chk|4"})   # Amazon's: not Walmart's, nor one you named
+
     def test_the_banks_name_for_one_and_undo(self):
         before = self.payees()
         r = self.call("chk|0", use="bank")

@@ -75,12 +75,18 @@ def _brand_matches(m: str, mode: str, payee: str, description: str | None) -> bo
     brand's name now ("Amazon", brands.merchant_name), but only the ones whose own bank text gives the payee the rule
     was made from, as the rule would have matched that payee: not every Amazon purchase (an "amzn digital" rule isn't
     one for the "Amazon.com" orders)."""
+    from .categorize import bank_payee   # here, not at the top: categorize imports this module
+    f = " ".join(bank_payee(description).lower().split())
+    fits = lambda text: (mode == "exact" and text == m) or (mode == "starts" and text.startswith(m)) or (mode == "contains" and m in text)
+    # And the other way: a rule made from the brand's name ("amazon") still knows its transactions when you've chosen
+    # the bank's name for them ("Amzn Mktp Us"), by the brand their bank text gives.
+    own = brands.merchant_name(f)
+    if own and payee == f and fits(own.lower()):   # still the bank's name: not one you gave it
+        return True
     brand = brands.merchant_name(m)
     if not brand or payee != brand.lower() or brand.lower() == m:
         return False
-    from .categorize import bank_payee   # here, not at the top: categorize imports this module
-    f = " ".join(bank_payee(description).lower().split())
-    return (mode == "exact" and f == m) or (mode == "starts" and f.startswith(m)) or (mode == "contains" and m in f)
+    return fits(f)
 
 
 def matches(r: dict, tx: dict) -> bool:

@@ -261,6 +261,7 @@ MERCHANT_PATTERNS: list[tuple[str, str, str | None]] = [
     (r"\bdhl\b", "dhl.com", None),
 ]
 _merchants = [(re.compile(p), site, name) for p, site, name in MERCHANT_PATTERNS]
+BRAND_NAMES = {name.lower() for _p, _site, name in MERCHANT_PATTERNS if name}   # the brands' own names, lowercased
 # A payee with one of these words is a payment to, money from, or a part of the business that's worth telling apart
 # ("Amazon Corp Syf Paymnt" is a store card's bill, "Costco Gas" isn't groceries, "Apple Cash" isn't a purchase): it
 # keeps the bank's text.
@@ -306,6 +307,7 @@ def fund_family(name: str | None) -> str | None:
     for rx, site in _families:
         if rx.search(text):
             return site
+    return None
 
 
 @functools.lru_cache(maxsize=4096)
