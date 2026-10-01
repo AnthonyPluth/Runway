@@ -860,12 +860,30 @@ class PaymentModeTests(LedgerCase):
         s1 = -700 + 300 + 500 / 31 * 10
         self.assertNotIn("2026-11-05", card)
         self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
-        # not paying in full, $50 entered as the payment on a statement below zero goes out, and adds to the credit
+        # not paying in full, an edit left from before on a statement that now has nothing to pay isn't a payment: no
+        # event, and the credit is untouched
         self.pay("fixed", amount="5000")
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-50.0))
         fc = forecast.build(self.conn, TODAY, 90)
-        self.assertEqual(self.payments(fc)["2026-11-05"], 50.0)
-        self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 - 50 + self.EST2, 2))
+        self.assertNotIn("2026-11-05", self.payments(fc))
+        self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 + self.EST2, 2))
+
+    def test_a_payment_edited_to_nothing_stays_on_the_overview(self):
+        # Paying the minimum ($50 left of $250), edited to $0: the event stays, to put back, and all $600 carries
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        self.pay("minimum")
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=0.0))
+        fc = forecast.build(self.conn, TODAY, 90)
+        e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-09-10")
+        self.assertEqual((e["amount"], e["overridden"], e["original_amount"]), (0.0, True, -50.0))
+        self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (0.0, 600.0))
+        self.assertEqual(self.payments(fc)["2026-11-05"], round((600 + self.EST1) * 0.02, 2))
+        # an edited estimate too: it keeps the plan's amount as its original
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=0.0))
+        fc = forecast.build(self.conn, TODAY, 90)
+        e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-10-10")
+        self.assertEqual((e["amount"], e["original_amount"]), (0.0, -round((600 + self.EST1) * 0.02, 2)))
+        self.assertEqual(self.payments(fc)["2026-12-07"], round((600 + self.EST1 + self.EST2) * 0.02, 2))
 
     def test_an_edited_payment_above_the_statement_comes_off_the_next_one(self):
         # Paying the minimum, but $1,000 entered for the $600 left on the statement (to clear the current balance): the
@@ -875,6 +893,8 @@ class PaymentModeTests(LedgerCase):
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=-1000.0))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (1000.0, -400.0))
+        e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-09-10")
+        self.assertEqual((e["amount"], e["overridden"], e["original_amount"]), (-1000.0, True, -50.0))   # "was" the minimum
         payments = self.payments(fc)
         s1 = -400 + self.EST1   # Oct 10's statement: $400 lower than the cycle's charges ($504.45, so the $25 floor)
         self.assertEqual(payments["2026-10-05"], 1000.0)

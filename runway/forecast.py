@@ -456,13 +456,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
 
-    def paying(info: dict, owes: float, planned: float, key: str, old_key: str) -> float:
-        """What's paid toward a card statement that still owes `owes`, for what carries into the next one (owes − this):
-        what its payment plan pays (`planned`), or, when you've edited that payment on the Overview, what you entered.
-        An edit above what's owed (clearing the current balance, say) leaves a credit, which comes off the next statement
-        like any other. A card paid in full carries nothing either way, as before."""
+    def paying(info: dict, planned: float, shown: bool, key: str, old_key: str) -> float:
+        """What's paid toward a card statement, for what carries into the next one (what it owes, less this): what its
+        payment plan pays (`planned`, which its payment event is built from), or, when that event is `shown` and you've
+        edited it on the Overview, what you entered (the edit itself is applied to the event with the other edits,
+        below). An edit above what's owed (clearing the current balance, say) leaves a credit, which comes off the next
+        statement like any other. A card paid in full carries nothing either way, as before."""
         edit = overrides.get(key, overrides.get(old_key))
-        return abs(edit) if info["pay_mode"] != "full" and edit is not None else planned
+        return abs(edit) if shown and info["pay_mode"] != "full" and edit is not None else planned
 
     for item in recurring:
         if item["account_id"] not in by_id:
@@ -503,7 +504,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         due = _d(info["due_date"])
         key = f"cardclose:{card['id']}:{info['last_close']}"
         old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
-        payment = paying(info, info["remaining"], info["payment"], key, old_keys[key])
+        pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
+        planned = info["payment"]   # what the payment plan pays: the event's amount, before any edit of yours
+        payment = paying(info, planned, pays >= today and planned > 0.005, key, old_keys[key])
         info.update(payment=round(payment, 2), carried=round(info["remaining"] - payment, 2))
         card_status.append(info)
         payer = by_id.get(card["pay_from"] or "")
@@ -517,10 +520,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         if info["minimum_estimated"] and info["remaining"] > 0.005:
             warn(f"{label}: the bank didn’t report a minimum payment, so the forecast pays the larger of "
                  f"${MIN_PAYMENT_FLOOR:,.0f} and {MIN_PAYMENT_RATE:.0%} of the statement.", "#setup/accounts")
-        pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
-        if pays >= today and info["payment"] > 0.005:
+        if pays >= today and planned > 0.005:
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
-                           "amount": -info["payment"], "kind": "card", "estimated": False,
+                           "amount": -planned, "kind": "card", "estimated": False,
                            "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["payment"] > 0.005:
             warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
@@ -560,15 +562,16 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             statement = carried + interest(info, carried) + est
             key = f"cardclose:{card['id']}:{close.isoformat()}"
             old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
-            pay = paying(info, statement, statement_payment(info, statement), key, old_keys[key])
+            pays_k = bankdays.next_business_day(due_k)
+            planned = statement_payment(info, statement)
+            pay = paying(info, planned, pays_k >= today and planned > 0.005, key, old_keys[key])
             carried = statement - pay
             carries = carries or carried > 0.005
-            pays_k = bankdays.next_business_day(due_k)
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
-            elif pay > 0.005:
+            elif planned > 0.005:
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
-                               "amount": -round(pay, 2), "kind": "card", "estimated": True,
+                               "amount": -round(planned, 2), "kind": "card", "estimated": True,
                                "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
