@@ -892,8 +892,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     fee charged in them, unless a budget covers its category).
 
     A card with no statement yet (a new one, or one whose bank hasn't sent one) still has its budgets counted: until a
-    statement says when its cycle closes, it's taken to close on the last day of each month and to be paid in full
-    NO_STATEMENT_DUE_DAYS later (the next business day), from the account that pays it. What it owes today is in the
+    statement says when its cycle closes, it's taken to close on the last day of each month and to be paid
+    NO_STATEMENT_DUE_DAYS later (the next business day), from the account that pays it, the way the card is set to be
+    paid (payment_plan: in full by default; what isn't paid carries over, with interest). What it owes today is in the
     first of those statements.
 
     A budget includes its category's recurring payments: the ones the forecast already takes out of its accounts are
@@ -996,21 +997,25 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             prev, close, first = close, next_after(close, card["closing_day"]), False
 
     # Cards without a statement: their budgeted charges (and what they owe today) on statements that close at each
-    # month's end, each paid in full NO_STATEMENT_DUE_DAYS later. A credit on the card comes off the next statement and
-    # what's left of it carries on, as the bank does.
+    # month's end, each paid NO_STATEMENT_DUE_DAYS later as the card's payment plan pays it. What isn't paid carries into
+    # the next one with interest; a credit comes off the next statement and what's left of it carries on, as the bank does.
     for cid in sorted(new_cards & spend.keys()):
         card = by_id[cid]
         payer, days = card["pay_from"], spend[cid]
         prev, first = today, True
         close = clamp_day(today.year, today.month, 31)
+        card_plan = payment_plan(conn, cid)
         owing = owed(card)   # the bank's sign, as everywhere (owed_positive): below zero is a credit
         while True:
             paid = bankdays.next_business_day(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()
             if paid > dates[-1]:
                 break
             owed_now = max(0.0, owing) if first else 0.0
-            statement = owing + sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
-            pay = max(0.0, statement)
+            charges = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
+            # What it owes today is this cycle's charges, not a balance carried from a statement: no interest on it.
+            owed_interest = 0.0 if first else interest(card_plan, owing, charges)
+            statement = owing + owed_interest + charges
+            pay = statement_payment(card_plan, statement, charged=owed_interest)
             owing = statement - pay
             if pay > 0.005:
                 extra.append((payer, paid, -round(pay, 2)))

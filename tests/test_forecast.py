@@ -723,6 +723,21 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertNotIn("2026-10-26", card)                                       # $310 - $400: nothing to pay
         self.assertEqual(card["2026-11-25"]["amount"], -220.0)                     # $310 - the $90 left
 
+    def test_a_budget_on_a_card_with_no_statement_is_paid_the_way_the_card_is_set(self):
+        # A new card set to pay a fixed $100, with $310 a month budgeted on it and nothing owed yet: $100 each time, and
+        # the rest carries over (with a month's interest once it does, at the 24% APR entered for it).
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        db.set_setting(self.conn, sk.card_pay_mode("cc3"), "fixed")
+        db.set_setting(self.conn, sk.card_pay_amount("cc3"), "100")
+        db.set_setting(self.conn, sk.card_apr("cc3"), "24")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-100.0, -100.0))
+        # paid in full when nothing's set
+        db.set_setting(self.conn, sk.card_pay_mode("cc3"), "full")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-310.0, -310.0))
+
     def test_a_budget_on_a_card_with_no_statement_and_no_paying_account_is_skipped(self):
         self.acct("cc3", "credit", 0.0)
         self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
