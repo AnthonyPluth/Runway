@@ -137,7 +137,7 @@ jobs:
           case "$minutes" in ''|*[!0-9]*) minutes=60;; esac
           [ "$minutes" -gt 120 ] && minutes=120
           echo "MINUTES=$minutes" >> "$GITHUB_ENV"
-          until=$(TZ=America/Chicago date -d "+$minutes min" '+%-I:%M %p %Z')
+          until=$(TZ=America/New_York date -d "+$minutes min" '+%-I:%M %p %Z')
           body=$(printf '%s\n' \
             "**Preview is up** until about $until: $URL" \
             "" \
