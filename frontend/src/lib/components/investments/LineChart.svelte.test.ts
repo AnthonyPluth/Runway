@@ -22,6 +22,15 @@ describe("LineChart", () => {
     expect(document.querySelector(".bg-popover")).toBeNull();
   });
 
+  it("offers the numbers as a table, or keeps it for screen readers only with table=\"sr\"", async () => {
+    const { unmount } = render(LineChart, props(days(5)));
+    expect(screen.getByText("Show as table")).toBeInTheDocument();
+    unmount();
+    render(LineChart, { ...props(days(5)), table: "sr" });
+    expect(screen.queryByText("Show as table")).not.toBeInTheDocument();
+    expect(screen.getByRole("table").closest(".sr-only")).not.toBeNull();
+  });
+
   it("draws a labelled dashed line at the mark, and nothing when it's outside the chart", async () => {
     const { rerender } = render(LineChart, { ...props(days(11)), mark: { at: 5, label: "Today" } });
     const line = screen.getByTestId("mark-line");

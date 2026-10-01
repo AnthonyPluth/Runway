@@ -158,12 +158,12 @@
     <Card.Header><Card.Title>Value</Card.Title></Card.Header>
     <Card.Content>
       {#if charts}
-        <LineChart xs={charts.dates} height={260} fmtY={shortMoney} fmtTip={fmt} estimateUntil={d.history.estimated_before} series={[
+        <LineChart xs={charts.dates} height={260} fmtY={shortMoney} fmtTip={fmt} estimateUntil={d.history.estimated_before} table="sr" series={[
           { name: "Value", values: charts.value, cls: "s-main", area: true },
           { name: "Net invested", values: charts.invested, cls: "s-muted", step: true },
         ]} />
         <h3 class="mt-6 mb-2 font-semibold">Return vs S&amp;P 500</h3>
-        <LineChart xs={charts.dates} height={200} zero fmtY={(v) => pct(v, 0)} fmtTip={(v) => pct(v, 2)} estimateUntil={d.history.estimated_before} series={[
+        <LineChart xs={charts.dates} height={200} zero fmtY={(v) => pct(v, 0)} fmtTip={(v) => pct(v, 2)} estimateUntil={d.history.estimated_before} table="sr" series={[
           { name: "Your portfolio", values: charts.twr, cls: "s-main" },
           { name: "S&P 500", values: charts.bench, cls: "s-alt" },
         ]} />

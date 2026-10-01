@@ -6,10 +6,11 @@
   // A small line chart, shared by Investments and Net worth: a shared y axis, each line's name at its end, and a
   // crosshair readout of every line on the day you point at. `xs` are dates (YYYY-MM-DD), or ready-made labels
   // with `labels`. Days before `estimateUntil` are shaded: they're rebuilt from activity, not recorded. `mark` draws a
-  // dashed vertical line at a (fractional) index into `xs`, with what comes after it shaded.
+  // dashed vertical line at a (fractional) index into `xs`, with what comes after it shaded. `table`: the numbers as a
+  // table behind "Show as table" (true), only for screen readers ("sr"), or not at all (false).
   let { xs, series, fmtY = String, fmtTip, height = 240, zero = false, labels = false, estimateUntil = null, table = true, mark = null }: {
     xs: string[]; series: Series[]; fmtY?: (v: number) => string; fmtTip?: (v: number) => string; height?: number;
-    zero?: boolean; labels?: boolean; estimateUntil?: string | null; table?: boolean; mark?: { at: number; label: string } | null;
+    zero?: boolean; labels?: boolean; estimateUntil?: string | null; table?: boolean | "sr"; mark?: { at: number; label: string } | null;
   } = $props();
 
   const COLOR = { "s-main": "var(--nw-1)", "s-alt": "var(--nw-2)", "s-muted": "var(--muted-foreground)" };
@@ -161,26 +162,30 @@
         {/each}
       </div>
     {/if}
-    {#if table}
+    {#if table === "sr"}
+      <div class="sr-only">{@render numbers()}</div>
+    {:else if table}
       <details class="mt-1">
         <summary class="cursor-pointer text-xs text-muted-foreground">Show as table</summary>
-        <div class="mt-2 max-h-72 overflow-auto">
-          <table class="w-full max-w-md text-sm">
-            <thead><tr class="text-left text-xs text-muted-foreground">
-              <th class="pb-1 font-medium">{labels ? "" : "Date"}</th>
-              {#each series as s, k (k)}<th class="pb-1 text-right font-medium">{s.name}</th>{/each}
-            </tr></thead>
-            <tbody>
-              {#each rows as i (i)}
-                <tr class="border-t border-border">
-                  <td class="py-1">{labels ? xs[i] : fmtDate(xs[i], { month: "short", day: "numeric", year: "numeric" })}</td>
-                  {#each series as s, k (k)}<td class="py-1 text-right tabular-nums">{s.values[i] == null ? "—" : ft(s.values[i]!)}</td>{/each}
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+        <div class="mt-2 max-h-72 overflow-auto">{@render numbers()}</div>
       </details>
     {/if}
   {/if}
 </div>
+
+{#snippet numbers()}
+  <table class="w-full max-w-md text-sm">
+    <thead><tr class="text-left text-xs text-muted-foreground">
+      <th class="pb-1 font-medium">{labels ? "" : "Date"}</th>
+      {#each series as s, k (k)}<th class="pb-1 text-right font-medium">{s.name}</th>{/each}
+    </tr></thead>
+    <tbody>
+      {#each rows as i (i)}
+        <tr class="border-t border-border">
+          <td class="py-1">{labels ? xs[i] : fmtDate(xs[i], { month: "short", day: "numeric", year: "numeric" })}</td>
+          {#each series as s, k (k)}<td class="py-1 text-right tabular-nums">{s.values[i] == null ? "—" : ft(s.values[i]!)}</td>{/each}
+        </tr>
+      {/each}
+    </tbody>
+  </table>
+{/snippet}
