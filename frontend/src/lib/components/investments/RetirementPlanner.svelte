@@ -247,7 +247,7 @@
   <section>
     <h3 class="mb-2 font-medium">In retirement</h3>
     <div class="grid grid-cols-2 gap-3">
-      <label class="flex flex-col gap-1">{@render field("Spending a year", "today's dollars")}
+      <label class="flex flex-col gap-1">{@render field("Spending a year", "today’s dollars")}
         {@render money(plan.spending, (v) => (plan.spending = v), "Yearly spending in retirement")}</label>
       <label class="flex flex-col gap-1">{@render field("Plan until age")}
         <Input type="number" step="1" value={plan.plan_to_age} oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
@@ -282,7 +282,7 @@
       <Button variant="outline" size="sm" onclick={() => addIncome("Pension", 65)}><Plus /> Pension</Button>
       <Button variant="outline" size="sm" onclick={() => addIncome("", 60)}><Plus /> Other income</Button>
     </div>
-    <p class="mt-2 text-sm text-muted-foreground">Yearly amounts in today's dollars, like the Social Security estimate at ssa.gov/myaccount.</p>
+    <p class="mt-2 text-sm text-muted-foreground">Yearly amounts in today’s dollars, like the Social Security estimate at ssa.gov/myaccount.</p>
   </section>
 
   <section class="lg:col-span-2">
@@ -358,9 +358,9 @@
         {@render percent(plan.inflation, (s) => setPct("inflation", s), "Inflation", `${uid}-inflation`)}</label>
     </div>
     <p class="mt-2 text-sm text-muted-foreground">
-      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year's return around these averages, which are
-      already after inflation (the plan runs in today's dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
-      about 15%, a balanced one about 10%). Inflation turns a sale into today's dollars, and today's into future ones when you show those.
+      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year’s return around these averages, which are
+      already after inflation (the plan runs in today’s dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
+      about 15%, a balanced one about 10%). Inflation turns a sale into today’s dollars, and today’s into future ones when you show those.
       Enter spending as what you'd withdraw before tax.
       {#if !isDefault}<ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton>{/if}
     </p>
