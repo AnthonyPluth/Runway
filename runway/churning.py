@@ -34,7 +34,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, func, insert, select, update
 
-from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits
+from . import bank_bonuses, churn_benefits, churn_wishlist, db, reports, splits, validate
 from .models import (Account, Category, ChurnBalance, ChurnBankBonus, ChurnCard, ChurnCurrency, ChurnRate, ChurnTask,
                      ChurnScore, ChurnWish, User)
 
@@ -706,44 +706,23 @@ def alerts(conn, today: date, fees: bool, bonuses: bool, plans: bool = False, be
 
 # ------------------------------------------------------------------------------------------------ changes
 
+_v = validate.Validator(ChurnError)
+
+
 def _text(v, label: str, limit: int, required: bool = False) -> str | None:
-    s = str(v or "").strip()
-    if required and not s:
-        raise ChurnError(f"Enter the {label}")
-    if len(s) > limit:
-        raise ChurnError(f"The {label} is too long (at most {limit} characters)")
-    return s or None
+    return _v.text(v, label, limit, required)
 
 
 def _date(v, label: str, required: bool = False) -> str | None:
-    s = str(v or "").strip()
-    if not s:
-        if required:
-            raise ChurnError(f"Enter the {label}")
-        return None
-    try:
-        return date.fromisoformat(s).isoformat()
-    except ValueError:
-        raise ChurnError(f"The {label} must be a date (YYYY-MM-DD)") from None
+    return _v.day(v, label, required)
 
 
 def _num(v, label: str, low: float = 0, high: float = 1e9) -> float | None:
-    if v in (None, ""):
-        return None
-    try:
-        n = db.number(str(v).replace(",", "").replace("$", "").strip())
-    except (TypeError, ValueError):
-        raise ChurnError(f"The {label} must be a number") from None
-    if not low <= n <= high:
-        raise ChurnError(f"The {label} must be between {low:g} and {high:g}")
-    return n
+    return _v.number(v, label, low, high)
 
 
 def _int(v, label: str, low: int, high: int) -> int | None:
-    n = _num(v, label, low, high)
-    if n is not None and n != int(n):
-        raise ChurnError(f"The {label} must be a whole number")
-    return None if n is None else int(n)
+    return _v.integer(v, label, low, high)
 
 
 def known_owners(conn) -> list[str]:
@@ -767,10 +746,6 @@ def _owner(v, conn=None) -> str:
     return owner
 
 
-def _flag(v) -> int:
-    return 1 if v in (True, 1, "1", "true", "on") else 0
-
-
 def _rates(conn, value) -> tuple[list[dict], float | None]:
     """A card's earning rates as a form sends them ([{category, multiplier, portal_only}]), checked: each category
     one of Runway's (or BASE_MARKER, the card's base rate), each multiplier 0-100, no category twice. Returns the
@@ -785,7 +760,7 @@ def _rates(conn, value) -> tuple[list[dict], float | None]:
         if not isinstance(r, dict):
             raise ChurnError("Each earning rate needs a category and points per dollar")
         category = str(r.get("category") or "").strip()
-        portal = _flag(r.get("portal_only"))
+        portal = validate.flag(r.get("portal_only"))
         if not category:
             raise ChurnError("Pick a category for each earning rate")
         if category != BASE_MARKER and category not in names:
@@ -839,7 +814,7 @@ def save_card(conn, body: dict, card_id: int | None = None) -> int:
         fields["status"] = status
     for key in ("authorized_user", "business", "hide_upcoming"):
         if key in body or new:
-            fields[key] = _flag(body.get(key))
+            fields[key] = validate.flag(body.get(key))
     if "plan" in body or new:
         plan = str(body.get("plan") or "undecided")
         if plan not in PLANS:
@@ -924,7 +899,7 @@ def set_rate(conn, card_id: int, category: str, multiplier, portal_only=False) -
     if not conn.execute(select(Category.name).where(Category.name == category)).fetchone():
         raise ChurnError("Pick a category")
     mult = _num(multiplier, "points per dollar", 0, 100)
-    portal = _flag(portal_only)
+    portal = validate.flag(portal_only)
     if mult is None:
         conn.execute(delete(ChurnRate).where(ChurnRate.card_id == card_id, ChurnRate.category == category,
                                              ChurnRate.portal_only == portal))
@@ -998,7 +973,7 @@ def save_task(conn, body: dict, task_id: int | None = None) -> int:
     if new or "action" in body:
         fields["action"] = _text(body.get("action"), "what to do", 120, required=True)
     if "done" in body or new:
-        fields["done"] = _flag(body.get("done"))
+        fields["done"] = validate.flag(body.get("done"))
     if "snooze_until" in body:
         fields["snooze_until"] = _date(body.get("snooze_until"), "day to snooze it until")
     if new:
