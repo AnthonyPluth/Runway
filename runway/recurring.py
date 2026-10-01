@@ -116,12 +116,13 @@ def expected_amount(item: dict, history: list[dict]) -> float:
 
 
 def already_happened(item: dict, occurrence: date, history: list[dict], today: date) -> bool:
-    """True if a real payment for this occurrence has already shown up (early or on time)."""
+    """True if a real payment for this occurrence has already shown up (early, on time or a little late): one within its
+    matching window either side of the date. A payment from after the window belongs to a later occurrence."""
     window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
     if occurrence - timedelta(days=window) > today:
         return False  # too far out for anything to have posted yet
     lo = (occurrence - timedelta(days=window)).isoformat()
-    hi = today.isoformat()
+    hi = min(today, occurrence + timedelta(days=window)).isoformat()
     return any(lo <= t["posted"] <= hi for t in history)
 
 

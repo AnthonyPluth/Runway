@@ -191,6 +191,9 @@ class HandlerTests(DbCase):
         self.assertEqual([tuple(r) for r in self.c.execute(select(Override.key, Override.amount))], [("rec:1:2026-09-01", -20.0)])
         state.api_override_delete(self.c, {}, {"key": "rec:1:2026-09-01"})
         self.assertIsNone(self.one(select(Override.key)))
+        state.api_override_set(self.c, {}, {"key": "cardclose:cc:2026-09-10", "amount": -500})   # a card payment, by its closing date
+        self.assertEqual(self.one(select(Override.key))[0], "cardclose:cc:2026-09-10")
+        state.api_override_delete(self.c, {}, {"key": "cardclose:cc:2026-09-10"})
 
     def test_settings_primary_account(self):
         with self.assertRaises(ApiError):

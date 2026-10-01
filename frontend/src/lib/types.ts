@@ -127,10 +127,11 @@ export interface Overview {
   dates: string[];
   total: number[];
   low: { date: string; balance: number };
-  /** daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on, which
+  /** balance: the bank's posted balance plus what's pending on the account (pending, money out negative);
+   *  daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on, which
    *  daily_spend_on says); daily_spend_estimate: what that would be, on or off. */
   accounts: {
-    id: string; name: string; kind: string; balance: number; balance_date?: string | null;
+    id: string; name: string; kind: string; balance: number; pending?: number; balance_date?: string | null;
     daily_spend?: number; daily_spend_on?: boolean; daily_spend_estimate?: number;
   }[];
   events: ForecastEvent[];

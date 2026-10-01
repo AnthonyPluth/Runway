@@ -267,6 +267,11 @@ class NotifyTests(DbCase):
         self.c.execute(insert(SyncLog).values(ok=1, message="fine again"))
         self.assertNotIn("syncfail:2026-09-23", {a["key"] for a in notify.alerts(self.c, TODAY, p)})
 
+    def test_a_card_payment_alert_says_which_account_pays(self):
+        p = {**notify.DEFAULTS, "card_due": True, "review": False, "low_balance": False, "missed": False}
+        got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
+        self.assertEqual(got["card:cc:2026-09-25"]["body"], "$400.00 comes out of Checking.")
+
     def test_old_log_entries_are_forgotten(self):
         self.c.execute(insert(NotifyLog), [{"key": "ancient", "sent": 1, "title": "x"},
                                            {"key": "recent", "sent": time.time(), "title": "y"}])
