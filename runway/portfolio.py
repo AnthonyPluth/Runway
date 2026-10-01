@@ -626,11 +626,14 @@ def _spending(today: date):
                       t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
 
 
-def spent_amounts(conn, today: date) -> list[float]:
-    """Each amount of money out that monthly_spending counts, as a positive number: to tell whether a loan's payment
-    is in the spending figure, or was left out as a transfer."""
+def spent_outflows(conn, today: date) -> list[dict]:
+    """Each money out that monthly_spending counts: {month (YYYY-MM), amount (positive), text (its payee and
+    description, lowercased)}. To tell whether a loan's payment is in the spending figure, or was left out as a
+    transfer."""
     t, counted = _spending(today)
-    return [-r[0] for r in conn.execute(counted.where(t.c.amount < 0))]
+    rows = conn.execute(counted.with_only_columns(t.c.posted, t.c.amount, t.c.payee, t.c.description).where(t.c.amount < 0))
+    return [{"month": r["posted"][:7], "amount": -r["amount"], "text": f"{r['payee'] or ''} {r['description'] or ''}".lower()}
+            for r in rows]
 
 
 def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[dict]:

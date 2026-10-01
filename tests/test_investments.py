@@ -255,16 +255,32 @@ class FireTests(Base):
         counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
         pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
             id=id, account_id="chk", posted=posted, amount=amount, category=category))
-        pay("p1", "2026-08-01", -1850, "Transfer")   # paid, but as a transfer: not in spending
+        for m in range(3, 9):   # paid every month, but as a transfer: not in spending
+            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer")
         pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
         pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
+        pay("p4", "2026-07-15", -1900, "Groceries")  # within 10% of it once: a one-off, not a payment
         self.assertFalse(counted())
-        pay("p4", "2026-07-01", -1900, "Mortgage")   # within 10% of it, in a spending category
+        for m in (3, 4, 5):   # with July, four months of it: a payment that repeats
+            pay(f"m{m}", f"2026-{m:02}-02", -1850, "Mortgage")
         self.assertTrue(counted())
-        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category=None))   # uncategorized counts too
+        self.c.execute(update(Transaction).where(Transaction.id == "p3").values(category=None))   # this month's still doesn't
+        self.c.execute(update(Transaction).where(Transaction.id == "m5").values(category=None))   # uncategorized counts too
         self.assertTrue(counted())
+        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))   # three months left
+        self.assertFalse(counted())
         self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
         self.assertFalse(counted())
+
+    def test_a_payment_that_names_the_lender_wins_over_lookalikes(self):
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        lookalikes = [out(m, 352, "whole foods") for m in (3, 4, 5, 6)]
+        self.assertTrue(planner.payment_counted(lookalikes, 350, ["Ally", "Car loan"]))   # nothing names it: amounts alone
+        named = [out(m, 350, "ally auto payment") for m in (3, 4)]
+        self.assertFalse(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))   # only two months of it
+        named += [out(m, 350, "ally auto payment") for m in (5, 6)]
+        self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
+        self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
 
     def test_yearly_savings_says_what_it_is(self):
         p = self.plan()["computed"]

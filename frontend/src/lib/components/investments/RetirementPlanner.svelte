@@ -114,6 +114,23 @@
     payment_below_interest: "its payment doesn’t cover the interest: check the loan’s terms",
   } as const;
 
+  // What happens to a loan's monthly payment in the plan: when it ends and comes off spending, or why it doesn't. Only
+  // a payment counted in the spending the plan starts from can come off it; one left out as a transfer never was in it.
+  function paymentLine(a: PlanAsset, sellYear: number | null): string {
+    const l = a.loan!;
+    const pay = `${fmt0(l.payment ?? 0)}/month`;
+    const ends = paymentEnds(a, sellYear);
+    const notIn = "It was never in your spending (no payment like it was counted as spending in the last 6 months; a transfer isn’t), so nothing comes off.";
+    if (ends != null) {
+      const when = l.payoff_year == null || ends <= l.payoff_year ? "stops when it’s sold" : `ends in ${l.payoff_year}`;
+      return l.payment_counted ? `Its ${pay} loan payment ${when}, and comes off your spending from ${ends}.` : `Its ${pay} loan payment ${when}. ${notIn}`;
+    }
+    const stays = l.payment_counted ? " It stays in your spending." : ` ${notIn}`;
+    if (l.note === "payment_below_interest") return `Its ${pay} loan payment doesn’t cover the interest, so it doesn’t pay the loan down.${stays}`;
+    if (l.note === "no_rate") return `Add the loan’s interest rate in Settings → Accounts to see when its ${pay} payment ends.${stays}`;
+    return `Its ${pay} loan payment goes on past the end of the plan.${stays}`;
+  }
+
   // An event is typed as money in or out plus a positive amount; it's kept signed.
   const setEventSign = (i: number, out: boolean) => { plan.events[i].amount = (out ? -1 : 1) * Math.abs(num(plan.events[i].amount)); keep(); };
   const setEventAmount = (i: number, s: string) => { plan.events[i].amount = (plan.events[i].amount < 0 ? -1 : 1) * Math.abs(Number(s) || 0); keep(); };
@@ -302,14 +319,7 @@
               {/if}
             {/if}
             {#if a.loan?.payment}
-              {@const paid = a.loan.payoff_year ?? null}
-              {@const ends = paymentEnds(a, s ? num(s.sell_year) : null)}
-              <p class="basis-full pl-6 text-sm text-muted-foreground">
-                {#if ends == null}Its {fmt0(a.loan.payment)}/month loan payment doesn't pay the loan down, so it stays in your spending.
-                {:else}Its {fmt0(a.loan.payment)}/month loan payment {paid == null || ends <= paid ? "stops when it's sold" : `ends in ${paid}`}{#if a.loan.payment_counted},
-                  and comes off your spending from {ends}.{:else}. It isn't in your spending (no payment like it was counted as spending in the last
-                  6 months; a transfer isn't), so nothing comes off.{/if}{/if}
-              </p>
+              <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? num(s.sell_year) : null)}</p>
             {/if}
           </li>
         {/each}

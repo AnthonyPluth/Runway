@@ -19,7 +19,19 @@ from . import settings_keys as sk
 from .models import Account
 
 MAX_ROWS = 20   # incomes, events or assets: plenty for one household, and a cap on what's stored
-PAYMENT_MATCH = 0.1   # money out within 10% of a loan's payment is taken to be that payment
+PAYMENT_MATCH = 0.1   # money out within 10% of a loan's payment can be that payment...
+PAYMENT_MONTHS = 4    # ... when it's there in at least this many of the 6 months spending is averaged over
+
+
+def payment_counted(spent: list[dict], payment: float, names: list[str]) -> bool:
+    """Whether a loan's monthly payment is in the spending figure: money out within PAYMENT_MATCH of it (from
+    portfolio.spent_outflows) in at least PAYMENT_MONTHS different months, as a real payment repeats. When some of
+    those name the loan (its lender or account name in the payee), only they count, so a grocery run that happens to
+    be the size of a car payment doesn't."""
+    near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
+    names = [n.lower() for n in names if n and len(n.strip()) >= 3]
+    named = [s for s in near if any(n in s["text"] for n in names)]
+    return len({s["month"] for s in (named or near)}) >= PAYMENT_MONTHS
 
 # Numbers the plan keeps: (lowest, highest).
 RATES = {"return_before": (-0.2, 0.2), "return_after": (-0.2, 0.2), "volatility": (0.0, 0.5), "inflation": (-0.05, 0.2)}
@@ -142,16 +154,16 @@ def sellable(conn, today: date) -> list[dict]:
     indexed by years from today and ending once it stops changing.
     A loan's `loan` also says which account it is (`account_id`), the calendar year of its last payment when it's
     projected (`payoff_year`), and whether its payment is in the spending figure the plan starts from
-    (`payment_counted`: some money out in those months within PAYMENT_MATCH of it), so the page can take the payment
+    (`payment_counted`, see payment_counted()), so the page can take the payment
     off spending once it's paid off or sold. One categorized as a transfer (common when the loan account is synced
     too) wasn't in it, so there's nothing to take off when it ends."""
     from . import portfolio   # imported here: portfolio imports this module
     accts = {a["id"]: a for a in db.rows(conn.execute(
-        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive)
+        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.org, Account.name)
         .where(Account.kind.in_(["credit", "loan"]))))}
     items = networth.assets(conn, today)
     terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
-    spent: list[float] | None = None
+    spent: list[dict] | None = None
     out = []
     for a in items:
         acct = accts.get(a["loan_account_id"])
@@ -162,8 +174,8 @@ def sellable(conn, today: date) -> list[dict]:
             by_year, loan = loans.owed_by_year(owed, t)
             counted = False
             if loan["payment"]:
-                spent = portfolio.spent_amounts(conn, today) if spent is None else spent
-                counted = any(abs(s - loan["payment"]) <= PAYMENT_MATCH * loan["payment"] for s in spent)
+                spent = portfolio.spent_outflows(conn, today) if spent is None else spent
+                counted = payment_counted(spent, loan["payment"], [acct["org"] or "", acct["name"] or ""])
             loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
                     "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
         else:   # none, or a card: what's owed today

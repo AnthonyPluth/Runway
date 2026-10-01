@@ -296,18 +296,35 @@ describe("RetirementPlanner", () => {
       const year = screen.getByDisplayValue("2051");
       await userEvent.clear(year);
       await userEvent.type(year, "2040");
-      expect(screen.getByText("Its $1,500/month loan payment stops when it's sold, and comes off your spending from 2040.")).toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment stops when it’s sold, and comes off your spending from 2040.")).toBeInTheDocument();
     });
 
     it("says when a loan's payment isn't in spending, so nothing comes off", () => {
       setup(data({ assets: [repaying({ payment_counted: false })] }));
-      expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It isn't in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
       expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
     });
 
-    it("says when a loan's payment never pays it down", () => {
-      setup(data({ assets: [repaying({ payment: 900, note: "payment_below_interest", payoff_year: null })] }));
-      expect(screen.getByText(/payment doesn't pay the loan down, so it stays in your spending/)).toBeInTheDocument();
+    it("says when a loan's payment never pays it down, and only that it stays in spending when it was counted", () => {
+      const below = { payment: 900, note: "payment_below_interest" as const, payoff_year: null };
+      const { unmount } = setup(data({ assets: [repaying(below)] }));
+      expect(screen.getByText("Its $900/month loan payment doesn’t cover the interest, so it doesn’t pay the loan down. It stays in your spending.")).toBeInTheDocument();
+      unmount();
+      setup(data({ assets: [repaying({ ...below, payment_counted: false })] }));
+      expect(screen.getByText(/doesn’t pay the loan down\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/stays in your spending/)).not.toBeInTheDocument();
+    });
+
+    it("asks for the rate when there's a payment but no rate", () => {
+      setup(data({ assets: [repaying({ rate: null, note: "no_rate", payoff_year: null })] }));
+      expect(screen.getByText("Add the loan’s interest rate in Settings → Accounts to see when its $1,500/month payment ends. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
+    });
+
+    it("says a payment that outlasts the plan goes on past it", () => {
+      setup(data({ assets: [repaying({ payoff_year: null })] }));   // projected, but not paid off within the plan's reach
+      expect(screen.getByText("Its $1,500/month loan payment goes on past the end of the plan. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
     });
   });
 
