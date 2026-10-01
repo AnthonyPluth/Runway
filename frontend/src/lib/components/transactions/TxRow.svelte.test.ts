@@ -205,12 +205,22 @@ describe("TxRow", () => {
 
   // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
   describe("narrow rows", () => {
-    it("lets the order chip shrink to its icon, and drops its text on a phone, so the merchant keeps its room", () => {
+    it("shows the order chip as just its icon unless the cell has room for its text", () => {
       render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 12 } })));
       const chip = screen.getByRole("button", { name: "Target in store · 12 items" });
-      expect(chip).toHaveClass("min-w-7", "shrink-[8]", "overflow-hidden");
-      expect(within(chip).getByText("Target in store · 12 items")).toHaveClass("truncate", "max-sm:hidden");
-      expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[8ch]", "truncate");
+      expect(chip).toHaveClass("@sm/title:shrink-[8]", "@sm/title:overflow-hidden", "@sm/title:bg-secondary");
+      expect(within(chip).getByText("Target in store · 12 items")).toHaveClass("truncate", "hidden", "@sm/title:inline");
+      expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[6ch]", "truncate");
+    });
+
+    it("shows the pending and review badges as an icon (labelled) unless the cell has room for the word", () => {
+      render(TxRow, props(tx({ pending: 1, needs_review: 1 })));
+      for (const word of ["pending", "review"]) {
+        const badge = within(row()).getByTitle(word);
+        expect(within(badge).getByLabelText(word)).toHaveClass("@sm/title:hidden");
+        expect(within(badge).getByText(word)).toHaveClass("hidden", "@sm/title:inline");
+        expect(badge).toHaveClass("shrink-0");
+      }
     });
 
     it("lets the account and the bank's text share a line, hiding the text until its cell has room", () => {
