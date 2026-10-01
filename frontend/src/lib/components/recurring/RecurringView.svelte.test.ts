@@ -90,6 +90,40 @@ describe("Recurring page", () => {
     expect(screen.queryByRole("heading", { name: "Add a recurring item" })).not.toBeInTheDocument();
   });
 
+  describe("the logo", () => {
+    it("shows the item's logo, and falls back to its category's icon without one", async () => {
+      serve([item({ logo: "/api/merchants/m-rent/logo" }), item({ id: 2, name: "Water", logo: null })]);
+      const { container } = render(Recurring);
+      await screen.findByText("Rent");
+      expect(container.querySelectorAll("img[src='/api/merchants/m-rent/logo']")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: "Logo for Water" })).toBeInTheDocument();
+    });
+
+    it("lets you choose it by the item's name with the same picker as Transactions, then refreshes the list", async () => {
+      let list = [item()];
+      serve(list, [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: true, configured: true, candidates: [{ name: "Landlord", domain: "landlord.com" }], error: null } });
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/recurring" && !opts?.method) return list as never;
+        if (path === "/api/merchants/logo") { list = [item({ logo: "/api/merchants/site%3Alandlord.com/logo" })]; return { ok: true } as never; }
+        return base(path, opts as never);
+      });
+      const { container } = render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
+      expect(screen.queryByText("Landlord")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /Landlord/ }));
+      expect(api).toHaveBeenCalledWith("/api/merchants/logo", { method: "POST", body: { name: "Rent", website: "landlord.com" } });
+      await waitFor(() => expect(container.querySelector("img[src='/api/merchants/site%3Alandlord.com/logo']")).toBeInTheDocument());
+    });
+
+    it("doesn't open the item when you click its logo", async () => {
+      serve([item()], [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: false, configured: false, candidates: [], error: null } });
+      const { container } = render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
+      expect(container.querySelector("details")).not.toHaveAttribute("open");
+    });
+  });
+
   describe("the add form", () => {
     const open = async (more: Record<string, unknown> = {}) => {
       app.state = { connected: true, primary_account: "a1" };

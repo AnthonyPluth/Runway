@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, insert, select, update
 
 from runway import categories, categorize, db, server
-from runway.models import Budget, Category, Merchant, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
+from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
 from tests.shared import LedgerCase
 
 
@@ -218,6 +218,31 @@ class CategoryTests(LedgerCase):
         ev = [e for e in fc["events"] if e.get("recurring_id") == rid]
         self.assertTrue(ev)
         self.assertEqual({e["logo"] for e in ev}, {"/api/merchants/m-netflix/logo"})
+
+    def test_a_logo_chosen_for_a_recurring_item_shows_on_it_and_its_coming_up_entries(self):
+        self.acct("chk", "checking", 1000.0)
+        last = (date.today() - timedelta(days=20)).isoformat()
+        for name, amount in (("Netflix", -15.49), ("Rent", -900)):
+            self.conn.execute(insert(Recurring).values(name=name, account_id="chk", amount=amount,
+                                                       frequency="monthly", anchor_date=last, active=1))
+        rid, rent = (r[0] for r in self.conn.execute(select(Recurring.id).order_by(Recurring.id)))
+        self.tx("chk", last, -15.49, "NETFLIX.COM")
+        self.conn.execute(update(Transaction).where(Transaction.description == "NETFLIX.COM")
+                          .values(recurring_id=rid, merchant_id="m-netflix"))
+        self.conn.execute(insert(Merchant).values(id="m-netflix", name="Netflix", logo="cG5n", logo_type="image/png"))
+        self.conn.execute(insert(Merchant).values(id="site:landlord.com", name="landlord.com", logo="cG5n", logo_type="image/png"))
+
+        def logos():
+            items = {i["id"]: i["logo"] for i in server.api_recurring(self.conn, {}, None)}
+            ev = server.api_overview(self.conn, {"days": ["60"]}, None)["events"]
+            return items, {e["recurring_id"]: e["logo"] for e in ev if e.get("recurring_id")}
+        netflix = "/api/merchants/m-netflix/logo"
+        self.assertEqual(logos(), ({rid: netflix, rent: None}, {rid: netflix, rent: None}))
+        # chosen by the item's name: it works for an item with nothing matched, and wins over its matched transaction's logo
+        self.conn.execute(insert(MerchantLogo).values(key="rent", website="landlord.com", hidden=0))
+        self.conn.execute(insert(MerchantLogo).values(key="netflix", website=None, hidden=1))
+        site = "/api/merchants/site%3Alandlord.com/logo"
+        self.assertEqual(logos(), ({rid: None, rent: site}, {rid: None, rent: site}))
 
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)

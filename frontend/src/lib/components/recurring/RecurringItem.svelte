@@ -13,6 +13,8 @@
   import { tick, untrack } from "svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import CatIcon from "$lib/components/CatIcon.svelte";
+  import Logo from "$lib/components/Logo.svelte";
+  import LogoPicker from "$lib/components/transactions/LogoPicker.svelte";
   import RecIcon from "./RecIcon.svelte";
   import RecurringFields from "./RecurringFields.svelte";
   import { FREQ, validate, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
@@ -40,6 +42,14 @@
   const amt = $derived(r.expected_amount ?? r.amount);
   const sub = $derived([FREQ[v.frequency] || v.frequency, r.next_date ? `next ${fmtDate(r.next_date)}` : "no upcoming date",
     r.matched_count ? `${r.matched_count} matched` : ""].filter(Boolean));
+
+  // The logo picker chooses by the item's name (the one the logo comes from, else its last matched transaction's), the
+  // same choice Transactions keeps by merchant name. A new one shows here and in Upcoming, so reload both.
+  async function logoChanged() {
+    reload();
+    try { onsaved?.(await api<RecurringItem[]>("/api/recurring")); }
+    catch { /* chosen; the list catches up on the next load */ }
+  }
 
   type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
   async function save(f: Field) {
@@ -77,7 +87,12 @@
 
 <details class="group border-t first:border-t-0" bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
   <summary class="-mx-2 flex cursor-pointer list-none items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/50 group-open:bg-muted/40 [&::-webkit-details-marker]:hidden">
-    {#if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} class="rounded-full" />{:else}<RecIcon id={r.account_id} />{/if}
+    <!-- A button inside the summary doesn't toggle it. -->
+    <LogoPicker name={r.name} onchanged={logoChanged}>
+      {#if r.logo}<Logo src={r.logo} size={28} />
+      {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} class="rounded-full" />
+      {:else}<RecIcon id={r.account_id} />{/if}
+    </LogoPicker>
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 items-center gap-2 font-medium"><span class="truncate">{v.name || r.name}</span>{#if !active}<Badge variant="secondary">paused</Badge>{/if}</span>
       <span class="text-xs text-muted-foreground">

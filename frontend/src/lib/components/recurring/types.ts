@@ -39,6 +39,8 @@ export interface RecurringItem {
   suggested_amount?: number | null;
   next_date?: string | null;
   last_matched?: MatchedTx | null;
+  /** Its logo: the one you chose, else its last matched transaction's merchant's (null: its category's icon). */
+  logo?: string | null;
   missed?: (Missed & { recurring_id: number })[];
 }
 
