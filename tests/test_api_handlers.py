@@ -61,6 +61,38 @@ class HandlerTests(DbCase):
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
 
+    def test_card_payment_plan(self):
+        plan = lambda: {k: v for k, v in next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-card").items()
+                        if k in ("pay_mode", "pay_amount", "apr")}
+        self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
+        self.assertNotIn("pay_mode", next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-checking"))
+        accounts.api_account_update(self.c, {}, {"pay_mode": "fixed", "pay_amount": "312.50", "apr": 24.99}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
+        # anything wrong is refused before anything is saved
+        for bad in ({"pay_mode": "revolve"}, {"pay_amount": "lots"}, {"pay_amount": -5}, {"apr": "nan"}, {"apr": 150}):
+            with self.assertRaises(ApiError):
+                accounts.api_account_update(self.c, {}, {"display_name": "Changed", **bad}, "demo-card")
+        self.assertIsNone(self.one(select(Account.display_name).where(Account.id == "demo-card"))[0])
+        self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
+        # back to paying in full, and blanks clear the amount and the APR
+        accounts.api_account_update(self.c, {}, {"pay_mode": "full", "pay_amount": "", "apr": None}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
+        accounts.api_account_update(self.c, {}, {"pay_mode": "minimum", "apr": "0"}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
+        # which is what the forecast reads
+        from runway import forecast
+        self.assertEqual(forecast.payment_plan(self.c, "demo-card", 24.99),
+                         {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0, "apr_source": "you"})
+        # with no APR of yours, the list has the issuer's alongside (Settings shows it as the field's placeholder)
+        self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="x", institution_name="Card Bank", products="liabilities"))
+        self.c.execute(insert(PlaidAccount).values(plaid_account_id="pa1", item_id="it1", mask="1234"))
+        self.c.execute(insert(CardStatement).values(plaid_account_id="pa1", item_id="it1", last_statement_date="2026-09-01",
+                                                    purchase_apr=24.99))
+        self.c.execute(update(Account).where(Account.id == "demo-card").values(plaid_account_id="pa1"))
+        accounts.api_account_update(self.c, {}, {"apr": ""}, "demo-card")
+        card = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-card")
+        self.assertEqual((card["apr"], card["issuer_apr"]), (None, 24.99))
+
     def test_loan_terms(self):
         terms = lambda: tuple(self.one(select(Account.interest_rate, Account.monthly_payment).where(Account.id == "demo-mortgage")))
         accounts.api_account_update(self.c, {}, {"interest_rate": "6.25%", "monthly_payment": "$1,840.50"}, "demo-mortgage")

@@ -105,7 +105,7 @@
     {@const end = fc.total.length ? fc.total[fc.total.length - 1] : cashNow}
     {@const allCards = fc.cards.concat(fc.unlinked_cards ?? [])}
     {@const owed = allCards.reduce((s, c) => s + (c.owed_now || 0), 0)}
-    {@const nextDue = fc.cards.filter((c) => c.remaining > 0 && c.due_date >= fc.today).sort((a, b) => a.due_date.localeCompare(b.due_date))[0]}
+    {@const nextDue = fc.cards.filter((c) => (c.payment ?? c.remaining) > 0 && c.due_date >= fc.today).sort((a, b) => a.due_date.localeCompare(b.due_date))[0]}
     {@const allChecking = fc.accounts.length > 0 && fc.accounts.every((a) => a.kind === "checking")}
     {@const what = fc.accounts.length === 1 ? (allChecking ? "Checking" : fc.accounts[0].name) : "Your cash"}
     {@const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount)}
