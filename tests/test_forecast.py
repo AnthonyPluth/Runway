@@ -584,11 +584,11 @@ class ForecastAssumptionTests(LedgerCase):
 
     def test_recurring_charges_the_average_leaves_out(self):
         self.three_cycles()
-        # a gym the card has paid every month since June (in the average), a yearly insurance premium, and a new
+        # a gym the card has paid every month since May (in the average), a yearly insurance premium, and a new
         # subscription that hasn't charged yet
         self.conn.execute(insert(Recurring).values(name="Gym", account_id="cc", amount=-30, frequency="monthly",
-                                                   anchor_date="2026-06-15", match="gym"))
-        for d in ("2026-06-15", "2026-07-15", "2026-08-15", "2026-09-15"):
+                                                   anchor_date="2026-05-15", match="gym"))
+        for d in ("2026-05-15", "2026-06-15", "2026-07-15", "2026-08-15", "2026-09-15"):
             self.tx("cc", d, -30.0, "GYM", "Fitness")
         self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-600, frequency="yearly",
                                                    anchor_date="2025-10-20", match="insurer"))
@@ -603,11 +603,40 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(est["2026-12-07"], round(avg + 600 + 15, 2))                # Insurance Oct 20, Streaming Oct 30
         self.assertEqual(est["2027-01-05"], round(avg + 15, 2))                      # Streaming Nov 30
         # once the subscription's been on the card since before the averaged cycles, it's in the average
-        self.conn.execute(update(Recurring).where(Recurring.name == "Streaming").values(anchor_date="2026-06-30"))
-        for d in ("2026-06-30", "2026-07-30", "2026-08-30"):
+        self.conn.execute(update(Recurring).where(Recurring.name == "Streaming").values(anchor_date="2026-05-30"))
+        for d in ("2026-05-30", "2026-06-30", "2026-07-30", "2026-08-30"):
             self.tx("cc", d, -15.0, "STREAMFLIX", "Subscriptions")
         card = next(c for c in forecast.build(self.conn, TODAY, 120)["cards"] if c["id"] == "cc")
+        self.assertEqual(card["avg_monthly_spend"], 1111.67)
         self.assertEqual(self.estimates(days=120)["2027-01-05"], card["avg_monthly_spend"])
+
+    def test_a_quarterly_charge_in_the_averaged_cycles_counts_once(self):
+        # $300 a quarter, paid Jul 20 (in the Jul 10 - Aug 10 cycle) and due again Oct 20
+        self.three_cycles()
+        self.conn.execute(insert(Recurring).values(name="Water", account_id="cc", amount=-300, frequency="quarterly",
+                                                   anchor_date="2026-07-20", match="water co"))
+        self.tx("cc", "2026-07-20", -300.0, "WATER CO", "Utilities")
+        fc = forecast.build(self.conn, TODAY, 120)
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        self.assertEqual(card["avg_monthly_spend"], 1066.67)   # without it: not $100 of it in every cycle
+        est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], round(300 + 1066.67 * 17 / 30, 2))
+        self.assertEqual(est["2026-12-07"], round(1066.67 + 300, 2))   # the whole of it in the cycle it's due
+        self.assertEqual(est["2027-01-05"], 1066.67)
+
+    def test_a_subscription_started_inside_the_averaged_cycles_counts_once(self):
+        # $90 a month since Jul 25: in two of the three averaged cycles, so $60 of the average and $90 on top before
+        self.three_cycles()
+        self.conn.execute(insert(Recurring).values(name="Meal kit", account_id="cc", amount=-90, frequency="monthly",
+                                                   anchor_date="2026-07-25", match="meal kit"))
+        for d in ("2026-07-25", "2026-08-25"):
+            self.tx("cc", d, -90.0, "MEAL KIT", "Groceries")
+        fc = forecast.build(self.conn, TODAY, 120)
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        self.assertEqual(card["avg_monthly_spend"], 1066.67)
+        est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], round(300 + 1066.67 * 17 / 30 + 90, 2))   # Sep 25
+        self.assertEqual(est["2026-12-07"], round(1066.67 + 90, 2))                   # Oct 25
 
     def test_a_budget_on_a_card_paid_from_outside_the_forecast_is_skipped(self):
         self.acct("sav", "savings", 20000.0)    # not forecast: checking is the only checking account

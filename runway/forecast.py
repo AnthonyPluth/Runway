@@ -38,6 +38,7 @@ from .models import Account, Budget, Category, Override, PlaidAccount, Recurring
 SPEND_WINDOW_DAYS = 90
 AVG_CYCLES = 3           # statement cycles averaged to estimate a card's future statements
 ONE_OFF_LIMIT = 1000.0   # single outflows larger than this are treated as one-offs, not everyday spending
+EVERY_MONTH = ("weekly", "biweekly", "semimonthly", "monthly")   # recurring frequencies a card's monthly average has
 PAY_MODES = ("full", "minimum", "fixed")   # how a card's statements are paid (payment_plan)
 MIN_PAYMENT_FLOOR = 25.0   # without the issuer's minimum: the larger of this and MIN_PAYMENT_RATE of the statement
 MIN_PAYMENT_RATE = 0.02
@@ -239,23 +240,42 @@ def pending_total(conn, account: dict, today: date) -> float:
 
 def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
     """Average spending per statement cycle over the last AVG_CYCLES closed cycles (only cycles fully covered by
-    the transaction history). Charges minus refunds; payments and transfers don't count."""
+    the transaction history). Charges minus refunds; payments and transfers don't count.
+
+    The card's recurring items the average can't stand for are left out of it and listed under "separate", for the
+    forecast to add on their own dates: ones that come less often than monthly (a yearly insurance premium) and ones
+    first paid after the oldest averaged cycle opened (a new subscription), which would otherwise be part in the
+    average and part on top of it."""
     transfers = _transfer_categories(conn)
-    first = conn.execute(select(func.min(Transaction.posted)).where(Transaction.account_id == card["id"])).fetchone()[0]
-    cycles = []
+    T = Transaction
+    first = conn.execute(select(func.min(T.posted)).where(T.account_id == card["id"])).fetchone()[0]
+    bounds = []
     end = last_close
     for _ in range(AVG_CYCLES):
         start = add_months(end, -1, card["closing_day"])
         if not first or _d(first) > start + timedelta(days=3):   # history doesn't reach back this far
             break
-        txs = conn.execute(select(Transaction.amount, Transaction.category)
-                           .where(Transaction.account_id == card["id"], Transaction.posted > start.isoformat(),
-                                  Transaction.posted <= end.isoformat(), Transaction.pending == 0)).fetchall()
+        bounds.append((start, end))
+        end = start
+    separate = []
+    if bounds:
+        opened = bounds[-1][0].isoformat()
+        for r in conn.execute(select(Recurring.id, Recurring.frequency, func.min(T.posted).label("first"))
+                              .outerjoin(T, T.recurring_id == Recurring.id)
+                              .where(Recurring.account_id == card["id"], Recurring.active == 1)
+                              .group_by(Recurring.id, Recurring.frequency)):
+            if r["frequency"] not in EVERY_MONTH or not r["first"] or r["first"][:10] > opened:
+                separate.append(r["id"])
+    cycles = []
+    for start, end in bounds:
+        txs = conn.execute(select(T.amount, T.category)
+                           .where(T.account_id == card["id"], T.posted > start.isoformat(), T.posted <= end.isoformat(),
+                                  T.pending == 0, func.coalesce(T.recurring_id, 0).not_in(separate or [-1]))).fetchall()
         spent = -sum(t["amount"] for t in txs if t["category"] not in transfers)
         cycles.append({"start": start.isoformat(), "end": end.isoformat(), "spent": round(max(0.0, spent), 2)})
-        end = start
     avg = sum(c["spent"] for c in cycles) / len(cycles) if cycles else None
-    return {"average": round(avg, 2) if avg is not None else None, "cycles": cycles}   # newest cycle first
+    return {"average": round(avg, 2) if avg is not None else None, "cycles": cycles,   # newest cycle first
+            "separate": separate}
 
 
 def statement_override(conn, card_id: str, close: date) -> float | None:
@@ -378,8 +398,7 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "avg_monthly_spend": spend["average"],
         "avg_cycles": len(spend["cycles"]),
-        # the close of the oldest cycle averaged: a recurring charge first paid after it isn't in every cycle of the average
-        "avg_first_close": spend["cycles"][-1]["end"] if spend["cycles"] else None,
+        "avg_separate": spend["separate"],   # recurring items left out of the average, added on their dates instead
         "paid_since_close": round(paid, 2),
         "remaining": round(remaining, 2),
         **plan,
@@ -422,7 +441,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     # forecast again as still to come. One UPDATE per item, over unlinked transactions.
     rec.auto_match(conn)
     recurring = db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))
-    items_by_id = {r["id"]: r for r in recurring}
     T = Transaction
     most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
 
@@ -430,7 +448,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     warnings: list[dict] = []   # {"text", "href"}: what's wrong, and the page where it's put right
     card_status: list[dict] = []
     old_keys: dict[str, str] = {}   # card payment key -> the key it had before keys followed the closing date
-    first_paid: dict[int, str | None] = {}   # recurring item -> its first linked payment's date
     unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
 
     def warn(text: str, href: str) -> None:
@@ -446,17 +463,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         like any other. A card paid in full carries nothing either way, as before."""
         edit = overrides.get(key, overrides.get(old_key))
         return abs(edit) if info["pay_mode"] != "full" and edit is not None else planned
-
-    def not_averaged(item_id: int, since: str) -> bool:
-        """Whether a card's spending average (over cycles from the one closing on `since`) leaves out this recurring
-        charge: it comes less often than monthly (a yearly insurance premium), or its first payment came after that
-        oldest cycle (a new subscription)."""
-        if items_by_id[item_id]["frequency"] not in ("weekly", "biweekly", "semimonthly", "monthly"):
-            return True
-        if item_id not in first_paid:
-            first_paid[item_id] = conn.execute(select(func.min(T.posted)).where(T.recurring_id == item_id)).scalar()
-        started = first_paid[item_id]
-        return not started or started[:10] > since
 
     for item in recurring:
         if item["account_id"] not in by_id:
@@ -545,7 +551,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                     est = info["new_charges"] + avg * min(1.0, left)
                 else:
                     est = avg
-                est += max(0.0, -sum(e["amount"] for e in upcoming if not_averaged(e["recurring_id"], info["avg_first_close"])))
+                est += max(0.0, -sum(e["amount"] for e in upcoming if e["recurring_id"] in info["avg_separate"]))
             else:
                 days_in_cycle = max(0, (close - max(today, prev_close)).days)
                 # The recent daily rate leaves out recurring charges on the card, so add all of them.
