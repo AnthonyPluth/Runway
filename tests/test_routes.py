@@ -12,7 +12,10 @@ import urllib.error
 import urllib.request
 from datetime import date, timedelta
 
+from sqlalchemy import delete, insert, select
+
 from runway import db, server
+from runway.models import Account, NetworthSnapshot, Setting, Transaction
 from tests.shared import hold_mcp_switch
 
 # Routes that would reach out to another service even with an empty request; they're covered by their own tests.
@@ -28,20 +31,21 @@ class RouteTests(unittest.TestCase):
         db.init()
         today = date.today()
         with db.session() as conn:   # on Postgres the database is shared with later tests, so note what's there already
-            cls.had_settings = {r["key"] for r in conn.execute("SELECT key FROM settings").fetchall()}
-            cls.had_snapshots = {r["date"] for r in conn.execute("SELECT date FROM networth_snapshots").fetchall()}
+            cls.had_settings = {r["key"] for r in conn.execute(select(Setting.key)).fetchall()}
+            cls.had_snapshots = {r["date"] for r in conn.execute(select(NetworthSnapshot.date)).fetchall()}
         with db.session() as conn:   # a little data, so the pages have something to add up
-            conn.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES (?,?,?,?,?)",
-                         ("chk", "Checking", "checking", 2500.0, today.isoformat()))
-            conn.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES (?,?,?,?,?)",
-                         ("card", "Card", "credit", -300.0, today.isoformat()))
+            conn.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=2500.0,
+                                                balance_date=today.isoformat()))
+            conn.execute(insert(Account).values(id="card", name="Card", kind="credit", balance=-300.0,
+                                                balance_date=today.isoformat()))
             for i, (acct, days, amount, desc, cat) in enumerate([
                 ("chk", 3, 2000.0, "ACME PAYROLL", "Paycheck"), ("chk", 5, -1200.0, "RENT", "Rent"),
                 ("card", 2, -45.5, "GROCER", "Groceries"), ("card", 40, -12.0, "COFFEE", None),
             ]):
-                conn.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, pending) "
-                             "VALUES (?,?,?,?,?,?,?,?)",
-                             (f"{acct}|{i}", acct, (today - timedelta(days=days)).isoformat(), amount, desc, desc.title(), cat, 0))
+                conn.execute(insert(Transaction).values(id=f"{acct}|{i}", account_id=acct,
+                                                        posted=(today - timedelta(days=days)).isoformat(),
+                                                        amount=amount, description=desc, payee=desc.title(),
+                                                        category=cat, pending=0))
         cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -51,14 +55,14 @@ class RouteTests(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         with db.session() as conn:   # leave the database as it was found
-            conn.execute("DELETE FROM transactions WHERE account_id IN ('chk', 'card')")
-            conn.execute("DELETE FROM accounts WHERE id IN ('chk', 'card')")
-            for r in conn.execute("SELECT key FROM settings").fetchall():
+            conn.execute(delete(Transaction).where(Transaction.account_id.in_(["chk", "card"])))
+            conn.execute(delete(Account).where(Account.id.in_(["chk", "card"])))
+            for r in conn.execute(select(Setting.key)).fetchall():
                 if r["key"] not in cls.had_settings:
-                    conn.execute("DELETE FROM settings WHERE key=?", (r["key"],))
-            for r in conn.execute("SELECT date FROM networth_snapshots").fetchall():
+                    conn.execute(delete(Setting).where(Setting.key == r["key"]))
+            for r in conn.execute(select(NetworthSnapshot.date)).fetchall():
                 if r["date"] not in cls.had_snapshots:
-                    conn.execute("DELETE FROM networth_snapshots WHERE date=?", (r["date"],))
+                    conn.execute(delete(NetworthSnapshot).where(NetworthSnapshot.date == r["date"]))
         cls.tmp.cleanup()
         os.environ.pop("RUNWAY_DATA", None)
 

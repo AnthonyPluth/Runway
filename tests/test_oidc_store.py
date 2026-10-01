@@ -6,7 +6,10 @@ import unittest
 import urllib.parse
 from unittest import mock
 
+from sqlalchemy import insert, select, update
+
 from runway import oidc, secretbox
+from runway.models import AuthPending, AuthSession, User
 from tests.shared import DbCase
 
 ISSUER = "https://id.example.com"
@@ -25,30 +28,31 @@ class OIDCStoreTests(DbCase):
         self.addCleanup(oidc._discovery.clear)
 
     def pending(self):
-        return [tuple(r) for r in self.c.execute("SELECT state, next FROM auth_pending ORDER BY created")]
+        return [tuple(r) for r in self.c.execute(select(AuthPending.state, AuthPending.next)
+                                                 .order_by(AuthPending.created))]
 
     def test_start_login_saves_the_pending_sign_in(self):
         url, state = oidc.start_login(self.c, "/#budget")
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
         self.assertEqual(q["state"], state)
-        row = self.c.execute("SELECT * FROM auth_pending WHERE state=?", (state,)).fetchone()
+        row = self.c.execute(select(AuthPending).where(AuthPending.state == state)).fetchone()
         self.assertEqual((row["nonce"], row["next"]), (q["nonce"], "/#budget"))
         self.assertAlmostEqual(row["created"], time.time(), delta=5)
 
     def test_old_and_surplus_pending_sign_ins_are_dropped(self):
         now = time.time()
-        self.c.execute("INSERT INTO auth_pending(state, nonce, verifier, next, created) VALUES ('stale','n','v','/',?)",
-                       (now - oidc.LOGIN_TTL - 5,))
+        self.c.execute(insert(AuthPending).values(state="stale", nonce="n", verifier="v", next="/",
+                                                  created=now - oidc.LOGIN_TTL - 5))
         for i in range(5):
-            self.c.execute("INSERT INTO auth_pending(state, nonce, verifier, next, created) VALUES (?,'n','v','/',?)",
-                           (f"s{i}", now - 100 + i))
+            self.c.execute(insert(AuthPending).values(state=f"s{i}", nonce="n", verifier="v", next="/",
+                                                      created=now - 100 + i))
         with mock.patch.object(oidc, "MAX_PENDING", 3):
             _, state = oidc.start_login(self.c)
         self.assertEqual([s for s, _ in self.pending()], ["s3", "s4", state])   # the newest ones stay
 
     def test_finish_login_refuses_expired_or_unknown_state(self):
-        self.c.execute("INSERT INTO auth_pending(state, nonce, verifier, next, created) VALUES ('old','n','v','/',?)",
-                       (time.time() - oidc.LOGIN_TTL - 1,))
+        self.c.execute(insert(AuthPending).values(state="old", nonce="n", verifier="v", next="/",
+                                                  created=time.time() - oidc.LOGIN_TTL - 1))
         with self.assertRaises(oidc.OIDCError) as e:
             oidc.finish_login(self.c, {"state": "old", "code": "c"}, "old")
         self.assertIn("expired", str(e.exception))
@@ -60,12 +64,12 @@ class OIDCStoreTests(DbCase):
 
     def add_session(self, token, email="me@example.com", expires=None, id_token=None, sub="u1"):
         now = time.time()
-        self.c.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires, id_token) VALUES (?,?,?,?,?,?,?)",
-                       (oidc._hash(token), sub, email, "Me", now, expires if expires is not None else now + 3600,
-                        secretbox.encrypt(id_token)))
+        self.c.execute(insert(AuthSession).values(token_hash=oidc._hash(token), sub=sub, email=email, name="Me",
+                                                  created=now, expires=expires if expires is not None else now + 3600,
+                                                  id_token=secretbox.encrypt(id_token)))
 
     def hashes(self):
-        return {r[0] for r in self.c.execute("SELECT token_hash FROM auth_sessions")}
+        return {r[0] for r in self.c.execute(select(AuthSession.token_hash))}
 
     def test_session_user(self):
         self.add_session("good")
@@ -91,7 +95,8 @@ class OIDCStoreTests(DbCase):
         self.assertEqual(self.hashes(), {oidc._hash("other")})
 
     def expires(self, token):
-        return self.c.execute("SELECT expires FROM auth_sessions WHERE token_hash=?", (oidc._hash(token),)).fetchone()[0]
+        return self.c.execute(select(AuthSession.expires)
+                              .where(AuthSession.token_hash == oidc._hash(token))).fetchone()[0]
 
     def test_a_session_in_use_is_extended_once_a_day(self):
         now, day = time.time(), 86400
@@ -110,12 +115,13 @@ class OIDCStoreTests(DbCase):
     def test_a_session_ends_90_days_after_signing_in_however_much_its_used(self):
         now, day = time.time(), 86400
         self.add_session("old", expires=now + 3 * day)
-        self.c.execute("UPDATE auth_sessions SET created=? WHERE token_hash=?", (now - 85 * day, oidc._hash("old")))
+        self.c.execute(update(AuthSession).where(AuthSession.token_hash == oidc._hash("old"))
+                       .values(created=now - 85 * day))
         max_age = oidc.renew_session(self.c, "old")                      # only as far as day 90
         self.assertAlmostEqual(max_age, 5 * day, delta=5)
         self.assertAlmostEqual(self.expires("old"), now + 5 * day, delta=5)
-        self.c.execute("UPDATE auth_sessions SET created=?, expires=? WHERE token_hash=?",
-                       (now - 89 * day, now + day, oidc._hash("old")))
+        self.c.execute(update(AuthSession).where(AuthSession.token_hash == oidc._hash("old"))
+                       .values(created=now - 89 * day, expires=now + day))
         self.assertIsNone(oidc.renew_session(self.c, "old"))             # at the limit: it ends when it ends
         self.assertEqual(self.expires("old"), now + day)
 
@@ -164,7 +170,9 @@ class OIDCStoreTests(DbCase):
         self.assertEqual(oidc.logout(self.c, None), "/auth/signed-out")
 
     def users(self):
-        return [tuple(r) for r in self.c.execute("SELECT sub, email, name, first_name, last_seen FROM users ORDER BY sub")]
+        return [tuple(r) for r in self.c.execute(select(User.sub, User.email, User.name, User.first_name,
+                                                        User.last_seen)
+                                                 .order_by(User.sub))]
 
     def test_remember_user_adds_then_updates(self):
         oidc.remember_user(self.c, None, "x@example.com", "X")              # no sub: nothing to remember
@@ -175,8 +183,8 @@ class OIDCStoreTests(DbCase):
 
     def test_backfill_users_from_sessions(self):
         for token, sub, created in (("a", "u1", 10.0), ("b", "u1", 30.0), ("c", "u2", 20.0), ("d", None, 40.0)):
-            self.c.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires) VALUES (?,?,?,?,?,?)",
-                           (token, sub, f"{sub}@example.com", f"Name {sub}", created, 9e9))
+            self.c.execute(insert(AuthSession).values(token_hash=token, sub=sub, email=f"{sub}@example.com",
+                                                      name=f"Name {sub}", created=created, expires=9e9))
         oidc.remember_user(self.c, "u2", "kept@example.com", "Kept", None, 5.0)    # already known: left alone
         oidc.backfill_users(self.c)
         self.assertEqual(self.users(), [("u1", "u1@example.com", "Name u1", "Name", 30.0),

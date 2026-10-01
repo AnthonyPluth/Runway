@@ -2,7 +2,10 @@
 import unittest
 from datetime import date, timedelta
 
+from sqlalchemy import delete, func, insert, select, update
+
 from runway import db, forecast, recurring
+from runway.models import Account, Budget, CardStatement, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -90,7 +93,7 @@ class ForecastTests(LedgerCase):
 
     def test_sticking_to_the_budget(self):
         # $500/month on Groceries, paid with the card. $200 already spent in September, so $300 over Sep 24-30.
-        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'cc')")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         b = fc["budget"]
         self.assertEqual((b["monthly"], [u["account_id"] for u in b["used"]]), (500.0, ["cc"]))
@@ -112,7 +115,7 @@ class ForecastTests(LedgerCase):
 
     def test_a_budget_paid_from_checking_comes_out_day_by_day(self):
         # $310/month on Groceries from checking; $200 spent in September, so $110 over Sep 24-30 ($15.71 a day)
-        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 310, 'chk')")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 40)
         b, days = fc["budget"], fc["dates"]
         out = {c["date"]: c for c in b["changes"] if c["kind"] == "budget"}
@@ -124,15 +127,17 @@ class ForecastTests(LedgerCase):
 
     def grocery_box(self, link=True):
         """A $100 grocery box from checking on the 1st of each month (Oct 1, Nov 1 in the forecast)."""
-        self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES (7, 'Grocery box','chk',-100,'monthly','2026-09-01')")
+        self.conn.execute(insert(Recurring).values(id=7, name="Grocery box", account_id="chk", amount=-100,
+                                                   frequency="monthly", anchor_date="2026-09-01"))
         self.tx("chk", "2026-09-01", -100.0, "GROCERY BOX", "Groceries")
         if link:
-            self.conn.execute("UPDATE transactions SET recurring_id=7 WHERE description='GROCERY BOX'")
+            self.conn.execute(update(Transaction)
+                              .where(Transaction.description == "GROCERY BOX").values(recurring_id=7))
 
     def test_a_budget_counts_its_recurring_payments_once(self):
         # $500 on Groceries from checking includes the $100 box: $400 a month more, not $500 on top of it
         self.grocery_box()
-        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'chk')")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         box = [e for e in fc["events"] if e.get("recurring_id") == 7]
         self.assertEqual([(e["date"], e["category"]) for e in box], [("2026-10-01", "Groceries"), ("2026-11-02", "Groceries")])
@@ -144,13 +149,13 @@ class ForecastTests(LedgerCase):
 
     def test_a_budget_its_recurring_payments_cover_adds_nothing(self):
         self.grocery_box()
-        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 80, 'chk')")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=80, pay_with="chk"))
         b = forecast.build(self.conn, TODAY, 60)["budget"]
         self.assertEqual((b["used"], b["skipped"][0]), ([], {"category": "Groceries", "reason": "a recurring item already covers it"}))
 
     def test_a_recurring_item_with_nothing_linked_yet_takes_its_category_from_what_it_matches(self):
         self.grocery_box(link=False)
-        self.conn.execute("INSERT INTO budgets(category, amount, pay_with) VALUES ('Groceries', 500, 'chk')")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 7}, {"Groceries"})
         daily = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "budget"}
@@ -159,7 +164,7 @@ class ForecastTests(LedgerCase):
     def test_statement_you_entered_wins(self):
         key = self.cycle("cc")["statement_key"]
         self.assertEqual(key, "stmt:cc:2026-09-10")
-        self.conn.execute("INSERT INTO overrides(key, amount) VALUES (?, 950)", (key,))
+        self.conn.execute(insert(Override).values(key=key, amount=950))
         info = self.cycle("cc")
         self.assertEqual((info["statement_balance"], info["statement_reported"], info["statement_set"], info["remaining"]),
                          (950.0, 800.0, True, 750.0))
@@ -171,13 +176,14 @@ class ForecastTests(LedgerCase):
         self.assertEqual((info["statement_set"], info["statement_balance"]), (False, 300.0))
 
     def test_owed_positive_convention(self):
-        self.conn.execute("UPDATE accounts SET balance=900, owed_positive=1 WHERE id='cc'")
+        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=900, owed_positive=1))
         card = next(c for c in forecast.build(self.conn, TODAY, 30)["cards"] if c["id"] == "cc")
         self.assertEqual((card["owed_now"], card["statement_balance"]), (900.0, 800.0))
 
     def test_build(self):
         self.conn.execute(
-            "INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) VALUES ('Paycheck','chk',3000,'biweekly','2026-09-18')"
+            insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000, frequency="biweekly",
+                                     anchor_date="2026-09-18")
         )
         fc = forecast.build(self.conn, TODAY, 60)
         names = [(e["date"], e["name"], e["amount"], e["estimated"]) for e in fc["events"]]
@@ -194,8 +200,10 @@ class ForecastTests(LedgerCase):
         self.assertEqual(fc["warnings"], [])
 
     def test_balance_after_each_event(self):
-        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) VALUES ('Paycheck','chk',3000,'biweekly','2026-09-18')")
-        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) VALUES ('Gym','chk',-50,'monthly','2026-09-05')")
+        self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000,
+                                                   frequency="biweekly", anchor_date="2026-09-18"))
+        self.conn.execute(insert(Recurring).values(name="Gym", account_id="chk", amount=-50, frequency="monthly",
+                                                   anchor_date="2026-09-05"))
         fc = forecast.build(self.conn, TODAY, 60)
         bal = 5000.0
         for e in fc["events"]:
@@ -226,36 +234,36 @@ class ForecastTests(LedgerCase):
         self.assertEqual((acct["daily_spend"], acct["daily_spend_on"]), (0.0, False))
         self.assertGreater(acct["daily_spend_estimate"], 0)
         # opting back in brings the drain back
-        self.conn.execute("UPDATE accounts SET daily_spend=1 WHERE id='chk'")
+        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertGreater(fc["accounts"][0]["daily_spend"], 0)
         self.assertTrue(fc["accounts"][0]["daily_spend_on"])
         self.assertEqual(fc["accounts"][0]["daily_spend"], fc["accounts"][0]["daily_spend_estimate"])
 
     def test_card_without_bank_statements_warns(self):
-        self.conn.execute("DELETE FROM card_statements")
+        self.conn.execute(delete(CardStatement))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn("Plaid hasn’t sent a statement for cc yet", fc["warnings"][0])     # linked, statement not in yet
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
         self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/connections"}])
-        self.conn.execute("UPDATE accounts SET plaid_account_id=NULL WHERE id='cc'")                  # not linked at all
+        self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))                  # not linked at all
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
         self.assertEqual(fc["warning_links"][0]["href"], "#setup/connections")   # nothing from Plaid to match: connect the bank
-        self.conn.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type) VALUES ('pcc', 'it', 'Visa', 'credit')")
+        self.conn.execute(insert(PlaidAccount).values(plaid_account_id="pcc", item_id="it", name="Visa", type="credit"))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][0])
         self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts")      # matched under “New from Plaid”
 
     def test_warnings_link_to_where_they_are_fixed(self):
-        self.conn.execute("UPDATE accounts SET pay_from=NULL WHERE id='cc'")
+        self.conn.execute(update(Account).where(Account.id == "cc").values(pay_from=None))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["warning_links"], [{"text": "cc: choose which account pays it in Settings.", "href": "#setup/accounts"}])
         self.assertEqual(fc["warnings"], ["cc: choose which account pays it in Settings."])   # plain text, as MCP clients read it
 
     def test_paid_statement_no_event(self):
         self.tx("cc", "2026-09-22", 600.0, "PAYMENT", "Credit Card Payment")
-        self.conn.execute("UPDATE accounts SET balance=-300 WHERE id='cc'")  # the payment lowers what's owed
+        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-300))  # the payment lowers what's owed
         info = self.cycle("cc")
         self.assertEqual((info["statement_balance"], info["remaining"]), (800.0, 0.0))
         fc = forecast.build(self.conn, TODAY, 30)
@@ -302,7 +310,8 @@ class ScheduleAndMissedTests(LedgerCase):
         self.acct("chk", "checking", 1000.0)
         r = server.api_recurring_add(self.conn, None, {"name": "Property tax", "account_id": "chk", "amount": -2400,
                                                        "frequency": "dates", "dates": "Apr 15, Oct 15", "anchor_date": "2026-01-01"})
-        self.assertEqual(self.conn.execute("SELECT dates FROM recurring WHERE id=?", (r["id"],)).fetchone()[0], "04-15,10-15")
+        self.assertEqual(self.conn.execute(select(Recurring.dates)
+                                           .where(Recurring.id == r["id"])).fetchone()[0], "04-15,10-15")
         with self.assertRaises(server.ApiError):
             server.api_recurring_add(self.conn, None, {"name": "X", "account_id": "chk", "amount": -1, "frequency": "dates",
                                                        "dates": "whenever", "anchor_date": "2026-01-01"})
@@ -311,8 +320,8 @@ class ScheduleAndMissedTests(LedgerCase):
         from runway import recurring
         self.acct("chk", "checking", 1000.0)
         self.tx("chk", "2026-06-01", -5.0, "OPENING", "Other")                      # history starts here
-        self.conn.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date, match, active) "
-                          "VALUES (1, 'Gym', 'chk', -40, 'monthly', '2026-07-05', 'gym', 1)")
+        self.conn.execute(insert(Recurring).values(id=1, name="Gym", account_id="chk", amount=-40, frequency="monthly",
+                                                   anchor_date="2026-07-05", match="gym", active=1))
         for d in ("2026-07-05", "2026-08-07"):                                      # paid July, August (2 days late)
             self.tx("chk", d, -40.0, "GYM MEMBERSHIP", "Other")
         recurring.auto_match(self.conn)
@@ -323,9 +332,9 @@ class ScheduleAndMissedTests(LedgerCase):
         recurring.dismiss(self.conn, m[0]["key"])
         self.assertEqual(recurring.missed(self.conn, today), [])
         # linking the payment that did happen also clears it
-        self.conn.execute("DELETE FROM recurring_dismissed")
+        self.conn.execute(delete(RecurringDismissed))
         self.tx("chk", "2026-09-06", -40.0, "CLUB FEE", "Other")
-        tid = self.conn.execute("SELECT id FROM transactions WHERE description='CLUB FEE'").fetchone()[0]
+        tid = self.conn.execute(select(Transaction.id).where(Transaction.description == "CLUB FEE")).fetchone()[0]
         recurring.link(self.conn, tid, 1)
         self.assertEqual(recurring.missed(self.conn, today), [])
 
@@ -364,8 +373,8 @@ class ForecastEdgeTests(LedgerCase):
     def test_rent_due_today_or_a_few_days_late_stays_in(self):
         for d in ("2026-07-01", "2026-08-01", "2026-09-01"):
             self.tx("chk", d, -2000.0, "LANDLORD LLC", "Rent")
-        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match) "
-                          "VALUES ('Rent','chk',-2000,'monthly','2026-07-01','landlord')")
+        self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
+                                                   anchor_date="2026-07-01", match="landlord"))
         recurring.auto_match(self.conn)
 
         def rent(today):
@@ -388,19 +397,26 @@ class ForecastEdgeTests(LedgerCase):
         self.tx("cc", "2026-09-23", 600.0, "PAYMENT THANK YOU", "Credit Card Payment")
         self.assertEqual(self.cycle("cc")["paid_since_close"], 800.0)
         # one that reached the card just before the close (and so is in the statement) isn't counted again
-        self.conn.execute("UPDATE transactions SET posted='2026-09-09' WHERE description='PAYMENT THANK YOU' AND amount=600")
-        self.conn.execute("UPDATE transactions SET posted='2026-09-11' WHERE account_id='chk' AND amount=-600")
+        self.conn.execute(update(Transaction)
+                          .where(Transaction.description == "PAYMENT THANK YOU", Transaction.amount == 600)
+                          .values(posted="2026-09-09"))
+        self.conn.execute(update(Transaction)
+                          .where(Transaction.account_id == "chk", Transaction.amount == -600)
+                          .values(posted="2026-09-11"))
         self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
-        self.conn.execute("UPDATE transactions SET posted='2026-09-23' WHERE description='PAYMENT THANK YOU' AND amount=600")
+        self.conn.execute(update(Transaction)
+                          .where(Transaction.description == "PAYMENT THANK YOU", Transaction.amount == 600)
+                          .values(posted="2026-09-23"))
         # an account that pays two cards can't tell whose it is, so it waits for the card
         self.acct("cc2", "credit", -50.0, pay_from="chk")
-        self.conn.execute("DELETE FROM transactions WHERE id=(SELECT MAX(id) FROM transactions WHERE account_id='cc')")
+        self.conn.execute(delete(Transaction).where(
+            Transaction.id == select(func.max(Transaction.id)).where(Transaction.account_id == "cc").scalar_subquery()))
         self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
 
     def test_recurring_card_charges_count_on_a_new_card(self):
         before = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}
-        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) "
-                          "VALUES ('Streaming','cc',-15,'monthly','2026-09-30')")
+        self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30"))
         after = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}
         self.assertAlmostEqual(after["2026-11-05"], before["2026-11-05"] - 15, places=2)
 

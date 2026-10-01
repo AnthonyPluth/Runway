@@ -66,7 +66,7 @@ poetry run alembic revision --autogenerate -m "add a column"   # writes runway/m
 poetry run alembic check                                       # the schema and migrations agree
 ```
 
-Runway applies it on its next start. Queries are plain SQL with `?` placeholders that both databases understand (`INSERT … ON CONFLICT`, not `INSERT OR REPLACE`), or SQLAlchemy statements over the ORM models; [Queries with SQLAlchemy](/Runway/contributing/orm/) is the guide for converting a module.
+Runway applies it on its next start. Queries, in the app and in the tests, are SQLAlchemy statements over the ORM models (`Connection.execute()` doesn't take SQL text), compiled for whichever database is in use; [Queries with SQLAlchemy](/Runway/contributing/orm/) is the guide.
 
 ## Code layout
 

@@ -4,8 +4,11 @@ a to-do, program currencies with estimated values, and whose card it is."""
 import unittest
 from datetime import date
 
+from sqlalchemy import insert
+
 from runway import churning, notify
 from runway.churning import ChurnError
+from runway.models import Account, Category, Transaction, User
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
@@ -65,8 +68,8 @@ class PortalRankTests(unittest.TestCase):
 class ChurnDbTests(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, owner) VALUES ('cc', 'Venture X', 'credit', 'Alex')")
-        self.c.execute("INSERT INTO categories(name, parent) VALUES ('Hotels', 'Travel')")
+        self.c.execute(insert(Account).values(id="cc", name="Venture X", kind="credit", owner="Alex"))
+        self.c.execute(insert(Category).values(name="Hotels", parent="Travel"))
 
     def add(self, **kw):
         return churning.save_card(self.c, {"owner": "Alex", "issuer": "chase", "product": "Card", "opened_on": "2025-10-10", **kw})
@@ -115,8 +118,8 @@ class ChurnDbTests(DbCase):
     def test_points_estimates_use_normal_rates(self):
         vx = self.add(issuer="capital_one", product="Venture X", currency="c1", account_id="cc",
                       rates=[{"category": "*", "multiplier": 2}, {"category": "Hotels", "multiplier": 10, "portal_only": True}])
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, category) VALUES "
-                       "('t1', 'cc', '2026-03-01', -100, 'Hotels')")
+        self.c.execute(insert(Transaction).values(id="t1", account_id="cc", posted="2026-03-01", amount=-100,
+                                                  category="Hotels"))
         got = next(c for c in self.out()["cards"] if c["id"] == vx)
         self.assertEqual(got["points_ytd"], 200)
         self.assertIn("normal rates", got["points_note"])
@@ -262,8 +265,8 @@ class ChurnDbTests(DbCase):
             churning.save_currency(self.c, {"name": "Rocks", "cents": 1, "kind": "mineral"})
 
     def test_owners(self):
-        self.c.execute("INSERT INTO users(sub, first_name, last_seen) VALUES ('u1', 'Alex', 1)")
-        self.c.execute("INSERT INTO accounts(id, name, kind, owner) VALUES ('sam', 'Checking', 'checking', 'Sam')")
+        self.c.execute(insert(User).values(sub="u1", first_name="Alex", last_seen=1))
+        self.c.execute(insert(Account).values(id="sam", name="Checking", kind="checking", owner="Sam"))
         cid = churning.save_card(self.c, {"owner": "sam", "issuer": "chase", "product": "Freedom", "opened_on": "2026-01-01"})
         self.assertEqual(self.out()["cards"][0]["owner"], "Sam")   # spelled as the account has it
         churning.save_card(self.c, {"owner": "Robin"}, cid)

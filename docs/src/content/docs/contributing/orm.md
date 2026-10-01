@@ -5,13 +5,14 @@ sidebar:
   order: 2
 ---
 
-Runway is moving its database code from SQL text (`conn.execute("SELECT ... WHERE id=?", (x,))`) to SQLAlchemy
-statements built from the ORM models in `runway/models.py`. This is the guide for converting a module: what to use,
-what to watch, and examples taken from code already converted (`runway/db.py`, `runway/networth.py`,
-`runway/equity.py`, `runway/planner.py`, and their API handlers).
+Runway's database code, tests included, builds its queries as SQLAlchemy statements from the ORM models in
+`runway/models.py`; it moved there from SQL text (`conn.execute("SELECT ... WHERE id=?", (x,))`), which
+`Connection.execute()` no longer takes (it raises `TypeError`). This is the guide to writing queries: what to use,
+what to watch, and examples taken from code that was converted (`runway/db.py`, `runway/networth.py`,
+`runway/equity.py`, `runway/planner.py`, and their API handlers), with the SQL each one replaced.
 
-The rule for every conversion: **no change in behavior**. Same rows, same order, same dict keys in API responses,
-same commit points.
+The rule for every conversion was, and for any rewrite of a query still is: **no change in behavior**. Same rows,
+same order, same dict keys in API responses, same commit points.
 
 ## The pieces
 
@@ -19,16 +20,16 @@ same commit points.
 |---|---|---|
 | Schema (the one source of truth) | `runway/schema.py` | Core `Table`s; Alembic migrations keep the database matching it. Don't change it while converting. |
 | Models | `runway/models.py` | One class per table, mapping schema.py's own `Table` (`__table__ = schema.assets`), so no migration. `Account`, `Transaction`, `TxSplit`, `Asset`, `AssetValue`, `Setting`, ... |
-| Connection | `db.connect()`, `db.session()` | Unchanged API. `conn.execute()` takes a statement **or** legacy SQL text. |
+| Connection | `db.connect()`, `db.session()` | `conn.execute()` takes a statement; SQL text raises `TypeError`. `conn.sa` is the SQLAlchemy connection underneath. |
 | ORM Session | `conn.orm` | A `sqlalchemy.orm.Session` on the same connection and transaction. |
 | Helpers | `runway/db.py` | `upsert`, `insert_ignore`, `dialect_insert`, `instr`, `account_label_expr`, `not_investment`, `rows`, `as_dict`, `Result.scalar()/scalars()` |
-| Shared fragments | `splits.parts()`, `db.not_investment()`, `db.account_label_expr()` | Core versions of `splits.PARTS`, `db.NOT_INVESTMENT`, `db.label_sql()` |
-| Guard | `tests/test_orm_guard.py`, `tests/orm_allowlist.json` | Counts SQL text per module; the counts may only go down. |
+| Shared fragments | `splits.parts()`, `db.not_investment()`, `db.account_label_expr()` | A split transaction as its parts, leaving out investment accounts, an account's name as lists show it |
+| Guard | `tests/test_orm_guard.py` | Fails on SQL text passed to `execute()` (or a `text()` that doesn't say why) anywhere in `runway/` or `tests/`. |
 
 ## Two ways to run a statement
 
 **1. `conn.execute(statement)`: the default.** Build a Core-style statement from the model attributes and run it on
-the connection. The result is the same `db.Result` the SQL text gave: rows read by name or position (`row["id"]`,
+the connection. The result is a `db.Result`, as the SQL text gave: rows read by name or position (`row["id"]`,
 `row[0]`, `dict(row)`), `fetchone()`, `fetchall()`, iteration, `rowcount`, `lastrowid`, plus `scalar()` and
 `scalars()`. `db.rows(...)` works on it unchanged. Code downstream of the query doesn't change.
 
@@ -40,7 +41,7 @@ look a row up, check it exists and change a few columns. Not for building API re
 Both share one connection and one transaction:
 
 - Pending ORM changes (`add()`, attribute changes) are written ("flushed") before any `conn.execute()` runs, so
-  SQL (text or statement) always sees them; they're also written at `conn.commit()`.
+  statements always see them; they're also written at `conn.commit()`.
 - After an `UPDATE`/`DELETE`/`INSERT` through `conn.execute()`, objects the Session had loaded are expired and
   re-read when next used, so they're never stale.
 - `conn.commit()` commits both; `conn.rollback()` rolls back both; `db.session()` commits on success and rolls back
@@ -141,11 +142,11 @@ select(Account.id, name, Account.kind).where(Account.kind == "loan", Account.hid
 
 Use the shared versions, never a copy:
 
-| SQL text | Statement |
+| What | Statement |
 |---|---|
-| `FROM {splits.PARTS} t` | `p = splits.parts()` then `select(p.c.category, func.sum(p.c.amount)).group_by(p.c.category)` |
-| `WHERE {db.NOT_INVESTMENT}` | `.where(db.not_investment())` (on `Transaction.account_id`) or `db.not_investment(p.c.account_id)` |
-| `db.label_sql("a") + " AS name"` | `db.account_label_expr().label("name")`, or `db.account_label_expr(a)` for an `aliased(Account)` |
+| Spending by category, a split transaction as its parts | `p = splits.parts()` then `select(p.c.category, func.sum(p.c.amount)).group_by(p.c.category)` |
+| Leaving out investment accounts' transactions | `.where(db.not_investment())` (on `Transaction.account_id`) or `db.not_investment(p.c.account_id)` |
+| An account's name as lists show it (`db.account_label()`) | `db.account_label_expr().label("name")`, or `db.account_label_expr(a)` for an `aliased(Account)` |
 
 ### Strings: `instr`, `LIKE`, concatenation, `CASE`
 
@@ -179,7 +180,7 @@ asset_id = cur.lastrowid
 `lastrowid` is the new row's primary key on both databases (from SQLAlchemy's `inserted_primary_key`). Columns you
 leave out get their server default, as before.
 
-Many rows (was `executemany`): `conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for
+Many rows: `conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for
 ...])`. Every dict must have the same keys. An empty list does nothing.
 
 ### Update and delete
@@ -280,8 +281,11 @@ conn.execute(text("... WHERE x = :x"), {"x": x})
 The guard counts `text()` calls without that comment. SQL must still run on both databases. Dynamic table names
 (runway/backup.py) aren't a reason: use `schema.metadata.tables[name]` and `insert(table)`.
 
-Not converted, on purpose: Alembic migrations (`runway/migrations`), and the driver-level setup in `db.py`'s engine
-functions (`dbapi_conn.execute("PRAGMA ...")`) and its schema upgrade (`exec_driver_sql` DDL).
+Not statements, on purpose: Alembic migrations (`runway/migrations`, with `op.execute`), the driver-level setup in
+`db.py`'s engine functions (`dbapi_conn.execute("PRAGMA ...")`) and its schema upgrade (`exec_driver_sql` DDL), and
+tests that set up an older schema, a column the models don't have, or a SQLite setting: they run SQL with
+`exec_driver_sql` on a SQLAlchemy connection (`conn.sa.exec_driver_sql(...)` for a `db.Connection`; a `PRAGMA` only
+`if not db.using_postgres()`).
 
 ## SQLite and Postgres
 
@@ -309,16 +313,15 @@ Tests here run on SQLite; CI also runs everything on Postgres 16 (`DATABASE_URL`
    add a test for any query path that wasn't covered before you change it.
 2. Compare old and new output (above).
 3. `ruff check .` (and `mypy`, once it's in CI).
-4. Lower the module's count: `python -m tests.test_orm_guard --write`, and commit `tests/orm_allowlist.json` with
-   the conversion. `tests/test_orm_guard.py` fails if any module's count goes up.
+4. `python -m unittest tests.test_orm_guard`: it fails if SQL text is left anywhere in `runway/` or `tests/`.
 5. Try the pages it feeds (`python run.py demo`, then `python run.py --no-sync`).
 
 ## Checklist for a module
 
-- [ ] Every `conn.execute("...")` / `executemany` in the module is a statement (or a commented `text()`).
+- [ ] Every `conn.execute(...)` in the module runs a statement (or a commented `text()`).
 - [ ] Same rows, order, dict keys and types; same `lastrowid`/`rowcount` use.
 - [ ] Every `conn.commit()` kept where it was; no `conn.orm.commit()`.
 - [ ] No per-row queries added (use joins, `in_()` or `selectinload`).
 - [ ] Shared fragments from `splits.parts()` / `db.not_investment()` / `db.account_label_expr()`.
 - [ ] Nothing SQLite- or Postgres-only.
-- [ ] Tests, ruff, allowlist updated.
+- [ ] Tests, ruff and the guard pass.

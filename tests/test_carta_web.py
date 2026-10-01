@@ -2,7 +2,10 @@
 import unittest
 from datetime import date
 
+from sqlalchemy import func, insert, select
+
 from runway import carta, carta_web, equity
+from runway.models import EquityCompany, EquityGrant
 from tests.shared import DbCase
 
 # Two made-up shapes, since Carta's web app isn't documented: a snake_case one with the company around its
@@ -114,7 +117,7 @@ class ImportTests(DbCase):
         carta_web.start(self.c)
         carta_web.ingest(self.c, "https://app.carta.com/api/portfolio/7/", HOLDINGS)
         carta_web.finish(self.c)
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM equity_grants").fetchone()[0], 3)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(EquityGrant)).fetchone()[0], 3)
         self.assertTrue(carta.settings(self.c)["web_last"])
 
     def test_import_web_app_shapes(self):
@@ -130,13 +133,13 @@ class ImportTests(DbCase):
         o = equity.overview(self.c, date(2026, 9, 28))
         self.assertEqual([c["name"] for c in o["companies"]], ["Northwind Payments, Inc."])
         # A grant canceled since the last import goes away.
-        self.c.execute("INSERT INTO equity_grants(id, company_id, kind, quantity, source) VALUES "
-                       "('carta-web:option:1801', 'carta:900', 'iso', 8000, 'carta')")
+        self.c.execute(insert(EquityGrant).values(id="carta-web:option:1801", company_id="carta:900", kind="iso",
+                                                  quantity=8000, source="carta"))
         carta_web.start(self.c)
         for c in WEB:
             carta_web.ingest(self.c, c["url"], c["data"])
         carta_web.finish(self.c)
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM equity_grants").fetchone()[0], 2)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(EquityGrant)).fetchone()[0], 2)
 
     def test_nothing_found_says_so(self):
         carta_web.start(self.c)
@@ -157,14 +160,17 @@ class ImportTests(DbCase):
                             ("carta:42", grant("carta:2", 50.0, months=48), {"b": 2})], "gone": []}
         again = {"companies": [{"id": "carta:42", "name": "Carta company 42", "unnamed": True, "price": None, "price_date": None}],
                  "grants": [("carta:42", grant("carta:1", 120.0), {"a": 3})], "gone": ["carta:2"]}
-        self.c.execute("INSERT INTO equity_grants(id, company_id, kind, quantity, source) VALUES ('m1', 'carta:42', 'rsu', 5, 'manual')")
+        self.c.execute(insert(EquityGrant).values(id="m1", company_id="carta:42", kind="rsu", quantity=5,
+                                                  source="manual"))
         for found in (first, again):
             with mock.patch.object(carta_web, "read", return_value=found):
                 carta_web.finish(self.c)
-        company = dict(self.c.execute("SELECT id, name, share_price, price_as_of, source FROM equity_companies").fetchone())
+        company = dict(self.c.execute(select(EquityCompany.id, EquityCompany.name, EquityCompany.share_price,
+                                             EquityCompany.price_as_of, EquityCompany.source)).fetchone())
         self.assertEqual(company, {"id": "carta:42", "name": "Acme", "share_price": 4.25, "price_as_of": "2026-03-01", "source": "carta"})
+        g = EquityGrant
         grants = [tuple(r) for r in self.c.execute(
-            "SELECT id, quantity, vest_months, vest_every, source, raw, vested_reported_on IS NOT NULL FROM equity_grants ORDER BY id")]
+            select(g.id, g.quantity, g.vest_months, g.vest_every, g.source, g.raw, g.vested_reported_on.is_not(None)).order_by(g.id))]
         self.assertEqual(grants, [("carta:1", 120.0, 48, 3, "carta", '{"a":3}', 1), ("m1", 5.0, None, 1, "manual", None, 0)])
 
 

@@ -11,8 +11,12 @@ import unittest
 import urllib.error
 import urllib.request
 
+from sqlalchemy import delete, func, insert, select, update
+
 from runway import db, mcp_access, mcp_oauth, mcp_server, server
 from runway.server import mcp_http
+from runway.models import (ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
+                           RetailItemMemory, RetailOrder, Transaction, TxSplit)
 from tests.shared import forget_oauth, hold_mcp_switch, tag
 
 VERIFIER = "v" * 50
@@ -52,13 +56,14 @@ class RunwayServer(unittest.TestCase):
     def forget(self):
         with db.session() as conn:
             forget_oauth(conn, self.clients)
-            conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
+            conn.execute(delete(ChurnCard).where(ChurnCard.owner == self.owner))
             mcp_access.set_allow_writes(conn, False)
             mcp_access.set_allow_categorize(conn, False)
 
     def cards(self):
         with db.session() as conn:
-            return conn.execute("SELECT COUNT(*) FROM churn_cards WHERE owner=?", (self.owner,)).fetchone()[0]
+            return conn.execute(select(func.count()).select_from(ChurnCard)
+                                .where(ChurnCard.owner == self.owner)).fetchone()[0]
 
     def make_token(self, *scopes, name="Claude", who=None):
         """An access token for this Runway's /mcp, as if an assistant had connected and you had approved `scopes`."""
@@ -90,8 +95,10 @@ class PagesTests(RunwayServer):
 
     def test_reads_orders_with_their_items_and_categories(self):
         with db.session() as conn:
-            conn.execute("INSERT INTO retail_orders(id, retailer, order_number, channel, placed, total, details) VALUES ('costco|9', 'costco', '9', 'store', '2026-09-26', 10, 1)")
-            conn.execute("INSERT INTO retail_items(order_id, title, amount, quantity, category, category_source) VALUES ('costco|9', 'BANANAS', 5, 1, 'Groceries', 'ai')")
+            conn.execute(insert(RetailOrder).values(id="costco|9", retailer="costco", order_number="9",
+                                                    channel="store", placed="2026-09-26", total=10, details=1))
+            conn.execute(insert(RetailItem).values(order_id="costco|9", title="BANANAS", amount=5, quantity=1,
+                                                   category="Groceries", category_source="ai"))
         try:
             self.assertIn("costco|9", json.dumps(mcp_http.local_fetch("retail", {}, None, READ)))
             order = mcp_http.local_fetch("retail/orders/costco%7C9", {}, None, READ)
@@ -103,8 +110,8 @@ class PagesTests(RunwayServer):
                     mcp_http.local_fetch(path, {}, None, READ)                    # only those two pages
         finally:
             with db.session() as conn:
-                conn.execute("DELETE FROM retail_items WHERE order_id='costco|9'")
-                conn.execute("DELETE FROM retail_orders WHERE id='costco|9'")
+                conn.execute(delete(RetailItem).where(RetailItem.order_id == "costco|9"))
+                conn.execute(delete(RetailOrder).where(RetailOrder.id == "costco|9"))
 
     def test_nothing_else_is_reachable(self):
         for path in ("state", "settings", "plaid/status", "backup", "retail/token", "push", "mcp-settings", "", "../accounts",
@@ -165,12 +172,13 @@ class PagesTests(RunwayServer):
         wish = post("churning/wishlist", {"owner": "Alex", "kind": "card", "issuer": "amex", "product": "Gold"})
         post(f"churning/wishlist/{wish['id']}", {"apply_url": "https://example.com/apply"})
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT notes FROM churn_cards WHERE id=?", (cid,)).fetchone()[0], "from an assistant")
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_benefit_uses").fetchone()[0], 0)   # used, then undone
-            conn.execute("DELETE FROM churn_tasks WHERE card_id=?", (cid,))
-            conn.execute("DELETE FROM churn_benefits WHERE card_id=?", (cid,))
-            conn.execute("DELETE FROM churn_cards WHERE id=?", (cid,))
-            conn.execute("DELETE FROM churn_wishlist WHERE id=?", (wish["id"],))   # the database can be shared with other tests (Postgres)
+            self.assertEqual(conn.execute(select(ChurnCard.notes)
+                                          .where(ChurnCard.id == cid)).fetchone()[0], "from an assistant")
+            self.assertEqual(conn.execute(select(func.count()).select_from(ChurnBenefitUse)).fetchone()[0], 0)   # used, then undone
+            conn.execute(delete(ChurnTask).where(ChurnTask.card_id == cid))
+            conn.execute(delete(ChurnBenefit).where(ChurnBenefit.card_id == cid))
+            conn.execute(delete(ChurnCard).where(ChurnCard.id == cid))
+            conn.execute(delete(ChurnWish).where(ChurnWish.id == wish["id"]))   # the database can be shared with other tests (Postgres)
 
     def test_every_writable_path_is_a_post_route_and_none_removes_anything(self):
         posts = {p for m, p, _ in server.ROUTES if m == "POST"}
@@ -187,17 +195,19 @@ class PagesTests(RunwayServer):
     def test_categorizing_needs_its_own_scope_and_switch(self):
         tx, item = "mcp-" + self.tag, None
         with db.session() as conn:
-            conn.execute("INSERT INTO transactions(id, account_id, posted, amount, payee, category, needs_review) "
-                         "VALUES (?, 'mcp-acct', '2026-09-20', -12, 'Corner Market', 'Shopping', 1)", (tx,))
-            conn.execute("INSERT INTO retail_orders(id, retailer, order_number, channel, placed, total, details) "
-                         "VALUES (?, 'costco', ?, 'store', '2026-09-26', 10, 1)", ("costco|" + self.tag, self.tag))
-            conn.execute("INSERT INTO retail_items(order_id, title, amount, quantity, category, category_source) "
-                         "VALUES (?, ?, 5, 1, 'Shopping', 'ai')", ("costco|" + self.tag, "APPLES " + self.tag))
-            item = conn.execute("SELECT id FROM retail_items WHERE order_id=?", ("costco|" + self.tag,)).fetchone()[0]
+            conn.execute(insert(Transaction).values(id=tx, account_id="mcp-acct", posted="2026-09-20", amount=-12,
+                                                    payee="Corner Market", category="Shopping", needs_review=1))
+            conn.execute(insert(RetailOrder).values(id="costco|" + self.tag, retailer="costco", order_number=self.tag,
+                                                    channel="store", placed="2026-09-26", total=10, details=1))
+            conn.execute(insert(RetailItem).values(order_id="costco|" + self.tag, title="APPLES " + self.tag, amount=5,
+                                                   quantity=1, category="Shopping", category_source="ai"))
+            item = conn.execute(select(RetailItem.id).where(RetailItem.order_id == "costco|" + self.tag)).fetchone()[0]
 
         def row():
             with db.session() as conn:
-                return tuple(conn.execute("SELECT category, category_source, needs_review FROM transactions WHERE id=?", (tx,)).fetchone())
+                return tuple(conn.execute(select(Transaction.category, Transaction.category_source,
+                                                 Transaction.needs_review)
+                                          .where(Transaction.id == tx)).fetchone())
         try:
             path, body = "transactions/" + tx + "/category", {"category": "Groceries", "remember": False}
             with self.assertRaisesRegex(mcp_server.ToolError, "switched off"):       # scope, switch off
@@ -226,7 +236,8 @@ class PagesTests(RunwayServer):
             with self.assertRaisesRegex(mcp_server.ToolError, "Unknown category"):   # only categories that exist
                 mcp_http.local_fetch(path, {}, {"category": "Made Up " + self.tag}, CATEGORIZE)
             with db.session() as conn:
-                conn.execute("UPDATE transactions SET category='Restaurants', category_source='ai', needs_review=1 WHERE id=?", (tx,))
+                conn.execute(update(Transaction).where(Transaction.id == tx)
+                             .values(category="Restaurants", category_source="ai", needs_review=1))
             mcp_http.local_fetch("transactions/" + tx + "/accept", {}, {}, CATEGORIZE)
             self.assertEqual(row(), ("Restaurants", "manual", 0))
 
@@ -243,9 +254,11 @@ class PagesTests(RunwayServer):
 
             mcp_http.local_fetch(f"retail/items/{item}", {}, {"category": "Groceries", "remember": False}, CATEGORIZE)
             with db.session() as conn:
-                self.assertEqual(tuple(conn.execute("SELECT category, category_source FROM retail_items WHERE id=?", (item,)).fetchone()),
+                self.assertEqual(tuple(conn.execute(select(RetailItem.category, RetailItem.category_source)
+                                                    .where(RetailItem.id == item)).fetchone()),
                                  ("Groceries", "manual"))
-                self.assertIsNone(conn.execute("SELECT 1 FROM retail_item_memory WHERE key LIKE ?", (f"%{self.tag}%",)).fetchone())
+                self.assertIsNone(conn.execute(select(RetailItemMemory.key)
+                                               .where(RetailItemMemory.key.like(f"%{self.tag}%"))).fetchone())
             for other in (f"transactions/{tx}/split", f"transactions/{tx}/recurring", "transactions/bulk", "recategorize",
                          "categories", "categories/rename", "categories/remove", f"retail/orders/costco%7C{self.tag}/suggest"):
                 with self.subTest(path=other), self.assertRaisesRegex(mcp_server.ToolError, "Not found"):
@@ -256,10 +269,10 @@ class PagesTests(RunwayServer):
                 mcp_http.local_fetch(path, {}, body, CATEGORIZE)
         finally:
             with db.session() as conn:
-                conn.execute("DELETE FROM tx_splits WHERE tx_id=?", (tx,))
-                conn.execute("DELETE FROM transactions WHERE id=?", (tx,))
-                conn.execute("DELETE FROM retail_items WHERE order_id=?", ("costco|" + self.tag,))
-                conn.execute("DELETE FROM retail_orders WHERE id=?", ("costco|" + self.tag,))
+                conn.execute(delete(TxSplit).where(TxSplit.tx_id == tx))
+                conn.execute(delete(Transaction).where(Transaction.id == tx))
+                conn.execute(delete(RetailItem).where(RetailItem.order_id == "costco|" + self.tag))
+                conn.execute(delete(RetailOrder).where(RetailOrder.id == "costco|" + self.tag))
 
 
 class SettingsTests(RunwayServer):
@@ -310,7 +323,8 @@ class SettingsTests(RunwayServer):
             urllib.request.urlopen(ping, timeout=20)
         self.assertEqual(e.exception.code, 401)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT revoked_reason FROM oauth_grants WHERE id=?", (rows[1]["id"],)).fetchone()[0],
+            self.assertEqual(conn.execute(select(OAuthGrant.revoked_reason)
+                                          .where(OAuthGrant.id == rows[1]["id"])).fetchone()[0],
                              "revoked_in_settings")
         self.assertEqual(self.api(f"/api/mcp-settings/connections/{rows[1]['id']}/revoke", {})[0], 404)
         self.assertEqual(self.api("/api/mcp-settings/connections/nope/revoke", {})[0], 404)

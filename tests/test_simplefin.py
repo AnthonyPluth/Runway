@@ -9,7 +9,10 @@ from unittest import mock
 from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from sqlalchemy import select, update
+
 from runway import simplefin, splits
+from runway.models import Account, Transaction
 from tests.shared import TODAY, LedgerCase, ts
 
 
@@ -26,9 +29,9 @@ class SimpleFinStoreTests(LedgerCase):
         ])
         new = simplefin.store_payload(self.conn, p1, date(2026, 9, 1))
         self.assertEqual(set(new), {"A1|t1", "A1|p1"})
-        a = self.conn.execute("SELECT * FROM accounts").fetchone()
+        a = self.conn.execute(select(Account)).fetchone()
         self.assertEqual((a["kind"], a["balance"], a["org"]), ("credit", -123.45, "Chase"))
-        self.conn.execute("UPDATE transactions SET category='Rideshare & Taxi' WHERE id='A1|p1'")
+        self.conn.execute(update(Transaction).where(Transaction.id == "A1|p1").values(category="Rideshare & Taxi"))
         # Pending posts with a new id: category carries over, not reported as new.
         p2 = self.payload([
             {"id": "t1", "posted": ts(date(2026, 9, 20)), "amount": "-10.00", "description": "SQ *CAFE"},
@@ -36,16 +39,18 @@ class SimpleFinStoreTests(LedgerCase):
         ])
         new2 = simplefin.store_payload(self.conn, p2, date(2026, 9, 1))
         self.assertEqual(new2, [])
-        self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id='A1|t2'").fetchone()[0], "Rideshare & Taxi")
-        self.assertIsNone(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|p1'").fetchone())
+        self.assertEqual(self.conn.execute(select(Transaction.category)
+                                           .where(Transaction.id == "A1|t2")).fetchone()[0], "Rideshare & Taxi")
+        self.assertIsNone(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|p1")).fetchone())
         p3 = self.payload([{"id": "p9", "posted": 0, "transacted_at": ts(date(2026, 9, 23)), "amount": "-7.00",
                             "description": "LYFT *RIDE", "pending": True}])
         simplefin.store_payload(self.conn, p3, date(2026, 9, 1))
-        self.conn.execute("UPDATE transactions SET category='Rideshare & Taxi' WHERE id='A1|p9'")
+        self.conn.execute(update(Transaction).where(Transaction.id == "A1|p9").values(category="Rideshare & Taxi"))
         p4 = self.payload([{"id": "p10", "posted": 0, "transacted_at": ts(date(2026, 9, 23)), "amount": "-7.00",
                             "description": "LYFT *RIDE", "pending": True}])
         self.assertEqual(simplefin.store_payload(self.conn, p4, date(2026, 9, 1)), [])
-        self.assertEqual(self.conn.execute("SELECT category FROM transactions WHERE id='A1|p10'").fetchone()[0], "Rideshare & Taxi")
+        self.assertEqual(self.conn.execute(select(Transaction.category)
+                                           .where(Transaction.id == "A1|p10")).fetchone()[0], "Rideshare & Taxi")
 
     def test_a_split_pending_charge_keeps_its_parts_when_it_posts_under_a_new_id(self):
         simplefin.store_payload(self.conn, self.payload([{"id": "p1", "posted": 0, "transacted_at": ts(date(2026, 9, 22)),
@@ -55,7 +60,8 @@ class SimpleFinStoreTests(LedgerCase):
                                                                 "description": "TARGET"}]), date(2026, 9, 1))
         self.assertEqual(new, [])
         self.assertEqual([(p["amount"], p["category"]) for p in splits.get(self.conn, "A1|t1")], [(-60.0, "Groceries"), (-40.0, "Shopping")])
-        self.assertEqual(self.conn.execute("SELECT is_split FROM transactions WHERE id='A1|t1'").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute(select(Transaction.is_split)
+                                           .where(Transaction.id == "A1|t1")).fetchone()[0], 1)
 
     def test_a_hold_that_never_posts_is_cleared(self):
         old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
@@ -63,9 +69,9 @@ class SimpleFinStoreTests(LedgerCase):
         simplefin.store_payload(self.conn, old, date(2026, 8, 1))
         # Weeks later the hold is gone from the bank; routine syncs only re-read the last 14 days.
         simplefin.store_payload(self.conn, self.payload([]), date(2026, 8, 20))   # a sync on Sep 3
-        self.assertTrue(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())   # 24 days: could still post
+        self.assertTrue(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|h1")).fetchone())   # 24 days: could still post
         simplefin.store_payload(self.conn, self.payload([]), date(2026, 9, 1))    # Sep 15: 36 days
-        self.assertIsNone(self.conn.execute("SELECT 1 FROM transactions WHERE id='A1|h1'").fetchone())
+        self.assertIsNone(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|h1")).fetchone())
 
     def test_sync_chunks_backfill(self):
         calls = []

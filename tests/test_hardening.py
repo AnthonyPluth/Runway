@@ -18,7 +18,10 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
+from sqlalchemy import delete, insert, select
+
 from runway import backup, carta, db, notify, oidc, secretbox, server, simplefin
+from runway.models import AuthSession, Merchant, NotifyLog, PushSubscription, Setting
 from tests.shared import own_database
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")
@@ -36,7 +39,7 @@ class SignInTests(unittest.TestCase):
 
     def tearDown(self):
         with db.session() as c:
-            c.execute("DELETE FROM auth_sessions")
+            c.execute(delete(AuthSession))
         for k, v in self.saved.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -64,13 +67,13 @@ class SignInTests(unittest.TestCase):
 
     def test_removed_email_ends_sessions(self):
         with db.session() as c:
-            c.execute("INSERT INTO auth_sessions(token_hash, sub, email, name, created, expires) VALUES (?,?,?,?,?,?)",
-                      (oidc._hash("tok"), "u1", "me@example.com", "Me", time.time(), time.time() + 3600))
+            c.execute(insert(AuthSession).values(token_hash=oidc._hash("tok"), sub="u1", email="me@example.com",
+                                                 name="Me", created=time.time(), expires=time.time() + 3600))
             self.assertEqual(oidc.session_user(c, "tok")["email"], "me@example.com")
         os.environ["OIDC_ALLOWED_EMAILS"] = "someone@example.com"
         with db.session() as c:
             self.assertIsNone(oidc.session_user(c, "tok"))
-            self.assertIsNone(c.execute("SELECT 1 FROM auth_sessions").fetchone())   # and it's gone for good
+            self.assertIsNone(c.execute(select(AuthSession.token_hash)).fetchone())   # and it's gone for good
         os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com"
         with db.session() as c:
             self.assertIsNone(oidc.session_user(c, "tok"))
@@ -91,7 +94,7 @@ class ServerTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.httpd.server_close()
         with db.session() as c:   # on Postgres the tests share one database: leave it as found
-            c.execute("DELETE FROM merchants WHERE id LIKE 'test:%'")
+            c.execute(delete(Merchant).where(Merchant.id.like("test:%")))
             db.set_setting(c, "carta_env", None)
         cls.tmp.cleanup()
         if cls.saved is None:
@@ -153,10 +156,11 @@ class ServerTests(unittest.TestCase):
     def test_only_image_logos_are_served(self):
         png = b"\x89PNG\r\n\x1a\n" + bytes(16)
         with db.session() as c:
-            c.execute("INSERT INTO merchants(id, name, logo, logo_type) VALUES ('test:png', 'P', ?, 'image/png')",
-                      (base64.b64encode(png).decode(),))
-            c.execute("INSERT INTO merchants(id, name, logo, logo_type) VALUES ('test:html', 'H', ?, 'text/html')",
-                      (base64.b64encode(b"<script>alert(1)</script>").decode(),))
+            c.execute(insert(Merchant).values(id="test:png", name="P", logo=base64.b64encode(png).decode(),
+                                              logo_type="image/png"))
+            c.execute(insert(Merchant).values(id="test:html", name="H",
+                                              logo=base64.b64encode(b"<script>alert(1)</script>").decode(),
+                                              logo_type="text/html"))
         code, h, body = self.open("/api/merchants/test:png/logo")
         self.assertEqual((code, body, h["Content-Type"]), (200, png, "image/png"))
         self.assertTrue(any("sandbox" in v for v in h.get_all("Content-Security-Policy")))
@@ -320,7 +324,8 @@ class NotifyTests(unittest.TestCase):
     def test_alert_is_remembered_even_if_the_run_fails_after_sending(self):
         alert = {"key": "test:1", "title": "Hello", "body": "b"}
         with db.session(self.path) as c:
-            c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, created) VALUES ('https://fcm.googleapis.com/x','k','a','d',0)")
+            c.execute(insert(PushSubscription).values(endpoint="https://fcm.googleapis.com/x", p256dh="k", auth="a",
+                                                      device="d", created=0))
         with mock.patch.object(notify, "alerts", return_value=[alert]), \
                 mock.patch.object(notify, "send_all", side_effect=RuntimeError("after sending")) as send:
             with self.assertRaises(RuntimeError):
@@ -328,7 +333,7 @@ class NotifyTests(unittest.TestCase):
                     notify.run(c, date(2026, 9, 28))
             send.assert_called_once()
         with db.session(self.path) as c:   # rolled back, but the alert was saved first: it won't go out twice
-            self.assertIsNotNone(c.execute("SELECT 1 FROM notify_log WHERE key='test:1'").fetchone())
+            self.assertIsNotNone(c.execute(select(NotifyLog.key).where(NotifyLog.key == "test:1")).fetchone())
 
 
 class SecretKeyTests(unittest.TestCase):
@@ -351,10 +356,10 @@ class SecretKeyTests(unittest.TestCase):
         key = os.environ["RUNWAY_SECRET_KEY"]
         self.assertNotEqual(secretbox._from_passphrase(key), secretbox._from_passphrase_v1(key))
         legacy = secretbox.PREFIX + Fernet(secretbox._from_passphrase_v1(key)).encrypt(b"sk-old").decode()
-        self.c.execute("INSERT INTO settings(key, value) VALUES ('openrouter_api_key', ?)", (legacy,))
+        self.c.execute(insert(Setting).values(key="openrouter_api_key", value=legacy))
         self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-old")   # saved by an earlier version
         self.assertEqual(secretbox.encrypt_stored(self.c), 1)                    # moved to the stretched key
-        stored = self.c.execute("SELECT value FROM settings WHERE key='openrouter_api_key'").fetchone()[0]
+        stored = self.c.execute(select(Setting.value).where(Setting.key == "openrouter_api_key")).fetchone()[0]
         Fernet(secretbox._from_passphrase(key)).decrypt(stored[len(secretbox.PREFIX):].encode())
         self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-old")
 

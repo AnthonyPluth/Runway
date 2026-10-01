@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from unittest import mock
 
+from sqlalchemy import func, insert, select, update
+
 from runway import brands, db
+from runway.models import Account, Merchant, PlaidAccount, PlaidItem
 
 
 class BrandTests(unittest.TestCase):
@@ -25,37 +28,43 @@ class BrandTests(unittest.TestCase):
         db.init(path)
         png = base64.b64encode(b"png").decode()
         with db.session(path) as c:
-            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('i','t','Citibank Online','transactions')")
-            c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name) VALUES ('p1','i','Double Cash')")
-            c.execute("INSERT INTO accounts(id, name, kind, plaid_account_id) VALUES ('a1','My card','credit','p1')")
-            c.execute("INSERT INTO accounts(id, name, org, kind, owner) VALUES ('w','Roth','Wealthfront Sara','investment','Sara')")
-            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('f','Brokerage','Fidelity Investments','investment')")
-            c.execute("INSERT INTO accounts(id, name, org, kind, owner) VALUES ('csr','CSR','Chase Bank Anthony','credit','Anthony')")
-            c.execute("INSERT INTO accounts(id, name, kind) VALUES ('vx','Venture X','credit')")   # no institution: its name says
-            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('i2','t','Vestwell','investments')")
-            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('x','Odd','?','checking')")
+            c.execute(insert(PlaidItem).values(item_id="i", access_token="t", institution_name="Citibank Online",
+                                               products="transactions"))
+            c.execute(insert(PlaidAccount).values(plaid_account_id="p1", item_id="i", name="Double Cash"))
+            c.execute(insert(Account).values(id="a1", name="My card", kind="credit", plaid_account_id="p1"))
+            c.execute(insert(Account).values(id="w", name="Roth", org="Wealthfront Sara", kind="investment",
+                                             owner="Sara"))
+            c.execute(insert(Account).values(id="f", name="Brokerage", org="Fidelity Investments", kind="investment"))
+            c.execute(insert(Account).values(id="csr", name="CSR", org="Chase Bank Anthony", kind="credit",
+                                             owner="Anthony"))
+            c.execute(insert(Account).values(id="vx", name="Venture X", kind="credit"))   # no institution: its name says
+            c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
+                                               products="investments"))
+            c.execute(insert(Account).values(id="x", name="Odd", org="?", kind="checking"))
             got = brands.account_brands(c)                                              # no Logo.dev key: letters, nothing asked
             self.assertEqual(got["a1"], {"src": None, "auto": None, "institution": "Citibank Online", "initial": "C"})
             self.assertEqual(got["w"]["institution"], "Wealthfront")                   # without the owner's name
             self.assertEqual(got["csr"]["institution"], "Chase Bank")
-            self.assertEqual(c.execute("SELECT COUNT(*) FROM merchants").fetchone()[0], 0)
+            self.assertEqual(c.execute(select(func.count()).select_from(Merchant)).fetchone()[0], 0)
             db.set_setting(c, "logodev_token", "pk_test")
             brands.account_brands(c)
-            asked = {r["id"]: r["logo_url"] for r in c.execute("SELECT id, logo_url FROM merchants")}
+            asked = {r["id"]: r["logo_url"] for r in c.execute(select(Merchant.id, Merchant.logo_url))}
             # banks Runway knows by website; the rest by name, for the next fetch
             self.assertEqual(sorted(asked), ["brand:wealthfront", "site:capitalone.com", "site:chase.com",
                                              "site:citi.com", "site:fidelity.com"])
             self.assertTrue(asked["brand:wealthfront"].startswith("https://img.logo.dev/name/Wealthfront"))
             # once a logo has been fetched (a sync does it), the account uses it
-            c.execute("UPDATE merchants SET logo=?, logo_type='image/png' WHERE id IN ('brand:wealthfront', 'site:chase.com')", (png,))
+            c.execute(update(Merchant)
+                      .where(Merchant.id.in_(["brand:wealthfront", "site:chase.com"]))
+                      .values(logo=png, logo_type="image/png"))
             got = brands.account_brands(c)
             self.assertEqual(got["w"]["src"], "/api/merchants/brand%3Awealthfront/logo")
             self.assertEqual(got["csr"]["src"], "/api/merchants/site%3Achase.com/logo")
             self.assertIsNone(got["f"]["src"])
             self.assertEqual(merchants.logo(c, "brand:wealthfront"), (b"png", "image/png"))
             # a logo you chose replaces the institution's (which stays as `auto`); "none" is the letter
-            c.execute("UPDATE accounts SET logo='chase.com' WHERE id='f'")
-            c.execute("UPDATE accounts SET logo='none' WHERE id='csr'")
+            c.execute(update(Account).where(Account.id == "f").values(logo="chase.com"))
+            c.execute(update(Account).where(Account.id == "csr").values(logo="none"))
             got = brands.account_brands(c)
             self.assertEqual(got["f"]["src"], "/api/merchants/site%3Achase.com/logo")
             self.assertIsNone(got["csr"]["src"])
@@ -67,13 +76,15 @@ class BrandTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "n.db")
         db.init(path)
         with db.session(path) as c:
-            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('i','t','Citibank Online','transactions')")
-            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('i2','t','Vestwell','investments')")
+            c.execute(insert(PlaidItem).values(item_id="i", access_token="t", institution_name="Citibank Online",
+                                               products="transactions"))
+            c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
+                                               products="investments"))
             self.assertEqual(brands.connection_logos(c), {"Citibank Online": None, "Vestwell": None})   # no key
             db.set_setting(c, "logodev_token", "pk_test")
             brands.connection_logos(c)
-            self.assertEqual(sorted(r["id"] for r in c.execute("SELECT id FROM merchants")), ["brand:vestwell", "site:citi.com"])
-            c.execute("UPDATE merchants SET logo='cG5n', logo_type='image/png'")
+            self.assertEqual(sorted(r["id"] for r in c.execute(select(Merchant.id))), ["brand:vestwell", "site:citi.com"])
+            c.execute(update(Merchant).values(logo="cG5n", logo_type="image/png"))
             self.assertEqual(brands.connection_logos(c), {"Citibank Online": "/api/merchants/site%3Aciti.com/logo",
                                                           "Vestwell": "/api/merchants/brand%3Avestwell/logo"})
 
@@ -91,7 +102,7 @@ class BrandTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "c.db")
         db.init(path)
         with db.session(path) as c:
-            c.execute("INSERT INTO accounts(id, name, org, kind) VALUES ('a','Card','Truist','credit')")
+            c.execute(insert(Account).values(id="a", name="Card", org="Truist", kind="credit"))
             with self.assertRaises(ApiError):                                           # no key: can't fetch a website's
                 api_account_logo(c, {}, {"website": "truist.com"}, "a")
             db.set_setting(c, "logodev_token", "pk_test")
@@ -100,10 +111,10 @@ class BrandTests(unittest.TestCase):
             self.assertIn("website", str(e.exception))
             with mock.patch.object(merchants, "_download", return_value=None), self.assertRaises(ApiError):
                 api_account_logo(c, {}, {"website": "truist.com"}, "a")              # Logo.dev has none: nothing changes
-            self.assertIsNone(c.execute("SELECT logo FROM accounts WHERE id='a'").fetchone()[0])
+            self.assertIsNone(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0])
             with mock.patch.object(merchants, "_download", return_value=(b"png", "image/png")):
                 api_account_logo(c, {}, {"website": "https://www.Truist.com/"}, "a")
-            self.assertEqual(c.execute("SELECT logo FROM accounts WHERE id='a'").fetchone()[0], "truist.com")
+            self.assertEqual(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0], "truist.com")
             self.assertEqual(brands.account_brands(c)["a"]["src"], "/api/merchants/site%3Atruist.com/logo")
             self.assertEqual(api_account_logo_options(c, {}, {}, "a")["choice"], {"website": "truist.com", "hidden": False})
             api_account_logo(c, {}, {"hidden": True}, "a")
@@ -144,13 +155,13 @@ class LabelTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "l.db")
         db.init(path)
         with db.session(path) as c:
-            c.executemany("INSERT INTO accounts(id, name, display_name, owner, kind) VALUES (?,?,?,?,'credit')", [
+            c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o, "kind": "credit"} for i, n, d, o in [
                 ("a", "Citi AAdvantage 8312", "AAdvantage", "Sara"),     # -> AAdvantage (Sara)
                 ("b", "CSP", "CSP (Sara)", "Sara"),                       # already says so
                 ("c", "Blue Cash", None, None),                           # no owner
-                ("d", "Checking", None, "Joint")])
-            got = {r[0]: r[1] for r in c.execute("SELECT a.id, " + db.label_sql("a") + " FROM accounts a")}
-            py = {r["id"]: db.account_label(r) for r in c.execute("SELECT * FROM accounts").fetchall()}
+                ("d", "Checking", None, "Joint")]])
+            got = {r[0]: r[1] for r in c.execute(select(Account.id, db.account_label_expr()))}
+            py = {r["id"]: db.account_label(r) for r in c.execute(select(Account)).fetchall()}
         want = {"a": "AAdvantage (Sara)", "b": "CSP (Sara)", "c": "Blue Cash", "d": "Checking (Joint)"}
         self.assertEqual(got, want)
         self.assertEqual(py, want)

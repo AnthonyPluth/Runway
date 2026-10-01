@@ -7,7 +7,10 @@ from unittest import mock
 from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+from sqlalchemy import func, insert, select, update
+
 from runway import db, plaid, planner, portfolio, prices
+from runway.models import Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -16,21 +19,24 @@ TODAY = date(2026, 9, 23)
 class Base(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it1','tok','Fidelity')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, type, subtype, balance) VALUES ('A','it1','Brokerage','investment','brokerage',0)")
-        self.c.executemany("INSERT INTO securities(id, ticker, name, type, is_cash) VALUES (?,?,?,?,?)", [
-            ("VTI", "VTI", "Vanguard Total Stock Market ETF", "etf", 0),
-            ("SPAXX", "SPAXX", "Fidelity Government Money Market", "mutual fund", 1),
-            ("XYZ", "XYZ", "XYZ Corp", "equity", 0),
-        ])
+        self.c.execute(insert(PlaidItem).values(item_id="it1", access_token="tok", institution_name="Fidelity"))
+        self.c.execute(insert(InvAccount).values(id="A", item_id="it1", name="Brokerage", type="investment",
+                                                 subtype="brokerage", balance=0))
+        self.c.execute(insert(Security), [{"id": "VTI", "ticker": "VTI", "name": "Vanguard Total Stock Market ETF",
+                                           "type": "etf", "is_cash": 0},
+                                          {"id": "SPAXX", "ticker": "SPAXX",
+                                           "name": "Fidelity Government Money Market", "type": "mutual fund",
+                                           "is_cash": 1},
+                                          {"id": "XYZ", "ticker": "XYZ", "name": "XYZ Corp", "type": "equity",
+                                           "is_cash": 0}])
 
     def tx(self, id, d, type_, sub, amount, sec=None, qty=0, price=None, fees=0):
-        self.c.execute("INSERT INTO inv_transactions(id, account_id, security_id, date, name, type, subtype, quantity, amount, price, fees) "
-                       "VALUES (?,?,?,?,?,?,?,?,?,?,?)", (id, "A", sec, d, id, type_, sub, qty, amount, price, fees))
+        self.c.execute(insert(InvTransaction).values(id=id, account_id="A", security_id=sec, date=d, name=id,
+                                                     type=type_, subtype=sub, quantity=qty, amount=amount, price=price,
+                                                     fees=fees))
 
     def price(self, ticker, d, close, adj=None):
-        self.c.execute("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
-                       "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", (ticker, d, close, adj or close))
+        db.upsert(self.c, Price, {"ticker": ticker, "date": d, "close": close, "adjclose": adj or close}, key=["ticker", "date"])
 
 
 class HistoryTests(Base):
@@ -40,8 +46,10 @@ class HistoryTests(Base):
         self.tx("t1", "2026-06-01", "cash", "deposit", -3000)
         self.tx("t2", "2026-06-02", "buy", "buy", 2500, "VTI", 10, 250)
         self.tx("t3", "2026-08-15", "cash", "dividend", -20, "VTI")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','VTI',10,300,3000,2500)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','SPAXX',520,1,520,520)")
+        self.c.execute(insert(Holding).values(account_id="A", security_id="VTI", quantity=10, price=300, value=3000,
+                                              cost_basis=2500))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=520, price=1, value=520,
+                                              cost_basis=520))
         self.price("VTI", "2026-06-01", 250)
         self.price("VTI", "2026-07-01", 275)
         self.price("VTI", "2026-08-01", 300)
@@ -88,14 +96,14 @@ class HistoryTests(Base):
 
     def test_withdrawal_not_a_loss(self):
         self.tx("t4", "2026-09-01", "cash", "withdrawal", 400)
-        self.c.execute("UPDATE holdings SET value=120, quantity=120 WHERE security_id='SPAXX'")
+        self.c.execute(update(Holding).where(Holding.security_id == "SPAXX").values(value=120, quantity=120))
         h = portfolio.history(self.c, TODAY)
         self.assertEqual(self.at(h, "2026-08-31"), 3520.0)
         self.assertEqual(self.at(h, "2026-09-01"), 3120.0)
         self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)  # unchanged by taking money out
 
     def test_hidden_accounts_excluded(self):
-        self.c.execute("UPDATE inv_accounts SET hidden=1")
+        self.c.execute(update(InvAccount).values(hidden=1))
         self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 0)
 
 
@@ -103,8 +111,9 @@ class TransferHistoryTests(Base):
     """Pins how history treats transfers, corporate actions, prices from trades alone, and balance-only accounts."""
 
     def test_transfers_trades_and_a_balance_only_account(self):
-        self.c.execute("INSERT INTO securities(id, ticker, name, type, is_cash) VALUES ('NOPX','NOPX','No Price Inc','equity',0)")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, type, subtype, balance) VALUES ('B','it1','Old 401k','investment','401k',2500)")
+        self.c.execute(insert(Security).values(id="NOPX", ticker="NOPX", name="No Price Inc", type="equity", is_cash=0))
+        self.c.execute(insert(InvAccount).values(id="B", item_id="it1", name="Old 401k", type="investment",
+                                                 subtype="401k", balance=2500))
         self.tx("d1", "2026-08-01", "cash", "deposit", -1000)
         self.tx("x1", "2026-08-05", "transfer", "transfer", 0, "XYZ", 5)            # in-kind: 5 XYZ, priced from history
         self.tx("n1", "2026-08-10", "buy", "buy", 400, "NOPX", 4, 100)             # no price history: valued at trades
@@ -112,9 +121,9 @@ class TransferHistoryTests(Base):
         self.tx("w1", "2026-09-05", "transfer", "transfer", 150)                    # cash sent out
         self.tx("s1", "2026-09-10", "transfer", "spin off", 0, "XYZ", 1)            # corporate action: shares, no flow
         self.tx("f1", "2026-09-30", "cash", "deposit", -50)                         # after today: ignored
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','XYZ',6,50,300)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','NOPX',2,110,220)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',670,1,670)")
+        self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=6, price=50, value=300))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="NOPX", quantity=2, price=110, value=220))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=670, price=1, value=670))
         self.price("XYZ", "2026-08-01", 40)
         self.price("XYZ", "2026-09-01", 45)
         self.price("XYZ", "2026-09-22", 50)
@@ -136,13 +145,14 @@ class SplitTests(Base):
         # 10 XYZ at $200, 2-for-1 split on Jul 1, now 20 at $100. Yahoo's closes are split-adjusted (100 throughout).
         self.tx("s0", "2026-06-10", "buy", "buy", 2000, "XYZ", 10, 200)
         self.tx("s1", "2026-07-01", "transfer", "split", 0, "XYZ", 10)
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','XYZ',20,100,2000,2000)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',0,1,0)")
+        self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=20, price=100, value=2000,
+                                              cost_basis=2000))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=0, price=1, value=0))
         self.tx("s_dep", "2026-06-09", "cash", "deposit", -2000)
         for d in ("2026-06-09", "2026-06-30", "2026-07-01", "2026-09-22"):
             self.price("XYZ", d, 100)
-        self.c.execute("INSERT INTO price_meta(ticker, fetched_at, ok, splits) VALUES ('XYZ', ?, 1, ?)",
-                       (datetime.now().isoformat(), json.dumps([["2026-07-01", 2.0]])))
+        self.c.execute(insert(PriceMeta).values(ticker="XYZ", fetched_at=datetime.now().isoformat(), ok=1,
+                                                splits=json.dumps([["2026-07-01", 2.0]])))
         h = portfolio.history(self.c, TODAY)
         vals = dict(zip(h["dates"], h["value"], strict=True))
         self.assertEqual(vals["2026-06-30"], 2000.0)
@@ -153,8 +163,9 @@ class SplitTests(Base):
 
 class XrayTests(Base):
     def test_rules(self):
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','XYZ',10,100,6000,4000)")
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value) VALUES ('A','SPAXX',4000,1,4000)")
+        self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=10, price=100, value=6000,
+                                              cost_basis=4000))
+        self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=4000, price=1, value=4000))
         self.tx("f1", "2026-09-01", "fee", "management fee", 80)
         ov = portfolio.overview(self.c, "1Y", TODAY)
         rules = {r["name"]: r for r in ov["xray"]}
@@ -169,7 +180,8 @@ class FireTests(Base):
 
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO holdings(account_id, security_id, quantity, price, value, cost_basis) VALUES ('A','VTI',10,300,3000,2500)")
+        self.c.execute(insert(Holding).values(account_id="A", security_id="VTI", quantity=10, price=300, value=3000,
+                                              cost_basis=2500))
 
     def plan(self):
         return portfolio.overview(self.c, "1Y", TODAY)["plan"]
@@ -210,9 +222,9 @@ class FireTests(Base):
         self.assertIsNone(planner.saved(self.c))
 
     def test_homes_and_equity_can_be_sold_into_the_plan(self):
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('mtg', 'Mortgage', 'loan', -200000)")
-        self.c.execute("INSERT INTO assets(name, kind, value, as_of, yearly_change, loan_account_id) "
-                       "VALUES ('House', 'home', 450000, ?, 3, 'mtg')", (TODAY.isoformat(),))
+        self.c.execute(insert(Account).values(id="mtg", name="Mortgage", kind="loan", balance=-200000))
+        self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(),
+                                            yearly_change=3, loan_account_id="mtg"))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
 
@@ -306,11 +318,11 @@ class SyncTests(DbCase):
         item = plaid.exchange(self.c, "public-1", {"name": "Fidelity", "institution_id": "ins_12"})
         res = plaid.sync_item(self.c, item, TODAY)
         self.assertEqual(res, {"accounts": 1, "holdings": 2, "transactions": 7})
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM inv_transactions").fetchone()[0], 7)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(InvTransaction)).fetchone()[0], 7)
         tx_calls = [c for p, c in MockPlaid.calls if p == "/investments/transactions/get"]
         self.assertEqual([c["options"]["offset"] for c in tx_calls], [0, 3, 6])
         self.assertEqual(tx_calls[0]["start_date"], (TODAY - timedelta(days=plaid.HISTORY_DAYS)).isoformat())
-        cash = self.c.execute("SELECT is_cash FROM securities WHERE id='s-cash'").fetchone()[0]
+        cash = self.c.execute(select(Security.is_cash).where(Security.id == "s-cash")).fetchone()[0]
         self.assertEqual(cash, 1)
         # second sync only re-reads a recent window
         plaid.sync_item(self.c, item, TODAY)
@@ -325,10 +337,10 @@ class SyncTests(DbCase):
         out = plaid.sync_all(self.c)
         self.assertEqual(out["items"], 0)
         self.assertIn("credentials have changed", out["errors"][0])
-        self.assertEqual(self.c.execute("SELECT error FROM plaid_items").fetchone()[0], "ITEM_LOGIN_REQUIRED")
+        self.assertEqual(self.c.execute(select(PlaidItem.error)).fetchone()[0], "ITEM_LOGIN_REQUIRED")
         plaid.remove_item(self.c, item)
-        for table in ("plaid_items", "inv_accounts", "holdings", "inv_transactions"):
-            self.assertEqual(self.c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
+        for model in (PlaidItem, InvAccount, Holding, InvTransaction):
+            self.assertEqual(self.c.execute(select(func.count()).select_from(model)).fetchone()[0], 0, model.__table__.name)
 
     def test_price_fetch_with_splits(self):
         res = prices.refresh(self.c, ["VTI", "CUR:USD"], date(2026, 1, 1))
@@ -352,10 +364,10 @@ class SyncTests(DbCase):
         with mock.patch.object(prices, "fetch", side_effect=limited):
             res = prices.refresh(self.c, ["VTI", "VXUS", "BND"], date(2026, 1, 1))
         self.assertEqual((asked, res["failed"]), (["BND"], ["BND"]))   # stops at the first refusal
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM price_meta").fetchone()[0], 0)   # nothing held against them
+        self.assertEqual(self.c.execute(select(func.count()).select_from(PriceMeta)).fetchone()[0], 0)   # nothing held against them
         with mock.patch.object(prices, "fetch", side_effect=TimeoutError("timed out")):
             prices.refresh(self.c, ["VTI"], date(2026, 1, 1))
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM price_meta").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(PriceMeta)).fetchone()[0], 0)
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1))["fetched"], ["VTI"])   # tried again next time
 
     def test_a_ticker_that_stops_answering_keeps_what_was_known(self):
@@ -366,13 +378,18 @@ class SyncTests(DbCase):
         again = ([("2026-09-22", 12.0, 11.5)], [("2026-03-02", 2.0)], {"type": None, "name": None})
         with mock.patch.object(prices, "fetch", return_value=again):   # new closes replace old ones; no name this time
             prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)
-        meta = dict(self.c.execute("SELECT ok, splits, instrument_type, long_name FROM price_meta WHERE ticker='ABC'").fetchone())
+        meta = dict(self.c.execute(select(PriceMeta.ok, PriceMeta.splits, PriceMeta.instrument_type,
+                                          PriceMeta.long_name)
+                                   .where(PriceMeta.ticker == "ABC")).fetchone())
         self.assertEqual(meta, {"ok": 1, "splits": "[[\"2026-03-02\", 2.0]]", "instrument_type": "ETF", "long_name": ""})
         with mock.patch.object(prices, "fetch", return_value=([], [], {})):   # nothing back: splits and type are kept
             self.assertEqual(prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)["failed"], ["ABC"])
-        meta = dict(self.c.execute("SELECT ok, splits, instrument_type, long_name FROM price_meta WHERE ticker='ABC'").fetchone())
+        meta = dict(self.c.execute(select(PriceMeta.ok, PriceMeta.splits, PriceMeta.instrument_type,
+                                          PriceMeta.long_name)
+                                   .where(PriceMeta.ticker == "ABC")).fetchone())
         self.assertEqual(meta, {"ok": 0, "splits": "[[\"2026-03-02\", 2.0]]", "instrument_type": "ETF", "long_name": ""})
-        rows = [tuple(r) for r in self.c.execute("SELECT date, close, adjclose FROM prices WHERE ticker='ABC' ORDER BY date")]
+        rows = [tuple(r) for r in self.c.execute(select(Price.date, Price.close, Price.adjclose)
+                                                 .where(Price.ticker == "ABC").order_by(Price.date))]
         self.assertEqual(rows, [("2026-09-21", 10.0, 9.5), ("2026-09-22", 12.0, 11.5)])
 
 
@@ -441,10 +458,10 @@ class DuplicateConnectionTests(DbCase):
     """The same login linked twice (two Wealthfront connections with the same accounts) is flagged, and refused at link."""
 
     def add(self, item, accounts, institution="Wealthfront", products="investments"):
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, products) VALUES (?,?,?,?,?)",
-                       (item, "tok", "ins_wf", institution, products))
+        self.c.execute(insert(PlaidItem).values(item_id=item, access_token="tok", institution_id="ins_wf",
+                                                institution_name=institution, products=products))
         for i, (name, mask) in enumerate(accounts):
-            self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask) VALUES (?,?,?,?)", (f"{item}-{i}", item, name, mask))
+            self.c.execute(insert(InvAccount).values(id=f"{item}-{i}", item_id=item, name=name, mask=mask))
 
     def test_duplicates_are_found(self):
         kids = [("Roth IRA", "3639"), ("Oliver's 529 Account", "6624")]
@@ -496,34 +513,36 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
 
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('wf', 't', 'Wealthfront', 'investments')")
+        self.c.execute(insert(PlaidItem).values(item_id="wf", access_token="t", institution_name="Wealthfront",
+                                                products="investments"))
 
     def inv(self, id_, name, balance):
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES (?, 'wf', ?, '1234', ?)", (id_, name, balance))
+        self.c.execute(insert(InvAccount).values(id=id_, item_id="wf", name=name, mask="1234", balance=balance))
 
     def sf(self, id_, name, balance, org="Wealthfront"):
-        self.c.execute("INSERT INTO accounts(id, name, org, kind, balance) VALUES (?,?,?, 'investment', ?)", (id_, name, org, balance))
+        self.c.execute(insert(Account).values(id=id_, name=name, org=org, kind="investment", balance=balance))
 
     def acct(self, id_):
-        return self.c.execute("SELECT account_id FROM inv_accounts WHERE id=?", (id_,)).fetchone()[0]
+        return self.c.execute(select(InvAccount.account_id).where(InvAccount.id == id_)).fetchone()[0]
 
     def test_its_own_account_when_simplefin_has_nothing_there(self):
         self.sf("et", "E*Trade", 1000, org="E*Trade")
         self.inv("a1", "Individual", 5000)
         plaid.update_investment_accounts(self.c, "wf")
         self.assertEqual(self.acct("a1"), "pl:a1")
-        row = self.c.execute("SELECT name, kind, balance FROM accounts WHERE id='pl:a1'").fetchone()
+        row = self.c.execute(select(Account.name, Account.kind, Account.balance)
+                             .where(Account.id == "pl:a1")).fetchone()
         self.assertEqual((row["name"], row["kind"], row["balance"]), ("Individual ••1234", "investment", 5000))
         from runway import networth
         self.assertAlmostEqual(networth.summary(self.c)["assets"], 6000)      # counted in net worth (with E*Trade's 1000)
-        self.c.execute("UPDATE inv_accounts SET balance=5100 WHERE id='a1'")
+        self.c.execute(update(InvAccount).where(InvAccount.id == "a1").values(balance=5100))
         plaid.update_investment_accounts(self.c, "wf")                       # balances follow each sync
-        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='pl:a1'").fetchone()[0], 5100)
+        self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "pl:a1")).fetchone()[0], 5100)
 
     def test_hiding_its_account_in_settings_hides_it_on_investments(self):
         self.inv("a1", "Individual", 5000)
         plaid.update_investment_accounts(self.c, "wf")
-        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='pl:a1'")
+        self.c.execute(update(Account).where(Account.id == "pl:a1").values(hidden=1))
         acct = next(a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if a["id"] == "a1")
         self.assertEqual((acct["hidden"], acct["hidden_in_accounts"]), (1, 1))
 
@@ -542,15 +561,16 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         plaid.match_investment(self.c, "529", "sf-529")
         plaid.match_investment(self.c, "new", "new")
         self.assertEqual(plaid.undecided_count(self.c), 0)
-        self.assertTrue(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:new'").fetchone())
+        self.assertTrue(self.c.execute(select(Account.id).where(Account.id == "pl:new")).fetchone())
         plaid.match_investment(self.c, "new", "ignore")                      # changing your mind removes its entry
-        self.assertIsNone(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:new'").fetchone())
+        self.assertIsNone(self.c.execute(select(Account.id).where(Account.id == "pl:new")).fetchone())
         with self.assertRaises(ValueError):
             plaid.match_investment(self.c, "529", "not-an-account")
 
     def test_a_matched_simplefin_account_shows_once_on_investments(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source) VALUES ('sf:sf-roth', 'sf', 'Roth IRA', 4943.43, 'simplefin')")
+        self.c.execute(insert(InvAccount).values(id="sf:sf-roth", item_id="sf", name="Roth IRA", balance=4943.43,
+                                                 source="simplefin"))
         self.inv("roth", "Roth IRA", 4943.43)
         ids = lambda: {a["id"] for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if not a["hidden"]}
         self.assertEqual(ids(), {"sf:sf-roth", "roth"})                     # not matched yet: both
@@ -559,16 +579,18 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
 
     def test_the_same_account_from_simplefin_and_plaid_is_listed_once(self):
         # E*TRADE sends ••8933 through Plaid and "Individual Brokerage (8933)" through SimpleFIN, and neither was matched
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
-                       "VALUES ('et', 't', 'E*TRADE from Morgan Stanley', 'investments')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES ('et-8933', 'et', 'Individual Brokerage -8933', '8933', 120000)")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES ('et-1111', 'et', 'Roth IRA', '1111', 30000)")
+        self.c.execute(insert(PlaidItem).values(item_id="et", access_token="t",
+                                                institution_name="E*TRADE from Morgan Stanley", products="investments"))
+        self.c.execute(insert(InvAccount).values(id="et-8933", item_id="et", name="Individual Brokerage -8933",
+                                                 mask="8933", balance=120000))
+        self.c.execute(insert(InvAccount).values(id="et-1111", item_id="et", name="Roth IRA", mask="1111",
+                                                 balance=30000))
         for id_, name in (("sf:et1", "Individual Brokerage (8933)"), ("sf:et2", "Rollover IRA (2222)")):
-            self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source, institution) VALUES (?, 'sf', ?, 1, 'simplefin', 'E*Trade')",
-                           (id_, name))
+            self.c.execute(insert(InvAccount).values(id=id_, item_id="sf", name=name, balance=1, source="simplefin",
+                                                     institution="E*Trade"))
         # "(8933)" at another firm is a different account
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, balance, source, institution) "
-                       "VALUES ('sf:rh', 'sf', 'Individual (8933)', 1, 'simplefin', 'Robinhood')")
+        self.c.execute(insert(InvAccount).values(id="sf:rh", item_id="sf", name="Individual (8933)", balance=1,
+                                                 source="simplefin", institution="Robinhood"))
         listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"]}
         self.assertNotIn("sf:et1", listed)                                   # the SimpleFIN copy isn't listed...
         self.assertTrue(listed["et-8933"]["also_simplefin"])                 # ...the Plaid one says so
@@ -577,7 +599,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.assertIn("sf:rh", listed)
         dup = next(a for a in portfolio._accounts(self.c) if a["id"] == "sf:et1")
         self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-8933", 1))   # ...and never counted
-        self.c.execute("UPDATE inv_accounts SET hidden=1 WHERE id='et-8933'")    # unticking the Plaid one: counted neither way
+        self.c.execute(update(InvAccount).where(InvAccount.id == "et-8933").values(hidden=1))    # unticking the Plaid one: counted neither way
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
         self.assertNotIn("et-8933", portfolio._visible_ids(self.c))
 
@@ -601,4 +623,4 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         plaid.update_investment_accounts(self.c, "wf")
         with mock.patch.object(plaid, "call", return_value={}):
             plaid.remove_item(self.c, "wf")
-        self.assertIsNone(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:a1'").fetchone())
+        self.assertIsNone(self.c.execute(select(Account.id).where(Account.id == "pl:a1")).fetchone())

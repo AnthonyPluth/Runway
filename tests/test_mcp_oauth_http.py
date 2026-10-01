@@ -14,8 +14,11 @@ from http.cookies import SimpleCookie
 from http.server import HTTPServer
 from unittest import mock
 
+from sqlalchemy import delete, func, select, update
+
 from runway import db, mcp_access, mcp_oauth, mcp_server, oidc, server
 from runway.server import common
+from runway.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
 from tests.shared import forget_oauth, hold_mcp_switch, tag
 from tests.test_server import NoRedirect, Provider
 
@@ -88,15 +91,14 @@ class OAuthServer(unittest.TestCase):
     def forget(self):
         with db.session() as conn:
             forget_oauth(conn, self.clients)
-            conn.execute("DELETE FROM churn_cards WHERE owner=?", (self.owner,))
+            conn.execute(delete(ChurnCard).where(ChurnCard.owner == self.owner))
             mcp_access.set_allow_writes(conn, False)
             mcp_access.set_allow_categorize(conn, False)
 
-    def mine(self, sql, *params):
-        """The first column of this SQL's first row (put {mine} in it for "this test's clients")."""
-        marks = ", ".join("?" * len(self.clients)) or "NULL"
+    def mine(self, stmt):
+        """The first column of this statement's first row (`.in_(self.clients)` picks "this test's clients")."""
         with db.session() as conn:
-            row = conn.execute(sql.format(mine=f"({marks})"), (*self.clients, *params)).fetchone()
+            row = conn.execute(stmt).fetchone()
         return row[0] if row else None
 
     def http(self, method, path, body=None, headers=None, cookies=None):
@@ -258,7 +260,8 @@ class RegistrationTests(OAuthServer):
         self.assertEqual(r.status, 413)                                           # over 8 KB
         self.assertEqual(self.http("GET", "/oauth/register").status, 405)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM oauth_clients WHERE name=?", (name,)).fetchone()[0], 0)
+            self.assertEqual(conn.execute(select(func.count())
+                                          .select_from(OAuthClient).where(OAuthClient.name == name)).fetchone()[0], 0)
         self.assertEqual(self.clients, [])
 
 
@@ -426,7 +429,8 @@ class TokenTests(OAuthServer):
         c = self.client()
         code = self.code(c)
         with db.session() as conn:
-            conn.execute("UPDATE oauth_codes SET created = created - 601 WHERE client_id=?", (c["client_id"],))
+            conn.execute(update(OAuthCode).where(OAuthCode.client_id == c["client_id"])
+                         .values(created=OAuthCode.created - 601))
         self.assertEqual(self.exchange(c, code).json["error"], "invalid_grant")
 
     def test_a_confidential_client(self):
@@ -453,7 +457,7 @@ class TokenTests(OAuthServer):
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         r = self.form("/oauth/token", {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": c["client_id"]})
         self.assertEqual(r.json["error"], "invalid_grant")
-        self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "revoked_by_client")
+        self.assertEqual(self.mine(select(OAuthGrant.revoked_reason).where(OAuthGrant.client_id.in_(self.clients))), "revoked_by_client")
 
 
 class McpTests(OAuthServer):
@@ -471,8 +475,8 @@ class McpTests(OAuthServer):
         t = self.tokens()
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
         with db.session() as conn:
-            conn.execute("UPDATE oauth_tokens SET expires = 1 WHERE kind = 'access' AND grant_id IN "
-                         "(SELECT id FROM oauth_grants WHERE client_id=?)", (self.clients[-1],))
+            grants = select(OAuthGrant.id).where(OAuthGrant.client_id == self.clients[-1])
+            conn.execute(update(OAuthToken).where(OAuthToken.kind == "access", OAuthToken.grant_id.in_(grants)).values(expires=1))
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         with db.session() as conn:   # a token Runway issued at another address (another RUNWAY_PUBLIC_URL)
             c = mcp_oauth.register(conn, {"redirect_uris": [CALLBACK]})
@@ -508,7 +512,9 @@ class McpTests(OAuthServer):
         self.assertIn("switched off", result["content"][0]["text"])
         self.assertEqual(self.rpc(token, "ping").status, 200)
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM churn_cards WHERE owner=?", (self.owner,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute(select(func.count())
+                                          .select_from(ChurnCard)
+                                          .where(ChurnCard.owner == self.owner)).fetchone()[0], 1)
 
 
 class EndToEndTests(OAuthServer):
@@ -550,7 +556,7 @@ class EndToEndTests(OAuthServer):
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
         r = self.form(asm["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": t2["refresh_token"], "client_id": reg["client_id"]})
         self.assertEqual(r.json["error"], "invalid_grant")
-        self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "refresh_reuse")
+        self.assertEqual(self.mine(select(OAuthGrant.revoked_reason).where(OAuthGrant.client_id.in_(self.clients))), "refresh_reuse")
 
 
 class SignInTests(OAuthServer):
@@ -597,7 +603,8 @@ class SignInTests(OAuthServer):
         self.assertEqual(r.status, 302)
         t = self.exchange(c, r.query()["code"]).json
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT sub, email FROM oauth_grants WHERE client_id=?", (c["client_id"],)).fetchone()[:],
+            self.assertEqual(conn.execute(select(OAuthGrant.sub, OAuthGrant.email)
+                                          .where(OAuthGrant.client_id == c["client_id"])).fetchone()[:],
                              ("user-1", "me@example.com"))
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)       # /mcp needs no session
         # The answer must come from the person who was shown the page
@@ -626,12 +633,12 @@ class SignInTests(OAuthServer):
             self.assertEqual(r.status, 401)
             self.assertEqual(r.headers["WWW-Authenticate"], f'Bearer realm="Runway", resource_metadata="{self.iss}'
                                                               '/.well-known/oauth-protected-resource/mcp", error="invalid_token"')
-            self.assertEqual(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"), "user_removed")
+            self.assertEqual(self.mine(select(OAuthGrant.revoked_reason).where(OAuthGrant.client_id.in_(self.clients))), "user_removed")
             r = self.form("/oauth/token", {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": c["client_id"]})
             self.assertEqual((r.status, r.json["error"]), (400, "invalid_grant"))
             self.assertNotIn("access_token", r.json)
-            self.assertEqual(self.mine("SELECT COUNT(*) FROM oauth_tokens WHERE grant_id IN "
-                                       "(SELECT id FROM oauth_grants WHERE client_id IN {mine})"), 0)
+            grants = select(OAuthGrant.id).where(OAuthGrant.client_id.in_(self.clients))
+            self.assertEqual(self.mine(select(func.count()).select_from(OAuthToken).where(OAuthToken.grant_id.in_(grants))), 0)
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)       # back on the list: still ended (reconnect)
 
     def test_a_person_still_allowed_keeps_their_assistant(self):
@@ -639,7 +646,7 @@ class SignInTests(OAuthServer):
         t = self.tokens()
         with mock.patch.dict(os.environ, {"OIDC_ALLOWED_EMAILS": "me@example.com,someone-else@example.com"}):
             self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
-        self.assertIsNone(self.mine("SELECT revoked_reason FROM oauth_grants WHERE client_id IN {mine}"))
+        self.assertIsNone(self.mine(select(OAuthGrant.revoked_reason).where(OAuthGrant.client_id.in_(self.clients))))
 
 
 if __name__ == "__main__":

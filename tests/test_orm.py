@@ -1,28 +1,31 @@
-"""The ORM session layer (runway/db.py): statements and the ORM Session share the Connection's transaction with the
-legacy SQL text, and the portable helpers (upsert, insert_ignore, instr, account_label_expr) behave as the SQL did."""
+"""The ORM session layer (runway/db.py): statements run with Connection.execute() and the ORM Session share the
+Connection's transaction, results read as rows did, and the portable helpers (upsert, insert_ignore, instr,
+account_label_expr, splits.parts, not_investment) give the rows they should."""
 import unittest
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, splits
-from runway.models import Account, Asset, AssetValue, Rule, Setting, Transaction
+from runway import db, schema, splits
+from runway.models import Account, Asset, AssetValue, Rule, Setting, Transaction, TxSplit
 from tests.shared import DbCase
 
 
 class SessionLayerTests(DbCase):
-    def others_see(self, sql):
+    def others_see(self, stmt):
         with db.session(self.path) as other:
-            return other.execute(sql).fetchall()
+            return other.execute(stmt).fetchall()
 
     def test_statement_results_read_like_legacy_rows(self):
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('a', 'Checking', 'checking')")
+        self.c.execute(insert(Account).values(id="a", name="Checking", kind="checking"))
         row = self.c.execute(select(Account.id, Account.name.label("n"))).fetchone()
         self.assertEqual((row[0], row["id"], row["n"], dict(row)), ("a", "a", "Checking", {"id": "a", "n": "Checking"}))
         self.assertEqual(db.rows(self.c.execute(select(Account.id))), [{"id": "a"}])
         self.assertEqual(db.rows(self.c.orm.execute(select(Account.id))), [{"id": "a"}])
         whole = db.rows(self.c.execute(select(Account)))[0]   # select(Model): every column, as SELECT * gave
-        self.assertEqual(whole, dict(self.c.execute("SELECT * FROM accounts").fetchone()))
+        self.assertEqual(list(whole), [c.name for c in schema.accounts.c])
+        self.assertEqual((whole["id"], whole["name"], whole["kind"], whole["display_name"]), ("a", "Checking", "checking", None))
         self.assertEqual(db.as_dict(self.c.orm.get(Account, "a")), whole)
+        self.assertRaisesRegex(TypeError, "SQL text isn't supported", self.c.execute, "SELECT * FROM accounts")   # only statements
 
     def test_insert_gives_lastrowid_and_rowcount(self):
         r = self.c.execute(insert(Rule).values(match="coffee", category="Coffee & Snacks"))
@@ -35,49 +38,49 @@ class SessionLayerTests(DbCase):
         self.assertEqual(self.c.execute(select(Rule.match).order_by(Rule.id)).scalars(), ["coffee", "a", "b"])
         self.assertIsNone(self.c.execute(select(Rule.match).where(Rule.id == -1)).scalar())
 
-    def test_orm_and_legacy_sql_share_one_transaction(self):
-        self.c.execute("INSERT INTO accounts(id, name) VALUES ('a', 'Checking')")   # legacy first: the Session joins
+    def test_orm_and_statements_share_one_transaction(self):
+        self.c.execute(insert(Account).values(id="a", name="Checking"))   # a statement first: the Session joins
         self.c.orm.add(Asset(name="House", kind="home", value=100.0))
-        # pending ORM changes are written before legacy SQL runs, so it sees them
-        self.assertEqual(self.c.execute("SELECT name FROM assets").fetchone()[0], "House")
-        self.assertEqual(self.others_see("SELECT * FROM assets"), [])   # nothing committed yet
+        # pending ORM changes are written before a statement runs, so it sees them
+        self.assertEqual(self.c.execute(select(Asset.name)).fetchone()[0], "House")
+        self.assertEqual(self.others_see(select(Asset)), [])   # nothing committed yet
         self.c.commit()
-        self.assertEqual(len(self.others_see("SELECT * FROM assets")), 1)
-        self.assertEqual(len(self.others_see("SELECT * FROM accounts")), 1)
+        self.assertEqual(len(self.others_see(select(Asset))), 1)
+        self.assertEqual(len(self.others_see(select(Account))), 1)
 
-    def test_orm_first_then_legacy_then_commit(self):
+    def test_orm_first_then_statements_then_commit(self):
         car = Asset(name="Car", kind="vehicle", value=5.0)
         self.c.orm.add(car)
         self.c.orm.flush()   # the Session began the transaction
-        self.c.execute("INSERT INTO asset_values(asset_id, date, value) VALUES (?, '2024-01-01', 5)", (car.id,))
+        self.c.execute(insert(AssetValue).values(asset_id=car.id, date="2024-01-01", value=5))
         self.c.commit()
-        self.assertEqual(self.others_see("SELECT asset_id FROM asset_values")[0][0], car.id)
+        self.assertEqual(self.others_see(select(AssetValue.asset_id))[0][0], car.id)
         # and both keep working after the commit (code commits before a slow network call, then carries on)
         car.value = 6.0
-        self.c.execute("UPDATE accounts SET hidden=1")
+        self.c.execute(update(Account).values(hidden=1))
         self.c.commit()
-        self.assertEqual(self.others_see("SELECT value FROM assets")[0][0], 6.0)
+        self.assertEqual(self.others_see(select(Asset.value))[0][0], 6.0)
 
     def test_rollback_undoes_both(self):
-        self.c.execute("INSERT INTO accounts(id, name) VALUES ('a', 'Checking')")
+        self.c.execute(insert(Account).values(id="a", name="Checking"))
         self.c.orm.add(Asset(name="House", kind="home"))
         self.c.orm.flush()
         self.c.rollback()
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(Account)).fetchone()[0], 0)
         self.assertEqual(self.c.execute(select(func.count()).select_from(Asset)).fetchone()[0], 0)
         with self.assertRaises(RuntimeError), db.session(self.path) as conn:
             conn.orm.add(Asset(name="Boat", kind="other"))
-            conn.execute("INSERT INTO accounts(id, name) VALUES ('b', 'Savings')")
+            conn.execute(insert(Account).values(id="b", name="Savings"))
             raise RuntimeError
-        self.assertEqual(self.others_see("SELECT * FROM assets") + self.others_see("SELECT * FROM accounts"), [])
+        self.assertEqual(self.others_see(select(Asset)) + self.others_see(select(Account)), [])
 
-    def test_legacy_writes_refresh_loaded_objects(self):
+    def test_statement_writes_refresh_loaded_objects(self):
         self.c.orm.add(Asset(id=1, name="House", kind="home", value=1.0))
         self.c.orm.flush()
         house = self.c.orm.get(Asset, 1)
-        self.c.execute("UPDATE assets SET value=2 WHERE id=1")
+        self.c.execute(update(Asset).where(Asset.id == 1).values(value=2))
         self.assertEqual(house.value, 2.0)
-        self.c.execute(update(Asset).where(Asset.id == 1).values(value=3.0))
+        self.c.execute(update(Asset).where(Asset.id == 1).values(value=Asset.value + 1))
         self.assertEqual(house.value, 3.0)
 
     def test_upsert_and_insert_ignore(self):
@@ -96,35 +99,39 @@ class SessionLayerTests(DbCase):
         db.insert_ignore(self.c, AssetValue, [{"asset_id": 1, "date": "2024-01-01", "value": 1.0}] * 2,
                          key=["asset_id", "date"])
         self.assertEqual(db.get_setting(self.c, "k"), "3x")
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM asset_values").fetchone()[0], 1)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(AssetValue)).fetchone()[0], 1)
 
-    def test_shared_fragments_match_their_sql(self):
-        self.c.executemany("INSERT INTO accounts(id, name, kind) VALUES (?,?,?)", [("a", "Checking", "checking"),
-                                                                                   ("i", "Brokerage", "investment")])
-        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, category, is_split) VALUES (?,?,?,?,?,?)", [
-            ("t1", "a", "2024-01-01", -100, "Shopping", 1), ("t2", "a", "2024-01-02", -5, "Coffee & Snacks", 0),
-            ("t3", "i", "2024-01-03", -7, None, None)])
-        self.c.executemany("INSERT INTO tx_splits(tx_id, amount, category) VALUES (?,?,?)",
-                           [("t1", -60, "Groceries"), ("t1", -40, "Shopping")])
+    def test_shared_fragments(self):
+        self.c.execute(insert(Account), [{"id": "a", "name": "Checking", "kind": "checking"},
+                                         {"id": "i", "name": "Brokerage", "kind": "investment"}])
+        self.c.execute(insert(Transaction), [
+            {"id": i, "account_id": a, "posted": d, "amount": amount, "category": cat, "is_split": split}
+            for i, a, d, amount, cat, split in [("t1", "a", "2024-01-01", -100, "Shopping", 1),
+                                                ("t2", "a", "2024-01-02", -5, "Coffee & Snacks", 0),
+                                                ("t3", "i", "2024-01-03", -7, None, None)]])
+        self.c.execute(insert(TxSplit), [{"tx_id": "t1", "amount": -60, "category": "Groceries"},
+                                         {"tx_id": "t1", "amount": -40, "category": "Shopping"}])
         p = splits.parts()
-        new = sorted(map(tuple, self.c.execute(select(p).where(db.not_investment(p.c.account_id)))))
-        old = sorted(map(tuple, self.c.execute(f"SELECT * FROM {splits.PARTS} t WHERE {db.NOT_INVESTMENT}")))
-        self.assertEqual(new, old)
-        self.assertEqual(len(new), 3)
+        got = sorted((r["id"], r["posted"], r["amount"], r["category"], r["category_source"])
+                     for r in self.c.execute(select(p).where(db.not_investment(p.c.account_id))))
+        self.assertEqual(got, [("t1", "2024-01-01", -60.0, "Groceries", "split"), ("t1", "2024-01-01", -40.0, "Shopping", "split"),
+                               ("t2", "2024-01-02", -5.0, "Coffee & Snacks", None)])   # t1 by its parts; t3 an investment
+        self.assertEqual(len(self.c.execute(select(p)).fetchall()), 4)
         self.assertEqual(list(self.c.execute(select(p)).fetchone().keys()),
-                         list(self.c.execute(f"SELECT * FROM {splits.PARTS} t").fetchone().keys()))
+                         ["id", "account_id", "posted", "amount", "payee", "description", "category", "category_source",
+                          "needs_review", "pending", "recurring_id"])
         self.assertEqual({r[0] for r in self.c.execute(select(Transaction.id).where(db.not_investment()))}, {"t1", "t2"})
 
     def test_instr_and_account_label_expr(self):
         self.assertEqual(self.c.execute(select(db.instr("hello", "ll"), db.instr("hello", "%"))).fetchone()[:], (3, 0))
-        self.c.executemany("INSERT INTO accounts(id, name, display_name, owner) VALUES (?,?,?,?)", [
+        self.c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o} for i, n, d, o in [
             ("a", "Card", None, "Sara"), ("b", "Card", "Sara's card", "sara"), ("c", "Card", "Mine", ""),
-            ("d", "Card", None, None), ("e", "50% card", None, "_")])
+            ("d", "Card", None, None), ("e", "50% card", None, "_")]])
         got = {r["id"]: r["name"] for r in self.c.execute(select(Account.id, db.account_label_expr().label("name")))}
-        want = {r["id"]: db.account_label(r) for r in self.c.execute("SELECT * FROM accounts")}
+        want = {r["id"]: db.account_label(r) for r in self.c.execute(select(Account))}
         self.assertEqual(got, want)
-        legacy = {r["id"]: r["name"] for r in self.c.execute(f"SELECT a.id, {db.label_sql('a')} AS name FROM accounts a")}
-        self.assertEqual(got, legacy)
+        self.assertEqual(got, {"a": "Card (Sara)", "b": "Sara's card", "c": "Mine", "d": "Card", "e": "50% card (_)"})
+        self.assertEqual(self.c.execute(select(Account.id).where(Account.name.like("50%"))).scalars(), ["e"])
 
 
 if __name__ == "__main__":

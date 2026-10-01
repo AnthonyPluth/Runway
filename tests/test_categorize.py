@@ -3,7 +3,10 @@ import json
 import unittest
 from datetime import date, timedelta
 
+from sqlalchemy import func, insert, select, update
+
 from runway import categories, categorize, db, server
+from runway.models import Budget, Category, Merchant, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
 from tests.shared import LedgerCase
 
 
@@ -36,7 +39,7 @@ class CategorizeTests(LedgerCase):
         self.tx("cc", "2026-09-02", 300.0, "AUTOPAY PAYMENT THANK YOU")
         self.tx("cc", "2026-09-03", -12.0, "TST*XIAN FAMOUS FOODS")
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY MERCHANT 123")
-        self.conn.execute("INSERT INTO rules(match, category) VALUES ('xian famous', 'Restaurants')")
+        self.conn.execute(insert(Rule).values(match="xian famous", category="Restaurants"))
         db.set_setting(self.conn, "openrouter_api_key", "k")
         seen = {}
 
@@ -48,9 +51,9 @@ class CategorizeTests(LedgerCase):
         self.assertEqual(counts, {"auto": 3, "rule": 1, "history": 0, "ai": 0, "review": 1})
         self.assertIn("MYSTERY MERCHANT", seen["prompt"])
         self.assertEqual(seen["model"], categorize.DEFAULT_MODEL)
-        row = self.conn.execute("SELECT * FROM transactions WHERE description LIKE 'MYSTERY%'").fetchone()
+        row = self.conn.execute(select(Transaction).where(Transaction.description.like("MYSTERY%"))).fetchone()
         self.assertEqual((row["category"], row["needs_review"], row["category_source"]), ("Shopping", 1, "ai"))
-        cats = dict(self.conn.execute("SELECT description, category FROM transactions").fetchall())
+        cats = dict(self.conn.execute(select(Transaction.description, Transaction.category)).fetchall())
         self.assertEqual(cats["DIRECT DEBIT CITI AUTOPAY PAYMENT"], "Credit Card Payment")
         self.assertEqual(cats["AUTOPAY PAYMENT THANK YOU"], "Credit Card Payment")
 
@@ -80,7 +83,8 @@ class CategorizeTests(LedgerCase):
         self.conn.commit()
         db.set_setting(self.conn, "openrouter_api_key", "k")
         other = db.connect(self.path)
-        other.execute("PRAGMA busy_timeout=1000")  # fail fast if the lock were still held
+        if not db.using_postgres():
+            other.sa.exec_driver_sql("PRAGMA busy_timeout=1000")  # fail fast if the lock were still held
         edited = {}
 
         def slow(key, model, prompt):
@@ -94,14 +98,15 @@ class CategorizeTests(LedgerCase):
         self.conn.commit()
         other.close()
         self.assertTrue(edited.get("ok"))
-        row = self.conn.execute("SELECT category, category_source FROM transactions WHERE id='cc|0'").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.category_source)
+                                .where(Transaction.id == "cc|0")).fetchone()
         self.assertEqual(tuple(row), ("Groceries", "manual"))
 
     def test_review_suggestions_need_confirmation(self):
         for d in range(3):
             self.tx("cc", f"2026-09-0{d + 1}", -9.0, "SQ *BLUE BOTTLE")
         self.tx("cc", "2026-09-05", -30.0, "Z & H GRILL CORP")
-        self.conn.execute("UPDATE transactions SET needs_review=1")
+        self.conn.execute(update(Transaction).values(needs_review=1))
         db.set_setting(self.conn, "openrouter_api_key", "k")
 
         def fake(key, model, prompt):
@@ -113,11 +118,16 @@ class CategorizeTests(LedgerCase):
         self.assertEqual([(s["merchant"], s["count"], s["category"]) for s in sug],
                          [("Blue Bottle", 3, "Coffee & Snacks"), ("Z & H Grill Corp", 1, "Restaurants")])
         # nothing applied yet
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0], 4)
+        self.assertEqual(self.conn.execute(select(func.count())
+                                           .select_from(Transaction)
+                                           .where(Transaction.needs_review == 1)).fetchone()[0], 4)
         n = categorize.apply_to_group(self.conn, sug[0]["tx_ids"], "Coffee & Snacks", remember=True)
         self.assertEqual(n, 3)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0], 1)
-        self.assertEqual(self.conn.execute("SELECT category FROM rules WHERE match='blue bottle'").fetchone()[0], "Coffee & Snacks")
+        self.assertEqual(self.conn.execute(select(func.count())
+                                           .select_from(Transaction)
+                                           .where(Transaction.needs_review == 1)).fetchone()[0], 1)
+        self.assertEqual(self.conn.execute(select(Rule.category)
+                                           .where(Rule.match == "blue bottle")).fetchone()[0], "Coffee & Snacks")
 
     def test_sync_can_skip_ai(self):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY")
@@ -147,11 +157,13 @@ class CategorizeTests(LedgerCase):
     def test_remember_creates_rule_and_propagates(self):
         self.tx("cc", "2026-09-03", -12.0, "SQ *BLUE BOTTLE 123")
         self.tx("cc", "2026-09-10", -9.0, "SQ *BLUE BOTTLE 456")
-        self.conn.execute("UPDATE transactions SET needs_review=1")
+        self.conn.execute(update(Transaction).values(needs_review=1))
         n = categorize.set_category(self.conn, "cc|0", "Coffee & Snacks", remember=True)
         self.assertEqual(n, 1)
-        self.assertEqual(self.conn.execute("SELECT match FROM rules").fetchone()[0], "blue bottle")
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM transactions WHERE needs_review=1").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(select(Rule.match)).fetchone()[0], "blue bottle")
+        self.assertEqual(self.conn.execute(select(func.count())
+                                           .select_from(Transaction)
+                                           .where(Transaction.needs_review == 1)).fetchone()[0], 0)
         with self.assertRaises(ValueError):
             categorize.set_category(self.conn, "cc|0", "Nope")
 
@@ -161,32 +173,32 @@ class CategoryTests(LedgerCase):
         super().setUp()
         self.acct("cc", "credit", -10.0)
         self.tx("cc", "2026-09-01", -12.0, "CHIPOTLE", "Restaurants")
-        self.conn.execute("INSERT INTO rules(match, category) VALUES ('chipotle', 'Restaurants')")
-        self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Restaurants', 300)")
+        self.conn.execute(insert(Rule).values(match="chipotle", category="Restaurants"))
+        self.conn.execute(insert(Budget).values(category="Restaurants", amount=300))
 
     def test_budget_rollover(self):
         # Restaurants: $300 a month, rolling over from July. The setUp's $12 CHIPOTLE is on Sep 1.
         categories.add(self.conn, "Fast food", parent="Restaurants")
-        self.conn.execute("UPDATE budgets SET rollover_from='2026-07' WHERE category='Restaurants'")
+        self.conn.execute(update(Budget).where(Budget.category == "Restaurants").values(rollover_from="2026-07"))
         self.tx("cc", "2026-06-10", -50.0, "BEFORE", "Restaurants")        # before it rolled over: not counted
         self.tx("cc", "2026-07-10", -200.0, "JULY", "Restaurants")         # $100 left
         self.tx("cc", "2026-08-10", -350.0, "AUGUST", "Fast food")         # a subcategory counts: $50 of $400 left
         cats = [c for c in categories.all_categories(self.conn) if not c["is_transfer"] and not c["is_income"]]
-        rows = {r["category"]: dict(r) for r in self.conn.execute("SELECT * FROM budgets")}
+        rows = {r["category"]: dict(r) for r in self.conn.execute(select(Budget))}
         carry = lambda m: server.budget_carry(self.conn, cats, rows, date.fromisoformat(m))["Restaurants"]
         self.assertEqual((carry("2026-07-01"), carry("2026-08-01"), carry("2026-09-01")), (0.0, 100.0, 50.0))
         self.tx("cc", "2026-08-20", -500.0, "BIG NIGHT", "Restaurants")     # going over isn't carried
         self.assertEqual(carry("2026-09-01"), 0.0)
         self.assertEqual(carry("2026-10-01"), 288.0)                        # September: $300 - $12
         server.api_budget_set(self.conn, {}, {"category": "Restaurants", "rollover": False})
-        self.assertIsNone(self.conn.execute("SELECT rollover_from FROM budgets").fetchone()[0])
+        self.assertIsNone(self.conn.execute(select(Budget.rollover_from)).fetchone()[0])
         with self.assertRaises(server.ApiError):
             server.api_budget_set(self.conn, {}, {"category": "Groceries", "rollover": True})   # no budget to roll over
 
     def test_investment_accounts_stay_out_of_transactions(self):
         self.acct("brk", "investment", 5000.0)
         self.tx("brk", "2026-09-02", -250.0, "BUY VTI")
-        self.conn.execute("UPDATE transactions SET needs_review=1")
+        self.conn.execute(update(Transaction).values(needs_review=1))
         got = server.api_transactions(self.conn, {}, None)
         self.assertEqual([t["description"] for t in got["items"]], ["CHIPOTLE"])
         self.assertEqual(got["total"], 1)
@@ -195,12 +207,13 @@ class CategoryTests(LedgerCase):
     def test_coming_up_wears_its_merchants_logo(self):
         self.acct("chk", "checking", 1000.0)
         last = (date.today() - timedelta(days=20)).isoformat()
-        self.conn.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, active) "
-                          "VALUES ('Netflix', 'chk', -15.49, 'monthly', ?, 1)", (last,))
-        rid = self.conn.execute("SELECT id FROM recurring").fetchone()[0]
+        self.conn.execute(insert(Recurring).values(name="Netflix", account_id="chk", amount=-15.49,
+                                                   frequency="monthly", anchor_date=last, active=1))
+        rid = self.conn.execute(select(Recurring.id)).fetchone()[0]
         self.tx("chk", last, -15.49, "NETFLIX.COM")
-        self.conn.execute("UPDATE transactions SET recurring_id=?, merchant_id='m-netflix' WHERE description='NETFLIX.COM'", (rid,))
-        self.conn.execute("INSERT INTO merchants(id, name, logo, logo_type) VALUES ('m-netflix', 'Netflix', 'cG5n', 'image/png')")
+        self.conn.execute(update(Transaction).where(Transaction.description == "NETFLIX.COM")
+                          .values(recurring_id=rid, merchant_id="m-netflix"))
+        self.conn.execute(insert(Merchant).values(id="m-netflix", name="Netflix", logo="cG5n", logo_type="image/png"))
         fc = server.api_overview(self.conn, {"days": ["60"]}, None)
         ev = [e for e in fc["events"] if e.get("recurring_id") == rid]
         self.assertTrue(ev)
@@ -226,12 +239,15 @@ class CategoryTests(LedgerCase):
         self.assertEqual((by["Restaurants"]["icon"], by["Restaurants"]["color"]), ("🍔", "#1c9aa8"))
         self.assertEqual(by["Fast food"]["color"], "#1c9aa8")
         categories.rename(self.conn, "Restaurants", "Eating out")                 # the look goes with the name
-        self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], "🍔")
+        self.assertEqual(self.conn.execute(select(Category.icon)
+                                           .where(Category.name == "Eating out")).fetchone()[0], "🍔")
         categories.set_look(self.conn, "Eating out", "", "")                      # back to the default
-        self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], None)
+        self.assertEqual(self.conn.execute(select(Category.icon)
+                                           .where(Category.name == "Eating out")).fetchone()[0], None)
         for icon in ("1️⃣", "#️⃣", "🇯🇵", "👍🏽", "👨‍👩‍👧‍👦", "❤️", "↩️", "▶️", "ℹ️", "‼️", "〰️", "↔️"):             # anything the emoji keyboard types
             categories.set_look(self.conn, "Eating out", icon, None)
-            self.assertEqual(self.conn.execute("SELECT icon FROM categories WHERE name='Eating out'").fetchone()[0], icon)
+            self.assertEqual(self.conn.execute(select(Category.icon)
+                                               .where(Category.name == "Eating out")).fetchone()[0], icon)
         for icon, color in (("abc", None), ("1", None), ("#", None), ("!?", None), ("é", None), ("!\ufe0f", None), ("🍔" * 17, None),
                             (None, "red"), (None, "#12345g")):
             with self.assertRaises(categories.CategoryError):
@@ -241,7 +257,7 @@ class CategoryTests(LedgerCase):
 
     def test_add_sub_rename_remove(self):
         categories.add(self.conn, "Fast food", parent="Restaurants")
-        sub = self.conn.execute("SELECT * FROM categories WHERE name='Fast food'").fetchone()
+        sub = self.conn.execute(select(Category).where(Category.name == "Fast food")).fetchone()
         self.assertEqual((sub["parent"], sub["is_transfer"], sub["is_income"]), ("Restaurants", 0, 0))
         with self.assertRaises(categories.CategoryError):
             categories.add(self.conn, "Burgers", parent="Fast food")  # one level only
@@ -251,10 +267,11 @@ class CategoryTests(LedgerCase):
         self.assertEqual(tree[tree.index("Restaurants") + 1], "Fast food")
         # rename carries transactions, rules, budgets and children along
         categories.rename(self.conn, "Restaurants", "Dining")
-        self.assertEqual(self.conn.execute("SELECT category FROM transactions").fetchone()[0], "Dining")
-        self.assertEqual(self.conn.execute("SELECT category FROM rules").fetchone()[0], "Dining")
-        self.assertEqual(self.conn.execute("SELECT category FROM budgets").fetchone()[0], "Dining")
-        self.assertEqual(self.conn.execute("SELECT parent FROM categories WHERE name='Fast food'").fetchone()[0], "Dining")
+        self.assertEqual(self.conn.execute(select(Transaction.category)).fetchone()[0], "Dining")
+        self.assertEqual(self.conn.execute(select(Rule.category)).fetchone()[0], "Dining")
+        self.assertEqual(self.conn.execute(select(Budget.category)).fetchone()[0], "Dining")
+        self.assertEqual(self.conn.execute(select(Category.parent)
+                                           .where(Category.name == "Fast food")).fetchone()[0], "Dining")
         # can't remove a parent that still has subcategories, or a built-in
         with self.assertRaises(categories.CategoryError):
             categories.remove(self.conn, "Dining")
@@ -263,9 +280,9 @@ class CategoryTests(LedgerCase):
         categories.remove(self.conn, "Fast food")
         moved = categories.remove(self.conn, "Dining", move_to="Other")
         self.assertEqual(moved, 1)
-        self.assertEqual(self.conn.execute("SELECT category FROM transactions").fetchone()[0], "Other")
-        self.assertEqual(self.conn.execute("SELECT category FROM rules").fetchone()[0], "Other")
-        self.assertIsNone(self.conn.execute("SELECT 1 FROM budgets").fetchone())
+        self.assertEqual(self.conn.execute(select(Transaction.category)).fetchone()[0], "Other")
+        self.assertEqual(self.conn.execute(select(Rule.category)).fetchone()[0], "Other")
+        self.assertIsNone(self.conn.execute(select(Budget.category)).fetchone())
 
     def test_move_rollups_and_flatten(self):
         categories.add(self.conn, "Food")
@@ -290,12 +307,14 @@ class CategoryTests(LedgerCase):
         self.assertEqual((food["value"], sorted(k["name"] for k in food["children"])), (20.0, ["Groceries & more", "Restaurants"]))
         self.assertEqual(len(server.api_transactions(self.conn, {"category": ["Food"]}, None)["items"]), 2)
         # anything nested deeper by an earlier version moves up under its top-level category
-        self.conn.execute("INSERT INTO categories(name, is_transfer, is_income, parent) VALUES ('Burgers', 0, 0, 'Restaurants')")
+        self.conn.execute(insert(Category).values(name="Burgers", is_transfer=0, is_income=0, parent="Restaurants"))
         self.assertEqual(categories.flatten(self.conn), 1)
-        self.assertEqual(self.conn.execute("SELECT parent FROM categories WHERE name='Burgers'").fetchone()[0], "Food")
+        self.assertEqual(self.conn.execute(select(Category.parent)
+                                           .where(Category.name == "Burgers")).fetchone()[0], "Food")
         categories.move(self.conn, "Burgers", None)
         categories.move(self.conn, "Burgers", "Income")
-        self.assertEqual(self.conn.execute("SELECT is_income FROM categories WHERE name='Burgers'").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute(select(Category.is_income)
+                                           .where(Category.name == "Burgers")).fetchone()[0], 1)
         with self.assertRaises(categories.CategoryError):
             categories.move(self.conn, "Transfer", "Food")
 
@@ -316,9 +335,9 @@ class CategoryTests(LedgerCase):
 
     def test_remove_without_target_sends_to_review(self):
         categories.remove(self.conn, "Restaurants")
-        row = self.conn.execute("SELECT category, needs_review FROM transactions").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.needs_review)).fetchone()
         self.assertEqual(tuple(row), (None, 1))
-        self.assertIsNone(self.conn.execute("SELECT 1 FROM rules").fetchone())
+        self.assertIsNone(self.conn.execute(select(Rule.id)).fetchone())
 
 
 class CategorizeFixTests(LedgerCase):
@@ -340,30 +359,32 @@ class CategorizeFixTests(LedgerCase):
         rules.save(self.conn, {"match": "chase credit", "category": "Transfer"})
         self.tx("chk", "2026-09-10", -300.0, "CHASE CREDIT CRD AUTOPAY")
         categorize.categorize(self.conn, use_ai=False)
-        row = self.conn.execute("SELECT category, category_source FROM transactions").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.category_source)).fetchone()
         self.assertEqual((row["category"], row["category_source"]), ("Transfer", "rule"))
 
     def test_a_split_that_cant_be_made_goes_to_review_and_the_sync_goes_on(self):
         import json
-        self.conn.execute("INSERT INTO rules(match, split) VALUES ('costco', ?)",
-                          (json.dumps([{"category": "Groceries", "percent": 60}, {"category": "Gone", "percent": 40}]),))
+        self.conn.execute(insert(Rule).values(match="costco",
+                                              split=json.dumps([{"category": "Groceries", "percent": 60},
+                                                                {"category": "Gone", "percent": 40}])))
         self.tx("chk", "2026-09-10", -250.0, "COSTCO WHSE")
         self.tx("chk", "2026-09-11", -20.0, "COFFEE")
         categorize.categorize(self.conn, use_ai=False)
-        row = self.conn.execute("SELECT is_split, needs_review FROM transactions WHERE description='COSTCO WHSE'").fetchone()
+        row = self.conn.execute(select(Transaction.is_split, Transaction.needs_review)
+                                .where(Transaction.description == "COSTCO WHSE")).fetchone()
         self.assertEqual((row["is_split"], row["needs_review"]), (0, 1))
 
     def test_renaming_or_removing_a_category_follows_order_items(self):
-        self.conn.execute("INSERT INTO retail_orders(id, retailer, order_number) VALUES ('amazon:1','amazon','1')")
-        self.conn.execute("INSERT INTO retail_items(order_id, title, amount, category, category_source) "
-                          "VALUES ('amazon:1','Oats',5,'Groceries','manual')")
-        self.conn.execute("INSERT INTO retail_item_memory(key, category) VALUES ('oats','Groceries')")
+        self.conn.execute(insert(RetailOrder).values(id="amazon:1", retailer="amazon", order_number="1"))
+        self.conn.execute(insert(RetailItem).values(order_id="amazon:1", title="Oats", amount=5, category="Groceries",
+                                                    category_source="manual"))
+        self.conn.execute(insert(RetailItemMemory).values(key="oats", category="Groceries"))
         categories.rename(self.conn, "Groceries", "Food")
-        self.assertEqual(self.conn.execute("SELECT category FROM retail_items").fetchone()[0], "Food")
-        self.assertEqual(self.conn.execute("SELECT category FROM retail_item_memory").fetchone()[0], "Food")
+        self.assertEqual(self.conn.execute(select(RetailItem.category)).fetchone()[0], "Food")
+        self.assertEqual(self.conn.execute(select(RetailItemMemory.category)).fetchone()[0], "Food")
         categories.remove(self.conn, "Food")
-        self.assertIsNone(self.conn.execute("SELECT category_source FROM retail_items").fetchone()[0])
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM retail_item_memory").fetchone()[0], 0)
+        self.assertIsNone(self.conn.execute(select(RetailItem.category_source)).fetchone()[0])
+        self.assertEqual(self.conn.execute(select(func.count()).select_from(RetailItemMemory)).fetchone()[0], 0)
 
 
 class ReportRefundTests(LedgerCase):

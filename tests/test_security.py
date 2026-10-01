@@ -10,7 +10,10 @@ import urllib.error
 import urllib.request
 from unittest import mock
 
+from sqlalchemy import delete, insert, select
+
 from runway import backup, categories, db, oidc, secretbox, server, simplefin
+from runway.models import PlaidItem, Setting, SyncLog
 from tests.test_web_app import built_app, serving
 
 
@@ -54,7 +57,7 @@ class SecretsTests(unittest.TestCase):
         self.c.close(); self.tmp.cleanup()
 
     def raw(self, key):
-        return self.c.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()[0]
+        return self.c.execute(select(Setting.value).where(Setting.key == key)).fetchone()[0]
 
     def test_secret_settings_are_encrypted(self):
         db.set_setting(self.c, "openrouter_api_key", "sk-or-123")
@@ -65,20 +68,20 @@ class SecretsTests(unittest.TestCase):
         self.assertEqual(self.raw("llm_model"), "some/model")
 
     def test_plaintext_from_older_versions_is_encrypted_at_start(self):
-        self.c.execute("INSERT INTO settings(key, value) VALUES ('plaid_secret', 'plain-secret')")
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token) VALUES ('i1', 'access-plain')")
+        self.c.execute(insert(Setting).values(key="plaid_secret", value="plain-secret"))
+        self.c.execute(insert(PlaidItem).values(item_id="i1", access_token="access-plain"))
         self.assertEqual(secretbox.encrypt_stored(self.c), 2)
         self.assertTrue(self.raw("plaid_secret").startswith("enc:v1:"))
-        tok = self.c.execute("SELECT access_token FROM plaid_items").fetchone()[0]
+        tok = self.c.execute(select(PlaidItem.access_token)).fetchone()[0]
         self.assertTrue(tok.startswith("enc:v1:"))
         self.assertEqual(secretbox.decrypt(tok), "access-plain")
         self.assertEqual(secretbox.encrypt_stored(self.c), 0)              # nothing left to do
 
     def test_backups_carry_secrets_encrypted(self):
         db.set_setting(self.c, "realie_api_key", "rl-key")
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token) VALUES ('i1', ?)", (secretbox.encrypt("access-1"),))
+        self.c.execute(insert(PlaidItem).values(item_id="i1", access_token=secretbox.encrypt("access-1")))
         # a value saved by a version before encryption goes out encrypted too
-        self.c.execute("INSERT INTO settings(key, value) VALUES ('finnhub_api_key', 'fh-plain')")
+        self.c.execute(insert(Setting).values(key="finnhub_api_key", value="fh-plain"))
         raw = backup.dump(self.c)
         for secret in (b"rl-key", b"access-1", b"fh-plain"):
             self.assertNotIn(secret, gzip.decompress(raw))
@@ -94,7 +97,8 @@ class SecretsTests(unittest.TestCase):
             backup.restore(c2, data)
             self.assertEqual(backup.unreadable_secrets(c2), [])
         with db.session(other) as c2:
-            self.assertTrue(c2.execute("SELECT value FROM settings WHERE key='realie_api_key'").fetchone()[0].startswith("enc:v1:"))
+            self.assertTrue(c2.execute(select(Setting.value)
+                                       .where(Setting.key == "realie_api_key")).fetchone()[0].startswith("enc:v1:"))
             self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
         # under another key they can't be read, and the restore says which
         elsewhere = os.path.join(self.tmp.name, "e.db")
@@ -218,7 +222,7 @@ class SyncStatusTests(unittest.TestCase):
         server.sync.AUTO_SYNC = True
         with db.session() as c:   # on Postgres the tests share one database: leave it as found
             db.set_setting(c, "simplefin_access_url", None)
-            c.execute("DELETE FROM sync_log")
+            c.execute(delete(SyncLog))
         self.tmp.cleanup()
         if self.saved is None:
             os.environ.pop("RUNWAY_DATA", None)
@@ -230,7 +234,7 @@ class SyncStatusTests(unittest.TestCase):
             with self.assertRaises(server.ApiError):
                 server.run_sync()
         with db.session() as c:
-            last = c.execute("SELECT ok, message FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+            last = c.execute(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
             self.assertEqual((last["ok"], last["message"]), (0, "SimpleFIN is down"))
             self.assertIsNone(db.get_setting(c, "last_sync_ok"))
 

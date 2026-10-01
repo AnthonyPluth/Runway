@@ -1,24 +1,23 @@
-"""Runway is moving from SQL text to SQLAlchemy statements built from runway/models.py
-(docs/src/content/docs/contributing/orm.md). This counts the SQL text still passed to `execute()`/`executemany()` in
-each module and fails if any module has more than tests/orm_allowlist.json allows, so the counts only go down (to 0).
+"""Runway queries with SQLAlchemy statements built from runway/models.py (docs/src/content/docs/contributing/orm.md),
+and db.Connection.execute() doesn't take SQL text. This finds any SQL text passed to `execute()`/`executemany()` in
+runway/ and tests/ and fails if there is some, so a query in text doesn't come back (in a code path the tests don't
+run, or in a test).
 
 What counts as SQL text: a string, f-string, string concatenation or formatting (`"..." + x`, `"..." % x`,
 `"...".format()`, `", ".join()`), or a variable assigned one in the same function, as the first argument. Also any
-`text(...)` without a `# raw SQL: <why>` comment on its line or the line above: text() is allowed only for SQL that
-can't be written with SQLAlchemy, and must say why. Not counted: runway/migrations (history, written once), and the
-driver-level SQL on a raw DB-API connection (`dbapi_conn.execute("PRAGMA ...")` in db.py's engine setup).
-
-After converting a module, lower its count: `python -m tests.test_orm_guard --write` rewrites the allowlist from the
-code as it is now (commit it with the conversion).
+SQLAlchemy `text(...)` without a `# raw SQL: <why>` comment on its line or the line above: text() is allowed only for
+SQL that can't be written with SQLAlchemy, and must say why. Not counted: runway/migrations (history, written once),
+the driver-level SQL on a raw DB-API connection (`dbapi_conn.execute("PRAGMA ...")` in db.py's engine setup, or a
+test's own sqlite3 connection named dbapi_conn), and `exec_driver_sql()` on a SQLAlchemy connection (db.py's schema
+upgrade, and tests that set up older schemas).
 """
 import ast
-import json
 import os
-import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ALLOWLIST = os.path.join(ROOT, "tests", "orm_allowlist.json")
+SCANNED = ("runway", "tests")
+SKIPPED_DIRS = {"migrations", "static", "fixtures", "__pycache__"}
 EXEMPT_RECEIVERS = {"dbapi_conn"}
 
 
@@ -50,11 +49,26 @@ def _string_names(fn) -> set[str]:
     return names
 
 
+def _sqlalchemy_names(tree) -> tuple[set[str], set[str]]:
+    """The names SQLAlchemy's text() goes by in this module (`from sqlalchemy import text`), and the names the
+    sqlalchemy package does (`import sqlalchemy as sa`, for `sa.text`). Another function called text isn't it."""
+    texts, modules = set(), set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and (n.module or "").split(".")[0] == "sqlalchemy":
+            texts.update(a.asname or a.name for a in n.names if a.name == "text")
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.split(".")[0] == "sqlalchemy":
+                    modules.add(a.asname or "sqlalchemy")
+    return texts, modules
+
+
 def count(path: str) -> int:
     with open(path, encoding="utf-8") as f:
         src = f.read()
     tree = ast.parse(src)
     lines = src.splitlines()
+    texts, modules = _sqlalchemy_names(tree)
     scopes = {id(tree): _string_names(tree)}
     parents = {}
     for p in ast.walk(tree):
@@ -79,8 +93,8 @@ def count(path: str) -> int:
                 continue
             if _is_sql_text(node.args[0], names_for(node)):
                 n += 1
-        elif (isinstance(f, ast.Name) and f.id == "text") or (isinstance(f, ast.Attribute) and f.attr == "text"
-                                                             and isinstance(f.value, ast.Name) and f.value.id == "sa"):
+        elif (isinstance(f, ast.Name) and f.id in texts) or (isinstance(f, ast.Attribute) and f.attr == "text"
+                                                            and isinstance(f.value, ast.Name) and f.value.id in modules):
             around = " ".join(lines[max(0, node.lineno - 2):node.lineno])
             parent = parents.get(id(node))
             if isinstance(parent, ast.keyword) and parent.arg == "server_default":   # a column default in schema.py
@@ -91,30 +105,31 @@ def count(path: str) -> int:
 
 
 def counts() -> dict[str, int]:
+    """SQL text found, by module (only modules with some)."""
     out = {}
-    base = os.path.join(ROOT, "runway")
-    for d, dirs, files in os.walk(base):
-        dirs[:] = sorted(x for x in dirs if x not in ("migrations", "static", "__pycache__"))
-        for fn in sorted(files):
-            if fn.endswith(".py"):
-                p = os.path.join(d, fn)
-                c = count(p)
-                if c:
-                    out[os.path.relpath(p, ROOT).replace(os.sep, "/")] = c
+    for top in SCANNED:
+        for d, dirs, files in os.walk(os.path.join(ROOT, top)):
+            dirs[:] = sorted(x for x in dirs if x not in SKIPPED_DIRS)
+            for fn in sorted(files):
+                if fn.endswith(".py"):
+                    p = os.path.join(d, fn)
+                    c = count(p)
+                    if c:
+                        out[os.path.relpath(p, ROOT).replace(os.sep, "/")] = c
     return dict(sorted(out.items()))
 
 
 class OrmGuardTests(unittest.TestCase):
-    def test_no_new_sql_text(self):
-        with open(ALLOWLIST) as f:
-            allowed = json.load(f)
-        now = counts()
-        over = {m: (c, allowed.get(m, 0)) for m, c in now.items() if c > allowed.get(m, 0)}
-        self.assertEqual(over, {}, "SQL text passed to execute() went up (module: (now, allowed)). Write the query with "
-                                   "SQLAlchemy and the models instead: see docs/src/content/docs/contributing/orm.md.")
+    def test_no_sql_text(self):
+        self.assertEqual(counts(), {}, "SQL text passed to execute() (module: how many). Write the query with SQLAlchemy "
+                                       "and the models instead: see docs/src/content/docs/contributing/orm.md.")
 
     def test_counter(self):
         src = '''
+import sqlalchemy as sa
+from sqlalchemy import text
+
+
 def f(conn, x):
     conn.execute("SELECT 1")
     conn.execute(f"SELECT {x}")
@@ -127,23 +142,28 @@ def f(conn, x):
     stmt = select(T)
     conn.execute(stmt)
     dbapi_conn.execute("PRAGMA foreign_keys=ON")
+    conn.sa.exec_driver_sql("PRAGMA busy_timeout=1000")
     text("SELECT 2")
+    sa.text("SELECT 3")
     # raw SQL: a window function SQLAlchemy can express, but not readably
-    text("SELECT 3")
+    text("SELECT 4")
+'''
+        own = '''
+def text(r):   # a test's own helper, not SQLAlchemy's
+    return r["text"]
+
+
+text({"text": "SELECT 5"})
 '''
         import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
-            f.write(src)
-        try:
-            self.assertEqual(count(f.name), 6)
-        finally:
-            os.unlink(f.name)
+        for code, want in ((src, 7), (own, 0)):
+            with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+                f.write(code)
+            try:
+                self.assertEqual(count(f.name), want)
+            finally:
+                os.unlink(f.name)
 
 
 if __name__ == "__main__":
-    if "--write" in sys.argv:
-        with open(ALLOWLIST, "w") as f:
-            f.write("{\n" + ",\n".join(f'  "{m}": {c}' for m, c in counts().items()) + "\n}\n")
-        print(f"wrote {ALLOWLIST}")
-    else:
-        unittest.main()
+    unittest.main()

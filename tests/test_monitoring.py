@@ -107,11 +107,12 @@ class MonitoringTests(unittest.TestCase):
         import sqlalchemy as sa
         engine = sa.create_engine("sqlite://")
         with engine.begin() as c:
-            c.execute(sa.text("CREATE TABLE tx (id INTEGER PRIMARY KEY, payee TEXT, amount REAL)"))
-            c.execute(sa.text("INSERT INTO tx VALUES (1, 'WHOLE FOODS', 87.12)"))
+            c.exec_driver_sql("CREATE TABLE tx (id INTEGER PRIMARY KEY, payee TEXT, amount REAL)")
+            c.exec_driver_sql("INSERT INTO tx VALUES (1, 'WHOLE FOODS', 87.12)")
         transport = start({"SENTRY_DSN": DSN})
         try:
             with engine.begin() as c:
+                # raw SQL: a throwaway table on a plain engine, with the bound parameters the error report must drop
                 c.execute(sa.text("INSERT INTO tx VALUES (:id, :payee, :amount)"), {"id": 1, "payee": "WHOLE FOODS", "amount": 87.12})
         except sa.exc.IntegrityError as e:
             self.assertIn("WHOLE FOODS", str(e))   # what SQLAlchemy says, and the local log keeps
