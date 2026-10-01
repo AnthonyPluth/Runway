@@ -87,7 +87,7 @@ describe("a loan's terms, for the retirement planner", () => {
     const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
     expect(rate).toHaveValue("6.25");
     expect(payment).toHaveValue("");
-    expect(payment).toHaveAttribute("placeholder", "about $1,840 from recent payments");
+    expect(payment).toHaveAttribute("placeholder", "1,840 from recent payments");
     await userEvent.type(payment, "1,900{Enter}");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg",
       { method: "POST", body: { interest_rate: "6.25", monthly_payment: "1,900" } }));

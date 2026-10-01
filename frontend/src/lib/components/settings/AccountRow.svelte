@@ -21,7 +21,7 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmt0, fmtDateTime, nb } from "$lib/format";
+  import { fmt, fmtDateTime, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -58,7 +58,7 @@
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
   // A loan's terms, for the retirement planner: the lender's through Plaid when it shares them, else yours.
   const loan = $derived(a.kind === "loan" ? a.loan : undefined);
-  const hint = $derived(loan?.inferred_payment ? `about ${fmt0(loan.inferred_payment)} from recent payments` : "e.g. 1,850");
+  const hint = $derived(loan?.inferred_payment ? `${Math.round(loan.inferred_payment).toLocaleString("en-US")} from recent payments` : "e.g. 1,850");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
@@ -226,7 +226,10 @@
         </span>
       </label>
       <label class={fieldCls} title="Left empty, it’s worked out from the payments into this account lately">Monthly payment
-        <input class={inputCls} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />
+        <span class="relative">
+          <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-xs" aria-hidden="true">$</span>
+          <input class={`${inputCls} w-full pl-6`} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />
+        </span>
       </label>
     {/if}
     {#if showSource}
