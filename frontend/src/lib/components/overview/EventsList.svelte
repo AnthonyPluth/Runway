@@ -44,6 +44,14 @@
 {:else}
   {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
+    {#if e.everyday_before}
+      <!-- What the forecast takes out day to day between items, so each balance follows from the lines above it. -->
+      <div class="cell py-1.5 text-[13px] text-muted-foreground tabular-nums"
+        title="What you usually spend day to day from this account, beyond the items listed">
+        <span class="flex-1">Everyday spending · {e.everyday_before.days} {e.everyday_before.days === 1 ? "day" : "days"}{#if accounts && e.account}{" · "}{e.account}{/if}</span>
+        <span>{fmt(e.everyday_before.amount)}</span>
+      </div>
+    {/if}
     <div class="cell">
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}

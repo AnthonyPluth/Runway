@@ -97,6 +97,8 @@ export interface ForecastEvent {
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
   balance_after?: number;
+  /** On the first item of its day: the everyday spending taken out of its account since the item before (or today). */
+  everyday_before?: { days: number; amount: number };
   account_id?: string | null;
   account?: string | null;
   /** Its merchant's logo (a recurring item's: from its last matched transaction). */

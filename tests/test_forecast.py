@@ -224,6 +224,32 @@ class ForecastTests(LedgerCase):
                 self.assertAlmostEqual(fc["total"][fc["dates"].index(e["date"])], bal, places=2)
         self.assertEqual(next(e for e in fc["events"] if e["kind"] == "card")["category"], "Credit Card Payment")
 
+    def test_a_list_of_the_items_adds_up_with_everyday_spending(self):
+        # With everyday spending on, each day's first item says what was taken out since the item before (or today), so
+        # starting balance + everyday spending + items = each item's balance, as a list of them shows it.
+        for i in range(60):
+            self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
+        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
+        self.conn.execute(insert(Recurring).values(name="Gym", account_id="chk", amount=-50, frequency="monthly",
+                                                   anchor_date="2026-09-05"))
+        fc = forecast.build(self.conn, TODAY, 60)
+        rate = fc["accounts"][0]["daily_spend"]
+        self.assertGreater(rate, 0)
+        bal, seen = 5000.0, set()
+        for e in fc["events"]:
+            ev = e.get("everyday_before")
+            if e["date"] in seen:
+                self.assertIsNone(ev)                         # only the day's first item carries it
+            else:
+                seen.add(e["date"])
+                if e["date"] != fc["dates"][0]:
+                    self.assertAlmostEqual(ev["amount"], -rate * ev["days"], places=2)
+                    bal += ev["amount"]
+            bal += e["amount"]
+            self.assertAlmostEqual(e["balance_after"], bal, places=2, msg=e["name"])
+        first = fc["events"][0]
+        self.assertEqual(first["everyday_before"]["days"], fc["dates"].index(first["date"]))   # since today
+
     def test_primary_only_and_flat_between_events(self):
         self.acct("sav", "savings", 20000.0)
         self.acct("chk2", "checking", 300.0)

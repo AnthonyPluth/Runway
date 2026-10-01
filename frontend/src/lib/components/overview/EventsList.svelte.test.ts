@@ -31,6 +31,18 @@ describe("EventsList", () => {
     expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
   });
 
+  it("shows the everyday spending between items, so the balances add up", () => {
+    show([ev({ key: "a", name: "Paycheck", amount: 5100, balance_after: 4356.13 }),
+      ev({ key: "b", date: "2026-03-19", name: "Venture X statement", amount: -1802.56, balance_after: 2363.89,
+        everyday_before: { days: 4, amount: -189.68 } }),
+      ev({ key: "c", date: "2026-03-20", name: "Costco statement", amount: -20, balance_after: 2296.47,
+        everyday_before: { days: 1, amount: -47.42 } })]);
+    expect(screen.getByText("Everyday spending · 4 days")).toBeInTheDocument();
+    expect(screen.getByText(/^[−-]\$189\.68$/)).toBeInTheDocument();
+    expect(screen.getByText("Everyday spending · 1 day")).toBeInTheDocument();
+    expect(screen.getAllByText(/Everyday spending/)).toHaveLength(2);   // none before the first item here
+  });
+
   it("shows each item's name, date, amount and the balance after it", () => {
     show([ev()]);
     expect(screen.getByText("Rent")).toBeInTheDocument();

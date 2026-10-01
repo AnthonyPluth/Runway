@@ -813,14 +813,21 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
-    # Balance of the item's account right after it lands (same-day items apply in the order listed).
+    # Balance of the item's account right after it lands (same-day items apply in the order listed), and, on the first
+    # item of its day, the everyday spending the forecast takes out of that account since its last item (or today), so
+    # a list of the items adds up.
     index = {d: i for i, d in enumerate(dates)}
     running: dict[tuple, float] = {}
+    last: dict[str, int] = {}
     for e in events:
         i, acct = index[e["date"]], e["account_id"]
         k = (acct, e["date"])
         if k not in running:
             running[k] = by_id[acct]["balance"] if i == 0 else series_by_acct[acct][i - 1] - rates.get(acct, 0.0)
+            days = i - last.get(acct, 0)
+            if days > 0 and rates.get(acct, 0.0) > 0:
+                e["everyday_before"] = {"days": days, "amount": -round(rates[acct] * days, 2)}
+            last[acct] = i
         running[k] += e["amount"]
         e["balance_after"] = round(running[k], 2)
         e["account"] = db.account_label(by_id[acct])
