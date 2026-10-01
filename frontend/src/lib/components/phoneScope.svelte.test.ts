@@ -15,6 +15,7 @@ import type { AppState } from "$lib/types";
 import { tx } from "../../test/fixtures";
 import type { BudgetCategory } from "./budget/types";
 import BudgetRow from "./budget/BudgetRow.svelte";
+import Benefits from "./churning/Benefits.svelte";
 import MobileNav from "./MobileNav.svelte";
 import NotConnected from "./NotConnected.svelte";
 import OrderDetail from "./orders/OrderDetail.svelte";
@@ -115,6 +116,19 @@ describe("a budget's row", () => {
     show();
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue(500);
     expect(screen.getByRole("button", { name: /Roll over/ })).toBeInTheDocument();
+  });
+});
+
+describe("churning benefits with none yet", () => {
+  it("say to add them on a computer, where cards are edited", () => {
+    viewport.phone = true;
+    render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
+    expect(screen.getByText("No benefits yet. Open Runway on a computer to add a card’s lounge access and credits.")).toBeInTheDocument();
+  });
+
+  it("say to edit a card on a computer screen", () => {
+    render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
+    expect(screen.getByText(/Edit a card and add its lounge access/)).toBeInTheDocument();
   });
 });
 

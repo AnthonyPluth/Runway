@@ -3,6 +3,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { fmt0 } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import { cn } from "$lib/utils";
   import { benefitUse } from "./actions";
   import { benefitBoard, benefitState, canUse, isPerk, usesText, type BenefitRow } from "./churning";
@@ -40,7 +41,7 @@
 </div>
 
 {#if none}
-  <Card.Root class="mb-6"><Card.Content><p class="py-6 text-center text-sm text-muted-foreground">No benefits yet. Edit a card and add its lounge access and credits to track them here.</p></Card.Content></Card.Root>
+  <Card.Root class="mb-6"><Card.Content><p class="py-6 text-center text-sm text-muted-foreground">{isPhone() ? "No benefits yet. Open Runway on a computer to add a card’s lounge access and credits." : "No benefits yet. Edit a card and add its lounge access and credits to track them here."}</p></Card.Content></Card.Root>
 {:else}
   {#each sections as s (s.key)}
     {#if s.rows.length}
