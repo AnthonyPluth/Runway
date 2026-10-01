@@ -19,7 +19,7 @@ class Base(DbCase):
     def setUp(self):
         super().setUp()
         self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0,
-                                          "owner": "Sara"},
+                                          "owner": "Sam"},
                                          {"id": "cc", "name": "Card", "kind": "credit", "balance": 0, "owner": None}])
         self.n = 0
 
@@ -163,7 +163,7 @@ class CategoryCascadeTests(Base):
         self.c.execute(insert(Rule).values(match="", account_id="chk", review=1))
         out = api_categories.api_rules(self.c, None, None)
         self.assertEqual([r["match"] for r in out], ["costco", "pharm", "rx", ""])
-        self.assertEqual(out[-1]["summary"], "in Checking (Sara)")
+        self.assertEqual(out[-1]["summary"], "in Checking (Sam)")
         api_categories.api_rule_delete(self.c, None, None, str(out[0]["id"]))
         self.assertEqual(self.col(select(Rule.match).order_by(Rule.id)), ["pharm", "rx", ""])
 
@@ -288,7 +288,7 @@ class RecurringPinnedTests(Base):
         self.assertEqual(list(s)[:13], ["id", "name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date",
                                         "active", "amount_mode", "dates", "amount_min", "amount_max"])
         self.assertEqual((s["account_name"], s["matched_count"], s["last_matched"]["posted"], s["expected_amount"]),
-                         ("Checking (Sara)", 4, "2026-09-03", -15.49))
+                         ("Checking (Sam)", 4, "2026-09-03", -15.49))
         self.assertEqual([i["name"] for i in api_recurring.api_recurring(self.c, None, None)], ["Odd", "Short", "Streaming", "Ten", "Off"])
         # changing the merchant text drops links that no longer fit
         body = {"name": "Streaming", "account_id": "chk", "amount": -15.49, "anchor_date": "2026-06-03", "match": "Streamflix 55"}
@@ -312,8 +312,8 @@ class RecurringPinnedTests(Base):
         self.c.execute(delete(Transaction).where(Transaction.posted == "2026-08-03"))
         missed = recurring.missed(self.c, date(2026, 9, 20))
         self.assertEqual([(m["name"], m["date"], m["account_name"]) for m in missed],
-                         [("Short", "2026-09-08", "Checking (Sara)"), ("Odd", "2026-08-07", "Checking (Sara)"),
-                          ("Short", "2026-08-07", "Checking (Sara)"), ("Streaming", "2026-08-03", "Checking (Sara)")])
+                         [("Short", "2026-09-08", "Checking (Sam)"), ("Odd", "2026-08-07", "Checking (Sam)"),
+                          ("Short", "2026-08-07", "Checking (Sam)"), ("Streaming", "2026-08-03", "Checking (Sam)")])
         with self.assertRaises(ApiError):
             api_recurring.api_recurring_dismiss(self.c, None, {"key": "card:x"})
         api_recurring.api_recurring_dismiss(self.c, None, {"key": "rec:1:2026-08-03"})

@@ -104,7 +104,7 @@ class FakeCarta:
         self.calls = []
         self.token_posts = []
         self.data = {
-            "portfolios": {"portfolios": [{"id": "p1", "name": "Anthony"}]},
+            "portfolios": {"portfolios": [{"id": "p1", "name": "Alex"}]},
             "portfolios/p1/issuers": {"issuers": [{"id": "42", "legalName": "Acme Robotics, Inc."}], "nextPageToken": None},
             "portfolios/p1/issuers/42/optionGrants": {"optionGrants": [
                 {"id": "og1", "label": "ES-7", "quantity": {"value": "4800"}, "exercisePrice": {"amount": "1.00", "currency": "USD"},

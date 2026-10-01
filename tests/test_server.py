@@ -72,7 +72,7 @@ class Provider(BaseHTTPRequestHandler):
             return self.reply({"error": "invalid_grant", "error_description": "PKCE"}, 400)
         now = int(time.time())
         claims = {"iss": base, "aud": grant.get("aud", "runway"), "sub": "user-1", "email": grant["email"], "email_verified": True,
-                  "name": "Anthony", "nonce": grant["nonce"], "iat": now, "exp": now + 300, "groups": grant.get("groups", [])}
+                  "name": "Alex", "nonce": grant["nonce"], "iat": now, "exp": now + 300, "groups": grant.get("groups", [])}
         tok = sign(claims)
         if grant.get("tamper"):
             h, _b, s = tok.split(".")
@@ -155,7 +155,7 @@ class OIDCTests(unittest.TestCase):
         status, _, _, body = self.req("/api/state", session)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["user"]["email"], "me@example.com")
-        self.assertIn("Anthony", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
+        self.assertIn("Alex", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
         with db.session() as conn:   # only a hash of the token is stored
             self.assertIsNone(conn.execute(select(AuthSession.token_hash)
                                            .where(AuthSession.token_hash == ck["runway_session"])).fetchone())

@@ -327,7 +327,7 @@ class AppViewsTests(Base):
 
     def setUp(self):
         super().setUp()
-        self.c.execute(update(Account).where(Account.id == "card").values(display_name="My Card", owner="Sara"))
+        self.c.execute(update(Account).where(Account.id == "card").values(display_name="My Card", owner="Sam"))
         self.amazon_order_with_charge()
         self.tx("t1", "2024-09-11", -60.88, "AMAZON MKTPL*ZX81J2", "Shopping", "rule")
         self.tx("t2", "2024-09-12", -60.88, "SHELL OIL")
@@ -350,9 +350,9 @@ class AppViewsTests(Base):
         self.assertEqual(o["charges"], [
             {"id": f"amazon|{ORDER}|x", "date": "2024-09-09", "amount": -60.88, "payment": None, "tx_id": "t1",
              "match_source": "auto", "posted": "2024-09-11", "payee": "AMAZON MKTPL*ZX81J2", "description": "AMAZON MKTPL*ZX81J2",
-             "account_name": "My Card (Sara)", "applied": "split"},
+             "account_name": "My Card (Sam)", "applied": "split"},
             {"id": "ref", "date": "2024-09-24", "amount": 4.0, "payment": None, "tx_id": "t4", "match_source": "auto",
-             "posted": "2024-09-25", "payee": "AMZN refund", "description": "AMZN refund", "account_name": "My Card (Sara)",
+             "posted": "2024-09-25", "payee": "AMZN refund", "description": "AMZN refund", "account_name": "My Card (Sam)",
              "applied": None}])
         t = retail.order_detail(self.c, retail.order_key("target", "5555"))
         self.assertEqual((t["items"], t["details"], t["url"]), ([], 0, "https://www.target.com/orders"))
@@ -364,7 +364,7 @@ class AppViewsTests(Base):
         got = retail.candidates(self.c, f"amazon|{ORDER}|x")
         self.assertEqual([r["id"] for r in got], ["t1", "t2", "t3"])   # same amount first, then the store's by date
         self.assertEqual(got[0], {"id": "t1", "posted": "2024-09-11", "amount": -60.88, "payee": "AMAZON MKTPL*ZX81J2",
-                                  "description": "AMAZON MKTPL*ZX81J2", "account_name": "My Card (Sara)"})
+                                  "description": "AMAZON MKTPL*ZX81J2", "account_name": "My Card (Sam)"})
         with self.assertRaises(retail.RetailError):
             retail.candidates(self.c, "nope")
 

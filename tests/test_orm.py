@@ -125,12 +125,12 @@ class SessionLayerTests(DbCase):
     def test_instr_and_account_label_expr(self):
         self.assertEqual(self.c.execute(select(db.instr("hello", "ll"), db.instr("hello", "%"))).fetchone()[:], (3, 0))
         self.c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o} for i, n, d, o in [
-            ("a", "Card", None, "Sara"), ("b", "Card", "Sara's card", "sara"), ("c", "Card", "Mine", ""),
+            ("a", "Card", None, "Sam"), ("b", "Card", "Sam's card", "sam"), ("c", "Card", "Mine", ""),
             ("d", "Card", None, None), ("e", "50% card", None, "_")]])
         got = {r["id"]: r["name"] for r in self.c.execute(select(Account.id, db.account_label_expr().label("name")))}
         want = {r["id"]: db.account_label(r) for r in self.c.execute(select(Account))}
         self.assertEqual(got, want)
-        self.assertEqual(got, {"a": "Card (Sara)", "b": "Sara's card", "c": "Mine", "d": "Card", "e": "50% card (_)"})
+        self.assertEqual(got, {"a": "Card (Sam)", "b": "Sam's card", "c": "Mine", "d": "Card", "e": "50% card (_)"})
         self.assertEqual(self.c.execute(select(Account.id).where(Account.name.like("50%"))).scalars(), ["e"])
 
 

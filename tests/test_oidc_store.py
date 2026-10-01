@@ -176,8 +176,8 @@ class OIDCStoreTests(DbCase):
 
     def test_remember_user_adds_then_updates(self):
         oidc.remember_user(self.c, None, "x@example.com", "X")              # no sub: nothing to remember
-        oidc.remember_user(self.c, "u1", "me@example.com", "Anthony Example", None, 100.0)
-        self.assertEqual(self.users(), [("u1", "me@example.com", "Anthony Example", "Anthony", 100.0)])
+        oidc.remember_user(self.c, "u1", "me@example.com", "Alex Example", None, 100.0)
+        self.assertEqual(self.users(), [("u1", "me@example.com", "Alex Example", "Alex", 100.0)])
         oidc.remember_user(self.c, "u1", "new@example.com", "Tony E", "Ant", 200.0)
         self.assertEqual(self.users(), [("u1", "new@example.com", "Tony E", "Ant", 200.0)])
 
@@ -194,9 +194,9 @@ class OIDCStoreTests(DbCase):
 class OwnerTests(unittest.TestCase):
     def test_first_names(self):
         from runway import oidc
-        self.assertEqual(oidc.first_name("Anthony Pluth", "a@x.com"), "Anthony")
-        self.assertEqual(oidc.first_name(None, "sara.smith@x.com"), "Sara")
-        self.assertEqual(oidc.first_name("sara@x.com", "sara@x.com", "Sara Jane"), "Sara")
+        self.assertEqual(oidc.first_name("Alex Example", "a@x.com"), "Alex")
+        self.assertEqual(oidc.first_name(None, "sam.smith@x.com"), "Sam")
+        self.assertEqual(oidc.first_name("sam@x.com", "sam@x.com", "Sam Jane"), "Sam")
 
 
 if __name__ == "__main__":

@@ -100,7 +100,7 @@
     return isNaN(d.getTime()) ? t : fmtDateTime(d);
   });
 
-  // The line under the name: "primary · Anthony · paid from Checking · via Plaid", with what needs a look in orange.
+  // The line under the name: "primary · Alex · paid from Checking · via Plaid", with what needs a look in orange.
   // Another checking or savings account offers "Use for the forecast" there instead of "primary". With no choice made,
   // a lone checking account is the one the forecast uses.
   const primary = $derived(a.id === app.state?.primary_account

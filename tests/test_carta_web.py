@@ -143,7 +143,7 @@ class ImportTests(DbCase):
 
     def test_nothing_found_says_so(self):
         carta_web.start(self.c)
-        carta_web.ingest(self.c, "https://app.carta.com/api/me/", {"user": {"name": "Anthony"}})
+        carta_web.ingest(self.c, "https://app.carta.com/api/me/", {"user": {"name": "Alex"}})
         self.assertEqual(carta_web.finish(self.c)["grants"], 0)
         self.assertIn("Download what it read", carta.settings(self.c)["web_error"])
         self.assertTrue(carta.settings(self.c)["web_capture"])
