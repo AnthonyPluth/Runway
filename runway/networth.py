@@ -3,11 +3,12 @@
 Account balances come from SimpleFIN. Homes, vehicles and other assets are entered by hand (a home can also be
 valued by Realie, see realie.py). An asset can carry a yearly change (say -15% for a car) so its value drifts
 between your updates, and can be linked to the loan against it to show equity. A loan whose monthly payment you've
-entered (Settings → Accounts) is paid down month by month from its last balance, synced or not. A snapshot is saved each day the
-numbers are looked at, which builds the history chart going forward.
+entered (Settings → Accounts) is paid down month by month from its last balance, synced or not. A snapshot is saved
+each day the numbers are looked at, which builds the history chart going forward.
 """
 from __future__ import annotations
 
+import calendar
 import json
 import re
 from datetime import date, timedelta
@@ -45,8 +46,10 @@ def assets(conn, today: date | None = None) -> list[dict]:
 
 
 def months_between(start: date, end: date) -> int:
-    """Monthly payments made after `start` up to `end` (one a month, on start's day of the month); 0 if end is earlier."""
-    return max(0, (end.year - start.year) * 12 + end.month - start.month - (1 if end.day < start.day else 0))
+    """Monthly payments made after `start` up to `end` (one a month, on start's day of the month or the month's last
+    day if it's shorter); 0 if end is earlier."""
+    due = min(start.day, calendar.monthrange(end.year, end.month)[1])
+    return max(0, (end.year - start.year) * 12 + end.month - start.month - (1 if end.day < due else 0))
 
 
 def amortize(owed: float, rate: float | None, payment: float | None, months: int) -> float:

@@ -122,6 +122,13 @@ class LoanTests(Base):
         self.assertEqual(networth.loan_balance(a, date(2056, 1, 1)), 0.0)              # paid off, never below zero
         self.assertEqual(networth.loan_balance(a, date(2025, 1, 1)), 200000.0)         # before the balance: as it is
 
+    def test_a_payment_on_the_31st_is_made_at_the_end_of_a_shorter_month(self):
+        self.assertEqual(networth.months_between(date(2026, 1, 31), date(2026, 2, 27)), 0)
+        self.assertEqual(networth.months_between(date(2026, 1, 31), date(2026, 2, 28)), 1)
+        self.assertEqual(networth.months_between(date(2026, 1, 31), date(2026, 3, 30)), 1)
+        self.assertEqual(networth.months_between(date(2026, 1, 31), date(2026, 3, 31)), 2)
+        self.assertEqual(networth.months_between(date(2026, 3, 15), date(2026, 1, 15)), 0)
+
     def test_without_a_rate_or_payment(self):
         self.assertEqual(networth.loan_balance(self.loan(loan_payment=1000), TODAY), 188000.0)   # no rate: straight-line
         self.assertEqual(networth.loan_balance(self.loan(loan_rate=6.0), TODAY), 200000.0)        # no payment: as it is
