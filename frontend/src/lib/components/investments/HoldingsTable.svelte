@@ -79,7 +79,7 @@
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-3">
           <td class="min-w-48">
             <div class="flex gap-2.5">
-              <TickerIcon ticker={x.ticker} name={x.name} />
+              <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
               <div>
                 <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>

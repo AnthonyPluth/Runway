@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import date, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 
 from ... import categorize, db, monitoring, plaid, plaidbank, recurring, simplefin
 from ... import settings_keys as sk
@@ -199,8 +199,3 @@ def api_plaid_match(conn, _q, body):
         return plaidbank.match(conn, pid, target)
     except ValueError as e:
         raise ApiError(str(e)) from e
-
-
-def api_inv_account(conn, _q, body, acct_id):
-    conn.execute(update(InvAccount).where(InvAccount.id == acct_id).values(hidden=1 if body.get("hidden") else 0))
-    return {"ok": True}

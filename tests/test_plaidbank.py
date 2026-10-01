@@ -610,15 +610,11 @@ class PlaidBankTests(DbCase):
         plaidbank.match(self.c, "p-new", "ignore", TODAY)
         self.assertEqual(plaid.undecided_count(self.c), 1)
 
-    def test_inv_account_hidden_and_match_goes_to_the_right_kind(self):
+    def test_match_goes_to_the_right_kind(self):
         from runway import server
         self.link()
         self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", institution_name="Wealthfront"))
         self.c.execute(insert(InvAccount).values(id="w1", item_id="inv", name="Roth IRA", mask="3639", balance=7))
-        self.assertEqual(server.api_inv_account(self.c, {}, {"hidden": True}, "w1"), {"ok": True})
-        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 1)
-        server.api_inv_account(self.c, {}, {}, "w1")
-        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 0)
         self.assertEqual(server.api_plaid_match(self.c, {}, {"plaid_account_id": "w1", "target": "new"}),
                          {"ok": True, "account_id": "pl:w1"})
         a = dict(self.c.execute(select(Account.name, Account.org, Account.kind, Account.balance, Account.provider,

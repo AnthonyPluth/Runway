@@ -256,3 +256,31 @@ def merchant(*names: str | None) -> str | None:
             if rx.search(text):
                 return site
     return None
+
+
+# Fund families by name, for a fund's or ETF's logo when Logo.dev has none by its ticker (most mutual funds and many ETFs:
+# it knows companies' tickers). "Vanguard Total Stock Market Index" is shown with Vanguard's logo. Checked in order.
+FUND_FAMILIES = [
+    (r"\bvanguard\b", "vanguard.com"), (r"\bishares\b|\bblackrock\b", "ishares.com"),
+    (r"\bspdr\b|state street", "ssga.com"), (r"\bfidelity\b", "fidelity.com"), (r"\bschwab\b", "schwab.com"),
+    (r"\binvesco\b", "invesco.com"), (r"\bt\.? ?rowe price\b", "troweprice.com"),
+    (r"american funds|capital group", "capitalgroup.com"),
+    (r"\bj\.? ?p\.? ?morgan\b", "jpmorgan.com"), (r"\bpimco\b", "pimco.com"),
+    (r"\bdimensional\b|\bdfa\b", "dimensional.com"), (r"\bwisdomtree\b", "wisdomtree.com"),
+    (r"\bvaneck\b", "vaneck.com"), (r"\bproshares\b", "proshares.com"), (r"\bark (innovation|invest|genomic|next|fintech)", "ark-funds.com"),
+    (r"\bglobal x\b", "globalxetfs.com"), (r"\bfirst trust\b", "ftportfolios.com"), (r"\bgoldman sachs\b", "gsam.com"),
+    (r"\bfranklin\b|\btempleton\b", "franklintempleton.com"), (r"\bnuveen\b|\btiaa\b", "nuveen.com"),
+    (r"\bjanus\b", "janushenderson.com"), (r"\bdodge ?& ?cox\b", "dodgeandcox.com"), (r"\bmfs\b", "mfs.com"),
+    (r"\bpgim\b|\bprudential\b", "pgim.com"), (r"\bmorgan stanley\b", "morganstanley.com"),
+    (r"\bwellington\b", "wellington.com"), (r"\bnorthern (trust|funds?)\b", "northerntrust.com"),
+]
+_families = [(re.compile(p), site) for p, site in FUND_FAMILIES]
+
+
+def fund_family(name: str | None) -> str | None:
+    """The website of the fund family a security's name names ("iShares Core S&P 500 ETF" -> ishares.com)."""
+    text = " ".join((name or "").lower().split())
+    for rx, site in _families:
+        if rx.search(text):
+            return site
+    return None

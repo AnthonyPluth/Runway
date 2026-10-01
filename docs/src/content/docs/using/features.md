@@ -81,6 +81,8 @@ On Net worth → Investments.
 - **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Connections) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
 - Positions from SimpleFIN, or optionally from Plaid for accounts SimpleFIN only knows the balance of. Accounts that neither can see into, like some 401(k)s, can be **tracked by hand**: enter shares and your contribution split, and Runway invests each new deposit accordingly.
 - Editable cost basis, per share.
+- **Logos** beside each holding, with a Logo.dev key (Settings → Connections): a stock's by its ticker, and a fund's by its fund family (Vanguard, iShares, Fidelity and so on, read from the fund's name) when Logo.dev has none for the ticker. Runway downloads them when investments sync, and a holding without one shows its first letter.
+- **Which accounts count:** every investment account does, unless you hide it in Settings → Accounts, which leaves it out of the holdings, totals, charts and the retirement plan alike. There's no separate switch on the Investments page. An account that both SimpleFIN and Plaid send is counted once, as its Plaid one.
 
 ## Retirement
 

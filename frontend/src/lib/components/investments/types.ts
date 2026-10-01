@@ -35,6 +35,8 @@ export interface Holding {
   gain_pct: number | null;
   day_change: number | null;
   day_change_pct: number | null;
+  /** Where Runway serves the holding's logo (by ticker, else its fund family's), once it has fetched one. */
+  logo?: string | null;
   /** Set by live quotes: priced in the last 20 minutes while the market is open. */
   live?: boolean;
   live_time?: number;

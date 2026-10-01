@@ -23,6 +23,14 @@ const setup = (holdings = [holding()]) => {
 beforeEach(() => { inv.sort = { key: "value", dir: -1 }; vi.mocked(api).mockClear(); });
 
 describe("HoldingsTable", () => {
+  it("shows each holding's logo when the API gave one, and its letter otherwise", () => {
+    setup([holding({ group: "t:VTI", logo: "/api/merchants/ticker%3AVTI/logo" }), holding({ security_id: "s2", group: "t:XYZ", ticker: "XYZ", name: "XYZ Corp", logo: null })]);
+    const [vti, xyz] = screen.getAllByRole("row").slice(1);
+    expect(vti.querySelector("img")).toHaveAttribute("src", "/api/merchants/ticker%3AVTI/logo");
+    expect(xyz.querySelector("img")).toBeNull();
+    expect(xyz.querySelector("td span[aria-hidden]")).toHaveTextContent("X");
+  });
+
   it("shows a holding's ticker, name, accounts, shares, price and value", () => {
     setup();
     const row = screen.getAllByRole("row")[1];

@@ -227,7 +227,7 @@ def _logo_dev():
     return or_(Merchant.id.like(SITE + "%"), Merchant.id.like(BRAND + "%"), Merchant.id.like(TICKER + "%"))
 
 
-def _todo(conn, limit: int) -> list:
+def _todo(conn, limit: int, only: list[str] | None = None) -> list:
     """Logos to fetch: Plaid's that Runway doesn't have yet (or tried a month ago), and Logo.dev's (by website or name)
     that it doesn't have or last checked a month ago, when there's a Logo.dev key. Never tried ones first."""
     retry_before = (datetime.now() - timedelta(days=RETRY_DAYS)).isoformat(timespec="seconds")
@@ -237,6 +237,8 @@ def _todo(conn, limit: int) -> list:
                                  & or_(m.logo_checked.is_(None), m.logo_checked < retry_before))
     if configured(conn):
         want = or_(want, _logo_dev() & or_(m.logo_checked.is_(None), m.logo_checked < refresh_before))
+    if only is not None:
+        want = want & m.id.in_(only)
     return conn.execute(select(m.id, m.name, m.logo_url).where(m.logo_url.is_not(None), want)
                         .order_by(m.logo_checked.is_not(None), m.id).limit(limit)).fetchall()
 
@@ -245,9 +247,9 @@ def _params(token: str | None) -> str:
     return urllib.parse.urlencode({"token": token, "size": 64, "format": "png", "theme": THEME, "fallback": 404})
 
 
-def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
+def fetch_logos(conn, limit: int = PER_SYNC, opener=None, only: list[str] | None = None) -> int:
     """Download logos Runway doesn't have yet (from Plaid), and Logo.dev logos it doesn't have or last checked a month
-    ago (when there's a Logo.dev key). Returns how many it got."""
+    ago (when there's a Logo.dev key); only those merchant ids, if given. Returns how many it got."""
     global _why
     now = datetime.now()
     token = db.get_setting(conn, sk.LOGODEV_TOKEN)
@@ -256,7 +258,7 @@ def fetch_logos(conn, limit: int = PER_SYNC, opener=None) -> int:
         # can't be keeps the logo Runway has.
         conn.execute(update(Merchant).where(_logo_dev()).values(logo_checked=None))
         db.set_setting(conn, sk.LOGODEV_THEME, THEME)
-    todo = _todo(conn, limit)
+    todo = _todo(conn, limit, only)
     got = 0
     refused: set[str] = set()   # kinds of Logo.dev lookup that failed this round: the rest of that kind wait for next time
     for m in todo:
@@ -374,16 +376,56 @@ def brand_logos(conn, names) -> set[str]:
     return {k for k in names if have.get(BRAND + k)}
 
 
-def note_tickers(conn) -> None:
-    """Note the stocks and funds you hold (never cash), so a sync fetches their logos from Logo.dev by ticker. Investments
-    asks for a holding's logo at ticker:<SYMBOL> and shows a letter until it's there."""
-    have = {r["id"] for r in conn.execute(select(Merchant.id).where(Merchant.id.like(TICKER + "%")))}
-    for r in conn.execute(select(Security.ticker).distinct().join(Holding, Holding.security_id == Security.id)
-                          .where(Security.ticker.is_not(None), or_(Security.is_cash.is_(None), Security.is_cash == 0))):
+def note_tickers(conn) -> list[str]:
+    """Note the stocks and funds you hold (never cash), so a sync fetches their logos from Logo.dev by ticker, and by the
+    fund family's website for a fund Logo.dev has no ticker for. Investments shows a letter until a logo is there.
+    Returns the merchant ids of what you hold (noted now or before)."""
+    have = {r["id"] for r in conn.execute(select(Merchant.id).where(or_(Merchant.id.like(TICKER + "%"), Merchant.id.like(SITE + "%"))))}
+    ids: list[str] = []
+    for r in conn.execute(select(Security.ticker, Security.name).distinct().join(Holding, Holding.security_id == Security.id)
+                          .where(or_(Security.is_cash.is_(None), Security.is_cash == 0))):
         t = (r["ticker"] or "").strip().upper()
-        if _TICKER_RX.match(t) and TICKER + t not in have:
-            conn.execute(insert(Merchant).values(id=TICKER + t, name=t, logo_url=f"{LOGO_DEV}ticker/{urllib.parse.quote(t, safe='')}"))
-            have.add(TICKER + t)
+        fam = brands.fund_family(r["name"])
+        for mid, url, name in ([(TICKER + t, f"{LOGO_DEV}ticker/{urllib.parse.quote(t, safe='')}", t)] if _TICKER_RX.match(t) else []) + \
+                              ([(SITE + fam, LOGO_DEV + fam, None)] if fam else []):
+            if mid not in have:
+                conn.execute(insert(Merchant).values(id=mid, name=name, logo_url=url))
+                have.add(mid)
+            ids.append(mid)
+    return ids
+
+
+def holding_logos(conn, holdings: list[dict]) -> dict[str, str]:
+    """{holding's group: where Runway serves its logo}, for the holdings Runway has a logo for: by ticker, else by the
+    fund family its name gives. A holding with neither gets no entry (Investments shows a letter)."""
+    want: dict[str, list[str]] = {}
+    for h in holdings:
+        if h.get("is_cash"):
+            continue
+        t = (h.get("ticker") or "").strip().upper()
+        fam = brands.fund_family(h.get("name"))
+        ids = ([TICKER + t] if _TICKER_RX.match(t) else []) + ([SITE + fam] if fam else [])
+        if ids:
+            want[h["group"]] = ids
+    if not want:
+        return {}
+    have = {r["id"] for r in conn.execute(select(Merchant.id).where(
+        Merchant.id.in_(sorted({i for ids in want.values() for i in ids})), Merchant.logo.is_not(None)))}
+    out = {}
+    for g, ids in want.items():
+        mid = next((i for i in ids if i in have), None)
+        if mid:
+            out[g] = f"/api/merchants/{urllib.parse.quote(mid, safe='')}/logo"
+    return out
+
+
+def refresh_holding_logos(conn, opener=None) -> int:
+    """With a Logo.dev key: note what you hold and fetch the logos for it, and only it. The investment sync calls this,
+    so holdings it finds get their logo right away, not with the next bank sync (which a Plaid investments-only setup
+    never has, and which fetches only PER_SYNC logos, merchants' first). Returns how many it got."""
+    if not configured(conn):
+        return 0
+    return fetch_logos(conn, opener=opener, only=note_tickers(conn))
 
 
 def logo_dev_logos(conn, txs: list[dict]) -> dict[str, str]:

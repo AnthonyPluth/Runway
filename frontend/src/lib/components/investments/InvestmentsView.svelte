@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import AccountsTable from "$lib/components/investments/AccountsTable.svelte";
   import BarChart from "$lib/components/investments/BarChart.svelte";
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
@@ -282,10 +281,5 @@
         {/if}
       {:else}<p class="py-6 text-center text-sm text-muted-foreground">No activity.</p>{/if}
     </Card.Content>
-  </Card.Root>
-
-  <Card.Root>
-    <Card.Header><Card.Title>Accounts</Card.Title></Card.Header>
-    <Card.Content><AccountsTable accounts={d.accounts} seen={status.simplefin_seen} onchanged={load} /></Card.Content>
   </Card.Root>
 {/if}

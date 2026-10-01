@@ -24,7 +24,7 @@ from .api.churning import (
     api_churn_wish_remove, api_churn_wish_update, api_churning, api_churning_best
 )
 from .api.connections import (
-    api_connect, api_inv_account, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
+    api_connect, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
     api_plaid_link_token, api_plaid_match, api_plaid_oauth_resume, api_plaid_settings, api_plaid_status
 )
 from .api.equity import (
@@ -133,7 +133,6 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/plaid/exchange", api_plaid_exchange),
     ("POST", "/api/plaid/items/{id}/sync", api_plaid_item_sync),
     ("POST", "/api/plaid/items/{id}/remove", api_plaid_item_remove),
-    ("POST", "/api/plaid/accounts/{id}", api_inv_account),
     ("POST", "/api/plaid/match", api_plaid_match),
     ("GET", "/api/plaid/oauth_resume", api_plaid_oauth_resume),
     ("GET", "/api/investments", api_investments),

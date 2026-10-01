@@ -103,9 +103,20 @@ class HistoryTests(Base):
         self.assertEqual(self.at(h, "2026-09-01"), 3120.0)
         self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)  # unchanged by taking money out
 
-    def test_hidden_accounts_excluded(self):
-        self.c.execute(update(InvAccount).values(hidden=1))
-        self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 0)
+    def test_accounts_hidden_in_settings_are_excluded_everywhere(self):
+        # Settings -> Accounts is the only way to leave an account out of Investments
+        self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 3520.0)
+        self.c.execute(insert(Account).values(id="pl:A", name="Brokerage", kind="investment", balance=3520, hidden=1))
+        self.c.execute(update(InvAccount).where(InvAccount.id == "A").values(account_id="pl:A"))
+        ov = portfolio.overview(self.c, "1Y", TODAY)
+        self.assertEqual(ov["total"], 0)
+        self.assertEqual(ov["holdings"], [])
+        self.c.execute(update(Account).where(Account.id == "pl:A").values(hidden=0))
+        self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 3520.0)
+
+    def test_the_old_per_account_flag_no_longer_has_an_endpoint(self):
+        from runway.server import routes
+        self.assertFalse([r for r in routes.ROUTES if r[1].startswith("/api/plaid/accounts/")])
 
 
 class TransferHistoryTests(Base):
@@ -765,9 +776,8 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.assertIn("sf:rh", listed)
         dup = next(a for a in portfolio._accounts(self.c) if a["id"] == "sf:et1")
         self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-6702", 1))   # ...and never counted
-        self.c.execute(update(InvAccount).where(InvAccount.id == "et-6702").values(hidden=1))    # unticking the Plaid one: counted neither way
+        self.assertIn("et-6702", portfolio._visible_ids(self.c))
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
-        self.assertNotIn("et-6702", portfolio._visible_ids(self.c))
 
     def test_a_simplefin_account_links_to_one_plaid_account(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)

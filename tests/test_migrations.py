@@ -12,7 +12,7 @@ from sqlalchemy import func, insert, select
 
 from runway import db, schema
 from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
-                           ChurnWish, DeletedAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
+                           ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
 
 
 def drift(path):
@@ -332,6 +332,25 @@ class MigrationTests(unittest.TestCase):
                                                     description=loan, payee="Fifth Third"))
             recurring.auto_match(conn, [1])
             self.assertEqual(conn.execute(select(Transaction.recurring_id).where(Transaction.id == "chk|8")).scalar(), 1)
+
+    def test_0033_shows_accounts_left_out_on_investments_again_but_not_duplicates(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0032")
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES "
+                              "('et', 't', 'E*TRADE from Morgan Stanley', 'investments')")
+            c.exec_driver_sql("INSERT INTO inv_accounts(id, item_id, name, hidden, source, institution, account_id) VALUES "
+                              "('p1', 'et', 'Left out by me', 1, 'plaid', NULL, NULL), "
+                              "('p2', 'et', 'Shown', 0, 'plaid', NULL, NULL), "
+                              "('sf:dup', 'sf', 'Brokerage (6702)', 1, 'simplefin', 'E*Trade', NULL), "
+                              "('sf:mine', 'sf', 'Left out by me too', 1, 'simplefin', 'Robinhood', NULL)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(dict(conn.execute(select(InvAccount.id, InvAccount.hidden)).fetchall()),
+                             {"p1": 0, "p2": 0, "sf:dup": 1, "sf:mine": 0})   # the SimpleFIN copy of a Plaid account stays out
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

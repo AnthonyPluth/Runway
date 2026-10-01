@@ -132,12 +132,40 @@ class MerchantTests(DbCase):
                                          {"account_id": "ia", "security_id": "s3", "quantity": 1}])
         merchants.note_tickers(self.c)
         merchants.note_sites(self.c)
-        self.assertEqual(sorted(r[0] for r in self.c.execute(select(Merchant.id))), ["ticker:BRK.B", "ticker:VTI"])   # no cash, nothing unheld
+        self.assertEqual(sorted(r[0] for r in self.c.execute(select(Merchant.id))), ["site:vanguard.com", "ticker:BRK.B", "ticker:VTI"])   # no cash, nothing unheld; Vanguard for the fund
         url = lambda t: f"https://img.logo.dev/ticker/{t}?token=pk_test123456&size=64&format=png&theme=dark&fallback=404"
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
         self.assertEqual(merchants.fetch_logos(self.c, opener=self.opener({url("VTI"): (PNG, "image/png")})), 1)
         self.assertEqual(merchants.logo(self.c, "ticker:VTI"), (PNG, "image/png"))
         self.assertIsNone(merchants.logo(self.c, "ticker:BRK.B"))
+
+    def test_holdings_get_their_logo_by_ticker_else_by_fund_family(self):
+        from runway import portfolio
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.c.execute(insert(InvAccount).values(id="ia", item_id="item", name="Brokerage"))
+        self.c.execute(insert(Security), [
+            {"id": "s1", "ticker": "AAPL", "name": "Apple Inc", "is_cash": 0},
+            {"id": "s2", "ticker": "VTSAX", "name": "Vanguard Total Stock Market Index Admiral", "is_cash": 0},   # a fund: no logo by ticker
+            {"id": "s3", "ticker": "XYZ", "name": "XYZ Corp", "is_cash": 0},                                      # nothing known
+            {"id": "s4", "ticker": "CUR:USD", "name": "Vanguard Cash", "is_cash": 1}])
+        self.c.execute(insert(Holding), [{"account_id": "ia", "security_id": s, "quantity": 1, "value": 100} for s in ("s1", "s2", "s3", "s4")])
+        self.c.execute(insert(Merchant).values(id="site:target.com", logo_url="https://img.logo.dev/target.com"))   # a merchant: not fetched here
+        params = "token=pk_test123456&size=64&format=png&theme=dark&fallback=404"
+        got = merchants.refresh_holding_logos(self.c, opener=self.opener({
+            f"https://img.logo.dev/ticker/AAPL?{params}": (PNG, "image/png"), f"https://img.logo.dev/vanguard.com?{params}": (PNG, "image/png")}))
+        self.assertEqual(got, 2)
+        self.assertFalse([u for u in self.asked if "target.com" in u or "CUR" in u])
+        by_ticker = {h["ticker"]: h["logo"] for h in portfolio.holdings(self.c)}
+        self.assertEqual(by_ticker, {"AAPL": "/api/merchants/ticker%3AAAPL/logo", "VTSAX": "/api/merchants/site%3Avanguard.com/logo",
+                                     "XYZ": None, "CUR:USD": None})
+        self.assertEqual(merchants.logo(self.c, "ticker:AAPL"), (PNG, "image/png"))   # and the URL it gives serves the image
+
+    def test_no_logos_are_fetched_for_holdings_without_a_key(self):
+        self.c.execute(insert(InvAccount).values(id="ia", item_id="item", name="Brokerage"))
+        self.c.execute(insert(Security).values(id="s1", ticker="AAPL", name="Apple Inc", is_cash=0))
+        self.c.execute(insert(Holding).values(account_id="ia", security_id="s1", quantity=1, value=100))
+        self.assertEqual(merchants.refresh_holding_logos(self.c, opener=self.opener({})), 0)
+        self.assertEqual(self.asked, [])
 
     def by_name(self, name, token="pk_test123456"):
         return f"https://img.logo.dev/name/{urllib.parse.quote(name, safe='')}?token={token}&size=64&format=png&theme=dark&fallback=404"

@@ -28,7 +28,7 @@ from .api.categories import (
     api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
 )
 from .api.connections import (
-    LINK_SYNC_WAIT, api_connect, api_inv_account, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
+    LINK_SYNC_WAIT, api_connect, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
     api_plaid_link_token, api_plaid_match, api_plaid_oauth_resume, api_plaid_settings, api_plaid_status
 )
 from .api.equity import (

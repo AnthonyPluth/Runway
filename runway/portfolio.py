@@ -21,7 +21,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_, case, func, literal_column, or_, select
 
-from . import db, plaid, planner, prices, splits
+from . import db, merchants, plaid, planner, prices, splits
 from . import settings_keys as sk
 from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
                      ManualState, PlaidItem, Price, Security, Transaction)
@@ -45,8 +45,8 @@ def asset_class(sec: dict) -> str:
 
 
 def _accounts(conn) -> list[dict]:
-    """Investment accounts. One is hidden if you hid it here (inv_accounts.hidden) or hid the account it is in
-    Settings -> Accounts: SimpleFIN's 'sf:<account id>', or the account a Plaid one was matched to.
+    """Investment accounts. One is hidden if you hid the account it is in Settings -> Accounts (the only way to leave
+    one out): SimpleFIN's 'sf:<account id>', or the account a Plaid one was matched to.
 
     An account connected through both SimpleFIN and Plaid is one account: the Plaid one, which has the fuller data
     (holdings, cost basis, activity), stands for it, and the SimpleFIN one is marked duplicate_of it and never counted
@@ -109,6 +109,9 @@ def holdings(conn) -> list[dict]:
     total = sum(h["value"] for h in by_sec.values()) or 1.0
     out = [_finish_holding(conn, h, total) for h in by_sec.values()]
     out.sort(key=lambda h: -h["value"])
+    logos = merchants.holding_logos(conn, out)   # where Runway serves a holding's logo, once it has fetched one
+    for h in out:
+        h["logo"] = logos.get(h["group"])
     return out
 
 
