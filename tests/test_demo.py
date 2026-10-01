@@ -3,7 +3,7 @@ from datetime import date
 
 from sqlalchemy import func, select
 
-from runway import db, demo
+from runway import db, demo, forecast
 from runway.models import Account, Recurring
 from tests.shared import DbCase
 
@@ -16,6 +16,10 @@ class DemoTests(DbCase):
         self.assertEqual(self.c.execute(select(func.count()).select_from(Account)).fetchone()[0], 4)
         self.assertEqual(self.c.execute(select(func.count()).select_from(Recurring)).fetchone()[0], len(demo.BILLS))
         self.assertTrue(db.get_setting(self.c, "simplefin_access_url").endswith(".invalid/simplefin"))
+        card = forecast.build(self.c, date(2026, 9, 28), 30)["cards"][0]   # its statement, entered by hand
+        self.assertEqual((card["statement_source"], card["last_close"], card["due_date"], card["statement_stale"]),
+                         ("manual", "2026-09-28", "2026-10-23", False))
+        self.assertGreater(card["statement_balance"], 0)
         with self.assertRaises(SystemExit):   # never on top of existing data
             demo.seed(self.c)
 

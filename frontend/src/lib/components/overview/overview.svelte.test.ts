@@ -89,10 +89,19 @@ describe("CardsTable", () => {
   });
   const at = (iso: string) => vi.useFakeTimers({ toFake: ["Date"], now: new Date(`${iso}T12:00:00`) });
 
-  it("explains how to link cards when there are none", () => {
+  it("explains how to enter cards' statements when there are none", () => {
     render(CardsTable, { cards: [] });
-    expect(screen.getByText(/Link your cards through Plaid/)).toBeInTheDocument();
+    expect(screen.getByText(/Enter each card’s latest statement/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+  });
+
+  it("says quietly when a statement was entered by hand", () => {
+    at("2026-03-10");
+    const { unmount } = render(CardsTable, { cards: [card()] });
+    expect(screen.queryByText("entered by hand")).toBeNull();
+    unmount();
+    render(CardsTable, { cards: [card({ statement_source: "manual" })] });
+    expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
   it("shows what a card owes, its statement, due date, minimum and usual spending", () => {

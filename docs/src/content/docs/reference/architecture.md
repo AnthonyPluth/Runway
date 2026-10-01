@@ -10,7 +10,7 @@ sidebar:
 | Source | Used for | Needed? |
 |---|---|---|
 | [SimpleFIN Bridge](https://beta-bridge.simplefin.org) | Balances, transactions and investment positions from your bank and brokerages | SimpleFIN or Plaid |
-| [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | For credit cards |
+| [Plaid](https://plaid.com) | Card statements and due dates (Liabilities), balances and transactions for accounts you set to Plaid (Transactions), investment holdings and trades (Investments) | SimpleFIN or Plaid; card statements can be entered by hand instead |
 | [OpenRouter](https://openrouter.ai) | AI category suggestions (any model; defaults to Claude Haiku) | Optional |
 | Yahoo Finance chart data | Daily and live prices, splits and fund names | Automatic |
 | [Finnhub](https://finnhub.io) | Real-time stock and ETF trades for the live prices (WebSocket; the free plan covers 50 tickers, for personal use) | Optional |
@@ -21,7 +21,7 @@ SimpleFIN, Plaid, the browser extension and the optional services are all config
 
 ## How it works
 
-- **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its due date (both from the issuer through Plaid), and optionally spread average everyday spending across the days.
+- **Forecast:** start from today's balance, add each recurring item on its dates, subtract each card's statement on its due date (from the issuer through Plaid, or the latest one you entered: `runway/statements.py` has the rules), and optionally spread average everyday spending across the days.
 - **Investment history:** rebuilt from activity where Plaid provides it, the way Ghostfolio does; otherwise from the position snapshots Runway saves on every sync. Changes in positions between snapshots count as money added or withdrawn, not as gains, and returns are time-weighted.
 - **Churning:** spending toward a card's bonus is counted the way Reports counts spending (split transactions by their parts, transfers and card payments left out, refunds lowering it). A bank bonus's direct deposits are deposits categorized as income, or that look like payroll. The banks' bonus rules live in `runway/churning.py` as data, and every estimate says it is one. Points values are community-consensus estimates with an as-of date (`VALUES_AS_OF`), not fetched from anywhere: no bank or aggregator (Plaid included) reports what a point is worth, so they're data you can override per program. Points estimated from spending use a card's normal rates, since a transaction doesn't say whether it was booked through the issuer's portal.
 

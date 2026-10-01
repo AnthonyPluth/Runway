@@ -2,7 +2,7 @@
   // Rows you opened stay open when the page redraws after a save.
   const openAccounts = new Set<string>();
 
-  // Why a linked card has no statement yet (Plaid's error code, if it gave one).
+  // Why a linked card has no statement from Plaid (Plaid's error code, if it gave one); you can enter it yourself meanwhile.
   const STATEMENT_NOTES: Record<string, string> = {
     ADDITIONAL_CONSENT_REQUIRED: "Plaid needs your consent to share card statements: reconnect this bank in Settings → Connections.",
     PRODUCTS_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.", INSTITUTION_NOT_SUPPORTED: "This bank doesn't share card statements through Plaid.",
@@ -10,7 +10,7 @@
     PRODUCT_NOT_READY: "Plaid is still gathering the statement; it usually arrives with the next sync.",
     NO_LIABILITY_ACCOUNTS: "Plaid didn't find card statements at this bank.",
   };
-  const statementNote = (code?: string | null) => STATEMENT_NOTES[code ?? ""] || "It usually arrives with the next sync.";
+  const statementNote = (code?: string | null) => STATEMENT_NOTES[code ?? ""] || "Plaid hasn’t sent a statement yet; it usually arrives with the next sync.";
   const KINDS = ["checking", "savings", "credit", "loan", "investment"];
 </script>
 
@@ -21,7 +21,8 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDateTime, nb } from "$lib/format";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
+  import { fmt, fmtDate, fmtDateTime, nb, plural } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -29,11 +30,13 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import LogoPicker from "$lib/components/transactions/LogoPicker.svelte";
   import BankIcon from "./BankIcon.svelte";
+  import CardStatement from "./CardStatement.svelte";
+  import { accountFocus } from "./accountFocus.svelte";
   import { linkable, linkableInvestments, plaidFor, plaidLabel } from "./plaidAccounts";
   import { connectPlaid, matchPlaidAccount } from "./plaid.svelte";
   import PlaidChoice from "./PlaidChoice.svelte";
-  import type { PlaidStatus, SettingsAccount } from "./types";
-  import { checkCls, fieldCls, inputCls, rowCls, selectCls, warnText } from "./ui";
+  import type { AccountRemoval, PlaidStatus, SettingsAccount } from "./types";
+  import { checkCls, fieldCls, inputCls, linkCls, rowCls, selectCls, warnText } from "./ui";
 
   // One account: a compact line (name, where it syncs from, what's notable, balance) that opens into its settings, each saved as you go.
   let { a, cash, byName, plaid = null, mine = [] }: {
@@ -92,8 +95,11 @@
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
-      if (!link) bits.push({ text: "not linked to Plaid", warn: true }, { text: "Link…", link: true });
-      else if (!link.closed) bits.push({ text: `no statement from ${link.institution || "the bank"} yet`, warn: true, title: statementNote(link.statement_note) });
+      // Its statement: Plaid's says nothing more; one you entered says when it's due; none (or an old one) asks for it.
+      const st = a.statement;
+      if (!st) bits.push({ text: "no statement", warn: true, title: link ? statementNote(link.statement_note) : undefined }, { text: "Enter…", link: true });
+      else if (st.source === "manual" && st.stale) bits.push({ text: "statement out of date", warn: true }, { text: "Enter…", link: true });
+      else if (st.source === "manual" && st.due) bits.push({ text: `statement due ${fmtDate(st.due)}` });
     }
     if (a.networth_hidden) bits.push({ text: "not in net worth", title: "Left out of the Net worth page; still counted everywhere else" });
     bits.push({ text: source, title: a.provider === "plaid" || own ? "Balances and transactions come from Plaid" : "Balances and transactions come from SimpleFIN" });
@@ -139,14 +145,41 @@
   }
   let kindSelect = $state<HTMLSelectElement | null>(null);
 
-  // "Link…" on the line opens the row at its Data source section.
-  let sourceBox = $state<HTMLElement | null>(null);
-  async function openSource(e: Event) {
-    e.preventDefault(); e.stopPropagation();
+  // "Enter…" on the line, or a link to #setup/accounts?account=<id> (Overview's "Enter Visa's latest statement"), opens
+  // the row at its Statement section.
+  let statementBox = $state<HTMLElement | null>(null);
+  async function openStatement(e?: Event) {
+    e?.preventDefault(); e?.stopPropagation();
     open = true; openAccounts.add(a.id);
     await tick();
-    sourceBox?.scrollIntoView({ block: "nearest" });
-    sourceBox?.querySelector<HTMLElement>("select, button")?.focus();
+    statementBox?.querySelector<HTMLElement>("[data-enter-next]")?.click();   // one entered already: "Enter the next statement"
+    await tick();
+    statementBox?.scrollIntoView({ block: "nearest" });
+    statementBox?.querySelector<HTMLElement>("form input")?.focus();
+  }
+  $effect(() => {
+    if (accountFocus.id !== a.id) return;
+    accountFocus.id = "";
+    if (a.kind === "credit") openStatement();
+    else { open = true; openAccounts.add(a.id); }
+  });
+
+  // Deleting the account: the dialog says what goes with it (asked when it opens).
+  let removing = $state(false);
+  let removal = $state<AccountRemoval | null>(null);
+  async function askRemove() {
+    removal = null;
+    removing = true;
+    try { removal = await api<AccountRemoval>(`/api/accounts/${encodeURIComponent(a.id)}/removal`); }
+    catch (err) { toast.error((err as Error).message); removing = false; }
+  }
+  async function remove() {
+    try {
+      await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, { method: "POST" });
+      toast.success(`${name.trim() || a.name} deleted`);
+      openAccounts.delete(a.id);
+      reload();
+    } catch (err) { toast.error((err as Error).message); return false; }
   }
   let linking = $state("");
   async function linkTo(e: Event) {
@@ -167,7 +200,7 @@
       <span class="truncate font-medium">{name.trim() || a.name}</span>
       <span class="text-xs text-muted-foreground">
         {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else if bit.link}<button
-          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openSource}>{bit.text}</button>{:else if bit.primary}<button
+          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openStatement}>{bit.text}</button>{:else if bit.primary}<button
           type="button" class="font-medium text-primary" onclick={makePrimary}>{bit.text}</button>{:else}<span
           class={bit.warn ? warnText : ""} title={bit.title}>{nb(bit.text)}</span>{/if}{/each}
       </span>
@@ -200,8 +233,13 @@
         </select>
       </label>
     {/if}
+    {#if a.kind === "credit"}
+      <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Statement" bind:this={statementBox}>
+        <CardStatement {a} note={link && !a.statement ? statementNote(link.statement_note) : ""} />
+      </section>
+    {/if}
     {#if showSource}
-      <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source" bind:this={sourceBox}>
+      <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source">
         <h4 class="text-sm font-medium">Data source</h4>
         <p class="text-sm text-muted-foreground">{nb(source)}{#if plaidSynced}{" · "}{nb(`Plaid synced ${plaidSynced}`)}{/if}</p>
         <div class={rowCls}>
@@ -266,6 +304,27 @@
             onclick={async () => { changingType = true; await Promise.resolve(); kindSelect?.focus(); }}>change type</button>
         {/if}
       </span>
+      <span class="text-sm">
+        <button type="button" class="font-medium text-destructive underline-offset-4 hover:underline" onclick={askRemove}>Delete account…</button>
+      </span>
     </div>
   </div>
 </details>
+
+<ConfirmDialog bind:open={removing} title={`Delete ${name.trim() || a.name}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive onconfirm={remove}>
+  {#snippet description()}
+    <p>Deletes the account and everything Runway keeps for it. This can’t be undone; only a backup has it.</p>
+    {#if removal}
+      <ul class="list-disc space-y-1 pl-5">
+        <li>{removal.transactions ? `${plural(removal.transactions, "transaction")}, with their categories and splits` : "No transactions"}</li>
+        {#if removal.recurring}<li>{plural(removal.recurring, "recurring item")} on this account</li>{/if}
+        {#if removal.rules}<li>{plural(removal.rules, "rule")} that only {removal.rules === 1 ? "applies" : "apply"} to it</li>{/if}
+        {#if removal.statements}<li>{plural(removal.statements, "statement")} you entered</li>{/if}
+        {#if removal.holdings}<li>{plural(removal.holdings, "holding")}, with the account’s investment history</li>{/if}
+        <li>Budgets, cards and loans that point at it let go of it.</li>
+      </ul>
+    {:else}<p>Counting what goes with it…</p>{/if}
+    <p>It stays deleted: {removal?.plaid ? "SimpleFIN and Plaid leave" : "syncs leave"} it out until you restore it, at the bottom of Settings → Accounts.</p>
+    <p><a class={linkCls} href="#setup/advanced" onclick={() => (removing = false)}>Download a backup first</a></p>
+  {/snippet}
+</ConfirmDialog>

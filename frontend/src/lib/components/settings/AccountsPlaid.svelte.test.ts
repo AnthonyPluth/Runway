@@ -34,6 +34,32 @@ const serve = (st: PlaidStatus | Error) => vi.mocked(api).mockImplementation(asy
 beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(reload).mockClear(); vi.mocked(toast.success).mockClear(); });
 const matchCall = () => vi.mocked(api).mock.calls.find(([p]) => p === "/api/plaid/match");
 
+describe("Settings → Accounts: deleted accounts", () => {
+  it("counts them, and restores one, saying the next sync brings it back", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === "/api/accounts/deleted") return [{ id: "A1", name: "Old Visa" }, { id: "A2", name: "Old Savings" }];
+      if (path === "/api/plaid/status") return status([]);
+      return { ok: true };
+    });
+    render(AccountsSection, { accounts: [acct()] });
+    const section = await screen.findByRole("region", { name: "Deleted accounts" });
+    expect(section).toHaveTextContent("2 deleted accounts");
+    await userEvent.click(within(section).getByRole("button", { name: "Restore" }));
+    expect(section).toHaveTextContent("lets the next sync bring it back, with whatever history the bank still offers");
+    await userEvent.click(within(within(section).getByText("Old Visa").closest("li")!).getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/A1/restore", { method: "POST" }));
+    expect(toast.success).toHaveBeenCalledWith("Old Visa comes back with the next sync");
+    expect(reload).toHaveBeenCalled();
+  });
+
+  it("shows nothing when none were deleted", async () => {
+    serve(status([]));
+    render(AccountsSection, { accounts: [acct()] });
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/deleted"));
+    expect(screen.queryByRole("region", { name: "Deleted accounts" })).toBeNull();
+  });
+});
+
 describe("Settings → Accounts: New from Plaid", () => {
   it("lists Plaid accounts nobody has decided about at the top, with the three choices", async () => {
     serve(status([item([unmatched, matched])]));
@@ -175,7 +201,8 @@ describe("Settings → Accounts: linking from an account row", () => {
 
   it("links an unlinked account to one of the unmatched Plaid accounts", async () => {
     show(card, st);
-    expect(screen.getByText("not linked to Plaid")).toBeInTheDocument();
+    expect(screen.queryByText("not linked to Plaid")).toBeNull();   // a card needs a statement, not Plaid
+    expect(screen.getByText("no statement")).toBeInTheDocument();
     const select = screen.getByRole("combobox", { name: "Link to a Plaid account" });
     const options = within(select).getAllByRole("option").map((o) => o.textContent);
     expect(options).toEqual(expect.arrayContaining(["Choose…"]));
@@ -188,14 +215,25 @@ describe("Settings → Accounts: linking from an account row", () => {
     await waitFor(() => expect(reload).toHaveBeenCalled());
   });
 
-  it("opens the row at Data source from the Link… action on the line", async () => {
+  it("opens the row at its Statement from the Enter… action on the line", async () => {
     show(card, st);
     const details = document.querySelector("details")!;
     expect(details.open).toBe(false);
-    await userEvent.click(screen.getByRole("button", { name: "Link…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Enter…" }));
     await waitFor(() => expect(details.open).toBe(true));
-    expect(screen.getByRole("region", { name: "Data source" })).toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Link to a Plaid account" }));
+    const section = screen.getByRole("region", { name: "Statement" });
+    expect(document.activeElement).toBe(within(section).getByLabelText("Closing date"));
+    expect(screen.getByRole("region", { name: "Data source" })).toBeInTheDocument();   // linking is still offered
+  });
+
+  it("says why a linked card's bank sends no statement, and offers to enter it", () => {
+    const linked = { ...card, plaid_account_id: "pa1", plaid_link: { transactions: true, institution: "Chase", mask: "4242", closed: null,
+      statement_note: "PRODUCTS_NOT_SUPPORTED" } };
+    show(linked, st);
+    expect(screen.getByText("no statement")).toHaveAttribute("title", "This bank doesn't share card statements through Plaid.");
+    const section = screen.getByRole("region", { name: "Statement" });
+    expect(within(section).getByText(/This bank doesn't share card statements through Plaid\. Enter the latest statement/)).toBeInTheDocument();
+    expect(within(section).getByRole("form", { name: "Enter a statement" })).toBeInTheDocument();
   });
 
   it("shows a linked account's sources and unlinks it with target \"\"", async () => {
