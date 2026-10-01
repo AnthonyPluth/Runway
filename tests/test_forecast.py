@@ -598,6 +598,12 @@ class ForecastAssumptionTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["key"]: e["amount"] for e in fc["events"] if e["kind"] == "card"},
                          {"card:cc:2026-09-10": -66.0, "card:cc:2026-10-10": -77.0})
+        # moved to the new keys, so putting one back (removing the event's key) works
+        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.like("card:%"))).scalars()),
+                         ["card:cc:2026-09-10", "card:cc:2026-10-10"])
+        self.conn.execute(delete(Override).where(Override.key == "card:cc:2026-10-10"))
+        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "card:cc:2026-10-10")
+        self.assertFalse(e.get("overridden"))
 
     def test_a_payment_that_posted_today_but_isnt_linked_yet_counts_once(self):
         for d in ("2026-08-01", "2026-09-01"):

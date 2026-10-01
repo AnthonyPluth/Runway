@@ -23,7 +23,7 @@ from typing import Literal
 
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 
 from . import bankdays, budgets, db, plaidbank, splits
 from . import categories as catmod
@@ -505,11 +505,15 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
+    for new, old in old_keys.items():
+        # A card payment's edit saved while its key was the due date moves to its key now, so it still applies (and
+        # putting it back, which removes the event's key, removes it).
+        if old in overrides and new not in overrides:
+            conn.execute(update(Override).where(Override.key == old).values(key=new))
+            overrides[new] = overrides.pop(old)
     for e in events:
-        # A card payment's edit saved while its key was the due date still applies.
-        k = e.get("key") if e.get("key") in overrides else old_keys.get(e.get("key") or "")
-        if k in overrides:
-            e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[k], 2), True
+        if e.get("key") in overrides:
+            e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
     # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
 
