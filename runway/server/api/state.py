@@ -103,7 +103,7 @@ def api_overview(conn, q, _b):
 
 def api_override_set(conn, _q, body):
     key = str(body.get("key") or "")
-    if not key.startswith(("rec:", "card:", "stmt:")):
+    if not key.startswith(("rec:", "card:", "cardclose:", "stmt:")):
         raise ApiError("Unknown item")
     try:
         amount = db.number(body.get("amount"))

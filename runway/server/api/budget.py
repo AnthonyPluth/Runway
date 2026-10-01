@@ -4,59 +4,12 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
-from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, func, select, update
 
-from ... import categories, db, forecast, splits
+from ... import categories, db, forecast
+from ...budgets import budget_carry, month_totals
 from ...models import Account, Budget, Category
 from ..common import ApiError, _month_range
-
-
-def _month_totals(conn, start: date, end: date) -> dict:
-    """Net amount per category for the month, across checking, savings and cards (not loans or investments)."""
-    t = splits.parts()
-    rows_ = conn.execute(
-        select(t.c.category.label("category"), func.sum(t.c.amount).label("total"))
-        .join(Account, Account.id == t.c.account_id)
-        .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), Account.hidden == 0,
-               Account.kind.in_(["checking", "savings", "credit"]))
-        .group_by(t.c.category)
-    ).fetchall()
-    return {r["category"]: r["total"] or 0.0 for r in rows_}
-
-
-def _family_spent(cats: list[dict], totals: dict) -> dict[str, float]:
-    """What each spending category spent in a month, counting its subcategories."""
-    out = {c["name"]: 0.0 for c in cats}
-    for c in cats:   # each category's own spending counts toward it and everything above it
-        for name in c["path"]:
-            if name in out:
-                out[name] -= totals.get(c["name"], 0.0)
-    return {k: round(v, 2) for k, v in out.items()}
-
-
-def budget_carry(conn, cats: list[dict], budget_rows: dict, month: date) -> dict[str, float]:
-    """For each budget that rolls over: what's carried into `month`, the unspent part of every month since it started
-    rolling over (overspending isn't carried; a month that goes over just uses up what was carried)."""
-    starts = {}
-    for name, r in budget_rows.items():
-        try:
-            if r.get("rollover_from"):
-                starts[name] = date.fromisoformat(r["rollover_from"] + "-01")
-        except ValueError:
-            continue
-    carry = {name: 0.0 for name in starts}
-    if not starts:
-        return carry
-    m = min(starts.values())
-    while m < month:
-        nxt = m + relativedelta(months=1)
-        spent = _family_spent(cats, _month_totals(conn, m, nxt))
-        for name, start in starts.items():
-            if start <= m:
-                carry[name] = max(0.0, round(budget_rows[name]["amount"] + carry[name] - spent.get(name, 0.0), 2))
-        m = nxt
-    return carry
 
 
 def api_budget(conn, q, _b):
@@ -65,7 +18,7 @@ def api_budget(conn, q, _b):
     days = calendar.monthrange(start.year, start.month)[1]
     cats = [c for c in categories.all_categories(conn) if not c["is_transfer"] and not c["is_income"]]
     income_cats = [c["name"] for c in categories.all_categories(conn) if c["is_income"] and c["top"] != "Refunds"]
-    totals = _month_totals(conn, start, end)
+    totals = month_totals(conn, start, end)
     budget_rows = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
     budgets = {k: r["amount"] for k, r in budget_rows.items()}
     usual = {p["category"]: p["usual"] for p in forecast.budget_plan(conn, today)}
