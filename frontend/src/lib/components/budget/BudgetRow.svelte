@@ -4,6 +4,7 @@
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, monthShort } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -11,6 +12,7 @@
 
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath.
   // `budgets` is true in the Budgets card, where the budget box is always shown and you can choose the card it's paid with.
+  // On a phone the budget is just a figure: setting budgets, the card and rolling over are for a computer.
   let { c, month, sub = false, budgets = false, counts = false, pace, payAccounts, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; counts?: boolean; pace: number; payAccounts: PayAccount[];
     onsave: (category: string, amount: string) => void; onchanged: () => void;
@@ -60,7 +62,7 @@
     {#if !sub}<CatIcon name={c.name} size={28} solid />{/if}
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
-    {#if budgets && c.budget != null && counts}
+    {#if budgets && c.budget != null && counts && !isPhone()}
       {#if choosing}
         {@const usual = acctName(c.usual_account)}
         <select use:focus data-editor aria-label={`Account ${c.name} is paid with`}
@@ -85,7 +87,7 @@
         </button>
       {/if}
     {/if}
-    {#if budgets && c.budget != null && !sub}
+    {#if budgets && c.budget != null && !sub && !isPhone()}
       <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
           : "Carry what's left at the end of each month into the next"}
@@ -97,6 +99,9 @@
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} title="See the transactions behind this amount"
         class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{fmt(c.spent)}</a>
+      {#if isPhone()}
+        {#if c.budget != null}<span class="text-muted-foreground">of</span><span>{fmt(c.budget)}</span>{/if}
+      {:else}
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-2 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
@@ -105,6 +110,7 @@
           class={cn("h-8 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-5" : "pl-5")} />
       </span>
+      {/if}
     </span>
   </div>
   {#if c.budget != null}

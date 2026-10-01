@@ -4,6 +4,7 @@
   import { autosave } from "$lib/autosave";
   import * as Sheet from "$lib/components/ui/sheet";
   import { checkCls, fieldCls, helpCls, inputCls, selectCls } from "$lib/components/settings/ui";
+  import { isPhone } from "$lib/phone.svelte";
   import { accountName, type Account, type Overview } from "$lib/types";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import { toast } from "svelte-sonner";
@@ -54,6 +55,9 @@
   }
 </script>
 
+{#if isPhone()}
+  <span class="inline-flex items-center py-0.5 text-[15px] text-muted-foreground">{label}</span>
+{:else}
 <Sheet.Root bind:open={forecastSheet.open}>
   <Sheet.Trigger aria-label="Forecast settings"
     class="-mx-1.5 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[15px] text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
@@ -90,3 +94,4 @@
     </div>
   </Sheet.Content>
 </Sheet.Root>
+{/if}

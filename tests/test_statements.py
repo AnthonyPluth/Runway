@@ -91,7 +91,7 @@ class ManualStatementForecastTests(LedgerCase):
         self.assertTrue(c["statement_stale"])
         self.assertEqual(self.card_events(fc), [("cardclose:cc:2026-08-10", "2026-09-30", -600.0, False)])   # its own payment (less $200 paid)
         self.assertEqual(fc["warning_links"], [{"text": "Enter cc’s latest statement so its payment stays in the forecast.",
-                                                "href": "#setup/accounts?account=cc"}])
+                                                "href": "#setup/accounts?account=cc", "setting": True}])
         fc = forecast.build(self.conn, date(2026, 10, 2), 90)                     # past its due date: nothing at all
         self.assertEqual(self.card_events(fc), [])
         self.assertIn("Enter cc’s latest statement so its payment stays in the forecast.", fc["warnings"])

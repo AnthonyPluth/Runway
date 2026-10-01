@@ -1,11 +1,13 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0, fmtDate } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
@@ -16,7 +18,8 @@
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
-  // Changes are kept a moment after you stop typing (or when you leave).
+  // Changes are kept a moment after you stop typing (or when you leave). On a phone it's the result only; the plan
+  // itself is edited on a computer.
   let { data }: { data: PlanData } = $props();
   const uid = $props.id();
 
@@ -200,14 +203,14 @@
     <h3 class="font-medium">Nothing to plan from yet</h3>
     <p class="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Runway plans from your investment accounts. Connect one, or enter holdings by
       hand, and the planner starts from real numbers.</p>
-    <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
+    {#if !isPhone()}<Button class="mt-4" href="#networth/investments">Go to Investments</Button>{/if}
   </div>
 {:else}
 {#if sample}
   <p class="mb-3 text-sm text-muted-foreground">
     <span class="mr-2 inline-block rounded-full border px-2 py-0.5 text-xs font-medium">Sample · based on default assumptions</span>
     Starting from Runway's figures: your investments, and what you've spent and saved over the last year. <strong class="font-medium text-foreground">Enter
-    your birth year and retirement age to make it yours.</strong></p>
+    your birth year and retirement age{isPhone() ? " on a computer" : ""} to make it yours.</strong></p>
 {/if}
 
 {#if shown}
@@ -246,10 +249,13 @@
     included, and taxes aren't modeled. Not financial advice.</p>
   <div class="mt-4"><PlannerChart p={shown} {names} {dollars} /></div>
 {:else}
-  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age{isPhone() ? " on a computer" : ""} to see the projection.</p>
 {/if}
 {#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
+{#if isPhone()}
+  <DesktopOnly class="mt-5" what="change the plan" />
+{:else}
 <div class="mt-5 grid gap-6 lg:grid-cols-2">
   <section>
     <h3 class="mb-2 font-medium">Who's retiring</h3>
@@ -415,6 +421,7 @@
     </p>
   </section>
 </div>
+{/if}
 {/if}
 
 {#if saved}

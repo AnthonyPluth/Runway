@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+/* A phone, in either orientation: the same query as PHONE_QUERY in lib/phone.svelte.ts. `desktop:` is everything else. */
+@custom-variant phone (@media (max-width: 767px), (max-height: 500px) and (pointer: coarse));
+@custom-variant desktop (@media not ((max-width: 767px) or ((max-height: 500px) and (pointer: coarse))));
 
 /* Geist, bundled with Runway (runway/static/fonts, SIL Open Font License). */
 @font-face { font-family: "Geist"; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }

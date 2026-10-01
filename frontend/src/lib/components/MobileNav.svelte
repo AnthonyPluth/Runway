@@ -8,8 +8,9 @@
   import Settings from "@lucide/svelte/icons/settings";
   import X from "@lucide/svelte/icons/x";
 
-  // On a phone: a tab bar along the bottom with the four pages you use most, and More for the rest (which opens a
-  // sheet from the bottom). Hidden from md up, where the sidebar shows instead.
+  // On a phone (lib/phone.svelte.ts): a tab bar along the bottom with the four pages you use most, and More for the rest
+  // (which opens a sheet from the bottom). Every page here is one a phone can use; what's only for a
+  // computer says so where you'd look for it. Hidden on a computer, where the sidebar shows instead.
   const TABS = MAIN_NAV;
   const MORE: NavItem[] = [...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
 
@@ -26,9 +27,9 @@
 <svelte:window onkeydown={(e) => { if (open && e.key === "Escape") open = false; }} />
 
 {#if open}
-  <button type="button" class="fixed inset-0 z-40 cursor-default bg-black/60 md:hidden" aria-label="Close" onclick={() => (open = false)}></button>
+  <button type="button" class="fixed inset-0 z-40 cursor-default bg-black/60 desktop:hidden" aria-label="Close" onclick={() => (open = false)}></button>
   <div role="dialog" aria-modal="true" aria-label="More pages"
-    class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+5rem)] shadow-2xl md:hidden">
+    class="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t bg-popover px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+5rem)] shadow-2xl desktop:hidden">
     <div class="mb-2 flex items-center justify-between">
       <span class="text-sm font-semibold">More</span>
       <button type="button" class="flex size-8 cursor-pointer items-center justify-center rounded-full hover:bg-muted" aria-label="Close" onclick={() => (open = false)}><X class="size-4" /></button>
@@ -61,7 +62,7 @@
   </div>
 {/if}
 
-<nav aria-label="Main" class="fixed inset-x-0 bottom-0 z-50 border-t bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+<nav aria-label="Main" class="fixed inset-x-0 bottom-0 z-50 border-t bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur desktop:hidden">
   <div class="mx-auto grid max-w-lg grid-cols-5">
     {#each TABS as item (item.page)}
       {@const on = current === item.page && !open}

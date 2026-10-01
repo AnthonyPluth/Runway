@@ -4,14 +4,17 @@
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { fmt } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import X from "@lucide/svelte/icons/x";
   import type { Tx } from "./types";
 
   // Spread one transaction across categories: each part gets its own category and amount, and they must add up.
-  // Amounts are typed as plain numbers; the transaction's own sign (a charge or a deposit) is kept.
+  // Amounts are typed as plain numbers; the transaction's own sign (a charge or a deposit) is kept. Splitting is for a
+  // computer: on a phone this says so instead.
   let { t, onclose, onsaved }: { t: Tx; onclose: () => void; onsaved: () => void } = $props();
 
   type Part = { key: number; category: string; amount: string; note: string };
@@ -45,6 +48,12 @@
   function focusFirst(el: HTMLElement) { el.querySelector("select")?.focus(); }
 </script>
 
+{#if isPhone()}
+<div class="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 p-4">
+  <DesktopOnly what="split transactions" />
+  <Button variant="outline" size="sm" onclick={onclose}>Close</Button>
+</div>
+{:else}
 <div class="flex flex-col gap-3 rounded-lg bg-muted/40 p-4 text-sm" data-editor use:focusFirst>
   <div class="flex items-baseline gap-2"><b>Split {fmt(total)}</b> <span class="truncate text-xs text-muted-foreground">{t.payee || t.description}</span></div>
   <div class="flex flex-col gap-2">
@@ -70,3 +79,4 @@
     </span>
   </div>
 </div>
+{/if}

@@ -34,7 +34,7 @@
 </script>
 
 {#if found.drafts.length || found.dismissed.length}
-  <section class="mb-6 hidden md:block" aria-labelledby="found-title" data-testid="found-cards">
+  <section class="mb-6 hidden desktop:block" aria-labelledby="found-title" data-testid="found-cards">
     {#if found.drafts.length}
       <h3 id="found-title" class="text-sm font-medium">Found on your accounts</h3>
       <p class="mb-2 text-xs text-muted-foreground">Credit cards Runway already knows that aren’t tracked here yet. Add one to review what we filled in; nothing is saved until you save it.</p>

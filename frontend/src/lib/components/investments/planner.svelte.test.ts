@@ -13,6 +13,7 @@ import { fmt0 } from "$lib/format";
 import { project, projectionIn } from "./planner";
 import RetirementPlanner from "./RetirementPlanner.svelte";
 import type { PlanAsset, PlanData, RetirementPlan } from "./types";
+import { viewport } from "$lib/phone.svelte";
 
 const plan = (extra: Partial<RetirementPlan> = {}): RetirementPlan => ({
   people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 20000 }], plan_to_age: 95, spending: 60000,
@@ -54,6 +55,15 @@ describe("RetirementPlanner", () => {
   it("says what the figures are based on, and that it isn't advice", () => {
     setup();
     expect(screen.getByText(/Based on your \$400,000 in investments today\./)).toHaveTextContent(/taxes aren't modeled\. Not financial advice\./);
+  });
+
+  it("on a phone, says the plan is made yours on a computer, where its fields are", () => {
+    viewport.phone = true;
+    try {
+      setup(data({ is_default: true }));
+      expect(screen.getByText(/Enter\s+your birth year and retirement age on a computer to make it yours/)).toBeInTheDocument();
+      expect(screen.getByText("Open Runway on a computer to change the plan.")).toBeInTheDocument();
+    } finally { viewport.phone = false; }
   });
 
   it("marks the results as a sample while it starts from Runway's own figures", () => {

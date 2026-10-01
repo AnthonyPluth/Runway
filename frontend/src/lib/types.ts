@@ -156,7 +156,8 @@ export interface Overview {
   unlinked_cards?: CardSummary[];
   warnings: string[];
   /** The same warnings, each with the page where it's put right. */
-  warning_links: { text: string; href: string }[];
+  /** `setting`: changing a setting on that page puts it right (false: an overdue payment, a statement still to come). */
+  warning_links: { text: string; href: string; setting?: boolean }[];
   missed?: Missed[];
   budget?: {
     monthly: number;

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isPhone } from "$lib/phone.svelte";
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
@@ -26,7 +27,7 @@
 
 <!-- One row per card, for a grouped list. -->
 {#if !cards.length}
-  <p class="cell text-sm text-muted-foreground">Enter each card’s latest statement in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> (or link it through Plaid) to see what’s due and when.</p>
+  <p class="cell text-sm text-muted-foreground">Enter each card’s latest statement in {#if isPhone()}Settings → Accounts on a computer{:else}<a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a>{/if} (or link it through Plaid) to see what’s due and when.</p>
 {:else}
   {#each cards as c (c.id)}
     {@const soon = (c.payment ?? c.remaining) > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}

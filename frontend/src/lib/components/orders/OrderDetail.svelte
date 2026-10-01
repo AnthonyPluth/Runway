@@ -4,7 +4,10 @@
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { fmt, fmtDate } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
+  import { untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import { ITEM_SOURCES, STORES, STORE_SITES, type RetailOrder } from "./retail";
 
@@ -23,7 +26,8 @@
     try { order = await api<RetailOrder>(`/api/retail/orders/${encodeURIComponent(orderId)}`, { keep: true }); failed = ""; }
     catch (err) { failed = (err as Error).message; }
   }
-  load();
+  // An order's items are read on a computer: load once the screen counts as one (now, or after it's widened or turned).
+  $effect(() => { if (!isPhone() && !order && !failed) untrack(load); });
   function changed() { onchange?.(); picking = {}; load(); }
 
   async function post(path: string, body: unknown, msg: string | ((r: any) => string)) {   // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -61,6 +65,9 @@
   function pick(id: string) { picking[id] = api<Candidate[]>(charge(id, "candidates"), { keep: true }).catch(() => []); }
 </script>
 
+{#if isPhone()}
+<div class="rounded-lg bg-muted/40 p-4"><DesktopOnly what="see what was in an order" /></div>
+{:else}
 <div class="flex flex-col gap-3 rounded-lg bg-muted/40 p-4 text-sm">
   {#if failed && !order}
     <p class="text-muted-foreground">{failed}</p>
@@ -147,3 +154,4 @@
     </div>
   {/if}
 </div>
+{/if}

@@ -9,7 +9,9 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
+  import NotConnected from "$lib/components/NotConnected.svelte";
   import CardsTable from "$lib/components/overview/CardsTable.svelte";
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
@@ -24,6 +26,7 @@
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmt0Down, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
   import { balanceAsOf } from "$lib/nav.svelte";
+  import { isPhone } from "$lib/phone.svelte";
   import type { Overview } from "$lib/types";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -34,7 +37,8 @@
   let { sub: _sub = "" }: { sub?: string } = $props();
   const connected = $derived(app.state?.connected);
   const setup = $derived(app.state?.setup);
-  const setupLeft = $derived(!!setup && !setup.dismissed && !(setup.bank && setup.primary && setup.recurring && setup.budgets));
+  // Setup (connecting a bank, choosing the main account, budgets) is done on a computer.
+  const setupLeft = $derived(!isPhone() && !!setup && !setup.dismissed && !(setup.bank && setup.primary && setup.recurring && setup.budgets));
   const initial = horizon ?? app.state?.horizon_days ?? 90;
   let days = $state(initial);
 
@@ -79,16 +83,29 @@
 
 </script>
 
-{#snippet attention(text: string, href: string)}
-  <a class="cell" {href}>
-    <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
-    <span class="min-w-0 flex-1 text-sm">{text}</span>
-    <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-  </a>
+<!-- An alert links to where it's put right; on a phone, one that's put right in Settings (or the forecast's settings)
+     says to do it on a computer instead of opening a page phones don't show. -->
+{#snippet attention(text: string, href: string, setting = true)}
+  {#if isPhone() && /#(setup\/(?!notifications)|overview\?forecast)/.test(href)}
+    <div class="cell">
+      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+      <span class="min-w-0 flex-1 text-sm">{text}{#if setting}{" "}<DesktopOnly what="put this right" class="inline" />{/if}</span>
+    </div>
+  {:else}
+    <a class="cell" {href}>
+      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+      <span class="min-w-0 flex-1 text-sm">{text}</span>
+      <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </a>
+  {/if}
 {/snippet}
 
 {#if !connected}
-  <SetupChecklist welcome />
+  {#if isPhone()}
+    <NotConnected title="Welcome to Runway" text="Runway reads your accounts and forecasts where your cash is headed. Setting it up takes a few minutes." />
+  {:else}
+    <SetupChecklist welcome />
+  {/if}
 {:else}
   {#if error && !shown}
     <div class="rounded-2xl bg-card p-5">
@@ -124,7 +141,7 @@
 
     {#if alerts}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
-        {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
+        {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`, w.setting ?? true)}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
         {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
       </Group>
@@ -150,12 +167,10 @@
           {#if nextIn}Next money in: {nb(nextIn.name + ",")} {fmt0(nextIn.amount)} on {nb(relDay(nextIn.date, fc.today))}.{/if}
         </p>
         <!-- What that verdict counts, and what it leaves out (everyday spending, unless it's turned on). -->
-        <p class="mt-1 max-w-3xl text-[13px] text-muted-foreground">{assumed.text} ·
-          <button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>{assumed.action}</button></p>
+        <p class="mt-1 max-w-3xl text-[13px] text-muted-foreground">{assumed.text}{#if !isPhone()}{" · "}<button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>{assumed.action}</button>{/if}</p>
       {/if}
       {#if fc.accounts.length > 1}
-        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined ·
-          <button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>choose one account</button></p>
+        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined{#if !isPhone()}{" · "}<button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>choose one account</button>{/if}</p>
       {/if}
 
       <div class="mt-5">

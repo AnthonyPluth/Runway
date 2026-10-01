@@ -255,7 +255,7 @@ class ForecastTests(LedgerCase):
         self.assertEqual(fc["warnings"], ["Plaid hasn’t sent a statement for cc yet. Enter its latest statement so its "
                                           "payment is in the forecast."])                  # linked, statement not in yet
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
-        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc"}])   # the card's row
+        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc", "setting": True}])   # the card's row
         self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))                  # not linked at all
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["warnings"], ["Enter cc’s latest statement so its payment is in the forecast."])   # no Plaid: not mentioned
@@ -270,7 +270,7 @@ class ForecastTests(LedgerCase):
     def test_warnings_link_to_where_they_are_fixed(self):
         self.conn.execute(update(Account).where(Account.id == "cc").values(pay_from=None))
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertEqual(fc["warning_links"], [{"text": "cc: choose which account pays it in Settings.", "href": "#setup/accounts"}])
+        self.assertEqual(fc["warning_links"], [{"text": "cc: choose which account pays it in Settings.", "href": "#setup/accounts", "setting": True}])
         self.assertEqual(fc["warnings"], ["cc: choose which account pays it in Settings."])   # plain text, as MCP clients read it
 
     def test_paid_statement_no_event(self):
@@ -389,6 +389,15 @@ class ForecastEdgeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertTrue(all(e["date"] >= TODAY.isoformat() for e in fc["events"]))
         self.assertTrue(any("hasn't sent the statement after Jun 10" in w for w in fc["warnings"]), fc["warnings"])
+        # Nothing to change in Settings: the bank's still to send it (so a phone doesn't send you to a computer).
+        stale = next(w for w in fc["warning_links"] if "hasn't sent the statement" in w["text"])
+        self.assertEqual((stale["href"], stale["setting"]), ("#setup/connections", False))
+
+    def test_a_late_payment_is_flagged_as_not_a_setting(self):
+        self.stmt("cc", 800.0, "2026-08-10", "2026-09-05")   # due Sat Sep 5, paid Tue Sep 8 (Labor Day): nothing came
+        fc = forecast.build(self.conn, date(2026, 9, 10), 30)
+        late = next(w for w in fc["warning_links"] if "no payment has shown up yet" in w["text"])
+        self.assertEqual((late["href"], late["setting"]), ("#setup/accounts", False))   # paying the card puts it right
 
     def test_a_payment_due_today_is_in_todays_balance(self):
         today = date(2026, 10, 5)   # the $600 left on the September statement is due today
@@ -576,7 +585,7 @@ class ForecastAssumptionTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 30)
         text = "3 payments over $1,000 in the last 90 days aren’t in the forecast (State University, Landlord Llc); " \
                "add them as recurring items."
-        self.assertIn({"text": text, "href": "#budget/recurring"}, fc["warning_links"])
+        self.assertIn({"text": text, "href": "#budget/recurring", "setting": True}, fc["warning_links"])
         # rent as a recurring item: it links, and only the tuition is left
         self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
                                                    anchor_date="2026-08-01", match="landlord"))
@@ -825,7 +834,7 @@ class PaymentModeTests(LedgerCase):
         self.assertGreater(s2, s1)   # paying the minimum, the balance grows
         self.assertTrue(all(e["estimated"] for e in fc["events"] if e["kind"] == "card" and e["date"] > "2026-10-05"))
         self.assertTrue(self.interest_warned(fc))
-        self.assertIn({"text": next(w for w in fc["warnings"] if "interest" in w), "href": "#setup/accounts"}, fc["warning_links"])
+        self.assertIn({"text": next(w for w in fc["warnings"] if "interest" in w), "href": "#setup/accounts", "setting": True}, fc["warning_links"])
         # the $40 minimum is paid already: nothing goes out on Oct 5, and all $600 carries
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=40.0)
         c = self.card(fc := forecast.build(self.conn, TODAY, 90))

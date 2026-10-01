@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
@@ -18,11 +19,14 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
 
+  // On a phone: the total, its change, the history and what it's made of (read-only), and the retirement result. Investments,
+  // Equity and changing assets and accounts are for a computer.
   let { sub = "" }: { sub?: string } = $props();
 
   // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come.
@@ -155,12 +159,13 @@
 <h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
-  { id: "investments", label: "Investments", href: "#networth/investments" },
-  { id: "equity", label: "Equity", href: "#networth/equity" },
+  ...(isPhone() ? [] : [{ id: "investments", label: "Investments", href: "#networth/investments" }, { id: "equity", label: "Equity", href: "#networth/equity" }]),
   { id: "retirement", label: "Retirement", href: "#networth/retirement" },
 ]} />
 
-{#if sub === "equity"}
+{#if isPhone() && (sub === "equity" || sub === "investments")}
+  <DesktopOnly what={sub === "equity" ? "see and edit your equity" : "see your investments"} />
+{:else if sub === "equity"}
   <EquityView />
 {:else if sub === "retirement"}
   <RetirementView />
@@ -225,6 +230,9 @@
           <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {pct(g.total / d.assets)}</span>
         {/each}
       </div>
+      {#if isPhone()}
+        <DesktopOnly class="mt-4" what="see and change the accounts and assets behind it" />
+      {:else}
       <div class="mt-4 grid gap-6 lg:grid-cols-2">
         <div><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}
           {#if !hasAssetItems}
@@ -235,7 +243,8 @@
           {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
         </div>
       </div>
-      {#if d.excluded.length}
+      {/if}
+      {#if d.excluded.length && !isPhone()}
         <div class="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
           <p>
             Not counted: {#if d.excluded.length > 3}{d.excluded.length} accounts{excludedTotal != null ? ` (${fmt0(excludedTotal)})` : ""}{:else}{d.excluded.map((a) => nb(`${a.name} ${fmt0(a.balance)}`)).join(" · ")}{/if}

@@ -16,15 +16,18 @@
   import Upcoming from "$lib/components/churning/Upcoming.svelte";
   import { BOTH, bankOrder, cardOrder, feesDue, five24Line, mine } from "$lib/components/churning/churning";
   import type { Churning, Found, FoundDraft, Wish } from "$lib/components/churning/types";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
 
   // Churning: credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. #churning
   // shows the cards, #churning/bank the bank account bonuses, #churning/benefits the card benefits; the tiles and Upcoming cover both.
+  // On a phone it's the tiles, Upcoming and the benefits to mark used; adding and editing cards, bonuses and plans is for a computer.
   let { sub = "" }: { sub?: string } = $props();
-  const tab = $derived(sub === "bank" ? "bank" : sub === "benefits" ? "benefits" : "cards");
+  const tab = $derived(isPhone() || sub === "benefits" ? "benefits" : sub === "bank" ? "bank" : "cards");
 
   let d = $state.raw<Churning | null>(null);
   let error = $state<string | null>(null);
@@ -127,25 +130,35 @@
     <Card.Root class="mb-6" data-testid="getting-started">
       <Card.Content class="flex flex-col gap-3">
         <p class="text-sm text-muted-foreground">Track the credit cards and bank accounts you open for sign-up bonuses: your 5/24 count, annual fees, bonus spending and when you can apply again, for you and your partner.</p>
-        <div class="flex flex-wrap gap-2">
-          <Button size="sm" onclick={startCard}>Add a card you’ve opened</Button>
-          <Button size="sm" variant="outline" onclick={startBank}>Add a bank bonus</Button>
-        </div>
+        {#if isPhone()}
+          <DesktopOnly what="add your cards and bank bonuses" />
+        {:else}
+          <div class="flex flex-wrap gap-2">
+            <Button size="sm" onclick={startCard}>Add a card you’ve opened</Button>
+            <Button size="sm" variant="outline" onclick={startBank}>Add a bank bonus</Button>
+          </div>
+        {/if}
       </Card.Content>
     </Card.Root>
   {:else}
     <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
-    <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
-    {#if hasOpenCards}<BestCard {person} {version} showOwner={people.length > 1} />{/if}
-    {#if hasRewards || addingBalance}<Rewards {d} {people} onchanged={load} />
-    {:else}<EmptyLine label="Rewards" message="no points tracked yet" action="Add a balance" onaction={() => (addingBalance = true)} />{/if}
+    {#if !isPhone()}
+      <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
+      {#if hasOpenCards}<BestCard {person} {version} showOwner={people.length > 1} />{/if}
+      {#if hasRewards || addingBalance}<Rewards {d} {people} onchanged={load} />
+      {:else}<EmptyLine label="Rewards" message="no points tracked yet" action="Add a balance" onaction={() => (addingBalance = true)} />{/if}
+    {/if}
   {/if}
 
+  {#if isPhone()}
+    {#if !noData}<DesktopOnly class="mb-4" what="manage cards, bank bonuses, plans and rewards" />{/if}
+  {:else}
   <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
       tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
     {#if tab !== "benefits"}<label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>{/if}
   </div>
+  {/if}
 
   {#if tab === "cards"}
     <Card.Root class="mb-6">

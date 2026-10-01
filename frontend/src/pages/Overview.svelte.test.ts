@@ -8,6 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
+import { viewport } from "$lib/phone.svelte";
 import { forecastSheet } from "$lib/components/overview/forecastSheet.svelte";
 import type { Overview as OverviewData } from "$lib/types";
 import Overview from "./Overview.svelte";
@@ -128,5 +129,38 @@ describe("Overview", () => {
 
     answer(forecast(30, 2000));
     expect(await screen.findByText(/stays above \$2,000 for 30\sdays/)).toBeInTheDocument();
+  });
+});
+
+describe("Overview on a phone", () => {
+  afterEach(() => { cleanup(); viewport.phone = false; });
+
+  it("says there's no account to forecast without a link to the forecast settings a phone doesn't have", async () => {
+    viewport.phone = true;
+    serve(() => fc({ accounts: [], total: [], events: [] }));
+    render(Overview);
+    expect(await screen.findByText(/No account to forecast yet/)).toBeInTheDocument();
+    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /No account to forecast/ })).not.toBeInTheDocument();
+  });
+
+  it("shows alerts that are put right in Settings as text, and keeps the others as links", async () => {
+    viewport.phone = true;
+    serve(() => fc({ warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" },
+      { text: "2 payments over $1,000 aren’t in the forecast.", href: "#budget/recurring" }] }));
+    render(Overview);
+    expect(await screen.findByText(/Visa: choose which account pays it/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Visa: choose which account/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#budget/recurring");
+    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
+  });
+
+  it("doesn't send you to a computer for an alert no setting puts right (a payment that's late)", async () => {
+    viewport.phone = true;
+    serve(() => fc({ warning_links: [{ text: "Visa: $40.00 was due Sep 3 and no payment has shown up yet.", href: "#setup/accounts", setting: false }] }));
+    render(Overview);
+    expect(await screen.findByText(/no payment has shown up yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /no payment has shown up/ })).not.toBeInTheDocument();
   });
 });
