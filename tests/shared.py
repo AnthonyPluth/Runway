@@ -20,7 +20,7 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway.models import Account, CardStatement, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, Transaction
+from runway.models import Account, CardStatement, ManualStatement, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, Transaction
 
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
 
@@ -115,6 +115,11 @@ class LedgerCase(DbCase):
         self.conn.execute(insert(CardStatement).values(plaid_account_id=f"p-{card}", item_id="item",
                                                        last_statement_balance=balance, last_statement_date=closed,
                                                        next_due_date=due, minimum_payment=minimum))
+
+    def manual(self, card, balance, closed, due, minimum=None):
+        """A statement you entered by hand for the card (statements.py)."""
+        self.conn.execute(insert(ManualStatement).values(account_id=card, statement_date=closed, balance=balance, due_date=due,
+                                                         minimum_payment=minimum))
 
     def cycle(self, card_id, today=None):
         from runway import forecast

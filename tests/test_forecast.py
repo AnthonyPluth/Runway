@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import OperationalError
 
-from runway import db, forecast, recurring
+from runway import db, forecast, plaidapi, recurring
 from runway import settings_keys as sk
 from runway.models import Account, Budget, CardStatement, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
@@ -252,17 +252,20 @@ class ForecastTests(LedgerCase):
     def test_card_without_bank_statements_warns(self):
         self.conn.execute(delete(CardStatement))
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("Plaid hasn’t sent a statement for cc yet", fc["warnings"][0])     # linked, statement not in yet
+        self.assertEqual(fc["warnings"], ["Plaid hasn’t sent a statement for cc yet. Enter its latest statement so its "
+                                          "payment is in the forecast."])                  # linked, statement not in yet
         self.assertEqual((fc["cards"], fc["unlinked_cards"]), ([], [{"id": "cc", "name": "cc", "owed_now": 900.0, "linked": True}]))
-        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/connections", "setting": False}])
+        self.assertEqual(fc["warning_links"], [{"text": fc["warnings"][0], "href": "#setup/accounts?account=cc", "setting": True}])   # the card's row
         self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))                  # not linked at all
         fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("cc isn’t linked through Plaid yet", fc["warnings"][0])
-        self.assertEqual(fc["warning_links"][0]["href"], "#setup/connections")   # nothing from Plaid to match: connect the bank
+        self.assertEqual(fc["warnings"], ["Enter cc’s latest statement so its payment is in the forecast."])   # no Plaid: not mentioned
+        self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts?account=cc")
         self.conn.execute(insert(PlaidAccount).values(plaid_account_id="pcc", item_id="it", name="Visa", type="credit"))
-        fc = forecast.build(self.conn, TODAY, 30)
-        self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][0])
-        self.assertEqual(fc["warning_links"][0]["href"], "#setup/accounts")      # matched under “New from Plaid”
+        with mock.patch.object(plaidapi, "configured", return_value=True):   # with Plaid set up, it's offered too
+            fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual(fc["warnings"][0], "Enter cc’s latest statement (or link it through Plaid) so its payment is in the forecast.")
+        self.assertIn("Plaid has 1 card waiting to be matched", fc["warnings"][1])
+        self.assertEqual(fc["warning_links"][1]["href"], "#setup/accounts")      # matched under “New from Plaid”
 
     def test_warnings_link_to_where_they_are_fixed(self):
         self.conn.execute(update(Account).where(Account.id == "cc").values(pay_from=None))
@@ -293,12 +296,15 @@ class ForecastTests(LedgerCase):
         self.tx("chk", "2026-09-05", -14.99, "AMAZON PRIME", "Subscriptions")    # the Prime fee: its recurring item's
         self.tx("chk", "2026-09-06", -35.0, "AMAZON MKTPLACE", "Shopping")       # orders: everyday spending
         self.tx("chk", "2026-09-08", -85.0, "AMAZON.COM", "Shopping")
-        prime = {"name": "Prime", "match": "amazon", "amount": -14.99, "amount_mode": "fixed"}
+        prime = {"name": "Prime", "match": "amazon", "amount": -14.99, "amount_mode": "fixed", "amount_min": 10, "amount_max": 20}
         rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [prime])
         self.assertAlmostEqual(rate, (300 + 35 + 85) / 30, places=2)
-        # an item without an amount can't tell them apart: everything with its text is left out, as before
-        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "amount": 0}])
+        # an item without an amount range can't tell them apart: everything with its text is left out, as matching does
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "amount_min": None, "amount_max": None}])
         self.assertAlmostEqual(rate, 300 / 30, places=2)
+        # any of its texts counts
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "match": "prime video\namazon"}])
+        self.assertAlmostEqual(rate, (300 + 35 + 85) / 30, places=2)
 
     def test_suggest_recurring(self):
         for d in ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01"]:
@@ -751,11 +757,16 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(events[0]["amount"], -100.0)
 
     def test_a_later_payment_doesnt_count_for_an_earlier_occurrence(self):
-        item = {"frequency": "monthly"}
-        history = [{"posted": "2026-10-01"}]
-        self.assertTrue(recurring.already_happened(item, date(2026, 10, 4), history, date(2026, 10, 5)))    # early
-        self.assertTrue(recurring.already_happened(item, date(2026, 9, 27), history, date(2026, 10, 5)))    # a little late
-        self.assertFalse(recurring.already_happened(item, date(2026, 9, 1), history, date(2026, 10, 5)))    # October's
+        today = date(2026, 10, 5)
+        history = [{"posted": "2026-10-01", "amount": -50.0}]
+        for due in (date(2026, 10, 5), date(2026, 9, 28)):   # paid early, or a little late
+            item = {"frequency": "monthly", "anchor_date": due.isoformat(), "amount": -50.0}
+            with self.subTest(due=due):
+                self.assertIsNone(recurring.still_due(item, due, recurring.paid_by_occurrence(item, history), today, -50.0))
+        item = {"frequency": "monthly", "anchor_date": "2026-09-01", "amount": -50.0}
+        paid = recurring.paid_by_occurrence(item, history)
+        self.assertIsNone(recurring.still_due(item, date(2026, 10, 1), paid, today, -50.0))         # October's...
+        self.assertNotIn(date(2026, 9, 1), paid)                                                     # ...not September's
 
 
 class PaymentModeTests(LedgerCase):

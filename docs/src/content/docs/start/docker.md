@@ -48,7 +48,7 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
 
 ## 2. First start
 
-1. Stop the Runway you run with `poetry run python run.py` (Ctrl-C) so the database is fully written.
+1. If you already run Runway from source in this folder, stop it (Ctrl-C) so the database is fully written.
 2. In this folder:
    ```
    cp .env.example .env        # fill in RUNWAY_PUBLIC_URL, OIDC_* and OIDC_ALLOWED_EMAILS
@@ -61,9 +61,9 @@ echo <token> | docker login ghcr.io -u AnthonyPluth --password-stdin
 
 If a setting is missing, the container stops with a message saying which one (see the logs).
 
-## Moving your data from your Mac
+## Moving your data from another machine
 
-1. On the Mac: Settings → Advanced → Backup → **Download a backup** (or `poetry run python run.py backup`).
+1. On the old machine: Settings → Advanced → Backup → **Download a backup** (or `poetry run python run.py backup`).
 2. Start the container on the server, sign in, and go to Settings → Advanced → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 

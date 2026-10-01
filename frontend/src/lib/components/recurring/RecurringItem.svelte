@@ -23,7 +23,7 @@
 
   const init = () => ({
     name: r.name, account_id: r.account_id, amount: r.amount, amount_mode: r.amount_mode || "fixed", frequency: r.frequency,
-    dates: r.dates || "", anchor_date: r.anchor_date || "", match: r.match || "",
+    dates: r.dates || "", anchor_date: r.anchor_date || "", match: r.match || "", amount_min: r.amount_min ?? "", amount_max: r.amount_max ?? "",
   });
   let v: RecurringValues = $state(init());
   // Open or closed is yours to change; `open` only says how it starts.
@@ -34,6 +34,8 @@
   let attempted = $state(false);   // once a save was refused, the fields that need fixing say so
   const errors = $derived(attempted ? validate(v) : {});
   let matches = $state<MatchedTx[] | null>(null);
+  // How each matched transaction got here; nothing for links from before Runway kept it.
+  const LINKED_BY: Record<string, string> = { you: "linked by you", auto: "matched automatically" };
 
   const amt = $derived(r.expected_amount ?? r.amount);
   const sub = $derived([FREQ[v.frequency] || v.frequency, r.next_date ? `next ${fmtDate(r.next_date)}` : "no upcoming date",
@@ -50,8 +52,10 @@
       if (errs.dates && f.name === "frequency") f.closest("details")?.querySelector<HTMLInputElement>("input[name=dates]")?.focus();
       throw new Error(`Not saved yet. ${first}`);
     }
-    const res = await api<{ linked: number }>(`/api/recurring/${r.id}`, { method: "POST", body: { ...v, active: active ? 1 : 0 } });
+    const res = await api<{ linked: number; amount_min?: number | null; amount_max?: number | null }>(`/api/recurring/${r.id}`, { method: "POST", body: { ...v, active: active ? 1 : 0 } });
     if (res.linked) toast(`Saved · matched ${res.linked} more`);
+    // A new amount outside the range moves the range with it (the server says where to), so the fields show that.
+    if (res.amount_min !== undefined) { v.amount_min = res.amount_min ?? ""; v.amount_max = res.amount_max ?? ""; }
     if (onsaved) {
       try { onsaved(await api<RecurringItem[]>("/api/recurring")); }
       catch { /* saved; the summary catches up on the next load */ }
@@ -85,7 +89,7 @@
   </summary>
   <div class="pt-3 pb-5 sm:pl-10">
     {#if missed.length}<div class="group-list mb-3 bg-muted/60" style:--inset="3.75rem">{#each missed as m (m.key)}<MissedAlert {m} ondismiss={(k) => (dismissed = [...dismissed, k])} />{/each}</div>{/if}
-    <RecurringFields bind:v {accounts} {save} {errors} />
+    <RecurringFields bind:v {accounts} {save} {errors} suggested={r.suggested_amount} suggestedFor={r.amount} />
     <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
       <label class="relative flex cursor-pointer items-center gap-2 text-sm">
         <input type="checkbox" name="active" class="size-4 accent-primary" bind:checked={active} use:autosave={save} /> Active
@@ -106,6 +110,7 @@
                 <tr class="border-t [&>td]:py-1.5">
                   <td class="w-20 whitespace-nowrap text-muted-foreground">{fmtDate(t.posted)}</td>
                   <td class="px-2">{t.description}</td>
+                  <td class="px-2 text-xs whitespace-nowrap text-muted-foreground">{LINKED_BY[t.recurring_linked_by ?? ""] ?? ""}</td>
                   <td class="text-right whitespace-nowrap tabular-nums">{fmt(t.amount)}</td>
                 </tr>
               {/each}

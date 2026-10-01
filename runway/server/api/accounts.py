@@ -1,15 +1,16 @@
-"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo, a loan's terms, and how a
-card is paid)."""
+"""Accounts: the list, the changes you make to one (its name, type, owner, provider, logo, a loan's terms, and how a
+card is paid), the card statements you enter by hand, and deleting an account (and restoring one you deleted)."""
 from __future__ import annotations
 
 from datetime import date
 
 from sqlalchemy import func, select, update
 
-from ... import brands, db, forecast, loans, merchants, plaidbank, validate
+from ... import brands, db, deleted_accounts, forecast, loans, merchants, plaidbank, statements, validate
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, LoanTerms, PlaidAccount, PlaidItem
 from ..common import ApiError
+from ..sync import _inv_lock, _sync_lock
 
 
 ACCOUNT_FIELDS = {
@@ -38,7 +39,10 @@ def api_accounts(conn, _q, _b):
                             "transactions": "transactions" in (it["products"] or ""),
                             "closed": it["last_statement_date"], "due": it["next_due_date"],
                             "statement_note": db.get_setting(conn, sk.plaid_stmt_note(it['item_id']))} if it else None)
-        if a["kind"] == "credit":   # how it's paid, as you set it, and the issuer's APR (used when you haven't set one)
+        if a["kind"] == "credit":
+            a["statement"] = card_statement(conn, a, it["institution_name"] if it else None)
+            a["statements"] = statements.history(conn, a["id"])   # the ones you entered, newest first
+            # How it's paid, as you set it, and the issuer's APR (used when you haven't set one).
             plan = forecast.payment_plan(conn, a["id"])
             a.update(pay_mode=plan["pay_mode"], pay_amount=plan["pay_amount"], apr=plan["apr"],
                      issuer_apr=it["purchase_apr"] if it else None)
@@ -47,6 +51,93 @@ def api_accounts(conn, _q, _b):
         if a["id"] in terms:
             a["loan"] = terms[a["id"]]
     return accts
+
+
+def card_statement(conn, card: dict, institution: str | None, today: date | None = None) -> dict | None:
+    """The statement the forecast uses for a card, and where it's from (the forecast's own rule: Plaid's wins, else the
+    latest one you entered; see statements.py)."""
+    today = today or date.today()
+    st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+    if st:
+        return {"source": "plaid", "institution": institution, "closed": st["last_statement_date"], "due": st["next_due_date"],
+                "balance": st["last_statement_balance"], "minimum": st["minimum_payment"]}
+    m = statements.latest(conn, card["id"], today)
+    if not m:
+        return None
+    return {"source": "manual", "closed": m["last_statement_date"], "due": m["next_due_date"], "balance": m["last_statement_balance"],
+            "minimum": m["minimum_payment"], "stale": m["stale"], "next_close": m["next_close"]}
+
+
+def api_statement_add(conn, _q, body, acct_id):
+    """A card statement you entered: closing date, balance, due date and (optionally) the minimum payment."""
+    try:
+        row = statements.add(conn, acct_id, body if isinstance(body, dict) else {})
+    except LookupError as e:
+        raise ApiError(str(e), 404) from e
+    except ValueError as e:
+        raise ApiError(str(e)) from e
+    return {"ok": True, "statement": row}
+
+
+def api_statement_remove(conn, _q, _b, acct_id, statement_date):
+    if not statements.remove(conn, acct_id, statement_date):
+        raise ApiError("Statement not found", 404)
+    return {"ok": True}
+
+
+def _no_sync_running():
+    """Deleting or restoring an account waits for no sync: one running could write the account back in between."""
+    if not _sync_lock.acquire(blocking=False):
+        raise ApiError("A sync is running. Try again when it’s done.", 409)
+    if not _inv_lock.acquire(blocking=False):
+        _sync_lock.release()
+        raise ApiError("A sync is running. Try again when it’s done.", 409)
+
+
+def _release():
+    _inv_lock.release()
+    _sync_lock.release()
+
+
+def api_account_removal(conn, _q, _b, acct_id):
+    """What deleting an account would take with it, for the confirmation."""
+    out = deleted_accounts.impact(conn, acct_id)
+    if out is None:
+        raise ApiError("Account not found", 404)
+    return out
+
+
+def api_account_remove(conn, _q, _b, acct_id):
+    """Delete an account and everything that belongs to it; syncs leave it out until it's restored."""
+    _no_sync_running()
+    try:
+        try:
+            out = deleted_accounts.remove(conn, acct_id)
+        except LookupError as e:
+            raise ApiError(str(e), 404) from e
+        conn.commit()   # before a sync can start and read the accounts to leave out
+    finally:
+        _release()
+    return out
+
+
+def api_accounts_deleted(conn, _q, _b):
+    return deleted_accounts.listed(conn)
+
+
+def api_account_restore(conn, _q, _b, acct_id):
+    _no_sync_running()
+    try:
+        try:
+            out = deleted_accounts.restore(conn, acct_id)
+        except LookupError as e:
+            raise ApiError(str(e), 404) from e
+        except ValueError as e:   # (Plaid's own account, if its Plaid account can't be used)
+            raise ApiError(str(e)) from e
+        conn.commit()
+    finally:
+        _release()
+    return out
 
 
 def _pay_settings(body: dict) -> dict[str, str | None]:

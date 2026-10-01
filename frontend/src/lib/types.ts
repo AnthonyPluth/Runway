@@ -102,6 +102,8 @@ export interface ForecastEvent {
   card_id?: string;
   /** A recurring item's id (in Bills & income). */
   recurring_id?: number;
+  /** A recurring payment that's partly come (in parts): what has, signed like amount; amount is the rest. */
+  paid_so_far?: number;
 }
 
 export interface CardSummary {
@@ -129,6 +131,10 @@ export interface CardSummary {
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;
+  /** Where the statement is from: Plaid, or entered by you. */
+  statement_source?: "plaid" | "manual";
+  /** One you entered that a newer one should have replaced by now. */
+  statement_stale?: boolean;
 }
 
 export interface Missed { key: string; name: string; amount: number; date: string; account_id?: string; account_name?: string }

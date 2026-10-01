@@ -9,7 +9,7 @@ run with `conn.execute(...)`), or load objects through the connection's ORM sess
 docs/src/content/docs/contributing/orm.md has the conventions.
 
 Relationships: the schema has no foreign keys, so each one spells out its join. They're all `viewonly` (writes go
-through the columns, as before: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one
+through the columns: deleting an order doesn't quietly touch its items) and `lazy="raise"`, so reading one
 that wasn't loaded up front fails loudly rather than running a query per row: load them with
 `options(selectinload(RetailOrder.items))`, or join on them (`select(...).join(Account.transactions)`).
 """
@@ -74,6 +74,7 @@ class Transaction(Base):
     recurring_id: Mapped[int | None]
     is_split: Mapped[int | None]
     merchant_id: Mapped[str | None]
+    recurring_linked_by: Mapped[str | None]
 
     account: Mapped[Account] = _rel("Account", "foreign(Transaction.account_id) == Account.id")
     splits: Mapped[list[TxSplit]] = _rel("TxSplit", "foreign(TxSplit.tx_id) == Transaction.id",
@@ -240,6 +241,9 @@ class Recurring(Base):
     active: Mapped[int | None]
     amount_mode: Mapped[str | None]
     dates: Mapped[str | None]
+    amount_min: Mapped[float | None]
+    amount_max: Mapped[float | None]
+    amount_since: Mapped[str | None]
 
 
 class RecurringDismissed(Base):
@@ -306,6 +310,27 @@ class CardStatement(Base):
     is_overdue: Mapped[int | None]
     updated: Mapped[str | None]
     purchase_apr: Mapped[float | None]
+
+
+class ManualStatement(Base):
+    __table__ = schema.manual_statements
+    account_id: Mapped[str]
+    statement_date: Mapped[str]
+    balance: Mapped[float]
+    due_date: Mapped[str]
+    minimum_payment: Mapped[float | None]
+    entered_at: Mapped[str | None]
+
+
+class DeletedAccount(Base):
+    __table__ = schema.deleted_accounts
+    id: Mapped[str]
+    name: Mapped[str | None]
+    kind: Mapped[str | None]
+    plaid_account_id: Mapped[str | None]
+    inv_ids: Mapped[str | None]
+    deleted_at: Mapped[str | None]
+    restored_at: Mapped[str | None]
 
 
 class LoanTerms(Base):

@@ -260,6 +260,7 @@ class RecurringPinnedTests(Base):
                                             "anchor_date": "2026-06-07", "match": "ax", "amount_mode": "fixed"}])
         self.c.execute(insert(Recurring).values(name="Off", account_id="chk", amount=-100, frequency="monthly",
                                                 anchor_date="2026-06-07", match="streamflix gift", active=0))
+        self.c.execute(update(Recurring).where(Recurring.id == 1).values(amount_min=10, amount_max=20))   # not the gift cards
 
     def ids(self, rid):
         return self.col(select(Transaction.id).where(Transaction.recurring_id == rid).order_by(Transaction.id))
@@ -271,6 +272,10 @@ class RecurringPinnedTests(Base):
         self.assertEqual(self.ids(3), [])                                     # too short to match on
         self.assertEqual(self.ids(4), [])                                     # inactive
         self.assertEqual(recurring.auto_match(self.c), 0)
+        # Without its amount range, any amount with its text is a payment for it: the gift cards too.
+        self.c.execute(update(Recurring).where(Recurring.id == 1).values(amount_min=None, amount_max=None))
+        self.assertEqual(recurring.auto_match(self.c), 1)
+        self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4", "chk|7"])
 
     def test_list_edit_and_delete(self):
         recurring.auto_match(self.c)
@@ -281,19 +286,19 @@ class RecurringPinnedTests(Base):
         items = {i["name"]: i for i in api_recurring.api_recurring(self.c, None, None)}
         s = items["Streaming"]
         self.assertEqual(list(s)[:13], ["id", "name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date",
-                                        "active", "amount_mode", "dates", "account_name", "matched_count"])
+                                        "active", "amount_mode", "dates", "amount_min", "amount_max"])
         self.assertEqual((s["account_name"], s["matched_count"], s["last_matched"]["posted"], s["expected_amount"]),
                          ("Checking (Sara)", 4, "2026-09-03", -15.49))
         self.assertEqual([i["name"] for i in api_recurring.api_recurring(self.c, None, None)], ["Odd", "Short", "Streaming", "Ten", "Off"])
         # changing the merchant text drops links that no longer fit
         body = {"name": "Streaming", "account_id": "chk", "amount": -15.49, "anchor_date": "2026-06-03", "match": "Streamflix 55"}
-        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 0})
+        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 0, "amount_min": None, "amount_max": None})
         self.assertEqual(self.ids(1), ["chk|1", "chk|2", "chk|3", "chk|4"])
         body["match"] = "flix cc"
-        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 0})
+        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 0, "amount_min": None, "amount_max": None})
         self.assertEqual(self.ids(1), [])
         body["account_id"] = "cc"
-        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 1})
+        self.assertEqual(api_recurring.api_recurring_update(self.c, None, body, "1"), {"ok": True, "linked": 1, "amount_min": None, "amount_max": None})
         with self.assertRaises(ApiError):
             api_recurring.api_recurring_update(self.c, None, body, "99")
         api_recurring.api_recurring_delete(self.c, None, None, "1")

@@ -22,6 +22,7 @@ import itertools
 import json
 from collections import defaultdict
 import statistics
+import urllib.parse
 from datetime import date, datetime, timedelta
 from typing import Literal
 
@@ -30,7 +31,7 @@ from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import OperationalError
 
-from . import bankdays, budgets, db, plaidbank, simplefin, splits
+from . import bankdays, budgets, db, plaidapi, plaidbank, simplefin, splits, statements
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -166,14 +167,14 @@ def owed(account: dict, balance: float | None = None) -> float:
 
 def paid_by_recurring(items: list[dict]):
     """A test for whether a transaction looks like a payment for one of these recurring items without being linked to
-    it: its payee or description has the item's match text and its amount is close to the item's (recurring.amount_range,
-    the tolerance linking uses; any amount for an item without one). So a "Prime" item matching "amazon" leaves the rest
-    of the Amazon orders alone."""
-    rules = [(m, rec.amount_range(r)) for r in items if (m := rec.match_text(r))]
+    it: its payee or description has one of the item's texts and its amount is within the item's amount range, if it has
+    one (recurring.fits_amount, as matching does). So a "Prime" item matching "amazon" with a range leaves the rest of the
+    Amazon orders alone."""
+    rules = [(texts, r) for r in items if (texts := rec.match_texts(r))]
 
     def test(t: dict) -> bool:
         hay = f"{t['payee'] or ''} {t['description'] or ''}".lower()
-        return any(m in hay and (span is None or span[0] <= abs(t["amount"]) <= span[1]) for m, span in rules)
+        return any(any(m in hay for m in texts) and rec.fits_amount(r, t["amount"]) for texts, r in rules)
     return test
 
 
@@ -284,10 +285,15 @@ def statement_override(conn, card_id: str, close: date) -> float | None:
     return abs(r["amount"]) if r else None
 
 
-def bank_statement(conn, card: dict, today: date):
-    """The card's latest statement from its issuer (Plaid Liabilities). The card's billing cycle follows it:
-    card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
-    st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+STATEMENT_FIELDS = ("last_statement_balance", "last_statement_date", "next_due_date", "minimum_payment", "purchase_apr")
+
+
+def bank_statement(conn, card: dict, today: date) -> dict | None:
+    """The card's latest statement: the issuer's, through Plaid Liabilities (source "plaid"), else the latest one you
+    entered (source "manual"; see statements.py, which also says when one is stale). The card's billing cycle follows
+    it: card["closing_day"] and card["due_day"] are set from the statement's closing and due dates."""
+    plaid = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+    st = {**{k: plaid[k] for k in STATEMENT_FIELDS}, "source": "plaid"} if plaid else statements.latest(conn, card["id"], today)
     if not st:
         return None
     close = _d(st["last_statement_date"])
@@ -372,7 +378,7 @@ def interest(plan: dict, carried: float, charges: float = 0.0) -> float:
     return (carried + max(0.0, charges) / 2) * plan["apr"] / 100 / 12
 
 
-def card_cycle(conn, card: dict, today: date, bank) -> dict:
+def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
     last_close = _d(bank["last_statement_date"])
@@ -394,11 +400,13 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
     remaining = max(0.0, statement - paid)
-    plan = payment_plan(conn, card["id"], bank["purchase_apr"])
+    plan = payment_plan(conn, card["id"], bank.get("purchase_apr"))   # none on a statement you entered
     # What the plan pays toward this statement, less what's been paid since it closed; the rest carries into the next.
     payment = min(remaining, max(0.0, statement_payment(plan, statement, bank["minimum_payment"]) - paid))
     return {
         "last_close": last_close.isoformat(),
+        "statement_source": bank.get("source", "plaid"),   # plaid | manual (entered by you)
+        "statement_stale": bool(bank.get("stale")),         # manual only: a newer one should have been entered by now
         "statement_balance": round(statement, 2),
         "statement_reported": round(reported, 2),
         "statement_set": known is not None,
@@ -420,6 +428,11 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         "credit": round(max(0.0, -net), 2),
         "daily_rate": round(daily_spend_rate(conn, card["id"], today), 2),
     }
+
+
+def statement_href(card_id: str) -> str:
+    """Where a card's statement is entered: its row in Settings → Accounts, opened at its Statement section."""
+    return "#setup/accounts?account=" + urllib.parse.quote(card_id, safe="")
 
 
 # ------------------------------------------------------------------------------------------------ forecast
@@ -453,7 +466,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     warnings: list[dict] = []   # {"text", "href", "setting"}: what's wrong, the page about it, and whether a setting there puts it right
     card_status: list[dict] = []
     old_keys: dict[str, str] = {}   # card payment key -> the key it had before keys followed the closing date
-    unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
+    unlinked: list[dict] = []   # cards without a statement: none from Plaid, and none entered
 
     def warn(text: str, href: str, setting: bool = True) -> None:
         warnings.append({"text": text, "href": href, "setting": setting})
@@ -470,6 +483,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         edit = overrides.get(key, overrides.get(old_key))
         return abs(edit) if shown and info["pay_mode"] != "full" and edit is not None else planned
 
+    rec_overrides = {k: v for k, v in overrides.items() if k.startswith("rec:")}
     for item in recurring:
         if item["account_id"] not in by_id:
             continue
@@ -479,23 +493,33 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
-            like = "%" + (item["match"] or item["name"] or "").lower().replace("%", "").replace("_", "") + "%"
+            like = "%" + next(iter(rec.match_texts(item)), "").replace("%", "").replace("_", "") + "%"
             cat_row = conn.execute(
                 select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None), func.length(like) > 4,
                                          or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
                 .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
+        # One that's partly paid (a paycheck in two deposits, early or on time) leaves the rest expected the same way,
+        # until the window closes; what's paid is in the balance already (see recurring.still_due).
         window = rec.MATCH_WINDOW_DAYS.get(item["frequency"], 6)
         first_tx = conn.execute(select(func.min(T.posted)).where(T.account_id == item["account_id"])).fetchone()[0]
         since = max(today - timedelta(days=window + 1), _d(first_tx) + timedelta(days=window) if first_tx else today)
+        paid = rec.paid_by_occurrence(item, history)
         for d in occurrences(item, min(since, today - timedelta(days=1)), end):
-            if rec.already_happened(item, d, history, today):
+            key = f"rec:{item['id']}:{d.isoformat()}"
+            # A one-off edit is what this occurrence comes to in all, so what's paid toward it comes off the edit too.
+            edited = rec_overrides.get(key)
+            left = rec.still_due(item, d, paid, today, amount if edited is None else round(edited, 2), edited is not None)
+            if left is None:
                 continue  # this one already posted (possibly early), don't count it twice
+            usual_left = rec.still_due(item, d, paid, today, amount)
             events.append({"date": max(d, today).isoformat(), "account_id": item["account_id"], "name": item["name"],
-                           "amount": amount, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
-                           "recurring_id": item["id"], "key": f"rec:{item['id']}:{d.isoformat()}",
-                           "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {})})
+                           "amount": left, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
+                           "recurring_id": item["id"], "key": key,
+                           "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {}),
+                           **({"paid_so_far": paid[d]} if abs(paid.get(d, 0.0)) >= rec.CENT else {}),
+                           **({"original_amount": usual_left if usual_left is not None else 0.0, "overridden": True} if edited is not None else {})})
 
     for card in cards:
         label = db.account_label(card)
@@ -514,6 +538,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         payment = paying(info, planned, pays >= today and planned > 0.005, key, old_keys[key])
         info.update(payment=round(payment, 2), carried=round(info["remaining"] - payment, 2))
         card_status.append(info)
+        if info["statement_stale"]:
+            warn(f"Enter {label}’s latest statement so its payment stays in the forecast.", statement_href(card["id"]))
         payer = by_id.get(card["pay_from"] or "")
         if not payer:
             warn(f"{label}: choose which account pays it in Settings.", "#setup/accounts")
@@ -532,6 +558,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         elif pays < today and info["payment"] > 0.005:
             warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts",
                  setting=False)   # paying the card puts it right, not a setting
+        if info["statement_stale"]:
+            continue   # a statement you entered a while ago: its own payment, but nothing estimated from it
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle in
         # progress, what's been charged already plus the average's share of the days left). Without enough history,
         # the recent daily rate. Either way, plus the recurring charges on the card the estimate doesn't already have.
@@ -588,26 +616,24 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             warn(f"{label}: the forecast carries part of its statements to the next one, but doesn’t count the interest "
                  "on it: enter the card’s APR in Settings.", "#setup/accounts")
 
-    def listed(names):
-        return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    not_linked = [c["name"] for c in unlinked if not c["linked"]]
-    no_statement = [c["name"] for c in unlinked if c["linked"]]
-    if not_linked:
+    # Cards without a statement: you enter the latest one by hand (Settings → Accounts, the card's row), unless Plaid
+    # can send it. Plaid is only mentioned when it's set up.
+    plaid_on = plaidapi.configured(conn)
+    for c in unlinked:
+        if c["linked"]:
+            warn(f"Plaid hasn’t sent a statement for {c['name']} yet. Enter its latest statement so its payment is in "
+                 "the forecast.", statement_href(c["id"]))
+        else:
+            warn(f"Enter {c['name']}’s latest statement{' (or link it through Plaid)' if plaid_on else ''} so its payment "
+                 "is in the forecast.", statement_href(c["id"]))
+    if plaid_on and any(not c["linked"] for c in unlinked):
         waiting = conn.execute(
             select(func.count()).select_from(PlaidAccount)
             .where(PlaidAccount.type == "credit", PlaidAccount.ignored == 0, PlaidAccount.plaid_account_id.not_in(
                 select(Account.plaid_account_id).where(Account.plaid_account_id.is_not(None))))).fetchone()[0]
-        one = len(not_linked) == 1
-        # Cards Plaid already has are matched in Settings → Accounts; otherwise the bank needs connecting first.
-        warn(f"{listed(not_linked)} {'isn’t' if one else 'aren’t'} linked through Plaid yet, so "
-             f"{'its payments aren’t' if one else 'their payments aren’t'} in the forecast. "
-             + (f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
-                f"choose “Same as …” for each under “New from Plaid”." if waiting else f"Link {'it' if one else 'them'} to get statements and due dates."),
-             "#setup/accounts" if waiting else "#setup/connections")
-    if no_statement:
-        one = len(no_statement) == 1
-        warn(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
-             "in the forecast. It usually arrives with the next sync.", "#setup/connections", setting=False)
+        if waiting:   # cards Plaid already has are matched in Settings → Accounts, and then send their statements
+            warn(f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
+                 "choose “Same as …” for each under “New from Plaid”.", "#setup/accounts")
     # Everyday spending leaves out big one-off payments; if they come back (rent paid by hand, tuition), they need to
     # be recurring items to be in the forecast.
     big = large_one_offs(conn, [a["id"] for a in cash], today, recurring)
@@ -633,7 +659,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         except OperationalError:
             pass
     for e in events:
-        if e.get("key") in overrides:
+        if e.get("key") in overrides and not e.get("overridden"):   # recurring items' edits are applied above
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
     # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
@@ -810,8 +836,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
     for cid, info in cards.items():
         card = by_id[cid]
         payer = card["pay_from"]
-        if payer not in cash_ids:
-            continue
+        if payer not in cash_ids or info.get("statement_stale"):
+            continue   # (a stale statement you entered: nothing is estimated from it; see statements.py)
         days = spend.get(cid, {})
         prev = _d(info["last_close"])
         close, first = next_after(prev, card["closing_day"]), True
@@ -879,7 +905,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
-    known = [(r["account_id"], (r["match"] or r["name"]).lower()) for r in conn.execute(select(Recurring))]
+    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) for m in rec.match_texts(r)]
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)

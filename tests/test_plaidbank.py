@@ -229,12 +229,13 @@ class PlaidBankTests(DbCase):
         self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "sf-chk")).fetchone()[0], 2500.0)
         # The lunch posts: it replaces the pending one and keeps the category you gave it.
         self.c.execute(update(Transaction).where(Transaction.id == "sf-chk|pl:a3")
-                       .values(category="Restaurants", category_source="manual"))
+                       .values(category="Restaurants", category_source="manual", recurring_id=7, recurring_linked_by="you"))
         MockBank.pages = [{"added": [tx("a4", "p-chk", "2026-09-24", 21.0, "LUNCH", pending_id="a3")], "removed": [{"transaction_id": "a3"}]}]
         r = plaidbank.sync_item(self.c, "item-b", TODAY)
         self.assertEqual(r["new"], [])
         lunch = self.c.execute(select(Transaction).where(Transaction.id == "sf-chk|pl:a4")).fetchone()
         self.assertEqual((lunch["amount"], lunch["category"], lunch["pending"]), (-21.0, "Restaurants", 0))
+        self.assertEqual((lunch["recurring_id"], lunch["recurring_linked_by"]), (7, "you"))   # and the link you made
         self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.id == "sf-chk|pl:a3")).fetchone())
 
     def test_merchants_and_their_logos_are_noted(self):

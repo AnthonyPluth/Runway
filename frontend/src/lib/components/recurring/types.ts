@@ -10,7 +10,11 @@ export interface RecurringValues {
   frequency: string;
   dates: string;
   anchor_date: string;
+  /** Merchant texts, one per line: a transaction with any of them matches. */
   match: string;
+  /** "Only amounts between": either end may be blank (any amount matches when both are). */
+  amount_min: number | string | null;
+  amount_max: number | string | null;
 }
 
 /** GET /api/recurring: a row of the recurring table, plus what's been matched and when it's next due. */
@@ -25,10 +29,14 @@ export interface RecurringItem {
   dates?: string | null;
   anchor_date?: string | null;
   match?: string | null;
+  amount_min?: number | null;
+  amount_max?: number | null;
   end_date?: string | null;
   active: number;
   matched_count: number;
   expected_amount?: number | null;
+  /** A fixed amount's last few posted payments all came to something else: about this much (signed like amount). */
+  suggested_amount?: number | null;
   next_date?: string | null;
   last_matched?: MatchedTx | null;
   missed?: (Missed & { recurring_id: number })[];
@@ -48,7 +56,11 @@ export interface Suggestion {
 }
 
 /** A matched transaction, as GET /api/transactions?recurring=… lists it. */
-export interface MatchedTx { id: string; posted: string; description: string; amount: number; category?: string | null }
+export interface MatchedTx {
+  id: string; posted: string; description: string; amount: number; category?: string | null;
+  /** How it was linked: by you (from Transactions) or automatically by its merchant text; null from before Runway kept it. */
+  recurring_linked_by?: "you" | "auto" | null;
+}
 
 export const FREQ_OPTIONS: [string, string][] = [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"],
   ["semimonthly", "Twice a month (set days)"], ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"],
@@ -62,7 +74,7 @@ export const FREQ: Record<string, string> = { monthly: "monthly", biweekly: "eve
 export const needsDates = (freq: string) => freq === "dates" || freq === "semimonthly";
 
 /** The fields that can be wrong, and what to tell you about each. */
-export type Errors = Partial<Record<"name" | "account_id" | "amount" | "dates" | "anchor_date", string>>;
+export type Errors = Partial<Record<"name" | "account_id" | "amount" | "dates" | "anchor_date" | "amount_max", string>>;
 
 /** The stored amount for what you typed: negative for money out, positive for money in (the forecast relies on the sign). */
 export function signedAmount(magnitude: number | string | null, out: boolean): number | null {
@@ -81,5 +93,7 @@ export function validate(v: RecurringValues): Errors {
   else if (amount === 0 && v.amount_mode === "fixed") e.amount = "Enter an amount above 0.";
   if (needsDates(v.frequency) && !v.dates.trim()) e.dates = v.frequency === "semimonthly" ? "List the days of the month, like 1, 15." : "List the dates, like Apr 15, Oct 15.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v.anchor_date)) e.anchor_date = "Pick a date.";
+  const [lo, hi] = [v.amount_min, v.amount_max].map((x) => (x === null || String(x).trim() === "" ? NaN : Math.abs(Number(x))));
+  if (lo > hi) e.amount_max = "The largest amount is smaller than the smallest.";
   return e;
 }

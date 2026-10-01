@@ -47,12 +47,12 @@ afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.poi
 describe("Overview", () => {
   it("links each warning to where it's put right", async () => {
     serve(() => fc({
-      warnings: ["Visa isn’t linked through Plaid yet", "Amex: choose which account pays it in Settings."],
-      warning_links: [{ text: "Visa isn’t linked through Plaid yet", href: "#setup/connections" },
+      warnings: ["Enter Visa’s latest statement so its payment is in the forecast.", "Amex: choose which account pays it in Settings."],
+      warning_links: [{ text: "Enter Visa’s latest statement so its payment is in the forecast.", href: "#setup/accounts?account=visa" },
         { text: "Amex: choose which account pays it in Settings.", href: "#setup/accounts" }],
     }));
     render(Overview);
-    expect(await screen.findByRole("link", { name: /Visa isn’t linked/ })).toHaveAttribute("href", "/#setup/connections");
+    expect(await screen.findByRole("link", { name: /Enter Visa’s latest statement/ })).toHaveAttribute("href", "/#setup/accounts?account=visa");
     expect(screen.getByRole("link", { name: /Amex: choose/ })).toHaveAttribute("href", "/#setup/accounts");
   });
 
