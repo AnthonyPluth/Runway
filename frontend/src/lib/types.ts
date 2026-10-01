@@ -19,6 +19,8 @@ export interface SentryConfig {
   traces?: number; profiles?: number; replays?: number; replays_on_error?: number;
   /** Console warnings and errors as Sentry Logs; "Send feedback" in Settings. */
   logs?: boolean; feedback?: boolean;
+  /** Who's signed in, as a code that doesn't say who (SENTRY_USER), so reports count the people they affect. */
+  user_id?: string | null;
 }
 
 export interface AppState {

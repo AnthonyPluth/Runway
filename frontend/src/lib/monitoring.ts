@@ -49,15 +49,23 @@ export function scrubSpan<S extends { name: string; attributes?: Data }>(span: S
   return span;
 }
 
+/** Of whoever the SDK has on an event, only the id: the code Runway gave it (startMonitoring), never a name or address. */
+export const onlyId = <E extends { user?: { id?: unknown } | null }>(event: E): E => {
+  const id = event.user?.id;
+  delete event.user;
+  if (typeof id === "string" && id) event.user = { id };
+  return event;
+};
+
 type Event = {
-  type?: string; request?: { url?: string }; user?: unknown; urls?: string[];
+  type?: string; request?: { url?: string }; user?: { id?: unknown } | null; urls?: string[];
   contexts?: { feedback?: { url?: string; message?: string } };
 };
 
 /** Feedback and replays (they don't go through beforeSend): addresses cleaned wherever they're kept. */
 function scrubEvent<E extends Event>(event: E): E {
   if (event.request) event.request = { url: pathOnly(event.request.url) };
-  delete event.user;
+  onlyId(event);
   if (event.contexts?.feedback?.url) event.contexts.feedback.url = pathOnly(event.contexts.feedback.url);
   if (event.urls) event.urls = event.urls.map((u) => pathOnly(u) ?? u);
   return event;
@@ -116,7 +124,7 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
     ],
     beforeSend(event) {
       if (event.request) event.request = { url: pathOnly(event.request.url) };
-      delete event.user;
+      onlyId(event);
       // An error's text can name an address or a row (a failed fetch says where), so it's cleaned like the server's.
       if (event.message) event.message = scrubText(event.message);
       const entry: { message?: string; formatted?: string } | undefined = event.logentry;   // "formatted" isn't in the SDK's type
@@ -139,6 +147,8 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
       return crumb;
     },
   });
+  // Who's signed in, as Runway's code for them: errors, traces, profiles and replays count people, not "anonymous".
+  if (cfg.user_id) Sentry.setUser({ id: cfg.user_id });
   // Feedback and replays don't go through beforeSend; this runs for every event.
   Sentry.addEventProcessor((event) => (event.type === "feedback" || event.type === "replay_event" ? scrubEvent(event as Event) as typeof event : event));
 }
