@@ -6,6 +6,8 @@
 
 <script lang="ts">
   import { autosave, markSaved } from "$lib/autosave";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
+  import { isPhone } from "$lib/phone.svelte";
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
   import { untrack } from "svelte";
@@ -103,6 +105,9 @@
   </div>
 </div>
 
+{#if isPhone()}
+  <DesktopOnly what="change the account, amount to forecast or merchant text" class="mt-4" />
+{:else}
 <details class="mt-4" bind:open={moreOpen}>
   <summary class="w-fit cursor-pointer text-sm text-muted-foreground select-none hover:text-foreground">More options <span class="text-xs">(account, amount to forecast, merchant text)</span></summary>
   <div class="mt-3 grid gap-x-3 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -130,3 +135,4 @@
     </div>
   </div>
 </details>
+{/if}

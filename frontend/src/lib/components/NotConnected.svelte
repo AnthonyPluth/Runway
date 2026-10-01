@@ -1,6 +1,8 @@
 <script lang="ts">
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { isPhone } from "$lib/phone.svelte";
 
   // What a page shows in place of its numbers until a bank is connected, so the page says what to do instead of
   // showing $0 everywhere. `secondary` is an extra way forward for a page that's useful without a bank (Net worth).
@@ -16,8 +18,12 @@
     <Card.Description>{text}</Card.Description>
   </Card.Header>
   <Card.Content class="flex flex-col items-center gap-3">
-    <Button href="#setup/connections">Connect a bank</Button>
-    {#if secondary}
+    {#if isPhone()}
+      <DesktopOnly what="connect a bank" />
+    {:else}
+      <Button href="#setup/connections">Connect a bank</Button>
+    {/if}
+    {#if secondary && !isPhone()}
       <Button variant="link" size="sm" class="h-auto px-0 py-0" onclick={secondary.onclick}>{secondary.label}</Button>
     {/if}
   </Card.Content>

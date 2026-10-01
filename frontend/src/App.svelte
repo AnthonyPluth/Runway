@@ -39,11 +39,11 @@
 
 <!-- On a phone in the installed app the page runs under the status bar (viewport-fit=cover): a solid strip keeps what scrolls
      by from showing through behind the clock, and the page starts below it (main's top padding). -->
-<div aria-hidden="true" class="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)] bg-background md:hidden"></div>
+<div aria-hidden="true" class="fixed inset-x-0 top-0 z-40 h-[env(safe-area-inset-top)] bg-background desktop:hidden"></div>
 
-<div class="flex min-h-dvh flex-col md:flex-row">
+<div class="flex min-h-dvh flex-col desktop:flex-row">
   <Sidebar />
-  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+5.5rem)] md:p-8">
+  <main class="min-w-0 flex-1 p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+5.5rem)] desktop:p-8">
     <div class="mx-auto max-w-7xl">
       {#if app.sessionExpired}
         <!-- Above the page, which stays drawn underneath, so an open edit isn't lost; signing in is up to you. -->

@@ -24,8 +24,8 @@
   </a>
 {/snippet}
 
-<!-- On a phone, MobileNav (a tab bar at the bottom) takes the sidebar's place. -->
-<aside class="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3 md:flex">
+<!-- On a phone (see lib/phone.svelte.ts), MobileNav (a tab bar at the bottom) takes the sidebar's place. -->
+<aside class="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3 desktop:flex">
   <a href="#overview" class="mb-4 flex items-center gap-2.5 px-2 font-semibold">
     <img src="/logo.svg" alt="" width="24" height="24" />Runway
     {#if s?.version}<span class="text-xs font-normal text-muted-foreground" title={`Runway ${s.version}`}>{s.version}</span>{/if}

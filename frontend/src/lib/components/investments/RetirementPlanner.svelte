@@ -1,10 +1,12 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { fmt0 } from "$lib/format";
+  import { isPhone } from "$lib/phone.svelte";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
@@ -13,7 +15,8 @@
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
-  // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave).
+  // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave). On a phone
+  // it's the result only; the plan itself is edited on a computer.
   let { data }: { data: PlanData } = $props();
 
   const copy = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
@@ -141,7 +144,7 @@
     <h3 class="font-medium">Nothing to plan from yet</h3>
     <p class="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Runway plans from your investment accounts. Connect one, or enter holdings by
       hand, and the planner starts from real numbers.</p>
-    <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
+    {#if !isPhone()}<Button class="mt-4" href="#networth/investments">Go to Investments</Button>{/if}
   </div>
 {:else}
 {#if sample}
@@ -183,6 +186,9 @@
 {/if}
 {#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
+{#if isPhone()}
+  <DesktopOnly class="mt-5" what="change the plan" />
+{:else}
 <div class="mt-5 grid gap-6 lg:grid-cols-2">
   <section>
     <h3 class="mb-2 font-medium">Who's retiring</h3>
@@ -327,6 +333,7 @@
     </p>
   </section>
 </div>
+{/if}
 {/if}
 
 {#if saved}

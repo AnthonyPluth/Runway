@@ -9,6 +9,8 @@ The [home page](/Runway/) has the short list. This is what each part does and wh
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget** (Budget and Bills & income), **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
+**On a phone** (a narrow screen, or a phone turned sideways), Runway is for glancing and quick fixes. You get the Overview (cash on hand, what's coming up, alerts), Transactions (search, change a category, mark an item recurring or not), the Budget's progress, the Net worth total and its change, the Retirement result, a summary Cash flow report, Churning's upcoming items and benefits to mark used, Settings → Notifications, and **Sync now** in the More menu. Heavier editing is for a computer: splitting transactions and order details, a recurring item's more options, setting budgets, editing the retirement plan, Investments, Equity, the other reports, and most of Settings (Connections, Accounts, Categories, Rules, Advanced). Those places show "Open Runway on a computer to…" instead.
+
 Settings has seven tabs: **Accounts**, **Connections** (SimpleFIN, Plaid and the browser extension for Amazon, Target, Costco and Carta), **Categories**, **Rules**, **Services** (OpenRouter, Realie, Finnhub and Logo.dev), **Notifications**, and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Connections.
 
 ## Cash-flow forecast
