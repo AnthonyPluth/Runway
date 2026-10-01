@@ -62,13 +62,38 @@ describe("SyncButton", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Last sync failed");
   });
 
-  it("doesn't fail when a sync is already running: it says so and keeps watching", async () => {
-    vi.mocked(api).mockImplementation(async (path: string) => { if (path === "/api/sync") throw new ApiError("A sync is already running.", 409); return state({ syncing: true }); });
+  it("doesn't fail when a sync is already running: it says so, keeps watching, and says if that sync fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let running = true;
+      vi.mocked(api).mockImplementation(async (path: string) => {
+        if (path === "/api/sync") throw new ApiError("A sync is already running.", 409);
+        return running ? state({ syncing: true, last_log: { at: "2026-10-01T06:00:00", ok: true, message: "" } })
+          : state({ syncing: false, last_log: { at: "2026-10-01T07:00:00", ok: false, message: "SimpleFIN is down" } });
+      });
+      app.state = state({ last_log: { at: "2026-10-01T06:00:00", ok: true, message: "" } });
+      render(SyncButton);
+      await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
+      await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining("already running")));
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+      running = false;
+      await vi.advanceTimersByTimeAsync(3100);
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("SimpleFIN is down"));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("doesn't reload under a form you're typing in, and says the page is older", async () => {
+    let finish!: (v: unknown) => void;
+    vi.mocked(api).mockImplementation((path: string) => path === "/api/sync" ? new Promise((r) => { finish = r; }) : Promise.resolve(state()));
     render(SyncButton);
+    const input = document.body.appendChild(document.createElement("input"));
     await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining("already running")));
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
+    input.focus();
+    finish({ new: 2, bank_messages: [] });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced · 2 new transactions. Change page to see the new data."));
+    expect(app.version).toBe(0);
+    input.remove();
   });
 
   it("is disabled while the server is syncing (the daily sync, or a visit's)", () => {
