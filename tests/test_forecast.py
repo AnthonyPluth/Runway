@@ -483,6 +483,17 @@ class ForecastAssumptionTests(LedgerCase):
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
         self.assertEqual(forecast.build(self.conn, TODAY, 30)["budget"]["total"][0], 7625.0)
 
+    def test_pending_isnt_added_to_a_balance_that_already_has_it(self):
+        self.tx("chk", "2026-09-22", -400.0, "HARDWARE STORE", "Shopping", pending=1)
+        # the bank's available balance is $400 less than its balance: the balance leaves the pending debit out
+        self.conn.execute(update(Account).where(Account.id == "chk").values(available=4600.0))
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (4600.0, -400.0))
+        # the same as the balance: the bank has taken it out already, so it isn't taken out twice
+        self.conn.execute(update(Account).where(Account.id == "chk").values(available=5000.0))
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (5000.0, 0.0))
+
     def test_an_overpayment_comes_off_the_next_statement(self):
         # $1,200 paid on the $800 statement (the current balance, say), with $100 of new charges since the close
         self.conn.execute(update(Transaction).where(Transaction.description == "GROCER").values(posted="2026-09-01"))
@@ -581,29 +592,42 @@ class ForecastAssumptionTests(LedgerCase):
     def test_card_payments_are_keyed_by_their_closing_date(self):
         events = [e for e in forecast.build(self.conn, TODAY, 90)["events"] if e["kind"] == "card"]
         self.assertEqual([(e["date"], e["key"]) for e in events],
-                         [("2026-10-05", "card:cc:2026-09-10"), ("2026-11-05", "card:cc:2026-10-10"),
-                          ("2026-12-07", "card:cc:2026-11-10")])
+                         [("2026-10-05", "cardclose:cc:2026-09-10"), ("2026-11-05", "cardclose:cc:2026-10-10"),
+                          ("2026-12-07", "cardclose:cc:2026-11-10")])
         # an amount set on the October statement's estimate still applies when the bank's statement has a different
         # due date
-        self.conn.execute(insert(Override).values(key="card:cc:2026-10-10", amount=-123.0))
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
         self.assertEqual(self.estimates()["2026-11-05"], 123.0)
         self.stmt("cc", 500.0, "2026-10-10", "2026-11-06")
         self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-500.0))
         e = next(e for e in forecast.build(self.conn, date(2026, 10, 12), 30)["events"] if e["kind"] == "card")
-        self.assertEqual((e["date"], e["key"], e["amount"], e["overridden"]), ("2026-11-06", "card:cc:2026-10-10", -123.0, True))
+        self.assertEqual((e["date"], e["key"], e["amount"], e["overridden"]), ("2026-11-06", "cardclose:cc:2026-10-10", -123.0, True))
 
     def test_an_amount_set_under_the_old_due_date_key_still_applies(self):
         self.conn.execute(insert(Override).values(key="card:cc:2026-11-05", amount=-77.0))
         self.conn.execute(insert(Override).values(key="card:cc:2026-10-05", amount=-66.0))
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["key"]: e["amount"] for e in fc["events"] if e["kind"] == "card"},
-                         {"card:cc:2026-09-10": -66.0, "card:cc:2026-10-10": -77.0})
-        # moved to the new keys, so putting one back (removing the event's key) works
-        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.like("card:%"))).scalars()),
-                         ["card:cc:2026-09-10", "card:cc:2026-10-10"])
-        self.conn.execute(delete(Override).where(Override.key == "card:cc:2026-10-10"))
-        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "card:cc:2026-10-10")
+                         {"cardclose:cc:2026-09-10": -66.0, "cardclose:cc:2026-10-10": -77.0})
+        # moved to the new keys (the old ones are gone), so putting one back (removing the event's key) works
+        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.like("card%"))).scalars()),
+                         ["cardclose:cc:2026-09-10", "cardclose:cc:2026-10-10"])
+        self.conn.execute(delete(Override).where(Override.key == "cardclose:cc:2026-10-10"))
+        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "cardclose:cc:2026-10-10")
         self.assertFalse(e.get("overridden"))
+
+    def test_an_old_key_on_a_due_date_that_is_another_closing_date_stays_put(self):
+        # Closing the 31st, due the 28th: the Jan 31 statement was due Feb 28, the day the next one closes. It's paid,
+        # so it has no event, and its old edit (keyed by that due date) mustn't land on the Feb 28 statement.
+        self.stmt("cc", 800.0, "2027-01-31", "2027-02-28")
+        self.tx("cc", "2027-02-05", 800.0, "PAYMENT THANK YOU", "Credit Card Payment")
+        self.tx("cc", "2027-02-08", -100.0, "COFFEE", "Restaurants")
+        self.conn.execute(insert(Override).values(key="card:cc:2027-02-28", amount=-5.0))
+        events = [e for e in forecast.build(self.conn, date(2027, 2, 10), 60)["events"] if e["kind"] == "card"]
+        self.assertEqual([(e["key"], e["date"]) for e in events],
+                         [("cardclose:cc:2027-02-28", "2027-03-29")])   # due Mar 28, a Sunday: paid the 29th
+        self.assertFalse(events[0].get("overridden"))
+        self.assertEqual(events[0]["amount"], -100.0)
 
     def test_a_payment_that_posted_today_but_isnt_linked_yet_counts_once(self):
         for d in ("2026-08-01", "2026-09-01"):

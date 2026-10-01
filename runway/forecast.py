@@ -209,11 +209,17 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
     return [t for t in txs if t["category"] not in transfers and not tests[t["account_id"]](t)]
 
 
-def pending_total(conn, account_id: str) -> float:
-    """What's pending on an account (money out negative): the bank's posted balance doesn't have it yet."""
+def pending_total(conn, account: dict) -> float:
+    """What's pending on an account (money out negative) that its balance doesn't have yet. Most banks' balance leaves
+    pending out, but some include it; when the bank also reports an available balance, pending is only added if that
+    brings the balance closer to the available one (otherwise the balance evidently has it already)."""
     T = Transaction
-    return conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
-                        .where(T.account_id == account_id, T.pending == 1)).scalar() or 0.0
+    pending = conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
+                           .where(T.account_id == account["id"], T.pending == 1)).scalar() or 0.0
+    available = account.get("available")
+    if available is not None and abs(account["balance"] + pending - available) >= abs(account["balance"] - available):
+        return 0.0
+    return pending
 
 
 def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
@@ -342,10 +348,11 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         cash = [a for a in cash_like if a["kind"] == "checking"]  # only one checking account: that's the primary
     else:
         cash = [a for a in cash_like if a["in_forecast"]]
-    # Each account starts from the bank's posted balance plus what's pending on it, money in and out. A pending payment
+    # Each account starts from the bank's balance plus what's pending on it that the balance doesn't have yet, money in
+    # and out (see pending_total). A pending payment
     # already linked to a recurring item counts as having happened (see below), so it's in the balance and not again
     # as an event.
-    pending = {a["id"]: round(pending_total(conn, a["id"]), 2) for a in cash}
+    pending = {a["id"]: round(pending_total(conn, a), 2) for a in cash}
     cash = [dict(a, balance=a["balance"] + pending[a["id"]]) for a in cash]
     by_id.update({a["id"]: a for a in cash})
     cards = [a for a in accounts if a["kind"] == "credit"]
@@ -424,7 +431,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         due = _d(info["due_date"])
         pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
         if pays >= today and info["remaining"] > 0.005:
-            key = f"card:{card['id']}:{info['last_close']}"
+            key = f"cardclose:{card['id']}:{info['last_close']}"
             old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -info["remaining"], "kind": "card", "estimated": False,
@@ -462,7 +469,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
             elif est > 0.005:
-                key = f"card:{card['id']}:{close.isoformat()}"
+                key = f"cardclose:{card['id']}:{close.isoformat()}"
                 old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
