@@ -267,7 +267,8 @@
             {#if s}
               <label class="flex items-center gap-2 text-sm">Sell in
                 <Input type="number" step="1" class="w-24" value={s.sell_year} oninput={(e) => { s.sell_year = Number(e.currentTarget.value); keep(); }} /></label>
-              <span class="text-sm text-muted-foreground tabular-nums">≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
+              <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
+              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums">≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
             {/if}
           </li>
         {/each}

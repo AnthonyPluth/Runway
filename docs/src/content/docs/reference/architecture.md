@@ -17,7 +17,7 @@ sidebar:
 | [Realie](https://www.realie.ai) | Automated home value estimates | Optional |
 | [Logo.dev](https://logo.dev) | Merchant and bank logos Plaid doesn't have | Optional |
 
-SimpleFIN and Plaid are configured under Settings → Connections; the optional services under Settings → Services.
+SimpleFIN, Plaid, the browser extension and the optional services are all configured under Settings → Connections.
 
 ## How it works
 
