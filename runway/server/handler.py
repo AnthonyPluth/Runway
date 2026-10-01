@@ -231,9 +231,11 @@ class Handler(BaseHTTPRequestHandler):
         return user
 
     def end_headers(self):
-        for ck in getattr(self, "_set_cookies", None) or []:   # a renewed session (_user), on whatever this request answers
+        # A renewed session (_user), on whatever this request answers. Taken before sending, so a cookie send_header
+        # refuses isn't sent again on the error that follows.
+        cookies, self._set_cookies = getattr(self, "_set_cookies", None) or [], []
+        for ck in cookies:
             self.send_header("Set-Cookie", ck)
-        self._set_cookies = []
         super().end_headers()
 
     def _redirect(self, location: str, cookies: list[str] | None = None) -> None:

@@ -185,6 +185,14 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(h["Set-Cookie"])
         self.assertIsNone(h["X-Next"])
         self.assertIn("reference", json.loads(body)["error"])
+        # The same for a cookie queued for whatever the request answers: the 500 goes out without it.
+        def bad_cookie(handler, _method):
+            handler._set_cookies.append("runway_session=x\r\nX-Injected: 1")
+            handler._send(200, b"ok", "text/plain")
+        with mock.patch.object(server.Handler, "_route", bad_cookie), mock.patch("runway.monitoring.report"):
+            code, h, body = self.open("/api/anything")
+        self.assertEqual((code, h["Set-Cookie"], h["X-Injected"]), (500, None, None))
+        self.assertIn("reference", json.loads(body)["error"])
         # A redirect somewhere with a line break in it goes home instead.
         def bad_redirect(handler, _method):
             handler._redirect("/x\r\nSet-Cookie: stolen=1")
