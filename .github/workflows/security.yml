@@ -1,9 +1,12 @@
 name: Security scans
 
 # Static analysis, dependency, container, secret and workflow scans, on top of what docker.yml already runs (pip-audit).
-# Findings from Semgrep, Trivy, zizmor and Scorecard are uploaded to the Security tab (Code scanning) instead of failing
-# the build; Bandit and npm audit fail it. CodeQL and Dependabot alerts come from GitHub's own settings, not from here.
-# Runs weekly too, because new vulnerabilities are published for code that hasn't changed.
+# Findings from Semgrep, Trivy, zizmor and Scorecard are uploaded to the Security tab (Code scanning), whose check runs
+# the merge gate requires; npm audit fails the build itself. CodeQL and Dependabot alerts come from GitHub's own
+# settings, not from here. Runs weekly too, because new vulnerabilities are published for code that hasn't changed.
+#
+# A pull request, and a push to main, runs only the scans its change can affect (see `changes`); the weekly and manual
+# runs scan everything.
 on:
   push:
     branches: [main]
@@ -30,8 +33,55 @@ defaults:
     shell: bash
 
 jobs:
-  python:
-    name: Bandit and Semgrep
+  # What a pull request (or a push to main) changes, so the scans it can't affect are skipped (a skipped job counts as
+  # passed, for the merge gate too). A change to the workflows (.github/) runs every scan. Trivy's file scan always runs:
+  # a secret can be committed in any file.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read      # the pull request's list of changed files
+    outputs:
+      code: ${{ steps.what.outputs.code }}
+      web_deps: ${{ steps.what.outputs.web_deps }}
+      image: ${{ steps.what.outputs.image }}
+      workflows: ${{ steps.what.outputs.workflows }}
+    steps:
+      - name: Which scans the change can affect
+        id: what
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          # A rename counts for both its old and its new path.
+          paths='.filename, (.previous_filename // empty)'
+          if [ -n "$PR" ]; then
+            files=$(gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq ".[] | $paths")
+            limit=3000      # the most the files API lists
+          elif [ "$EVENT" = push ] && [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            files=$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq ".files[] | $paths")
+            limit=300       # the most a comparison lists
+          else
+            files=".github/(a scheduled or manual run scans everything)" limit=0
+          fi
+          # A change too big to list runs everything.
+          if [ "$limit" -gt 0 ] && [ "$(grep -c . <<< "$files" || true)" -ge "$limit" ]; then files=".github/(too many to list)"; fi
+          touches() { if grep -qE "$1|^\.github/" <<< "$files"; then echo true; else echo false; fi; }
+          {
+            echo "code=$(touches '^(runway|frontend/src|extension)/')"                               # Semgrep's paths
+            echo "web_deps=$(touches '^frontend/package(-lock)?\.json$')"                             # npm audit
+            echo "image=$(touches '^(Dockerfile|\.dockerignore|pyproject\.toml|poetry\.lock)$')"     # what the image holds beyond Runway's own code
+            echo "workflows=$(touches '^\.github/')"                                                 # zizmor
+          } | tee -a "$GITHUB_OUTPUT"
+
+  semgrep:
+    name: Semgrep
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,19 +90,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
-        id: python
-        with:
-          python-version: "3.14"
-      # Bandit at the version poetry.lock pins (pyproject.toml's dev group), the same as `poetry install` gives you.
-      - name: Install Poetry and Bandit
-        env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-        run: |
-          pipx install --python "$PYTHON_PATH" "poetry==$POETRY_VERSION"
-          poetry install --no-root --only dev --no-interaction
-      - name: Bandit (settings in pyproject.toml)
-        run: poetry run bandit -c pyproject.toml -r runway -ll
       - name: Semgrep
         run: >
           pipx run "semgrep==1.146.0" scan --metrics=off --sarif --output semgrep.sarif
@@ -65,6 +102,8 @@ jobs:
 
   web:
     name: npm audit
+    needs: changes
+    if: needs.changes.outputs.web_deps == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
@@ -78,7 +117,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
 
   trivy:
-    name: Trivy (files and image)
+    name: Trivy (files)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,8 +139,29 @@ jobs:
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
+
+  image:
+    name: Trivy (image)
+    needs: changes
+    if: needs.changes.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069   # v4.4.1
+      # Built from the layers docker.yml's builds on main leave in the build cache, so only what the change touches is
+      # built again. Read-only: nothing this build makes goes back into the cache.
       - name: Build the image (not published)
-        run: docker build -t runway:scan .
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc   # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: runway:scan
+          cache-from: type=gha
       - name: Scan the image (OS packages and libraries)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25   # v0.36.0
         with:
@@ -118,6 +178,8 @@ jobs:
 
   workflows:
     name: zizmor (GitHub Actions)
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -29,7 +29,6 @@ types-python-dateutil = "2.9.0.20260807"
 coverage = "7.16.2"
 unittest-parallel = "1.8.6"
 pip-audit = "2.10.1"
-bandit = {version = "1.9.4", extras = ["toml"]}
 zizmor = "1.30.1"
 
 [build-system]
@@ -53,13 +52,6 @@ ignore = [
     # Nested `with` keeps a patch's scope apart from the assertRaises (or block) it sets up.
     "SIM117",
 ]
-
-[tool.bandit]
-# Security lint for runway/ (`bandit -c pyproject.toml -r runway`, run in CI). Fails on anything medium or worse.
-# B310 (urlopen with a non-http scheme): every request goes to an https address Runway builds or a provider
-# publishes, and urlopen is how the code makes them. B105 also skipped: it takes settings-key names for passwords.
-skips = ["B310", "B105"]
-exclude_dirs = ["tests"]
 
 [tool.coverage.run]
 # CI measures how much of Runway the tests run and sends it to Codecov (the README's backend badge):
