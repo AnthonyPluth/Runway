@@ -199,7 +199,10 @@ def still_due(item: dict, occurrence: date, paid: dict[date, float], today: date
     got = paid.get(occurrence, 0.0)
     if abs(got) < CENT:
         return amount
-    if not edited and (item.get("amount_mode") or "fixed") != "fixed":
+    if edited:   # you said what this one comes to: whatever of that hasn't come yet is still expected, however small
+        left = round(amount - got, 2)
+        return left if left * amount > 0 else None
+    if (item.get("amount_mode") or "fixed") != "fixed":
         return None   # a learned amount varies: whatever came is this time's
     if amount < 0 and abs(got) >= abs(amount) / 2:
         return None   # a bill that came in cheaper, not a first part

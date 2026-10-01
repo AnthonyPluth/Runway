@@ -407,6 +407,13 @@ class SplitPaymentTests(LedgerCase):
         item = {"frequency": "monthly", "amount_mode": "avg3", "amount": -120.0}
         self.assertEqual(recurring.still_due(item, date(2026, 10, 3), {date(2026, 10, 3): -95.0}, date(2026, 10, 4), -200.0, True),
                          -105.0)   # an amount you set for this one counts as fixed
+        # ...and whatever of it hasn't come is still expected, however small: a rest edited to $200, a $10 renewal rest.
+        pay = {"frequency": "monthly", "amount_mode": "fixed", "amount": 5000.0}
+        self.assertEqual(recurring.still_due(pay, date(2026, 10, 3), {date(2026, 10, 3): 2150.4}, date(2026, 10, 4), 2350.4, True),
+                         200.0)
+        self.assertEqual(recurring.still_due(item, date(2026, 10, 3), {date(2026, 10, 3): -15.0}, date(2026, 10, 4), -25.0, True),
+                         -10.0)
+        self.assertIsNone(recurring.still_due(pay, date(2026, 10, 3), {date(2026, 10, 3): 2400.0}, date(2026, 10, 4), 2350.4, True))
 
     def test_a_small_charge_near_a_yearly_renewal_leaves_the_rest_expected(self):
         self.conn.execute(insert(Recurring).values(name="Prime", account_id="chk", amount=-139, frequency="yearly",
