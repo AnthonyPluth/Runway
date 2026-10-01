@@ -82,7 +82,6 @@ export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): { yea
   }
   return [...byLoan.values()];
 }
-}
 
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */
 export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[]) {
