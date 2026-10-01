@@ -257,16 +257,12 @@ describe("the Churning page", () => {
 
   describe("the annual fee tile", () => {
     const due = (over: Partial<ChurnCard>) => card({ fee_due: "2026-10-20", annual_fee: 95, ...over });
-    it("doesn't ask keep, downgrade or close when every card due has a plan", async () => {
-      serve({ cards: [due({ id: 1, plan: "keep" }), due({ id: 2, plan: "close", plan_active: true }), due({ id: 3, plan: "product_change", plan_active: true })] });
-      render(Churning);
-      expect(await screen.findByText("3 cards, each with a plan")).toBeInTheDocument();
-      expect(screen.queryByText(/keep, downgrade or close/)).toBeNull();
-    });
-    it("still asks about the cards with no plan", async () => {
+    it("shows the fee total and count, and never asks keep, downgrade or close", async () => {
       serve({ cards: [due({ id: 1, plan: "keep" }), due({ id: 2, plan: "undecided" })] });
       render(Churning);
-      expect(await screen.findByText("1 card: keep, downgrade or close?")).toBeInTheDocument();
+      expect(await screen.findByText("2 cards")).toBeInTheDocument();
+      expect(screen.queryByText(/keep, downgrade or close/)).toBeNull();
+      expect(screen.queryByText(/each with a plan/)).toBeNull();
     });
   });
 });

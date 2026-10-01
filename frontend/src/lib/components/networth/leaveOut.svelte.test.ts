@@ -8,9 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 vi.mock("$lib/app.svelte", () => ({ app: { state: { brands: {}, connected: true }, version: 0 }, refreshState: vi.fn(), reload: vi.fn() }));
 
 import { api } from "$lib/api";
-import AccountsTable from "../investments/AccountsTable.svelte";
 import NetWorth from "../../../pages/NetWorth.svelte";
-import type { InvAccount } from "../investments/types";
 
 const calls = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path);
 
@@ -80,23 +78,5 @@ describe("the not-counted footnote", () => {
     render(NetWorth);
     await screen.findByText("What makes it up");
     expect(screen.queryByText(/Not counted:/)).not.toBeInTheDocument();
-  });
-});
-
-describe("the investment accounts", () => {
-  const acct = (over: Partial<InvAccount>): InvAccount => ({ id: "a1", item_id: "i", name: "Roth IRA", official_name: null, subtype: null, mask: "3639", balance: 100, hidden: 0,
-    hidden_in_accounts: 0, source: "plaid", institution_name: "Wealthfront", tracked: 0, drift: null, ...over });
-
-  it("has no box to leave an account out, only a way to show one that was hidden", async () => {
-    vi.mocked(api).mockResolvedValue({ ok: true } as never);
-    const onchanged = vi.fn();
-    render(AccountsTable, { accounts: [acct({}), acct({ id: "a2", name: "Old", hidden: 1 }), acct({ id: "a3", name: "Dup", hidden: 1, duplicate_of: "a1" })], seen: [], onchanged });
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Show Roth IRA again/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Show Dup again/ })).not.toBeInTheDocument();   // a duplicate stays out (it would count twice)
-    await userEvent.click(screen.getByRole("button", { name: "Show Old again" }));
-    await waitFor(() => expect(calls("/api/plaid/accounts/a2")).toHaveLength(1));
-    expect((calls("/api/plaid/accounts/a2")[0][1] as { body: unknown }).body).toEqual({ hidden: false });
-    expect(onchanged).toHaveBeenCalled();
   });
 });

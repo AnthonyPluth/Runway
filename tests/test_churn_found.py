@@ -323,6 +323,19 @@ class ChatRequestTests(DbCase):
         self.assertNotIn("tools", body)
         self.assertEqual(out["annual_fee"], 95.0)
 
+    def test_card_lookups_use_their_own_model(self):
+        models = []
+
+        def call(api_key, model, prompt, web=None):
+            models.append(model)
+            return "{}", []
+        db.set_setting(self.c, sk.LLM_MODEL, "openai/gpt-4o-mini")   # the categorizer's: not the card lookup's
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
+        db.set_setting(self.c, sk.CARD_AI_MODEL, "google/gemini-2.5-flash")
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
+        self.assertEqual(models, ["anthropic/claude-haiku-4.5", "google/gemini-2.5-flash"])
+        self.assertEqual(categorize.DEFAULT_CARD_MODEL, "anthropic/claude-haiku-4.5")
+
     def test_switched_off_and_categorizing_send_no_web_search(self):
         db.set_setting(self.c, sk.CHURN_AI_WEB, "0")
         with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
@@ -330,6 +343,18 @@ class ChatRequestTests(DbCase):
             self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
             self.assertIn("Found it", categorize.call_llm("k", "m", "p"))
             self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
+
+    def test_categorizing_asks_for_providers_that_keep_nothing_and_says_when_there_are_none(self):
+        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+            categorize.call_llm("k", "openrouter/free", "p")
+            self.assertEqual(self.sent(urlopen)["provider"], {"data_collection": "deny"})
+            churn_found.suggest(self.c, "chase", "Sapphire Reserve")   # a card's name only: any provider
+            self.assertNotIn("provider", self.sent(urlopen))
+        none = urllib.error.HTTPError("u", 404, "Not Found", {},
+                                      io.BytesIO(b'{"error":{"message":"No endpoints found matching your data policy"}}'))
+        with mock.patch("urllib.request.urlopen", side_effect=none), \
+                self.assertRaisesRegex(RuntimeError, "without keeping them.*Settings → Connections"):
+            categorize.call_llm("k", "openrouter/free", "p")
 
     def test_other_errors_are_not_mistaken_for_a_model_without_tools(self):
         down = urllib.error.HTTPError("u", 502, "Bad Gateway", {}, io.BytesIO(b"upstream tool error"))

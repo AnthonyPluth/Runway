@@ -69,6 +69,7 @@ def api_transactions(conn, q, _b):
         t["splits"] = parts.get(t["id"], [])
         t["retail"] = orders.get(t["id"])
         t["logo"] = logos.get(t["id"])
+        t["brand"] = categorize.brand_choice(t)
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
     return {"items": items, "total": total}
 
@@ -167,6 +168,9 @@ def api_tx_split(conn, _q, body, tx_id):
 def api_tx_bulk(conn, _q, body, *_):
     """Change many transactions at once (the checkboxes on Transactions)."""
     if isinstance(body.get("restore"), list):   # Undo: the `was` an earlier change sent back
+        keep = body.get("keep_bank")   # ... and whether a brand kept the bank's name before (api_tx_brand_name)
+        if isinstance(keep, dict) and isinstance(keep.get("brand"), str) and keep["brand"]:
+            categorize.keep_bank_name(conn, keep["brand"], bool(keep.get("keep")))
         return {"ok": True, "updated": restore(conn, body["restore"])}
     ids = body.get("ids")
     if not isinstance(ids, list):
@@ -180,6 +184,24 @@ def api_tx_bulk(conn, _q, body, *_):
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True, "updated": n, "was": was}
+
+
+def api_tx_brand_name(conn, _q, body, tx_id):
+    """Name a transaction by the bank's text instead of the brand's name a sync gave it ({"use": "bank"}), or by the
+    brand's again ({"use": "brand"}). With {"all": true}, the brand's other transactions too, and the syncs from now on
+    (categorize.keep_bank_name). Sends back what Undo needs: the transactions as they were, and the brand's setting."""
+    try:
+        brand, names = categorize.brand_renames(conn, tx_id, str(body.get("use") or ""), bool(body.get("all")))
+    except ValueError as e:
+        raise ApiError(str(e)) from e
+    was = snapshot(conn, list(names))
+    kept = brand in categorize.kept_bank_names(conn)
+    for tid, payee in names.items():
+        conn.execute(update(Transaction).where(Transaction.id == tid).values(payee=payee))
+    if body.get("all"):
+        categorize.keep_bank_name(conn, brand, body.get("use") == "bank")
+    return {"ok": True, "updated": len(names), "brand": brand, "payee": names[tx_id], "was": was,
+            "keep_bank": {"brand": brand, "keep": kept}}
 
 
 def api_tx_accept(conn, _q, _b, tx_id):

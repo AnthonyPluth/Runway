@@ -352,7 +352,7 @@ inv_accounts = Table(
     Column('mask', Text),
     Column('balance', Float),
     Column('currency', Text, server_default=text("'USD'")),
-    Column('hidden', Integer, server_default=text('0')),
+    Column('hidden', Integer, server_default=text('0'), doc='unused, always 0 (an account is left out in Settings → Accounts)'),
     Column('source', Text, server_default=text("'plaid'"), doc='plaid | simplefin'),
     Column('institution', Text),
     Column('account_id', Text, doc="Plaid accounts: the Runway account it is (accounts.id; 'pl:<id>' when it's its own), "

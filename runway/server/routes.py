@@ -24,7 +24,7 @@ from .api.churning import (
     api_churn_wish_remove, api_churn_wish_update, api_churning, api_churning_best
 )
 from .api.connections import (
-    api_connect, api_inv_account, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
+    api_connect, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
     api_plaid_link_token, api_plaid_match, api_plaid_oauth_resume, api_plaid_settings, api_plaid_status
 )
 from .api.equity import (
@@ -59,7 +59,7 @@ from .api.retail import (
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
 from .api.transactions import (
     api_ai_apply, api_ai_log, api_ai_suggest, api_recategorize, api_transactions, api_tx_accept, api_tx_bulk,
-    api_tx_category, api_tx_split
+    api_tx_brand_name, api_tx_category, api_tx_split
 )
 
 
@@ -82,6 +82,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
     ("POST", "/api/transactions/{id}/split", api_tx_split),
+    ("POST", "/api/transactions/{id}/name", api_tx_brand_name),
     ("POST", "/api/transactions/{id}/recurring", api_tx_recurring),
     ("POST", "/api/overrides", api_override_set),
     ("DELETE", "/api/overrides", api_override_delete),
@@ -133,7 +134,6 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/plaid/exchange", api_plaid_exchange),
     ("POST", "/api/plaid/items/{id}/sync", api_plaid_item_sync),
     ("POST", "/api/plaid/items/{id}/remove", api_plaid_item_remove),
-    ("POST", "/api/plaid/accounts/{id}", api_inv_account),
     ("POST", "/api/plaid/match", api_plaid_match),
     ("GET", "/api/plaid/oauth_resume", api_plaid_oauth_resume),
     ("GET", "/api/investments", api_investments),

@@ -24,7 +24,8 @@ def api_state(conn, _q, _b):
         "connection_logos": brands.connection_logos(conn),   # each bank connection's, by its institution's name
         "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
         "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
-        "llm_model": db.get_setting(conn, sk.LLM_MODEL) or categorize.DEFAULT_MODEL,
+        "llm_model": categorize.llm_model(conn),
+        "card_ai_model": categorize.card_ai_model(conn),
         "last_sync_ok": with_offset(db.get_setting(conn, sk.LAST_SYNC_OK)),
         "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
         "sync_warnings": json.loads(db.get_setting(conn, sk.LAST_SYNC_WARNINGS) or "[]"),   # what banks said on that sync
@@ -134,6 +135,9 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "llm_model" in body:
         db.set_setting(conn, sk.LLM_MODEL, (body.get("llm_model") or "").strip() or None)
+        db.set_setting(conn, sk.LAST_LLM_ERROR, None)
+    if "card_ai_model" in body:
+        db.set_setting(conn, sk.CARD_AI_MODEL, (body.get("card_ai_model") or "").strip() or None)
         db.set_setting(conn, sk.LAST_LLM_ERROR, None)
     if "primary_account" in body:
         acct = body.get("primary_account") or None

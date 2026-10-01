@@ -35,8 +35,12 @@ export const fromRule = (c: RuleWas): Was => ({
   needs_review: c.was_needs_review, payee: c.was_payee, is_split: c.was_split,
 });
 
-/** Put these transactions back as they were, and refresh what counts them (the To review badge). */
-export async function restoreTx(was: Was[]): Promise<void> {
-  await api("/api/transactions/bulk", { method: "POST", body: { restore: was } });
+/** Whether a brand's transactions kept the bank's name before a change (`keep_bank` in POST /api/transactions/{id}/name). */
+export interface KeepBank { brand: string; keep: boolean }
+
+/** Put these transactions back as they were (and the brand's setting, if it changed), and refresh what counts them
+ *  (the To review badge). */
+export async function restoreTx(was: Was[], keepBank?: KeepBank): Promise<void> {
+  await api("/api/transactions/bulk", { method: "POST", body: keepBank ? { restore: was, keep_bank: keepBank } : { restore: was } });
   refreshState();
 }

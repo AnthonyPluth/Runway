@@ -16,6 +16,10 @@
   import Logo from "$lib/components/Logo.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { Tx } from "./types";
+  import { restoreTx, type KeepBank, type Was } from "./restore";
+  import { api } from "$lib/api";
+  import { undoable } from "$lib/undo";
+  import { toast } from "svelte-sonner";
   import { openOrders } from "./expanded.svelte";
   import Receipt from "@lucide/svelte/icons/receipt";
   import Clock from "@lucide/svelte/icons/clock";
@@ -55,6 +59,24 @@
   const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
   // Shown on hover (and always on touch screens, and while focused).
   const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
+
+  // A big merchant's name: the brand's a sync gave it, or the bank's text instead (for this one, or for all of the brand's
+  // and the syncs from now on), and back. Undo puts back the names and the brand's setting.
+  let naming = $state(false);
+  async function rename(all: boolean) {
+    const b = t.brand;
+    if (!b) return;
+    naming = false;
+    const use = b.using === "brand" ? "bank" : "brand";
+    try {
+      const r = await api<{ updated: number; payee: string; was: Was[]; keep_bank: KeepBank }>(
+        `/api/transactions/${encodeURIComponent(t.id)}/name`, { method: "POST", body: { use, all } });
+      const message = !all ? `${name} → ${r.payee}` : use === "bank" ? `${b.brand}: the bank’s names from now on` : `${b.brand} from now on`;
+      undoable(message, async () => { await restoreTx(r.was, all ? r.keep_bank : undefined); onchanged(); },
+        { description: all ? `${r.updated} renamed` : undefined });
+      onchanged();
+    } catch (err) { toast.error((err as Error).message); }
+  }
 
   async function save(category: string) {
     if (!category) return;
@@ -169,6 +191,18 @@
       {#if brand?.institution}<div><dt class="text-muted-foreground">Source</dt><dd>{brand.institution}</dd></div>{/if}
       <div><dt class="text-muted-foreground">Posted</dt><dd>{fmtDate(t.posted.slice(0, 10), { month: "short", day: "numeric", year: "numeric" })}</dd></div>
       {#if t.description}<div><dt class="text-muted-foreground">Bank’s text</dt><dd class="break-words">{t.description}</dd></div>{/if}
+      {#if t.brand}
+        <div><dt class="text-muted-foreground">Name</dt><dd class="flex flex-wrap gap-x-3">
+          {#if naming}
+            <Button variant="link" size="sm" class="h-auto p-0 text-xs" onclick={() => rename(false)}>Just this one</Button>
+            <Button variant="link" size="sm" class="h-auto p-0 text-xs" onclick={() => rename(true)}>All {t.brand.brand}, from now on</Button>
+          {:else}
+            <Button variant="link" size="sm" class="h-auto p-0 text-xs" onclick={() => (naming = true)}
+              title={`Rename it “${t.brand.using === "brand" ? t.brand.bank_name : t.brand.brand}”`}>
+              {t.brand.using === "brand" ? "Use the bank’s name" : `Use “${t.brand.brand}”`}</Button>
+          {/if}
+        </dd></div>
+      {/if}
       {#if sourceLabel && t.category}<div><dt class="text-muted-foreground">Category set by</dt><dd>{sourceLabel}</dd></div>{/if}
     </dl>
   {/if}

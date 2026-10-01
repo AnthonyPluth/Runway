@@ -8,16 +8,19 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Collection
 
 from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_coerce, update
 
 from . import categories as catmod
 from . import settings_keys as sk
-from . import db, monitoring, payees, rules as rulesmod, splits
+from . import brands, db, monitoring, payees, rules as rulesmod, splits
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
-DEFAULT_MODEL = "anthropic/claude-haiku-4.5"  # any OpenRouter model id works
+DEFAULT_MODEL = "openrouter/free"  # OpenRouter's free-models router; any OpenRouter model id works
+DEFAULT_CARD_MODEL = "anthropic/claude-haiku-4.5"  # card lookups use OpenRouter's web-search tool, which it calls reliably; cheap
+PAID_HINT_MODEL = "anthropic/claude-haiku-4.5"   # what to suggest when a free model's reply is unusable
 OPENROUTER_URL = os.environ.get("RUNWAY_OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
 
 # Processor prefixes that hide the real merchant name.
@@ -34,8 +37,81 @@ _TRAILING_NOISE = re.compile(
 )
 
 
-def clean_payee(raw: str | None) -> str:
-    return payees.shorten(tidy_payee(raw))   # "Target Debit Cach Tran" -> "Target"
+def bank_payee(raw: str | None) -> str:
+    """The payee the bank's text gives on its own: tidied, without its transfer words ("Target Debit Cach Tran" ->
+    "Target"), but not yet the brand's name ("Amzn Mktp Us")."""
+    return payees.shorten(tidy_payee(raw))
+
+
+def clean_payee(raw: str | None, keep_bank: Collection[str] = ()) -> str:
+    """The payee a sync gives a transaction from the bank's text: `bank_payee`, or the brand's own name for a big
+    merchant ("AMZN Mktp US*2K3" -> "Amazon": brands.merchant_name), except for the brands in `keep_bank` (the ones
+    you chose to keep the bank's name for: kept_bank_names)."""
+    name = bank_payee(raw)
+    brand = brands.merchant_name(name)
+    return brand if brand and brand not in keep_bank else name
+
+
+def kept_bank_names(conn) -> set[str]:
+    """The brands whose transactions keep the bank's name instead of the brand's (Use the bank's name, for all)."""
+    try:
+        names = json.loads(db.get_setting(conn, sk.BRAND_NAMES_OFF) or "[]")
+    except ValueError:
+        return set()
+    return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def keep_bank_name(conn, brand: str, keep: bool) -> None:
+    """Keep the bank's name for this brand's transactions from now on (or go back to the brand's)."""
+    names = kept_bank_names(conn)
+    names = names | {brand} if keep else names - {brand}
+    db.set_setting(conn, sk.BRAND_NAMES_OFF, json.dumps(sorted(names)))
+
+
+def _key(s: str | None) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def brand_choice(tx: dict) -> dict | None:
+    """For a transaction's details: {"brand", "bank_name", "using"} when its payee is a brand's name made from the
+    bank's text ("using": "brand", with the name the bank's text gives, to go back to), or that bank's name where a
+    brand's could be ("using": "bank"); None otherwise (a name Plaid gave it, one you gave it, or no brand)."""
+    if tx.get("merchant_id") or not tx.get("description"):
+        return None
+    bank = bank_payee(tx["description"])
+    brand = brands.merchant_name(bank)
+    if not brand or _key(brand) == _key(bank):
+        return None
+    payee = _key(tx.get("payee"))
+    using = "brand" if payee == _key(brand) else "bank" if payee == _key(bank) else None
+    return {"brand": brand, "bank_name": bank, "using": using} if using else None
+
+
+def brand_renames(conn, tx_id: str, use: str, everywhere: bool) -> tuple[str, dict[str, str]]:
+    """What "Use the bank's name" (use="bank") or "Use <brand>" (use="brand") renames: (the brand, {transaction id:
+    its new payee}). This transaction, and with `everywhere` every other one of the brand's named the other way (not
+    one Plaid named, nor one you named something else)."""
+    if use not in ("bank", "brand"):
+        raise ValueError("Choose the bank’s name or the brand’s")
+    t = Transaction
+    row = conn.execute(select(t.id, t.payee, t.description, t.merchant_id).where(t.id == tx_id)).fetchone()
+    if not row:
+        raise ValueError("Transaction not found")
+    choice = brand_choice(dict(row))
+    if not choice:
+        raise ValueError("This transaction’s name isn’t a brand’s")
+    brand = choice["brand"]
+    out = {tx_id: choice["bank_name"] if use == "bank" else brand}
+    if everywhere:
+        q = select(t.id, t.payee, t.description, t.merchant_id).where(
+            t.merchant_id.is_(None), t.description.is_not(None), t.id != tx_id)
+        if use == "bank":
+            q = q.where(func.lower(t.payee) == brand.lower())
+        for r in conn.execute(q):
+            c = brand_choice(dict(r))
+            if c and c["brand"] == brand and c["using"] != use:
+                out[r["id"]] = c["bank_name"] if use == "bank" else brand
+    return brand, out
 
 
 def tidy_payee(raw: str | None) -> str:
@@ -240,14 +316,21 @@ def _citations(message: dict) -> list[str]:
     return out
 
 
+NO_PRIVATE_PROVIDER = ("No provider of this model takes requests without keeping them, so nothing was sent: choose "
+                       "another model in Settings → Connections → AI categorization")
+
+
 def call_llm(api_key: str, model: str, prompt: str) -> str:
-    """Ask a model through OpenRouter's chat completions API (no web search)."""
-    return chat(api_key, model, prompt)[0]
+    """Ask a model through OpenRouter's chat completions API (no web search) about your transactions or orders: only
+    providers that don't keep or train on what they're sent (`private`)."""
+    return chat(api_key, model, prompt, private=True)[0]
 
 
-def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple[str, list[str]]:
+def chat(api_key: str, model: str, prompt: str, web: str | None = None, private: bool = False) -> tuple[str, list[str]]:
     """Ask a model through OpenRouter's chat completions API: its reply, and the web pages it cites. `web` is None (no
-    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model."""
+    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model.
+    `private` asks OpenRouter for providers that don't collect what they're sent (provider.data_collection "deny"):
+    for anything about your money. A model with none of them says so (NO_PRIVATE_PROVIDER)."""
     if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
         raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
     body = json.dumps({
@@ -256,6 +339,7 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple
         "temperature": 0,
         "messages": [{"role": "user", "content": prompt}],
         **_web_request(web),
+        **({"provider": {"data_collection": "deny"}} if private else {}),
     }).encode()
     req = urllib.request.Request(
         OPENROUTER_URL,
@@ -282,10 +366,14 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
+            if private and "data policy" in detail.lower():
+                raise RuntimeError(f"{NO_PRIVATE_PROVIDER} (OpenRouter HTTP {e.code})") from e
             raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
                 f"OpenRouter HTTP {e.code}: {detail}") from e
         if data.get("error"):
             err = data["error"]
+            if private and "data policy" in str(err).lower():
+                raise RuntimeError(NO_PRIVATE_PROVIDER)
             code = err.get("code") if isinstance(err, dict) else None
             raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
                 f"OpenRouter: {err}")
@@ -446,6 +534,16 @@ def _log(conn, purpose, model, merchants, answered, new_cats, ok, seconds, messa
     conn.execute(delete(AiLog).where(AiLog.id.not_in(newest)))
 
 
+def llm_model(conn) -> str:
+    """The model for categorizing (transactions and order items): the one set in Settings, else the free router."""
+    return db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
+
+
+def card_ai_model(conn) -> str:
+    """The model for Churning's card lookups: the one set in Settings, else a small paid model that searches the web reliably."""
+    return db.get_setting(conn, sk.CARD_AI_MODEL, DEFAULT_CARD_MODEL) or DEFAULT_CARD_MODEL
+
+
 def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool = False, purpose: str = "sync") -> list[tuple]:
     """Ask the model for one category per group. Doesn't write anything except the last error message.
     Call with no write transaction open: requests can take a while."""
@@ -453,7 +551,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
     empty = (None, 0.0, None) if allow_new else (None, 0.0)
     if not api_key or not groups:
         return [empty] * len(groups)
-    model = db.get_setting(conn, sk.LLM_MODEL, DEFAULT_MODEL) or DEFAULT_MODEL
+    model = llm_model(conn)
     categories = _category_names(conn)
     # The latest choice for each merchant (newest first), as examples for the model.
     examples, seen = [], set()
@@ -481,7 +579,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 if extract_json_array(reply) is None:
                     snippet = " ".join((reply or "(empty reply)").split())[:160]
                     raise ValueError(f"the model ({model}) didn't answer in the expected format. It said: \"{snippet}\". "
-                                     f"Free or small models often do this; try {DEFAULT_MODEL} in Settings.")
+                                     f"Free or small models often do this; try {PAID_HINT_MODEL} in Settings.")
                 results = parse_ai_reply(reply, categories, allow_new)
                 db.set_setting(conn, sk.LAST_LLM_ERROR, None)
                 answered = sum(1 for r in results.values() if r[0] or (len(r) > 2 and r[2]))

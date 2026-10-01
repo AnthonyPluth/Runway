@@ -44,8 +44,9 @@ const quantile = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.len
 const atYear = (list: number[] | undefined, k: number) => (list?.length ? list[Math.min(Math.max(0, k), list.length - 1)] : undefined);
 
 /** Whether the plan counts an asset: vehicles lose value, so they're neither held nor sold into it (the payment on a
- *  loan against one still is, until it's paid off). */
-export const counted = (a: PlanAsset) => a.kind !== "vehicle";
+ *  loan against one still is, until it's paid off). Nor are loans against nothing (a student or personal loan): debts,
+ *  listed for their payment. */
+export const counted = (a: PlanAsset) => a.kind !== "vehicle" && a.kind !== "loan";
 
 /** The year a sale is counted in: never before this one. A sale kept for a year that's now past counts this year. */
 export const saleYear = (sellYear: number, thisYear: number) => Math.max(thisYear, sellYear);

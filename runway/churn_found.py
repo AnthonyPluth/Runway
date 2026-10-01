@@ -381,7 +381,7 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
     api_key = db.get_setting(conn, sk.OPENROUTER_API_KEY)
     if not api_key:
         raise churning.ChurnError("Add an OpenRouter API key in Settings first.")
-    model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    model = categorize.card_ai_model(conn)
     web = web_search_on(conn)
     currencies = {k: v["name"] for k, v in churning.values(conn).items()}
     categories = [c["name"] for c in churning.spending_categories(conn)]
@@ -398,5 +398,5 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
         raise RuntimeError(f"The AI request failed after {time.time() - began:.0f}s: {said}"[:300]) from e
     parsed = _object(reply)
     if parsed is None:
-        raise RuntimeError(f"The model ({model}) didn't answer in the expected format. Try {categorize.DEFAULT_MODEL} in Settings.")
+        raise RuntimeError(f"The model ({model}) didn't answer in the expected format. Try {categorize.DEFAULT_CARD_MODEL} in Settings.")
     return {**validate_suggestion(parsed, currencies, categories, cited), "web": web}

@@ -66,10 +66,7 @@ describe("churning helpers", () => {
       ({ id, status, opened_on: opened, fee_due, annual_fee }) as ChurnCard;
     const cards = [c(1, "closed", "2026-01-01"), c(2, "open", "2024-01-01", "2026-10-10", 95), c(3, "open", "2025-01-01", "2027-06-01", 550)];
     expect([...cards].sort(cardOrder).map((x) => x.id)).toEqual([3, 2, 1]);
-    expect(feesDue(cards, TODAY)).toEqual({ total: 95, count: 1, undecided: 1 });
-    // a plan of any kind (keeping it included) settles it: still due, but nothing left to decide
-    expect(feesDue(cards.map((x) => ({ ...x, plan: "keep" }) as ChurnCard), TODAY)).toEqual({ total: 95, count: 1, undecided: 0 });
-    expect(feesDue(cards.map((x) => ({ ...x, plan: "close" }) as ChurnCard), TODAY).undecided).toBe(0);
+    expect(feesDue(cards, TODAY)).toEqual({ total: 95, count: 1 });
     const b = { id: 1, state: "active", opened_on: "2026-08-01", dd_total: 1000, dd_count: 2, debit_count: 1, min_balance: 1500,
       progress: { dd_total: 400, dd_count: 1, debits: 1, balance: 1000, balance_ok: false } } as BankBonus;
     expect(bankLeft(b)).toEqual(["$600 more direct deposits", "1 more deposit", "$500 more to reach the minimum balance"]);

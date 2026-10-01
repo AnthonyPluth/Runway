@@ -72,7 +72,7 @@
 
   // Over 5/24 is a warning; someone with no cards on file isn't.
   const five24Tone = (p: string) => (d?.five24[p] && !d.five24[p].under ? ("warn" as const) : undefined);
-  const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0, undecided: 0 });
+  const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0 });
   const activeCards = $derived(cards.filter((c) => c.bonus_state === "active"));
   const activeBank = $derived(bank.filter((b) => b.state === "active" || b.state === "met"));
   const incomeYears = $derived(d ? [...new Set(people.flatMap((p) => Object.keys(d!.bank_income[p] ?? {})))].sort().reverse() : []);
@@ -123,7 +123,7 @@
       : people.length === 0
         ? [{ label: "5/24", value: "0/24", sub: "Add cards you’ve opened in the last 24 months" }]
         : people.map((p) => ({ label: `${p}’s 5/24`, value: five24Line(d!.five24[p]).count, sub: five24Line(d!.five24[p]).next, tone: five24Tone(p) }))),
-    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.undecided ? `${fees.undecided} card${fees.undecided === 1 ? "" : "s"}: keep, downgrade or close?` : fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}, each with a plan` : "None due", tone: fees.undecided ? "warn" : undefined },
+    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}` : "None due" },
     { label: "Bonuses in progress", value: String(activeCards.length + activeBank.length),
       sub: [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
         activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now" },

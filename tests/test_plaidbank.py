@@ -257,6 +257,20 @@ class PlaidBankTests(DbCase):
         self.assertEqual(dict(self.c.execute(select(Transaction.id, Transaction.payee).where(Transaction.id.like("%pl:%"))).fetchall()),
                          {"sf-chk|pl:b1": "Birthday Gifts", "sf-chk|pl:b2": "Joe's Coffee"})
 
+    def test_a_big_merchant_gets_the_brands_name_unless_plaid_named_it(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        MockBank.pages = [{"added": [{**tx("c1", "p-chk", "2026-09-23", 20.0, "AMZN Mktp US*2K3AB1"), "merchant_name": None},
+                                     {**tx("c2", "p-chk", "2026-09-23", 20.0, "AMZN Mktp US*7Y6T5R"), "merchant_name": "Amazon Marketplace"},
+                                     {**tx("c3", "p-chk", "2026-09-23", 20.0, "WM SUPERCENTER #123"), "merchant_name": None}]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        db.set_setting(self.c, "brand_names_off", '["Walmart"]')   # Use the bank's name, for all of Walmart's
+        MockBank.pages = [{"added": [{**tx("c4", "p-chk", "2026-09-24", 20.0, "WM SUPERCENTER #123"), "merchant_name": None}]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(dict(self.c.execute(select(Transaction.id, Transaction.payee).where(Transaction.id.like("%pl:c%"))).fetchall()),
+                         {"sf-chk|pl:c1": "Amazon", "sf-chk|pl:c2": "Amazon Marketplace", "sf-chk|pl:c3": "Walmart",
+                          "sf-chk|pl:c4": "Wm Supercenter"})
+
     def test_merchants_and_their_logos_are_noted(self):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
@@ -593,9 +607,9 @@ class PlaidBankTests(DbCase):
         self.assertEqual((inv["bank"], inv["products"], inv["env"]), (False, ["investments"], "sandbox"))
         self.assertEqual(inv["accounts"], [
             {"id": "w2", "name": "Individual", "official_name": None, "subtype": "brokerage", "mask": None, "balance": 5.0,
-             "hidden": 0, "account_id": None},
+             "account_id": None},
             {"id": "w1", "name": "Roth IRA", "official_name": "Roth", "subtype": "roth", "mask": "3639", "balance": 1000.0,
-             "hidden": 0, "account_id": "sf-wf"}])
+             "account_id": "sf-wf"}])
         self.assertEqual(inv["candidates"], [{"id": "sf-wf", "name": "Wealthfront Roth", "display_name": None, "org": "Wealthfront",
                                               "balance": 990.0, "linked_to": "w1"}])
         self.assertEqual((s["inv_accounts"], s["configured"], s["env"], s["client_id"]), (3, True, "production", "cid"))
@@ -610,15 +624,11 @@ class PlaidBankTests(DbCase):
         plaidbank.match(self.c, "p-new", "ignore", TODAY)
         self.assertEqual(plaid.undecided_count(self.c), 1)
 
-    def test_inv_account_hidden_and_match_goes_to_the_right_kind(self):
+    def test_match_goes_to_the_right_kind(self):
         from runway import server
         self.link()
         self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", institution_name="Wealthfront"))
         self.c.execute(insert(InvAccount).values(id="w1", item_id="inv", name="Roth IRA", mask="3639", balance=7))
-        self.assertEqual(server.api_inv_account(self.c, {}, {"hidden": True}, "w1"), {"ok": True})
-        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 1)
-        server.api_inv_account(self.c, {}, {}, "w1")
-        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 0)
         self.assertEqual(server.api_plaid_match(self.c, {}, {"plaid_account_id": "w1", "target": "new"}),
                          {"ok": True, "account_id": "pl:w1"})
         a = dict(self.c.execute(select(Account.name, Account.org, Account.kind, Account.balance, Account.provider,
@@ -737,29 +747,6 @@ class PlaidBankTests(DbCase):
             self.assertEqual(plaid.sync_all(self.c), {"items": 1, "errors": []})
         with self.assertRaises(plaid.PlaidError):
             plaid.sync_item(self.c, "nope", TODAY)
-
-    def test_simplefin_copies_of_a_plaid_brokerage_are_hidden_once(self):
-        self.c.execute(insert(PlaidItem), [{"item_id": "et", "access_token": "tok",
-                                            "institution_name": "E*TRADE from Morgan Stanley",
-                                            "products": "investments"},
-                                           {"item_id": "bk", "access_token": "tok", "institution_name": "Chase",
-                                            "products": "transactions"},
-                                           {"item_id": "x", "access_token": "tok", "institution_name": "Ally",
-                                            "products": None}])
-        self.c.execute(insert(InvAccount), [{"id": "s1", "item_id": "sf", "name": "E*Trade Brokerage",
-                                             "source": "simplefin", "institution": "E*Trade"},
-                                            {"id": "s2", "item_id": "sf", "name": "Chase Invest",
-                                             "source": "simplefin", "institution": "Chase"},
-                                            {"id": "s3", "item_id": "sf", "name": "Ally Invest", "source": "simplefin",
-                                             "institution": "Ally Invest"}])
-        # Chase is a bank connection; Ally's (no products listed) counts as investments.
-        self.assertEqual(plaid.hide_all_duplicates(self.c), ["E*Trade Brokerage", "Ally Invest"])
-        self.assertEqual([tuple(r) for r in self.c.execute(select(InvAccount.id, InvAccount.hidden)
-                                                           .order_by(InvAccount.id))],
-                         [("s1", 1), ("s2", 0), ("s3", 1)])
-        self.c.execute(update(InvAccount).values(hidden=0))
-        self.assertEqual(plaid.hide_all_duplicates(self.c), [])   # once only
-        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "nope"), [])
 
     def test_removing_an_investment_connection_removes_its_data(self):
         self.c.execute(insert(PlaidItem), [{"item_id": "inv", "access_token": "tok", "products": "investments"},

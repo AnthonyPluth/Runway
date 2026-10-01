@@ -390,9 +390,13 @@ def card_cycle(conn, card: dict, today: date, bank: dict) -> dict:
     transfers = _transfer_categories(conn)
     last_close = _d(bank["last_statement_date"])
     T = Transaction
+    # SimpleFIN's pending rows count from its refresh window only, as in pending_total: an older one isn't re-read by a
+    # sync, so one that has since posted under a new id would count twice.
+    current = or_(T.pending == 0, T.id.like(plaidbank.PLAID_IDS),
+                  T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())
     txs = db.rows(conn.execute(
         select(T.posted, T.amount, T.category, T.pending)
-        .where(T.account_id == card["id"], T.posted > last_close.isoformat()).order_by(T.posted)
+        .where(T.account_id == card["id"], T.posted > last_close.isoformat(), current).order_by(T.posted)
     ))
     reported = max(0.0, bank["last_statement_balance"] or 0.0)
     known = statement_override(conn, card["id"], last_close)

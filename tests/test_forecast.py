@@ -534,6 +534,20 @@ class ForecastAssumptionTests(LedgerCase):
         acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
         self.assertEqual((acct["balance"], acct["pending"]), (4750.0, -250.0))
 
+    def test_old_simplefin_pending_card_rows_are_left_out_of_the_cycle(self):
+        # As in the starting balance: a SimpleFIN pending charge older than its 14-day refresh may have posted since
+        # under a new id, so counting it too would count the charge twice. Plaid's are kept accurate, and count.
+        later = date(2026, 10, 5)   # the statement that closed Sep 10 is still the latest
+        before = self.cycle("cc", later)["new_charges"]
+        self.tx("cc", "2026-09-15", -70.0, "COFFEE", "Dining", pending=1)   # 20 days old: SimpleFIN's, not re-read
+        self.tx("cc", "2026-09-16", -70.0, "COFFEE", "Dining")              # ... and posted under its new id
+        self.assertEqual(self.cycle("cc", later)["new_charges"], before + 70)
+        self.tx("cc", "2026-09-25", -30.0, "LUNCH", "Dining", pending=1)    # within the 14 days: counts
+        self.assertEqual(self.cycle("cc", later)["new_charges"], before + 100)
+        self.conn.execute(insert(Transaction).values(id="cc|pl:hold1", account_id="cc", amount=-200.0, pending=1,
+                                                     posted="2026-09-15", description="HOTEL", category="Travel"))
+        self.assertEqual(self.cycle("cc", later)["new_charges"], before + 300)
+
     def paycheck_pending(self):
         """A biweekly $1,000 paycheck, today's pending (and linked to it once the forecast matches it)."""
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=1000, frequency="biweekly",

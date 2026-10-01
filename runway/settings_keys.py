@@ -34,7 +34,6 @@ PLAID_SECRET = "plaid_secret"
 PLAID_ENV = "plaid_env"
 PLAID_REDIRECT_URI = "plaid_redirect_uri"
 PLAID_PENDING_LINK = "plaid_pending_link"      # JSON: the Link session in progress
-DEDUPE_SIMPLEFIN_V2 = "dedupe_simplefin_v2"    # set once the one-time SimpleFIN/Plaid duplicate cleanup ran
 
 
 def plaid_stmt_note(item_id: str) -> str:
@@ -45,6 +44,7 @@ def plaid_stmt_note(item_id: str) -> str:
 # AI categorizing (OpenRouter)
 OPENROUTER_API_KEY = "openrouter_api_key"
 LLM_MODEL = "llm_model"
+CARD_AI_MODEL = "card_ai_model"   # Churning's card lookups; unset means categorize.DEFAULT_CARD_MODEL
 LAST_LLM_ERROR = "last_llm_error"
 AUTO_AI_ON_SYNC = "auto_ai_on_sync"   # "1"/"0"; on unless switched off
 
@@ -69,6 +69,9 @@ def card_apr(card_id: str) -> str:
     """The card's APR, in percent, for the interest on a balance carried from one statement to the next."""
     return f"card_apr:{card_id}"
 
+
+# Merchant names
+BRAND_NAMES_OFF = "brand_names_off"   # JSON: brands whose transactions keep the bank's name (categorize.keep_bank_name)
 
 # Recurring items
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"

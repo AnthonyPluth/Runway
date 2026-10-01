@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import db, payees, splits
+from . import brands, db, payees, splits
 from .models import Account, Category, Rule, Transaction
 
 MODES = ("contains", "exact", "starts")
@@ -61,11 +61,32 @@ def _text_matches(r: dict, tx: dict) -> bool:
     # A rule made from a long payee ("target cach tran cash") still knows that merchant by its shorter name ("Target"),
     # but only on transactions whose bank text had transfer words cut too: not every purchase from that merchant (a
     # "paypal ach transfer" rule isn't one for PayPal purchases).
+    payee = " ".join((tx.get("payee") or "").lower().split())
     short = payees.short_match(m)
-    if not short or " ".join((tx.get("payee") or "").lower().split()) != short:
+    if short and payee == short:
+        from .categorize import tidy_payee   # here, not at the top: categorize imports this module
+        if payees.bank_tailed(tidy_payee(tx.get("description"))):   # tidied: trace numbers and "(Cash)" off first
+            return True
+    return _brand_matches(m, mode, payee, tx.get("description"))
+
+
+def _brand_matches(m: str, mode: str, payee: str, description: str | None) -> bool:
+    """A rule made from a payee as the bank's text had it ("amzn mktp us") still knows the transactions that have the
+    brand's name now ("Amazon", brands.merchant_name), but only the ones whose own bank text gives the payee the rule
+    was made from, as the rule would have matched that payee: not every Amazon purchase (an "amzn digital" rule isn't
+    one for the "Amazon.com" orders)."""
+    from .categorize import bank_payee   # here, not at the top: categorize imports this module
+    f = " ".join(bank_payee(description).lower().split())
+    fits = lambda text: (mode == "exact" and text == m) or (mode == "starts" and text.startswith(m)) or (mode == "contains" and m in text)
+    # And the other way: a rule made from the brand's name ("amazon") still knows its transactions when you've chosen
+    # the bank's name for them ("Amzn Mktp Us"), by the brand their bank text gives.
+    own = brands.merchant_name(f)
+    if own and payee == f and fits(own.lower()):   # still the bank's name: not one you gave it
+        return True
+    brand = brands.merchant_name(m)
+    if not brand or payee != brand.lower() or brand.lower() == m:
         return False
-    from .categorize import tidy_payee   # here, not at the top: categorize imports this module
-    return payees.bank_tailed(tidy_payee(tx.get("description")))   # tidied: trace numbers and "(Cash)" off first
+    return fits(f)
 
 
 def matches(r: dict, tx: dict) -> bool:

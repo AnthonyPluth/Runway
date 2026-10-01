@@ -61,6 +61,7 @@ def run_sync() -> dict:
                 result["errors"] = [monitoring.public_text(x) for x in result["errors"]]
                 try:   # logos: Plaid's new ones, and big brands' (a nice-to-have; never fail the sync)
                     merchants.note_sites(conn)
+                    merchants.refresh_holding_logos(conn)   # before the rest: held funds' logos wait behind merchants' otherwise
                     merchants.fetch_logos(conn)
                 except Exception:
                     monitoring.report()
@@ -131,6 +132,10 @@ def run_investment_sync() -> dict:
                 return out
             out["prices"] = refresh_prices(conn)
             db.set_setting(conn, sk.LAST_INV_SYNC, datetime.now().isoformat(timespec="seconds"))
+            try:   # logos for what you hold (a nice-to-have; never fail the sync)
+                merchants.refresh_holding_logos(conn)
+            except Exception:
+                monitoring.report()
             return out
     finally:
         _inv_lock.release()

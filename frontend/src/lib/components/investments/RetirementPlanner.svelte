@@ -147,9 +147,11 @@
     keep();
   }
   const pastYear = (s: RetirementPlan["assets"][number]) => num(s.sell_year) < year;
-  // What the plan counts, and what it lists only for a loan's payment (vehicles).
+  // Equity still vesting: what it comes to once it's all vested, at today's share price (value_by_year's last entry).
+  const vestsTo = (a: PlanAsset) => (a.kind === "equity" && (a.value_by_year?.length ?? 0) > 1 ? a.value_by_year![a.value_by_year!.length - 1] : null);
+  // What the plan counts, and what it lists only for a loan's payment (vehicles, and loans against nothing).
   const plannable = $derived(data.assets.filter(counted));
-  const vehicles = $derived(data.assets.filter((a) => !counted(a)));
+  const listed = $derived(data.assets.filter((a) => !counted(a)));
   // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
   const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
   // In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then.
@@ -335,14 +337,14 @@
 
   {#if data.assets.length}
   <section class="lg:col-span-2">
-    <h3 class="mb-2 font-medium">Homes &amp; other assets</h3>
+    <h3 class="mb-2 font-medium">{data.assets.some((a) => a.kind === "loan") ? "Homes, other assets & loans" : "Homes & other assets"}</h3>
     <ul class="space-y-2">
       {#each plannable as a (a.key)}
         {@const s = sale(a.key)}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <label class="flex min-w-40 flex-1 items-center gap-2">
             <input type="checkbox" class="size-4 cursor-pointer accent-primary" checked={!!s} onchange={(e) => toggleSale(a.key, e.currentTarget.checked)} />
-            <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}</span></span>
+            <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}{vestsTo(a) != null ? ` vested today · ${fmt0(vestsTo(a)!)} once all vested` : ""}</span></span>
           </label>
           {#if s}
             {@const at = saleYear(num(s.sell_year), year)}
@@ -362,9 +364,10 @@
           {/if}
         </li>
       {/each}
-      {#each vehicles as a (a.key)}
+      {#each listed as a (a.key)}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">Vehicle</span></span>
+          <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">{a.kind === "loan"
+            ? `Loan · ${fmt0(a.owed)} owed` : "Vehicle"}</span></span>
           {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null)}</p>{/if}
         </li>
       {/each}

@@ -73,6 +73,28 @@ def vested_now(g: dict, today: date) -> float:
     return vested_on(g, today)
 
 
+def vested_later(g: dict, on: date, today: date) -> float:
+    """What will have vested by `on` (today or later). By the schedule, from today's amount (vested_now). When Carta
+    has reported what's vested, that's where it starts from: the rest vests as the schedule vests its rest, so it's all
+    vested when the schedule is. Carta's figure can be ahead of the schedule worked out here (its vesting start isn't
+    always the grant date Runway has), and the schedule alone would hold it flat until it caught up."""
+    qty = g["quantity"] or 0.0
+    reported = g.get("vested_reported")
+    by_schedule = vested_on(g, on)
+    if reported is None:
+        return min(qty, max(vested_now(g, today), by_schedule))
+    reported = min(qty, reported)
+    try:
+        since = date.fromisoformat(str(g.get("vested_reported_on") or "")[:10])
+    except ValueError:
+        since = today
+    at_report = vested_on(g, min(since, on))
+    if at_report >= qty:   # the schedule had it all vested by then: Carta's is behind, and the schedule's done
+        return max(reported, by_schedule)
+    share = max(0.0, by_schedule - at_report) / (qty - at_report)
+    return round(min(qty, reported + (qty - reported) * share), 4)
+
+
 def fully_vested_on(g: dict) -> str | None:
     start = g.get("vest_start") or g.get("granted_on")
     if not start or not g.get("vest_months"):
@@ -170,7 +192,8 @@ def _expired(g: dict, on: date) -> bool:
 
 def value_by_year(c: dict, today: date, max_years: int = 100) -> list[float]:
     """A company's vested value 0, 1, 2… years from today at today's share price, as its grants keep vesting, until
-    it's all vested (the last entry holds from then on). `c` is a company from overview(), with its grants. Options
+    it's all vested (the last entry holds from then on): each grant goes on vesting on its schedule (vested_later), from
+    its vesting start or, without one, its grant date. `c` is a company from overview(), with its grants. Options
     that have expired already are worth only the shares exercised from them. Ones that expire later are taken as
     exercised before they do (nobody lets vested options lapse): from then on they're the shares vested by that day,
     net of their exercise price, like shares held."""
@@ -186,7 +209,7 @@ def value_by_year(c: dict, today: date, max_years: int = 100) -> list[float]:
             # an option that expires by then was exercised before it did: what vested up to that day
             at = date.fromisoformat(str(g["expires_on"])[:10]) if g["kind"] in OPTIONS and _expired(g, on) else on
             if k and not g.get("problem"):   # one whose schedule can't be worked out stays at today's
-                vested = min(g["quantity"] or 0.0, max(vested, vested_on(g, at)))
+                vested = max(vested, vested_later(g, at, today))
             done = done and (bool(g.get("problem")) or vested >= (g["quantity"] or 0.0) or at != on)   # expired: settled
             total += value(g, c["share_price"], vested)["vested_value"]
         out.append(round(total, 2))

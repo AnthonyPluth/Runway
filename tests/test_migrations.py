@@ -12,7 +12,7 @@ from sqlalchemy import func, insert, select
 
 from runway import db, schema
 from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
-                           ChurnWish, DeletedAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
+                           ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
 
 
 def drift(path):
@@ -332,6 +332,101 @@ class MigrationTests(unittest.TestCase):
                                                     description=loan, payee="Fifth Third"))
             recurring.auto_match(conn, [1])
             self.assertEqual(conn.execute(select(Transaction.recurring_id).where(Transaction.id == "chk|8")).scalar(), 1)
+
+    def test_0033_clears_hidden_on_every_investment_account(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0032")
+        with db.engine(self.path).begin() as c:
+            c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES "
+                              "('fid', 't', 'Fidelity Investments', 'investments')")
+            c.exec_driver_sql("INSERT INTO inv_accounts(id, item_id, name, hidden, source, institution, account_id) VALUES "
+                              "('p1', 'fid', 'Left out by me', 1, 'plaid', NULL, NULL), "
+                              "('p2', 'fid', 'Shown', 0, 'plaid', NULL, NULL), "
+                              "('sf:dup', 'sf', 'Brokerage (6702)', 1, 'simplefin', 'Fidelity', NULL), "
+                              "('sf:401k', 'sf', 'Fidelity 401(k)', 1, 'simplefin', 'Fidelity NetBenefits', NULL)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(dict(conn.execute(select(InvAccount.id, InvAccount.hidden)).fetchall()),
+                             {"p1": 0, "p2": 0, "sf:dup": 0, "sf:401k": 0})   # real twins are left out by portfolio, not by this
+
+    def test_0034_gives_brands_their_names_and_leaves_yours(self):
+        from alembic import command
+        from runway import recurring, rules
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0034-1")
+        mktp, digital = "AMZN Mktp US*2K3AB1", "AMZN Digital*RT4QW2"
+        with db.session(self.path) as conn:
+            txs = [
+                {"id": "chk|1", "account_id": "chk", "posted": "2026-09-01", "amount": -35.91, "description": mktp, "payee": "Amzn Mktp Us"},
+                {"id": "chk|2", "account_id": "chk", "posted": "2026-09-02", "amount": -9.99, "description": digital, "payee": "Amzn Digital"},
+                {"id": "chk|3", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": "WM SUPERCENTER #123",
+                 "payee": "Wm Supercenter"},
+                {"id": "chk|4", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": mktp,
+                 "payee": "Birthday Gift"},                                   # a name you gave it
+                {"id": "chk|5", "account_id": "chk", "posted": "2026-09-05", "amount": -9.00, "description": "TARGET T-1234",
+                 "payee": "Target T-1234"},                                   # a rule renames to it
+                {"id": "chk|pl:6", "account_id": "chk", "posted": "2026-09-06", "amount": -5.00, "description": mktp,
+                 "payee": "Amzn Mktp Us", "merchant_id": "ent-x"},           # Plaid named the merchant
+                {"id": "chk|7", "account_id": "chk", "posted": "2026-09-07", "amount": -50.00, "description": "COSTCO GAS #0123",
+                 "payee": "Costco Gas"},                                      # not a brand's name
+                {"id": "chk|8", "account_id": "chk", "posted": "2026-09-08", "amount": -6.50, "description": "UBER *EATS",
+                 "payee": "Uber Eats"},                                       # the brand's name already
+                {"id": "chk|9", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY USA 8777781161",
+                 "payee": "Spotify Usa"},
+                {"id": "chk|13", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY*USA 877-778-1161",
+                 "payee": "Spotify Usa"},                                     # not what a sync makes of its text ("Spotify")
+                {"id": "chk|12", "account_id": "chk", "posted": "2026-09-10", "amount": -40.00, "description": "WAL-MART SUPERCENTER #1234",
+                 "payee": "Walmart Supercenter"},                             # the provider's own name, not the bank's text
+            ]
+            conn.execute(insert(Transaction), [{"recurring_id": None, "merchant_id": None, **t} for t in txs])
+            conn.execute(insert(Rule).values(match="target", rename="Target T-1234"))
+            items = [
+                {"id": 1, "name": "Amzn Digital", "account_id": "chk", "amount": -9.99, "frequency": "monthly",
+                 "anchor_date": "2026-09-02", "match": None},
+                {"id": 2, "name": "Music", "account_id": "chk", "amount": -11.99, "frequency": "monthly",
+                 "anchor_date": "2026-09-09", "match": "spotify usa"},
+                {"id": 3, "name": "Birthday Gift", "account_id": "chk", "amount": -12, "frequency": "yearly",
+                 "anchor_date": "2026-09-03", "match": "birthday gift"},
+            ]
+            conn.execute(insert(Recurring), [{"amount_min": None, "amount_max": None, **r} for r in items])
+            conn.execute(insert(schema.merchant_logos).values(key="amzn mktp us", website="amazon.com", hidden=1))
+            conn.execute(insert(schema.merchant_logos).values(key="wm supercenter", website="walmart.com", hidden=0))
+            conn.execute(insert(schema.merchant_logos).values(key="walmart", website="example.com", hidden=0))   # chosen already
+            conn.execute(insert(Rule).values(match="amzn digital", match_mode="exact", category="Subscriptions"))
+            db.set_setting(conn, "recurring_suggestions_dismissed", '["chk|amzn digital|monthly", "chk|costco gas|weekly"]')
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "0034")
+        with db.session(self.path) as conn:
+            self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.payee)).fetchall()), {
+                "chk|1": "Amazon", "chk|2": "Amazon", "chk|3": "Walmart", "chk|4": "Birthday Gift", "chk|5": "Target T-1234",
+                "chk|pl:6": "Amzn Mktp Us", "chk|7": "Costco Gas", "chk|8": "Uber Eats", "chk|9": "Spotify",
+                "chk|12": "Walmart Supercenter", "chk|13": "Spotify Usa"})
+            # Each description still has the bank's text: an item matching it keeps its text (written out when it matched
+            # by name), without taking in every Amazon order; Spotify's bank text still has "spotify usa".
+            self.assertEqual([tuple(r) for r in conn.execute(select(Recurring.name, Recurring.match).order_by(Recurring.id))], [
+                ("Amazon", "amzn digital"), ("Music", "spotify usa"), ("Birthday Gift", "birthday gift")])
+            logos = schema.merchant_logos.c
+            self.assertEqual({k: (w, h) for k, w, h in conn.execute(select(logos.key, logos.website, logos.hidden)).fetchall()},
+                             {"amzn mktp us": ("amazon.com", 1), "amazon": ("amazon.com", 1), "wm supercenter": ("walmart.com", 0),
+                              "walmart": ("example.com", 0)})
+            self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
+                             ["chk|amazon|monthly", "chk|amzn digital|monthly", "chk|costco gas|weekly"])
+            # The next Kindle payment, synced with the brand's name, still finds its recurring item, and an Amazon order doesn't.
+            conn.execute(insert(Transaction), [
+                {"id": "chk|10", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": digital, "payee": "Amazon"},
+                {"id": "chk|11", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": "AMAZON.COM*ZZ1",
+                 "payee": "Amazon"}])
+            recurring.auto_match(conn, [1])
+            self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.recurring_id).where(
+                Transaction.id.in_(["chk|10", "chk|11"]))).fetchall()), {"chk|10": 1, "chk|11": None})
+            # The rule made from the bank's name still matches it (exactly, as made), not the other Amazon order.
+            rule = {"match": "amzn digital", "match_mode": "exact"}
+            self.assertTrue(rules.matches(rule, {"payee": "Amazon", "description": digital, "amount": -9.99}))
+            self.assertFalse(rules.matches(rule, {"payee": "Amazon", "description": "AMAZON.COM*ZZ1", "amount": -9.99}))
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

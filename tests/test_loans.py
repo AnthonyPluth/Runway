@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import insert, update
 
 from runway import equity, loans, planner
-from runway.models import Account, Asset, LoanTerms
+from runway.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -166,6 +166,41 @@ class SellableTests(LedgerCase):
         h = self.sellable("asset:")
         self.assertEqual((h["owed"], h["owed_by_year"], h["loan"]), (5_000, [5_000], None))
 
+    def test_loans_against_nothing_are_in_the_plan_as_debts(self):
+        # A student loan with its terms, paid from checking each month; a personal loan with none yet (as a new one
+        # synced from Fifth Third is); a mortgage against the house; and a hidden loan and a paid-off one, left out
+        self.acct("mtg", "loan", -200_000, interest_rate=6.5, monthly_payment=1264.14)
+        self.home()
+        self.acct("stu", "loan", -12_000, name="Student Loan", org="Nelnet", interest_rate=5, monthly_payment=400)
+        self.acct("exp", "loan", -30_000, name="Expedition Loan", org="Fifth Third")
+        self.acct("old", "loan", -5_000, hidden=1)
+        self.acct("done", "loan", 0, interest_rate=4, monthly_payment=100)
+        self.acct("chk", "checking", 0)
+        for m in (4, 5, 6, 7, 8):
+            self.tx("chk", f"2026-{m:02}-12", -400, "NELNET STUDENT LN PMT", "Education")
+        plan = planner.sellable(self.conn, TODAY)
+        self.assertEqual([a["key"] for a in plan], ["asset:1", "loan:exp", "loan:stu"])   # the mortgage is the home's
+        stu = next(a for a in plan if a["key"] == "loan:stu")
+        self.assertEqual((stu["name"], stu["kind"], stu["value"], stu["owed"]), ("Student Loan", "loan", 0, 12_000))
+        self.assertEqual(stu["owed_by_year"], loans.project(12_000, 5, 400)[0])   # paid down on its terms
+        self.assertEqual(stu["loan"], {"rate": 5, "payment": 400, "source": "manual", "note": None, "account_id": "stu",
+                                       "payment_counted": True, "payoff_year": 2029})
+        exp = next(a for a in plan if a["key"] == "loan:exp")
+        self.assertEqual((exp["owed"], exp["owed_by_year"]), (30_000, [30_000]))
+        self.assertEqual(exp["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "exp",
+                                       "payment_counted": None, "payoff_year": None})
+        # paid as a transfer naming it: not in spending, so the page adds it
+        self.conn.execute(update(Transaction).where(Transaction.account_id == "chk").values(category="Transfer"))
+        stu = next(a for a in planner.sellable(self.conn, TODAY) if a["key"] == "loan:stu")
+        self.assertIs(stu["loan"]["payment_counted"], False)
+        # left out of net worth: left out of the plan too
+        self.conn.execute(update(Account).where(Account.id == "stu").values(networth_hidden=1))
+        self.assertNotIn("loan:stu", [a["key"] for a in planner.sellable(self.conn, TODAY)])
+        # and never sold into it
+        with self.assertRaisesRegex(planner.PlanError, "Unknown asset"):
+            planner.clean({**planner.default({"yearly_savings": 0, "annual_spending": 0, "expected_return": 0.05}, TODAY),
+                           "assets": [{"key": "loan:exp", "sell_year": 2030}]}, TODAY)
+
     def test_equity_counts_what_will_have_vested(self):
         # 4,800 RSUs from 2025-09-15 over 4 years with a 1-year cliff: 1,200 vested on TODAY (2026-09-23), all by 2029.
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})
@@ -209,6 +244,37 @@ class SellableTests(LedgerCase):
                                             "vest_months": 48, "exercised": 300, "expires_on": "2026-01-01"})
         old = next(a for a in planner.sellable(self.conn, TODAY) if a["name"] == "Oldco")
         self.assertEqual(old["value_by_year"], [600])
+
+    def test_carta_grants_go_on_vesting_from_what_carta_reported(self):
+        # As Carta sends them: no vesting start (the schedule runs from the grant date), and what's vested as Carta
+        # reported it two days ago, ahead of the schedule from the grant date (9,450 then). It goes on vesting from
+        # there, every year, until it's all vested in November 2028 as the schedule has it, and stays there after.
+        today = date(2026, 10, 1)
+        self.conn.execute(insert(EquityCompany).values(id="c", name="Startup", share_price=12, in_networth=1, source="carta"))
+        self.conn.execute(insert(EquityGrant), [
+            {"id": "g1", "company_id": "c", "kind": "iso", "label": "ES-452", "granted_on": "2024-11-23", "quantity": 20619,
+             "strike": 3.5, "vest_start": None, "vest_months": 48, "cliff_months": 12, "vest_every": 1, "exercised": 0,
+             "vested_reported": 11168, "vested_reported_on": "2026-09-29", "expires_on": "2034-11-22", "source": "carta"},
+            {"id": "g2", "company_id": "c", "kind": "iso", "label": "ES-858", "granted_on": "2026-01-23", "quantity": 3002,
+             "strike": 4.78, "vest_start": "2026-01-23", "vest_months": 12, "cliff_months": 0, "vest_every": 1, "exercised": 0,
+             "vested_reported": None, "vested_reported_on": None, "expires_on": "2036-01-23", "source": "carta"}])
+        e = next(a for a in planner.sellable(self.conn, today) if a["key"] == "equity:c")
+        by_year = e["value_by_year"]
+        es858 = 3002 * (12 - 4.78)   # all vested by January 2027
+        self.assertEqual(by_year[0], round(11168 * 8.5 + 3002 * 8 / 12 * 7.22, 2))   # today: Carta's 11,168 and 8 of 12 months
+        self.assertEqual(len(by_year), 4)   # 2026, 2027, 2028 still vesting (until November), then flat
+        self.assertTrue(by_year[0] < by_year[1] < by_year[2] < by_year[3])
+        self.assertEqual(by_year[3], round(20619 * 8.5 + es858, 2))
+        # a year out, the 9,451 still to vest has vested as the schedule vests its last 11,169: 4,362 more
+        self.assertAlmostEqual(by_year[1], (11168 + 9451 * 5154.75 / 11168.625) * 8.5 + es858, delta=0.05)
+        # all vested in November 2028, not before
+        g = equity.overview(self.conn, today)["companies"][0]["grants"][0]
+        self.assertLess(equity.vested_later(g, date(2028, 11, 22), today), 20619)
+        self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
+        # Carta behind the schedule: never below what the schedule has vested
+        g = {**g, "vested_reported": 5000}
+        self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
+        self.assertGreaterEqual(equity.vested_later(g, date(2027, 10, 1), today), 5000)
 
     def test_a_grant_whose_schedule_cant_be_worked_out_stays_at_today(self):
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})

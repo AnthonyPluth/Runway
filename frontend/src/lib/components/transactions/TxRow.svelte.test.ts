@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn(
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { toast } from "svelte-sonner";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { category, tx } from "../../../test/fixtures";
@@ -261,6 +262,62 @@ describe("TxRow", () => {
       expect(screen.getByText("BLUE BOTTLE #123", { selector: "dd" })).toBeInTheDocument();
       await userEvent.click(toggle);
       expect(screen.queryByText("SimpleFIN Bridge")).not.toBeInTheDocument();
+    });
+
+    const amazon = (using: "brand" | "bank" = "brand") => tx({ payee: using === "brand" ? "Amazon" : "Amzn Mktp Us", description: "AMZN Mktp US*2K3AB1",
+      brand: { brand: "Amazon", bank_name: "Amzn Mktp Us", using } });
+
+    it("offers the bank's name only for a brand's name a sync gave it", async () => {
+      render(TxRow, props(tx()));
+      await userEvent.click(screen.getByRole("button", { name: "Details for Blue Bottle" }));
+      expect(screen.queryByRole("button", { name: "Use the bank’s name" })).not.toBeInTheDocument();
+    });
+
+    it("uses the bank's name for one transaction, and undoes it", async () => {
+      const p = props(amazon());
+      render(TxRow, p);
+      await userEvent.click(screen.getByRole("button", { name: "Details for Amazon" }));
+      expect(screen.getByRole("button", { name: "Use the bank’s name" })).toHaveAttribute("title", "Rename it “Amzn Mktp Us”");
+      const was = [{ id: "t1", payee: "Amazon" }];
+      vi.mocked(api).mockResolvedValueOnce({ updated: 1, payee: "Amzn Mktp Us", was, keep_bank: { brand: "Amazon", keep: false } });
+      await userEvent.click(screen.getByRole("button", { name: "Use the bank’s name" }));
+      await userEvent.click(screen.getByRole("button", { name: "Just this one" }));
+      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "bank", all: false } });
+      expect(p.onchanged).toHaveBeenCalledTimes(1);
+      const [message, opts] = vi.mocked(toast).mock.calls.at(-1)!;
+      expect(message).toBe("Amazon → Amzn Mktp Us");
+      await (opts as unknown as { action: { onClick: () => Promise<void> } }).action.onClick();
+      // Just the names: the brand's setting didn't change
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: was } });
+      expect(p.onchanged).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps the bank's names for all of the brand's from now on, and undo puts the setting back too", async () => {
+      render(TxRow, props(amazon()));
+      await userEvent.click(screen.getByRole("button", { name: "Details for Amazon" }));
+      const was = [{ id: "t1", payee: "Amazon" }, { id: "t2", payee: "Amazon" }];
+      vi.mocked(api).mockResolvedValueOnce({ updated: 2, payee: "Amzn Mktp Us", was, keep_bank: { brand: "Amazon", keep: false } });
+      await userEvent.click(screen.getByRole("button", { name: "Use the bank’s name" }));
+      await userEvent.click(screen.getByRole("button", { name: "All Amazon, from now on" }));
+      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "bank", all: true } });
+      const [message, opts] = vi.mocked(toast).mock.calls.at(-1)!;
+      expect(message).toBe("Amazon: the bank’s names from now on");
+      expect(opts).toMatchObject({ description: "2 renamed" });
+      await (opts as unknown as { action: { onClick: () => Promise<void> } }).action.onClick();
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk",
+        { method: "POST", body: { restore: was, keep_bank: { brand: "Amazon", keep: false } } });
+    });
+
+    it("goes back to the brand's name, and says so when that fails", async () => {
+      const p = props(amazon("bank"));
+      render(TxRow, p);
+      await userEvent.click(screen.getByRole("button", { name: "Details for Amzn Mktp Us" }));
+      vi.mocked(api).mockRejectedValueOnce(new Error("This transaction’s name isn’t a brand’s"));
+      await userEvent.click(screen.getByRole("button", { name: "Use “Amazon”" }));
+      await userEvent.click(screen.getByRole("button", { name: "Just this one" }));
+      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "brand", all: false } });
+      expect(toast.error).toHaveBeenCalledWith("This transaction’s name isn’t a brand’s");
+      expect(p.onchanged).not.toHaveBeenCalled();
     });
   });
 });

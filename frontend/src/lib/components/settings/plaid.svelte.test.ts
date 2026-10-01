@@ -49,12 +49,12 @@ describe("runPlaidLink", () => {
   });
 
   it("re-syncs an existing connection instead of exchanging a token when reconnecting", async () => {
-    vi.mocked(api).mockResolvedValue({ accounts: 1, holdings: 12, transactions: 30, hidden_simplefin: ["Brokerage"] });
+    vi.mocked(api).mockResolvedValue({ accounts: 1, holdings: 12, transactions: 30 });
     const done = runPlaidLink("tok", "item/1", "investments");
     await opts.onSuccess("public", {});
     await done;
     expect(api).toHaveBeenCalledWith("/api/plaid/items/item%2F1/sync", { method: "POST" });
-    expect(toast.success).toHaveBeenCalledWith("Synced 1 account, 12 holdings, 30 activities · hid the SimpleFIN copy of Brokerage");
+    expect(toast.success).toHaveBeenCalledWith("Synced 1 account, 12 holdings, 30 activities");
   });
 
   it("still resolves true, with the error shown, when the exchange fails", async () => {

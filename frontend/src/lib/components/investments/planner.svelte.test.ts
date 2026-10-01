@@ -296,6 +296,15 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
     });
 
+    it("says what equity still vesting comes to once it's all vested", () => {
+      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: null, owed: 0,
+        value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
+      const done = { ...acme, key: "equity:done", name: "Doneco", value: 5000, value_by_year: [5000] };
+      setup(data({ assets: [acme, done] }));
+      expect(screen.getByText("$10,000 vested today · $40,000 once all vested")).toBeInTheDocument();
+      expect(screen.getByText("$5,000")).toBeInTheDocument();   // all vested already: just what it's worth
+    });
+
     it("leaves the rules for selling and loans to Settings → Assumptions", () => {
       setup(data({ assets: [home] }));
       expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();
@@ -407,6 +416,20 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
         .toBeInTheDocument();
       expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();   // nothing to sell
+    });
+
+    it("lists a loan against nothing for its payment, with what's owed: it isn't sold", () => {
+      const stu = repaying({ account_id: "stu", payoff_year: 2029 });
+      const none = { ...stu, key: "loan:exp", name: "Expedition Loan", kind: "loan", value: 0, owed: 30000,
+        loan: { rate: null, payment: null, source: null, note: "no_rate" as const, account_id: "exp", payoff_year: null, payment_counted: null } };
+      setup(data({ assets: [{ ...stu, key: "loan:stu", name: "Student Loan", kind: "loan", value: 0, owed: 12000 }, none] }));
+      expect(screen.getByRole("heading", { name: "Homes, other assets & loans" })).toBeInTheDocument();
+      expect(screen.getByText("Loan · $12,000 owed")).toBeInTheDocument();
+      expect(screen.getByText("Loan · $30,000 owed")).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
+        .toBeInTheDocument();
+      expect(screen.getAllByText(/loan payment/)).toHaveLength(1);   // no payment known for the new one: nothing to say
     });
 
     it("won't take a sale year before this one, and says when a kept one has passed", async () => {

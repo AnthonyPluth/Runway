@@ -837,7 +837,7 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
     """Ask the model about items, AI_BATCH at a time, and save its answers. Items it answered are marked done.
     Stops at the first failed request (recorded in the AI log); what's left falls back to departments. Returns how
     many items it categorized."""
-    model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    model = categorize.llm_model(conn)
     cats = sorted(spend)
     subs = [h for h in categorize._subcategory_hints(conn) if h.split(" > ")[-1] in spend]
     examples = [{"title": r["title"][:80], "category": r["category"]} for r in conn.execute(
@@ -892,7 +892,7 @@ def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
         select(RetailItem.title, RetailItem.category).where(RetailItem.category_source == "manual")
         .order_by(RetailItem.id.desc()).limit(40))]
     names = " and ".join(sorted({NAMES.get(it["retailer"], it["retailer"]) for it in items}))
-    model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    model = categorize.llm_model(conn)
     payload = [{"i": n, "item": ai_title(it["retailer"], it["title"])[:200], "price": round(it["amount"] or 0, 2),
                 **({"department": it["department"]} if it["department"] else {})} for n, it in enumerate(items[:AI_BATCH])]
     conn.commit()   # don't hold the database while the model thinks
