@@ -48,7 +48,15 @@
   let loads = $state(0);             // a new search starts the table afresh (no leftover ticks); a reload after a change keeps it
   let applied = $state<TxFilters>({ ...f });   // the filters the list (and Upcoming) was last loaded with
   let appliedIgnored = txShow.ignored;
+  let ignoredCount = $state(0);      // what's marked Ignore, under the same search and filters (All only)
   let seq = 0;
+
+  async function countIgnored() {
+    if (review) return;
+    const qs = new URLSearchParams({ q: f.q, account: f.account, category: "Ignore", month: f.month, scope: f.scope, limit: "1", offset: "0" });
+    try { const r = await api<TxList>(`/api/transactions?${qs}`); ignoredCount = f.category && f.category !== "Ignore" ? 0 : r.total; }
+    catch { /* the line just isn't shown */ }
+  }
 
   async function load() {
     const mine = ++seq;
@@ -63,6 +71,7 @@
       // search starts the table afresh.
       applied = now; appliedIgnored = ignored; list = data; count = data.total; listError = "";
       if (!same) loads++;
+      countIgnored();
     } catch (err) { if (mine === seq) listError = (err as Error).message; }
   }
   const PAGE = 100;
@@ -161,8 +170,7 @@
 ]} />
 
 {#if !app.state?.connected}
-  <NotConnected title={review ? "Connect a bank to review transactions" : "Connect a bank to see your transactions"}
-    text="Runway lists what your accounts take in and pay out, and sorts it into categories. The first sync brings in months of history." />
+  <NotConnected title={review ? "Connect a bank to review transactions" : "Connect a bank to see your transactions"} />
 {:else}
 {#await setup}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
@@ -195,10 +203,10 @@
       </span>
     {/if}
     {#if !review}
-      <label class="ml-1 flex cursor-pointer items-center gap-2 text-sm max-sm:w-full text-muted-foreground hover:text-foreground">
-        <input type="checkbox" class="size-4 cursor-pointer accent-primary" bind:checked={txShow.ignored} onchange={load} />
-        Show ignored
-      </label>
+      {#if ignoredCount > 0 || txShow.ignored}
+        <span class="ml-1 text-sm text-muted-foreground max-sm:w-full">{ignoredCount} ignored · <button type="button" class="cursor-pointer font-medium text-primary"
+          onclick={() => { txShow.ignored = !txShow.ignored; load(); }}>{txShow.ignored ? "Hide" : "Show"}</button></span>
+      {/if}
     {/if}
     {#if isFiltered(f)}
       <Button variant="link" size="sm" class="h-auto px-1 py-0" onclick={clearFilters}>Clear filters</Button>
@@ -215,7 +223,7 @@
       <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
     </Card.Content></Card.Root>
   {:else if !list}
-    <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">Loading…</Card.Content></Card.Root>
+    <div class="h-40 animate-pulse rounded-xl bg-muted" aria-busy="true"></div>
   {:else if !list.items.length}
     {@const sync = syncStatus(app.state).text}
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">
@@ -223,7 +231,7 @@
         <p bind:this={caughtUp} tabindex="-1" class="outline-none">No transactions match these filters.</p>
         <Button class="mt-3" variant="outline" onclick={clearFilters}>Clear filters</Button>
       {:else if review}
-        <p bind:this={caughtUp} tabindex="-1" class="outline-none">All caught up. New transactions that need a decision will show up here.</p>
+        <p bind:this={caughtUp} tabindex="-1" class="outline-none">All caught up.</p>
       {:else}
         <p bind:this={caughtUp} tabindex="-1" class="outline-none">No transactions yet. The first sync brings in months of history.</p>
         {#if sync}<p class="mt-1 text-xs">{sync}</p>{/if}

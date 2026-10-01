@@ -72,7 +72,7 @@
   {#if failed && !order}
     <p class="text-muted-foreground">{failed}</p>
   {:else if !order}
-    <p class="text-muted-foreground">Loading…</p>
+    <div class="h-16 animate-pulse rounded-md bg-muted" aria-busy="true"></div>
   {:else}
     {@const o = order}
     {@const totals = [o.subtotal != null ? `items ${fmt(o.subtotal)}` : "", o.shipping ? `shipping ${fmt(o.shipping)}` : "",
@@ -89,11 +89,11 @@
     {#if o.items.length}
       {#if o.items.some((x) => !x.category)}
         <div class="flex items-center gap-2">
-          <Button size="sm" variant="outline" disabled={asking} onclick={suggest}>{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
-          <span class="text-xs text-muted-foreground">for the items with no category; it can propose a new one</span>
+          <Button size="sm" variant="outline" disabled={asking} onclick={suggest}
+            title="For the items with no category; it can propose a new one">{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
         </div>
       {/if}
-      <div class="flex flex-col">
+      <div class="flex flex-col" title="A category you pick here is used for this item in every order, now and next time">
         {#each o.items as i (i.id)}
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
@@ -110,7 +110,6 @@
           </div>
         {/each}
       </div>
-      <p class="text-xs text-muted-foreground">A category you pick here is used for this item in every order, now and next time.</p>
     {:else}
       <p class="text-muted-foreground">{o.details ? "No items in this order." : "Runway hasn't read this order's items yet; they come with the next import."}</p>
     {/if}

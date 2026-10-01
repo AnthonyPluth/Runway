@@ -1,84 +1,26 @@
-<script lang="ts" module>
-  // Open or closed stays as you left it when the page loads again.
-  let open = $state(false);
-</script>
-
 <script lang="ts">
   import { api } from "$lib/api";
-  import * as Card from "$lib/components/ui/card";
   import { fmtDateTime } from "$lib/format";
-  import { cn } from "$lib/utils";
   import type { AiLogRow } from "./types";
 
-  // Every request Runway made to the AI (the Suggest button, automatic runs during sync, order items), newest first.
-  // Loading again keeps the log on screen until the new one arrives.
-  let rows = $state<Promise<AiLogRow[]> | AiLogRow[]>(get());
+  // One line under the Suggest button: when the AI last ran and how it went. Every request is listed under
+  // Settings → Connections → AI categorization. Loading again keeps the line on screen until the new one arrives.
+  let last = $state<AiLogRow | null>(null);
   let seq = 0;
   function get() {
-    const n = ++seq, p = api<AiLogRow[]>("/api/ai/log", { keep: true });
-    p.then((r) => { if (n === seq) rows = r; }, () => {});
-    return p;
+    const n = ++seq;
+    api<AiLogRow[]>("/api/ai/log", { keep: true }).then((r) => { if (n === seq) last = r[0] ?? null; }, () => {});
   }
+  get();
 
-  /** Load the log again; `show` opens it (after a failed request, so you see why). */
-  export function refresh(show = false) { if (show) open = true; if (Array.isArray(rows)) get(); else rows = get(); }
+  /** Load the log again, after a request. */
+  export function refresh(_failed = false) { get(); }
 
-  const when = (at: string, seconds = false) => {
-    const d = new Date(at.replace(" ", "T"));
-    return seconds ? d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) : fmtDateTime(d);
-  };
-  const what = (p: string) => (p === "review" ? "Suggest button" : p === "orders" ? "Amazon and Target items" : "Automatic, during sync");
+  const what = (p: string) => (p === "review" ? "run" : p === "orders" ? "order items run" : "automatic run");
 </script>
 
-<Card.Root class="mb-6 py-0">
-  <details bind:open class="group">
-    <summary class="cursor-pointer px-6 py-4 text-sm">
-      <b class="font-semibold">AI activity</b>
-      <span class="text-xs text-muted-foreground">
-        {#await rows then list}
-          {@const last = list[0]}
-          {#if last}
-            · last {last.purpose === "review" ? "run" : last.purpose === "orders" ? "order items run" : "automatic run"} {when(last.at)}: {last.ok ? `${last.answered} of ${last.merchants} suggested` : "failed"}
-          {:else}· nothing yet{/if}
-        {/await}
-      </span>
-    </summary>
-    <div class="px-6 pb-4 text-xs text-muted-foreground">
-      {#await rows}
-        Loading…
-      {:then list}
-        {#if list.length}
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead>
-                <tr class="text-left"><th class="py-1.5 pr-2 font-medium">When</th><th class="px-2 py-1.5 font-medium">What</th><th class="px-2 py-1.5 font-medium">Model</th>
-                  <th class="px-2 py-1.5 text-right font-medium">Result</th><th class="py-1.5 pl-2 text-right font-medium">Time</th></tr>
-              </thead>
-              <tbody>
-                {#each list as r (r.id)}
-                  <tr class="border-t align-top">
-                    <td class="whitespace-nowrap py-1.5 pr-2">{when(r.at, true)}</td>
-                    <td class="px-2 py-1.5 text-foreground">{what(r.purpose)}
-                      <div class={cn("text-muted-foreground", !r.ok && "text-destructive")}>{r.ok ? "" : "▲ "}{r.message || ""}</div>
-                      {#if r.reply}
-                        <details><summary class="cursor-pointer">What the model said</summary>
-                          <pre class="mt-1 max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">{r.reply}</pre></details>
-                      {/if}
-                    </td>
-                    <td class="px-2 py-1.5"><code>{r.model || ""}</code></td>
-                    <td class="px-2 py-1.5 text-right tabular-nums">{r.ok ? `${r.answered}/${r.merchants}` : "error"}</td>
-                    <td class="py-1.5 pl-2 text-right tabular-nums">{r.seconds != null ? `${r.seconds}s` : ""}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {:else}
-          <p>No AI requests yet. Click “Suggest categories with AI” and each request will show up here.</p>
-        {/if}
-      {:catch err}
-        {err.message}
-      {/await}
-    </div>
-  </details>
-</Card.Root>
+{#if last}
+  <p class="mb-4 text-xs text-muted-foreground" title="Every AI request is listed in Settings → Connections → AI categorization">
+    Last {what(last.purpose)} {fmtDateTime(new Date(last.at.replace(" ", "T")))}: {last.ok ? `${last.answered} of ${last.merchants} suggested` : "failed"}
+  </p>
+{/if}

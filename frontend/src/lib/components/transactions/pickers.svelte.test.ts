@@ -64,7 +64,7 @@ describe("RecurringPicker", () => {
     setup();
     await userEvent.selectOptions(select(), "new:weekly");
     expect(api).toHaveBeenCalledWith("/api/transactions/t1/recurring", { method: "POST", body: { new: "weekly" } });
-    expect(toast.success).toHaveBeenCalledWith("Recurring item created; edit it on the Recurring tab");
+    expect(toast.success).toHaveBeenCalledWith("Recurring item created; edit it in Bills & income");
   });
 
   it("offers to match the transaction's text from now on when none of the item's is on it", async () => {

@@ -31,7 +31,7 @@ const serve = (list: Tx[] = rows(), total = list.length, extra: Handler = () => 
     if (path.startsWith("/api/transactions?")) return { items: list, total };
     return {};
   }) as never);
-const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?")).at(-1)!;
+const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("category=Ignore")).at(-1)!;
 
 beforeEach(() => {
   closeRemember();   // the "always use this category" question is module state and would leak between tests
@@ -55,18 +55,27 @@ describe("Transactions page", () => {
     expect(lastList()).not.toContain("review=1");
   });
 
-  it("hides what's marked Ignore unless you tick Show ignored, which Clear filters leaves alone", async () => {
-    serve();
+  it("hides what's marked Ignore behind an \"N ignored · Show\" line, which Clear filters leaves alone", async () => {
+    serve(rows(), 2, (path) => (path.startsWith("/api/transactions?") && path.includes("category=Ignore") ? { items: [], total: 4 } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
     expect(lastList()).toContain("ignored=0");
-    await userEvent.click(screen.getByRole("checkbox", { name: "Show ignored" }));
+    expect(await screen.findByText(/4 ignored/)).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Show ignored" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
     await waitFor(() => expect(lastList()).not.toContain("ignored="));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
     await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(lastList()).not.toContain("account=a1"));
     expect(lastList()).not.toContain("ignored=");
-    expect(screen.getByRole("checkbox", { name: "Show ignored" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Hide" })).toBeInTheDocument();
+  });
+
+  it("shows no ignored line when nothing is ignored", async () => {
+    serve(rows(), 2, (path) => (path.includes("category=Ignore") ? { items: [], total: 0 } : undefined));
+    render(Transactions);
+    await screen.findByText("Alpha");
+    expect(screen.queryByText(/ignored/)).not.toBeInTheDocument();
   });
 
   it("doesn't offer investment accounts in the account filter", async () => {
@@ -187,9 +196,9 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 4, offer_rule: null } : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
-    const before = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length;
+    const before = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("category=Ignore")).length;
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
-    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length).toBe(before + 1));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?") && !String(c[0]).includes("category=Ignore")).length).toBe(before + 1));
   });
 
   it("shows the error when saving a category fails", async () => {
