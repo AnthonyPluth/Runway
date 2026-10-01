@@ -18,7 +18,7 @@ Python goes through Poetry (Python 3.14).
 - `make lint`: ruff, mypy, and ESLint.
 - `make test`: `poetry run python -m unittest discover tests`.
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
-- `make security`: Bandit over `runway/` and zizmor over the workflows.
+- `make security`: Bandit over `runway/` and zizmor over the workflows and Dependabot's settings.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
 
 ## Conventions

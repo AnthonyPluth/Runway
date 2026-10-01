@@ -33,11 +33,12 @@ test:
 fix:
 	$(RUFF) check --fix .
 
-# Bandit over runway/ (settings in pyproject.toml) and zizmor over the workflows, as security.yml runs them. zizmor
-# runs offline here (CI's also asks GitHub about the actions it uses), and fails on a finding CI would report.
+# Bandit over runway/ (settings in pyproject.toml) and zizmor over the repository (the workflows and Dependabot's
+# settings), as security.yml runs them. zizmor runs offline here (CI's also asks GitHub about the actions it uses), and
+# fails on a finding CI would report.
 security:
 	$(BANDIT) -c pyproject.toml -r runway -ll
-	$(ZIZMOR) --offline .github/workflows
+	$(ZIZMOR) --offline .
 
 # Known vulnerabilities in the Python and the web app's dependencies, as CI checks them; needs the network.
 audit:
