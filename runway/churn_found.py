@@ -64,7 +64,7 @@ def match_issuer(*texts: str | None) -> str:
 # ------------------------------------------------------------------------------------------------ the product
 
 _MARKS = re.compile(r"[®™℠]")
-# "(1234)", "-1234", "- 5773", "••1234", "x1234", "…1234" at the end: the card's last digits, however the bank writes them.
+# "(1234)", "-1234", "- 4417", "••1234", "x1234", "…1234" at the end: the card's last digits, however the bank writes them.
 _MASK_PAREN = re.compile(r"\s*[(\[]\s*(?:[•*…·.]+\s*|x+(?=\d))?\d{2,}\s*[)\]]\s*$", re.I)
 _MASK_TAIL = re.compile(r"[\s\-–—:]*(?:[•*…·.]+\s*|x+(?=\d))?(?<!\d)\d{3,6}\s*$", re.I)
 # What isn't part of a card's name: its type and network.

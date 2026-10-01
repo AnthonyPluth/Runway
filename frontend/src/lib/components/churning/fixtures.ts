@@ -28,7 +28,7 @@ export const card = (over: Partial<ChurnCard> = {}): ChurnCard => ({
 });
 
 export const found = (over: Partial<FoundDraft> = {}): FoundDraft => ({
-  account_id: "acct-1", account_name: "Chase Sapphire Reserve (1034)", org: "Chase Bank Alex", owner: "Alex", issuer: "chase",
+  account_id: "acct-1", account_name: "Chase Sapphire Reserve (8814)", org: "Chase Bank Alex", owner: "Alex", issuer: "chase",
   product: "Sapphire Reserve", business: 0, annual_fee: 795, fee_month: 3, opened_on: "2024-03-02", opened_on_estimate: true, ...over,
 });
 
