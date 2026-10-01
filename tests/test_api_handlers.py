@@ -10,7 +10,7 @@ from runway import categories, db, demo, splits
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
-from runway.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction,
+from runway.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction, LoanTerms,
                            ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring, Security, SyncLog,
                            Transaction, User)
 from tests.shared import DbCase
@@ -60,6 +60,46 @@ class HandlerTests(DbCase):
                        .where(Account.id == "demo-checking"))
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
+
+    def test_loan_terms(self):
+        terms = lambda: tuple(self.one(select(Account.interest_rate, Account.monthly_payment).where(Account.id == "demo-mortgage")))
+        accounts.api_account_update(self.c, {}, {"interest_rate": "6.25%", "monthly_payment": "$1,840.50"}, "demo-mortgage")
+        self.assertEqual(terms(), (6.25, 1840.5))
+        mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
+        self.assertEqual({k: mtg["loan"][k] for k in ("rate", "payment", "source", "plaid", "set_rate", "set_payment")},
+                         {"rate": 6.25, "payment": 1840.5, "source": "manual", "plaid": False, "set_rate": 6.25, "set_payment": 1840.5})
+        self.assertNotIn("loan", next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-checking"))
+        # Empty clears one (the payment is then worked out from recent payments); 0 is a rate.
+        accounts.api_account_update(self.c, {}, {"interest_rate": "0", "monthly_payment": ""}, "demo-mortgage")
+        self.assertEqual(terms(), (0, None))
+        for bad in ({"interest_rate": "31"}, {"interest_rate": "-1"}, {"interest_rate": "lots"}, {"monthly_payment": "-5"},
+                    {"interest_rate": "nan"}, {"interest_rate": "5", "display_name": "x", "monthly_payment": "-1"}):
+            with self.assertRaises(ApiError):
+                accounts.api_account_update(self.c, {}, bad, "demo-mortgage")
+        self.assertEqual(terms(), (0, None))
+        self.assertEqual(self.one(select(Account.display_name).where(Account.id == "demo-mortgage"))[0], None)   # nothing half-saved
+        with self.assertRaisesRegex(ApiError, "Only a loan"):
+            accounts.api_account_update(self.c, {}, {"interest_rate": "5"}, "demo-checking")
+        # The lender's terms through Plaid aren't yours to change.
+        self.c.execute(insert(LoanTerms).values(plaid_account_id="pm", item_id="it1", kind="mortgage", interest_rate=5.5,
+                                                monthly_payment=2000))
+        self.c.execute(update(Account).where(Account.id == "demo-mortgage").values(plaid_account_id="pm"))
+        with self.assertRaisesRegex(ApiError, "interest rate comes from Plaid"):
+            accounts.api_account_update(self.c, {}, {"interest_rate": "4"}, "demo-mortgage")
+        with self.assertRaisesRegex(ApiError, "monthly payment comes from Plaid"):
+            accounts.api_account_update(self.c, {}, {"monthly_payment": "100"}, "demo-mortgage")
+        self.assertEqual(terms(), (0, None))
+        mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
+        self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["plaid"], mtg["loan"]["plaid_payment"]),
+                         (5.5, 2000, True, True))
+        accounts.api_account_update(self.c, {}, {"display_name": "Home loan"}, "demo-mortgage")   # the rest still saves
+        # What Plaid leaves out (a new loan's payment, or a deferred student loan's $0) is yours to set, and used.
+        self.c.execute(update(LoanTerms).where(LoanTerms.plaid_account_id == "pm").values(monthly_payment=0))
+        accounts.api_account_update(self.c, {}, {"monthly_payment": "1,950"}, "demo-mortgage")
+        self.assertEqual(terms(), (0, 1950))
+        mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
+        self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["source"], mtg["loan"]["plaid_payment"]),
+                         (5.5, 1950, "manual", False))
 
     # ------------------------------------------------------------------------------------------ push
 

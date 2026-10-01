@@ -11,8 +11,8 @@ import sqlalchemy.exc
 from sqlalchemy import delete, insert, select, update
 
 from runway import db, forecast, plaid, plaidbank, simplefin
-from runway.models import (Account, CardStatement, Holding, InvAccount, InvSnapshot, InvTransaction, Merchant,
-                           Override, PlaidAccount, PlaidItem, Security, Transaction)
+from runway.models import (Account, CardStatement, Holding, InvAccount, InvSnapshot, InvTransaction, LoanTerms,
+                           Merchant, Override, PlaidAccount, PlaidItem, Security, Transaction)
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -27,6 +27,8 @@ class MockBank(BaseHTTPRequestHandler):
     drop: set = set()         # paths whose connection is dropped without a reply
     fail: dict = {}           # path -> (status, body): Plaid refuses
     during_sync = None        # run while Plaid answers /transactions/sync
+    accounts: list | None = None   # /accounts/get's accounts instead of the usual three
+    loans: dict = {}          # /liabilities/get's mortgage and student loans
 
     def log_message(self, *a):
         pass
@@ -58,6 +60,8 @@ class MockBank(BaseHTTPRequestHandler):
             return self.reply(200, {})
         if self.path == "/item/get":
             return self.reply(200, {"item": {"item_id": "item-b", "products": MockBank.products, "billed_products": MockBank.products}})
+        if self.path == "/accounts/get" and MockBank.accounts is not None:
+            return self.reply(200, {"item": {"institution_name": "Chase"}, "accounts": MockBank.accounts})
         if self.path == "/accounts/get":
             return self.reply(200, {"item": {"institution_name": "Chase"}, "accounts": [
                 {"account_id": "p-chk", "name": "Checking", "mask": "0001", "type": "depository", "subtype": "checking",
@@ -75,7 +79,7 @@ class MockBank(BaseHTTPRequestHandler):
             return self.reply(200, {"liabilities": {"credit": [
                 {"account_id": "p-csp", "last_statement_balance": 640.5, "last_statement_issue_date": "2026-09-05",
                  "next_payment_due_date": "2026-10-02", "minimum_payment_amount": 35, "last_payment_amount": 700,
-                 "last_payment_date": "2026-08-30", "is_overdue": False}]}})
+                 "last_payment_date": "2026-08-30", "is_overdue": False}], **MockBank.loans}})
         self.reply(404, {"error_code": "NOT_FOUND"})
 
 
@@ -101,6 +105,7 @@ class PlaidBankTests(DbCase):
         MockBank.products = ["transactions", "liabilities"]
         MockBank.pages, MockBank.calls, MockBank.reject_redirect = [], [], False
         MockBank.drop, MockBank.fail, MockBank.during_sync = set(), {}, None
+        MockBank.accounts, MockBank.loans = None, {}
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         # What SimpleFIN already brought in: checking and a card, with some history.
         self.c.execute(insert(Account).values(id="sf-chk", name="Chase Checking", kind="checking", balance=2500))
@@ -284,6 +289,54 @@ class PlaidBankTests(DbCase):
         self.assertIn("liabilities", self.c.execute(select(PlaidItem.products)).fetchone()[0])
         self.assertTrue(self.c.execute(select(CardStatement.plaid_account_id)
                                        .where(CardStatement.plaid_account_id == "p-csp")).fetchone())
+
+    def test_loan_terms_from_liabilities(self):
+        loan = lambda pid, subtype, owed: {"account_id": pid, "name": pid, "type": "loan", "subtype": subtype,
+                                           "balances": {"current": owed}}
+        MockBank.accounts = [loan("p-mtg", "mortgage", 250000.0), loan("p-stu", "student", 12000.0),
+                             loan("p-car", "auto", 9000.0)]
+        MockBank.loans = {
+            "mortgage": [{"account_id": "p-mtg", "interest_rate": {"percentage": 6.25, "type": "fixed"},
+                          "next_monthly_payment": 2140.5, "last_payment_amount": 2100, "maturity_date": "2052-05-01",
+                          "origination_principal_amount": 300000}],
+            "student": [{"account_id": "p-stu", "interest_rate_percentage": 4.5, "minimum_payment_amount": None,
+                         "last_payment_amount": 180.25, "expected_payoff_date": "2032-06-15"},
+                        {"account_id": "p-gone", "interest_rate_percentage": None, "minimum_payment_amount": None,
+                         "expected_payoff_date": None}]}
+        MockBank.products = ["transactions"]        # Liabilities wasn't listed on the Item, and there's no card
+        out = self.link()
+        self.assertTrue(any(p == "/liabilities/get" for p, _ in MockBank.calls))
+        self.assertEqual(out["loans"], 3)
+        got = {r["plaid_account_id"]: tuple(r)[1:6] for r in self.c.execute(
+            select(LoanTerms.plaid_account_id, LoanTerms.item_id, LoanTerms.kind, LoanTerms.interest_rate,
+                   LoanTerms.monthly_payment, LoanTerms.maturity_date))}
+        self.assertEqual(got, {"p-mtg": ("item-b", "mortgage", 6.25, 2140.5, "2052-05-01"),
+                               "p-stu": ("item-b", "student", 4.5, 180.25, "2032-06-15"),   # the last payment, with no minimum
+                               "p-gone": ("item-b", "student", None, None, None)})   # auto loans aren't in Liabilities
+        # The next sync updates them in place.
+        MockBank.loans["mortgage"][0]["next_monthly_payment"] = 2150
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(self.c.execute(select(LoanTerms.monthly_payment).where(LoanTerms.plaid_account_id == "p-mtg")).scalar(), 2150)
+        plaidbank.forget_item(self.c, "item-b")
+        self.assertIsNone(self.c.execute(select(LoanTerms.plaid_account_id)).fetchone())
+
+    def test_liabilities_not_asked_for_without_a_card_mortgage_or_student_loan(self):
+        MockBank.accounts = [{"account_id": "p-car", "name": "Auto", "type": "loan", "subtype": "auto", "balances": {"current": 9000.0}},
+                             {"account_id": "p-chk", "name": "Checking", "type": "depository", "subtype": "checking",
+                              "balances": {"current": 10.0}}]
+        MockBank.products = ["transactions"]
+        self.link()
+        self.assertFalse(any(p == "/liabilities/get" for p, _ in MockBank.calls))
+
+    def test_a_mortgage_at_a_bank_without_liabilities_leaves_a_note_not_an_error(self):
+        MockBank.accounts = [{"account_id": "p-mtg", "name": "Mortgage", "type": "loan", "subtype": "mortgage",
+                              "balances": {"current": 250000.0}}]
+        MockBank.products = ["transactions"]
+        MockBank.fail = {"/liabilities/get": (400, {"error_code": "PRODUCTS_NOT_SUPPORTED", "error_message": "no"})}
+        out = self.link()
+        self.assertNotIn("error", out)
+        self.assertEqual(db.get_setting(self.c, "plaid_stmt_note:item-b"), "PRODUCTS_NOT_SUPPORTED")
+        self.assertIsNone(self.c.execute(select(LoanTerms.plaid_account_id)).fetchone())
 
     def test_statements_only_when_transactions_isnt_enabled(self):
         MockBank.products = ["liabilities"]

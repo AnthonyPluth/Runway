@@ -47,6 +47,8 @@ accounts = Table(
     Column('plaid_account_id', Text, doc='the same account in a Plaid connection, if any'),
     Column('provider_since', Text, doc='when the provider last changed (YYYY-MM-DD); overlapping history is matched up'),
     Column('logo', Text, doc='the logo you chose: a website ("citi.com"), "none" for a letter, or NULL for its institution\'s'),
+    Column('interest_rate', Float, doc='loans: the annual interest rate in percent, as you set it (Plaid\'s, if any, is in loan_terms)'),
+    Column('monthly_payment', Float, doc='loans: the monthly payment, as you set it; NULL works it out from recent payments'),
 )
 
 transactions = Table(
@@ -295,6 +297,18 @@ card_statements = Table(
     Column('is_overdue', Integer),
     Column('updated', Text),
     info={'doc': "credit card statements from the bank, via Plaid Liabilities"},
+)
+
+loan_terms = Table(
+    'loan_terms', metadata,
+    Column('plaid_account_id', Text, primary_key=True),
+    Column('item_id', Text, nullable=False),
+    Column('kind', Text, doc='mortgage | student'),
+    Column('interest_rate', Float, doc='annual, in percent'),
+    Column('monthly_payment', Float, doc='the next (or last) monthly payment'),
+    Column('maturity_date', Text, doc='when the loan is due to be paid off (YYYY-MM-DD)'),
+    Column('updated', Text),
+    info={'doc': "mortgage and student loan terms from the lender, via Plaid Liabilities"},
 )
 
 inv_accounts = Table(
