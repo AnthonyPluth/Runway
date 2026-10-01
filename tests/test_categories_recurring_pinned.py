@@ -4,34 +4,39 @@ import json
 import unittest
 from datetime import date
 
+from sqlalchemy import delete, func, insert, literal, select, update
+
 from runway import categories, categorize, db, recurring, rules
 from runway.server.api import categories as api_categories
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
+from runway.models import (Account, AiLog, Budget, Category, Override, Recurring, RetailItem, RetailItemMemory,
+                           RetailOrder, Rule, Transaction, TxSplit)
 from tests.shared import DbCase
 
 
 class Base(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance, owner) VALUES ('chk','Checking','checking',0,'Sara'),"
-                       "('cc','Card','credit',0,NULL)")
+        self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0,
+                                          "owner": "Sara"},
+                                         {"id": "cc", "name": "Card", "kind": "credit", "balance": 0, "owner": None}])
         self.n = 0
 
     def tx(self, amount, desc, acct="chk", posted=None, category=None, source=None, review=0, payee=None):
         self.n += 1
         tid = f"{acct}|{self.n}"
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source, "
-                       "needs_review) VALUES (?,?,?,?,?,?,?,?,?)",
-                       (tid, acct, posted or f"2026-09-{self.n:02d}", amount, desc,
-                        categorize.clean_payee(desc) if payee is None else payee, category, source, review))
+        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=posted or f"2026-09-{self.n:02d}",
+                                                  amount=amount, description=desc,
+                                                  payee=categorize.clean_payee(desc) if payee is None else payee,
+                                                  category=category, category_source=source, needs_review=review))
         return tid
 
-    def one(self, sql, *args):
-        return self.c.execute(sql, args).fetchone()
+    def one(self, stmt):
+        return self.c.execute(stmt).fetchone()
 
-    def col(self, sql, *args):
-        return [r[0] for r in self.c.execute(sql, args)]
+    def col(self, stmt):
+        return [r[0] for r in self.c.execute(stmt)]
 
 
 class CategoryCascadeTests(Base):
@@ -39,55 +44,62 @@ class CategoryCascadeTests(Base):
         super().setUp()
         self.whole = self.tx(-10, "PHARMACY ONE", category="Pharmacy", source="manual")
         self.split = self.tx(-100, "COSTCO", category="Groceries", source="manual")
-        self.c.execute("UPDATE transactions SET is_split=1 WHERE id=?", (self.split,))
-        self.c.execute("INSERT INTO tx_splits(tx_id, amount, category) VALUES (?,?,?),(?,?,?)",
-                       (self.split, -60, "Groceries", self.split, -40, "Pharmacy"))
-        self.c.execute("INSERT INTO retail_orders(id, retailer, order_number) VALUES ('amazon:1','amazon','1')")
-        self.c.execute("INSERT INTO retail_items(order_id, title, category, category_source, confidence) "
-                       "VALUES ('amazon:1','Aspirin','Pharmacy','ai',0.9)")
-        self.c.execute("INSERT INTO retail_item_memory(key, category) VALUES ('aspirin','Pharmacy')")
-        self.c.execute("INSERT INTO budgets(category, amount) VALUES ('Pharmacy', 40)")
-        self.c.execute("INSERT INTO rules(match, category) VALUES ('pharm','Pharmacy')")
-        self.c.execute("INSERT INTO rules(match, split) VALUES ('costco', ?)",
-                       (json.dumps([{"category": "Groceries", "percent": 50}, {"category": "Pharmacy", "percent": 50}]),))
-        self.c.execute("INSERT INTO rules(match, category, rename) VALUES ('rx','Pharmacy','Rx')")
+        self.c.execute(update(Transaction).where(Transaction.id == self.split).values(is_split=1))
+        self.c.execute(insert(TxSplit), [{"tx_id": self.split, "amount": -60, "category": "Groceries"},
+                                         {"tx_id": self.split, "amount": -40, "category": "Pharmacy"}])
+        self.c.execute(insert(RetailOrder).values(id="amazon:1", retailer="amazon", order_number="1"))
+        self.c.execute(insert(RetailItem).values(order_id="amazon:1", title="Aspirin", category="Pharmacy",
+                                                 category_source="ai", confidence=0.9))
+        self.c.execute(insert(RetailItemMemory).values(key="aspirin", category="Pharmacy"))
+        self.c.execute(insert(Budget).values(category="Pharmacy", amount=40))
+        self.c.execute(insert(Rule).values(match="pharm", category="Pharmacy"))
+        self.c.execute(insert(Rule).values(match="costco", split=json.dumps([{"category": "Groceries", "percent": 50},
+                                                                             {"category": "Pharmacy", "percent": 50}])))
+        self.c.execute(insert(Rule).values(match="rx", category="Pharmacy", rename="Rx"))
 
     def test_remove_without_a_replacement(self):
         self.assertEqual(categories.remove(self.c, "Pharmacy"), 2)
-        w = self.one("SELECT category, category_source, confidence, needs_review FROM transactions WHERE id=?", self.whole)
-        s = self.one("SELECT is_split, category, category_source, confidence, needs_review FROM transactions WHERE id=?", self.split)
+        w = self.one(select(Transaction.category, Transaction.category_source, Transaction.confidence,
+                            Transaction.needs_review)
+                     .where(Transaction.id == self.whole))
+        s = self.one(select(Transaction.is_split, Transaction.category, Transaction.category_source,
+                            Transaction.confidence, Transaction.needs_review)
+                     .where(Transaction.id == self.split))
         self.assertEqual(tuple(w), (None, None, None, 1))
         self.assertEqual(tuple(s), (0, None, None, None, 1))
-        self.assertEqual(self.col("SELECT COUNT(*) FROM tx_splits"), [0])
-        self.assertEqual(tuple(self.one("SELECT category, category_source, confidence FROM retail_items")), (None, None, None))
-        self.assertEqual(self.col("SELECT key FROM retail_item_memory"), [])
-        self.assertEqual(self.col("SELECT category FROM budgets"), [])
-        self.assertEqual([(r["match"], r["category"], r["split"], r["rename"]) for r in self.c.execute("SELECT * FROM rules ORDER BY id")],
+        self.assertEqual(self.col(select(func.count()).select_from(TxSplit)), [0])
+        self.assertEqual(tuple(self.one(select(RetailItem.category, RetailItem.category_source,
+                                               RetailItem.confidence))), (None, None, None))
+        self.assertEqual(self.col(select(RetailItemMemory.key)), [])
+        self.assertEqual(self.col(select(Budget.category)), [])
+        self.assertEqual([(r["match"], r["category"], r["split"], r["rename"])
+                          for r in self.c.execute(select(Rule).order_by(Rule.id))],
                          [("rx", None, None, "Rx")])
-        self.assertIsNone(self.one("SELECT 1 FROM categories WHERE name='Pharmacy'"))
+        self.assertIsNone(self.one(select(Category.name).where(Category.name == "Pharmacy")))
 
     def test_remove_into_another_category(self):
         self.assertEqual(categories.remove(self.c, "Pharmacy", "Medical"), 2)
-        self.assertEqual(self.col("SELECT category FROM transactions WHERE id=?", self.whole), ["Medical"])
-        self.assertEqual(self.col("SELECT category FROM tx_splits ORDER BY id"), ["Groceries", "Medical"])
-        self.assertEqual(self.col("SELECT category FROM retail_items"), ["Medical"])
-        self.assertEqual(self.col("SELECT category FROM retail_item_memory"), ["Medical"])
-        self.assertEqual(self.col("SELECT category FROM budgets"), [])   # its budget goes; Medical keeps its own
-        self.assertEqual(self.col("SELECT category FROM rules ORDER BY id"), ["Medical", None, "Medical"])
-        self.assertEqual(json.loads(self.col("SELECT split FROM rules WHERE match='costco'")[0])[1]["category"], "Medical")
+        self.assertEqual(self.col(select(Transaction.category).where(Transaction.id == self.whole)), ["Medical"])
+        self.assertEqual(self.col(select(TxSplit.category).order_by(TxSplit.id)), ["Groceries", "Medical"])
+        self.assertEqual(self.col(select(RetailItem.category)), ["Medical"])
+        self.assertEqual(self.col(select(RetailItemMemory.category)), ["Medical"])
+        self.assertEqual(self.col(select(Budget.category)), [])   # its budget goes; Medical keeps its own
+        self.assertEqual(self.col(select(Rule.category).order_by(Rule.id)), ["Medical", None, "Medical"])
+        self.assertEqual(json.loads(self.col(select(Rule.split)
+                                             .where(Rule.match == "costco"))[0])[1]["category"], "Medical")
 
     def test_rename_follows_everywhere(self):
         categories.add(self.c, "Vitamins", "Pharmacy")
         categories.rename(self.c, "Pharmacy", "Health")
-        self.assertEqual(self.col("SELECT parent FROM categories WHERE name='Vitamins'"), ["Health"])
-        self.assertEqual(self.col("SELECT category FROM transactions WHERE id=?", self.whole), ["Health"])
-        self.assertEqual(self.col("SELECT category FROM tx_splits ORDER BY id"), ["Groceries", "Health"])
-        self.assertEqual(self.col("SELECT category FROM retail_items"), ["Health"])
-        self.assertEqual(self.col("SELECT category FROM retail_item_memory"), ["Health"])
-        self.assertEqual(self.col("SELECT category FROM budgets"), ["Health"])
-        self.assertEqual(self.col("SELECT category FROM rules ORDER BY id"), ["Health", None, "Health"])
+        self.assertEqual(self.col(select(Category.parent).where(Category.name == "Vitamins")), ["Health"])
+        self.assertEqual(self.col(select(Transaction.category).where(Transaction.id == self.whole)), ["Health"])
+        self.assertEqual(self.col(select(TxSplit.category).order_by(TxSplit.id)), ["Groceries", "Health"])
+        self.assertEqual(self.col(select(RetailItem.category)), ["Health"])
+        self.assertEqual(self.col(select(RetailItemMemory.category)), ["Health"])
+        self.assertEqual(self.col(select(Budget.category)), ["Health"])
+        self.assertEqual(self.col(select(Rule.category).order_by(Rule.id)), ["Health", None, "Health"])
         categories.rename(self.c, "Health", "health")   # only the case changes: allowed
-        self.assertEqual(self.col("SELECT category FROM budgets"), ["health"])
+        self.assertEqual(self.col(select(Budget.category)), ["health"])
 
     def test_errors(self):
         cases = [
@@ -120,34 +132,40 @@ class CategoryCascadeTests(Base):
         categories.add(self.c, "Pets")
         categories.add(self.c, "Vet", "Pets")
         categories.add(self.c, "Side", "Income")
-        self.assertEqual(tuple(self.one("SELECT is_transfer, is_income FROM categories WHERE name='Side'")), (0, 1))
+        self.assertEqual(tuple(self.one(select(Category.is_transfer, Category.is_income)
+                                        .where(Category.name == "Side"))), (0, 1))
         categories.move(self.c, "Vet", "Transfer")
-        self.assertEqual(tuple(self.one("SELECT parent, is_transfer, is_income FROM categories WHERE name='Vet'")), ("Transfer", 1, 0))
+        self.assertEqual(tuple(self.one(select(Category.parent, Category.is_transfer, Category.is_income)
+                                        .where(Category.name == "Vet"))), ("Transfer", 1, 0))
         categories.move(self.c, "Vet", None)
-        self.assertEqual(tuple(self.one("SELECT parent, is_transfer FROM categories WHERE name='Vet'")), (None, 1))
+        self.assertEqual(tuple(self.one(select(Category.parent, Category.is_transfer)
+                                        .where(Category.name == "Vet"))), (None, 1))
         categories.set_look(self.c, "Pets", " 🐶 ", "#AABBCC")
-        self.assertEqual(tuple(self.one("SELECT icon, color FROM categories WHERE name='Pets'")), ("🐶", "#aabbcc"))
+        self.assertEqual(tuple(self.one(select(Category.icon, Category.color)
+                                        .where(Category.name == "Pets"))), ("🐶", "#aabbcc"))
         categories.set_look(self.c, "Pets", "", "")
-        self.assertEqual(tuple(self.one("SELECT icon, color FROM categories WHERE name='Pets'")), (None, None))
+        self.assertEqual(tuple(self.one(select(Category.icon, Category.color)
+                                        .where(Category.name == "Pets"))), (None, None))
         # an orphan (its parent removed by hand) shows at the top level; deeper nesting gets flattened
-        self.c.execute("INSERT INTO categories(name, is_transfer, is_income, parent) VALUES ('Lost',0,0,'Gone'),('Deep',0,0,'Vitamins')")
+        self.c.execute(insert(Category), [{"name": "Lost", "is_transfer": 0, "is_income": 0, "parent": "Gone"},
+                                          {"name": "Deep", "is_transfer": 0, "is_income": 0, "parent": "Vitamins"}])
         categories.add(self.c, "Vitamins", "Pharmacy")
         lost = next(c for c in categories.all_categories(self.c) if c["name"] == "Lost")
         self.assertEqual((lost["parent"], lost["depth"], lost["top"]), (None, 0, "Lost"))
         self.assertEqual(categories.flatten(self.c), 1)
-        self.assertEqual(self.col("SELECT parent FROM categories WHERE name='Deep'"), ["Pharmacy"])
+        self.assertEqual(self.col(select(Category.parent).where(Category.name == "Deep")), ["Pharmacy"])
 
     def test_category_list_counts_split_parts(self):
         cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
         self.assertEqual((cats["Pharmacy"]["transactions"], cats["Groceries"]["transactions"], cats["Travel"]["transactions"]), (2, 1, 0))
 
     def test_rule_list_and_delete(self):
-        self.c.execute("INSERT INTO rules(match, account_id, review) VALUES ('', 'chk', 1)")
+        self.c.execute(insert(Rule).values(match="", account_id="chk", review=1))
         out = api_categories.api_rules(self.c, None, None)
         self.assertEqual([r["match"] for r in out], ["costco", "pharm", "rx", ""])
         self.assertEqual(out[-1]["summary"], "in Checking (Sara)")
         api_categories.api_rule_delete(self.c, None, None, str(out[0]["id"]))
-        self.assertEqual(self.col("SELECT match FROM rules ORDER BY id"), ["pharm", "rx", ""])
+        self.assertEqual(self.col(select(Rule.match).order_by(Rule.id)), ["pharm", "rx", ""])
 
 
 class CategorizePinnedTests(Base):
@@ -155,43 +173,53 @@ class CategorizePinnedTests(Base):
         a = self.tx(-5, "A", category="Shopping", source="ai", review=1)
         b = self.tx(-5, "B", review=1)
         s = self.tx(-10, "S", category="Groceries", source="manual")
-        self.c.execute("UPDATE transactions SET is_split=1 WHERE id=?", (s,))
-        self.c.execute("INSERT INTO tx_splits(tx_id, amount, category) VALUES (?,-5,'Groceries'),(?,-5,'Shopping')", (s, s))
+        self.c.execute(update(Transaction).where(Transaction.id == s).values(is_split=1))
+        self.c.execute(insert(TxSplit), [{"tx_id": s, "amount": -5, "category": "Groceries"},
+                                         {"tx_id": s, "amount": -5, "category": "Shopping"}])
         self.assertEqual(categorize.bulk_update(self.c, [a, b, a, "nope"], reviewed=True), 2)
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT category_source, needs_review FROM transactions WHERE id IN (?,?) ORDER BY id", (a, b))],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Transaction.category_source, Transaction.needs_review)
+                                                           .where(Transaction.id.in_([a, b]))
+                                                           .order_by(Transaction.id))],
                          [("manual", 0), (None, 0)])
         self.assertEqual(categorize.bulk_update(self.c, [s, b], category="Travel", payee="  New   Name "), 2)
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT category, payee, is_split, category_source FROM transactions WHERE id IN (?,?) ORDER BY id", (b, s))],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Transaction.category, Transaction.payee,
+                                                                  Transaction.is_split, Transaction.category_source)
+                                                           .where(Transaction.id.in_([b, s]))
+                                                           .order_by(Transaction.id))],
                          [("Travel", "New Name", 0, "manual"), ("Travel", "New Name", 0, "manual")])
-        self.assertEqual(self.col("SELECT COUNT(*) FROM tx_splits"), [0])
+        self.assertEqual(self.col(select(func.count()).select_from(TxSplit)), [0])
         ids = [f"x{i}" for i in range(700)] + [a]
         self.assertEqual(categorize.bulk_update(self.c, ids, payee="Z"), 1)   # more than one chunk
 
     def test_remember_updates_matching_open_transactions(self):
         a = self.tx(-5, "BLUE BOTTLE 1", review=1, payee="Blue Bottle")
         b = self.tx(-6, "x", payee="Cafe", review=0, category="Coffee & Snacks", source="ai")
-        self.c.execute("UPDATE transactions SET description='SQ *BLUE BOTTLE 2' WHERE id=?", (b,))
+        self.c.execute(update(Transaction).where(Transaction.id == b).values(description="SQ *BLUE BOTTLE 2"))
         c = self.tx(-7, "BLUE BOTTLE 3", category="Shopping", source="manual")
         d = self.tx(-8, "BLUE_BOTTLE 4", review=1)   # '_' isn't a wildcard
         e = self.tx(-9, "BLUE BOTTLE 5", review=1)
-        self.c.execute("UPDATE transactions SET category='Shopping', category_source='ai' WHERE id=?", (e,))
+        self.c.execute(update(Transaction).where(Transaction.id == e).values(category="Shopping", category_source="ai"))
         f = self.tx(-9, "PAID blue bottle xx", review=1, payee="Other")
         self.assertEqual(categorize.set_category(self.c, a, "Coffee & Snacks", remember=True), 2)
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT id, category, category_source FROM transactions ORDER BY id")],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Transaction.id, Transaction.category,
+                                                                  Transaction.category_source)
+                                                           .order_by(Transaction.id))],
                          [(a, "Coffee & Snacks", "manual"), (b, "Coffee & Snacks", "ai"), (c, "Shopping", "manual"),
                           (d, None, None), (e, "Coffee & Snacks", "rule"), (f, "Coffee & Snacks", "rule")])
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT match, category FROM rules")], [("blue bottle", "Coffee & Snacks")])
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Rule.match, Rule.category))],
+                         [("blue bottle", "Coffee & Snacks")])
 
     def test_ai_log_keeps_the_last_200(self):
         for i in range(205):
-            self.c.execute("INSERT INTO ai_log(purpose, model, merchants) VALUES ('x','m',?)", (i,))
+            self.c.execute(insert(AiLog).values(purpose="x", model="m", merchants=i))
         db.set_setting(self.c, "openrouter_api_key", "k")
         t = self.tx(-5, "SOMEWHERE")
-        group = [[dict(self.one("SELECT t.*, 'checking' AS kind FROM transactions t WHERE id=?", t))]]
+        group = [[dict(self.one(select(Transaction, literal("checking").label("kind")).where(Transaction.id == t)))]]
         out = categorize.ask_model(self.c, group, lambda *a: '[{"i": 0, "category": "Travel", "confidence": 0.8}]')
         self.assertEqual(out, [("Travel", 0.8)])
-        self.assertEqual(self.col("SELECT COUNT(*) FROM ai_log"), [200])
-        last = self.one("SELECT purpose, merchants, answered, new_cats, ok, message FROM ai_log ORDER BY id DESC")
+        self.assertEqual(self.col(select(func.count()).select_from(AiLog)), [200])
+        last = self.one(select(AiLog.purpose, AiLog.merchants, AiLog.answered, AiLog.new_cats, AiLog.ok, AiLog.message)
+                        .order_by(AiLog.id.desc()))
         self.assertEqual(tuple(last), ("sync", 1, 1, 0, 1, "Suggested a category for 1 of 1 merchants"))
 
     def test_ai_answers_and_what_waits_in_review(self):
@@ -207,7 +235,9 @@ class CategorizePinnedTests(Base):
             return json.dumps([{"i": t["i"], "category": answer[t["payee"]][0], "confidence": answer[t["payee"]][1]} for t in txs])
         counts = categorize.categorize(self.c, caller=caller)
         self.assertEqual(counts, {"auto": 0, "rule": 0, "history": 0, "ai": 1, "review": 3})
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT id, category, category_source, needs_review FROM transactions ORDER BY id")],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Transaction.id, Transaction.category,
+                                                                  Transaction.category_source, Transaction.needs_review)
+                                                           .order_by(Transaction.id))],
                          [(t1, "Shopping", "ai", 0), (t2, "Transfer", "ai", 1), (t3, None, None, 1), (t4, "Income", "ai", 1)])
 
 
@@ -221,15 +251,18 @@ class RecurringPinnedTests(Base):
         self.tx(-100, "STREAMFLIX GIFT CARDS", posted="2026-09-06")
         self.tx(-5, "A_%B", posted="2026-09-07")
         self.tx(-5, "AXXB", posted="2026-09-08")
-        self.c.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match, amount_mode) VALUES "
-                       "('Streaming','chk',-15.49,'monthly','2026-06-03','streamflix','fixed'),"
-                       "('Odd','chk',-5,'monthly','2026-06-07','a_%b','fixed'),"
-                       "('Short','chk',-5,'monthly','2026-06-07','ax','fixed')")
-        self.c.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date, match, active) VALUES "
-                       "('Off','chk',-100,'monthly','2026-06-07','streamflix gift',0)")
+        self.c.execute(insert(Recurring), [{"name": "Streaming", "account_id": "chk", "amount": -15.49,
+                                            "frequency": "monthly", "anchor_date": "2026-06-03", "match": "streamflix",
+                                            "amount_mode": "fixed"},
+                                           {"name": "Odd", "account_id": "chk", "amount": -5, "frequency": "monthly",
+                                            "anchor_date": "2026-06-07", "match": "a_%b", "amount_mode": "fixed"},
+                                           {"name": "Short", "account_id": "chk", "amount": -5, "frequency": "monthly",
+                                            "anchor_date": "2026-06-07", "match": "ax", "amount_mode": "fixed"}])
+        self.c.execute(insert(Recurring).values(name="Off", account_id="chk", amount=-100, frequency="monthly",
+                                                anchor_date="2026-06-07", match="streamflix gift", active=0))
 
     def ids(self, rid):
-        return self.col("SELECT id FROM transactions WHERE recurring_id=? ORDER BY id", rid)
+        return self.col(select(Transaction.id).where(Transaction.recurring_id == rid).order_by(Transaction.id))
 
     def test_auto_match_edges(self):
         self.assertEqual(recurring.auto_match(self.c), 5)
@@ -241,8 +274,10 @@ class RecurringPinnedTests(Base):
 
     def test_list_edit_and_delete(self):
         recurring.auto_match(self.c)
-        self.c.execute("INSERT INTO overrides(key, amount) VALUES ('rec:1:2026-10-03', -20), ('rec:10:2026-10-03', -20)")
-        self.c.execute("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date) VALUES (10,'Ten','chk',-1,'monthly','2026-06-01')")
+        self.c.execute(insert(Override), [{"key": "rec:1:2026-10-03", "amount": -20},
+                                          {"key": "rec:10:2026-10-03", "amount": -20}])
+        self.c.execute(insert(Recurring).values(id=10, name="Ten", account_id="chk", amount=-1, frequency="monthly",
+                                                anchor_date="2026-06-01"))
         items = {i["name"]: i for i in api_recurring.api_recurring(self.c, None, None)}
         s = items["Streaming"]
         self.assertEqual(list(s)[:13], ["id", "name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date",
@@ -262,13 +297,14 @@ class RecurringPinnedTests(Base):
         with self.assertRaises(ApiError):
             api_recurring.api_recurring_update(self.c, None, body, "99")
         api_recurring.api_recurring_delete(self.c, None, None, "1")
-        self.assertEqual(self.col("SELECT key FROM overrides"), ["rec:10:2026-10-03"])
-        self.assertEqual(self.col("SELECT COUNT(*) FROM transactions WHERE recurring_id=1"), [0])
-        self.assertIsNone(self.one("SELECT 1 FROM recurring WHERE id=1"))
+        self.assertEqual(self.col(select(Override.key)), ["rec:10:2026-10-03"])
+        self.assertEqual(self.col(select(func.count()).select_from(Transaction)
+                                  .where(Transaction.recurring_id == 1)), [0])
+        self.assertIsNone(self.one(select(Recurring.id).where(Recurring.id == 1)))
 
     def test_missed_and_dismiss(self):
         recurring.auto_match(self.c)
-        self.c.execute("DELETE FROM transactions WHERE posted='2026-08-03'")
+        self.c.execute(delete(Transaction).where(Transaction.posted == "2026-08-03"))
         missed = recurring.missed(self.c, date(2026, 9, 20))
         self.assertEqual([(m["name"], m["date"], m["account_name"]) for m in missed],
                          [("Short", "2026-09-08", "Checking (Sara)"), ("Odd", "2026-08-07", "Checking (Sara)"),
@@ -283,16 +319,19 @@ class RecurringPinnedTests(Base):
         r = api_recurring.api_recurring_add(self.c, None, {"name": "Gifts", "account_id": "chk", "amount": "-100",
                                                            "anchor_date": "2026-09-06", "match": " Gift Cards "})
         self.assertEqual(r, {"ok": True, "id": 5, "linked": 1})
-        self.assertEqual(tuple(self.one("SELECT match, amount_mode, active, dates FROM recurring WHERE id=?", r["id"])),
+        self.assertEqual(tuple(self.one(select(Recurring.match, Recurring.amount_mode, Recurring.active,
+                                               Recurring.dates)
+                                        .where(Recurring.id == r["id"]))),
                          ("gift cards", "fixed", 1, None))
         with self.assertRaises(ApiError):
             api_recurring.api_recurring_add(self.c, None, {"name": "X", "account_id": "nope", "amount": 1, "anchor_date": "2026-01-01"})
-        self.c.execute("INSERT INTO recurring(name, account_id, amount, frequency, anchor_date) VALUES ('Blank','chk',-5,'monthly','2026-06-07')")
-        blank = self.col("SELECT id FROM recurring WHERE name='Blank'")[0]
+        self.c.execute(insert(Recurring).values(name="Blank", account_id="chk", amount=-5, frequency="monthly",
+                                                anchor_date="2026-06-07"))
+        blank = self.col(select(Recurring.id).where(Recurring.name == "Blank"))[0]
         recurring.link(self.c, "chk|9", blank)
-        self.assertEqual(self.col("SELECT match FROM recurring WHERE id=?", blank), ["axxb"])
+        self.assertEqual(self.col(select(Recurring.match).where(Recurring.id == blank)), ["axxb"])
         self.assertEqual(api_recurring.api_tx_recurring(self.c, None, {}, "chk|9"), {"ok": True})
-        self.assertEqual(self.col("SELECT recurring_id FROM transactions WHERE id='chk|9'"), [0])
+        self.assertEqual(self.col(select(Transaction.recurring_id).where(Transaction.id == "chk|9")), [0])
         with self.assertRaises(ApiError):
             api_recurring.api_tx_recurring(self.c, None, {"recurring_id": 999}, "chk|9")
 
@@ -302,13 +341,14 @@ class RulesPinnedTests(Base):
         t = self.tx(-5, "BLUE BOTTLE")
         self.assertEqual(categorize.rule_offer(self.c, t, "Coffee & Snacks"),
                          {"merchant": "Blue Bottle", "match": "blue bottle", "replaces": None})
-        self.c.execute("INSERT INTO rules(match, match_mode, category) VALUES ('blue bottle','exact','Shopping')")
+        self.c.execute(insert(Rule).values(match="blue bottle", match_mode="exact", category="Shopping"))
         rules.remember(self.c, "blue bottle", "Coffee & Snacks")   # not the exact-text rule: a new one
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT match, match_mode, category FROM rules ORDER BY id")],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(Rule.match, Rule.match_mode, Rule.category)
+                                                           .order_by(Rule.id))],
                          [("blue bottle", "exact", "Shopping"), ("blue bottle", "contains", "Coffee & Snacks")])
         self.assertIsNone(categorize.rule_offer(self.c, t, "Coffee & Snacks"))
         rules.remember(self.c, "blue bottle", "Restaurants")
-        self.assertEqual(self.col("SELECT category FROM rules ORDER BY id"), ["Shopping", "Restaurants"])
+        self.assertEqual(self.col(select(Rule.category).order_by(Rule.id)), ["Shopping", "Restaurants"])
         self.assertEqual(categorize.rule_offer(self.c, t, "Groceries")["replaces"], "Restaurants")
 
 
