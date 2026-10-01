@@ -203,6 +203,12 @@ class BenefitDbTests(unittest.TestCase):
         cb.save(self.c, {"guests": "1"}, None, c1)
         guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
         self.assertEqual((guests[pp], guests[c1]), (None, 1))
+        # Only access keeps guests: a credit sent with some, or a lounge switched to a credit, has none.
+        credit = cb.save(self.c, {"name": "Travel credit", "kind": "credit", "amount": 300, "guests": 2}, self.card)
+        cb.save(self.c, {"kind": "credit"}, None, c1)
+        cb.save(self.c, {"guests": 3}, None, credit)
+        guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
+        self.assertEqual((guests[credit], guests[c1]), (None, None))
 
 
 if __name__ == "__main__":

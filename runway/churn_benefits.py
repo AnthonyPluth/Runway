@@ -259,6 +259,9 @@ def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = 
             f[key] = _flag(body.get(key, 1))
     if "guests" in body:
         f["guests"] = churning._int(body.get("guests"), "number of guests", 0, 20)
+    # Guests are a lounge's (access): anything else drops them, so a benefit switched away from access doesn't keep them.
+    if f.get("kind", current.kind if current else None) != "access" and ("guests" in f or "kind" in f):
+        f["guests"] = None
     if "remind_days" in body:
         f["remind_days"] = churning._int(body.get("remind_days"), "days ahead to remind you", 0, 365)
     if "expires_on" in body:
