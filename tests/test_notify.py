@@ -267,6 +267,16 @@ class NotifyTests(DbCase):
         self.c.execute(insert(SyncLog).values(ok=1, message="fine again"))
         self.assertNotIn("syncfail:2026-09-23", {a["key"] for a in notify.alerts(self.c, TODAY, p)})
 
+    def test_sync_failed_alert_with_plaid_only(self):
+        from runway.models import PlaidItem
+        self.c.execute(insert(SyncLog).values(ok=0, message="Plaid: ITEM_LOGIN_REQUIRED"))
+        p = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False}
+        keys = lambda: {a["key"] for a in notify.alerts(self.c, TODAY, p)}
+        self.assertNotIn("syncfail:2026-09-23", keys())                 # no bank connected: nothing to say
+        db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
+        self.c.execute(insert(PlaidItem).values(item_id="it", access_token="x", products="transactions"))
+        self.assertIn("syncfail:2026-09-23", keys())                    # a Plaid bank, without SimpleFIN
+
     def test_old_log_entries_are_forgotten(self):
         self.c.execute(insert(NotifyLog), [{"key": "ancient", "sent": 1, "title": "x"},
                                            {"key": "recent", "sent": time.time(), "title": "y"}])

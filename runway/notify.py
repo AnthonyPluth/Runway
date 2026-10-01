@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, or_, select, update
 
-from . import churning, db, forecast, oidc, recurring, webpush
+from . import banks, churning, db, forecast, oidc, recurring, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
@@ -273,7 +273,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         last_ok = db.get_setting(conn, sk.LAST_SYNC_OK)
         log = conn.execute(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
         stale = not last_ok or (date.today() - date.fromisoformat(last_ok[:10])).days >= 1
-        if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
+        if log and not log["ok"] and stale and banks.bank_configured(conn):   # SimpleFIN or Plaid
             # Not what the bank said: a notification shows on a lock screen, and goes through a push service.
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
                         "body": "The last sync failed. Open Settings → Connections to see what it said.", "url": "/#setup/connections"})
