@@ -203,6 +203,33 @@ describe("TxRow", () => {
     });
   });
 
+  // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
+  describe("narrow rows", () => {
+    it("lets the order chip shrink to its icon, and drops its text on a phone, so the merchant keeps its room", () => {
+      render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 12 } })));
+      const chip = screen.getByRole("button", { name: "Target in store · 12 items" });
+      expect(chip).toHaveClass("min-w-7", "shrink-[8]", "overflow-hidden");
+      expect(within(chip).getByText("Target in store · 12 items")).toHaveClass("truncate", "max-sm:hidden");
+      expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[8ch]", "truncate");
+    });
+
+    it("lets the account and the bank's text share a line, hiding the text until its cell has room", () => {
+      render(TxRow, props(tx({ account_name: "Checking (Joint)" })));
+      const account = within(row()).getAllByText("Checking (Joint)")[0].parentElement!.parentElement!;
+      expect(account).toHaveClass("min-w-0", "shrink-[4]");
+      const bankText = within(row()).getByTitle("BLUE BOTTLE #123");
+      expect(bankText).toHaveClass("hidden", "min-w-0", "truncate", "@sm/acct:block");
+      expect(bankText.parentElement).toHaveClass("@container/acct", "min-w-0");
+    });
+
+    it("shows only the account's logo on a phone", () => {
+      app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
+      render(TxRow, props(tx({ account_name: "Checking (Joint)" })));
+      const logo = within(row()).getAllByTitle("Checking (Joint)").find((e) => e.classList.contains("md:hidden"))!;
+      expect(within(logo).getByText("Checking (Joint)")).toHaveClass("hidden");
+    });
+  });
+
   describe("details (from lg up)", () => {
     it("opens the details, with the account, its institution and the bank's text, and closes them again", async () => {
       app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };

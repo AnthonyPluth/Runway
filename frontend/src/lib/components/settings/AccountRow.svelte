@@ -185,7 +185,7 @@
     <BankIcon id={a.id} />
     <span class="flex min-w-0 flex-1 flex-col">
       <span class="truncate font-medium">{name.trim() || a.name}</span>
-      <span class="text-xs text-muted-foreground">
+      <span class="text-xs text-muted-foreground [overflow-wrap:anywhere]">
         {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else if bit.link}<button
           type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openSource}>{bit.text}</button>{:else if bit.primary}<button
           type="button" class="font-medium text-primary" onclick={makePrimary}>{bit.text}</button>{:else}<span

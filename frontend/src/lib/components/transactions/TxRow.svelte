@@ -81,39 +81,44 @@
   </div>
 
   <div class="col-start-3 row-start-1 min-w-0 pr-3">
-    <div class="flex min-w-0 items-center gap-1.5">
-      <span class="truncate font-medium" title={name}>{name}</span>
-      {#if t.pending}<Badge variant="secondary" class="shrink-0">pending</Badge>{/if}
-      {#if !review && t.needs_review}<Badge variant="outline" class="shrink-0 border-amber-500/50 text-amber-500">review</Badge>{/if}
+    <!-- The merchant keeps at least 8 characters; what sits beside it gives way first (the order chip and the recurring
+         name shrink to their icons), and on a narrow phone the badges drop to a line of their own. -->
+    <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
+      <span class="min-w-[8ch] truncate font-medium max-sm:max-w-full" title={name}>{name}</span>
+      {#if t.pending}<Badge variant="secondary" class="min-w-0 shrink-[4] justify-start overflow-hidden text-ellipsis">pending</Badge>{/if}
+      {#if !review && t.needs_review}<Badge variant="outline" class="min-w-0 shrink-[4] justify-start overflow-hidden text-ellipsis border-amber-500/50 text-amber-500">review</Badge>{/if}
       {#if picking}
         <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
       {:else}
         <button type="button" onclick={() => (picking = true)}
           title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
-          class={cn("shrink-0 cursor-pointer rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
-            linked ? "bg-primary/15 font-semibold text-primary" : onHover)}>
-          ↻{#if linked}<span class="ml-1 text-xs font-normal max-sm:hidden">{t.recurring_name}</span>{/if}
+          class={cn("inline-flex cursor-pointer items-center overflow-hidden rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
+            linked ? "min-w-7 shrink-[8] bg-primary/15 font-semibold text-primary" : cn("shrink-0", onHover))}>
+          ↻{#if linked}<span class="ml-1 truncate text-xs font-normal max-sm:hidden [@media(max-height:500px)]:hidden">{t.recurring_name}</span>{/if}
         </button>
       {/if}
       {#if t.retail}
-        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} onclick={toggleOrder}
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={orderLabel(t.retail)} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
-          class="inline-flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
-          <ChevronRight class={cn("size-3.5 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
-          {orderLabel(t.retail)}</button>
+          class="inline-flex min-w-7 max-w-full shrink-[8] cursor-pointer items-center gap-0.5 overflow-hidden rounded-md bg-secondary py-0.5 pl-1 pr-2 text-xs font-medium text-secondary-foreground hover:bg-primary/15 hover:text-primary">
+          <ChevronRight class={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
+          <span class="truncate max-sm:hidden [@media(max-height:500px)]:hidden">{orderLabel(t.retail)}</span></button>
       {/if}
     </div>
   </div>
   <!-- Account (and the bank's own text): under the merchant on a tablet, its own column from lg up (where the bank's text
-       is in the details instead). -->
-  <div class="col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    <span class="min-w-0 lg:col-start-5 lg:row-start-1 lg:truncate lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" /></span>
-    {#if detail}<span aria-hidden="true" class="lg:hidden">·</span><span class="truncate lg:hidden" title={detail}>{detail}</span>{/if}
+       is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
+       text only shows once the cell is 24rem wide, so it never lands on the account. -->
+  <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
+    <span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="[@media(max-height:500px)]:hidden" /></span>
+    {#if detail}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! [@media(max-height:500px)]:hidden!">·</span><span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! [@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
   <div class="col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
+    <!-- On a phone the account is only its bank's logo, ahead of the category. -->
+    <span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>
     {#if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <Badge class="bg-primary/15 text-primary">split</Badge>

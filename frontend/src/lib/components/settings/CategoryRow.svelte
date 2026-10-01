@@ -57,7 +57,7 @@
 
 <div class="group flex min-h-11 flex-wrap items-center gap-x-2.5 gap-y-1 border-b py-1 pr-1 last:border-b-0"
   style:padding-left={`${4 + (c.depth || 0) * 22}px`}>
-  <span class="flex min-w-0 flex-1 basis-48 items-center gap-1.5">
+  <span class="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-x-1.5 gap-y-1">
     <LookPicker {c} />
     {#if builtIn}
       <span class={cn("px-3 text-sm",c.parent && "text-muted-foreground")}>{name}</span>

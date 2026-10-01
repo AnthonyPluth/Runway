@@ -49,7 +49,7 @@
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)
     .map((c) => ({ ...c, pct: c.spent / (c.available || c.budget!) })).sort((a, b) => b.pct - a.pct).slice(0, 4)}
   {@const c = chart(pace)}
-  <div class="flex flex-col gap-6">
+  <div class="flex min-w-0 flex-col gap-6">
     <Group title="This month">
       <div class="px-4 pt-3 pb-2">
         <div class="text-[13px] text-muted-foreground">Spent so far in {monthShort(pace.month)}</div>
