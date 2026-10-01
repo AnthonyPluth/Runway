@@ -27,7 +27,7 @@ describe("AiLog", () => {
     vi.mocked(api).mockResolvedValue([]);
     const { container } = render(AiLog);
     await vi.waitFor(() => expect(api).toHaveBeenCalledTimes(2));
-    expect(container).toHaveTextContent("");
+    expect(container.textContent?.trim()).toBe("");
   });
 });
 

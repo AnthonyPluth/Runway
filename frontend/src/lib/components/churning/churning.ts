@@ -316,7 +316,7 @@ export function wishExpectSummary(v: Fields, currencyName: string): string {
   const card = v.kind === "card";
   const got = num(v.bonus) ? (card ? bonusLabel(num(v.bonus), String(v.currency), currencyName) : fmt0(num(v.bonus))) : "";
   return join(card
-    ? [v.annual_fee !== "" && `${fmt0(num(v.annual_fee))} fee`, got && (num(v.bonus_spend) ? `${got} after ${fmt0(num(v.bonus_spend))}${num(v.bonus_months) ? ` in ${num(v.bonus_months)} months` : ""}` : got)]
+    ? [v.annual_fee !== "" && v.annual_fee != null && `${fmt0(num(v.annual_fee))} fee`, got && (num(v.bonus_spend) ? `${got} after ${fmt0(num(v.bonus_spend))}${num(v.bonus_months) ? ` in ${num(v.bonus_months)} months` : ""}` : got)]
     : [got, String(v.requirements).trim() && "Has requirements", v.once_per_lifetime ? "once per lifetime" : num(v.repeat_months) && `again after ${plural(num(v.repeat_months), "month")}`]);
 }
 /** Timing: "Offer ends Dec 1 · wait until Jan 5 · score 740". */

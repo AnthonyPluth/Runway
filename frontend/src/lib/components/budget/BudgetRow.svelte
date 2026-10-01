@@ -129,7 +129,7 @@
       <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:w-48">
         {#if over}<span class="font-semibold text-destructive">▲ {money(c.spent - avail!)} over</span>
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
-        {:else if c.spent > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
+        {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
     </div>
     {#if carried > 0.005}

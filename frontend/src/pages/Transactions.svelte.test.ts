@@ -62,13 +62,13 @@ describe("Transactions page", () => {
     expect(lastList()).toContain("ignored=0");
     expect(await screen.findByText(/4 ignored/)).toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: "Show ignored" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show ignored transactions" }));
     await waitFor(() => expect(lastList()).not.toContain("ignored="));
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
     await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
     await waitFor(() => expect(lastList()).not.toContain("account=a1"));
     expect(lastList()).not.toContain("ignored=");
-    expect(screen.getByRole("button", { name: "Hide" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide ignored transactions" })).toHaveAttribute("aria-expanded", "true");
   });
 
   it("shows no ignored line when nothing is ignored", async () => {
@@ -76,6 +76,15 @@ describe("Transactions page", () => {
     render(Transactions);
     await screen.findByText("Alpha");
     expect(screen.queryByText(/ignored/)).not.toBeInTheDocument();
+  });
+
+  it("still offers to show ignored transactions when they couldn't be counted", async () => {
+    serve(rows(), 2, (path) => (path.includes("category=Ignore") ? Promise.reject(new Error("offline")) : undefined));
+    render(Transactions);
+    await screen.findByText("Alpha");
+    expect(await screen.findByText(/^Ignored ·/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show ignored transactions" }));
+    await waitFor(() => expect(lastList()).not.toContain("ignored="));
   });
 
   it("doesn't offer investment accounts in the account filter", async () => {
