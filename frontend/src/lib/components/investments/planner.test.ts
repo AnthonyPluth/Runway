@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flows, project, RUNS, sale, saleProceeds } from "./planner";
+import { flows, inDollars, project, projectionIn, RUNS, sale, saleProceeds } from "./planner";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
@@ -202,5 +202,45 @@ describe("saleProceeds", () => {
     expect(saleProceeds(shares, Y, Y, 0.03)).toBe(10_000);
     expect(saleProceeds(shares, Y + 1, Y, 0.03)).toBeCloseTo(20_000 / 1.03, 6);
     expect(saleProceeds(shares, Y + 10, Y, 0)).toBe(40_000);   // fully vested from the third year
+  });
+});
+
+describe("inDollars", () => {
+  it("grows a figure by inflation to its own year's dollars", () => {
+    expect(inDollars(100_000, Y + 10, Y, 0.025, "future")).toBeCloseTo(128_008.45, 2);   // 1.025^10 = 1.28008…
+    expect(inDollars(100_000, Y, Y, 0.025, "future")).toBe(100_000);   // this year's are today's
+  });
+
+  it("leaves today's dollars as they are", () => {
+    expect(inDollars(100_000, Y + 10, Y, 0.025, "today")).toBe(100_000);
+  });
+
+  it("turns a sale back into that year's figures: the value grown at its own rate, and the loan's balance then", () => {
+    const s = sale(paying, Y + 2, Y, 0.03);
+    expect(inDollars(s.owed, Y + 2, Y, 0.03, "future")).toBeCloseTo(39_000, 6);
+    expect(inDollars(s.value, Y + 2, Y, 0.03, "future")).toBeCloseTo(300_000 * 1.04 ** 2, 6);
+    expect(inDollars(sale(shares, Y + 2, Y, 0.03).value, Y + 2, Y, 0.03, "future")).toBeCloseTo(40_000, 6);   // at today's share price
+  });
+});
+
+describe("projectionIn", () => {
+  const p = project(plan({ volatility: 0.1 }), 100_000, Y, []);
+
+  it("is the projection itself in today's dollars", () => {
+    expect(projectionIn(p, Y, 0.03, "today")).toBe(p);
+  });
+
+  it("puts each year's figures in that year's dollars, and keeps the odds and ages", () => {
+    const f = projectionIn(p, Y, 0.03, "future");
+    for (const k of [0, 3, 10]) {
+      expect(f.mid[k]).toBeCloseTo(p.mid[k] * 1.03 ** k, 6);
+      expect(f.low[k]).toBeCloseTo(p.low[k] * 1.03 ** k, 6);
+      expect(f.high[k]).toBeCloseTo(p.high[k] * 1.03 ** k, 6);
+    }
+    expect(f.atRetirement).toBeCloseTo(p.atRetirement * 1.03 ** 5, 6);   // everyone has retired from the sixth year
+    expect(f.atEnd).toBeCloseTo(p.atEnd * 1.03 ** 10, 6);
+    expect([f.success, f.retireIndex, f.runsOutAge, f.lowRunsOutAge]).toEqual([p.success, p.retireIndex, p.runsOutAge, p.lowRunsOutAge]);
+    expect(f.years).toEqual(p.years);
+    expect(f.ages).toEqual(p.ages);
   });
 });
