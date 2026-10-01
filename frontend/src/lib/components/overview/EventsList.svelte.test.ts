@@ -76,6 +76,12 @@ describe("EventsList", () => {
   });
 
   describe("badges", () => {
+    it("says when a payment that came in parts is only the rest", () => {
+      show([ev({ name: "Paycheck", amount: 2849.6, paid_so_far: 2150.4, late_from: "2026-09-30" })]);
+      expect(screen.getByText("rest")).toHaveAttribute("title", "$2,150.40 has come in already; this is the rest");
+      expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-09-30 and the rest hasn't shown up yet");
+    });
+
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
       expect(screen.getByText("estimate")).toBeInTheDocument();
@@ -139,6 +145,15 @@ describe("EventsList", () => {
       await userEvent.type(input, "1400{Enter}");
       expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: -1400 } });
       expect(toast.success).toHaveBeenCalledWith("Updated for this date only");
+    });
+
+    it("on the rest of one paid in parts, saves the whole occurrence: what you typed plus what came", async () => {
+      show([ev({ amount: 2849.6, paid_so_far: 2150.4 })]);
+      await userEvent.click(screen.getByRole("button", { name: "+$2,849.60" }));
+      const input = screen.getByRole("spinbutton");
+      await userEvent.clear(input);
+      await userEvent.type(input, "3000{Enter}");
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: 5150.4 } });
     });
 
     it("keeps an income positive", async () => {

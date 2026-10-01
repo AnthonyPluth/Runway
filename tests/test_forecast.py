@@ -296,12 +296,15 @@ class ForecastTests(LedgerCase):
         self.tx("chk", "2026-09-05", -14.99, "AMAZON PRIME", "Subscriptions")    # the Prime fee: its recurring item's
         self.tx("chk", "2026-09-06", -35.0, "AMAZON MKTPLACE", "Shopping")       # orders: everyday spending
         self.tx("chk", "2026-09-08", -85.0, "AMAZON.COM", "Shopping")
-        prime = {"name": "Prime", "match": "amazon", "amount": -14.99, "amount_mode": "fixed"}
+        prime = {"name": "Prime", "match": "amazon", "amount": -14.99, "amount_mode": "fixed", "amount_min": 10, "amount_max": 20}
         rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [prime])
         self.assertAlmostEqual(rate, (300 + 35 + 85) / 30, places=2)
-        # an item without an amount can't tell them apart: everything with its text is left out, as before
-        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "amount": 0}])
+        # an item without an amount range can't tell them apart: everything with its text is left out, as matching does
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "amount_min": None, "amount_max": None}])
         self.assertAlmostEqual(rate, 300 / 30, places=2)
+        # any of its texts counts
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "match": "prime video\namazon"}])
+        self.assertAlmostEqual(rate, (300 + 35 + 85) / 30, places=2)
 
     def test_suggest_recurring(self):
         for d in ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01"]:
@@ -754,11 +757,16 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(events[0]["amount"], -100.0)
 
     def test_a_later_payment_doesnt_count_for_an_earlier_occurrence(self):
-        item = {"frequency": "monthly"}
-        history = [{"posted": "2026-10-01"}]
-        self.assertTrue(recurring.already_happened(item, date(2026, 10, 4), history, date(2026, 10, 5)))    # early
-        self.assertTrue(recurring.already_happened(item, date(2026, 9, 27), history, date(2026, 10, 5)))    # a little late
-        self.assertFalse(recurring.already_happened(item, date(2026, 9, 1), history, date(2026, 10, 5)))    # October's
+        today = date(2026, 10, 5)
+        history = [{"posted": "2026-10-01", "amount": -50.0}]
+        for due in (date(2026, 10, 5), date(2026, 9, 28)):   # paid early, or a little late
+            item = {"frequency": "monthly", "anchor_date": due.isoformat(), "amount": -50.0}
+            with self.subTest(due=due):
+                self.assertIsNone(recurring.still_due(item, due, recurring.paid_by_occurrence(item, history), today, -50.0))
+        item = {"frequency": "monthly", "anchor_date": "2026-09-01", "amount": -50.0}
+        paid = recurring.paid_by_occurrence(item, history)
+        self.assertIsNone(recurring.still_due(item, date(2026, 10, 1), paid, today, -50.0))         # October's...
+        self.assertNotIn(date(2026, 9, 1), paid)                                                     # ...not September's
 
 
 class PaymentModeTests(LedgerCase):

@@ -31,7 +31,7 @@
     return { accounts };
   }
   // A new item starts today, monthly, for the primary account.
-  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "" });
+  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "" });
   let primary = "";
   let adding = $state(false);
   let blank: RecurringValues = $state(fresh());
@@ -65,7 +65,7 @@
   }
   // "Add" on a suggestion fills the form with it, so you can adjust the name, amount or schedule first.
   async function useSuggestion(s: Suggestion) {
-    Object.assign(blank, { name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match });
+    Object.assign(blank, { name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "" });
     submitted = false; formKey++; adding = true;
     await focusForm();
   }

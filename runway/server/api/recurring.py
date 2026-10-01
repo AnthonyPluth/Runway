@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, delete, func, insert, not_, or_, select, update
 
 from ... import db, forecast, recurring
 from ...models import Account, Override, Recurring, Transaction
@@ -12,7 +12,8 @@ from ..common import ApiError
 
 FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates"}
 # The columns _recurring_values() gives, in its order.
-COLUMNS = ("name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date", "active", "amount_mode", "dates")
+COLUMNS = ("name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date", "active", "amount_mode", "dates",
+           "amount_min", "amount_max")
 
 
 def api_recurring_missed(conn, _q, _b):
@@ -36,8 +37,10 @@ def api_recurring(conn, _q, _b):
             select(func.count()).select_from(Transaction).where(Transaction.recurring_id == it["id"])).scalar()
         it["last_matched"] = hist[0] if hist else None
         it["expected_amount"] = recurring.expected_amount(it, hist)
+        it["suggested_amount"] = recurring.stale_amount(it, hist, today)   # its last payments all came to something else
+        paid = recurring.paid_by_occurrence(it, hist)
         nxt = [d for d in forecast.occurrences(it, today, today + timedelta(days=400))
-               if not recurring.already_happened(it, d, hist, today)]
+               if recurring.still_due(it, d, paid, today, it["expected_amount"]) is not None]
         it["next_date"] = nxt[0].isoformat() if nxt else None
     missed = recurring.missed(conn, today)
     for it in items:
@@ -59,7 +62,13 @@ def _recurring_values(conn, body):
     end = body.get("end_date") or None
     if end:
         end = date.fromisoformat(end).isoformat()
-    match = (body.get("match") or "").strip().lower() or None
+    match = recurring.clean_texts(body.get("match"))
+    try:
+        lo, hi = (None if body.get(k) in (None, "") else round(abs(db.number(body[k])), 2) for k in ("amount_min", "amount_max"))
+    except (TypeError, ValueError):
+        raise ApiError("The amount range must be numbers") from None
+    if lo is not None and hi is not None and lo > hi:
+        raise ApiError("The smallest amount is bigger than the largest")
     mode = body.get("amount_mode") or "fixed"
     if mode not in recurring.AMOUNT_MODES:
         raise ApiError("Unknown amount mode")
@@ -71,14 +80,27 @@ def _recurring_values(conn, body):
             raise ApiError("List the dates like 04-15, 10-15 (or Apr 15, Oct 15)" if freq == "dates"
                            else "List the days of the month like 1, 15") from None
         dates = ",".join(f"{d}" if freq == "semimonthly" else f"{m:02d}-{d:02d}" for m, d in spec)
-    return (name, acct, amount, freq, anchor, match, end, int(body.get("active", 1)), mode, dates)
+    return (name, acct, amount, freq, anchor, match, end, int(body.get("active", 1)), mode, dates, lo, hi)
 
 
 def api_recurring_add(conn, _q, body):
     vals = _recurring_values(conn, body)
-    cur = conn.execute(insert(Recurring).values(dict(zip(COLUMNS, vals, strict=True))))
+    cur = conn.execute(insert(Recurring).values(dict(zip(COLUMNS, vals, strict=True), amount_since=date.today().isoformat())))
     linked = recurring.auto_match(conn, [cur.lastrowid])
     return {"ok": True, "id": cur.lastrowid, "linked": linked}
+
+
+def _range_for_new_amount(old, vals: dict) -> dict:
+    """When the amount changes (say "use $2,100" on a $5,000 paycheck) and its range, left as it was, no longer holds the
+    new amount, the range moves with it, keeping its proportions; otherwise the new payments would never match."""
+    lo, hi, was = vals["amount_min"], vals["amount_max"], abs(old["amount"] or 0)
+    if (lo, hi) != (old["amount_min"], old["amount_max"]) or (lo is None and hi is None) or was < 0.005:
+        return {}
+    now = abs(vals["amount"])
+    if (lo is None or lo <= now) and (hi is None or now <= hi):
+        return {}
+    scale = now / was
+    return {"amount_min": None if lo is None else round(lo * scale, 2), "amount_max": None if hi is None else round(hi * scale, 2)}
 
 
 def api_recurring_update(conn, _q, body, rid):
@@ -86,24 +108,44 @@ def api_recurring_update(conn, _q, body, rid):
     old = conn.execute(select(Recurring).where(Recurring.id == rid)).fetchone()
     if not old:
         raise ApiError("Recurring item not found", 404)
-    vals = _recurring_values(conn, body)
-    conn.execute(update(Recurring).where(Recurring.id == rid).values(dict(zip(COLUMNS, vals, strict=True))))
+    vals = dict(zip(COLUMNS, _recurring_values(conn, body), strict=True))
+    typed = (vals["amount_min"], vals["amount_max"])   # the range as you left it, before any move with the amount
+    if abs(vals["amount"] - old["amount"]) >= 0.005:
+        vals["amount_since"] = date.today().isoformat()   # the "use $X" hint looks at payments from here on
+        vals.update(_range_for_new_amount(old, vals))
+    conn.execute(update(Recurring).where(Recurring.id == rid).values(vals))
     new = dict(conn.execute(select(Recurring).where(Recurring.id == rid)).fetchone())
-    if recurring.match_text(dict(old)) != recurring.match_text(new) or old["account_id"] != new["account_id"]:
-        # Merchant text changed: drop links that no longer fit, then match again.
-        m = recurring.match_text(new)
-        t = Transaction
-        conn.execute(update(t).where(t.recurring_id == rid, or_(
-            t.account_id != new["account_id"],
-            and_(db.instr(func.lower(func.coalesce(t.payee, "")), m) == 0,
-                 db.instr(func.lower(func.coalesce(t.description, "")), m) == 0))).values(recurring_id=None))
+    # Links that no longer fit go before matching again, for what changed: ones on another account when the item moved
+    # account, unless you made them (a part of a payday that came from savings, say); ones
+    # without any of the texts now, unless you made them; ones outside a range you changed that were made automatically
+    # (not ones from before Runway kept how: they may be yours). A range that only moved with a new amount leaves the
+    # links made at the old one: they were those paydays' payments. Changing anything else leaves them all.
+    t, old = Transaction, dict(old)
+    gone = []
+    if old["account_id"] != new["account_id"]:   # moved to another account: what matched on the old one goes, not yours
+        gone.append(and_(func.coalesce(t.recurring_linked_by, "") != "you", t.account_id != new["account_id"]))
+    if recurring.match_texts(old) != recurring.match_texts(new):
+        gone.append(and_(func.coalesce(t.recurring_linked_by, "") != "you", not_(recurring.has_text(recurring.match_texts(new)))))
+    if (old["amount_min"], old["amount_max"]) != typed:
+        gone.append(and_(t.recurring_linked_by == "auto", not_(recurring.amount_fits(new))))
+    if gone:
+        conn.execute(update(t).where(t.recurring_id == rid, or_(*gone)).values(recurring_id=None, recurring_linked_by=None))
     linked = recurring.auto_match(conn, [rid])
+    return {"ok": True, "linked": linked, "amount_min": new["amount_min"], "amount_max": new["amount_max"]}   # it may have moved
+
+
+def api_recurring_add_text(conn, _q, body, rid):
+    """"Also match this from now on": add another merchant text to an item."""
+    try:
+        linked = recurring.add_text(conn, int(rid), body.get("text") or "")
+    except ValueError as e:
+        raise ApiError(str(e)) from e
     return {"ok": True, "linked": linked}
 
 
 def api_recurring_delete(conn, _q, _b, rid):
     rid = int(rid)
-    conn.execute(update(Transaction).where(Transaction.recurring_id == rid).values(recurring_id=None))
+    conn.execute(update(Transaction).where(Transaction.recurring_id == rid).values(recurring_id=None, recurring_linked_by=None))
     conn.execute(delete(Override).where(Override.key.like(f"rec:{rid}:%")))
     conn.execute(delete(Recurring).where(Recurring.id == rid))
     return {"ok": True}
@@ -117,10 +159,11 @@ def api_tx_recurring(conn, _q, body, tx_id):
             rid = recurring.create_from_transaction(conn, tx_id, freq)
             return {"ok": True, "recurring_id": rid}
         rid = body.get("recurring_id")
-        recurring.link(conn, tx_id, int(rid) if rid else None)
+        text = recurring.link(conn, tx_id, int(rid) if rid else None)
     except ValueError as e:
         raise ApiError(str(e)) from e
-    return {"ok": True}
+    # None of the item's texts is on it: offer its own, so the next one links by itself.
+    return {"ok": True, **({"suggest_text": text} if text else {})}
 
 
 def api_recurring_suggestions(conn, _q, _b):

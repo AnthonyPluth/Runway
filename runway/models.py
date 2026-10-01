@@ -74,6 +74,7 @@ class Transaction(Base):
     recurring_id: Mapped[int | None]
     is_split: Mapped[int | None]
     merchant_id: Mapped[str | None]
+    recurring_linked_by: Mapped[str | None]
 
     account: Mapped[Account] = _rel("Account", "foreign(Transaction.account_id) == Account.id")
     splits: Mapped[list[TxSplit]] = _rel("TxSplit", "foreign(TxSplit.tx_id) == Transaction.id",
@@ -240,6 +241,9 @@ class Recurring(Base):
     active: Mapped[int | None]
     amount_mode: Mapped[str | None]
     dates: Mapped[str | None]
+    amount_min: Mapped[float | None]
+    amount_max: Mapped[float | None]
+    amount_since: Mapped[str | None]
 
 
 class RecurringDismissed(Base):

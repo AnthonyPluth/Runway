@@ -8,13 +8,18 @@
   import { autosave, markSaved } from "$lib/autosave";
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
+  import { fmt0 } from "$lib/format";
   import { FREQ_OPTIONS, MODE_OPTIONS, needsDates, signedAmount, type Errors, type RecurringValues } from "./types";
 
   // A recurring item's fields. With `save`, each one saves itself when you change it (the classic onEdit);
-  // without it (the Add form), they just hold what you type. `errors` marks the fields to fix.
+  // without it (the Add form), they just hold what you type. `errors` marks the fields to fix. `suggested` is what the
+  // last few payments came to when they all missed a fixed amount (the API's suggested_amount), worked out against the
+  // saved amount `suggestedFor`: offered as the new amount while the field still has that one.
   type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-  let { v = $bindable(), accounts, save, errors = {} }: { v: RecurringValues; accounts: Account[]; save?: (f: Field) => Promise<void>; errors?: Errors } = $props();
+  let { v = $bindable(), accounts, save, errors = {}, suggested = null, suggestedFor = null }: {
+    v: RecurringValues; accounts: Account[]; save?: (f: Field) => Promise<void>; errors?: Errors; suggested?: number | null; suggestedFor?: number | null;
+  } = $props();
 
   const uid = $props.id();
   const saveIf = (f: Field, fn?: (f: Field) => Promise<void>) => (fn ? autosave(f, fn) : undefined);
@@ -36,14 +41,30 @@
     if (!save || !amountInput || v.amount === null) return;
     try { await save(amountInput); markSaved(amountInput); } catch (err) { toast.error((err as Error).message); }
   }
+  // The suggestion is about the saved amount: it goes once the field has another (you took it, or typed your own) or
+  // the amount comes from the payments, and comes back if a save of it fails and the old amount returns.
+  const suggest = $derived.by(() => {
+    if (!suggested || suggestedFor === null || v.amount_mode !== "fixed") return null;
+    const n = Math.round(Math.abs(suggested)), now = Math.abs(Number(v.amount));
+    return Math.abs(now - Math.abs(suggestedFor)) < 0.005 && Math.abs(now - n) > 2 ? n : null;
+  });
+  async function useSuggested(n: number) {
+    const was = mag;
+    mag = String(n); push();
+    if (!save || !amountInput) return;
+    await tick();   // the input shows the new amount before it saves
+    try { await save(amountInput); markSaved(amountInput); }
+    catch (err) { mag = was; push(); toast.error((err as Error).message); }
+  }
 
   const hints = {
     anchor_date: "Any date it falls on works.", account_id: "The account the money moves through.",
     amount_mode: "Use the recent payments when the amount changes, like a utility bill.",
-    match: "Text that appears on the bank statement, e.g. COMED. Leave blank to use the name.",
+    match: "Text on the bank statement, e.g. COMED. One per line to match any of them; blank uses the name.",
+    amount_max: "Leave blank to match any amount with the text.",
   };
   let moreOpen = $state(untrack(() => !!save));   // the Add form keeps these tucked away; an existing item shows them all
-  $effect(() => { if (errors.account_id) moreOpen = true; });
+  $effect(() => { if (errors.account_id || errors.amount_max) moreOpen = true; });
   const err = (name: string) => errors[name as keyof Errors];
   const ids = (name: string, hint = "") => [err(name) && `${uid}-${name}-err`, hint && `${uid}-${name}-hint`].filter(Boolean).join(" ") || undefined;
   const bad = (name: string) => (err(name) ? "true" : undefined);
@@ -103,8 +124,15 @@
   </div>
 </div>
 
+{#if suggest}
+  <p class="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+    <span>The last payments were about {fmt0(suggest)}, not {fmt0(Math.abs(Number(v.amount)))}.</span>
+    <button type="button" class="font-medium text-primary underline-offset-4 hover:underline" onclick={() => useSuggested(suggest)}>Use {fmt0(suggest)}</button>
+  </p>
+{/if}
+
 <details class="mt-4" bind:open={moreOpen}>
-  <summary class="w-fit cursor-pointer text-sm text-muted-foreground select-none hover:text-foreground">More options <span class="text-xs">(account, amount to forecast, merchant text)</span></summary>
+  <summary class="w-fit cursor-pointer text-sm text-muted-foreground select-none hover:text-foreground">More options <span class="text-xs">(account, amount to forecast, what to match)</span></summary>
   <div class="mt-3 grid gap-x-3 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Account
@@ -124,9 +152,25 @@
     </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Merchant text
-        <input class={fieldCls} name="match" bind:value={v.match} placeholder="e.g. comed" aria-describedby={ids("match", hints.match)} use:saveIf={save} />
+        <textarea class={fieldCls + " h-auto min-h-9 resize-y py-1.5"} name="match" rows={Math.max(1, v.match.split("\n").length)} bind:value={v.match}
+          placeholder="e.g. comed" aria-describedby={ids("match", hints.match)} use:saveIf={save}></textarea>
       </label>
       {@render note("match", hints.match)}
+    </div>
+    <div class="flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground">
+      <span id="{uid}-range">Only amounts between</span>
+      <div class="flex items-center gap-2" role="group" aria-labelledby="{uid}-range">
+        <label class="relative min-w-0 flex-1"><span class="sr-only">Smallest amount</span>
+          <input class={fieldCls + " tabular-nums"} name="amount_min" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
+            bind:value={v.amount_min} aria-describedby={ids("amount_max", hints.amount_max)} use:saveIf={save} />
+        </label>
+        <span>and</span>
+        <label class="relative min-w-0 flex-1"><span class="sr-only">Largest amount</span>
+          <input class={fieldCls + " tabular-nums"} name="amount_max" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
+            bind:value={v.amount_max} aria-invalid={bad("amount_max")} aria-describedby={ids("amount_max", hints.amount_max)} use:saveIf={save} />
+        </label>
+      </div>
+      {@render note("amount_max", hints.amount_max)}
     </div>
   </div>
 </details>

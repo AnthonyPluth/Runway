@@ -68,6 +68,7 @@ transactions = Table(
     Column('recurring_id', Integer, doc='NULL = not matched, 0 = never match'),
     Column('is_split', Integer, server_default=text('0'), doc='split across categories: the parts are in tx_splits, and they, not this row, count'),
     Column('merchant_id', Text, doc='the merchant as Plaid named it (merchants.id)'),
+    Column('recurring_linked_by', Text, doc="how it got its recurring_id: 'you' | 'auto' (NULL = not known, from before this was kept)"),
 )
 
 merchants = Table(
@@ -227,11 +228,14 @@ recurring = Table(
     Column('amount', Float, nullable=False, doc='negative = money out'),
     Column('frequency', Text, nullable=False, doc='weekly | biweekly | semimonthly | monthly | quarterly | semiannual | yearly | dates'),
     Column('anchor_date', Text, nullable=False, doc='a known occurrence (YYYY-MM-DD)'),
-    Column('match', Text, doc='payee text, so history of this item is not double counted'),
+    Column('match', Text, doc='payee texts, one per line: a transaction with any of them matches'),
     Column('end_date', Text),
     Column('active', Integer, server_default=text('1')),
     Column('amount_mode', Text, server_default=text("'fixed'"), doc='fixed | last | avg3'),
     Column('dates', Text, doc='semimonthly days or yearly dates'),
+    Column('amount_min', Float, doc='only payments of at least this much match on their own (dollars, positive)'),
+    Column('amount_max', Float, doc='only payments of at most this much'),
+    Column('amount_since', Text, doc='when the amount was last set (YYYY-MM-DD); the "use $X" hint looks at payments since'),
     sqlite_autoincrement=True,
 )
 

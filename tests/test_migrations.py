@@ -11,7 +11,7 @@ from sqlalchemy import func, insert, select
 
 from runway import db, schema
 from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
-                           ChurnWish, DeletedAccount, LoanTerms, ManualStatement, Rule, Setting)
+                           ChurnWish, DeletedAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
 
 
 def drift(path):
@@ -253,6 +253,28 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:   # and back down
             command.downgrade(db.alembic_config(c), "0029")
             self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
+
+    def test_0031_writes_down_the_amount_range_existing_recurring_items_matched(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0030")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("amount_min", {col["name"] for col in sa.inspect(c).get_columns("recurring")})
+            c.exec_driver_sql("INSERT INTO recurring(id, name, account_id, amount, frequency, anchor_date, match, amount_mode) VALUES "
+                              "(1, 'Prime', 'cc', -14.99, 'monthly', '2026-01-01', 'amazon', 'fixed'), "
+                              "(2, 'Electric', 'chk', -120, 'monthly', '2026-01-01', 'comed', 'avg3'), "
+                              "(3, 'Paycheck', 'chk', 5000, 'semimonthly', '2026-01-01', 'acme', NULL), "
+                              "(4, 'Whatever', 'chk', 0, 'monthly', '2026-01-01', NULL, 'last')")
+            c.exec_driver_sql("INSERT INTO transactions(id, account_id, posted, amount, recurring_id) "
+                              "VALUES ('cc|1', 'cc', '2026-01-01', -14.99, 1)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual([tuple(r) for r in conn.execute(select(Recurring.amount_min, Recurring.amount_max, Recurring.amount_since)
+                                                              .order_by(Recurring.id))],
+                             [(10.49, 19.49, None), (48.0, 192.0, None), (3500.0, 6500.0, None), (None, None, None)])
+            self.assertEqual(tuple(conn.execute(select(Transaction.recurring_id, Transaction.recurring_linked_by)).fetchone()), (1, None))
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

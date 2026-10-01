@@ -424,13 +424,15 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
             prior = conn.execute(select(Transaction.payee, Transaction.category, Transaction.category_source, Transaction.confidence,
-                                        Transaction.needs_review, Transaction.recurring_id).where(Transaction.id == old)).fetchone()
+                                        Transaction.needs_review, Transaction.recurring_id, Transaction.recurring_linked_by)
+                                 .where(Transaction.id == old)).fetchone()
             conn.execute(delete(Transaction).where(Transaction.id == old))
         row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee, "pending": pending}
         if prior and prior["category"]:
             conn.execute(insert(Transaction).values(
                 **row | {"payee": prior["payee"] or payee}, category=prior["category"], category_source=prior["category_source"],
-                confidence=prior["confidence"], needs_review=prior["needs_review"], recurring_id=prior["recurring_id"]))
+                confidence=prior["confidence"], needs_review=prior["needs_review"], recurring_id=prior["recurring_id"],
+                recurring_linked_by=prior["recurring_linked_by"]))
         else:
             conn.execute(insert(Transaction).values(**row))
             new_ids.append(key)

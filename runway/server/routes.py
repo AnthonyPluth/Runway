@@ -45,7 +45,7 @@ from .api.networth import (
 from .api.notifications import api_push, api_push_prefs, api_push_subscribe, api_push_test, api_push_unsubscribe
 from .api.recurring import (
     api_recurring, api_recurring_add, api_recurring_delete, api_recurring_dismiss, api_recurring_missed,
-    api_recurring_suggestion_dismiss, api_recurring_suggestions, api_recurring_update, api_tx_recurring
+    api_recurring_add_text, api_recurring_suggestion_dismiss, api_recurring_suggestions, api_recurring_update, api_tx_recurring
 )
 from .api.reports import (
     api_cashflow, api_month_pace, api_report_breakdown, api_report_income, api_report_merchant, api_report_merchants,
@@ -120,6 +120,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/recurring/suggestions/dismiss", api_recurring_suggestion_dismiss),
     ("GET", "/api/recurring/missed", api_recurring_missed),
     ("POST", "/api/recurring/dismiss", api_recurring_dismiss),
+    ("POST", "/api/recurring/{id}/match", api_recurring_add_text),
     ("POST", "/api/recurring/{id}", api_recurring_update),
     ("DELETE", "/api/recurring/{id}", api_recurring_delete),
     ("POST", "/api/connect", api_connect),
