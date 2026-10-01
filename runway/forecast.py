@@ -28,6 +28,7 @@ from typing import Literal
 from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, db, plaidbank, simplefin, splits
 from . import categories as catmod
@@ -437,9 +438,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     cash = [dict(a, balance=a["balance"] + pending[a["id"]]) for a in cash]
     by_id.update({a["id"]: a for a in cash})
     cards = [a for a in accounts if a["kind"] == "credit"]
-    # Link anything that's come in since the last sync's matching (a payment that posted today), so it isn't
-    # forecast again as still to come. One UPDATE per item, over unlinked transactions.
-    rec.auto_match(conn)
     recurring = db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))
     T = Transaction
     most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
@@ -612,12 +610,19 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
              f"{'isn’t' if one else 'aren’t'} in the forecast{named}; add {'it as a recurring item' if one else 'them as recurring items'}.",
              "#budget/recurring")
 
-    for new, old in old_keys.items():
-        # A card payment's edit saved while its key was the due date moves to its key now, so it still applies (and
-        # putting it back, which removes the event's key, removes it).
-        if old in overrides and new not in overrides:
-            conn.execute(update(Override).where(Override.key == old).values(key=new))
-            overrides[new] = overrides.pop(old)
+    # A card payment's edit saved while its key was the due date still applies, and moves to its key now (once), so
+    # putting it back, which removes the event's key, removes it. Building the forecast otherwise writes nothing: a
+    # page load mustn't wait on a sync's write lock. If the move can't get the lock, it's tried again next time.
+    moving = {new: old for new, old in old_keys.items() if old in overrides and new not in overrides}
+    for new, old in moving.items():
+        overrides[new] = overrides[old]
+    if moving:
+        try:
+            with conn.sa.begin_nested():
+                for new, old in moving.items():
+                    conn.execute(update(Override).where(Override.key == old).values(key=new))
+        except OperationalError:
+            pass
     for e in events:
         if e.get("key") in overrides:
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
