@@ -23,7 +23,7 @@ PLAID_REFRESH_AT = (6, 30)   # before that sync, Plaid is told to fetch from the
                              # sync gets the banks as of now and not as of Plaid's own last visit. Only before
                              # PLAID_SYNC_HOUR: a refresh after the day's sync would be a call for nothing.
 VISIT_SYNC_MINUTES = 60      # opening Runway refreshes investments (prices) if they're older than this
-CRON_SLUG = "runway-bank-sync"   # the bank sync's Sentry Cron Monitor (SENTRY_CRONS; see run_sync)
+CRON_SLUG = "runway-bank-sync"   # the bank sync's Sentry Cron Monitor (see run_sync)
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
@@ -49,7 +49,7 @@ def run_sync() -> dict:
                 has_plaid = plaid_banks(conn)
                 if not access_url and not has_plaid:
                     raise ApiError("Connect SimpleFIN or a Plaid bank in Settings first.")
-                # Every bank sync that starts checks in with Sentry's Cron Monitor (SENTRY_CRONS), yours from the Sync
+                # Every bank sync that starts checks in with Sentry's Cron Monitor, yours from the Sync
                 # button too: the monitor is about the data being fresh each day. One that can't start (another is
                 # running, nothing is connected) doesn't.
                 # With automatic syncing off (--no-sync), there's no daily schedule to promise: the check-in goes to a

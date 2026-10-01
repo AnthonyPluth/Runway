@@ -161,6 +161,37 @@ def networth_items(conn, today: date | None = None) -> list[dict]:
     return out
 
 
+def _expired(g: dict, on: date) -> bool:
+    try:
+        return bool(g.get("expires_on")) and date.fromisoformat(str(g["expires_on"])[:10]) <= on
+    except ValueError:
+        return False
+
+
+def value_by_year(c: dict, today: date, max_years: int = 100) -> list[float]:
+    """A company's vested value 0, 1, 2… years from today at today's share price, as its grants keep vesting, until
+    it's all vested (the last entry holds from then on). `c` is a company from overview(), with its grants. Options
+    past their expiration date are worth only the shares exercised from them: the rest can't be exercised any more."""
+    out: list[float] = []
+    for k in range(max_years + 1):
+        on = _add_months(today, 12 * k)
+        total, done = 0.0, True
+        for g in c["grants"]:
+            vested = g["vested"]   # today's (Carta's, if it reported it)
+            if k and not g.get("problem"):   # one whose schedule can't be worked out stays at today's
+                vested = min(g["quantity"] or 0.0, max(vested, vested_on(g, on)))
+            if g["kind"] in OPTIONS and _expired(g, on):
+                total += (c["share_price"] or 0.0) * min(g.get("exercised") or 0.0, vested)
+                continue   # nothing more to come from it
+            expiring = g["kind"] in OPTIONS and bool(g.get("expires_on"))   # its value still drops when it expires
+            done = done and not expiring and (bool(g.get("problem")) or vested >= (g["quantity"] or 0.0))
+            total += value(g, c["share_price"], vested)["vested_value"]
+        out.append(round(total, 2))
+        if done:
+            break
+    return out
+
+
 # ------------------------------------------------------------------------------------------------ editing
 
 _v = validate.Validator(EquityError, drop="", out_of_range="The {label} can't be negative")

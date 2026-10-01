@@ -33,11 +33,28 @@ function rng(seed: number) {
 
 const quantile = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
-/** What selling an asset in `year` brings in, in today's dollars: its value grown by its own yearly change less
- *  inflation, minus what's owed on it today (a conservative guess: the loan will usually be smaller by then). */
-export function saleProceeds(a: PlanAsset, year: number, thisYear: number, inflation: number): number {
+// The entry for `k` years from today in a by-year list that stops once it stops changing.
+const atYear = (list: number[] | undefined, k: number) => (list?.length ? list[Math.min(Math.max(0, k), list.length - 1)] : undefined);
+
+/** Whether a loan's balance is projected (paid down on its terms) rather than held at today's. */
+export const loanProjected = (a: PlanAsset) => !!a.loan && a.loan.note == null && a.loan.payment != null;
+
+/** Selling an asset in `year`, in today's dollars: what it's worth then (its value grown by its own yearly change less
+ *  inflation; for equity, what will have vested by then) and what's still owed on it. A loan with known terms is paid
+ *  down to its balance that year, in today's dollars like the rest; one without stays at today's balance (a
+ *  conservative guess). */
+export function sale(a: PlanAsset, year: number, thisYear: number, inflation: number): { value: number; owed: number } {
+  const k = year - thisYear;
   const real = (1 + a.yearly_change) / (1 + inflation) - 1;
-  return Math.max(0, a.value * Math.pow(1 + real, year - thisYear) - a.owed);
+  const value = (atYear(a.value_by_year, k) ?? a.value) * Math.pow(1 + real, k);
+  const owed = loanProjected(a) ? (atYear(a.owed_by_year, k) ?? a.owed) / Math.pow(1 + inflation, Math.max(0, k)) : a.owed;
+  return { value, owed };
+}
+
+/** What selling an asset in `year` brings in, in today's dollars: what it's worth then less what's still owed. */
+export function saleProceeds(a: PlanAsset, year: number, thisYear: number, inflation: number): number {
+  const { value, owed } = sale(a, year, thisYear, inflation);
+  return Math.max(0, value - owed);
 }
 
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */
