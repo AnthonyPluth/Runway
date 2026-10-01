@@ -152,13 +152,30 @@ def falls_off(card: dict) -> date:
     return add_months(date.fromisoformat(card["opened_on"]), 24)
 
 
+def anniversaries(conn) -> dict[int, str]:
+    """{card id: the day its annual fee's anniversary counts from}: the day it was opened, or for a product change, the
+    day the account was (the first card of its changed_from chain), since a product change keeps the account and the
+    issuer keeps charging on its anniversary."""
+    rows = {r["id"]: (r["opened_on"], r["changed_from"])
+            for r in conn.execute(select(ChurnCard.id, ChurnCard.opened_on, ChurnCard.changed_from))}
+    out: dict[int, str] = {}
+    for cid in rows:
+        cur, seen = cid, {cid}
+        while rows[cur][1] in rows and rows[cur][1] not in seen:
+            cur = rows[cur][1]
+            seen.add(cur)
+        out[cid] = rows[cur][0]
+    return out
+
+
 def next_fee(card: dict, today: date) -> date | None:
-    """The next annual fee: on the anniversary of opening, from today on. None for a card without a fee, or one that's
-    closed. (The fee posts in its anniversary month. The card's `fee_month` column, once settable, is no longer read or
-    written: it stays in the table so old rows load, but the open date decides.)"""
+    """The next annual fee: on the account's anniversary (`_anniversary`, from `anniversaries`; else the day the card
+    was opened), from today on. None for a card without a fee, or one that's closed. (The fee posts in its anniversary
+    month. The card's `fee_month` column, once settable, is no longer read or written: it stays in the table so old
+    rows load, but the anniversary decides.)"""
     if not card.get("annual_fee") or (card.get("status") or "open") != "open":
         return None
-    opened = date.fromisoformat(card["opened_on"])
+    opened = date.fromisoformat(card.get("_anniversary") or card["opened_on"])
     for year in range(max(opened.year, today.year - 1), today.year + 2):
         d = _on(year, opened.month, opened.day)
         if d > opened and d >= today:
@@ -353,6 +370,9 @@ def best_cards(cards: list[dict], rates: dict[int, dict[str, float]], vals: dict
 def load(conn) -> dict:
     """The cards, rates (normal, and portal-only), tasks, points values and balances, as stored."""
     cards = db.rows(conn.execute(select(ChurnCard).order_by(ChurnCard.owner, ChurnCard.opened_on, ChurnCard.id)))
+    anniversary = anniversaries(conn)
+    for c in cards:
+        c["_anniversary"] = anniversary.get(c["id"])
     rates: dict[int, dict[str, float]] = {}
     portal: dict[int, dict[str, float]] = {}
     for r in conn.execute(select(ChurnRate.card_id, ChurnRate.category, ChurnRate.multiplier, ChurnRate.portal_only)

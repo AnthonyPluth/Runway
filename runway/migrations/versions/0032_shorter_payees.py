@@ -60,7 +60,7 @@ def shorten(name: str | None) -> str:
 
 
 def from_bank(payee: str | None, description: str | None) -> bool:
-    desc = (description or "").lower()
+    desc = re.sub(r"[^a-z0-9 ]", "", (description or "").lower())   # plain like the payee's words ("joe's" -> "joes")
     return bool(desc) and all(_plain(w) in desc for w in (payee or "").split())
 
 

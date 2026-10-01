@@ -464,8 +464,9 @@ def fee_recurring(recurring: list[dict], account_id: str, day: date) -> bool:
 def annual_fees(conn, card: dict, today: date, end: date, closing_day: int | None, recurring: list[dict]) -> list[dict]:
     """A churning card's (churn_cards row) annual fees from today through `end`: one, or two with a horizon over a year.
 
-    The fee posts in the card's anniversary month, the month it was opened (the fee month always follows the opened
-    date, whatever fee_month says), from the first anniversary on. The day: the statement closing day in that month when
+    The fee posts in the account's anniversary month, the month the card was opened (for a product change, the month
+    the original card was: `_anniversary`, churning.anniversaries; whatever fee_month says), from the first
+    anniversary on. The day: the statement closing day in that month when
     the card's account has a statement (`closing_day`; issuers charge it on the anniversary month's statement, so it's
     on that one, paid the month after, which is also the earlier of the two statements it could land on), else the day
     of the month it was opened (a shorter month's last day: Feb 29 -> Feb 28). An anniversary earlier this month whose
@@ -478,7 +479,7 @@ def annual_fees(conn, card: dict, today: date, end: date, closing_day: int | Non
     fee = round(card.get("annual_fee") or 0.0, 2)
     if fee < 0.005 or (card.get("status") or "open") != "open":
         return []
-    opened = _d(card["opened_on"])
+    opened = _d(card.get("_anniversary") or card["opened_on"])   # a product change keeps the account's anniversary
     acct = card.get("account_id")
     plan_by = _d(card["plan_date"]) if card.get("plan_date") else None
     out = []
@@ -543,8 +544,10 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     # payment (paid_on), never on its own. One whose card's payments aren't in the forecast (no statement, not paid from
     # a forecast account, past the horizon) is only listed.
     fee_cards: dict[str | None, list[dict]] = defaultdict(list)
+    anniversary = churning.anniversaries(conn)
     for c in db.rows(conn.execute(select(ChurnCard).where(func.coalesce(ChurnCard.status, "open") == "open",
                                                           ChurnCard.annual_fee > 0).order_by(ChurnCard.id))):
+        c["_anniversary"] = anniversary.get(c["id"])
         linked = by_id.get(c.get("account_id") or "")
         fee_cards[linked["id"] if linked and linked["kind"] == "credit" else None].append(c)
     fee_category = FEE_CATEGORY if conn.execute(select(Category.name).where(Category.name == FEE_CATEGORY)).fetchone() else None

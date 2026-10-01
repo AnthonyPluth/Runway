@@ -57,7 +57,7 @@ def shorten(name: str | None) -> str:
 def from_bank(payee: str | None, description: str | None) -> bool:
     """Whether a payee is (a tidied piece of) the bank's own text, rather than a name you gave it: nothing records a
     rename, but a name you typed rarely has every word in the bank's description."""
-    desc = (description or "").lower()
+    desc = re.sub(r"[^a-z0-9 ]", "", (description or "").lower())   # plain like the payee's words ("joe's" -> "joes")
     return bool(desc) and all(_plain(w) in desc for w in (payee or "").split())
 
 

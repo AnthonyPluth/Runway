@@ -57,6 +57,10 @@ class PayeeTests(unittest.TestCase):
         self.assertTrue(payees.from_bank("Target C Cash", "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)"))
         self.assertFalse(payees.from_bank("Groceries Run", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
         self.assertFalse(payees.from_bank("Target", None))
+        # punctuation is plain on both sides
+        self.assertTrue(payees.from_bank("Trader Joe's", "TRADER JOE'S #123"))
+        self.assertTrue(payees.from_bank("At&t", "AT&T BILL PAYMENT"))
+        self.assertTrue(payees.from_bank("Amazon.com", "AMAZON.COM*2K3AB1"))
 
 
 class CategorizeTests(LedgerCase):

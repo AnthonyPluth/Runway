@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import OperationalError
 
-from runway import db, forecast, plaidapi, recurring
+from runway import churning, db, forecast, plaidapi, recurring
 from runway import settings_keys as sk
 from runway.models import Account, Budget, CardStatement, ChurnCard, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
@@ -1053,6 +1053,15 @@ class AnnualFeeTests(LedgerCase):
         self.assertEqual(fc["total"][i - 1], before["total"][i - 1])
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual(card["annual_fees"], [{"date": "2026-10-10", "amount": -95.0, "category": "Fees & Interest"}])
+
+    def test_a_product_change_keeps_the_accounts_anniversary(self):
+        # Opened in October 2023, changed in July to a card with a fee: the fee is still October's, not July's.
+        self.churn(opened="2023-10-20", product="Reserve", annual_fee=0.0, status="product_changed")
+        self.churn(opened="2026-07-01", product="Preferred", account_id="cc", changed_from=1)
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual([(f["name"], f["date"]) for f in fc["fees"]], [("Preferred annual fee", "2026-10-10")])
+        card = next(c for c in churning.load(self.conn)["cards"] if c["product"] == "Preferred")
+        self.assertEqual(churning.next_fee(card, TODAY), date(2026, 10, 20))
 
     def test_fee_after_the_close_is_on_the_next_statement(self):
         # Paid in full each month, the fee lands on the statement after the one in progress when the closing day comes

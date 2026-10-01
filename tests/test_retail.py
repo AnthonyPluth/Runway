@@ -331,6 +331,16 @@ class TransactionCategoryTests(Base):
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItemMemory)).scalar(), 0)
         self.assertIn("items", r["was"][0])
 
+    def test_a_refunds_category_leaves_the_orders_items_alone(self):
+        oid = retail.order_key("amazon", ORDER)
+        before_items, before_parts = self.items(), self.parts("t1")
+        self.tx("back", "2024-09-20", 20.0, "AMZN Mktp US Refund", "Shopping", "rule")
+        retail._save_charge(self.c, f"amazon|{ORDER}|r", oid, "2024-09-20", 20.0, None)
+        self.c.execute(update(RetailCharge).where(RetailCharge.id == f"amazon|{ORDER}|r").values(tx_id="back"))
+        api_tx.api_tx_category(self.c, None, {"category": "Refunds"}, "back")
+        self.assertEqual(self.row("back")["category"], "Refunds")
+        self.assertEqual((self.items(), self.parts("t1")), (before_items, before_parts))
+
     def test_undo_puts_back_the_split_and_each_items_own_category(self):
         # awkward values: an item picked by hand, one with no category at all, a fractional confidence
         ids = sorted(self.c.execute(select(RetailItem.id)).scalars())

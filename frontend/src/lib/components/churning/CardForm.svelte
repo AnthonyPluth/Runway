@@ -231,7 +231,8 @@
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card</label>
   </div>
 
-  {#if Number(v.annual_fee) > 0 && feeMonth}
+  <!-- A product change keeps the account's anniversary, which isn't this card's opened date. -->
+  {#if Number(v.annual_fee) > 0 && feeMonth && !c?.changed_from}
     <p class="mt-1 text-xs text-muted-foreground" data-testid="fee-month">The fee posts each {feeMonth}, the month the card was opened.</p>
   {/if}
   {#if openedGuess}

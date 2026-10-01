@@ -939,14 +939,17 @@ def set_item_category(conn, item_id: int, category: str, remember: bool = True) 
     return {"orders": len(orders), "resplit": redone}
 
 
-def _orders_of(conn, tx_ids: list[str]) -> dict[str, list[str]]:
-    """{tx id: the orders its charges pay for}. A charge pairs with one transaction and a transaction with one charge
-    (`match` and `link` see to both), so this is one order each; an order paid in several charges shows up under
-    each of their transactions."""
+def _orders_of(conn, tx_ids: list[str], refunds: bool = True) -> dict[str, list[str]]:
+    """{tx id: the orders its charges pay for (or, with `refunds`, its refunds came from)}. A charge pairs with one
+    transaction and a transaction with one charge (`match` and `link` see to both), so this is one order each; an
+    order paid in several charges shows up under each of their transactions."""
     c = RetailCharge
     out: dict[str, list[str]] = {}
     for i in range(0, len(tx_ids), 500):
-        for r in conn.execute(select(c.tx_id, c.order_id).where(c.tx_id.in_(tx_ids[i:i + 500])).order_by(c.id)):
+        q = select(c.tx_id, c.order_id).where(c.tx_id.in_(tx_ids[i:i + 500]))
+        if not refunds:
+            q = q.where(c.amount <= 0)
+        for r in conn.execute(q.order_by(c.id)):
             out.setdefault(r["tx_id"], []).append(r["order_id"])
     return out
 
@@ -1016,8 +1019,9 @@ def set_transaction_category(conn, tx_ids: list[str], category: str) -> int:
     The items count as picked by hand, but nothing is remembered for the same item in other orders (that's what
     picking an item's own category is for). An order paid in several charges has the same category on all its items,
     so its other transactions follow it unless they're yours (a category or split you made yourself stays); `apply`
-    decides that, and a transaction only ever pairs with one charge, so there's no one-transaction, many-orders case."""
-    orders = sorted({o for v in _orders_of(conn, list(dict.fromkeys(tx_ids))).values() for o in v})
+    decides that, and a transaction only ever pairs with one charge, so there's no one-transaction, many-orders case.
+    A refund's category says nothing about what was bought: its order's items stay as they are."""
+    orders = sorted({o for v in _orders_of(conn, list(dict.fromkeys(tx_ids)), refunds=False).values() for o in v})
     if not orders:
         return 0
     i, c = RetailItem, RetailCharge
