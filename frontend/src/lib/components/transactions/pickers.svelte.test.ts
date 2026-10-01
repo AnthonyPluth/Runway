@@ -179,6 +179,22 @@ describe("LogoPicker", () => {
     expect(api).toHaveBeenLastCalledWith("/api/merchants/logo", { method: "POST", body: { name: "Target" } });
   });
 
+  it("chooses an account's logo, with Logo.dev's matches for its institution", async () => {
+    const chase = options({ candidates: [{ name: "Chase", domain: "chase.com" }] });
+    vi.mocked(api).mockResolvedValueOnce(chase).mockResolvedValueOnce({}).mockResolvedValueOnce(chase).mockResolvedValue({});
+    const onchanged = vi.fn();
+    render(LogoPicker, { name: "CSR", account: "a 1", children: logo, onchanged });
+    await userEvent.click(screen.getByRole("button", { name: "Logo for CSR" }));
+    expect(api).toHaveBeenCalledWith("/api/accounts/a%201/logo-options");
+    await userEvent.click(await screen.findByRole("button", { name: /chase\.com/ }));
+    expect(api).toHaveBeenLastCalledWith("/api/accounts/a%201/logo", { method: "POST", body: { website: "chase.com" } });
+    expect(toast.success).toHaveBeenCalledWith("Using chase.com's logo for CSR");
+    expect(onchanged).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Logo for CSR" }));
+    await userEvent.click(await screen.findByRole("button", { name: "No logo" }));
+    expect(api).toHaveBeenLastCalledWith("/api/accounts/a%201/logo", { method: "POST", body: { hidden: true } });
+  });
+
   it("says how to pick by website when there's no Logo.dev key", async () => {
     vi.mocked(api).mockResolvedValue(options({ configured: false, candidates: [] }));
     setup();

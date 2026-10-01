@@ -2,7 +2,8 @@
 institution a name is (PATTERNS, for telling whether two accounts are the same one), and which big merchant a transaction
 is from (its website, for its logo from Logo.dev: runway/merchants.py).
 
-Accounts whose logo Runway doesn't have (no Logo.dev key, or not fetched yet) get a letter badge instead.
+Accounts whose logo Runway doesn't have (no Logo.dev key, or not fetched yet), or that you chose no logo for, get a
+letter badge instead.
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import re
 
 from sqlalchemy import select
 
-from .models import Account, PlaidAccount, PlaidItem
+from .models import Account, PlaidAccount, PlaidItem, User
 
 # (pattern, institution): checked in order against the lowercased institution and account names. Not for logos: which
 # institution a name is (plaidbank uses it to tell whether two accounts are the same one).
@@ -53,35 +54,89 @@ def brand(*names: str | None) -> str | None:
     return None
 
 
-def account_brands(conn) -> dict[str, dict]:
-    """{account_id: {"src": image address or None, "initial": "C", "institution": "Chase"}} for every account.
+# Each institution's website, for its logo: Logo.dev has a bank's logo by website for sure, where a lookup by name
+# ("Chase Bank Sara", "Citibank Online") may find nothing, or not clearly that bank.
+SITES = {
+    "chase": "chase.com", "capital-one": "capitalone.com", "citibank": "citi.com", "american-express": "americanexpress.com",
+    "discover-card": "discover.com", "bank-of-america": "bankofamerica.com", "wells-fargo": "wellsfargo.com",
+    "u-s-bank": "usbank.com", "m-t-bank": "mtb.com", "navy-federal-credit-union": "navyfederal.org", "usaa": "usaa.com",
+    "fidelity": "fidelity.com", "vanguard": "vanguard.com", "charles-schwab": "schwab.com", "e-trade": "etrade.com",
+    "interactive-brokers": "interactivebrokers.com", "robinhood": "robinhood.com", "sofi": "sofi.com",
+    "paypal": "paypal.com", "apple": "apple.com", "amazon": "amazon.com", "target": "target.com",
+}
+NO_LOGO = "none"   # accounts.logo: you chose a letter instead of a logo
 
-    The logo is Logo.dev's, by the institution's name (Settings → Services → Logo.dev), fetched by a sync and served by
-    Runway like a merchant's: nothing is bundled, so a new bank needs nothing added to the app. `src` is None (a letter
-    badge) without a Logo.dev key, or until the logo has been fetched. The institution's name is the connection's (Plaid)
-    or the bank's own (SimpleFIN's org); the connected institutions' names are noted too, for Settings → Bank connections."""
+
+def institution(name: str | None, owners) -> str | None:
+    """The institution's name without the owner's that a bank connection adds to it ("Chase Bank Sara" -> "Chase Bank")."""
+    words = (name or "").split()
+    drop = {o.lower() for o in owners if o}
+    while len(words) > 1 and words[-1].lower() in drop:
+        words.pop()
+    return " ".join(words) or None
+
+
+def connection_logos(conn) -> dict[str, str | None]:
+    """{institution name: its logo's address, or None for a letter} for every bank connection (Plaid's), for Settings →
+    Bank connections: by website for the banks Runway knows, else by name, like an account's."""
+    from . import merchants   # imports this module too
+    names = sorted({r["institution_name"] for r in conn.execute(
+        select(PlaidItem.institution_name).where(PlaidItem.institution_name.is_not(None)))})
+    out: dict[str, str | None] = dict.fromkeys(names)
+    if not merchants.configured(conn):
+        return out
+    sites = {n: SITES[b] for n in names if (b := brand(n)) in SITES}
+    by_name = {merchants.key(n): n for n in names if n not in sites and len(re.findall(r"[A-Za-z]", n)) >= 3}
+    have_sites = merchants.site_logos(conn, sites.values())
+    have_names = merchants.brand_logos(conn, list(by_name.items()))
+    for n in names:
+        s = sites.get(n)
+        out[n] = merchants.site_path(s) if s in have_sites else merchants.logo_path(merchants.key(n)) if not s and merchants.key(n) in have_names else None
+    return out
+
+
+def account_brands(conn) -> dict[str, dict]:
+    """{account_id: {"src": image address or None, "initial": "C", "institution": "Chase", "auto": address or None}}
+    for every account.
+
+    The logo is the one you chose for the account (a website's, or none: Settings → Accounts), else its institution's,
+    from Logo.dev: by website for the banks Runway knows (SITES), else by the institution's name. It's fetched by a sync
+    (or when you choose it) and served by Runway like a merchant's. `src` is None (a letter badge) without a Logo.dev
+    key, or until the logo has been fetched; `auto` is the institution's, which a choice replaces. The institution's
+    name is the connection's (Plaid) or the bank's own (SimpleFIN's org, without the owner's name)."""
     from . import merchants   # imports this module too
     out: dict[str, dict] = {}
     names: dict[str, str] = {}   # institution key -> name
+    sites: dict[str, str] = {}   # account id -> its institution's website
     rows = conn.execute(
-        select(Account.id, Account.name, Account.display_name, Account.org, PlaidItem.institution_name)
+        select(Account.id, Account.name, Account.display_name, Account.org, Account.logo, PlaidItem.institution_name)
         .outerjoin(PlaidAccount, PlaidAccount.plaid_account_id == Account.plaid_account_id)
         .outerjoin(PlaidItem, PlaidItem.item_id == PlaidAccount.item_id)).fetchall()
+    owners = {r["owner"] for r in conn.execute(select(Account.owner).distinct().where(Account.owner.is_not(None)))}
+    owners |= {r["first_name"] for r in conn.execute(select(User.first_name).where(User.first_name.is_not(None)))}
+    insts: dict[str, str | None] = {}
     for r in rows:
-        inst = r["institution_name"] or r["org"]
+        inst = insts[r["id"]] = institution(r["institution_name"] or r["org"], owners)
         label = inst or r["display_name"] or r["name"] or "?"
-        out[r["id"]] = {"src": None, "institution": inst, "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
-        if inst and len(re.findall(r"[A-Za-z]", inst)) >= 3:
+        out[r["id"]] = {"src": None, "auto": None, "institution": inst,
+                        "initial": (re.sub(r"[^A-Za-z0-9]", "", label)[:1] or "?").upper()}
+        # the account's own name only says which bank it is when the bank doesn't ("Venture X" is Capital One)
+        s = SITES.get((brand(inst) if inst else brand(r["display_name"], r["name"])) or "")
+        if s:
+            sites[r["id"]] = s
+        elif inst and len(re.findall(r"[A-Za-z]", inst)) >= 3:
             names[merchants.key(inst)] = inst
-    for r in conn.execute(select(PlaidItem.institution_name).where(PlaidItem.institution_name.is_not(None))):
-        if len(re.findall(r"[A-Za-z]", r["institution_name"])) >= 3:
-            names[merchants.key(r["institution_name"])] = r["institution_name"]
-    if names and merchants.configured(conn):
-        have = merchants.brand_logos(conn, list(names.items()))   # notes the ones never asked about, for the next fetch
-        for r in rows:
-            k = merchants.key(r["institution_name"] or r["org"])
-            if k in have:
-                out[r["id"]]["src"] = merchants.logo_path(k)
+    if not merchants.configured(conn):
+        return out
+    chosen = {r["id"]: r["logo"] for r in rows if r["logo"] and r["logo"] != NO_LOGO}
+    have_sites = merchants.site_logos(conn, [*sites.values(), *chosen.values()])   # notes the ones never asked about
+    have_names = merchants.brand_logos(conn, list(names.items()))                  # ... for the next fetch
+    for r in rows:
+        o = out[r["id"]]
+        s, k = sites.get(r["id"]), merchants.key(insts[r["id"]])
+        o["auto"] = merchants.site_path(s) if s in have_sites else merchants.logo_path(k) if not s and k in have_names else None
+        pick = chosen.get(r["id"])
+        o["src"] = None if r["logo"] == NO_LOGO else (merchants.site_path(pick) if pick in have_sites else None) if pick else o["auto"]
     return out
 
 

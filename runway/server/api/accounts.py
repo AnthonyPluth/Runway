@@ -1,9 +1,9 @@
-"""Accounts: the list, and the changes you make to one (its name, type, owner, provider)."""
+"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo)."""
 from __future__ import annotations
 
 from sqlalchemy import func, select, update
 
-from ... import db, plaidbank
+from ... import brands, db, merchants, plaidbank
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, PlaidAccount, PlaidItem
 from ..common import ApiError
@@ -56,4 +56,36 @@ def api_account_update(conn, _q, body, acct_id):
             plaidbank.set_provider(conn, acct_id, body["provider"])
         except ValueError as e:
             raise ApiError(str(e)) from e
+    return {"ok": True}
+
+
+def api_account_logo_options(conn, _q, _b, acct_id):
+    """For choosing an account's logo: what you chose, and the brands Logo.dev's Brand Search finds for its institution."""
+    row = conn.execute(select(Account.logo).where(Account.id == acct_id)).fetchone()
+    if not row:
+        raise ApiError("Account not found", 404)
+    name = brands.account_brands(conn).get(acct_id, {}).get("institution") or ""
+    choice = None if not row["logo"] else {"website": None, "hidden": True} if row["logo"] == brands.NO_LOGO else {
+        "website": row["logo"], "hidden": False}
+    out: dict = {"choice": choice, "searchable": merchants.searchable(conn), "configured": merchants.configured(conn),
+                 "candidates": [], "error": None}
+    if name and out["searchable"]:
+        found = merchants.search(conn, name)
+        if found is None:
+            out["error"] = merchants._why
+        else:
+            out["candidates"] = found[:6]
+    return out
+
+
+def api_account_logo(conn, _q, body, acct_id):
+    """Choose an account's logo: a website's (fetched from Logo.dev now), none (its letter), or (neither) its institution's."""
+    if not conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone():
+        raise ApiError("Account not found", 404)
+    website = (body.get("website") or "").strip()
+    try:
+        logo = merchants.fetch_site(conn, website) if website else brands.NO_LOGO if body.get("hidden") else None
+    except ValueError as e:
+        raise ApiError(str(e)) from e
+    conn.execute(update(Account).where(Account.id == acct_id).values(logo=logo))
     return {"ok": True}

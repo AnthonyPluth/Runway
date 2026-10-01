@@ -97,6 +97,11 @@ def logo_path(k: str) -> str:
     return f"/api/merchants/{urllib.parse.quote(BRAND + k, safe='')}/logo"
 
 
+def site_path(s: str) -> str:
+    """Where Runway serves the Logo.dev logo it fetched for a website."""
+    return f"/api/merchants/{urllib.parse.quote(SITE + s, safe='')}/logo"
+
+
 def note(conn, t: dict) -> str | None:
     """Remember the merchant of a Plaid transaction. Returns its id (for transactions.merchant_id), or None."""
     cp: dict[str, Any] = next((c for c in t.get("counterparties") or [] if (c.get("type") or "merchant") == "merchant"), {}) or {}
@@ -494,26 +499,31 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
     if not website and not hidden:
         conn.execute(delete(MerchantLogo).where(MerchantLogo.key == k))
         return
-    s = None
-    if website:
-        s = site(website)
-        if not s:
-            raise ValueError("That doesn't look like a website (e.g. target.com)")
-        if not configured(conn):
-            raise ValueError("Add a Logo.dev publishable key in Settings → Services first")
-        mid = SITE + s
-        row = conn.execute(select(Merchant.logo).where(Merchant.id == mid)).fetchone()
-        if not row or not row["logo"]:
-            params = _params(db.get_setting(conn, sk.LOGODEV_TOKEN))
-            found = _download(f"{LOGO_DEV}{s}?{params}", opener)
-            if not found:
-                raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))
-            data, ctype = found
-            now = datetime.now().isoformat(timespec="seconds")
-            db.upsert(conn, Merchant, {"id": mid, "logo_url": LOGO_DEV + s, "logo": base64.b64encode(data).decode(),
-                                       "logo_type": ctype, "logo_checked": now}, key=["id"],
-                      update=["logo", "logo_type", "logo_checked"])
+    s = fetch_site(conn, website, opener) if website else None
     db.upsert(conn, MerchantLogo, {"key": k, "website": s, "hidden": int(bool(hidden))}, key=["key"])
+
+
+def fetch_site(conn, website: str, opener=None) -> str:
+    """A website's logo from Logo.dev, fetched now unless Runway has it, for a logo you chose. Returns the website as
+    Runway keeps it ("https://www.Target.com" -> "target.com"); ValueError says why there's no logo."""
+    s = site(website)
+    if not s:
+        raise ValueError("That doesn't look like a website (e.g. target.com)")
+    if not configured(conn):
+        raise ValueError("Add a Logo.dev publishable key in Settings → Services first")
+    mid = SITE + s
+    row = conn.execute(select(Merchant.logo).where(Merchant.id == mid)).fetchone()
+    if not row or not row["logo"]:
+        params = _params(db.get_setting(conn, sk.LOGODEV_TOKEN))
+        found = _download(f"{LOGO_DEV}{s}?{params}", opener)
+        if not found:
+            raise ValueError(f"Logo.dev has no logo for {s}" + (f" ({_why})" if _why else ""))
+        data, ctype = found
+        now = datetime.now().isoformat(timespec="seconds")
+        db.upsert(conn, Merchant, {"id": mid, "logo_url": LOGO_DEV + s, "logo": base64.b64encode(data).decode(),
+                                   "logo_type": ctype, "logo_checked": now}, key=["id"],
+                  update=["logo", "logo_type", "logo_checked"])
+    return s
 
 
 def chosen_for(conn, txs: list[dict]) -> dict[str, str | None]:

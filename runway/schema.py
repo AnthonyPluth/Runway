@@ -46,6 +46,7 @@ accounts = Table(
     Column('provider', Text, server_default=text("'simplefin'"), doc='where balances and transactions come from: simplefin | plaid'),
     Column('plaid_account_id', Text, doc='the same account in a Plaid connection, if any'),
     Column('provider_since', Text, doc='when the provider last changed (YYYY-MM-DD); overlapping history is matched up'),
+    Column('logo', Text, doc='the logo you chose: a website ("citi.com"), "none" for a letter, or NULL for its institution\'s'),
 )
 
 transactions = Table(
