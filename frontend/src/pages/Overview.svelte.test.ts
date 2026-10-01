@@ -152,5 +152,15 @@ describe("Overview on a phone", () => {
     expect(await screen.findByText(/Visa: choose which account pays it/)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Visa: choose which account/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#budget/recurring");
+    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
+  });
+
+  it("doesn't send you to a computer for an alert no setting puts right (a payment that's late)", async () => {
+    viewport.phone = true;
+    serve(() => fc({ warning_links: [{ text: "Visa: $40.00 was due Sep 3 and no payment has shown up yet.", href: "#setup/accounts", setting: false }] }));
+    render(Overview);
+    expect(await screen.findByText(/no payment has shown up yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /no payment has shown up/ })).not.toBeInTheDocument();
   });
 });

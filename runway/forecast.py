@@ -450,13 +450,13 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
 
     events: list[dict] = []
-    warnings: list[dict] = []   # {"text", "href"}: what's wrong, and the page where it's put right
+    warnings: list[dict] = []   # {"text", "href", "setting"}: what's wrong, the page about it, and whether a setting there puts it right
     card_status: list[dict] = []
     old_keys: dict[str, str] = {}   # card payment key -> the key it had before keys followed the closing date
     unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
 
-    def warn(text: str, href: str) -> None:
-        warnings.append({"text": text, "href": href})
+    def warn(text: str, href: str, setting: bool = True) -> None:
+        warnings.append({"text": text, "href": href, "setting": setting})
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
@@ -530,7 +530,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            "amount": -planned, "kind": "card", "estimated": False,
                            "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["payment"] > 0.005:
-            warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
+            warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts",
+                 setting=False)   # paying the card puts it right, not a setting
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle in
         # progress, what's been charged already plus the average's share of the days left). Without enough history,
         # the recent daily rate. Either way, plus the recurring charges on the card the estimate doesn't already have.
@@ -582,7 +583,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
             warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
-                 "payment isn't in the forecast.", "#setup/connections")
+                 "payment isn't in the forecast.", "#setup/connections", setting=False)   # the bank's to send
         if carries and info["apr"] is None:
             warn(f"{label}: the forecast carries part of its statements to the next one, but doesn’t count the interest "
                  "on it: enter the card’s APR in Settings.", "#setup/accounts")
@@ -606,7 +607,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     if no_statement:
         one = len(no_statement) == 1
         warn(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
-             "in the forecast. It usually arrives with the next sync.", "#setup/connections")
+             "in the forecast. It usually arrives with the next sync.", "#setup/connections", setting=False)
     # Everyday spending leaves out big one-off payments; if they come back (rent paid by hand, tuition), they need to
     # be recurring items to be in the forecast.
     big = large_one_offs(conn, [a["id"] for a in cash], today, recurring)
