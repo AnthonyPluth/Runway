@@ -75,6 +75,7 @@ RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: ke
 
 # Churning
 CHURN_FOUND_DISMISSED = "churn_found_dismissed"   # JSON: ids of credit card accounts marked "not a churning card" (found on your accounts)
+CHURN_AI_WEB = "churn_ai_web"   # "1"/"0": "Fill in the rest with AI" searches the web (runway/churn_found.py); on unless switched off
 
 # Notifications
 NOTIFY_PREFS = "notify_prefs"             # JSON: without sign-in, and where a person who hasn't chosen yet starts from

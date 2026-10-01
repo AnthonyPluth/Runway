@@ -36,6 +36,7 @@ def api_state(conn, _q, _b):
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
         "primary_account": db.get_setting(conn, sk.PRIMARY_ACCOUNT),
         "auto_ai_on_sync": (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1",
+        "churn_ai_web": (db.get_setting(conn, sk.CHURN_AI_WEB, "1") or "1") == "1",   # card suggestions search the web
         "realie_configured": realie.configured(conn),
         "finnhub_configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY)),
         "logodev_configured": merchants.configured(conn),
@@ -142,6 +143,8 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, sk.PRIMARY_ACCOUNT, acct)
     if "auto_ai_on_sync" in body:
         db.set_setting(conn, sk.AUTO_AI_ON_SYNC, "1" if body.get("auto_ai_on_sync") else "0")
+    if "churn_ai_web" in body:
+        db.set_setting(conn, sk.CHURN_AI_WEB, "1" if body.get("churn_ai_web") else "0")
     if "horizon_days" in body:
         db.set_setting(conn, sk.HORIZON_DAYS, str(max(14, min(int(body["horizon_days"]), 365))))
     if "setup_dismissed" in body:

@@ -195,8 +195,54 @@ def parse_ai_reply(text: str, categories: list[str], allow_new: bool = False) ->
     return out
 
 
+# Web search through OpenRouter (Churning's card suggestions only: categorizing never searches). "tool" is OpenRouter's
+# web search server tool: the model searches as it needs to, which takes a model that can call tools. "plugin" is the
+# older web plugin, which searches once before the model answers and works with any model (OpenRouter has deprecated
+# it in favour of the tool; kept for models without tools). Both are billed per result found, on top of the model's
+# tokens (about $4 per 1,000 results with OpenRouter's own search engine): at most WEB_RESULTS a search and
+# WEB_TOTAL_RESULTS a request.
+WEB_RESULTS = 5
+WEB_TOTAL_RESULTS = 10
+
+
+class ToolsUnsupported(RuntimeError):
+    """OpenRouter has no endpoint for this model that can call tools, so no web search server tool."""
+
+
+def _web_request(web: str | None) -> dict:
+    if web == "tool":
+        return {"tools": [{"type": "openrouter:web_search",
+                           "parameters": {"max_results": WEB_RESULTS, "max_total_results": WEB_TOTAL_RESULTS}}]}
+    if web == "plugin":
+        return {"plugins": [{"id": "web", "max_results": WEB_RESULTS}]}
+    return {}
+
+
+def _no_tools(code: int, said: str) -> bool:
+    """OpenRouter's answer when a request has tools and none of the model's providers can call them ("No endpoints
+    found that support tool use")."""
+    return code in (400, 404) and "tool" in said.lower()
+
+
+def _citations(message: dict) -> list[str]:
+    """The addresses a reply cites: OpenRouter's url_citation annotations on its message."""
+    out: list[str] = []
+    for a in message.get("annotations") or []:
+        cite = a.get("url_citation") if isinstance(a, dict) and a.get("type") == "url_citation" else None
+        url = cite.get("url") if isinstance(cite, dict) else None
+        if isinstance(url, str) and url not in out:
+            out.append(url)
+    return out
+
+
 def call_llm(api_key: str, model: str, prompt: str) -> str:
-    """Ask a model through OpenRouter's chat completions API."""
+    """Ask a model through OpenRouter's chat completions API (no web search)."""
+    return chat(api_key, model, prompt)[0]
+
+
+def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple[str, list[str]]:
+    """Ask a model through OpenRouter's chat completions API: its reply, and the web pages it cites. `web` is None (no
+    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model."""
     if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
         raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
     body = json.dumps({
@@ -204,6 +250,7 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
         "max_tokens": 4096,
         "temperature": 0,
         "messages": [{"role": "user", "content": prompt}],
+        **_web_request(web),
     }).encode()
     req = urllib.request.Request(
         OPENROUTER_URL,
@@ -224,20 +271,25 @@ def call_llm(api_key: str, model: str, prompt: str) -> str:
     except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
         pass
     # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
-    with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0) as span:
+    with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0, **({"web_search": web} if web else {})) as span:
         try:
             with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
-            raise RuntimeError(f"OpenRouter HTTP {e.code}: {detail}") from e
+            raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
+                f"OpenRouter HTTP {e.code}: {detail}") from e
         if data.get("error"):
-            raise RuntimeError(f"OpenRouter: {data['error']}")
-        content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            err = data["error"]
+            code = err.get("code") if isinstance(err, dict) else None
+            raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
+                f"OpenRouter: {err}")
+        message = (data.get("choices") or [{}])[0].get("message") or {}
+        content = message.get("content") or ""
         if isinstance(content, list):  # some providers return content parts
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
         monitoring.ai_result(span, data, model, content)
-    return content
+    return content, _citations(message)
 
 
 # ---------------------------------------------------------------------------------------------------------

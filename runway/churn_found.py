@@ -6,17 +6,21 @@ page pre-fills the add-card form with. Nothing is saved until you save the form.
 no list of card products, benefits or bank-to-card mappings, only the issuers Churning already knows (ISSUERS) and
 rules for cleaning a name up. A draft you don't want can be dismissed (and brought back).
 
-`suggest` asks an AI model (the OpenRouter key from Settings, through categorize.call_llm) for what it knows of a card
-from its bank and name alone: family, currency, earning rates, benefits. It sends nothing else (no account, owner,
-balance or transaction), and every part of its reply is checked against what Runway has: a currency or category that
-doesn't exist is dropped, and numbers are clamped.
+`suggest` asks an AI model (the OpenRouter key from Settings, through categorize.chat) about a card from its bank and
+name alone: family, currency, earning rates, annual fee, sign-up bonus, benefits. Card offers change often, so unless
+it's switched off in Settings the request searches the web (OpenRouter's web search, billed per result) and the reply
+lists the pages it came from, for you to check. It sends nothing else (no account, owner, balance or transaction), and
+every part of its reply is checked against what Runway has: a currency or category that doesn't exist is dropped,
+numbers are clamped, and a source has to be a web address.
 """
 from __future__ import annotations
 
 import json
 import re
 import time
+from datetime import date
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import func, select
 
@@ -188,25 +192,51 @@ MAX_RATE = 20.0               # points per dollar
 MAX_FEE = 10000.0
 MAX_CREDIT = 5000.0           # dollars a period
 MAX_BENEFITS = 15
+MAX_BONUS = 1_000_000.0       # points (or dollars, for cash back)
+MAX_BONUS_SPEND = 100_000.0
+MAX_SOURCES = 8
 
 
-def build_prompt(issuer: str, product: str, currencies: dict[str, str], categories: list[str]) -> str:
+def build_prompt(issuer: str, product: str, currencies: dict[str, str], categories: list[str], web: bool = True,
+                 today: date | None = None) -> str:
+    """What the model is asked: the bank's name and the card's name, and what Runway can take back (its currencies,
+    categories and kinds of benefit). Nothing about you or your accounts."""
     bank = churning.ISSUERS[issuer]["name"] if issuer in churning.ISSUERS and issuer != "other" else "(unknown bank)"
+    find = ([
+        "Search the web for this card's current terms. Prefer the bank's own page for the card; use other sites (such as "
+        "news or review sites) only for what the bank's page doesn't say. Ignore what is about a different card (another "
+        "version, the business or personal sibling) and offers that have ended.",
+    ] if web else [
+        "Answer from what you know. Card offers change often: leave out anything you can't be sure is still current.",
+    ])
     return "\n".join([
-        "You know US credit cards. Describe this card from its bank and name alone.",
+        f"Today is {(today or date.today()).isoformat()}. Find the current public terms of this US credit card.",
         f"Bank: {bank}",
         f"Card: {json.dumps(product, ensure_ascii=False)}",
         "",
-        "Reply with only one JSON object, with these keys. Leave out a key (or use null) when you are not sure: never guess.",
+        *find,
+        "",
+        "Reply with only one JSON object, with these keys. Leave a key out when your sources don't say it: never guess, and "
+        "never fill something in from a similar card.",
         '- "family": the cards whose sign-up bonuses the bank counts as one, e.g. "Sapphire" for Sapphire Preferred and Reserve.',
         '- "currency": what it earns, one of these keys: ' + "; ".join(f"{k} = {n}" for k, n in currencies.items()),
         '- "base_rate": points (or percent cash back) per dollar on everything else.',
-        '- "rates": [{"category": <one of the categories below>, "multiplier": <points per dollar>, "portal_only": <true if only booked through the bank\'s travel portal>}]',
-        "  Categories: " + ", ".join(categories),
-        '- "annual_fee": dollars a year.',
+        '- "rates": [{"category": <one of the categories below>, "multiplier": <points per dollar>, '
+        '"portal_only": <true if earned only when booked through the bank\'s travel portal>}]',
+        "  Map each of the card's bonus categories to the closest of these, and leave out one that matches none: "
+        + ", ".join(categories),
+        '- "annual_fee": the regular annual fee in dollars (not a first-year waiver; 0 if it has none).',
+        '- "bonus": the current public sign-up bonus for new cardmembers: {"amount": <points or miles, or dollars for a '
+        'cash back card>, "spend": <dollars to spend>, "months": <months after opening to spend it in>}.',
         '- "portal_name": the bank\'s travel portal, if rates are earned through it.',
-        '- "benefits": [{"name": <short name>, "kind": "credit" | "access" | "status" | "other", "amount": <dollars each period, for a credit>, '
-        '"period": "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time"}]',
+        '- "benefits": [{"name": <short name>, "kind": "credit" | "access" | "status" | "other", '
+        '"amount": <for a credit: dollars each period, e.g. 10 for "$10 a month">, '
+        '"period": "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time", '
+        '"basis": "calendar" (resets on Jan 1 or the 1st of the month) | "anniversary" (resets on the cardmember year), '
+        '"guests": <for lounge access: guests who get in free>}]',
+        "  Credits (travel, dining, airline fee, Global Entry...), lounge access (each network its own benefit), elite "
+        "status, free night certificates, anniversary points. Not insurance or purchase protections.",
+        *(['- "sources": [the addresses (URLs) of the pages you took this from]'] if web else []),
     ])
 
 
@@ -244,9 +274,42 @@ def _short(v: Any, limit: int) -> str | None:
     return s or None
 
 
-def validate_suggestion(reply: dict, currencies: dict[str, str], categories: list[str]) -> dict:
+def _sources(*lists: Any) -> list[str]:
+    """Web addresses to show as where a suggestion came from: http(s) only, with a host and no user name or password in
+    them, each once, at most MAX_SOURCES."""
+    out: list[str] = []
+    for v in lists:
+        for u in _list(v):
+            if not isinstance(u, str) or len(u.strip()) > 500:
+                continue
+            u = u.strip()
+            try:
+                parts = urlsplit(u)
+            except ValueError:
+                continue
+            if parts.scheme.lower() not in ("http", "https") or not parts.hostname or "@" in parts.netloc or any(c.isspace() for c in u):
+                continue
+            if u not in out:
+                out.append(u)
+            if len(out) >= MAX_SOURCES:
+                return out
+    return out
+
+
+def _bonus(v: Any) -> dict | None:
+    """The sign-up bonus: {amount, spend, months}, or None without an amount."""
+    if not isinstance(v, dict):
+        return None
+    months = _number(v.get("months"), 24)
+    bonus = {"amount": _number(v.get("amount"), MAX_BONUS), "spend": _number(v.get("spend"), MAX_BONUS_SPEND),
+             "months": int(months) if months else None}
+    return bonus if bonus["amount"] else None
+
+
+def validate_suggestion(reply: dict, currencies: dict[str, str], categories: list[str], cited: list[str] | None = None) -> dict:
     """What the model said, kept only where it fits Runway: a currency Runway has (by key or name), categories it has
-    (case aside), a benefit's kind and period from its lists; numbers clamped. The rest is dropped."""
+    (case aside), a benefit's kind, period and basis from its lists; numbers clamped; sources that are web addresses
+    (the model's own list, then the pages OpenRouter says it cited). The rest is dropped."""
     out: dict[str, Any] = {"family": _short(reply.get("family"), 60)}
     cur = str(reply.get("currency") or "").strip().lower()
     by_name = {n.lower(): k for k, n in currencies.items()}
@@ -265,6 +328,7 @@ def validate_suggestion(reply: dict, currencies: dict[str, str], categories: lis
             rates.append({"category": cat, "multiplier": mult, "portal_only": portal})
     out["rates"] = rates
     out["annual_fee"] = _number(reply.get("annual_fee"), MAX_FEE)
+    out["bonus"] = _bonus(reply.get("bonus"))
     out["portal_name"] = _short(reply.get("portal_name"), 60)
     benefits, names_seen = [], set()
     for b in _list(reply.get("benefits")):
@@ -276,17 +340,39 @@ def validate_suggestion(reply: dict, currencies: dict[str, str], categories: lis
         kind = kind if kind in churn_benefits.KINDS else "other"
         period = str(b.get("period") or "").strip().lower()
         period = period if period in churn_benefits.PERIODS else "annual"
+        basis = str(b.get("basis") or "").strip().lower()
         amount = _number(b.get("amount"), MAX_CREDIT) if kind == "credit" else None
-        benefits.append({"name": name, "kind": kind, "amount": amount or None, "period": period})
+        guests = _number(b.get("guests"), 20) if kind == "access" else None
+        benefits.append({"name": name, "kind": kind, "amount": amount or None, "period": period,
+                         "basis": basis if basis in churn_benefits.BASES else None,
+                         "guests": int(guests) if guests is not None else None})
         if len(benefits) >= MAX_BENEFITS:
             break
     out["benefits"] = benefits
+    out["sources"] = _sources(reply.get("sources"), cited or [])
     return out
 
 
+def web_search_on(conn) -> bool:
+    """Whether "Fill in the rest with AI" searches the web (Settings; on unless switched off)."""
+    return (db.get_setting(conn, sk.CHURN_AI_WEB, "1") or "1") == "1"
+
+
+def _ask(ask, api_key: str, model: str, prompt: str, web: bool) -> tuple[str, list[str]]:
+    """The model's reply and the pages it cites. With web search: OpenRouter's web search tool, or its web plugin for a
+    model that can't call tools."""
+    if not web:
+        return ask(api_key, model, prompt)
+    try:
+        return ask(api_key, model, prompt, web="tool")
+    except categorize.ToolsUnsupported:
+        return ask(api_key, model, prompt, web="plugin")
+
+
 def suggest(conn, issuer: str, product: str, caller=None) -> dict:
-    """Ask the model what it knows of this card. Sends the bank's name and the card's name only. Raises
-    churning.ChurnError for a bad request or no key, RuntimeError if the request fails or the reply is unusable."""
+    """Ask the model about this card, searching the web first unless that's switched off in Settings. Sends the bank's
+    name and the card's name only. Raises churning.ChurnError for a bad request or no key, RuntimeError if the request
+    fails or the reply is unusable."""
     if issuer not in churning.ISSUERS:
         raise churning.ChurnError("Pick the bank")
     product = _MARKS.sub("", _strip_masks(" ".join(str(product or "").split())))[:80].strip()
@@ -296,17 +382,21 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
     if not api_key:
         raise churning.ChurnError("Add an OpenRouter API key in Settings first.")
     model = db.get_setting(conn, sk.LLM_MODEL, categorize.DEFAULT_MODEL) or categorize.DEFAULT_MODEL
+    web = web_search_on(conn)
     currencies = {k: v["name"] for k, v in churning.values(conn).items()}
     categories = [c["name"] for c in churning.spending_categories(conn)]
-    prompt = build_prompt(issuer, product, currencies, categories)
+    prompt = build_prompt(issuer, product, currencies, categories, web)
     began = time.time()
     try:
         with monitoring.ai_agent("Card suggestions", "churning"):
-            reply = (caller or categorize.call_llm)(api_key, model, prompt)
+            reply, cited = _ask(caller or categorize.chat, api_key, model, prompt, web)
     except Exception as e:   # network, timeout or API error (its text quotes OpenRouter's answer: kept scrubbed)
         said = monitoring.public_text(str(e)) or type(e).__name__
+        if web:
+            raise RuntimeError(f"The AI’s web search failed after {time.time() - began:.0f}s ({model}): {said}"[:240]
+                               + ". To ask without searching, turn off web search for card suggestions in Settings → Connections → AI categorization.") from e
         raise RuntimeError(f"The AI request failed after {time.time() - began:.0f}s: {said}"[:300]) from e
     parsed = _object(reply)
     if parsed is None:
         raise RuntimeError(f"The model ({model}) didn't answer in the expected format. Try {categorize.DEFAULT_MODEL} in Settings.")
-    return validate_suggestion(parsed, currencies, categories)
+    return {**validate_suggestion(parsed, currencies, categories, cited), "web": web}

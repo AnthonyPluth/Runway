@@ -324,10 +324,16 @@ export interface CardSuggestion {
   base_rate: number | null;
   rates: { category: string; multiplier: number; portal_only: number }[];
   annual_fee: number | null;
+  // The current public sign-up bonus: points (dollars for cash back), the spend, and the months to spend it in.
+  bonus?: { amount: number; spend: number | null; months: number | null } | null;
   portal_name: string | null;
   benefits: SuggestedBenefit[];
+  sources?: string[];   // the web pages it came from (http(s) only), to check it against
+  web?: boolean;        // whether it searched the web (Settings → AI)
 }
-export interface SuggestedBenefit { name: string; kind: BenefitKind; amount: number | null; period: BenefitPeriod }
+export interface SuggestedBenefit {
+  name: string; kind: BenefitKind; amount: number | null; period: BenefitPeriod; basis?: BenefitBasis | null; guests?: number | null;
+}
 /** A benefit in the card form before the card is saved: from the quick-add list (`preset`), typed in, or suggested by the AI. */
 export interface DraftBenefit extends SuggestedBenefit { preset?: string; ai?: boolean }
 

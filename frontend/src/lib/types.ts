@@ -39,6 +39,7 @@ export interface AppState {
   syncing?: boolean;
   primary_account?: string | null;
   auto_ai_on_sync?: boolean;
+  churn_ai_web?: boolean;   // Churning's "Fill in the rest with AI" searches the web
   realie_configured?: boolean;
   finnhub_configured?: boolean;
   logodev_configured?: boolean;

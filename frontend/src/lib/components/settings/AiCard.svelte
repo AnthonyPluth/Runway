@@ -26,9 +26,9 @@
     try { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); reload(); }
     catch (err) { toast.error((err as Error).message); }
   }
-  async function setAuto(e: Event) {
+  async function setFlag(key: "auto_ai_on_sync" | "churn_ai_web", e: Event) {
     try {
-      await api("/api/settings", { method: "POST", body: { auto_ai_on_sync: (e.currentTarget as HTMLInputElement).checked } });
+      await api("/api/settings", { method: "POST", body: { [key]: (e.currentTarget as HTMLInputElement).checked } });
       toast.success("Saved"); refreshState();
     } catch (err) { toast.error((err as Error).message); }
   }
@@ -43,8 +43,11 @@
       <input class={inputCls} value={st.llm_model ?? ""} spellcheck="false" use:autosave={saveModel} /></label>
     {#if st.has_api_key}<Button variant="outline" onclick={clearKey}>Remove key</Button>{/if}
   </div>
-  <label class={checkCls}><input type="checkbox" checked={!!st.auto_ai_on_sync} onchange={setAuto} />
+  <label class={checkCls}><input type="checkbox" checked={!!st.auto_ai_on_sync} onchange={(e) => setFlag("auto_ai_on_sync", e)} />
     Categorize new merchants during each sync when the AI is confident</label>
+  <label class={checkCls}><input type="checkbox" checked={st.churn_ai_web !== false} onchange={(e) => setFlag("churn_ai_web", e)} />
+    Search the web when filling in a card with AI (Churning)</label>
+  <p class={helpCls}>Card offers change often, so “Fill in the rest with AI” looks up the card’s current terms and shows the pages it used. Only the bank and the card’s name are searched for. OpenRouter charges for the search on top of the model: about $4 per 1,000 results with its own search engine, at most 10 results a card (up to about 4¢), plus the model’s tokens for reading them. Turn it off to answer from the model’s memory alone, which costs less but is often out of date.</p>
   {#if st.last_llm_error}
     <Alert.Root variant="destructive"><TriangleAlert /><Alert.Description><p>Last AI error: {st.last_llm_error}</p></Alert.Description></Alert.Root>
   {/if}

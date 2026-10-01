@@ -335,6 +335,46 @@ describe("card form", () => {
       expect(Number((saved as { annual_fee: unknown }).annual_fee)).toBe(95);
     });
 
+    it("shows the pages it came from, and fills the sign-up bonus when adding", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      const withSources = {
+        ...suggestion, web: true, bonus: { amount: 100000, spend: 5000, months: 3 },
+        sources: ["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr", "javascript:alert(1)"],
+      };
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? withSources : { ok: true })) as never);
+      render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      const sources = await screen.findByTestId("ai-sources");
+      expect(sources).toHaveTextContent("From: chase.com, news.example.com");
+      const links = within(sources).getAllByRole("link");
+      expect(links.map((a) => a.getAttribute("href"))).toEqual(["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr"]);
+      expect(links[0]).toHaveAttribute("target", "_blank");
+      expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(100000);
+      expect(screen.getByLabelText("Spend")).toHaveValue(5000);
+      await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
+    });
+
+    it("says when the suggestions didn't come from a web search", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, web: false, sources: [] } : { ok: true })) as never);
+      render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      expect(await screen.findByTestId("ai-sources")).toHaveTextContent("without a web search");
+    });
+
+    it("doesn't fill the public sign-up offer into a card you already have", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, bonus: { amount: 100000, spend: 5000, months: 3 } } : { ok: true })) as never);
+      render(CardForm, { c: card({ currency: "cash", annual_fee: 0, rates: [], bonus: null, bonus_spend: null }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
+    });
+
     it("shows an error as a toast and leaves the form alone", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       vi.mocked(api).mockRejectedValue(new Error("The AI request failed after 45s: timed out"));

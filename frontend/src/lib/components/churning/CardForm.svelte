@@ -114,6 +114,10 @@
   let suggesting = $state(false);
   let aiMarked = $state(false);
   let aiBenefits = $state<DraftBenefit[]>([]);
+  // Where the suggestions came from (web pages, http(s) only), and whether the AI searched the web at all.
+  let aiSources = $state<string[]>([]);
+  let aiWeb = $state(false);
+  const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
   let aiUndo: (() => void) | null = null;
   let aiFields: Record<string, unknown> = {};
   let aiRates = false;
@@ -131,6 +135,12 @@
     if (s.currency && v.currency === "cash" && s.currency !== "cash") { v.currency = s.currency; fields.currency = s.currency; }
     if (s.annual_fee && !v.annual_fee) { v.annual_fee = String(s.annual_fee); fields.annual_fee = s.annual_fee; }
     if (s.portal_name && !portalName.trim()) { portalName = s.portal_name; fields.portal_name = s.portal_name; }
+    // The public sign-up offer, only for a card you're adding (one you have came with the offer you applied with).
+    if (!c && s.bonus?.amount && !v.bonus && !v.bonus_spend) {
+      v.bonus = String(s.bonus.amount); fields.bonus = v.bonus;
+      if (s.bonus.spend) { v.bonus_spend = String(s.bonus.spend); fields.bonus_spend = v.bonus_spend; }
+      if (s.bonus.months && ["", "3"].includes(String(v.bonus_months))) { v.bonus_months = String(s.bonus.months); fields.bonus_months = v.bonus_months; }
+    }
     let rates = false;
     if (!rateRows.length && (s.rates.length || s.base_rate != null)) {
       if (s.base_rate != null && ["", "1"].includes(String(v.base_rate))) { v.base_rate = String(s.base_rate); fields.base_rate = v.base_rate; }
@@ -145,6 +155,9 @@
     if (fields.family) open.more = true;
     if (fields.currency || fields.portal_name || rates) open.rates = true;
     if (fresh.length) open.benefits = true;
+    if (fields.bonus) open.bonus = true;
+    aiSources = [...new Set([...aiSources, ...(s.sources ?? []).filter((u) => /^https?:\/\//i.test(u))])];
+    aiWeb = !!s.web;
     aiFields = { ...aiFields, ...fields };
     aiRates = aiRates || rates;
     const prev = aiUndo;
@@ -163,14 +176,14 @@
     };
     aiMarked = true;
   }
-  function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; }
+  function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; aiSources = []; }
   async function saveSuggestions() {
     try {
       // What the form holds now for the fields the AI filled: you may have corrected one since.
       const now = Object.fromEntries(Object.keys(aiFields).map((k) => [k, k === "portal_name" ? portalName : (v as Record<string, unknown>)[k]]));
       await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: { ...now, ...(aiRates ? ratesBody() : {}) } });
       await saveBenefits(c!.id);
-      aiBenefits = []; aiFields = {}; aiRates = false; aiUndo = null; aiMarked = false; changed = true;
+      aiBenefits = []; aiFields = {}; aiRates = false; aiUndo = null; aiMarked = false; aiSources = []; changed = true;
       toast("Saved the suggestions");
       await onchanged();
     } catch (err) { toast.error((err as Error).message); }
@@ -200,7 +213,7 @@
     <label class={`${lbl} min-w-48 flex-1`}>Card<Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" /></label>
     {#if canSuggest}
       <Button variant="outline" size="sm" disabled={!v.product.trim() || suggesting} onclick={suggest}
-        title="Asks an AI model what it knows of this card. Only the bank and the card’s name are sent.">{suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
+        title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent.">{suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
     {/if}
   </div>
   <div class="mt-3 flex flex-wrap items-end gap-3">
@@ -230,6 +243,11 @@
       <span class="text-muted-foreground">Suggested by AI, check before saving. The fields it filled are below; change anything that’s wrong.</span>
       {#if c}<Button size="sm" onclick={saveSuggestions}>Save these</Button>{/if}
       <Button size="sm" variant="ghost" onclick={discardSuggestions}>Discard</Button>
+      <p class="w-full text-xs text-muted-foreground" data-testid="ai-sources">
+        {#if aiSources.length}From: {#each aiSources as u, i (u)}{i ? ", " : ""}<a href={u} target="_blank" rel="noopener noreferrer" class="underline" title={u}>{host(u)}</a>{/each}
+        {:else if aiWeb}It didn’t say where this came from: check it on the bank’s site.
+        {:else}From the model’s memory, without a web search (Settings → Connections → AI categorization): it may be out of date.{/if}
+      </p>
     </div>
   {/if}
 
