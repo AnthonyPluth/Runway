@@ -13,10 +13,8 @@
   import AdvancedSection from "$lib/components/settings/AdvancedSection.svelte";
   import CategoriesSection from "$lib/components/settings/CategoriesSection.svelte";
   import ConnectionsSection from "$lib/components/settings/ConnectionsSection.svelte";
-  import ExtensionSection from "$lib/components/settings/ExtensionSection.svelte";
   import NotificationsSection from "$lib/components/settings/NotificationsSection.svelte";
   import RulesSection from "$lib/components/settings/RulesSection.svelte";
-  import ServicesSection from "$lib/components/settings/ServicesSection.svelte";
   import { SECTIONS, resolveSection } from "$lib/components/settings/sections";
   import type { Rule, SettingsAccount } from "$lib/components/settings/types";
   import { linkCls } from "$lib/components/settings/ui";
@@ -50,8 +48,7 @@
     {#if section === "accounts"}<AccountsSection accounts={d.accounts} />
     {:else if section === "categories"}<CategoriesSection />
     {:else if section === "rules"}<RulesSection rules={d.rules} accounts={d.accounts} />
-    {:else if section === "connections"}<ConnectionsSection accounts={d.accounts} /><ExtensionSection />
-    {:else if section === "services"}<ServicesSection />
+    {:else if section === "connections"}<ConnectionsSection accounts={d.accounts} />
     {:else if section === "notifications"}<NotificationsSection />
     {:else}<AdvancedSection />{/if}
   </div>

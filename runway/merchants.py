@@ -510,7 +510,7 @@ def fetch_site(conn, website: str, opener=None) -> str:
     if not s:
         raise ValueError("That doesn't look like a website (e.g. target.com)")
     if not configured(conn):
-        raise ValueError("Add a Logo.dev publishable key in Settings → Services first")
+        raise ValueError("Add a Logo.dev publishable key in Settings → Connections first")
     mid = SITE + s
     row = conn.execute(select(Merchant.logo).where(Merchant.id == mid)).fetchone()
     if not row or not row["logo"]:

@@ -5,17 +5,18 @@
   import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
   import { orderLabel } from "$lib/components/orders/retail";
   import { Button } from "$lib/components/ui/button";
-  import * as Card from "$lib/components/ui/card";
   import { fmt, fmtDate, relTime } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Snippet } from "svelte";
+  import ServiceRow from "./ServiceRow.svelte";
   import type { RecentOrder, RetailStatus } from "./types";
   import { checkCls, helpCls, inputCls, linkCls, warnText } from "./ui";
 
   // The Runway browser extension: how to set it up (with the key it needs), what it has imported from each store
-  // (`children` adds Carta's row to that list), and the recent orders, each opening to its items and charges.
+  // (`children` adds Carta's row to that list), and the recent orders, each opening to its items and charges. Its row
+  // under Connections is On once it has a key, and amber when that key no longer works.
   let { children }: { children?: Snippet } = $props();
   let data = $state<RetailStatus | null>(null);
   let error = $state("");
@@ -70,89 +71,87 @@
   const selectOnMount = (el: HTMLInputElement) => { el.select(); };
 </script>
 
-<Card.Root>
-  <Card.Header><Card.Title>Browser extension</Card.Title></Card.Header>
-  <Card.Content class="flex flex-col gap-3">
-    {#if error}
-      <p class="text-sm text-muted-foreground">{error}</p>
-    {:else if !data}
-      <p class="text-sm text-muted-foreground">Loading…</p>
-    {:else}
-      {@const r = data}
-      <p class={helpCls}>Optional. Amazon, Target, Costco and Carta have no API for this, so a small extension in your browser reads your orders
-        (and your Carta equity) with the sign-in you already have there and sends them only to Runway. Runway matches each Amazon, Target or
-        Costco charge to its order (online, or in store with your Target account) and splits the transaction by what you bought.</p>
-      <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
-        <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
-          <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
-        <li>Give it Runway's address ({location.origin}) and a key:
-          {#if r.token}
-            <span>key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
-            {#if r.token_problem}
-              <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
-            {/if}
-            <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
-            <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>
-          {:else}
-            <Button variant="outline" size="sm" class="ml-1" onclick={newKey}>Make a key</Button>
+<ServiceRow name="Browser extension" purpose="Amazon, Target, Costco and Carta, read in your browser" on={!!data?.token}
+  status={data?.token_problem ? "New key needed" : undefined} warn={!!data?.token_problem}>
+  {#if error}
+    <p class="text-sm text-muted-foreground">{error}</p>
+  {:else if !data}
+    <p class="text-sm text-muted-foreground">Loading…</p>
+  {:else}
+    {@const r = data}
+    <p class={helpCls}>Optional. Amazon, Target, Costco and Carta have no API for this, so a small extension in your browser reads your orders
+      (and your Carta equity) with the sign-in you already have there and sends them only to Runway. Runway matches each Amazon, Target or
+      Costco charge to its order (online, or in store with your Target account) and splits the transaction by what you bought.</p>
+    <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
+      <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
+        <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
+      <li>Give it Runway's address ({location.origin}) and a key:
+        {#if r.token}
+          <span>key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
+          {#if r.token_problem}
+            <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
           {/if}
-          {#if shownKey}
-            <span class="mt-2 flex flex-wrap items-center gap-2">
-              <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={shownKey} aria-label="Extension key" bind:this={keyInput} use:selectOnMount />
-              <Button variant="outline" size="sm" onclick={() => copy(keyInput)}>Copy</Button>
-              <span class="text-xs">Shown once: paste it into the extension's options now.</span>
-            </span>
-          {/if}
-        </li>
-        <li>Stay signed in to Amazon, Target, Costco and Carta in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
-      </ol>
-
-      <div class="flex flex-col">
-        {#each (["amazon", "target", "costco"] as const) as k (k)}
-          {@const s = r.stores[k]}
-          <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-0.5 border-b py-1.5 last:border-b-0">
-            <b class="text-sm">{s.name}</b>
-            <span class="text-xs text-muted-foreground">
-              {#if !s.last && !s.orders}not imported yet
-              {:else}{s.orders} order{s.orders === 1 ? "" : "s"} · {s.matched} charge{s.matched === 1 ? "" : "s"} matched{#if s.unmatched}{" · "}<span class={warnText}
-                title="Charges with no transaction: paid with a card that isn't in Runway, or not posted yet">{s.unmatched} not matched</span>{/if}{#if s.last}{` · imported ${relTime(s.last)}`}{/if}{/if}
-            </span>
-          </div>
-        {/each}
-        {@render children?.()}
-      </div>
-
-      <div class="flex flex-wrap items-center gap-3">
-        {#if app.state?.has_api_key}
-          <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI
-            <span class="text-muted-foreground">(only item names and prices are sent)</span></label>
+          <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
+          <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>
         {:else}
-          <span class={helpCls}>Add an OpenRouter key in <a class={linkCls} href="#setup/services">Services</a> and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>
+          <Button variant="outline" size="sm" class="ml-1" onclick={newKey}>Make a key</Button>
         {/if}
-        {#if r.recent.length}<Button variant="outline" size="sm" disabled={matching} onclick={matchAgain}>{matching ? "Working…" : "Match and split again"}</Button>{/if}
-      </div>
+        {#if shownKey}
+          <span class="mt-2 flex flex-wrap items-center gap-2">
+            <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={shownKey} aria-label="Extension key" bind:this={keyInput} use:selectOnMount />
+            <Button variant="outline" size="sm" onclick={() => copy(keyInput)}>Copy</Button>
+            <span class="text-xs">Shown once: paste it into the extension's options now.</span>
+          </span>
+        {/if}
+      </li>
+      <li>Stay signed in to Amazon, Target, Costco and Carta in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
+    </ol>
 
-      {#if r.recent.length}
-        <details>
-          <summary class="cursor-pointer py-1 text-sm text-muted-foreground">Recent orders</summary>
-          <div class="mt-1 flex flex-col">
-            {#each r.recent as o (o.id)}
-              {@const st = orderState(o)}
-              <div class="border-b last:border-b-0">
-                <button type="button" class="grid w-full cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-1 py-2 text-left text-sm hover:bg-muted/50 sm:grid-cols-[4.5rem_1fr_6rem_8rem_auto]"
-                  aria-expanded={opened.has(o.id)} onclick={() => toggle(o.id)}>
-                  <span class="text-xs text-muted-foreground">{o.placed ? fmtDate(o.placed) : ""}</span>
-                  <span class="min-w-0 truncate">{orderLabel(o)} <span class="text-xs text-muted-foreground">{o.order_number}</span></span>
-                  <span class="text-right tabular-nums">{o.total != null ? fmt(o.total) : ""}</span>
-                  <span class={cn("text-xs max-sm:col-start-2", o.charges && o.matched === o.charges ? "text-muted-foreground" : warnText)}>{st}</span>
-                  <ChevronRight class={cn("size-4 text-muted-foreground transition-transform max-sm:hidden", opened.has(o.id) && "rotate-90")} aria-hidden="true" />
-                </button>
-                {#if opened.has(o.id)}<div class="pb-3"><OrderDetail orderId={o.id} onchange={recount} /></div>{/if}
-              </div>
-            {/each}
-          </div>
-        </details>
+    <div class="flex flex-col">
+      {#each (["amazon", "target", "costco"] as const) as k (k)}
+        {@const s = r.stores[k]}
+        <div class="flex min-h-10 flex-wrap items-center gap-x-3 gap-y-0.5 border-b py-1.5 last:border-b-0">
+          <b class="text-sm">{s.name}</b>
+          <span class="text-xs text-muted-foreground">
+            {#if !s.last && !s.orders}not imported yet
+            {:else}{s.orders} order{s.orders === 1 ? "" : "s"} · {s.matched} charge{s.matched === 1 ? "" : "s"} matched{#if s.unmatched}{" · "}<span class={warnText}
+              title="Charges with no transaction: paid with a card that isn't in Runway, or not posted yet">{s.unmatched} not matched</span>{/if}{#if s.last}{` · imported ${relTime(s.last)}`}{/if}{/if}
+          </span>
+        </div>
+      {/each}
+      {@render children?.()}
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+      {#if app.state?.has_api_key}
+        <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI
+          <span class="text-muted-foreground">(only item names and prices are sent)</span></label>
+      {:else}
+        <span class={helpCls}>Add an OpenRouter key under AI categorization below and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>
       {/if}
+      {#if r.recent.length}<Button variant="outline" size="sm" disabled={matching} onclick={matchAgain}>{matching ? "Working…" : "Match and split again"}</Button>{/if}
+    </div>
+
+    {#if r.recent.length}
+      <details>
+        <summary class="cursor-pointer py-1 text-sm text-muted-foreground">Recent orders</summary>
+        <div class="mt-1 flex flex-col">
+          {#each r.recent as o (o.id)}
+            {@const st = orderState(o)}
+            <div class="border-b last:border-b-0">
+              <button type="button" class="grid w-full cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-0.5 rounded-md px-1 py-2 text-left text-sm hover:bg-muted/50 sm:grid-cols-[4.5rem_1fr_6rem_8rem_auto]"
+                aria-expanded={opened.has(o.id)} onclick={() => toggle(o.id)}>
+                <span class="text-xs text-muted-foreground">{o.placed ? fmtDate(o.placed) : ""}</span>
+                <span class="min-w-0 truncate">{orderLabel(o)} <span class="text-xs text-muted-foreground">{o.order_number}</span></span>
+                <span class="text-right tabular-nums">{o.total != null ? fmt(o.total) : ""}</span>
+                <span class={cn("text-xs max-sm:col-start-2", o.charges && o.matched === o.charges ? "text-muted-foreground" : warnText)}>{st}</span>
+                <ChevronRight class={cn("size-4 text-muted-foreground transition-transform max-sm:hidden", opened.has(o.id) && "rotate-90")} aria-hidden="true" />
+              </button>
+              {#if opened.has(o.id)}<div class="pb-3"><OrderDetail orderId={o.id} onchange={recount} /></div>{/if}
+            </div>
+          {/each}
+        </div>
+      </details>
     {/if}
-  </Card.Content>
-</Card.Root>
+  {/if}
+</ServiceRow>

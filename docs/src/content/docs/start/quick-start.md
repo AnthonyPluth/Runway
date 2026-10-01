@@ -35,6 +35,6 @@ Open `http://localhost:8765`. Your data is stored in `data/runway.db`. To look a
 1. **Connect your bank.** Create a setup token in [SimpleFIN Bridge](https://beta-bridge.simplefin.org) and paste it into **Settings → Connections**. The first sync pulls about six months of history. Or, with Plaid keys, connect through Plaid on the same tab (up to two years), and mix the two account by account under **Settings → Accounts**.
 2. **Link your credit cards through Plaid** so Runway gets their statements and due dates, and set each card's paying account under **Settings → Accounts**. To choose which account the forecast shows, click the account name above the balance on **Overview** (or “Choose” in the setup checklist), or use “Use for the forecast” on the account in **Settings → Accounts**.
 3. **Add your paychecks and bills** on **Budget → Bills & income**, or accept the ones Runway suggests.
-4. Optionally add an OpenRouter, Realie, Finnhub or Logo.dev key under **Settings → Services**.
+4. Optionally add an OpenRouter, Realie, Finnhub or Logo.dev key under **Settings → Connections**.
 
 Next: what each page does is in [Features](/Runway/using/features/), and every environment variable is in [Configuration](/Runway/reference/configuration/).

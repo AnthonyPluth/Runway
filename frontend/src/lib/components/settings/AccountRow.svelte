@@ -177,15 +177,17 @@
   </summary>
 
   <div class="grid gap-4 pb-4 pl-1 pt-1 sm:grid-cols-2 sm:pl-10 lg:grid-cols-3">
-    <label class={`${fieldCls} sm:col-span-2 lg:col-span-3`}>Name
-      <input class={`${inputCls} sm:max-w-md`} bind:value={name} placeholder={a.name} use:autosave={() => save(false)} />
+    <div class={`${fieldCls} sm:col-span-2 lg:col-span-3`}>
+      <label for={`name-${a.id}`}>Name</label>
+      <span class="flex items-center gap-2 sm:max-w-md">
+        <!-- The logo, which opens the picker as a payee's does in Transactions: the institution's, or one you chose (a
+             website's, or its letter), wherever the account shows. -->
+        <LogoPicker account={a.id} name={name.trim() || a.name} onchanged={() => refreshState()}>
+          <span class="flex size-9 items-center justify-center rounded-lg transition-colors hover:bg-muted"><BankIcon id={a.id} /></span>
+        </LogoPicker>
+        <input id={`name-${a.id}`} class={`${inputCls} min-w-0 flex-1`} bind:value={name} placeholder={a.name} use:autosave={() => save(false)} />
+      </span>
       {#if a.display_name}<span class="truncate text-xs" title={bank}>From the bank: {bank}</span>{/if}
-    </label>
-    <div class={fieldCls}>Logo
-      <!-- the institution's, or one you chose (a website's, or its letter), wherever the account shows -->
-      <LogoPicker account={a.id} name={name.trim() || a.name} onchanged={() => refreshState()}>
-        <span class="flex h-9 items-center gap-2 text-foreground"><BankIcon id={a.id} /><span class="text-sm underline-offset-4 hover:underline">Change</span></span>
-      </LogoPicker>
     </div>
     <label class={fieldCls}>Owner
       <OwnerSelect bind:value={owner} {owners} joint blank="—" {@attach fromAction(autosave, () => () => save(true))} />
