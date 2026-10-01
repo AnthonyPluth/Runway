@@ -117,7 +117,7 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
 ## Error reports (optional)
 
 Set `SENTRY_DSN` (Sentry → your project → Settings → Client Keys) and Runway sends its errors to Sentry, from the
-server and from the web app, tagged with the version, and everything in the table below. Without it, nothing is sent
+server and from the web app, tagged with the version, and everything listed below. Without it, nothing is sent
 anywhere.
 
 - A report has the error, its stack trace and the page or API path. It never has request bodies, cookies, headers,
@@ -129,20 +129,29 @@ anywhere.
 - `SENTRY_ENVIRONMENT` (default `production`).
 - An error page's "reference" code is on the Sentry event as the `ref` tag, so a reference from the app finds its report.
 
-The rest of Sentry, all on with a DSN. Turn a rate down (`0` for none, the default is `1`: all) or a switch off
-(`=0`):
+Everything is sent once there's a DSN, at full rate (it's your own Sentry project, for your own household):
 
-| Variable | What it adds |
-| --- | --- |
-| `SENTRY_TRACES_SAMPLE_RATE` | Tracing, for that share of requests, syncs and page views: each API request by its route (`GET /api/transactions/{id}/category`, never the ids or what was searched), its database queries (without their values) and calls to banks and services; the daily sync; page loads and navigations with Web Vitals. A page's trace continues into the server's. |
-| `SENTRY_PROFILE_SESSION_SAMPLE_RATE` | Profiling while tracing, for that share of server runs and browser visits: which functions the time goes to. The browser's profiler is Chrome's and Edge's. |
-| `SENTRY_REPLAY_SAMPLE_RATE`, `SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE` | Session Replay, for that share of visits (or of visits with an error, their last minute). Every piece of text, every input and every image is masked: a replay shows the layout, the clicks and the pages, not your data. |
-| `SENTRY_LOGS` | Runway's log lines as Sentry Logs (one per request, with its route and timing but not your address), and the web app's console warnings and errors. |
-| `SENTRY_METRICS` | Metrics: how long syncs take and whether they fail, new transactions per sync, and the AI's tokens. |
-| `SENTRY_CRONS` | A Cron Monitor for the bank sync (`runway-bank-sync`), so Sentry tells you when a day goes by without one or one fails. Any bank sync counts, the Sync button's too. Sentry makes the monitor in Runway's time zone (`TZ`, or the system's); if `TZ` is a rule like `EST5EDT` rather than a name like `America/New_York`, or automatic syncing is off (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug. |
-| `SENTRY_FEEDBACK` | "Send feedback" at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a screenshot. |
-| `SENTRY_USER` | Who's signed in, so Sentry counts the people an error, a slow page, a profile or a replay affects instead of calling everyone "anonymous user". Each person is a 16-character code made from their sign-in id and Runway's key (`RUNWAY_SECRET_KEY`, or `secret.key`): the same every time, but it doesn't say who it is, and Sentry never gets a name, email or address. Without OIDC everyone is `local`. A new key gives everyone new codes. |
-| `SENTRY_AI_CONTENT` | With tracing, the AI's prompts and replies on its spans in Sentry's Agent Tracing (the merchants, amounts and dates it's asked about, which the AI provider sees anyway). With `SENTRY_AI_CONTENT=0`, Agent Tracing still has each categorizing run, its model, timings and tokens. |
+- **Tracing and profiling** of every request, sync and page view: each API request by its route
+  (`GET /api/transactions/{id}/category`, never the ids or what was searched), its database queries (without their
+  values) and calls to banks and services; the daily sync; page loads and navigations with Web Vitals. A page's trace
+  continues into the server's. The browser's profiler is Chrome's and Edge's.
+- **Session Replay**, with every piece of text, every input and every image masked: a replay shows the layout, the
+  clicks and the pages, not your data.
+- **Logs and metrics:** Runway's log lines as Sentry Logs (one per request, with its route and timing but not your
+  address) and the web app's console warnings and errors; how long syncs take and whether they fail, new transactions
+  per sync, and the AI's tokens.
+- **A Cron Monitor** for the bank sync (`runway-bank-sync`), so Sentry tells you when a day goes by without one or one
+  fails. Any bank sync counts, the Sync button's too. Sentry makes the monitor in Runway's time zone (`TZ`, or the
+  system's); if `TZ` is a rule like `EST5EDT` rather than a name like `America/New_York`, or automatic syncing is off
+  (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug.
+- **"Send feedback"** at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a
+  screenshot.
+- **Who's signed in**, so Sentry counts the people an error, a slow page, a profile or a replay affects instead of
+  calling everyone "anonymous user". Each person is a 16-character code made from their sign-in id and Runway's key
+  (`RUNWAY_SECRET_KEY`, or `secret.key`): the same every time, but it doesn't say who it is, and Sentry never gets a
+  name, email or address. Without OIDC everyone is `local`. A new key gives everyone new codes.
+- **The AI's prompts and replies** on its spans in Sentry's Agent Tracing (the merchants, amounts and dates it's asked
+  about, which the AI provider sees anyway).
 
 Also in Sentry, without a variable:
 
@@ -170,7 +179,7 @@ Also in Sentry, without a variable:
   signing in, so leaving the group takes effect.) Signing out ends the Runway session and your provider session.
 - Someone who isn't allowed in sees that, with a button to sign in with another account; the log says who was refused.
 - Runway answers only to addresses that are yours: `RUNWAY_PUBLIC_URL`'s host, local IPs, `*.local`, plain names like
-  `nas`, and Tailscale names. Add others to `RUNWAY_ALLOWED_HOSTS`.
+  `nas`, and Tailscale names. Add others with `RUNWAY_ALLOWED_HOSTS` ([Configuration](/Runway/reference/configuration/#advanced)).
 - Use `https://` for `RUNWAY_PUBLIC_URL` (a reverse proxy like Caddy or Traefik, or Tailscale). Session cookies are
   then marked Secure. On an internet address Runway requires it.
 - Already sign in through a proxy (Authelia forward-auth, Cloudflare Access, oauth2-proxy)? Leave `OIDC_ISSUER`
