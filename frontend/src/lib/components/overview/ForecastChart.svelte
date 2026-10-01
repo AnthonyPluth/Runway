@@ -184,11 +184,7 @@
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
       {#if estIndex > v0 && estIndex <= v1}
         {@const ex = x(estIndex)}
-        {@const right = ex < W - m.right - 150}
         <line x1={ex} x2={ex} y1={m.top - 6} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="2 3" />
-        <text x={ex + (right ? 6 : -6)} y={m.top - 10} text-anchor={right ? "start" : "end"} fill="var(--muted-foreground)">
-          {right ? "Estimated new spending from here →" : "← Estimated new spending from here"}
-        </text>
       {/if}
       {#if lowIndex >= 0 && inView(lowIndex)}
         {@const lx = x(lowIndex)}
