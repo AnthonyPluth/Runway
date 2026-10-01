@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import func, insert, select, update
 
-from runway import categories, categorize, db, server
+from runway import categories, categorize, db, payees, server
 from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
 from tests.shared import LedgerCase
 
@@ -25,6 +25,38 @@ class PayeeTests(unittest.TestCase):
         }
         for raw, want in cases.items():
             self.assertEqual(categorize.clean_payee(raw), want, raw)
+
+    def test_the_banks_transfer_words_come_off_the_merchant(self):
+        cases = {
+            # What banks send through SimpleFIN for a Target debit card or a loan paid on the bank's website
+            "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)": "Target",
+            "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)": "Target",
+            "DIRECT DEPOSIT TARGET DEBITACH TRAN (Cash)": "Target",
+            "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)": "Fifth Third",
+            "GEICO ACH PMT": "Geico",
+            "COMCAST WEB PAY": "Comcast",
+            "ACME CORP PAYROLL PPD ID: 1234567": "Acme Corp Payroll",
+        }
+        for raw, want in cases.items():
+            self.assertEqual(categorize.clean_payee(raw), want, raw)
+        # And payees synced before, as they were stored
+        for long in ("Target Cach Tran Cash", "Target C Cash", "Direct Deposit Target Debitach Tran Cash", "Target Debit Cach Tran"):
+            self.assertEqual(payees.shorten(long), "Target", long)
+        self.assertEqual(payees.shorten("Fifth Third Baweb Pay Cash"), "Fifth Third")
+
+    def test_a_merchants_own_name_stays_as_it_is(self):
+        # Transfer words alone aren't enough: a merchant's name can end with them. Only an ACH code (or "web pay", or a
+        # cut-off letter before one) says the tail is the bank's.
+        for name in ("Apple Cash", "Apple Pay", "Charlotte's Web", "Vitamin C", "Target C", "Discover Credit", "Ach Payment",
+                     "Direct Deposit Acme Payroll", "Cash App", "Chase Bill Pay", "Bach Pay", "Coach", "Ppd", "Target"):
+            self.assertEqual(payees.shorten(name), name, name)
+            self.assertEqual(categorize.clean_payee(name.upper()), name, name)
+
+    def test_a_payee_from_the_banks_text_or_from_you(self):
+        self.assertTrue(payees.from_bank("Target Cach Tran Cash", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
+        self.assertTrue(payees.from_bank("Target C Cash", "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)"))
+        self.assertFalse(payees.from_bank("Groceries Run", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
+        self.assertFalse(payees.from_bank("Target", None))
 
 
 class CategorizeTests(LedgerCase):

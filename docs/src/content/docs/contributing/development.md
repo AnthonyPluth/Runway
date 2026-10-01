@@ -77,7 +77,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
 | `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
 | `runway/tracked.py` | Hand-tracked holdings |
-| `runway/categorize.py`, `categories.py` | Rules, history and AI categorization; the category tree |
+| `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
 | `runway/networth.py`, `realie.py` | Net worth and home values |

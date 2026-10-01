@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import db, splits
+from . import db, payees, splits
 from .models import Account, Category, Rule, Transaction
 
 MODES = ("contains", "exact", "starts")
@@ -58,7 +58,9 @@ def _text_matches(r: dict, tx: dict) -> bool:
         f = " ".join((field or "").lower().split())
         if (mode == "exact" and f == m) or (mode == "starts" and f.startswith(m)) or (mode == "contains" and m in f):
             return True
-    return False
+    # A rule made from a long payee ("target cach tran cash") still knows that merchant by its shorter name ("Target").
+    short = payees.short_match(m)
+    return bool(short) and " ".join((tx.get("payee") or "").lower().split()) == short
 
 
 def matches(r: dict, tx: dict) -> bool:

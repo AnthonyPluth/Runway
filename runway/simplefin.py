@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, UTC
 
 from sqlalchemy import delete, insert, select, update
 
-from . import db, deleted_accounts, plaidbank, sfinvest, splits
+from . import db, deleted_accounts, payees, plaidbank, sfinvest, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
 from .models import Account, Transaction
@@ -289,7 +289,8 @@ def _upsert_account(conn, acct: dict, acct_id: str) -> tuple[str | None, float, 
 
 def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
     """Pending items often come back with new ids once they post. Replace this window's pending items wholesale,
-    but remember their categories (by description and amount) so the replacements don't go back through review."""
+    but remember their categories and names (by description and amount) so the replacements don't go back through
+    review, or lose a name you gave them."""
     carried: dict[tuple, list] = {}
     in_window = (Transaction.account_id == acct_id, Transaction.pending == 1, Transaction.posted >= window_start.isoformat())
     for old in conn.execute(
@@ -297,8 +298,7 @@ def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
                Transaction.category_source, Transaction.confidence, Transaction.needs_review, Transaction.is_split)
         .where(*in_window)
     ).fetchall():
-        if old["category"] or old["is_split"]:
-            carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
+        carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
     conn.execute(delete(Transaction).where(*in_window))
     # Older than any window re-read: a hold that dropped off without posting would otherwise stay forever.
     conn.execute(delete(Transaction).where(
@@ -328,6 +328,12 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
     prior = carried.get((desc, round(amount, 2)))
     if prior:
         p = prior.pop(0)
+        if not (p["category"] or p["is_split"]):   # categorized like a new one, keeping a name you gave it
+            mine = p["payee"] and not payees.from_bank(p["payee"], p["description"])
+            conn.execute(insert(Transaction).values(
+                id=key, account_id=acct_id, posted=posted, amount=amount, description=desc, payee=p["payee"] if mine else payee,
+                pending=pending))
+            return key
         conn.execute(insert(Transaction).values(
             id=key, account_id=acct_id, posted=posted, amount=amount, description=desc,
             payee=p["payee"] or payee, pending=pending,   # a rule may have renamed it

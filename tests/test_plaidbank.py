@@ -238,6 +238,25 @@ class PlaidBankTests(DbCase):
         self.assertEqual((lunch["recurring_id"], lunch["recurring_linked_by"]), (7, "you"))   # and the link you made
         self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.id == "sf-chk|pl:a3")).fetchone())
 
+    def test_a_pending_charge_you_renamed_keeps_its_name_when_it_posts(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        MockBank.pages = [{"added": [{**tx("a1", "p-chk", "2026-09-23", 35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN", pending=True),
+                                      "merchant_name": None},
+                                     {**tx("a2", "p-chk", "2026-09-23", 9.0, "SQ *JOES", pending=True), "merchant_name": None}]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(self.c.execute(select(Transaction.payee).where(Transaction.id == "sf-chk|pl:a1")).scalar(), "Target")
+        self.c.execute(update(Transaction).where(Transaction.id == "sf-chk|pl:a1").values(payee="Birthday Gifts"))   # not categorized
+        # They post; Plaid names the coffee shop only now, and it gets that name since you hadn't given it one.
+        MockBank.pages = [{"added": [{**tx("b1", "p-chk", "2026-09-24", 35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN", pending_id="a1"),
+                                      "merchant_name": None},
+                                     {**tx("b2", "p-chk", "2026-09-24", 9.0, "SQ *JOES", pending_id="a2"), "merchant_name": "Joe's Coffee"}],
+                           "removed": [{"transaction_id": "a1"}, {"transaction_id": "a2"}]}]
+        r = plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(sorted(r["new"]), ["sf-chk|pl:b1", "sf-chk|pl:b2"])
+        self.assertEqual(dict(self.c.execute(select(Transaction.id, Transaction.payee).where(Transaction.id.like("%pl:%"))).fetchall()),
+                         {"sf-chk|pl:b1": "Birthday Gifts", "sf-chk|pl:b2": "Joe's Coffee"})
+
     def test_merchants_and_their_logos_are_noted(self):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)

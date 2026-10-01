@@ -13,7 +13,7 @@ from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_co
 
 from . import categories as catmod
 from . import settings_keys as sk
-from . import db, monitoring, rules as rulesmod, splits
+from . import db, monitoring, payees, rules as rulesmod, splits
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
@@ -53,7 +53,8 @@ def clean_payee(raw: str | None) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     if not s:
         s = re.sub(r"\s+", " ", raw).strip()
-    return " ".join(w[:1].upper() + w[1:].lower() if w.isupper() or w.islower() else w for w in s.split(" "))
+    s = " ".join(w[:1].upper() + w[1:].lower() if w.isupper() or w.islower() else w for w in s.split(" "))
+    return payees.shorten(s)   # "Target Debit Cach Tran" -> "Target"
 
 
 # ---------------------------------------------------------------------------------------------------------

@@ -52,6 +52,21 @@ class SimpleFinStoreTests(LedgerCase):
         self.assertEqual(self.conn.execute(select(Transaction.category)
                                            .where(Transaction.id == "A1|p10")).fetchone()[0], "Rideshare & Taxi")
 
+    def test_a_pending_charge_you_renamed_keeps_its_name_when_it_posts(self):
+        def pending(tid, desc, amount):
+            return {"id": tid, "posted": 0, "transacted_at": ts(date(2026, 9, 22)), "amount": amount, "description": desc, "pending": True}
+        simplefin.store_payload(self.conn, self.payload([pending("p1", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)", "-35.91"),
+                                                         pending("p2", "SQ *CAFE", "-4.00")]), date(2026, 9, 1))
+        self.assertEqual(self.conn.execute(select(Transaction.payee).where(Transaction.id == "A1|p1")).scalar(), "Target")
+        # Renamed, not categorized (the bulk "rename their merchant"); the other one is left as the bank named it.
+        self.conn.execute(update(Transaction).where(Transaction.id == "A1|p1").values(payee="Birthday Gifts"))
+        new = simplefin.store_payload(self.conn, self.payload([
+            {"id": "t1", "posted": ts(date(2026, 9, 23)), "amount": "-35.91", "description": "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"},
+            {"id": "t2", "posted": ts(date(2026, 9, 23)), "amount": "-4.00", "description": "SQ *CAFE"}]), date(2026, 9, 1))
+        self.assertEqual(sorted(new), ["A1|t1", "A1|t2"])   # still to be categorized
+        self.assertEqual(dict(self.conn.execute(select(Transaction.id, Transaction.payee)).fetchall()),
+                         {"A1|t1": "Birthday Gifts", "A1|t2": "Cafe"})
+
     def test_a_split_pending_charge_keeps_its_parts_when_it_posts_under_a_new_id(self):
         simplefin.store_payload(self.conn, self.payload([{"id": "p1", "posted": 0, "transacted_at": ts(date(2026, 9, 22)),
                                                           "amount": "-100.00", "description": "TARGET", "pending": True}]), date(2026, 9, 1))

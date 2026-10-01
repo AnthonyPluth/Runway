@@ -56,6 +56,20 @@ class MatchingTests(Base):
         categorize.categorize(self.c, use_ai=False)
         self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e)], ["Income", None, None, "Subscriptions", None])
 
+    def test_a_rule_made_from_a_long_payee_matches_its_shorter_name(self):
+        # Made ("remember for this merchant") when the payee was "Target Cach Tran Cash"; payees are shorter now, and
+        # the bank's text ("...TARGET DEBIT CACH TRAN (Cash)") doesn't have that long name in it either.
+        self.rule(match="target cach tran cash", category="Shopping")
+        self.rule(match="fifth third baweb pay cash", match_mode="exact", category="Loans")
+        a = self.tx(-35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)")
+        b = self.tx(-47.02, "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)")
+        c = self.tx(-698.38, "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)")
+        d = self.tx(-12, "TARGETED ADS LLC")                      # not Target
+        e = self.tx(-20, "FIFTH THIRD MORTGAGE")                  # Fifth Third, but not the merchant the rule was for
+        self.assertEqual(self.row(a)["payee"], "Target")
+        categorize.categorize(self.c, use_ai=False)
+        self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e)], ["Shopping", "Shopping", "Loans", None, None])
+
     def test_rename_feeds_history(self):
         self.rule(match="sq *joes", rename="Joe's Coffee")
         old = self.tx(-4, "SQ *JOES 123", category="Coffee & Snacks", source="manual")
