@@ -132,9 +132,9 @@ describe("TxRow", () => {
   describe("split", () => {
     const split = tx({ is_split: 1, category: null, amount: -30, splits: [{ category: "Groceries", amount: -20 }, { category: "Coffee", amount: -10, note: "beans" }] });
 
-    it("lists each part's category and amount instead of a single category", () => {
+    it("lists each part's category and amount instead of a single category, without a split badge", () => {
       render(TxRow, props(split));
-      expect(screen.getByText("split")).toBeInTheDocument();
+      expect(screen.queryByText("split")).not.toBeInTheDocument();
       expect(screen.getByText("Groceries $20.00")).toBeInTheDocument();
       expect(screen.getByText("Coffee $10.00")).toHaveAttribute("title", "beans");
       expect(screen.queryByRole("combobox", { name: /Category for/ })).not.toBeInTheDocument();
@@ -189,10 +189,11 @@ describe("TxRow", () => {
   describe("retail order", () => {
     const withOrder = tx({ retail: { order_id: "o1", retailer: "amazon", items: 3 } });
 
-    it("labels the order and only loads its items when you open it", async () => {
+    it("shows a receipt badge, labelled with the order, and only loads its items when you open it", async () => {
       vi.mocked(api).mockResolvedValue({ id: "o1", retailer: "amazon", order_number: "111", items: [], charges: [], url: "" });
       render(TxRow, props(withOrder));
       const toggle = screen.getByRole("button", { name: /Amazon · 3 items/ });
+      expect(within(toggle).getByText("receipt")).toBeInTheDocument();
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       expect(api).not.toHaveBeenCalled();
       await userEvent.click(toggle);
@@ -205,21 +206,18 @@ describe("TxRow", () => {
 
   // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
   describe("narrow rows", () => {
-    it("hides the account name, chip text and recurring name in phone landscape only below lg, not on short desktop windows", () => {
+    it("hides the account name and recurring name in phone landscape only below lg, not on short desktop windows", () => {
       const landscape = "max-lg:[@media(max-height:500px)]";
-      render(TxRow, props(tx({ account_name: "Shared Checking", recurring_id: 2, recurring_name: "Rent",
-        retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
-      const chipText = within(screen.getByRole("button", { name: "Target in store · 3 items" })).getByText("Target in store · 3 items");
-      expect(chipText).toHaveClass(`${landscape}:hidden!`);
+      render(TxRow, props(tx({ account_name: "Shared Checking", recurring_id: 2, recurring_name: "Rent" })));
       expect(within(row()).getByText("Rent")).toHaveClass(`${landscape}:hidden!`);
       for (const e of within(row()).getAllByText("Shared Checking")) expect(e.className).not.toMatch(/(^|\s)\[@media\(max-height:500px\)\]/);
     });
 
-    it("shows the order chip as just its icon unless the cell has room for its text", () => {
+    it("shows the receipt badge as just its icon unless the cell has room for the word", () => {
       render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
       const chip = screen.getByRole("button", { name: "Target in store · 3 items" });
-      expect(chip).toHaveClass("@sm/title:shrink-[8]", "@sm/title:overflow-hidden", "@sm/title:bg-secondary");
-      expect(within(chip).getByText("Target in store · 3 items")).toHaveClass("truncate", "hidden", "@sm/title:inline");
+      expect(chip).toHaveClass("shrink-0");
+      expect(within(chip).getByText("receipt")).toHaveClass("hidden", "@sm/title:inline", "max-sm:inline");
       expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[6ch]", "truncate");
     });
 

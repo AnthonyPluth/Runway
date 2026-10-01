@@ -17,12 +17,12 @@
   import SplitEditor from "./SplitEditor.svelte";
   import type { Tx } from "./types";
   import { openOrders } from "./expanded.svelte";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Receipt from "@lucide/svelte/icons/receipt";
   import Clock from "@lucide/svelte/icons/clock";
   import Flag from "@lucide/svelte/icons/flag";
 
-  // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
-  // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
+  // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (from its
+  // receipt badge) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
   // merchant; on a wider screen it has a column of its own. From lg up a row is one 40px line (logo, merchant, category,
   // account, amount in aligned columns), the same height opened or not, and a chevron opens the details: the account with its
   // institution and the bank's own text.
@@ -84,8 +84,8 @@
   </div>
 
   <div class="@container/title col-start-3 row-start-1 min-w-0 pr-3">
-    <!-- The merchant keeps at least 6 characters. Beside it, the badges, the recurring name and the order chip are their full
-         text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
+    <!-- The merchant keeps at least 6 characters. Beside it, the badges (receipt included) and the recurring name are their
+         full text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
     <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
       <span class="min-w-[6ch] truncate font-medium max-sm:max-w-full" title={name}>{name}</span>
       {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
@@ -106,9 +106,9 @@
       {#if t.retail}
         <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={orderLabel(t.retail)} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
-          class="inline-flex max-w-full shrink-0 cursor-pointer items-center gap-0.5 rounded-md py-0.5 pl-0.5 text-xs font-medium text-muted-foreground hover:text-primary @sm/title:min-w-7 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-secondary @sm/title:pl-1 @sm/title:pr-2 @sm/title:text-secondary-foreground @sm/title:hover:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!">
-          <ChevronRight class={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
-          <span class="hidden truncate @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{orderLabel(t.retail)}</span></button>
+          class={cn("inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition-colors @sm/title:px-2 max-sm:px-2",
+            showOrder ? "bg-primary/15 text-primary" : "bg-secondary text-secondary-foreground hover:bg-primary/15 hover:text-primary")}>
+          <Receipt class="size-3 shrink-0" aria-hidden="true" /><span class="hidden @sm/title:inline max-sm:inline">receipt</span></button>
       {/if}
     </div>
   </div>
@@ -126,7 +126,6 @@
     <span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>
     {#if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
-        <Badge class="bg-primary/15 text-primary">split</Badge>
         <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
           {#each t.splits ?? [] as s, i (i)}
             <span class="inline-flex items-center gap-1" title={s.note || undefined}><CatIcon name={s.category} size={16} />{s.category} {fmt(Math.abs(s.amount))}</span>
