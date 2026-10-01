@@ -152,11 +152,82 @@ def merchant_name(payee: str | None) -> str | None:
     return None
 
 
-# Whether a payee is (a tidied piece of) the bank's text: each of its words in the description as written, so a name
-# the provider gave of its own ("Walmart Supercenter" for "WAL-MART SUPERCENTER #1234") stays, as a sync keeps it.
+# The payee a sync gives the bank's text without a brand's name (categorize.bank_payee: tidy_payee, then
+# payees.shorten), frozen as they were when this was written. A payee is renamed only when it's exactly that, as a
+# sync only gives the brand's name then (simplefin._store_transaction): a name a provider gave of its own ("Walmart
+# Supercenter" for "WAL-MART SUPERCENTER #1234 DALLAS TX") stays, on old rows and new ones alike.
+_PREFIX = re.compile(
+    r"^(?:tst\s*\*|sq\s*\*|dd\s*\*|py\s*\*|sp\s*\*|pp\s*\*|paypal\s*\*|toast\s*\*|clover\s*\*|"
+    r"pos\s+(?:purchase\s+)?|debit card purchase\s+|direct debit\s+|ach debit\s+|ach credit\s+|"
+    r"checkcard\s+\d*\s*|purchase authorized on\s+\d+/\d+\s+)",
+    re.I,
+)
+_KEEP_SECOND = {"eats", "prime", "music", "one", "pass", "plus"}
+_BRAND_STAR = re.compile(r"^([A-Za-z][A-Za-z0-9&'.]{1,20})\s*\*\s*\S")
+_TRAILING_NOISE = re.compile(
+    r"(\s+-\s+\d.*$|\s+#+\s*\d+.*$|\s*##\d+.*$|\s+\d{3,}.*$|\s+\(cash\)$|\s+x{3,}\d*.*$|\s+-\s*$)", re.I
+)
+
+
+def _tidy(raw: str | None) -> str:
+    if not raw:
+        return ""
+    s = re.sub(r"\s+", " ", raw).strip()
+    for _ in range(2):
+        s = _PREFIX.sub("", s).strip()
+    m = _BRAND_STAR.match(s)
+    if m:
+        nxt = s[m.end() - 1 :].split(" ")[0].lower()
+        s = f"{m.group(1)} {nxt}" if nxt in _KEEP_SECOND else m.group(1)
+    s = re.sub(r"\s*\*\s*[A-Za-z0-9]{5,}$", "", s)
+    s = s.replace("*", " ")
+    prev = None
+    while prev != s:
+        prev = s
+        s = _TRAILING_NOISE.sub("", s).strip(" -")
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        s = re.sub(r"\s+", " ", raw).strip()
+    return " ".join(w[:1].upper() + w[1:].lower() if w.isupper() or w.islower() else w for w in s.split(" "))
+
+
+_LEAD = re.compile(r"^(?:direct deposit|direct dep|dir dep)\s+", re.I)
+_MARKER = re.compile(r"(?:c|debit|credit)?ach|ppd|ccd|baweb|cpurchase")
+_TAIL_WORDS = {"cash", "tran", "trans", "transfer", "xfer", "pay", "pmt", "pymt", "payment", "debit", "credit", "web",
+               "purchase", "deposit", "dep", "withdrawal", "wd", "bill", "online", "id"}
+_PAY_WORDS = {"pay", "pmt", "pymt", "payment"}
+
+
+def _plain(word: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", word.lower())
+
+
+def _bank_tail(words: list[str]) -> bool:
+    for i, w in enumerate(words):
+        nxt = words[i + 1] if i + 1 < len(words) else ""
+        if _MARKER.fullmatch(w) or (w == "web" and nxt in _PAY_WORDS) or (len(w) == 1 and w.isalpha() and nxt in _TAIL_WORDS):
+            return True
+    return False
+
+
+def _noise(w: str) -> bool:
+    return bool(_MARKER.fullmatch(w)) or w in _TAIL_WORDS or (len(w) == 1 and w.isalpha())
+
+
+def _shorten(name: str) -> str:
+    s = " ".join((name or "").split())
+    words = _LEAD.sub("", s).split(" ")
+    plain = [_plain(w) for w in words]
+    cut = len(words)
+    while cut > 1 and _noise(plain[cut - 1]):
+        cut -= 1
+    if cut == len(words) or not _bank_tail(plain[cut:]):
+        return s
+    return " ".join(words[:cut])
+
+
 def from_bank(payee: str | None, description: str | None) -> bool:
-    desc = (description or "").lower()
-    return bool(desc) and all(w in desc for w in (payee or "").lower().split())
+    return bool(description) and _key(payee or "") == _key(_shorten(_tidy(description)))
 
 
 def _key(s: str) -> str:

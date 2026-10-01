@@ -375,8 +375,10 @@ class MigrationTests(unittest.TestCase):
                  "payee": "Costco Gas"},                                      # not a brand's name
                 {"id": "chk|8", "account_id": "chk", "posted": "2026-09-08", "amount": -6.50, "description": "UBER *EATS",
                  "payee": "Uber Eats"},                                       # the brand's name already
-                {"id": "chk|9", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY*USA 877-778-1161",
-                 "payee": "Spotify Usa"},                                     # the bank's words, not its run of text
+                {"id": "chk|9", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY USA 8777781161",
+                 "payee": "Spotify Usa"},
+                {"id": "chk|13", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY*USA 877-778-1161",
+                 "payee": "Spotify Usa"},                                     # not what a sync makes of its text ("Spotify")
                 {"id": "chk|12", "account_id": "chk", "posted": "2026-09-10", "amount": -40.00, "description": "WAL-MART SUPERCENTER #1234",
                  "payee": "Walmart Supercenter"},                             # the provider's own name, not the bank's text
             ]
@@ -402,12 +404,11 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.payee)).fetchall()), {
                 "chk|1": "Amazon", "chk|2": "Amazon", "chk|3": "Walmart", "chk|4": "Birthday Gift", "chk|5": "Target T-1234",
                 "chk|pl:6": "Amzn Mktp Us", "chk|7": "Costco Gas", "chk|8": "Uber Eats", "chk|9": "Spotify",
-                "chk|12": "Walmart Supercenter"})
+                "chk|12": "Walmart Supercenter", "chk|13": "Spotify Usa"})
             # Each description still has the bank's text: an item matching it keeps its text (written out when it matched
-            # by name), without taking in every Amazon order. Spotify's bank text doesn't have "spotify usa": it matches
-            # the brand's name too.
+            # by name), without taking in every Amazon order; Spotify's bank text still has "spotify usa".
             self.assertEqual([tuple(r) for r in conn.execute(select(Recurring.name, Recurring.match).order_by(Recurring.id))], [
-                ("Amazon", "amzn digital"), ("Music", "spotify usa\nspotify"), ("Birthday Gift", "birthday gift")])
+                ("Amazon", "amzn digital"), ("Music", "spotify usa"), ("Birthday Gift", "birthday gift")])
             logos = schema.merchant_logos.c
             self.assertEqual({k: (w, h) for k, w, h in conn.execute(select(logos.key, logos.website, logos.hidden)).fetchall()},
                              {"amzn mktp us": ("amazon.com", 1), "amazon": ("amazon.com", 1), "wm supercenter": ("walmart.com", 0),
