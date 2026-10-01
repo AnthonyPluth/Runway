@@ -1,5 +1,13 @@
 // Churning data for component tests: a page's reply with just enough in it, each piece overridable.
+import { api } from "$lib/api";
+import { vi } from "vitest";
 import type { Benefit, ChurnCard, Churning, Wish } from "./types";
+
+/** The requests made to a path (or paths matching a pattern), from a test file that mocks `$lib/api`. */
+export const calls = (path: string | RegExp) =>
+  vi.mocked(api).mock.calls.filter((c) => (typeof path === "string" ? c[0] === path : path.test(c[0] as string)));
+/** A request's JSON body. */
+export const bodyOf = (call: unknown[]) => (call[1] as { body?: Record<string, unknown> } | undefined)?.body;
 
 export const benefit = (over: Partial<Benefit> = {}): Benefit => ({
   id: 1, card_id: 1, name: "Travel credit", kind: "credit", amount: 300, period: "annual", basis: "anniversary", annual_value: null, guests: null,

@@ -18,7 +18,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, insert, select
 
-from . import churning, db
+from . import churning, db, validate
 from .models import ChurnBenefit, ChurnBenefitUse, ChurnCard
 
 KINDS = {"credit": "Credit", "access": "Access", "status": "Status", "other": "Other"}
@@ -208,10 +208,6 @@ def alerts(cards: list[dict]) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ changes
 
-def _flag(v) -> int:
-    return 1 if v in (True, 1, "1", "true", "on") else 0
-
-
 def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = None) -> int:
     """Add a benefit to a card (a preset's name, kind and period filled in unless given), or change the fields given
     of one."""
@@ -256,7 +252,7 @@ def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = 
             f[key] = churning._num(body.get(key), label, 0, 100000)
     for key in ("counts", "remind", "active"):
         if new or key in body:
-            f[key] = _flag(body.get(key, 1))
+            f[key] = validate.flag(body.get(key, 1))
     if "guests" in body:
         f["guests"] = churning._int(body.get("guests"), "number of guests", 0, 20)
     # Guests are a lounge's (access): anything else drops them, so a benefit switched away from access doesn't keep them.

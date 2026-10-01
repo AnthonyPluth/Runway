@@ -11,13 +11,13 @@ import { api } from "$lib/api";
 import PlannerChart from "./PlannerChart.svelte";
 import { project } from "./planner";
 import RetirementPlanner from "./RetirementPlanner.svelte";
-import type { Plan, PlanData } from "./types";
+import type { PlanData, RetirementPlan } from "./types";
 
-const plan = (extra: Partial<Plan> = {}): Plan => ({
+const plan = (extra: Partial<RetirementPlan> = {}): RetirementPlan => ({
   people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 20000 }], plan_to_age: 95, spending: 60000,
   return_before: 0.05, return_after: 0.04, volatility: 0.1, inflation: 0.025, income: [], events: [], assets: [], ...extra,
 });
-const data = (extra: Partial<PlanData> = {}, p: Partial<Plan> = {}): PlanData => ({
+const data = (extra: Partial<PlanData> = {}, p: Partial<RetirementPlan> = {}): PlanData => ({
   plan: plan(p), is_default: false, current: 400000, year: 2026, assets: [],
   computed: { annual_spending: 55000, yearly_savings: 18000, expected_return: 0.05 }, ...extra,
 });
@@ -96,7 +96,7 @@ describe("RetirementPlanner", () => {
       expect(api).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(800);
       expect(api).toHaveBeenCalledOnce();
-      const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { body: { plan: Plan } }];
+      const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { body: { plan: RetirementPlan } }];
       expect(path).toBe("/api/investments/plan");
       expect(opts.body.plan.spending).toBe(600005);
     });
@@ -110,7 +110,7 @@ describe("RetirementPlanner", () => {
       await user.clear(infl);
       await user.type(infl, "3");
       await vi.advanceTimersByTimeAsync(800);
-      expect((vi.mocked(api).mock.lastCall![1] as { body: { plan: Plan } }).body.plan.inflation).toBeCloseTo(0.03);
+      expect((vi.mocked(api).mock.lastCall![1] as { body: { plan: RetirementPlan } }).body.plan.inflation).toBeCloseTo(0.03);
     });
 
     it("keeps inflation out of the assumptions, next to the homes it applies to", () => {
@@ -129,7 +129,7 @@ describe("RetirementPlanner", () => {
       expect(api).not.toHaveBeenCalled();
       unmount();
       expect(api).toHaveBeenCalledOnce();
-      expect((vi.mocked(api).mock.calls[0][1] as { body: { plan: Plan } }).body.plan.spending).toBe(600005);
+      expect((vi.mocked(api).mock.calls[0][1] as { body: { plan: RetirementPlan } }).body.plan.spending).toBe(600005);
     });
 
     it("doesn't save on leaving when nothing changed", () => {

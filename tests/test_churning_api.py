@@ -1,13 +1,11 @@
 """The Churning page's API handlers (runway/server/api/churning.py), on the sample data plus a few cards."""
-import os
-import tempfile
 import unittest
 from datetime import date, timedelta
-from unittest import mock
 
-from runway import db, demo
+from runway import demo
 from runway.server.api import churning as api
 from runway.server.common import ApiError
+from tests.shared import DbCase
 
 TODAY = date.today()
 
@@ -16,21 +14,11 @@ def q(**kw):
     return {k: [str(v)] for k, v in kw.items()}
 
 
-class ChurningApiTests(unittest.TestCase):
+class ChurningApiTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        env = mock.patch.dict(os.environ, {"RUNWAY_DATA": self.tmp.name})
-        env.start()
-        self.addCleanup(env.stop)
-        path = os.path.join(self.tmp.name, "runway.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         demo.seed(self.c, TODAY)
         self.c.execute("INSERT INTO users(sub, first_name, last_seen) VALUES ('u1', 'Alex', 1)")
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def add(self, **body):
         return api.api_churn_card_add(self.c, {}, {"owner": "Alex", "issuer": "chase", "opened_on": TODAY.isoformat(), **body})["id"]

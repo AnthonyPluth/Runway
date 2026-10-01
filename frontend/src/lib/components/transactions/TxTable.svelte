@@ -9,9 +9,10 @@
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import type { RecurringItem } from "$lib/components/recurring/types";
   import { restoreTx, type Was } from "./restore";
   import TxRow from "./TxRow.svelte";
-  import type { RecurringItem, Tx } from "./types";
+  import type { Tx } from "./types";
 
   // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
   // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll. Changing

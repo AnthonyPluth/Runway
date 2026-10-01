@@ -4,21 +4,15 @@ import tempfile
 import unittest
 
 from runway import categories, categorize, db, rules, splits
+from tests.shared import DbCase
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "r.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         for aid, kind in (("chk", "checking"), ("cc", "credit")):
             self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES (?,?,?,0)", (aid, aid.upper(), kind))
         self.n = 0
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, amount, desc, acct="chk", category=None, source=None):
         self.n += 1

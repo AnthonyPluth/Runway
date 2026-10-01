@@ -6,10 +6,10 @@ from runway import db, forecast
 from runway import settings_keys as sk
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
-from tests.test_runway import Base, TODAY
+from tests.shared import TODAY, LedgerCase
 
 
-class SuggestionDismissTests(Base):
+class SuggestionDismissTests(LedgerCase):
     def setUp(self):
         super().setUp()
         self.acct("chk", "checking", 3000.0)
@@ -60,7 +60,7 @@ class SuggestionDismissTests(Base):
                 api_recurring.api_recurring_suggestion_dismiss(self.conn, None, body)
 
 
-class AmountSignTests(Base):
+class AmountSignTests(LedgerCase):
     """The form sends the signed amount (negative for money out); the API stores what it's given."""
     def setUp(self):
         super().setUp()

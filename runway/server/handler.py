@@ -391,6 +391,7 @@ class Handler(BaseHTTPRequestHandler):
         # The look of the sign-in pages is public; everything else needs you signed in.
         if url.path not in PUBLIC_FILES:
             self.user = self._user(renew=url.path.startswith("/api/"))   # API answers are never cached, so a new cookie is safe there
+            monitoring.set_user(self.user)   # its reports and traces say who (as a code; see monitoring.user_id)
             if not self.user:
                 if url.path.startswith("/api/"):
                     return self._json(401, {"error": "You've been signed out.", "login": "/auth/login"})

@@ -3,7 +3,7 @@
   import { autosave } from "$lib/autosave";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt } from "$lib/format";
+  import { barWidth, fmt } from "$lib/format";
   import { cn } from "$lib/utils";
   import Pencil from "@lucide/svelte/icons/pencil";
   import { tick } from "svelte";
@@ -101,7 +101,7 @@
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
           <td class="text-right tabular-nums">
-            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={`${Math.min(100, x.allocation * 100).toFixed(1)}%`}></span></span>{(x.allocation * 100).toFixed(1)}%
+            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span>{(x.allocation * 100).toFixed(1)}%
           </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>

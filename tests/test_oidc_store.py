@@ -1,21 +1,21 @@
 """What sign-in keeps in the database: unfinished sign-ins (auth_pending), sessions (auth_sessions, stored hashed) and
 the people who've signed in (users). The HTTP flow is in test_server.py; these pin the rows."""
 import os
-import tempfile
 import time
 import unittest
 import urllib.parse
 from unittest import mock
 
-from runway import db, oidc, secretbox
+from runway import oidc, secretbox
+from tests.shared import DbCase
 
 ISSUER = "https://id.example.com"
 
 
-class OIDCStoreTests(unittest.TestCase):
+class OIDCStoreTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        env = mock.patch.dict(os.environ, {"RUNWAY_DATA": self.tmp.name, "OIDC_ISSUER": ISSUER, "OIDC_CLIENT_ID": "runway",
+        super().setUp()
+        env = mock.patch.dict(os.environ, {"OIDC_ISSUER": ISSUER, "OIDC_CLIENT_ID": "runway",
                                            "OIDC_CLIENT_SECRET": "s", "OIDC_ALLOWED_EMAILS": "me@example.com",
                                            "RUNWAY_PUBLIC_URL": "https://runway.example.com"})
         env.start()
@@ -23,13 +23,6 @@ class OIDCStoreTests(unittest.TestCase):
         oidc._discovery[ISSUER] = (time.time(), {"issuer": ISSUER, "authorization_endpoint": ISSUER + "/authorize",
                                                  "token_endpoint": ISSUER + "/token", "end_session_endpoint": ISSUER + "/logout"})
         self.addCleanup(oidc._discovery.clear)
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def pending(self):
         return [tuple(r) for r in self.c.execute("SELECT state, next FROM auth_pending ORDER BY created")]
@@ -188,6 +181,14 @@ class OIDCStoreTests(unittest.TestCase):
         oidc.backfill_users(self.c)
         self.assertEqual(self.users(), [("u1", "u1@example.com", "Name u1", "Name", 30.0),
                                         ("u2", "kept@example.com", "Kept", "Kept", 5.0)])
+
+
+class OwnerTests(unittest.TestCase):
+    def test_first_names(self):
+        from runway import oidc
+        self.assertEqual(oidc.first_name("Anthony Pluth", "a@x.com"), "Anthony")
+        self.assertEqual(oidc.first_name(None, "sara.smith@x.com"), "Sara")
+        self.assertEqual(oidc.first_name("sara@x.com", "sara@x.com", "Sara Jane"), "Sara")
 
 
 if __name__ == "__main__":

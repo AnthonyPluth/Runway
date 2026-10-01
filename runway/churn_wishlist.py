@@ -23,7 +23,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select
 
-from . import bank_bonuses, churning, db
+from . import bank_bonuses, churning, db, validate
 from .models import ChurnScore, ChurnWish
 
 KINDS = ("card", "bank_bonus")
@@ -266,7 +266,7 @@ def save(conn, body: dict, wish_id: int | None = None) -> int:
         f["apply_url"] = _link(body.get("apply_url"))
     for key in ("business", "once_per_lifetime", "assume_prior_planned"):
         if key in body or new:
-            f[key] = churning._flag(body.get(key))
+            f[key] = validate.flag(body.get(key))
     for key, label, high in (("annual_fee", "annual fee", 10000), ("bonus", "bonus", 1e7), ("bonus_spend", "spending needed", 1e6)):
         if key in body:
             f[key] = churning._num(body.get(key), label, 0, high)

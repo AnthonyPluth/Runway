@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from . import db, equity, forecast, networth
+from . import db, equity, forecast, networth, validate
 from . import settings_keys as sk
 from .models import Account
 
@@ -28,14 +28,13 @@ class PlanError(ValueError):
     pass
 
 
+# Numbers go to db.number as sent (no "$" or "," dropped, and true is 1); left out, one isn't a number.
+_v = validate.Validator(PlanError, drop="", missing="{label} must be a number", not_number="{label} must be a number",
+                        out_of_range="{label} is out of range")
+
+
 def _num(v, label: str, low: float, high: float) -> float:
-    try:
-        n = db.number(v)
-    except (TypeError, ValueError):
-        raise PlanError(f"{label} must be a number") from None
-    if not low <= n <= high:
-        raise PlanError(f"{label} is out of range")
-    return n
+    return _v.number(v, label, low, high, required=True)
 
 
 def _int(v, label: str, low: int, high: int) -> int:
