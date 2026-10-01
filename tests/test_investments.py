@@ -288,6 +288,16 @@ class FireTests(Base):
         self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
         self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
 
+    def test_a_transfer_is_the_loans_payment_only_by_name_size_and_not_a_cards(self):
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        months = (3, 4, 5, 6)
+        # a Chase card's autopay names the auto loan's lender, at the card bill's size: not the loan's payment
+        card = [out(m, 520, "chase credit crd autopay") for m in months]
+        self.assertFalse(planner.payment_counted(card, 500, ["Chase", "Auto loan"], named_only=True))
+        # past 10% of it (an escrow allowance is for spending only)
+        self.assertFalse(planner.payment_counted([out(m, 600, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
+        self.assertTrue(planner.payment_counted([out(m, 500, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
+
     def test_a_mortgage_paid_with_its_escrow_is_still_its_payment(self):
         # The lender reports $1,850 of principal and interest; the bank shows $2,450 going out, taxes and insurance in
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}

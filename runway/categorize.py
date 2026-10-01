@@ -65,7 +65,7 @@ def tidy_payee(raw: str | None) -> str:
 # ---------------------------------------------------------------------------------------------------------
 # Built-in heuristics that are safe without asking anyone.
 
-_CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit ?card|cardmember|payment to .*card|amex|chase credit|citi autopay|"
+CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit ?card|cardmember|payment to .*card|amex|chase credit|citi autopay|"
                                r"discover e-payment|applecard|capital one\b.*\b(?:pmt|payment)", re.I)
 # "autopay" and "epay" are just as often a utility, insurer or loan: only a card payment when something says card.
 _AUTOPAY = re.compile(r"autopay|e-?pay", re.I)
@@ -85,7 +85,7 @@ def heuristic_category(tx: dict, account_kind: str) -> str | None:
     if account_kind == "credit" and amt > 0 and _CARD_PAYMENT_IN.search(desc):
         return "Credit Card Payment"
     if account_kind in ("checking", "savings") and amt < 0 and not _NOT_CARD.search(desc) and (
-            _CARD_PAYMENT_OUT.search(desc) or (_AUTOPAY.search(desc) and _CARD_WORDS.search(desc))):
+            CARD_PAYMENT_OUT.search(desc) or (_AUTOPAY.search(desc) and _CARD_WORDS.search(desc))):
         return "Credit Card Payment"
     return None
 

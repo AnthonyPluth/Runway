@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from . import db, equity, forecast, loans, networth, validate
+from . import categorize, db, equity, forecast, loans, networth, validate
 from . import settings_keys as sk
 from .models import Account
 
@@ -30,11 +30,14 @@ def payment_counted(spent: list[dict], payment: float, names: list[str], named_o
     portfolio.spent_outflows) in at least PAYMENT_MONTHS different months, as a real payment repeats. When some of
     those name the loan (its lender or account name in the payee), only they count, so a grocery run that happens to
     be the size of a car payment doesn't; and one that names it can be more than the payment, up to PAYMENT_ESCROW
-    times it, as a mortgage paid with its escrow is. With `named_only`, only ones that name it count: for transfers,
-    which repeat at fixed amounts (to savings, a brokerage) and so look like a payment by size alone."""
+    times it, as a mortgage paid with its escrow is. With `named_only`, only ones that name it count, within
+    PAYMENT_MATCH and not a card's payment: for transfers, which repeat at fixed amounts (to savings, a brokerage),
+    and whose lender is often also the bank of a card paid by transfer ("CHASE CREDIT CRD AUTOPAY")."""
     names = [n.lower() for n in names if n and len(n.strip()) >= 3]
     low = (1 - PAYMENT_MATCH) * payment
-    named = [s for s in spent if low <= s["amount"] <= PAYMENT_ESCROW * payment and any(n in s["text"] for n in names)]
+    high = (1 + PAYMENT_MATCH if named_only else PAYMENT_ESCROW) * payment
+    named = [s for s in spent if low <= s["amount"] <= high and any(n in s["text"] for n in names)
+             and not (named_only and categorize.CARD_PAYMENT_OUT.search(s["text"]))]
     near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
     return len({s["month"] for s in (named if named_only else named or near)}) >= PAYMENT_MONTHS
 
