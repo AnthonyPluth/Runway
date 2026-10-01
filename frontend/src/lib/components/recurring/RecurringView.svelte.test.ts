@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { isoDay } from "$lib/format";
-import type { RecurringItem, Suggestion } from "$lib/components/recurring/types";
+import type { DismissedSuggestion, RecurringItem, Suggestion } from "$lib/components/recurring/types";
 import type { Account } from "$lib/types";
 import { toast } from "svelte-sonner";
 import Recurring from "./RecurringView.svelte";
@@ -19,12 +19,14 @@ const item = (extra: Partial<RecurringItem> = {}): RecurringItem => ({
   id: 1, name: "Rent", account_id: "a1", amount: -1500, frequency: "monthly", anchor_date: "2026-03-01", active: 1, matched_count: 0, next_date: "2026-04-01", ...extra,
 });
 const suggestion = (extra: Partial<Suggestion> = {}): Suggestion => ({ key: "a1|netflix|monthly", account_id: "a1", name: "Netflix", match: "NETFLIX", amount: -15.49, frequency: "monthly", anchor_date: "2026-03-05", count: 6, ...extra });
+const gone = (extra: Partial<DismissedSuggestion> = {}): DismissedSuggestion => ({ key: "a1|hulu|monthly", account_id: "a1", account_name: "Checking", match: "hulu", frequency: "monthly", ...extra });
 const serve = (items: RecurringItem[], suggestions: Suggestion[] = [], more: Record<string, unknown> = {}) =>
   vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
     if (path in more) return more[path] as never;
     if (path === "/api/accounts") return accounts as never;
     if (path === "/api/recurring" && !opts?.method) return items as never;
     if (path === "/api/recurring/suggestions") return suggestions as never;
+    if (path === "/api/recurring/suggestions/dismissed") return [] as never;
     return { linked: 0 } as never;
   });
 
@@ -88,6 +90,46 @@ describe("Recurring page", () => {
     expect(await screen.findByRole("heading", { name: "Add a recurring item" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("heading", { name: "Add a recurring item" })).not.toBeInTheDocument();
+  });
+
+  describe("the logo", () => {
+    it("shows the item's logo, and falls back to its category's icon without one", async () => {
+      serve([item({ logo: "/api/merchants/m-rent/logo" }), item({ id: 2, name: "Water", logo: null })]);
+      const { container } = render(Recurring);
+      await screen.findByText("Rent");
+      expect(container.querySelectorAll("img[src='/api/merchants/m-rent/logo']")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: "Logo for Water" })).toBeInTheDocument();
+    });
+
+    it("lets you choose it by the item's name with the same picker as Transactions, then refreshes the list", async () => {
+      let list = [item()];
+      serve(list, [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: true, configured: true, candidates: [{ name: "Landlord", domain: "landlord.com" }], error: null } });
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/recurring" && !opts?.method) return list as never;
+        if (path === "/api/merchants/logo") { list = [item({ logo: "/api/merchants/site%3Alandlord.com/logo" })]; return { ok: true } as never; }
+        return base(path, opts as never);
+      });
+      const { container } = render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
+      expect(screen.queryByText("Landlord")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /Landlord/ }));
+      expect(api).toHaveBeenCalledWith("/api/merchants/logo", { method: "POST", body: { name: "Rent", website: "landlord.com" } });
+      await waitFor(() => expect(container.querySelector("img[src='/api/merchants/site%3Alandlord.com/logo']")).toBeInTheDocument());
+    });
+
+    it("doesn't open the item when you click its logo", async () => {
+      serve([item()], [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: false, configured: false, candidates: [], error: null } });
+      const { container } = render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
+      expect(container.querySelector("details")).not.toHaveAttribute("open");
+      // The panel isn't inside the item's summary, so clicking its text doesn't open the item (or close the panel).
+      const panel = await screen.findByRole("dialog", { name: "Logo for Rent" });
+      expect(container.querySelector("summary")!.contains(panel)).toBe(false);
+      await userEvent.click(within(panel).getByText("Logo for Rent"));
+      expect(container.querySelector("details")).not.toHaveAttribute("open");
+      expect(screen.getByRole("dialog", { name: "Logo for Rent" })).toBeInTheDocument();
+    });
   });
 
   describe("the add form", () => {
@@ -248,6 +290,56 @@ describe("Recurring page", () => {
       await waitFor(() => expect(screen.queryByText("Netflix")).not.toBeInTheDocument());
       expect(screen.getByText("Gym")).toBeInTheDocument();
       expect(posts("/api/recurring/suggestions/dismiss")[0][1]).toMatchObject({ method: "POST", body: { key: "a1|netflix|monthly" } });
+    });
+
+    it("offers a dismissed suggestion back: N dismissed · Show lists them, Restore brings one back", async () => {
+      let restored = false;
+      const hulu = suggestion({ key: "a1|hulu|monthly", name: "Hulu", match: "hulu" });
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/accounts") return accounts as never;
+        if (path === "/api/recurring" && !opts?.method) return [item()] as never;
+        if (path === "/api/recurring/suggestions") return (restored ? [hulu] : []) as never;
+        if (path === "/api/recurring/suggestions/dismissed") return (restored ? [] : [gone(), gone({ key: "a1|gym|weekly", match: "gym", frequency: "weekly" })]) as never;
+        if (path === "/api/recurring/suggestions/restore") { restored = true; return { ok: true } as never; }
+        return {} as never;
+      });
+      render(Recurring);
+      expect(await screen.findByText("2 dismissed ·")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Restore hulu" })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show" }));
+      expect(screen.getByText("monthly · Checking")).toBeInTheDocument();
+      expect(screen.getByText("weekly · Checking")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Restore hulu" }));
+      expect(await screen.findByRole("button", { name: "Add Hulu" })).toBeInTheDocument();
+      expect(posts("/api/recurring/suggestions/restore")[0][1]).toMatchObject({ body: { key: "a1|hulu|monthly" } });
+      expect(toast.success).toHaveBeenCalledWith("hulu can be suggested again");
+      expect(screen.queryByText(/dismissed ·/)).not.toBeInTheDocument();
+    });
+
+    it("lists a suggestion you just dismissed, ready to restore", async () => {
+      serve([item()], [suggestion()]);
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Netflix is not recurring" }));
+      expect(await screen.findByText("1 dismissed ·")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show" }));
+      expect(screen.getByRole("button", { name: "Restore NETFLIX" })).toBeInTheDocument();
+    });
+
+    it("says nothing when none are dismissed", async () => {
+      serve([item()], [suggestion()]);
+      render(Recurring);
+      await screen.findByText("Netflix");
+      expect(screen.queryByText(/dismissed/)).not.toBeInTheDocument();
+    });
+
+    it("keeps a dismissed suggestion listed when restoring it fails", async () => {
+      serve([item()], [], { "/api/recurring/suggestions/dismissed": [gone()] });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Show" }));
+      vi.mocked(api).mockRejectedValueOnce(new Error("Boom"));
+      await userEvent.click(screen.getByRole("button", { name: "Restore hulu" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Boom"));
+      expect(screen.getByRole("button", { name: "Restore hulu" })).toBeInTheDocument();
     });
 
     it("keeps a suggestion when dismissing it fails", async () => {

@@ -6,9 +6,9 @@ from datetime import date, timedelta
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.exc import OperationalError
 
-from runway import db, forecast, plaidapi, recurring
+from runway import churning, db, forecast, plaidapi, recurring
 from runway import settings_keys as sk
-from runway.models import Account, Budget, CardStatement, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
+from runway.models import Account, Budget, CardStatement, ChurnCard, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -1020,6 +1020,161 @@ class PaymentModeTests(LedgerCase):
         card = {c["date"]: c for c in fc["budget"]["changes"] if c["kind"] == "card"}
         i1 = (550 + charged / 2) * 0.02
         self.assertAlmostEqual(-card["2026-11-05"]["amount"], self.minimum(550 + i1 + charged, i1), places=1)
+
+
+class AnnualFeeTests(LedgerCase):
+    """Churning cards' annual fees, on ForecastTests' card (its statements close the 10th and are due the 5th)."""
+
+    def setUp(self):
+        super().setUp()
+        ForecastTests.card_setup(self)
+
+    def churn(self, opened="2024-10-20", product="Sapphire", annual_fee=95.0, **kw):
+        self.conn.execute(insert(ChurnCard).values(owner="Alex", issuer="chase", product=product, opened_on=opened,
+                                                   annual_fee=annual_fee, **kw))
+
+    def payments(self, fc):
+        return {e["date"]: e["amount"] for e in fc["events"] if e["kind"] == "card"}
+
+    def test_fee_is_a_charge_on_the_card_paid_with_its_statement(self):
+        before = forecast.build(self.conn, TODAY, 90)
+        self.churn(account_id="cc")   # opened Oct 20: its fee is on October's statement, which closes Oct 10
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(fc["fees"], [{
+            "date": "2026-10-10", "amount": -95.0, "kind": "fee", "churn_card_id": 1, "name": "Sapphire annual fee",
+            "account_id": "cc", "account": "cc", "category": "Fees & Interest", "paid_on": "2026-11-05", "paid_from": "chk"}])
+        # Not taken out of checking on its own: it's in the Nov 5 payment of the statement it's on, and only there.
+        self.assertNotIn("fee", [e["kind"] for e in fc["events"]])
+        was, now = self.payments(before), self.payments(fc)
+        self.assertAlmostEqual(now["2026-11-05"] - was["2026-11-05"], -95.0, places=2)
+        self.assertEqual({d: a for d, a in now.items() if d != "2026-11-05"}, {d: a for d, a in was.items() if d != "2026-11-05"})
+        i = fc["dates"].index("2026-11-05")
+        self.assertAlmostEqual(fc["total"][i] - before["total"][i], -95.0, places=2)
+        self.assertEqual(fc["total"][i - 1], before["total"][i - 1])
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        self.assertEqual(card["annual_fees"], [{"date": "2026-10-10", "amount": -95.0, "category": "Fees & Interest"}])
+
+    def test_a_product_change_keeps_the_accounts_anniversary(self):
+        # Opened in October 2023, changed in July to a card with a fee: the fee is still October's, not July's.
+        self.churn(opened="2023-10-20", product="Reserve", annual_fee=0.0, status="product_changed")
+        self.churn(opened="2026-07-01", product="Preferred", account_id="cc", changed_from=1)
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual([(f["name"], f["date"]) for f in fc["fees"]], [("Preferred annual fee", "2026-10-10")])
+        card = next(c for c in churning.load(self.conn)["cards"] if c["product"] == "Preferred")
+        self.assertEqual(churning.next_fee(card, TODAY), date(2026, 10, 20))
+
+    def test_fee_after_the_close_is_on_the_next_statement(self):
+        # Paid in full each month, the fee lands on the statement after the one in progress when the closing day comes
+        # first: anniversary month November, closing Nov 10, paid Dec 5 (a Saturday: Monday the 7th).
+        before = self.payments(forecast.build(self.conn, TODAY, 90))
+        self.churn(opened="2023-11-02", account_id="cc")
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual((fc["fees"][0]["date"], fc["fees"][0]["paid_on"]), ("2026-11-10", "2026-12-07"))
+        self.assertAlmostEqual(self.payments(fc)["2026-12-07"] - before["2026-12-07"], -95.0, places=2)
+
+    def test_fee_past_the_horizon_of_its_payment_is_only_listed(self):
+        # Dec 10's statement is paid Jan 5, past a 80-day horizon: the fee is listed, its payment isn't in the chart.
+        before = forecast.build(self.conn, TODAY, 80)
+        self.churn(opened="2022-12-01", account_id="cc")
+        fc = forecast.build(self.conn, TODAY, 80)
+        self.assertEqual((fc["fees"][0]["date"], fc["fees"][0]["paid_on"]), ("2026-12-10", None))
+        self.assertEqual(fc["total"], before["total"])
+
+    def test_no_fee_for_closed_planned_free_or_charged_cards(self):
+        self.churn(status="closed", closed_on="2026-01-05", account_id="cc")
+        self.churn(status="product_changed", closed_on="2026-01-05", account_id="cc")
+        self.churn(closed_on="2026-10-01", account_id="cc")                       # set to close before the fee
+        self.churn(plan="close", account_id="cc")                                 # to close before the fee
+        self.churn(plan="product_change", plan_date="2026-10-01", account_id="cc")
+        self.churn(annual_fee=0.0, account_id="cc")
+        self.churn(annual_fee=None, account_id="cc")
+        self.churn(opened="2026-01-15", account_id="cc")                          # opened this year: no fee till next
+        before = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(before["fees"], [])
+        # A plan already done, or one for after the fee, leaves the fee to come.
+        self.churn(plan="close", plan_date="2026-10-20", account_id="cc")
+        self.churn(plan="keep", account_id="cc")
+        self.assertEqual(len(forecast.build(self.conn, TODAY, 90)["fees"]), 2)
+
+    def test_no_fee_once_charged(self):
+        self.churn(account_id="cc")
+        self.tx("cc", "2025-10-10", -95.0, "ANNUAL FEE", "Fees & Interest")   # last year's: this year's is still to come
+        self.assertEqual(len(forecast.build(self.conn, TODAY, 90)["fees"]), 1)
+        self.tx("cc", "2026-09-21", 95.0, "ANNUAL FEE REFUND", "Refunds")        # a refund isn't the fee
+        self.assertEqual(len(forecast.build(self.conn, TODAY, 90)["fees"]), 1)
+        self.tx("cc", "2026-09-22", -95.0, "ANNUAL MEMBERSHIP FEE", "Fees & Interest", pending=1)   # charged early
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(fc["fees"], [])
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        self.assertEqual(card["annual_fees"], [])
+
+    def test_late_fee_comes_today(self):
+        # Anniversary (closing day) Oct 10, and it's the 15th: not charged yet, so it's still coming, today.
+        self.churn(account_id="cc")
+        self.churn(opened="2024-10-02", product="Unlinked")                      # can't tell: nothing
+        fees = forecast.build(self.conn, date(2026, 10, 15), 60)["fees"]
+        self.assertEqual([(f["name"], f["date"], f["late_from"]) for f in fees], [("Sapphire annual fee", "2026-10-15", "2026-10-10")])
+        self.tx("cc", "2026-10-12", -95.0, "ANNUAL FEE")
+        self.assertEqual(forecast.build(self.conn, date(2026, 10, 15), 60)["fees"], [])
+        # November: October's anniversary is over.
+        self.assertEqual(forecast.build(self.conn, date(2026, 11, 1), 60)["fees"], [])
+
+    def test_a_recurring_item_for_the_fee_is_not_doubled(self):
+        self.churn(account_id="cc")
+        self.conn.execute(insert(Recurring).values(name="Sapphire fee", account_id="cc", amount=-95, frequency="yearly",
+                                                   anchor_date="2025-10-12", active=1))
+        self.assertEqual(forecast.build(self.conn, TODAY, 90)["fees"], [])
+        # one that isn't a fee, or not near the anniversary, doesn't count
+        self.conn.execute(update(Recurring).values(name="Sapphire travel credit"))
+        self.assertEqual(len(forecast.build(self.conn, TODAY, 90)["fees"]), 1)
+        self.conn.execute(update(Recurring).values(name="Sapphire fee", anchor_date="2026-03-12"))
+        self.assertEqual(len(forecast.build(self.conn, TODAY, 90)["fees"]), 1)
+
+    def test_unlinked_card_is_listed_without_touching_cash(self):
+        before = forecast.build(self.conn, TODAY, 90)
+        self.churn(opened="2020-11-30", product="Gold")             # no account: on the anniversary itself
+        self.acct("hidden", "credit", -10.0, hidden=1)
+        self.churn(opened="2021-12-05", product="Hidden", account_id="hidden")
+        self.acct("sav", "savings", 100.0)
+        self.churn(opened="2021-11-03", product="Odd", account_id="sav")  # linked to something that isn't a card
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual([(f["name"], f["date"], f["account_id"], f["paid_on"]) for f in fc["fees"]],
+                         [("Odd annual fee", "2026-11-03", None, None), ("Gold annual fee", "2026-11-30", None, None),
+                          ("Hidden annual fee", "2026-12-05", None, None)])
+        self.assertEqual((fc["total"], self.payments(fc)), (before["total"], self.payments(before)))
+
+    def test_a_card_without_a_statement_is_listed_on_its_anniversary(self):
+        self.acct("cc2", "credit", -50.0, pay_from="chk")             # no statement: its payments aren't forecast
+        self.churn(opened="2019-11-17", account_id="cc2")
+        fees = forecast.build(self.conn, TODAY, 90)["fees"]
+        self.assertEqual([(f["date"], f["account_id"], f["paid_on"]) for f in fees], [("2026-11-17", "cc2", None)])
+
+    def test_short_months_and_leap_days(self):
+        card = {"id": 1, "product": "Plat", "annual_fee": 695.0, "opened_on": "2024-02-29", "status": "open"}
+        on = lambda today, end, closing=None: [f["date"] for f in forecast.annual_fees(self.conn, card, today, end, closing, [])]
+        self.assertEqual(on(date(2027, 1, 15), date(2027, 3, 31)), ["2027-02-28"])     # Feb 29, not a leap year
+        self.assertEqual(on(date(2027, 3, 1), date(2028, 3, 31)), ["2028-02-29"])      # and in one
+        self.assertEqual(on(date(2027, 1, 15), date(2027, 3, 31), 31), ["2027-02-28"])  # closing the 31st
+        self.assertEqual(on(date(2027, 1, 15), date(2027, 3, 31), 5), ["2027-02-05"])
+        self.assertEqual(on(date(2024, 3, 1), date(2025, 1, 31)), [])                  # the first year: none yet
+        # A long horizon has the next year's too; a fee month left over from before doesn't move it.
+        card.update(opened_on="2023-10-31", fee_month=3)
+        self.assertEqual(on(date(2026, 9, 23), date(2027, 11, 30)), ["2026-10-31", "2027-10-31"])
+        self.assertEqual(on(date(2026, 11, 1), date(2027, 9, 30)), [])
+
+    def test_budget_line_keeps_the_fee(self):
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        before = forecast.build(self.conn, TODAY, 90)["budget"]
+        self.churn(account_id="cc")
+        fc = forecast.build(self.conn, TODAY, 90)
+        paid = lambda b, d: b["total"][fc["dates"].index(d) - 1] - b["total"][fc["dates"].index(d)]
+        self.assertAlmostEqual(paid(fc["budget"], "2026-11-05") - paid(before, "2026-11-05"), 95.0, places=2)
+        # a budget for fees has it already
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=10, pay_with="cc"))
+        with_fees = forecast.build(self.conn, TODAY, 90)
+        self.churn(product="Second", account_id="cc")
+        again = forecast.build(self.conn, TODAY, 90)
+        self.assertAlmostEqual(paid(again["budget"], "2026-11-05"), paid(with_fees["budget"], "2026-11-05"), places=2)
 
 
 if __name__ == "__main__":

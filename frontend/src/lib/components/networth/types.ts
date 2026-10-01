@@ -36,6 +36,8 @@ export interface Asset {
   /** When the home can next be looked up (once a week at most), or null if it can be now. */
   next_lookup: string | null;
   current_value: number;
+  /** A home Realie values (set up, an address it can use, and its value from Realie): its value isn't typed by hand. */
+  realie_valued?: boolean;
 }
 
 /** GET /api/networth */

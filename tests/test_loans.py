@@ -147,7 +147,7 @@ class SellableTests(LedgerCase):
         self.assertEqual(h["owed_by_year"][-1], 0)
         # 360 payments from October 2026: the last in September 2056; no money out like it, so it isn't in spending
         self.assertEqual(h["loan"], {"rate": 6.5, "payment": 1264.14, "source": "manual", "note": None, "account_id": "mtg",
-                                     "payment_counted": False, "payoff_year": 2056})
+                                     "payment_counted": None, "payoff_year": 2056})
 
     def test_a_home_whose_loan_has_no_rate_keeps_todays_balance(self):
         self.acct("mtg", "loan", 200_000, owed_positive=1)
@@ -173,7 +173,7 @@ class SellableTests(LedgerCase):
                                            "cliff_months": 12})
         e = self.sellable("equity:")
         self.assertEqual(e["value_by_year"], [12_000, 24_000, 36_000, 48_000])
-        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, 0))
+        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, None))   # keeps pace with inflation
 
     def test_equity_with_nothing_vested_yet_is_offered_if_it_will_vest(self):
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
@@ -187,14 +187,28 @@ class SellableTests(LedgerCase):
         equity.save_company(self.conn, {"name": "Unpriced"})
         self.assertFalse(any(a["key"].startswith("equity:") for a in planner.sellable(self.conn, TODAY)))
 
-    def test_options_past_their_expiration_count_only_what_was_exercised(self):
-        # 1,000 options at $0.50, all vested by TODAY; 200 exercised; they expire in 2028.
+    def test_options_expiring_later_are_taken_as_exercised_first(self):
+        # 1,000 options at $0.50, all vested by TODAY; 200 exercised; they expire in 2028. Nobody lets vested options
+        # lapse, so selling after 2028 still counts them: 800 × $1.50 spread + 200 shares × $2, every year.
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
         equity.save_grant(self.conn, cid, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2022-01-01",
                                            "vest_months": 48, "exercised": 200, "expires_on": "2028-06-30"})
-        e = self.sellable("equity:")
-        # Today and next year: 800 × $1.50 spread + 200 shares × $2; from 2028-09 on, only the 200 exercised shares.
-        self.assertEqual(e["value_by_year"], [1_600, 1_600, 400])
+        self.assertEqual(self.sellable("equity:")["value_by_year"], [1_600])
+
+    def test_options_vest_only_until_they_expire_and_expired_ones_count_what_was_exercised(self):
+        # 1,200 options vesting monthly over 4 years from 2025-10-01, expiring 2027-10-01: 24 months' worth (600) vest.
+        cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
+        equity.save_grant(self.conn, cid, {"kind": "nso", "quantity": 1200, "strike": 1, "vest_start": "2025-10-01",
+                                           "vest_months": 48, "expires_on": "2027-10-01"})
+        by_year = self.sellable("equity:")["value_by_year"]
+        self.assertEqual(by_year[-1], 600)   # 600 × $1 spread, from the expiry on
+        self.assertEqual(len(by_year), 3)    # and nothing changes after it
+        # one that expired before today: only what was exercised from it
+        cid2 = equity.save_company(self.conn, {"name": "Oldco", "share_price": 2})
+        equity.save_grant(self.conn, cid2, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2018-01-01",
+                                            "vest_months": 48, "exercised": 300, "expires_on": "2026-01-01"})
+        old = next(a for a in planner.sellable(self.conn, TODAY) if a["name"] == "Oldco")
+        self.assertEqual(old["value_by_year"], [600])
 
     def test_a_grant_whose_schedule_cant_be_worked_out_stays_at_today(self):
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})

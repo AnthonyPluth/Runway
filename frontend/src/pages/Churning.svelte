@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -55,7 +56,9 @@
   const upcoming = $derived(d ? mine(d.upcoming, person) : []);
   let showClosed = $state(false);
   const visibleCards = $derived(showClosed ? cards : cards.filter((c) => c.status === "open"));
-  const visibleBank = $derived(showClosed ? bank : bank.filter((b) => b.state !== "closed"));
+  // Bonuses that are paid (or the account closed) are tucked into a collapsed group under the ones still in play.
+  const openBank = $derived(bank.filter((b) => b.state !== "received" && b.state !== "closed"));
+  const doneBank = $derived(bank.filter((b) => b.state === "received" || b.state === "closed"));
 
   // A brand-new page: no cards, bank bonuses or plans yet. Upcoming, Planned, Best card and Rewards give way to one block.
   const noData = $derived(!!d && !d.cards.length && !d.bank.length && !d.wishlist.length && !d.tasks.length);
@@ -69,11 +72,9 @@
 
   // Over 5/24 is a warning; someone with no cards on file isn't.
   const five24Tone = (p: string) => (d?.five24[p] && !d.five24[p].under ? ("warn" as const) : undefined);
-  const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0 });
+  const fees = $derived(d ? feesDue(cards.filter((c) => c.status === "open"), d.today) : { total: 0, count: 0, undecided: 0 });
   const activeCards = $derived(cards.filter((c) => c.bonus_state === "active"));
   const activeBank = $derived(bank.filter((b) => b.state === "active" || b.state === "met"));
-  const year = $derived(d?.today.slice(0, 4) ?? "");
-  const bankThisYear = $derived(d ? people.reduce((s, p) => s + (d!.bank_income[p]?.[year] ?? 0), 0) : 0);
   const incomeYears = $derived(d ? [...new Set(people.flatMap((p) => Object.keys(d!.bank_income[p] ?? {})))].sort().reverse() : []);
 
   // The open form is remembered by id, so it keeps its place when the data behind it is reloaded (a benefit was marked
@@ -106,7 +107,10 @@
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
+    <div class="flex items-center gap-1">
+      <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
+      <AssumptionsLink group="churning" />
+    </div>
     {#if d.people.length > 1}
       <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}
         options={[...d.people.map((p) => ({ value: p, label: p })), { value: "all", label: "Both" }]} />
@@ -119,17 +123,16 @@
       : people.length === 0
         ? [{ label: "5/24", value: "0/24", sub: "Add cards you’ve opened in the last 24 months" }]
         : people.map((p) => ({ label: `${p}’s 5/24`, value: five24Line(d!.five24[p]).count, sub: five24Line(d!.five24[p]).next, tone: five24Tone(p) }))),
-    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}: keep, downgrade or close?` : "None due", tone: fees.count ? "warn" : undefined },
+    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.undecided ? `${fees.undecided} card${fees.undecided === 1 ? "" : "s"}: keep, downgrade or close?` : fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}, each with a plan` : "None due", tone: fees.undecided ? "warn" : undefined },
     { label: "Bonuses in progress", value: String(activeCards.length + activeBank.length),
       sub: [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
         activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now" },
-    { label: `Bank bonuses in ${year}`, value: fmt0(bankThisYear), sub: "Received so far; usually reported as taxable interest" },
   ]} />
 
   {#if noData}
     <Card.Root class="mb-6" data-testid="getting-started">
       <Card.Content class="flex flex-col gap-3">
-        <p class="text-sm text-muted-foreground">Track the credit cards and bank accounts you open for sign-up bonuses: your 5/24 count, annual fees, bonus spending and when you can apply again, for you and your partner.</p>
+        <p class="text-sm text-muted-foreground">Add the cards and bank accounts you open for sign-up bonuses to start tracking them.</p>
         {#if isPhone()}
           <DesktopOnly what="add your cards and bank bonuses" />
         {:else}
@@ -156,7 +159,7 @@
   <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
       tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
-    {#if tab !== "benefits"}<label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>{/if}
+    {#if tab === "cards"}<label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>{/if}
   </div>
   {/if}
 
@@ -195,12 +198,17 @@
         </Card.Header>
         <Card.Content>
           {#if bankForm}{#key bankFormId}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
-          {#if visibleBank.length}
-            <BankList bonuses={visibleBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
+          {#if openBank.length}
+            <BankList bonuses={openBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
           {:else}
-            <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing open. Tick Show closed to see the rest." : "No bank bonuses yet."}</p>
+            <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing in progress." : "No bank bonuses yet."}</p>
           {/if}
-          <p class="mt-4 text-xs text-muted-foreground">Linked to a Runway account, deposits categorized as income (or that look like payroll) count as direct deposits, and purchases as debit transactions. Banks decide what counts: check the offer's terms.</p>
+          {#if doneBank.length}
+            <details class="mt-4 text-sm text-muted-foreground" data-testid="done-bank">
+              <summary class="cursor-pointer">{doneBank.length} paid or closed</summary>
+              <div class="mt-2"><BankList bonuses={doneBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} /></div>
+            </details>
+          {/if}
         </Card.Content>
       </Card.Root>
     {/if}
@@ -208,7 +216,6 @@
       <Card.Root class="mb-6">
         <Card.Header>
           <Card.Title>Bonus money by year</Card.Title>
-          <Card.Description>Banks usually report account bonuses as interest on a 1099-INT, so they're usually taxable. For your records, not tax advice.</Card.Description>
         </Card.Header>
         <Card.Content>
           <table class="w-full max-w-md text-sm">

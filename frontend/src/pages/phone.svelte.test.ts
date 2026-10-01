@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn(), session: {} }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
-vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, catLook: () => ({ color: "#888" }), categoryGroups: () => [] }));
+vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, catLook: () => ({ color: "#888" }), categoryGroups: () => [], catParentOf: () => null }));
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
@@ -38,7 +38,7 @@ describe("Settings", () => {
     render(Settings, { sub: "notifications" });
     const tabs = await screen.findByRole("navigation", { name: "Settings" });
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim().replace(/\d+$/, ""))).toEqual(
-      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Advanced"]);
+      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Assumptions", "Advanced"]);
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 });

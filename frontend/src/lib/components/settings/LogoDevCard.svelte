@@ -42,11 +42,7 @@
 </script>
 
 <ServiceRow name="Merchant and bank logos" purpose="Logo.dev · logos for merchants Plaid has none for" on={configured}>
-  <p class={helpCls}>Plaid has logos for many merchants. For the rest, a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev</a>
-    publishable key lets Runway fetch one by the merchant's website, or by its name when there's no website (most SimpleFIN
-    transactions). Adding the key fetches the past year's at once; after that, each sync fetches new merchants'. Runway downloads
-    and serves them itself, so your browser never contacts Logo.dev, and Logo.dev only sees merchants' websites and names, never
-    amounts or dates. The same key gives each account's bank its logo, by the bank's name; without it accounts show a letter.</p>
+  <p class={helpCls}>Get a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev publishable key</a>.</p>
   <div class={rowCls}>
     <label class={`${fieldCls} w-full sm:w-72`}>Publishable key
       <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
@@ -58,9 +54,6 @@
         <input class={inputCls} type="password" autocomplete="off" placeholder={st?.searchable ? "•••••••• saved" : "sk_…"} use:autosave={saveSecret} /></label>
       {#if st?.searchable}<Button variant="link" onclick={clearSecret}>Remove secret key</Button>{/if}
     </div>
-    <p class={helpCls}>With the secret key, Runway finds merchants by name with Logo.dev's Brand Search and keeps a logo only when the
-      brand clearly is that merchant, so fewer logos are someone else's. Click any transaction's logo to choose a different one
-      for that merchant.</p>
   {/if}
   {#if st}
     <div class="rounded-lg bg-muted/50 p-3 text-sm">

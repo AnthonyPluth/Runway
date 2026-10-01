@@ -322,6 +322,19 @@ class HandlerTests(DbCase):
                          {r[0] for r in self.c.execute(select(Transaction.id)
                                                        .where(Transaction.account_id != "demo-mortgage"))})
 
+    def test_transaction_ignored_filter(self):
+        categories.add(self.c, "Reimbursed", "Ignore")
+        a, b, c = (r[0] for r in self.c.execute(select(Transaction.id).order_by(Transaction.id).limit(3)))
+        self.c.execute(update(Transaction).where(Transaction.id == a).values(category="Ignore"))
+        self.c.execute(update(Transaction).where(Transaction.id == b).values(category="Reimbursed"))
+        self.c.execute(update(Transaction).where(Transaction.id == c).values(category=None))
+        everything = set(self.ids(limit=1000))
+        self.assertTrue({a, b, c} <= everything)   # shown unless asked to hide them
+        hidden = transactions.api_transactions(self.c, q(ignored="0", limit=1000), {})
+        self.assertEqual({t["id"] for t in hidden["items"]}, everything - {a, b})
+        self.assertEqual(hidden["total"], len(everything) - 2)
+        self.assertEqual(set(self.ids(ignored="0", category="Ignore")), {a, b})   # asked for by name: shown
+
     def test_transaction_category_filters(self):
         categories.add(self.c, "Farmers Market", "Groceries")
         tid = self.one(select(Transaction.id).where(Transaction.category == "Shopping").order_by(Transaction.id))[0]

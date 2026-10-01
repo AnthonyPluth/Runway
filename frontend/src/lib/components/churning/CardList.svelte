@@ -4,11 +4,11 @@
   import { barWidth, fmt0, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import { planDone, planUndo } from "./actions";
-  import { STATUS_LABEL, benefitSummary, bonusLabel, daysUntil, eligibilityText, fullDate, planLine, ratesText, spendProgress } from "./churning";
+  import { STATUS_LABEL, benefitSummary, bonusLabel, daysUntil, eligibilityText, fullDate, planLine, spendProgress } from "./churning";
   import type { ChurnCard, Churning } from "./types";
 
   // The cards, one row each: the bank and card, its annual fee, the bonus and its spending, when the bonus can be
-  // earned again, then a line under it with what it earns (portal-only rates marked), its benefits net of the fee, and
+  // earned again, then a line under it with its benefits net of the fee, and
   // your plan for it. A table's columns on a computer; stacked on a phone.
   let { cards, d, showOwner, onedit, onchanged }: {
     cards: ChurnCard[]; d: Churning; showOwner: boolean; onedit: (c: ChurnCard) => void; onchanged: () => void;
@@ -66,9 +66,8 @@
         <span class={cn(c.eligibility.status === "now" && "text-[var(--good)]")}>{eligibilityText(c.eligibility, d.today)}</span>
       </div>
       <div class="max-md:absolute max-md:top-2 max-md:right-0 md:text-right"><Button variant="link" size="sm" class="h-auto px-0" onclick={() => onedit(c)} aria-label={`Edit ${c.product}`}>Edit</Button></div>
-      {#if c.rates.length || perks || plan || c.hide_upcoming}
+      {#if perks || plan || c.hide_upcoming}
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground md:col-span-full">
-          {#if c.rates.length}<span>Earns {ratesText(c.rates, c.portal_name)}</span>{/if}
           {#if perks}<span>{perks}</span>{/if}
           {#if plan}
             <span class="inline-flex items-center gap-1.5">

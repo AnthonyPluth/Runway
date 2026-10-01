@@ -1,4 +1,5 @@
 """The schema comes from Alembic migrations; they must match runway/schema.py, and older databases must upgrade."""
+import json
 import os
 import tempfile
 import unittest
@@ -275,6 +276,62 @@ class MigrationTests(unittest.TestCase):
                                                               .order_by(Recurring.id))],
                              [(10.49, 19.49, None), (48.0, 192.0, None), (3500.0, 6500.0, None), (None, None, None)])
             self.assertEqual(tuple(conn.execute(select(Transaction.recurring_id, Transaction.recurring_linked_by)).fetchone()), (1, None))
+
+    def test_0032_shortens_the_banks_payees_and_leaves_yours(self):
+        from alembic import command
+        from runway import recurring
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0031")
+        target, loan = "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)", "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)"
+        with db.session(self.path) as conn:
+            txs = [
+                {"id": "chk|1", "account_id": "chk", "posted": "2026-09-01", "amount": -35.91, "description": target,
+                 "payee": "Target Cach Tran Cash"},
+                {"id": "chk|2", "account_id": "chk", "posted": "2026-09-02", "amount": -47.02,
+                 "description": "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)", "payee": "Target C Cash"},
+                {"id": "chk|3", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": target,
+                 "payee": "Groceries Run"},                                   # a name you gave it
+                {"id": "chk|4", "account_id": "chk", "posted": "2026-08-08", "amount": -698.38, "description": loan,
+                 "payee": "Fifth Third Baweb Pay Cash", "recurring_id": 1},
+                {"id": "chk|5", "account_id": "chk", "posted": "2026-09-05", "amount": -9.00, "description": "ACME ACH",
+                 "payee": "Acme Ach"},                                        # a rule renames to it
+                {"id": "chk|pl:6", "account_id": "chk", "posted": "2026-09-06", "amount": -5.00, "description": target,
+                 "payee": "Target Cach Tran Cash", "merchant_id": "ent-x"},  # Plaid named the merchant
+                {"id": "chk|7", "account_id": "chk", "posted": "2026-09-07", "amount": -5.00, "description": "APPLE CASH",
+                 "payee": "Apple Cash"},
+            ]
+            conn.execute(insert(Transaction), [{"recurring_id": None, "merchant_id": None, **t} for t in txs])
+            conn.execute(insert(Rule).values(match="acme", rename="Acme Ach"))
+            items = [
+                {"id": 1, "name": "Fifth Third Baweb Pay Cash", "account_id": "chk", "amount": -698.38, "frequency": "monthly",
+                 "anchor_date": "2026-08-08", "match": "fifth third baweb pay cash", "amount_min": 488.87, "amount_max": 907.89},
+                {"id": 2, "name": "Car", "account_id": "chk", "amount": -698.38, "frequency": "monthly",
+                 "anchor_date": "2026-08-08", "match": "fifth third baweb pay cash\nloan"},
+                {"id": 3, "name": "Groceries Run", "account_id": "chk", "amount": -12, "frequency": "weekly",
+                 "anchor_date": "2026-09-03", "match": "groceries run"},
+            ]
+            conn.execute(insert(Recurring), [{"amount_min": None, "amount_max": None, **r} for r in items])
+            conn.execute(insert(schema.merchant_logos).values(key="target cach tran cash", website="target.com", hidden=0))
+            db.set_setting(conn, "recurring_suggestions_dismissed", '["chk|target c cash|weekly", "chk|apple cash|monthly"]')
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.payee)).fetchall()), {
+                "chk|1": "Target", "chk|2": "Target", "chk|3": "Groceries Run", "chk|4": "Fifth Third", "chk|5": "Acme Ach",
+                "chk|pl:6": "Target Cach Tran Cash", "chk|7": "Apple Cash"})
+            self.assertEqual([tuple(r) for r in conn.execute(select(Recurring.name, Recurring.match).order_by(Recurring.id))], [
+                ("Fifth Third", "fifth third baweb pay cash\nfifth third"), ("Car", "fifth third baweb pay cash\nloan\nfifth third"),
+                ("Groceries Run", "groceries run")])
+            self.assertEqual(dict(conn.execute(select(schema.merchant_logos.c.key, schema.merchant_logos.c.website)).fetchall()),
+                             {"target cach tran cash": "target.com", "target": "target.com"})
+            self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
+                             ["chk|apple cash|monthly", "chk|target c cash|weekly", "chk|target|weekly"])
+            # The next loan payment, synced with the shorter name, still finds its recurring item.
+            conn.execute(insert(Transaction).values(id="chk|8", account_id="chk", posted="2026-09-08", amount=-698.38,
+                                                    description=loan, payee="Fifth Third"))
+            recurring.auto_match(conn, [1])
+            self.assertEqual(conn.execute(select(Transaction.recurring_id).where(Transaction.id == "chk|8")).scalar(), 1)
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

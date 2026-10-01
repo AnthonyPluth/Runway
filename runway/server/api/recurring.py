@@ -1,13 +1,15 @@
 """Recurring bills and income: the list, adding and changing them, suggestions, and missed ones."""
 from __future__ import annotations
 
+import urllib.parse
 from datetime import date, timedelta
 
 from sqlalchemy import and_, delete, func, insert, not_, or_, select, update
 
-from ... import db, forecast, recurring
+from ... import db, forecast, merchants, recurring
 from ...models import Account, Override, Recurring, Transaction
 from ..common import ApiError
+from .transactions import tx_logos
 
 
 FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates"}
@@ -28,6 +30,28 @@ def api_recurring_dismiss(conn, _q, body):
     return {"ok": True}
 
 
+def recurring_logos(conn, items: list[dict]) -> dict[int, str | None]:
+    """{recurring id: its logo's URL}. An item wears the logo of the last transaction matched to it, unless you chose one
+    for it: the logo picker on Bills & income picks by the item's name (a bill needn't have a matched transaction, and its
+    name is what you'd call the merchant). That's the same choice Transactions keeps by merchant name, so a name that is
+    also a merchant's changes both. A choice of "no logo" leaves the item without one."""
+    ids = [i["id"] for i in items]
+    if not ids:
+        return {}
+    last: dict[int, dict] = {}
+    for t in db.rows(conn.execute(
+            select(Transaction).where(Transaction.recurring_id.in_(ids)).order_by(Transaction.posted.desc()))):
+        last.setdefault(t["recurring_id"], t)
+    logos = tx_logos(conn, list(last.values()))
+    out = {rid: logos.get(t["id"]) for rid, t in last.items()}
+    chosen = merchants.chosen_for(conn, [{"id": str(i["id"]), "payee": i["name"]} for i in items])
+    for i in items:
+        if str(i["id"]) in chosen:
+            mid = chosen[str(i["id"])]
+            out[i["id"]] = f"/api/merchants/{urllib.parse.quote(mid, safe='')}/logo" if mid else None
+    return out
+
+
 def api_recurring(conn, _q, _b):
     items = db.rows(conn.execute(recurring.with_account_name().order_by(Recurring.active.desc(), Recurring.name)))
     today = date.today()
@@ -42,8 +66,10 @@ def api_recurring(conn, _q, _b):
         nxt = [d for d in forecast.occurrences(it, today, today + timedelta(days=400))
                if recurring.still_due(it, d, paid, today, it["expected_amount"]) is not None]
         it["next_date"] = nxt[0].isoformat() if nxt else None
+    logos = recurring_logos(conn, items)
     missed = recurring.missed(conn, today)
     for it in items:
+        it["logo"] = logos.get(it["id"])
         it["missed"] = [m for m in missed if m["recurring_id"] == it["id"]]
     return items
 
@@ -176,4 +202,16 @@ def api_recurring_suggestion_dismiss(conn, _q, body):
     if not isinstance(key, str) or not key.strip() or len(key) > 300:
         raise ApiError("Unknown suggestion")
     forecast.dismiss_suggestion(conn, key)
+    return {"ok": True}
+
+
+def api_recurring_suggestions_dismissed(conn, _q, _b):
+    return forecast.list_dismissed_suggestions(conn)
+
+
+def api_recurring_suggestion_restore(conn, _q, body):
+    """Bring a dismissed suggestion back, so it's offered again if it still looks recurring."""
+    key = body.get("key")
+    if not isinstance(key, str) or not forecast.restore_suggestion(conn, key):
+        raise ApiError("That suggestion isn’t dismissed")
     return {"ok": True}

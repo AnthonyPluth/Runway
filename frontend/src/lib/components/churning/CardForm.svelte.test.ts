@@ -10,7 +10,7 @@ import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
 import CardForm from "./CardForm.svelte";
-import { bodyOf, calls, card, churning, found } from "./fixtures";
+import { benefit, bodyOf, calls, card, churning, found } from "./fixtures";
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
@@ -33,6 +33,107 @@ describe("card form", () => {
     expect(within(owner).getAllByRole("option").map((o) => o.textContent)).toEqual(["Alex", "Sam"]);
     const earns = screen.getByLabelText("Earns");
     expect([...earns.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Bank points", "Airline miles", "Hotel points", "Cash back"]);
+  });
+
+  describe("sections", () => {
+    const section = (id: string) => screen.getByTestId(`section-${id}`) as HTMLDetailsElement;
+    const summary = (id: string) => screen.getByTestId(`summary-${id}`);
+
+    it("keeps the essentials up front and every other part closed, each saying what's in it", () => {
+      setup();
+      for (const id of ["rates", "bonus", "benefits", "plan", "more"]) expect(section(id).open).toBe(false);
+      for (const label of ["Whose card", "Bank", "Card", "Opened", "Annual fee"]) expect(screen.getByLabelText(label).closest("details")).toBeNull();
+      expect(summary("rates")).toHaveTextContent("1x on everything");
+      expect(summary("bonus")).toHaveTextContent("None");
+      expect(summary("benefits")).toHaveTextContent("None");
+      expect(summary("plan")).toHaveTextContent("Undecided");
+      expect(summary("more")).toHaveTextContent("Nothing added");
+    });
+
+    it("has no annual-fee month to pick", () => {
+      setup();
+      expect(screen.queryByLabelText("Fee posts in")).toBeNull();
+      expect(screen.queryByText("Its anniversary month")).toBeNull();
+    });
+
+    it("says in the summaries what you filled in", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
+      await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
+      await userEvent.selectOptions(screen.getByLabelText("Earns"), "ur");
+      await userEvent.type(screen.getByLabelText(/^Bonus \(/), "75000");
+      await userEvent.type(screen.getByLabelText("Spend"), "4000");
+      expect(summary("rates")).toHaveTextContent("2 rates · Chase Ultimate Rewards");
+      expect(summary("bonus")).toHaveTextContent("75k Ultimate Rewards after $4,000 in 3 months");
+      await userEvent.type(screen.getByLabelText(/Family/), "Sapphire");
+      expect(summary("more")).toHaveTextContent("Family: Sapphire");
+    });
+
+    it("starts closed with summaries when editing a card too", () => {
+      setup(card({ bonus: 60000, bonus_spend: 4000, currency: "ur", rates: [{ category: "Travel", multiplier: 5, portal_only: false }], benefits: [benefit()] }));
+      expect(section("bonus").open).toBe(false);
+      expect(summary("bonus")).toHaveTextContent("60k Ultimate Rewards after $4,000 in 3 months");
+      expect(summary("rates")).toHaveTextContent("1 rate");
+      expect(summary("benefits")).toHaveTextContent("1 benefit");
+    });
+
+    it("opens the section a refused save is about, and marks it", async () => {
+      vi.mocked(api).mockRejectedValue(new Error("Pick a category for each earning rate"));
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
+      expect(section("rates").open).toBe(false);
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(section("rates").open).toBe(true));
+      expect(screen.getByTestId("flagged-rates")).toBeInTheDocument();
+      expect(section("bonus").open).toBe(false);
+    });
+
+    it("opens the benefits section when a benefit is refused", async () => {
+      vi.mocked(api).mockRejectedValue(new Error("Enter the benefit's name"));
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(section("benefits").open).toBe(true));
+    });
+
+    it("adds the benefits you enter in the request that adds the card", async () => {
+      vi.mocked(api).mockResolvedValue({ id: 5 } as never);
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "lounge");
+      await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "custom");
+      await userEvent.type(screen.getByLabelText("Benefit 2"), "Travel credit");
+      await userEvent.type(screen.getByLabelText("Amount of Travel credit"), "300");
+      expect(summary("benefits")).toHaveTextContent("2 benefits");
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards")[0])!.benefits).toEqual([
+        { name: "Lounge access", kind: "access", amount: null, period: "annual", preset: "lounge" },
+        { name: "Travel credit", kind: "credit", amount: 300, period: "annual" }]);
+      expect(calls(/benefits/)).toHaveLength(0);
+    });
+
+    it("leaves out a benefit row with no name, and a removed one", async () => {
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "custom");
+      await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "lounge");
+      await userEvent.click(screen.getByRole("button", { name: "Remove Lounge access" }));
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards")[0])!.benefits).toEqual([]);
+    });
+  });
+
+  it("offers portal-only just for travel rates", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
+    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();   // no category yet
+    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Restaurants");
+    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Travel");
+    expect(screen.getByLabelText("Only through the issuer's travel portal")).toBeInTheDocument();
   });
 
   it("sends the earning rates, portal-only ones included, in the request that adds the card", async () => {
@@ -78,7 +179,7 @@ describe("card form", () => {
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ plan: "product_change" }));
     await userEvent.click(screen.getByLabelText("Don't show this card in Upcoming"));
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ hide_upcoming: true }));
-    expect(screen.getByText(/the day before the next annual fee posts/)).toBeInTheDocument();
+    expect(screen.getByText(/Left blank: the day before the next annual fee/)).toBeInTheDocument();
   });
 
   describe("from an account found on your accounts", () => {
@@ -91,14 +192,16 @@ describe("card form", () => {
       expect(screen.getByLabelText("Whose card")).toHaveValue("Alex");
       expect(screen.getByLabelText("Bank")).toHaveValue("chase");
       expect(screen.getByLabelText("Annual fee")).toHaveValue(795);
-      expect(screen.getByLabelText("Fee posts in")).toHaveValue("3");
+      expect(screen.queryByLabelText("Fee posts in")).toBeNull();
+      expect(screen.queryByTestId("fee-month")).toBeNull();
       expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
       expect(screen.getByTestId("opened-guess")).toHaveTextContent("opened on or before this day");
       expect(calls(/./)).toHaveLength(0);
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
       await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
       expect(bodyOf(calls("/api/churning/cards")[0])).toMatchObject({
-        owner: "Alex", issuer: "chase", product: "Sapphire Reserve", account_id: "acct-1", opened_on: "2024-03-02", annual_fee: "795", fee_month: "3", business: false });
+        owner: "Alex", issuer: "chase", product: "Sapphire Reserve", account_id: "acct-1", opened_on: "2024-03-02", annual_fee: "795", business: false });
+      expect(bodyOf(calls("/api/churning/cards")[0])).not.toHaveProperty("fee_month");
     });
 
     it("stops calling the date a guess once you change it", async () => {
@@ -149,13 +252,18 @@ describe("card form", () => {
       expect(screen.getByLabelText("Category of rate 1")).toHaveValue("Travel");
       expect(screen.getByLabelText("The portal's name")).toHaveValue("Chase Travel");
       expect(screen.getByLabelText("Suggested benefit 1")).toHaveValue("Travel credit");
+      expect(screen.getAllByText(/Suggested by AI, check before saving/).length).toBeGreaterThan(1);   // the banner, and the benefit
+      for (const id of ["rates", "benefits", "more"]) expect((screen.getByTestId(`section-${id}`) as HTMLDetailsElement).open).toBe(true);   // the ones that got values
+      expect((screen.getByTestId("section-bonus") as HTMLDetailsElement).open).toBe(false);
       expect(calls("/api/churning/cards")).toHaveLength(0);   // nothing saved yet
       await userEvent.clear(screen.getByLabelText("Amount of Travel credit"));
       await userEvent.type(screen.getByLabelText("Amount of Travel credit"), "250");   // editable
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
-      await waitFor(() => expect(calls("/api/churning/cards/7/benefits")).toHaveLength(1));
-      expect(bodyOf(calls("/api/churning/cards")[0])).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: "550", portal_name: "Chase Travel" });
-      expect(bodyOf(calls("/api/churning/cards/7/benefits")[0])).toMatchObject({ name: "Travel credit", kind: "credit", amount: 250, period: "annual" });
+      await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
+      const body = bodyOf(calls("/api/churning/cards")[0])!;
+      expect(body).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: "550", portal_name: "Chase Travel" });
+      expect(body.benefits).toEqual([{ name: "Travel credit", kind: "credit", amount: 250, period: "annual" }]);   // with the card, not after it
+      expect(calls("/api/churning/cards/7/benefits")).toHaveLength(0);
     });
 
     it("keeps what you already entered, and Discard puts the form back", async () => {
@@ -225,6 +333,46 @@ describe("card form", () => {
       const saved = calls("/api/churning/cards/1").map(bodyOf).find((b) => "family" in (b as object));
       expect(saved).toMatchObject({ family: "Sapphire" });
       expect(Number((saved as { annual_fee: unknown }).annual_fee)).toBe(95);
+    });
+
+    it("shows the pages it came from, and fills the sign-up bonus when adding", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      const withSources = {
+        ...suggestion, web: true, bonus: { amount: 100000, spend: 5000, months: 3 },
+        sources: ["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr", "javascript:alert(1)"],
+      };
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? withSources : { ok: true })) as never);
+      render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      const sources = await screen.findByTestId("ai-sources");
+      expect(sources).toHaveTextContent("From: chase.com, news.example.com");
+      const links = within(sources).getAllByRole("link");
+      expect(links.map((a) => a.getAttribute("href"))).toEqual(["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr"]);
+      expect(links[0]).toHaveAttribute("target", "_blank");
+      expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(100000);
+      expect(screen.getByLabelText("Spend")).toHaveValue(5000);
+      await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
+    });
+
+    it("says when the suggestions didn't come from a web search", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, web: false, sources: [] } : { ok: true })) as never);
+      render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      expect(await screen.findByTestId("ai-sources")).toHaveTextContent("without a web search");
+    });
+
+    it("doesn't fill the public sign-up offer into a card you already have", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, bonus: { amount: 100000, spend: 5000, months: 3 } } : { ok: true })) as never);
+      render(CardForm, { c: card({ currency: "cash", annual_fee: 0, rates: [], bonus: null, bonus_spend: null }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
     });
 
     it("shows an error as a toast and leaves the form alone", async () => {

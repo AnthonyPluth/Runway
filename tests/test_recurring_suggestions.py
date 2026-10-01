@@ -63,6 +63,46 @@ class SuggestionDismissTests(LedgerCase):
                 api_recurring.api_recurring_suggestion_dismiss(self.conn, None, body)
 
 
+class SuggestionRestoreTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        self.acct("chk", "checking", 3000.0)
+        for d in ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01"]:
+            self.tx("chk", d, -2500.0, "MORTGAGE CO", "Mortgage")
+        self.key = "chk|mortgage co|monthly"
+
+    def dismissed(self):
+        return api_recurring.api_recurring_suggestions_dismissed(self.conn, None, None)
+
+    def test_lists_what_a_dismissed_key_says(self):
+        self.assertEqual(self.dismissed(), [])
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": self.key})
+        [d] = self.dismissed()
+        self.assertEqual({k: d[k] for k in ("key", "account_id", "match", "frequency")},
+                         {"key": self.key, "account_id": "chk", "match": "mortgage co", "frequency": "monthly"})
+        self.assertTrue(d["account_name"])
+
+    def test_a_merchant_with_a_bar_and_a_gone_account_still_list(self):
+        key = forecast.suggestion_key("old", "A|B pay", "weekly")
+        db.set_setting(self.conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps([key, "junk"]))
+        self.assertEqual(self.dismissed(), [{"key": key, "account_id": "old", "account_name": None, "match": "a|b pay", "frequency": "weekly"}])
+
+    def test_restoring_offers_it_again_and_keeps_the_others_dismissed(self):
+        other = "chk|acme payroll|biweekly"
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": self.key})
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": other})
+        self.assertEqual(forecast.suggest_recurring(self.conn, TODAY), [])
+        self.assertEqual(api_recurring.api_recurring_suggestion_restore(self.conn, None, {"key": self.key}), {"ok": True})
+        self.assertEqual([s["key"] for s in forecast.suggest_recurring(self.conn, TODAY)], [self.key])
+        self.assertEqual([d["key"] for d in self.dismissed()], [other])
+        self.assertEqual(json.loads(db.get_setting(self.conn, sk.RECURRING_SUGGESTIONS_DISMISSED)), [other])
+
+    def test_restoring_what_isnt_dismissed_is_an_error(self):
+        for body in ({}, {"key": 5}, {"key": self.key}):
+            with self.assertRaises(ApiError):
+                api_recurring.api_recurring_suggestion_restore(self.conn, None, body)
+
+
 class AmountSignTests(LedgerCase):
     """The form sends the signed amount (negative for money out); the API stores what it's given."""
     def setUp(self):

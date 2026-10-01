@@ -83,6 +83,19 @@ describe("the breakdown", () => {
     expect(body(calls("/api/assets/8")[0])).toEqual({ value: "21000" });
   });
 
+  it("has no hand-typed value for a home Realie values, only its lookup", async () => {
+    data = nw();
+    data.realie = { configured: true, used: 3, limit: 25 };
+    data.assets_list = [{ ...house, address: "1 Main St, Springfield, IL 62701", source: "realie", realie_valued: true } as unknown as typeof house, car];
+    render(NetWorth);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /^House, / }));
+    const dialog = await screen.findByRole("dialog", { name: "House" });
+    expect(within(dialog).queryByRole("button", { name: "Update value" })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Update from Realie" })).toBeInTheDocument();
+    // (a vehicle keeps its Update value: "shows a vehicle's value link and saves a new value from the panel")
+  });
+
   it("edits details in the panel and goes back to the summary", async () => {
     render(NetWorth);
     const user = userEvent.setup();

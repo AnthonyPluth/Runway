@@ -12,7 +12,8 @@ from unittest import mock
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, oidc, retail, splits
-from runway.models import Account, AiLog, Category, RetailCharge, RetailItem, RetailOrder, Transaction
+from runway.models import Account, AiLog, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
+from runway.server.api import transactions as api_tx
 from tests.shared import DbCase
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "amazon")
@@ -300,6 +301,93 @@ class SplitTests(Base):
         self.assertEqual(retail.match(self.c), 2)
         got = {r["order_id"]: r["tx_id"] for r in self.c.execute(select(RetailCharge.order_id, RetailCharge.tx_id))}
         self.assertEqual(got, {retail.order_key("amazon", ORDER): "a", retail.order_key("amazon", other): "c"})
+
+
+class TransactionCategoryTests(Base):
+    """Picking a category for a transaction sets the category of every item on its order."""
+
+    def setUp(self):
+        super().setUp()
+        self.amazon_order_with_charge()
+        self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US", "Shopping", "rule")
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        retail.finish(self.c, "amazon", caller=AI)   # split three ways, items by the AI
+
+    def items(self):
+        return [tuple(r) for r in self.c.execute(
+            select(RetailItem.category, RetailItem.category_source, RetailItem.confidence).order_by(RetailItem.id))]
+
+    def test_every_item_follows_and_the_transaction_stays_whole(self):
+        self.assertTrue(self.row("t1")["is_split"])
+        r = api_tx.api_tx_category(self.c, None, {"category": "Gifts & Donations"}, "t1")
+        self.assertEqual(self.items(), [("Gifts & Donations", "manual", 1)] * 4)
+        t = self.row("t1")
+        self.assertEqual((t["category"], t["category_source"], t["is_split"]), ("Gifts & Donations", "manual", 0))
+        self.assertEqual(self.parts("t1"), [])
+        # a later re-apply (an item recategorized elsewhere) leaves your choice alone
+        charge = self.c.execute(select(RetailCharge.id)).fetchone()["id"]
+        self.assertEqual(retail.apply(self.c, charge), "manual")
+        # nothing was remembered for the same items in other orders
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItemMemory)).scalar(), 0)
+        self.assertIn("items", r["was"][0])
+
+    def test_a_refunds_category_leaves_the_orders_items_alone(self):
+        oid = retail.order_key("amazon", ORDER)
+        before_items, before_parts = self.items(), self.parts("t1")
+        self.tx("back", "2024-09-20", 20.0, "AMZN Mktp US Refund", "Shopping", "rule")
+        retail._save_charge(self.c, f"amazon|{ORDER}|r", oid, "2024-09-20", 20.0, None)
+        self.c.execute(update(RetailCharge).where(RetailCharge.id == f"amazon|{ORDER}|r").values(tx_id="back"))
+        api_tx.api_tx_category(self.c, None, {"category": "Refunds"}, "back")
+        self.assertEqual(self.row("back")["category"], "Refunds")
+        self.assertEqual((self.items(), self.parts("t1")), (before_items, before_parts))
+
+    def test_undo_puts_back_the_split_and_each_items_own_category(self):
+        # awkward values: an item picked by hand, one with no category at all, a fractional confidence
+        ids = sorted(self.c.execute(select(RetailItem.id)).scalars())
+        self.c.execute(update(RetailItem).where(RetailItem.id == ids[0]).values(category_source="manual", confidence=1))
+        self.c.execute(update(RetailItem).where(RetailItem.id == ids[-1]).values(category=None, category_source=None, confidence=None))
+        self.c.execute(update(RetailItem).where(RetailItem.id == ids[-2]).values(confidence=0.123))
+        before_items, before_parts, before = self.items(), self.parts("t1"), tuple(self.row("t1"))
+        r = api_tx.api_tx_bulk(self.c, None, {"ids": ["t1"], "category": "Gifts & Donations"})
+        self.assertNotEqual(self.items(), before_items)
+        self.assertEqual(api_tx.api_tx_bulk(self.c, None, {"restore": r["was"]})["updated"], 1)
+        self.assertEqual(self.items(), before_items)
+        self.assertEqual(self.parts("t1"), before_parts)
+        self.assertEqual(tuple(self.row("t1")), before)
+
+    def test_bulk_sets_items_of_each_selected_order(self):
+        self.tx("t9", "2024-09-10", -5.0, "CORNER STORE", "Shopping", "rule")   # no order
+        api_tx.api_tx_bulk(self.c, None, {"ids": ["t1", "t9"], "category": "Groceries"})
+        self.assertEqual(self.items(), [("Groceries", "manual", 1)] * 4)
+        self.assertEqual(self.row("t9")["category"], "Groceries")
+        self.c.execute(update(RetailItem).values(category="Shopping", category_source="ai"))
+        api_tx.api_tx_bulk(self.c, None, {"ids": ["t1"], "reviewed": True})   # no category: items stay
+        self.assertEqual(self.items(), [("Shopping", "ai", 1)] * 4)
+
+    def test_an_order_paid_twice_follows_unless_the_other_is_yours(self):
+        oid = retail.order_key("amazon", ORDER)
+        self.tx("t2", "2024-09-12", -10.0, "AMZN Mktp US", "Shopping", "rule")
+        self.tx("t3", "2024-09-13", -10.0, "AMZN Mktp US", "Gifts & Donations", "manual")
+        for cid, day, tid in (("y", "2024-09-12", "t2"), ("z", "2024-09-13", "t3")):
+            retail._save_charge(self.c, f"amazon|{ORDER}|{cid}", oid, day, -10.0, None)
+            self.c.execute(update(RetailCharge).where(RetailCharge.id == f"amazon|{ORDER}|{cid}").values(tx_id=tid))
+        retail.apply(self.c, f"amazon|{ORDER}|y")
+        before_t2 = self.parts("t2")
+        self.assertTrue(before_t2)   # split by the order's items
+        r = api_tx.api_tx_category(self.c, None, {"category": "Groceries"}, "t1")
+        self.assertEqual(self.items(), [("Groceries", "manual", 1)] * 4)
+        t2, t3 = self.row("t2"), self.row("t3")
+        self.assertEqual((t2["category"], t2["category_source"], t2["is_split"]), ("Groceries", "retail", 0))
+        self.assertEqual((t3["category"], t3["category_source"]), ("Gifts & Donations", "manual"))
+        self.assertEqual({w["id"] for w in r["was"]}, {"t1", "t2", "t3"})
+        api_tx.api_tx_bulk(self.c, None, {"restore": r["was"]})
+        self.assertEqual(self.parts("t2"), before_t2)
+        self.assertEqual(self.row("t3")["category"], "Gifts & Donations")
+        self.assertTrue(self.row("t1")["is_split"])
+        # After the undo the other charge is Runway's split again: changing an item re-splits it.
+        item = self.c.execute(select(RetailItem.id).where(RetailItem.order_id == oid).order_by(RetailItem.id)).fetchone()[0]
+        retail.set_item_category(self.c, item, "Pharmacy", remember=False)
+        self.assertIn("Pharmacy", [p[0] for p in self.parts("t2")])
 
 
 class TransactionsListTests(Base):

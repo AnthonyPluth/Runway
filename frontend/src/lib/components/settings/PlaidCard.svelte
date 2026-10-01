@@ -40,7 +40,6 @@
 
 <ServiceRow name="Plaid" purpose="Banks, cards with statements and investment accounts, through Plaid Link" on={!!st?.configured}
   status={trouble ? "Needs attention" : count} warn={trouble} open={startOpen || trouble}>
-  <p class={helpCls}>Banks, credit cards (with statements) and investment accounts, through Plaid Link, with up to two years of history.</p>
   {#await status}
     <p class="text-sm text-muted-foreground">Loading…</p>
   {:then st}

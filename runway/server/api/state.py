@@ -13,7 +13,7 @@ from ... import settings_keys as sk
 from ...models import Account, Budget, Override, Recurring, SyncLog, Transaction, User
 from ..common import ApiError, _current
 from ..sync import _inv_lock, _sync_lock, bank_configured
-from .transactions import tx_logos
+from .recurring import recurring_logos
 
 
 def api_state(conn, _q, _b):
@@ -36,6 +36,7 @@ def api_state(conn, _q, _b):
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
         "primary_account": db.get_setting(conn, sk.PRIMARY_ACCOUNT),
         "auto_ai_on_sync": (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1",
+        "churn_ai_web": (db.get_setting(conn, sk.CHURN_AI_WEB, "1") or "1") == "1",   # card suggestions search the web
         "realie_configured": realie.configured(conn),
         "finnhub_configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY)),
         "logodev_configured": merchants.configured(conn),
@@ -80,17 +81,12 @@ def api_overview(conn, q, _b):
     horizon = max(14, min(horizon, 365))
     fc = forecast.build(conn, date.today(), horizon)
     fc["missed"] = recurring.missed(conn)
-    # a recurring item wears the logo of the last transaction matched to it
+    # a recurring item wears its logo: the one you chose for it, else its last matched transaction's
     ids = sorted({e["recurring_id"] for e in fc["events"] if e.get("recurring_id")})
     if ids:
-        last: dict[int, dict] = {}
-        for t in db.rows(conn.execute(
-                select(Transaction).where(Transaction.recurring_id.in_(ids)).order_by(Transaction.posted.desc()))):
-            last.setdefault(t["recurring_id"], t)
-        logos = tx_logos(conn, list(last.values()))
+        logos = recurring_logos(conn, db.rows(conn.execute(select(Recurring.id, Recurring.name).where(Recurring.id.in_(ids)))))
         for e in fc["events"]:
-            hit = last.get(e.get("recurring_id"))
-            e["logo"] = logos.get(hit["id"]) if hit else None
+            e["logo"] = logos.get(e.get("recurring_id"))
     name = func.coalesce(Account.display_name, Account.name).label("name")
     fc["all_accounts"] = db.rows(conn.execute(
         select(Account.id, name, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.hidden)
@@ -147,6 +143,8 @@ def api_settings(conn, _q, body):
         db.set_setting(conn, sk.PRIMARY_ACCOUNT, acct)
     if "auto_ai_on_sync" in body:
         db.set_setting(conn, sk.AUTO_AI_ON_SYNC, "1" if body.get("auto_ai_on_sync") else "0")
+    if "churn_ai_web" in body:
+        db.set_setting(conn, sk.CHURN_AI_WEB, "1" if body.get("churn_ai_web") else "0")
     if "horizon_days" in body:
         db.set_setting(conn, sk.HORIZON_DAYS, str(max(14, min(int(body["horizon_days"]), 365))))
     if "setup_dismissed" in body:

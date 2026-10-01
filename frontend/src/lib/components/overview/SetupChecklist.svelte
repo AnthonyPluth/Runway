@@ -38,7 +38,6 @@
   <Card.Header>
     {#if welcome}<img src="/logo.svg" alt="" width="40" height="40" class="mb-2" />{/if}
     <Card.Title class={welcome ? "text-2xl" : ""}>{welcome ? "Welcome to Runway" : "Finish setting up"}</Card.Title>
-    <Card.Description>Four steps to see where your cash is headed.</Card.Description>
     {#if !welcome}<Card.Action><Button variant="ghost" size="sm" onclick={dismiss}>Dismiss</Button></Card.Action>{/if}
   </Card.Header>
   <Card.Content>

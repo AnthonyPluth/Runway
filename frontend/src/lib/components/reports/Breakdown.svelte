@@ -111,7 +111,6 @@
         {@const kids = node.children ?? []}
         <Treemap items={kids.map((c) => ({ ...c, color: color || colorOf[c.name] }))} total={node.value}
           onpick={(c) => go([...st.path, c.name])} />
-        <p class="mt-2 text-sm text-muted-foreground">Each block is sized by what was spent. Click one to look inside.</p>
         <details class="mt-2">
           <summary class="cursor-pointer text-sm text-muted-foreground">Show as table</summary>
           <table class="mt-2 w-full text-sm">

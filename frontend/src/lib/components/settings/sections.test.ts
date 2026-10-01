@@ -3,7 +3,7 @@ import { SECTIONS, resolveSection } from "./sections";
 
 describe("Settings tabs", () => {
   it("lists Accounts first, then Connections (which holds the optional services too), and Advanced last", () => {
-    expect(SECTIONS.map((s) => s.id)).toEqual(["accounts", "connections", "categories", "rules", "notifications", "advanced"]);
+    expect(SECTIONS.map((s) => s.id)).toEqual(["accounts", "connections", "categories", "rules", "notifications", "assumptions", "advanced"]);
     expect(SECTIONS.find((s) => s.id === "connections")?.label).toBe("Connections");
   });
 

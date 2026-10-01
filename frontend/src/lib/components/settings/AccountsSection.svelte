@@ -6,6 +6,7 @@
   import { plural } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { accountName } from "$lib/types";
+  import { accountFocus } from "./accountFocus.svelte";
   import AccountRow from "./AccountRow.svelte";
   import NewFromPlaid from "./NewFromPlaid.svelte";
   import { ignoredAccounts, undecidedAccounts } from "./plaidAccounts";
@@ -20,10 +21,11 @@
   const byName = $derived(Object.fromEntries(accounts.map((a) => [a.id, accountName(a)])));
 
   const KIND_GROUPS: [string, string[]][] = [["Cash", ["checking", "savings"]], ["Credit cards", ["credit"]], ["Loans", ["loan"]], ["Investments", ["investment"]]];
-  const groups = $derived([
-    ...KIND_GROUPS.map(([title, kinds]) => ({ title, list: accounts.filter((a) => !a.hidden && kinds.includes(a.kind)) })),
-    { title: "Hidden", list: accounts.filter((a) => a.hidden) },
-  ].filter((g) => g.list.length));
+  const groups = $derived(KIND_GROUPS.map(([title, kinds]) => ({ title, list: accounts.filter((a) => !a.hidden && kinds.includes(a.kind)) })).filter((g) => g.list.length));
+  // Hidden accounts are tucked into a collapsed line, like the deleted ones below; a link to one of them opens it.
+  const hiddenList = $derived(accounts.filter((a) => a.hidden));
+  let showHidden = $state(false);
+  const hiddenOpen = $derived(showHidden || hiddenList.some((a) => a.id === accountFocus.id));
 
   // Plaid's accounts, for the "New from Plaid" group and for linking an account to one. Without Plaid this just stays null.
   let plaid = $state<PlaidStatus | null>(null);
@@ -47,9 +49,6 @@
   }
 </script>
 
-<p class="text-sm text-muted-foreground">Choose the forecast’s account with “Use for the forecast” on a checking or savings account, or in
-  <a class={linkCls} href="#overview?forecast">Overview’s forecast settings</a>, which also set how far ahead it looks.</p>
-
 <NewFromPlaid {waiting} left={ignoredAccounts(plaid)} {mine} />
 
 <Card.Root>
@@ -61,8 +60,17 @@
         {#each g.list as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}
       </section>
     {:else}
-      <p class="py-6 text-center text-sm text-muted-foreground">Accounts appear here after the first sync.</p>
+      {#if !hiddenList.length}<p class="py-6 text-center text-sm text-muted-foreground">Accounts appear here after the first sync.</p>{/if}
     {/each}
+    {#if hiddenList.length}
+      <section class="mt-4 border-t pt-3 text-sm text-muted-foreground first:mt-0 first:border-t-0 first:pt-0" aria-label="Hidden accounts">
+        <p>{plural(hiddenList.length, "hidden account")} ·
+          <button type="button" class={linkCls} aria-expanded={hiddenOpen} onclick={() => (showHidden = !hiddenOpen)}>{hiddenOpen ? "Collapse" : "Show"}</button></p>
+        {#if hiddenOpen}
+          <div class="mt-2">{#each hiddenList as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}</div>
+        {/if}
+      </section>
+    {/if}
     {#if deleted.length}
       <section class="mt-4 border-t pt-3 text-sm text-muted-foreground" aria-label="Deleted accounts">
         <p>{plural(deleted.length, "deleted account")} ·

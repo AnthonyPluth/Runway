@@ -229,7 +229,7 @@ class FireTests(Base):
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
         self.assertEqual(house["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "mtg",
-                                         "payment_counted": False, "payoff_year": None})   # no terms: kept as it is
+                                         "payment_counted": None, "payoff_year": None})   # no terms: kept as it is
         # with its terms set, what's owed is paid down to today (as on Net worth), projected on from there
         self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", interest_rate=6, monthly_payment=1500))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
@@ -253,10 +253,13 @@ class FireTests(Base):
                                           "monthly_payment": None}])
         self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(), loan_account_id="mtg"))
         counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
-        pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
-            id=id, account_id="chk", posted=posted, amount=amount, category=category))
-        for m in range(3, 9):   # paid every month, but as a transfer: not in spending
-            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer")
+        pay = lambda id, posted, amount, category, desc=None: self.c.execute(insert(Transaction).values(
+            id=id, account_id="chk", posted=posted, amount=amount, category=category, description=desc))
+        for m in range(3, 9):   # a steady move to savings about the payment's size: not taken for the payment
+            pay(f"s{m}", f"2026-{m:02}-20", -2000, "Transfer", "TO SAVINGS")
+        self.assertIsNone(counted())
+        for m in range(3, 9):   # paid every month, but as a transfer naming it: not in spending
+            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer", "MORTGAGE PMT")
         pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
         pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
         pay("p4", "2026-07-15", -1900, "Groceries")  # within 10% of it once: a one-off, not a payment
@@ -269,8 +272,11 @@ class FireTests(Base):
         self.assertTrue(counted())
         self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))   # three months left
         self.assertFalse(counted())
+        # found in neither: Runway can't tell, so it's left as it is (None), not added
+        self.c.execute(update(Transaction).where(Transaction.id.like("t%")).values(amount=-925, category="Gifts & Donations"))   # in halves
+        self.assertIsNone(counted())
         self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
-        self.assertFalse(counted())
+        self.assertIsNone(counted())
 
     def test_a_payment_that_names_the_lender_wins_over_lookalikes(self):
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
@@ -281,6 +287,65 @@ class FireTests(Base):
         named += [out(m, 350, "ally auto payment") for m in (5, 6)]
         self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
         self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
+
+    def test_a_transfer_is_the_loans_payment_only_by_name_size_and_not_a_cards(self):
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        months = (3, 4, 5, 6)
+        # a Chase card's autopay names the auto loan's lender, at the card bill's size: not the loan's payment
+        card = [out(m, 520, "chase credit crd autopay") for m in months]
+        self.assertFalse(planner.payment_counted(card, 500, ["Chase", "Auto loan"], named_only=True))
+        # past 10% of it (an escrow allowance is for spending only)
+        self.assertFalse(planner.payment_counted([out(m, 600, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
+        self.assertTrue(planner.payment_counted([out(m, 500, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
+        # a loan from a card issuer, paid by transfer, is still the loan's payment
+        self.assertTrue(planner.payment_counted([out(m, 500, "capital one auto pmt") for m in months], 500, ["Capital One"], named_only=True))
+
+    def test_a_mortgage_paid_with_its_escrow_is_still_its_payment(self):
+        # The lender reports $1,850 of principal and interest; the bank shows $2,450 going out, taxes and insurance in
+        out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
+        escrowed = [out(m, 2450, "rocket mortgage payment") for m in (3, 4, 5, 6)]
+        self.assertTrue(planner.payment_counted(escrowed, 1850, ["Rocket Mortgage", "Home loan"]))
+        self.assertFalse(planner.payment_counted(escrowed, 1850, ["Other Bank"]))   # not named: the amount alone is too far off
+        self.assertFalse(planner.payment_counted([out(m, 2900, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
+        self.assertFalse(planner.payment_counted([out(m, 1500, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
+
+    def test_a_sale_cant_be_in_the_past(self):
+        good = self.plan()["plan"]
+        with self.assertRaisesRegex(planner.PlanError, r"^A sale can’t be in the past: sell in 2026 or later$"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2025}]}, TODAY)
+        with self.assertRaisesRegex(planner.PlanError, r"at most 100 years out, in 2126"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2127}]}, TODAY)
+        with self.assertRaisesRegex(planner.PlanError, r"^The year it's sold must be a number$"):
+            planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": "soon"}]}, TODAY)
+        self.assertEqual(planner.clean({**good, "assets": [{"key": "asset:1", "sell_year": 2026}]}, TODAY)["assets"],
+                         [{"key": "asset:1", "sell_year": 2026}])
+
+    def test_a_sale_kept_for_a_year_now_past_counts_this_year(self):
+        self.c.execute(insert(Asset).values(id=7, name="House", kind="home", value=450000, as_of=TODAY.isoformat()))
+        raw = json.dumps({**planner.clean(self.plan()["plan"], date(2024, 1, 1)), "assets": [{"key": "asset:7", "sell_year": 2025}]})
+        db.set_setting(self.c, "retirement_plan", raw)
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026, "was": 2025}])
+        self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)   # shown, not written back
+        planner.save(self.c, self.plan()["plan"], TODAY)   # the next change keeps this year (and drops `was`)
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026}])
+
+    def test_vehicles_are_listed_for_their_loan_but_never_sold_into_the_plan(self):
+        self.c.execute(insert(Account).values(id="auto", name="Car loan", kind="loan", balance=-20000, interest_rate=5,
+                                              monthly_payment=600))
+        self.c.execute(insert(Asset), [{"id": 8, "name": "Car", "kind": "vehicle", "value": 30000, "as_of": TODAY.isoformat(),
+                                        "yearly_change": -15, "loan_account_id": "auto"},
+                                       {"id": 9, "name": "Cabin", "kind": "other", "value": 90000, "as_of": TODAY.isoformat(),
+                                        "yearly_change": None, "loan_account_id": None}])
+        assets = {a["name"]: a for a in self.plan()["assets"]}
+        self.assertEqual((assets["Car"]["kind"], assets["Car"]["loan"]["payment"]), ("vehicle", 600))
+        self.assertIsNone(assets["Cabin"]["yearly_change"])   # not set: the page keeps it level with inflation
+        good = self.plan()["plan"]
+        with self.assertRaisesRegex(planner.PlanError, "Vehicles aren’t sold into the plan"):
+            planner.save(self.c, {**good, "assets": [{"key": "asset:8", "sell_year": 2030}]}, TODAY)
+        # one kept from before vehicles were left out isn't counted
+        db.set_setting(self.c, "retirement_plan", json.dumps({**planner.clean(good, TODAY), "assets": [
+            {"key": "asset:8", "sell_year": 2030}, {"key": "asset:9", "sell_year": 2031}]}))
+        self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:9", "sell_year": 2031}])
 
     def test_the_plan_knows_whether_spending_is_runways_figure_or_yours(self):
         p = self.plan()

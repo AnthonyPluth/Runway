@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -47,6 +47,37 @@ describe("Net worth summary", () => {
   });
 });
 
+describe("#networth/equity vesting chart", () => {
+  const withSchedule = { ...grant, schedule: [["2026-01-01", 10000], ["2027-01-01", 20000], ["2028-01-01", 40000]] };
+  const serve = () => vi.mocked(api).mockImplementation((async (path: string) => {
+    if (path === "/api/networth") return nw;
+    if (path === "/api/equity") return { ...equity, companies: [{ ...equity.companies[0], grants: [withSchedule] }] };
+    return { ok: true };
+  }) as never);
+  afterEach(() => vi.useRealTimers());
+
+  it("marks today on the chart, so it's clear what has vested", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 30, 12));
+    serve();
+    render(NetWorth, { sub: "equity" });
+    const line = await screen.findByTestId("mark-line");
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    const x = Number(line.getAttribute("x1"));
+    expect(x).toBeGreaterThan(56);
+    expect(x).toBeLessThan(320 - 110 + 1);
+  });
+
+  it("leaves the marker off when today is past the last vesting date", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2030, 0, 15));
+    serve();
+    render(NetWorth, { sub: "equity" });
+    expect(await screen.findByText("Vesting over time")).toBeInTheDocument();
+    expect(screen.queryByTestId("mark-line")).not.toBeInTheDocument();
+  });
+});
+
 describe("#networth/equity", () => {
   it("says why a grant's vesting couldn't be worked out, instead of a silent zero", async () => {
     const broken = { ...grant, id: "g2", label: "ES-2", vested: 0, fully_vested_on: null, vested_value: 0, unvested_value: 0,
@@ -68,7 +99,8 @@ describe("#networth/equity", () => {
     expect(screen.getByText("Vested now")).toBeInTheDocument();
     expect(screen.getAllByText("Still to vest").length).toBeGreaterThan(0);
     expect(screen.getByText("Acme Robotics")).toBeInTheDocument();
-    expect(screen.getByText("How is this valued?")).toBeInTheDocument();
+    expect(screen.queryByText("How is this valued?")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Only what has vested counts/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync from Carta" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

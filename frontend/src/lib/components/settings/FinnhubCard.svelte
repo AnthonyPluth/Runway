@@ -30,11 +30,7 @@
 </script>
 
 <ServiceRow name="Live stock prices" purpose="Finnhub · real-time trades on Investments" on={configured}>
-  <p class={helpCls}>A free <a class={linkCls} href="https://finnhub.io/register" target="_blank" rel="noopener">Finnhub</a> key makes the
-    Investments page's live prices real trades, arriving the moment they happen while the market is open, for up to {st?.limit ?? 50} of
-    your stocks and ETFs. Everything else (price history, splits, mutual funds, and any ticker over the limit) still comes from
-    Yahoo, which also supplies live prices when there's no key. Runway connects to Finnhub itself, so your browser never
-    sees the key, and Finnhub only learns which tickers you hold, never shares or amounts. The free plan is for personal use.</p>
+  <p class={helpCls}>Get a free <a class={linkCls} href="https://finnhub.io/register" target="_blank" rel="noopener">Finnhub key</a>.</p>
   <div class={rowCls}>
     <label class={`${fieldCls} w-full sm:w-72`}>Finnhub API key
       <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "paste your key"} use:autosave={saveKey} /></label>

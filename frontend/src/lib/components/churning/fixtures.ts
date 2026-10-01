@@ -18,7 +18,7 @@ export const benefit = (over: Partial<Benefit> = {}): Benefit => ({
 
 export const card = (over: Partial<ChurnCard> = {}): ChurnCard => ({
   id: 1, owner: "Alex", issuer: "capital_one", product: "Venture X", family: null, account_id: null, opened_on: "2025-03-14", closed_on: null,
-  status: "open", changed_from: null, authorized_user: 0, business: 0, annual_fee: 395, fee_month: null, currency: "c1", base_rate: 2,
+  status: "open", changed_from: null, authorized_user: 0, business: 0, annual_fee: 395, currency: "c1", base_rate: 2,
   earn_note: null, bonus: null, bonus_spend: null, bonus_months: 3, bonus_deadline: null, bonus_earned_on: null, manual_spend: null,
   eligible_on: null, notes: null, portal_name: null, plan: "undecided", plan_target: null, plan_date: null, plan_remind_days: 30,
   plan_done_on: null, plan_new_id: null, hide_upcoming: 0, plan_due: null, plan_active: false, benefits: [], benefits_value: 0,
@@ -29,7 +29,7 @@ export const card = (over: Partial<ChurnCard> = {}): ChurnCard => ({
 
 export const found = (over: Partial<FoundDraft> = {}): FoundDraft => ({
   account_id: "acct-1", account_name: "Chase Sapphire Reserve (8814)", org: "Chase Bank Alex", owner: "Alex", issuer: "chase",
-  product: "Sapphire Reserve", business: 0, annual_fee: 795, fee_month: 3, opened_on: "2024-03-02", opened_on_estimate: true, ...over,
+  product: "Sapphire Reserve", business: 0, annual_fee: 795, opened_on: "2024-03-02", opened_on_estimate: true, ...over,
 });
 
 export const wish = (over: Partial<Wish> = {}): Wish => ({

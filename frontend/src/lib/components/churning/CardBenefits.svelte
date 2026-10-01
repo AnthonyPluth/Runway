@@ -43,7 +43,7 @@
 </script>
 
 <div class="mt-2" role="group" aria-label={`Benefits of ${card.product}`}>
-  {#if summary}<p class="mb-2 text-sm text-muted-foreground">{summary}{" "}<span class="text-xs">(the annual fee, {fmt0(card.annual_fee)}, less the benefits you'll use)</span></p>{/if}
+  {#if summary}<p class="mb-2 text-sm text-muted-foreground">{summary}</p>{/if}
   {#if card.benefits.length}
     <ul class="divide-y rounded-lg border bg-background">
       {#each benefits as b (b.id)}

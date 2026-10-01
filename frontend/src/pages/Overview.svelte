@@ -9,6 +9,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
@@ -16,7 +17,7 @@
   import EventsList from "$lib/components/overview/EventsList.svelte";
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
   import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
-  import { assumptions } from "$lib/components/overview/assumptions";
+  import { comingUp } from "$lib/components/overview/comingUp";
   import { openForecastSettings } from "$lib/components/overview/forecastSheet.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
@@ -130,13 +131,15 @@
     {@const asOf = balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok)}
     {@const note = balanceNote(asOf?.text, fc.accounts.reduce((s, a) => s + (a.pending ?? 0), 0))}
     {@const alerts = fc.warning_links.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
-    {@const assumed = assumptions(fc)}
 
     <header class="mb-5">
       <div class="text-[13px] font-semibold tracking-wide text-muted-foreground uppercase">
         {parseDate(fc.today).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
       </div>
-      <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
+      <div class="flex items-center gap-1">
+        <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
+        <AssumptionsLink group="forecast" />
+      </div>
     </header>
 
     {#if alerts}
@@ -166,8 +169,6 @@
           {:else}The tightest moment is {lowWhen(fc)}{#if lowEvents.length}, when {lowEvents[0].kind === "card" ? `the ${nb(lowEvents[0].name.replace(/ statement$/, ""))} payment` : lowEvents[0].name} goes out{/if}.{/if}
           {#if nextIn}Next money in: {nb(nextIn.name + ",")} {fmt0(nextIn.amount)} on {nb(relDay(nextIn.date, fc.today))}.{/if}
         </p>
-        <!-- What that verdict counts, and what it leaves out (everyday spending, unless it's turned on). -->
-        <p class="mt-1 max-w-3xl text-[13px] text-muted-foreground">{assumed.text}{#if !isPhone()}{" · "}<button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>{assumed.action}</button>{/if}</p>
       {/if}
       {#if fc.accounts.length > 1}
         <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined{#if !isPhone()}{" · "}<button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>choose one account</button>{/if}</p>
@@ -203,7 +204,7 @@
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <Group title="Coming up" inset="3.75rem"><EventsList events={fc.events} limit={6} bind:all={comingAll} /></Group>
+        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll} /></Group>
         <Group title="Credit cards"><CardsTable cards={fc.cards} /></Group>
       </div>
       <ThisMonth />

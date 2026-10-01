@@ -1,14 +1,17 @@
 """Churning: credit cards found on your accounts (runway/churn_found.py) and the AI's suggestions for them."""
+import io
 import json
 import unittest
+import urllib.error
 from unittest import mock
 
 from sqlalchemy import insert, select
 
-from runway import churn_found, churning, db
+from runway import categorize, churn_found, churning, db
 from runway import settings_keys as sk
 from runway.models import Account, ChurnCard, PlaidAccount, PlaidItem, Transaction
 from runway.server.api import churning as api
+from runway.server.api import state as api_state
 from runway.server.common import ApiError
 from tests.shared import DbCase
 
@@ -71,14 +74,15 @@ class FoundTests(DbCase):
         self.tx("t4", "a1", "2026-04-01", 795, description="Annual fee refund")   # a refund isn't the fee
         d = self.drafts()["a1"]
         self.assertEqual((d["issuer"], d["product"], d["owner"], d["business"]), ("chase", "Sapphire Reserve", "Alex", 0))
-        self.assertEqual((d["annual_fee"], d["fee_month"]), (795.0, 3))   # the latest charge
+        self.assertEqual(d["annual_fee"], 795.0)   # the latest charge; its month isn't kept (the fee follows the opening month)
+        self.assertNotIn("fee_month", d)
         self.assertEqual((d["opened_on"], d["opened_on_estimate"]), ("2024-03-02", True))
         self.assertNotIn("family", d)
 
     def test_no_transactions_and_no_fee(self):
         self.account("a1", "Venture X (7731)")
         d = self.drafts()["a1"]
-        self.assertEqual((d["opened_on"], d["annual_fee"], d["fee_month"]), (None, None, None))
+        self.assertEqual((d["opened_on"], d["annual_fee"]), (None, None))
 
     def test_joint_owner_is_left_for_you_and_business_is_by_name(self):
         self.c.execute(insert(Account).values(id="j", name="Ink Business Cash (1111)", kind="credit", owner="Joint"))
@@ -131,13 +135,19 @@ class SuggestTests(DbCase):
         assert {"Travel", "Restaurants"} <= names, names
         db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-test")
         self.prompts = []
+        self.webs = []
 
-    def caller(self, reply):
-        def call(api_key, model, prompt, timeout=0):
+    def caller(self, reply, cited=(), no_tools=False):
+        """A stand-in for categorize.chat: the reply (or an exception to raise), the pages it cites. no_tools: the
+        model can't call tools, so the web search tool is refused."""
+        def call(api_key, model, prompt, web=None):
             self.prompts.append(prompt)
+            self.webs.append(web)
+            if no_tools and web == "tool":
+                raise categorize.ToolsUnsupported("OpenRouter HTTP 404: No endpoints found that support tool use")
             if isinstance(reply, Exception):
                 raise reply
-            return reply
+            return reply, list(cited)
         return call
 
     REPLY = json.dumps({
@@ -155,8 +165,9 @@ class SuggestTests(DbCase):
         self.assertEqual(out["rates"], [{"category": "Travel", "multiplier": 3.0, "portal_only": 0},
                                         {"category": "Restaurants", "multiplier": 3.0, "portal_only": 0},
                                         {"category": "Travel", "multiplier": 8.0, "portal_only": 1}])
-        self.assertEqual(out["benefits"], [{"name": "Travel credit", "kind": "credit", "amount": 300.0, "period": "annual"},
-                                           {"name": "Lounge", "kind": "other", "amount": None, "period": "annual"}])
+        self.assertEqual(out["benefits"], [{"name": "Travel credit", "kind": "credit", "amount": 300.0, "period": "annual", "basis": None, "guests": None},
+                                           {"name": "Lounge", "kind": "other", "amount": None, "period": "annual", "basis": None, "guests": None}])
+        self.assertEqual((out["bonus"], out["sources"], out["web"]), (None, [], True))
 
     def test_drops_unknown_currencies_and_clamps_numbers(self):
         reply = json.dumps({"currency": "bitcoin", "base_rate": 9999, "annual_fee": -5, "family": 12,
@@ -195,16 +206,137 @@ class SuggestTests(DbCase):
         self.assertEqual(len(self.prompts), 2)   # no key: nothing was sent
 
     def test_the_endpoint_reports_errors(self):
-        with mock.patch("runway.categorize.call_llm", self.caller(self.REPLY)):
+        with mock.patch("runway.categorize.chat", self.caller(self.REPLY)):
             out = api.api_churn_suggest(self.c, {}, {"issuer": "chase", "product": "Sapphire Reserve"})
         self.assertEqual(out["currency"], "ur")
-        with mock.patch("runway.categorize.call_llm", self.caller(OSError("down"))):
+        with mock.patch("runway.categorize.chat", self.caller(OSError("down"))):
             with self.assertRaises(ApiError) as cm:
                 api.api_churn_suggest(self.c, {}, {"issuer": "chase", "product": "Sapphire Reserve"})
         self.assertEqual(cm.exception.status, 502)
         with self.assertRaises(ApiError) as cm:
             api.api_churn_suggest(self.c, {}, {"issuer": "chase"})
         self.assertEqual(cm.exception.status, 400)
+
+    def test_searches_the_web_unless_switched_off(self):
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}"))
+        self.assertEqual(self.webs, ["tool"])
+        self.assertIn("Search the web", self.prompts[-1])
+        self.assertIn('"sources"', self.prompts[-1])
+        # A model that can't call tools: the web plugin instead (it still searches).
+        out = churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}", no_tools=True))
+        self.assertEqual(self.webs[1:], ["tool", "plugin"])
+        self.assertTrue(out["web"])
+        # Switched off in Settings: no search, and the prompt says so.
+        api_state.api_settings(self.c, {}, {"churn_ai_web": False})
+        self.assertFalse(api_state.api_state(self.c, {}, None)["churn_ai_web"])
+        out = churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}"))
+        self.assertEqual(self.webs[-1], None)
+        self.assertNotIn("Search the web", self.prompts[-1])
+        self.assertNotIn('"sources"', self.prompts[-1])
+        self.assertFalse(out["web"])
+
+    def test_the_prompt_asks_for_the_bonus_fee_and_benefits(self):
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}"))
+        (prompt,) = self.prompts
+        for asked in ('"bonus"', '"spend"', '"months"', '"annual_fee"', '"portal_name"', '"basis"', '"guests"',
+                      "bank's own page", "never guess", "Travel", "Restaurants"):
+            self.assertIn(asked, prompt)
+
+    def test_reads_the_json_out_of_prose_with_its_bonus_and_sources(self):
+        reply = ("I searched Chase's site [1]. Here is what I found:\n\n```json\n" + json.dumps({
+            "currency": "ur", "annual_fee": 795,
+            "bonus": {"amount": 100000, "spend": 5000, "months": 3},
+            "benefits": [{"name": "Priority Pass", "kind": "access", "period": "annual", "basis": "anniversary", "guests": 2},
+                         {"name": "Dining credit", "kind": "credit", "amount": 150, "period": "semiannual", "basis": "calendar", "guests": 4}],
+            "sources": ["https://creditcards.chase.com/rewards-credit-cards/sapphire/reserve", "javascript:alert(1)",
+                        "ftp://chase.com/x", "https://user:pw@evil.example/", "/relative", 42, "https://bad host.com/"],
+        }) + "\n```\n\nNote that offers change. [1] https://creditcards.chase.com")
+        cited = ["https://creditcards.chase.com/rewards-credit-cards/sapphire/reserve", "https://www.example-news.com/csr", "data:text/html,x"]
+        out = churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller(reply, cited))
+        self.assertEqual((out["currency"], out["annual_fee"]), ("ur", 795.0))
+        self.assertEqual(out["bonus"], {"amount": 100000.0, "spend": 5000.0, "months": 3})
+        self.assertEqual(out["benefits"], [
+            {"name": "Priority Pass", "kind": "access", "amount": None, "period": "annual", "basis": "anniversary", "guests": 2},
+            {"name": "Dining credit", "kind": "credit", "amount": 150.0, "period": "semiannual", "basis": "calendar", "guests": None}])
+        self.assertEqual(out["sources"], ["https://creditcards.chase.com/rewards-credit-cards/sapphire/reserve", "https://www.example-news.com/csr"])
+
+    def test_a_bonus_without_an_amount_is_dropped_and_numbers_clamped(self):
+        reply = json.dumps({"bonus": {"spend": 4000}, "sources": "https://x.com"})
+        out = churn_found.suggest(self.c, "chase", "X", self.caller(reply))
+        self.assertEqual((out["bonus"], out["sources"]), (None, []))
+        reply = json.dumps({"bonus": {"amount": 1e12, "spend": -3, "months": 99}})
+        out = churn_found.suggest(self.c, "chase", "X", self.caller(reply))
+        self.assertEqual(out["bonus"], {"amount": churn_found.MAX_BONUS, "spend": 0.0, "months": 24})
+
+    def test_a_failed_web_search_says_so(self):
+        with self.assertRaisesRegex(RuntimeError, "web search failed.*turn off web search"):
+            churn_found.suggest(self.c, "chase", "X", self.caller(RuntimeError("OpenRouter HTTP 400: plugin unavailable")))
+        api_state.api_settings(self.c, {}, {"churn_ai_web": False})
+        with self.assertRaises(RuntimeError) as cm:
+            churn_found.suggest(self.c, "chase", "X", self.caller(RuntimeError("down")))
+        self.assertNotIn("web search", str(cm.exception))
+
+
+def _response(body: dict):
+    resp = mock.MagicMock()
+    resp.__enter__.return_value.read.return_value = json.dumps(body).encode()
+    return resp
+
+
+class ChatRequestTests(DbCase):
+    """What actually goes to OpenRouter (the HTTP call mocked): the web search tool or plugin for card suggestions only,
+    and nothing private."""
+
+    REPLY = {"choices": [{"message": {"content": 'Found it. {"annual_fee": 95, "sources": ["https://www.chase.com/card"]}',
+                                      "annotations": [{"type": "url_citation", "url_citation": {"url": "https://www.chase.com/card", "title": "Chase"}},
+                                                      {"type": "url_citation", "url_citation": {"url": "https://news.example.com/a"}},
+                                                      {"type": "other"}]}}]}
+
+    def setUp(self):
+        super().setUp()
+        db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-test")
+
+    def sent(self, urlopen) -> dict:
+        (req,), _ = urlopen.call_args
+        return json.loads(req.data.decode())
+
+    def test_card_suggestions_carry_the_web_search_tool_and_nothing_private(self):
+        self.c.execute(insert(Account).values(id="acct-secret-1", name="Chase Sapphire Reserve (8814)", kind="credit",
+                                              owner="Alex", org="Chase Bank Alex", balance=-4321.99))
+        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+            out = churn_found.suggest(self.c, "chase", "Sapphire Reserve (8814)")
+        body = self.sent(urlopen)
+        self.assertEqual(body["tools"], [{"type": "openrouter:web_search", "parameters": {
+            "max_results": categorize.WEB_RESULTS, "max_total_results": categorize.WEB_TOTAL_RESULTS}}])
+        self.assertNotIn("plugins", body)
+        self.assertEqual(out["annual_fee"], 95.0)
+        self.assertEqual(out["sources"], ["https://www.chase.com/card", "https://news.example.com/a"])
+        for private in ("acct-secret-1", "Alex", "4321", "8814", "sk-or-test"):
+            self.assertNotIn(private, json.dumps(body))
+
+    def test_a_model_without_tools_gets_the_web_plugin(self):
+        refused = urllib.error.HTTPError("u", 404, "Not Found", {}, io.BytesIO(b'{"error":{"message":"No endpoints found that support tool use"}}'))
+        with mock.patch("urllib.request.urlopen", side_effect=[refused, _response(self.REPLY)]) as urlopen:
+            out = churn_found.suggest(self.c, "chase", "Sapphire Reserve")
+        body = self.sent(urlopen)
+        self.assertEqual(body["plugins"], [{"id": "web", "max_results": categorize.WEB_RESULTS}])
+        self.assertNotIn("tools", body)
+        self.assertEqual(out["annual_fee"], 95.0)
+
+    def test_switched_off_and_categorizing_send_no_web_search(self):
+        db.set_setting(self.c, sk.CHURN_AI_WEB, "0")
+        with mock.patch("urllib.request.urlopen", return_value=_response(self.REPLY)) as urlopen:
+            churn_found.suggest(self.c, "chase", "Sapphire Reserve")
+            self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
+            self.assertIn("Found it", categorize.call_llm("k", "m", "p"))
+            self.assertFalse({"tools", "plugins"} & set(self.sent(urlopen)))
+
+    def test_other_errors_are_not_mistaken_for_a_model_without_tools(self):
+        down = urllib.error.HTTPError("u", 502, "Bad Gateway", {}, io.BytesIO(b"upstream tool error"))
+        with mock.patch("urllib.request.urlopen", side_effect=down) as urlopen, \
+                self.assertRaisesRegex(RuntimeError, "web search failed.*502"):
+            churn_found.suggest(self.c, "chase", "Sapphire Reserve")
+        self.assertEqual(urlopen.call_count, 1)
 
 
 if __name__ == "__main__":

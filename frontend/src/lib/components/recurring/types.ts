@@ -39,6 +39,8 @@ export interface RecurringItem {
   suggested_amount?: number | null;
   next_date?: string | null;
   last_matched?: MatchedTx | null;
+  /** Its logo: the one you chose, else its last matched transaction's merchant's (null: its category's icon). */
+  logo?: string | null;
   missed?: (Missed & { recurring_id: number })[];
 }
 
@@ -53,6 +55,16 @@ export interface Suggestion {
   frequency: string;
   anchor_date: string;
   count: number;
+}
+
+/** GET /api/recurring/suggestions/dismissed: a suggestion marked "Not recurring". Only what its key holds is kept, so no amount. */
+export interface DismissedSuggestion {
+  key: string;
+  account_id: string;
+  account_name?: string | null;
+  /** The merchant text, lowercased. */
+  match: string;
+  frequency: string;
 }
 
 /** A matched transaction, as GET /api/transactions?recurring=… lists it. */

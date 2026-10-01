@@ -2,9 +2,15 @@
 // (returns are after inflation). Each run draws a return for every year; the middle half of a thousand runs is the
 // likely range, and the share of runs that never run dry is the chance the money lasts. The draws come from a fixed
 // seed, so the same plan always shows the same picture and typing a figure moves it only by what you changed.
+// What you enter (spending, savings, income, events) is in today's dollars and keeps pace with inflation; a loan's
+// payment and balance are fixed dollar amounts, so in today's dollars they shrink each year by inflation.
 import type { PlanAsset, RetirementPlan } from "./types";
 
 export const RUNS = 1000;
+
+/** What the plan holds outside its investments, by kind: homes, other assets and company equity. */
+export type HeldKind = "home" | "other" | "equity";
+export const HELD_KINDS: HeldKind[] = ["home", "other", "equity"];
 
 export interface Projection {
   years: number[];                 // calendar years, this one first
@@ -16,6 +22,7 @@ export interface Projection {
   atEnd: number;                   // median left at the end
   runsOutAge: number | null;       // your age when the median run runs out, if it does
   lowRunsOutAge: number | null;    // the same in poor markets (25th percentile)
+  held: Record<HeldKind, number[]>;   // each year's home equity, other assets and vested equity not yet sold (held())
 }
 
 // A small, fast seeded generator (mulberry32), and normally distributed draws from it (Box–Muller).
@@ -36,16 +43,24 @@ const quantile = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.len
 // The entry for `k` years from today in a by-year list that stops once it stops changing.
 const atYear = (list: number[] | undefined, k: number) => (list?.length ? list[Math.min(Math.max(0, k), list.length - 1)] : undefined);
 
+/** Whether the plan counts an asset: vehicles lose value, so they're neither held nor sold into it (the payment on a
+ *  loan against one still is, until it's paid off). */
+export const counted = (a: PlanAsset) => a.kind !== "vehicle";
+
+/** The year a sale is counted in: never before this one. A sale kept for a year that's now past counts this year. */
+export const saleYear = (sellYear: number, thisYear: number) => Math.max(thisYear, sellYear);
+
 /** Whether a loan's balance is projected (paid down on its terms) rather than held at today's. */
 export const loanProjected = (a: PlanAsset) => !!a.loan && a.loan.note == null && a.loan.payment != null;
 
-/** Selling an asset in `year`, in today's dollars: what it's worth then (its value grown by its own yearly change less
- *  inflation; for equity, what will have vested by then) and what's still owed on it. A loan with known terms is paid
- *  down to its balance that year, in today's dollars like the rest; one without stays at today's balance (a
- *  conservative guess). */
+/** Selling an asset in `year`, in today's dollars: what it's worth then and what's still owed on it. Its value grows
+ *  by its own yearly change less inflation; with no yearly change set (and for equity, at today's share price) it
+ *  keeps pace with inflation, so it holds its value in today's dollars. A loan with known terms is paid down to its
+ *  balance that year, in today's dollars like the rest; one without stays at today's balance (a conservative
+ *  guess). */
 export function sale(a: PlanAsset, year: number, thisYear: number, inflation: number): { value: number; owed: number } {
   const k = year - thisYear;
-  const real = (1 + a.yearly_change) / (1 + inflation) - 1;
+  const real = a.yearly_change == null ? 0 : (1 + a.yearly_change) / (1 + inflation) - 1;
   const value = (atYear(a.value_by_year, k) ?? a.value) * Math.pow(1 + real, k);
   const owed = loanProjected(a) ? (atYear(a.owed_by_year, k) ?? a.owed) / Math.pow(1 + inflation, Math.max(0, k)) : a.owed;
   return { value, owed };
@@ -67,23 +82,39 @@ export function paymentEnds(a: PlanAsset, sellYear: number | null): number | nul
   return ends.length ? Math.min(...ends) : null;
 }
 
-/** Each loan's yearly payment and the first year it's no longer spent (once per loan, however many assets it's
- *  against: the soonest). Only loans whose payment is known, ends, and was counted in the spending the plan starts
- *  from: one categorized as a transfer was never in it, so there's nothing to take off. */
-export interface EndingPayment { yearly: number; from: number; name: string; sold: boolean }
-export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): EndingPayment[] {
-  const sold = new Map(plan.assets.map((s) => [s.key, s.sell_year]));
-  const byLoan = new Map<string, EndingPayment>();
+/** A loan's payment in the plan, once per loan however many assets it's against: `yearly` is twelve monthly payments
+ *  (a fixed dollar amount), `from` the first year it's no longer paid (the soonest, null when it goes on past the
+ *  plan), `counted` whether it's in the spending figure the plan starts from. One that is comes off spending from
+ *  `from`; one paid as a transfer instead (false) is added to spending until then, as it's still being paid; one Runway
+ *  couldn't find either way (null) is left as it is, as adding one that's already in would count it twice. */
+export interface LoanPayment { yearly: number; from: number | null; name: string; sold: boolean; counted: boolean | null }
+export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] {
+  const byKey = new Map(assets.map((a) => [a.key, a]));
+  const sold = new Map(plan.assets.filter((s) => { const a = byKey.get(s.key); return !a || counted(a); })
+    .map((s) => [s.key, saleYear(s.sell_year, thisYear)]));
+  const byLoan = new Map<string, LoanPayment>();
+  const sooner = (a: number | null, b: number | null) => (a ?? Infinity) < (b ?? Infinity);
   for (const a of assets) {
+    const l = a.loan;
+    if (!l?.account_id || !l.payment) continue;
     const sellYear = sold.get(a.key) ?? null;
     const from = paymentEnds(a, sellYear);
-    const l = a.loan;
-    if (from == null || !l?.account_id || !l.payment || !l.payment_counted) continue;
     const had = byLoan.get(l.account_id);
-    if (!had || from < had.from) byLoan.set(l.account_id, { yearly: 12 * l.payment, from, name: a.name, sold: from === sellYear });
+    if (!had || sooner(from, had.from)) {
+      byLoan.set(l.account_id, { yearly: 12 * l.payment, from, name: a.name, sold: from != null && from === sellYear, counted: l.payment_counted ?? null });
+    }
   }
   return [...byLoan.values()];
 }
+
+/** Loan payments in Runway's spending figure that end during the plan, and come off it then. */
+export type EndingPayment = LoanPayment & { from: number };
+export const endingPayments = (plan: RetirementPlan, assets: PlanAsset[], thisYear: number): EndingPayment[] =>
+  loanPayments(plan, assets, thisYear).filter((p): p is EndingPayment => p.counted === true && p.from != null);
+
+/** Loan payments paid as transfers, so missing from Runway's spending figure: added to it while they're still paid. */
+export const addedPayments = (plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] =>
+  loanPayments(plan, assets, thisYear).filter((p) => p.counted === false);
 
 /** Which dollars the planner shows its figures in: today's (what the projection runs in) or each year's own. */
 export type Dollars = "today" | "future";
@@ -101,6 +132,7 @@ export function projectionIn(p: Projection, thisYear: number, inflation: number,
   const each = (vals: number[]) => vals.map((v, i) => inDollars(v, p.years[i], thisYear, inflation, dollars));
   return {
     ...p, low: each(p.low), mid: each(p.mid), high: each(p.high),
+    held: { home: each(p.held.home), other: each(p.held.other), equity: each(p.held.equity) },
     atRetirement: inDollars(p.atRetirement, p.years[p.retireIndex], thisYear, inflation, dollars),
     atEnd: inDollars(p.atEnd, p.years[p.years.length - 1], thisYear, inflation, dollars),
   };
@@ -115,11 +147,18 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
   const ages = people.map((p) => years.map((y) => y - p.birth_year));
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const retireYear = Math.max(...people.map((p) => p.birth_year + p.retire_age));
-  // Runway's spending figure (from your history) includes the payments on loans counted as spending; once such a loan
-  // is paid off or its asset sold, its payment comes off. A figure you typed yourself is taken as it is: it probably
-  // leaves the loan out already, and taking it off again would count it twice.
-  const ending = plan.spending_own ? [] : endingPayments(plan, assets);
-  const spending = (y: number) => Math.max(0, plan.spending - ending.reduce((s, e) => s + (y >= e.from ? e.yearly : 0), 0));
+  // Runway's spending figure (from your history) includes the payments on loans counted as spending: a fixed dollar
+  // amount, so in today's dollars each year it's worth less, and once the loan is paid off or its asset sold it comes
+  // off altogether. One paid as a transfer is added while it's still paid; one Runway can't place is left as it is. A
+  // figure you typed yourself is
+  // taken as it is: it probably has your loans in or out as you mean them, and adjusting it would count them twice.
+  const payments = plan.spending_own ? [] : loanPayments(plan, assets, thisYear);
+  const deflate = (y: number) => Math.pow(1 + plan.inflation, -Math.max(0, y - thisYear));
+  const spending = (y: number) => Math.max(0, plan.spending + payments.reduce((s, p) => {
+    const paying = p.from == null || y < p.from;
+    if (p.counted == null) return s;
+    return s + (paying ? p.yearly * deflate(y) : 0) - (p.counted ? p.yearly : 0);
+  }, 0));
   const net = years.map((y, t) => {
     let f = 0;
     people.forEach((p, i) => { if (ages[i][t] < p.retire_age) f += p.savings; });
@@ -131,12 +170,28 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
     for (const e of plan.events) if (e.year === y) f += e.amount;
     for (const s of plan.assets) {
       const a = byKey.get(s.key);
-      if (a && s.sell_year === y) f += saleProceeds(a, y, thisYear, plan.inflation);
+      const at = saleYear(s.sell_year, thisYear);
+      if (a && counted(a) && at === y) f += saleProceeds(a, at, thisYear, plan.inflation);
     }
     return f;
   });
   const retired = years.map((y) => y >= retireYear);
   return { years, ages, net, retired, retireIndex: Math.min(years.length - 1, Math.max(0, retireYear - thisYear)) };
+}
+
+/** What the plan holds outside its investments in each of `years`, in today's dollars, by kind: each home's and other
+ *  asset's value less what's still owed on it, and equity vested by then. An asset counts until the year it's sold
+ *  into the plan; from then its proceeds are in the investments, so it isn't counted twice. Vehicles aren't counted. */
+export function held(plan: RetirementPlan, thisYear: number, assets: PlanAsset[], years: number[]): Record<HeldKind, number[]> {
+  const sold = new Map(plan.assets.map((s) => [s.key, saleYear(s.sell_year, thisYear)]));
+  const out: Record<HeldKind, number[]> = { home: years.map(() => 0), other: years.map(() => 0), equity: years.map(() => 0) };
+  for (const a of assets) {
+    if (!counted(a)) continue;
+    const kind: HeldKind = a.kind === "equity" ? "equity" : a.kind === "home" ? "home" : "other";
+    const until = sold.get(a.key) ?? Infinity;
+    years.forEach((y, t) => { if (y < until) out[kind][t] += saleProceeds(a, y, thisYear, plan.inflation); });
+  }
+  return out;
 }
 
 export function project(plan: RetirementPlan, current: number, thisYear: number, assets: PlanAsset[], runs = RUNS): Projection {
@@ -171,5 +226,6 @@ export function project(plan: RetirementPlan, current: number, thisYear: number,
   return {
     years, ages, low, mid, high, success: lasted / runs, retireIndex,
     atRetirement: mid[retireIndex], atEnd: mid[n - 1], runsOutAge: outAge(mid), lowRunsOutAge: outAge(low),
+    held: held(plan, thisYear, assets, years),
   };
 }

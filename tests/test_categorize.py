@@ -5,8 +5,8 @@ from datetime import date, timedelta
 
 from sqlalchemy import func, insert, select, update
 
-from runway import categories, categorize, db, server
-from runway.models import Budget, Category, Merchant, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
+from runway import categories, categorize, db, payees, server
+from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
 from tests.shared import LedgerCase
 
 
@@ -25,6 +25,42 @@ class PayeeTests(unittest.TestCase):
         }
         for raw, want in cases.items():
             self.assertEqual(categorize.clean_payee(raw), want, raw)
+
+    def test_the_banks_transfer_words_come_off_the_merchant(self):
+        cases = {
+            # What banks send through SimpleFIN for a Target debit card or a loan paid on the bank's website
+            "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)": "Target",
+            "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)": "Target",
+            "DIRECT DEPOSIT TARGET DEBITACH TRAN (Cash)": "Target",
+            "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)": "Fifth Third",
+            "GEICO ACH PMT": "Geico",
+            "COMCAST WEB PAY": "Comcast",
+            "ACME CORP PAYROLL PPD ID: 1234567": "Acme Corp Payroll",
+        }
+        for raw, want in cases.items():
+            self.assertEqual(categorize.clean_payee(raw), want, raw)
+        # And payees synced before, as they were stored
+        for long in ("Target Cach Tran Cash", "Target C Cash", "Direct Deposit Target Debitach Tran Cash", "Target Debit Cach Tran"):
+            self.assertEqual(payees.shorten(long), "Target", long)
+        self.assertEqual(payees.shorten("Fifth Third Baweb Pay Cash"), "Fifth Third")
+
+    def test_a_merchants_own_name_stays_as_it_is(self):
+        # Transfer words alone aren't enough: a merchant's name can end with them. Only an ACH code (or "web pay", or a
+        # cut-off letter before one) says the tail is the bank's.
+        for name in ("Apple Cash", "Apple Pay", "Charlotte's Web", "Vitamin C", "Target C", "Discover Credit", "Ach Payment",
+                     "Direct Deposit Acme Payroll", "Cash App", "Chase Bill Pay", "Bach Pay", "Coach", "Ppd", "Target"):
+            self.assertEqual(payees.shorten(name), name, name)
+            self.assertEqual(categorize.clean_payee(name.upper()), name, name)
+
+    def test_a_payee_from_the_banks_text_or_from_you(self):
+        self.assertTrue(payees.from_bank("Target Cach Tran Cash", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
+        self.assertTrue(payees.from_bank("Target C Cash", "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)"))
+        self.assertFalse(payees.from_bank("Groceries Run", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
+        self.assertFalse(payees.from_bank("Target", None))
+        # punctuation is plain on both sides
+        self.assertTrue(payees.from_bank("Trader Joe's", "TRADER JOE'S #123"))
+        self.assertTrue(payees.from_bank("At&t", "AT&T BILL PAYMENT"))
+        self.assertTrue(payees.from_bank("Amazon.com", "AMAZON.COM*2K3AB1"))
 
 
 class CategorizeTests(LedgerCase):
@@ -219,6 +255,31 @@ class CategoryTests(LedgerCase):
         self.assertTrue(ev)
         self.assertEqual({e["logo"] for e in ev}, {"/api/merchants/m-netflix/logo"})
 
+    def test_a_logo_chosen_for_a_recurring_item_shows_on_it_and_its_coming_up_entries(self):
+        self.acct("chk", "checking", 1000.0)
+        last = (date.today() - timedelta(days=20)).isoformat()
+        for name, amount in (("Netflix", -15.49), ("Rent", -900)):
+            self.conn.execute(insert(Recurring).values(name=name, account_id="chk", amount=amount,
+                                                       frequency="monthly", anchor_date=last, active=1))
+        rid, rent = (r[0] for r in self.conn.execute(select(Recurring.id).order_by(Recurring.id)))
+        self.tx("chk", last, -15.49, "NETFLIX.COM")
+        self.conn.execute(update(Transaction).where(Transaction.description == "NETFLIX.COM")
+                          .values(recurring_id=rid, merchant_id="m-netflix"))
+        self.conn.execute(insert(Merchant).values(id="m-netflix", name="Netflix", logo="cG5n", logo_type="image/png"))
+        self.conn.execute(insert(Merchant).values(id="site:landlord.com", name="landlord.com", logo="cG5n", logo_type="image/png"))
+
+        def logos():
+            items = {i["id"]: i["logo"] for i in server.api_recurring(self.conn, {}, None)}
+            ev = server.api_overview(self.conn, {"days": ["60"]}, None)["events"]
+            return items, {e["recurring_id"]: e["logo"] for e in ev if e.get("recurring_id")}
+        netflix = "/api/merchants/m-netflix/logo"
+        self.assertEqual(logos(), ({rid: netflix, rent: None}, {rid: netflix, rent: None}))
+        # chosen by the item's name: it works for an item with nothing matched, and wins over its matched transaction's logo
+        self.conn.execute(insert(MerchantLogo).values(key="rent", website="landlord.com", hidden=0))
+        self.conn.execute(insert(MerchantLogo).values(key="netflix", website=None, hidden=1))
+        site = "/api/merchants/site%3Alandlord.com/logo"
+        self.assertEqual(logos(), ({rid: None, rent: site}, {rid: None, rent: site}))
+
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)
         self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))
@@ -348,7 +409,7 @@ class CategorizeFixTests(LedgerCase):
     def test_autopay_needs_a_card(self):
         cat = lambda d: categorize.heuristic_category({"description": d, "amount": -100}, "checking")
         for bill in ("COMCAST XFINITY AUTOPAY", "STATE FARM AUTOPAY", "CITY WATER EPAY", "CAPITAL ONE AUTO FINANCE PMT",
-                     "CHASE MORTGAGE AUTOPAY"):
+                     "CHASE MORTGAGE AUTOPAY", "CAPITAL ONE AUTO PMT", "TRUIST MORTG OLB MTGPMT"):
             self.assertIsNone(cat(bill), bill)
         for card in ("CHASE CREDIT CRD AUTOPAY", "CAPITAL ONE MOBILE PMT", "AMEX EPAYMENT ACH PMT", "DISCOVER E-PAYMENT",
                      "CITI AUTOPAY PAYMENT", "BARCLAYCARD US AUTOPAY", "APPLECARD GSBANK PAYMENT"):

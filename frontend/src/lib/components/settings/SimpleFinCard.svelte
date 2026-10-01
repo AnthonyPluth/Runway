@@ -30,8 +30,8 @@
 
 <ServiceRow name="SimpleFIN" purpose="Your banks through SimpleFIN Bridge, synced once a day" on={!!st.simplefin}
   status={st.simplefin ? (problem ? "Needs attention" : "Connected") : undefined} warn={!!st.simplefin && !!problem} open={startOpen}>
-  <p class={helpCls}>Your banks through <a class={linkCls} href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN
-    Bridge</a>, synced together once a day. Banks are added and removed there.</p>
+  <p class={helpCls}>Banks are added and removed at <a class={linkCls} href="https://beta-bridge.simplefin.org" target="_blank" rel="noopener">SimpleFIN
+    Bridge</a>.</p>
   {#if st.simplefin}
     <p class="text-sm text-muted-foreground">{log ? `Last sync ${when}${summary ? ` · ${summary}` : ""}` : "Not synced yet"}</p>
     {#if problem}<p class="text-sm text-amber-500">{problem}</p>{/if}
@@ -45,7 +45,7 @@
     </div>
     {#if replacing}<SimpleFinSetup ondone={() => (replacing = false)} />{/if}
   {:else}
-    <p class={helpCls}>Paste a setup token from SimpleFIN Bridge; Runway claims it and runs the first sync (about six months of history).</p>
+    <p class={helpCls}>Paste a setup token from SimpleFIN Bridge.</p>
     <SimpleFinSetup />
   {/if}
 </ServiceRow>

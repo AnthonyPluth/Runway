@@ -1,7 +1,7 @@
 // Settings' tabs, in order, and which one a #setup/… link (or the one you were on last) opens.
 export const SECTIONS = [
   { id: "accounts", label: "Accounts" }, { id: "connections", label: "Connections" }, { id: "categories", label: "Categories" },
-  { id: "rules", label: "Rules" }, { id: "notifications", label: "Notifications" }, { id: "advanced", label: "Advanced" },
+  { id: "rules", label: "Rules" }, { id: "notifications", label: "Notifications" }, { id: "assumptions", label: "Assumptions" }, { id: "advanced", label: "Advanced" },
 ];
 
 // Tabs that were merged into another, so old links still land there: Backup is now under Advanced, and the browser

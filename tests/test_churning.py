@@ -25,7 +25,9 @@ class DateTests(unittest.TestCase):
         self.assertEqual(fee("2026-03-01", date(2026, 9, 29)), date(2027, 3, 1))       # first year: the first anniversary
         self.assertEqual(fee("2024-02-29", date(2027, 1, 1)), date(2027, 2, 28))       # a leap day, in a common year
         self.assertEqual(fee("2024-02-29", date(2028, 1, 1)), date(2028, 2, 29))       # ... and in a leap year
-        self.assertEqual(fee("2024-01-31", date(2026, 3, 1), fee_month=4), date(2026, 4, 30))   # a fee month you set
+        # The fee posts in the anniversary month: a fee_month stored by an older version is ignored.
+        self.assertEqual(fee("2024-01-31", date(2026, 3, 1), fee_month=4), date(2027, 1, 31))
+        self.assertEqual(fee("2024-01-31", date(2026, 1, 1)), date(2026, 1, 31))
         self.assertIsNone(churning.next_fee(card(1, "2024-01-01", annual_fee=0), TODAY))
         self.assertIsNone(churning.next_fee(card(1, "2024-01-01", annual_fee=95, status="closed"), TODAY))
 
@@ -192,12 +194,12 @@ class DbTests(DbCase):
         base = {"owner": "Alex", "issuer": "chase", "product": "Freedom", "opened_on": "2026-01-01"}
         for bad, msg in (({"owner": ""}, "person"), ({"owner": "Joint"}, "one person"), ({"issuer": "bank"}, "bank"),
                          ({"product": " "}, "name"), ({"opened_on": "soon"}, "date"), ({"annual_fee": "-5"}, "between"),
-                         ({"fee_month": 13}, "between"), ({"fee_month": 2.5}, "whole"), ({"currency": "gold"}, "earns"),
+                         ({"benefits": "lounge"}, "list"), ({"benefits": [{"name": ""}]}, "name"), ({"currency": "gold"}, "earns"),
                          ({"account_id": "chk"}, "credit card"), ({"closed_on": "2025-01-01"}, "before"),
                          ({"status": "lost"}, "Status"), ({"bonus": "nan"}, "number"), ({"changed_from": 99}, "changed from")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 churning.save_card(self.c, {**base, **bad})
-        cid = churning.save_card(self.c, {**base, "authorized_user": True, "fee_month": "", "notes": "  hi "})
+        cid = churning.save_card(self.c, {**base, "authorized_user": True, "fee_month": 5, "notes": "  hi "})
         row = self.c.execute(select(ChurnCard.authorized_user, ChurnCard.business, ChurnCard.fee_month,
                                     ChurnCard.notes, ChurnCard.status, ChurnCard.bonus_months, ChurnCard.base_rate,
                                     ChurnCard.currency)

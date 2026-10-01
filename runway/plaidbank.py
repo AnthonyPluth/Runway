@@ -19,7 +19,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import brands, db, merchants, splits
+from . import brands, db, merchants, payees, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
 from .models import Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Transaction
@@ -423,14 +423,18 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         prior, old = None, None
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
-            prior = conn.execute(select(Transaction.payee, Transaction.category, Transaction.category_source, Transaction.confidence,
+            prior = conn.execute(select(Transaction.payee, Transaction.description, Transaction.category, Transaction.category_source, Transaction.confidence,
                                         Transaction.needs_review, Transaction.recurring_id, Transaction.recurring_linked_by)
                                  .where(Transaction.id == old)).fetchone()
             conn.execute(delete(Transaction).where(Transaction.id == old))
+        # And the name you gave it: a categorized one's as it was (a rule may have renamed it), an uncategorized one's
+        # if it isn't the bank's (Plaid may name the merchant only once it posts).
+        if prior and prior["payee"] and (prior["category"] or not payees.from_bank(prior["payee"], prior["description"])):
+            payee = prior["payee"]
         row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee, "pending": pending}
         if prior and prior["category"]:
             conn.execute(insert(Transaction).values(
-                **row | {"payee": prior["payee"] or payee}, category=prior["category"], category_source=prior["category_source"],
+                **row, category=prior["category"], category_source=prior["category_source"],
                 confidence=prior["confidence"], needs_review=prior["needs_review"], recurring_id=prior["recurring_id"],
                 recurring_linked_by=prior["recurring_linked_by"]))
         else:

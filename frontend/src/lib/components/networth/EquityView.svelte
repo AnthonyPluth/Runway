@@ -9,10 +9,10 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
-  import { barWidth, fmt, fmt0, fmtDate, shortMoney } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, isoDay, shortMoney } from "$lib/format";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
-  import { EQ_KINDS, isOption, shares, vestingSeries } from "./equity";
+  import { EQ_KINDS, isOption, shares, todayIndex, vestingSeries } from "./equity";
   import GrantSheet from "./GrantSheet.svelte";
   import type { Company, Equity, Grant, GrantBody } from "./types";
 
@@ -27,6 +27,7 @@
   const c = $derived(d?.carta);
   const lastRead = $derived([c?.web_last, c?.last_sync].filter(Boolean).sort().at(-1));
   const chart = $derived(d?.companies.length ? vestingSeries(d.companies) : null);
+  const today = $derived(chart ? todayIndex(chart.xs, isoDay()) : null);
   const CLS = ["s-main", "s-alt", "s-muted"] as const;
   const my = (s: string | null | undefined, o: Intl.DateTimeFormatOptions = { month: "short", year: "numeric" }) => (s ? fmtDate(s, o) : "");
 
@@ -73,15 +74,7 @@
 {#if error && !d}<p class="text-sm text-destructive">{error}</p>
 {:else if !d || !c}<div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
-  <p class="text-sm text-muted-foreground">{lastRead ? `From Carta, last read ${fmtDate(lastRead)}. ` : ""}Only what has vested counts toward net worth.</p>
-  <details class="mt-1 mb-6 text-sm text-muted-foreground">
-    <summary class="w-fit cursor-pointer underline underline-offset-2 hover:text-foreground">How is this valued?</summary>
-    <p class="mt-2 max-w-prose">
-      Stock options, RSUs and shares: enter them here, or read them from Carta with Runway’s browser extension
-      (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Connections</a>).
-      Only what has vested counts toward net worth, at each company’s latest share price (its 409A value, for a private company).
-    </p>
-  </details>
+  {#if lastRead}<p class="mb-6 text-sm text-muted-foreground">From Carta, last read {fmtDate(lastRead)}.</p>{/if}
   {#if c.last_error}
     <Alert.Root variant="destructive" class="mb-6"><TriangleAlert /><Alert.Description>Carta: {c.last_error}</Alert.Description></Alert.Root>
   {/if}
@@ -92,7 +85,7 @@
       <Card.Root class="mb-6">
         <Card.Header><Card.Title>Vesting over time</Card.Title></Card.Header>
         <Card.Content>
-          <LineChart xs={chart.xs.map((x) => fmtDate(x, { month: "short", year: "numeric" }))} labels zero height={200} fmtY={shortMoney} fmtTip={fmt}
+          <LineChart xs={chart.xs.map((x) => fmtDate(x, { month: "short", year: "numeric" }))} labels zero height={200} mark={today == null ? null : { at: today, label: "Today" }} fmtY={shortMoney} fmtTip={fmt}
             series={chart.lines.map((l, i) => ({ ...l, cls: CLS[i], step: true }))} />
         </Card.Content>
       </Card.Root>

@@ -43,6 +43,9 @@ def api_transactions(conn, q, _b):
             # a split transaction counts under every category it's split into, not the one on the row
             where.append(or_(and_(func.coalesce(T.is_split, 0) == 0, T.category.in_(family)),
                              select(TxSplit.id).where(TxSplit.tx_id == T.id, TxSplit.category.in_(family)).exists()))
+    elif q.get("ignored", [""])[0] == "0":   # hide what's marked Ignore (unless that's the category asked for)
+        where.append(or_(T.category.is_(None), func.coalesce(T.is_split, 0) == 1,
+                         T.category.notin_(["Ignore", *categories.descendants(conn, "Ignore")])))
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
         where += [T.posted >= start.isoformat(), T.posted < end.isoformat()]
@@ -74,10 +77,16 @@ def api_transactions(conn, q, _b):
 _WAS = ("id", "category", "category_source", "confidence", "needs_review", "payee")
 
 
-def snapshot(conn, ids: list[str]) -> list[dict]:
-    """These transactions as they are now (before a change), for `restore`. A split one carries its parts."""
+def snapshot(conn, ids: list[str], orders: bool = False) -> list[dict]:
+    """These transactions as they are now (before a change), for `restore`. A split one carries its parts. With
+    `orders`, the change also sets the categories of the items of the transactions' orders (see
+    `retail.set_transaction_category`): the other transactions of those orders come along, and each one with an order
+    carries its items' categories."""
     t = Transaction
     out: list[dict] = []
+    if orders:
+        ids = [str(x) for x in ids]
+        ids += retail.order_mates(conn, ids)
     for i in range(0, len(ids), 500):
         chunk = [str(x) for x in ids[i:i + 500]]
         rows = db.rows(conn.execute(select(*(getattr(t, c) for c in _WAS), t.is_split).where(t.id.in_(chunk))))
@@ -85,6 +94,14 @@ def snapshot(conn, ids: list[str]) -> list[dict]:
         for r in rows:
             r["splits"] = [{"amount": p["amount"], "category": p["category"], "note": p["note"]} for p in parts.get(r["id"], [])]
             r["is_split"] = 1 if r["is_split"] else 0
+        if orders:
+            items = retail.items_of_transactions(conn, [r["id"] for r in rows])
+            charges = retail.charges_of_transactions(conn, [r["id"] for r in rows])
+            for r in rows:
+                if r["id"] in items:
+                    r["items"] = items[r["id"]]
+                if r["id"] in charges:
+                    r["charges"] = charges[r["id"]]
         out += rows
     return out
 
@@ -107,6 +124,10 @@ def restore(conn, rows: list) -> int:
             needs_review=1 if r.get("needs_review") else 0, payee=payee))
         if not cur.rowcount:
             continue
+        if isinstance(r.get("items"), list):   # the items of its order, which a category change had set too
+            retail.restore_items(conn, r["items"])
+        if isinstance(r.get("charges"), list):   # and what Runway had given it from them
+            retail.restore_charges(conn, r["id"], r["charges"])
         if not r.get("is_split"):   # it wasn't split before (a split made since goes away)
             splits.clear(conn, r["id"])
         elif r.get("splits"):   # it was: the parts a category change removed come back
@@ -119,10 +140,11 @@ def restore(conn, rows: list) -> int:
 
 
 def api_tx_category(conn, _q, body, tx_id):
-    was = snapshot(conn, [tx_id])
+    was = snapshot(conn, [tx_id], orders=True)
     try:
         remember = bool(body.get("remember"))
         n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
+        retail.set_transaction_category(conn, [tx_id], body.get("category", ""))
     except ValueError as e:
         raise ApiError(str(e)) from e
     # Not remembered yet: the app asks whether to use this category for the merchant from now on.
@@ -149,10 +171,12 @@ def api_tx_bulk(conn, _q, body, *_):
     ids = body.get("ids")
     if not isinstance(ids, list):
         raise ApiError("Select some transactions first")
-    was = snapshot(conn, ids)
+    was = snapshot(conn, ids, orders=bool(body.get("category")))
     try:
         n = categorize.bulk_update(conn, ids, body.get("category") or None, body.get("payee") or None,
                                    bool(body.get("reviewed")))
+        if body.get("category"):
+            retail.set_transaction_category(conn, [str(i) for i in ids], body["category"])
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True, "updated": n, "was": was}
@@ -187,9 +211,10 @@ def api_ai_apply(conn, _q, body):
         except ValueError as e:
             raise ApiError(str(e)) from e
     remember = bool(body.get("remember"))
-    was = snapshot(conn, ids)
+    was = snapshot(conn, ids, orders=True)
     try:
         n = categorize.apply_to_group(conn, ids, category, remember)
+        retail.set_transaction_category(conn, ids, category)
     except ValueError as e:
         raise ApiError(str(e)) from e
     # Applying a suggestion categorizes; the app then asks whether this merchant should always be this category.

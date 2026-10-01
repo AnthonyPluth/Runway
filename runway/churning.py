@@ -152,15 +152,32 @@ def falls_off(card: dict) -> date:
     return add_months(date.fromisoformat(card["opened_on"]), 24)
 
 
+def anniversaries(conn) -> dict[int, str]:
+    """{card id: the day its annual fee's anniversary counts from}: the day it was opened, or for a product change, the
+    day the account was (the first card of its changed_from chain), since a product change keeps the account and the
+    issuer keeps charging on its anniversary."""
+    rows = {r["id"]: (r["opened_on"], r["changed_from"])
+            for r in conn.execute(select(ChurnCard.id, ChurnCard.opened_on, ChurnCard.changed_from))}
+    out: dict[int, str] = {}
+    for cid in rows:
+        cur, seen = cid, {cid}
+        while rows[cur][1] in rows and rows[cur][1] not in seen:
+            cur = rows[cur][1]
+            seen.add(cur)
+        out[cid] = rows[cur][0]
+    return out
+
+
 def next_fee(card: dict, today: date) -> date | None:
-    """The next annual fee: on the anniversary of opening (in the fee month, if you set one), from today on. None for
-    a card without a fee, or one that's closed."""
+    """The next annual fee: on the account's anniversary (`_anniversary`, from `anniversaries`; else the day the card
+    was opened), from today on. None for a card without a fee, or one that's closed. (The fee posts in its anniversary
+    month. The card's `fee_month` column, once settable, is no longer read or written: it stays in the table so old
+    rows load, but the anniversary decides.)"""
     if not card.get("annual_fee") or (card.get("status") or "open") != "open":
         return None
-    opened = date.fromisoformat(card["opened_on"])
-    month = card.get("fee_month") or opened.month
+    opened = date.fromisoformat(card.get("_anniversary") or card["opened_on"])
     for year in range(max(opened.year, today.year - 1), today.year + 2):
-        d = _on(year, month, opened.day)
+        d = _on(year, opened.month, opened.day)
         if d > opened and d >= today:
             return d
     return None
@@ -353,6 +370,9 @@ def best_cards(cards: list[dict], rates: dict[int, dict[str, float]], vals: dict
 def load(conn) -> dict:
     """The cards, rates (normal, and portal-only), tasks, points values and balances, as stored."""
     cards = db.rows(conn.execute(select(ChurnCard).order_by(ChurnCard.owner, ChurnCard.opened_on, ChurnCard.id)))
+    anniversary = anniversaries(conn)
+    for c in cards:
+        c["_anniversary"] = anniversary.get(c["id"])
     rates: dict[int, dict[str, float]] = {}
     portal: dict[int, dict[str, float]] = {}
     for r in conn.execute(select(ChurnRate.card_id, ChurnRate.category, ChurnRate.multiplier, ChurnRate.portal_only)
@@ -782,8 +802,12 @@ def _rates(conn, value) -> tuple[list[dict], float | None]:
 
 
 def save_card(conn, body: dict, card_id: int | None = None) -> int:
-    """Add a card, or change the fields given of one."""
+    """Add a card, or change the fields given of one. A new card may come with `benefits` (a list of what
+    `churn_benefits.save` takes), added with it: a benefit that's refused leaves no card behind."""
     new = card_id is None
+    benefits = body.get("benefits") if new else None
+    if benefits is not None and (not isinstance(benefits, list) or not all(isinstance(b, dict) for b in benefits)):
+        raise ChurnError("The benefits must be a list")
     fields: dict[str, Any] = {}
     if new or "owner" in body:
         fields["owner"] = _owner(body.get("owner"), conn)
@@ -825,8 +849,6 @@ def save_card(conn, body: dict, card_id: int | None = None) -> int:
         fields["plan_remind_days"] = PLAN_REMIND_DAYS if n is None else n
     if "annual_fee" in body or new:
         fields["annual_fee"] = _num(body.get("annual_fee"), "annual fee", 0, 10000) or 0.0
-    if "fee_month" in body:
-        fields["fee_month"] = _int(body.get("fee_month"), "fee month", 1, 12)
     if "currency" in body or new:
         cur = str(body.get("currency") or "cash")
         if cur not in values(conn):
@@ -878,6 +900,8 @@ def save_card(conn, body: dict, card_id: int | None = None) -> int:
         conn.execute(delete(ChurnRate).where(ChurnRate.card_id == card_id))
         if rates:
             conn.execute(insert(ChurnRate), [{"card_id": card_id, **r} for r in rates])
+    for b in benefits or []:
+        churn_benefits.save(conn, b, int(card_id))  # type: ignore[arg-type]
     return int(card_id)  # type: ignore[arg-type]
 
 
@@ -1032,7 +1056,7 @@ def plan_done(conn, card_id: int, today: date, on=None) -> dict:
             new_id = int(conn.execute(insert(ChurnCard).values(
                 owner=card.owner, issuer=card.issuer, product=card.plan_target, opened_on=day, changed_from=card.id,
                 account_id=card.account_id, currency=card.currency, annual_fee=0.0, base_rate=1.0,
-                fee_month=card.fee_month or date.fromisoformat(card.opened_on).month, authorized_user=card.authorized_user,
+                authorized_user=card.authorized_user,
                 business=card.business)).lastrowid)
             card.plan_new_id = new_id
             changes.append(f"{card.plan_target} is added, changed from {card.product} (the same account: not a new "

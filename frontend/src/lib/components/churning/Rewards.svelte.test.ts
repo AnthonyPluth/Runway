@@ -104,12 +104,12 @@ describe("rewards", () => {
     await waitFor(() => expect(bodyOf(calls("/api/churning/balances")[0])).toEqual({ owner: "Alex", currency: "aa", points: "42000", as_of: "2026-09-30" }));
   });
 
-  it("groups the point values and says which are estimates and which are yours", async () => {
+  it("groups the point values and marks which are estimates and which are yours", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Point values" }));
     expect(screen.getByText("Airline miles")).toBeInTheDocument();
     expect(screen.getByText("your value")).toBeInTheDocument();      // AA is overridden
     expect(screen.getAllByText(/estimate \(as of Jun 2026\)/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Estimates, not official values/)).toBeInTheDocument();
+    expect(screen.queryByText(/Estimates, not official values/)).toBeNull();   // that note is under Settings → Assumptions
   });
 });

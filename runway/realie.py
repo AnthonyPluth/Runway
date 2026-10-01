@@ -76,6 +76,24 @@ def split_address(address: str) -> dict:
     return {"street": parts[0], "city": city, "state": m.group(1).upper(), "zip": m.group(2) or ""}
 
 
+def usable_address(address: str | None) -> bool:
+    """Whether Realie can look this address up (split_address takes it)."""
+    try:
+        split_address(address or "")
+    except RealieError:
+        return False
+    return True
+
+
+def values_home(configured: bool, a: dict) -> bool:
+    """Whether Realie keeps this asset's value, so it isn't typed by hand: a home with an address Realie can use, whose
+    value came from Realie and that Realie keeps up to date (`auto_update`), while Realie is set up (`configured`).
+    Anything else (a vehicle, another asset, a home without such an address, one Realie couldn't value, or one you
+    asked Realie about once but don't keep updated: its value is still yours) is valued by hand."""
+    return (configured and a.get("kind") == "home" and a.get("source") == "realie" and bool(a.get("auto_update"))
+            and usable_address(a.get("address")))
+
+
 def _model_value(r: dict):
     return r.get("modelValue") or ((r.get("realieValuation") or {}).get("ml") or {}).get("value")
 

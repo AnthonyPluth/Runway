@@ -47,7 +47,16 @@
     } catch (err) { toast.error((err as Error).message); }
     finally { busy = false; }
   }
-  function outside(e: MouseEvent) { if (open && root && !root.contains(e.target as Node)) open = false; }
+  function outside(e: MouseEvent) {
+    const t = e.target as Node;
+    if (open && root && !root.contains(t) && !panel?.contains(t)) open = false;
+  }
+  // The panel lives at the end of the page, not beside its button: inside a <summary> (Bills & income), a click on the
+  // panel's text would open or close the item underneath.
+  function toBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return () => node.remove();
+  }
 </script>
 
 <svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") open = false; }}
@@ -59,7 +68,7 @@
     {@render children()}
   </button>
   {#if open}
-    <div data-editor role="dialog" aria-label={`Logo for ${name}`} bind:this={panel}
+    <div data-editor role="dialog" aria-label={`Logo for ${name}`} bind:this={panel} {@attach toBody}
       style:top={`${pos.top}px`} style:left={`${pos.left}px`}
       class="fixed z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl bg-popover p-3 text-sm text-popover-foreground shadow-xl ring-1 ring-border">
       <div class="mb-2 font-medium">Logo for {name}</div>

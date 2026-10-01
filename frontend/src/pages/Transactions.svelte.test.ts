@@ -9,7 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
-import { txFilters } from "$lib/filters.svelte";
+import { txFilters, txShow } from "$lib/filters.svelte";
 import type { Tx } from "$lib/components/transactions/types";
 import { closeRemember } from "$lib/components/transactions/remember.svelte";
 import { toast } from "svelte-sonner";
@@ -41,6 +41,7 @@ beforeEach(() => {
   categories.list = [];
   Object.assign(txFilters.transactions, { q: "", account: "", category: "", month: "", scope: "" });
   Object.assign(txFilters.review, { q: "", account: "", category: "", month: "", scope: "" });
+  txShow.ignored = false;
 });
 
 describe("Transactions page", () => {
@@ -52,6 +53,20 @@ describe("Transactions page", () => {
     expect(screen.getByRole("link", { name: /To review/ })).toHaveTextContent("3");
     expect(lastList()).toContain("limit=100");
     expect(lastList()).not.toContain("review=1");
+  });
+
+  it("hides what's marked Ignore unless you tick Show ignored, which Clear filters leaves alone", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    expect(lastList()).toContain("ignored=0");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show ignored" }));
+    await waitFor(() => expect(lastList()).not.toContain("ignored="));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
+    await userEvent.click(await screen.findByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(lastList()).not.toContain("account=a1"));
+    expect(lastList()).not.toContain("ignored=");
+    expect(screen.getByRole("checkbox", { name: "Show ignored" })).toBeChecked();
   });
 
   it("doesn't offer investment accounts in the account filter", async () => {
@@ -208,6 +223,7 @@ describe("Transactions page", () => {
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
       expect(lastList()).toContain("review=1");
+      expect(lastList()).not.toContain("ignored=");   // review shows everything that needs a decision
       expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("2 to go");
       expect(api).not.toHaveBeenCalledWith(expect.stringContaining("/api/overview"));
     });

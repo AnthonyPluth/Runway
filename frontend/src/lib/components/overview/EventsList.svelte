@@ -6,14 +6,15 @@
   import Logo from "$lib/components/Logo.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDow } from "$lib/format";
+  import { fmt, fmtDate, fmtDow } from "$lib/format";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
 
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's ↻ opens Bills & income, to
-  // change every one. `limit` is how many show before
+  // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
+  // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together).
   let { events, limit = 8, accounts = false, all = $bindable(false) }: {
     events: (ForecastEvent & { late_from?: string | null })[];
@@ -65,10 +66,20 @@
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
         </div>
-        <div class="truncate text-[13px] text-muted-foreground tabular-nums">
-          {fmtDow(e.date)}{#if accounts && e.account}{" · "}{e.account}{/if} ·
-          <span class={e.balance_after < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after)}</span>
-        </div>
+        {#if e.kind === "fee"}
+          <!-- An annual fee is a charge on its card: it reaches cash in the card's statement payment, not on its own. -->
+          <div class="truncate text-[13px] text-muted-foreground tabular-nums"
+            title="Charged to the card: it's paid with the card's statement, so it's in that payment rather than taken out of your balance on its own">
+            {fmtDow(e.date)} · {#if !e.account}card not linked to an account, so not in the forecast
+            {:else if e.paid_on}on {e.account}, paid with its {fmtDate(e.paid_on)} payment
+            {:else}on {e.account}; its payment isn’t in the forecast{/if}
+          </div>
+        {:else}
+          <div class="truncate text-[13px] text-muted-foreground tabular-nums">
+            {fmtDow(e.date)}{#if accounts && e.account}{" · "}{e.account}{/if} ·
+            <span class={(e.balance_after ?? 0) < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after ?? 0)}</span>
+          </div>
+        {/if}
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
         {#if e.key}

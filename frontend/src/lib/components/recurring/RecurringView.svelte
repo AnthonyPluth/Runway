@@ -9,7 +9,8 @@
   import RecIcon from "$lib/components/recurring/RecIcon.svelte";
   import RecurringFields from "$lib/components/recurring/RecurringFields.svelte";
   import RecurringItem from "$lib/components/recurring/RecurringItem.svelte";
-  import { validate, type RecurringItem as Item, type RecurringValues, type Suggestion } from "$lib/components/recurring/types";
+  import { FREQ, validate, type RecurringItem as Item, type RecurringValues, type DismissedSuggestion, type Suggestion } from "$lib/components/recurring/types";
+  import { linkCls } from "$lib/components/settings/ui";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { fmt, fmtDate, isoDay, nb } from "$lib/format";
@@ -23,12 +24,16 @@
   async function load(): Promise<Data> {
     const [accounts, list] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
     items = list;
-    suggestions = app.state?.connected ? await api<Suggestion[]>("/api/recurring/suggestions") : [];
+    if (app.state?.connected) await loadSuggestions(); else { suggestions = []; dismissed = []; }
     // The Add form starts open when there's nothing yet, with your primary account chosen.
     adding = !list.length;
     primary = app.state?.primary_account || accounts.find((a) => !a.hidden)?.id || "";
     blank.account_id = primary;
     return { accounts };
+  }
+  async function loadSuggestions() {
+    [suggestions, dismissed] = await Promise.all([api<Suggestion[]>("/api/recurring/suggestions"), api<DismissedSuggestion[]>("/api/recurring/suggestions/dismissed")]);
+    if (!dismissed.length) showDismissed = false;
   }
   // A new item starts today, monthly, for the primary account.
   const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "" });
@@ -37,6 +42,8 @@
   let blank: RecurringValues = $state(fresh());
   let items = $state<Item[]>([]);
   let suggestions = $state<Suggestion[]>([]);
+  let dismissed = $state<DismissedSuggestion[]>([]);
+  let showDismissed = $state(false);
   let busy = $state(false);
   let submitted = $state(false);   // after the first Add, the fields that need fixing say so
   let formKey = $state(0);         // a new key starts the fields over (they read the amount once)
@@ -73,14 +80,22 @@
     try {
       await api("/api/recurring/suggestions/dismiss", { method: "POST", body: { key: s.key } });
       suggestions = suggestions.filter((x) => x.key !== s.key);
+      dismissed = [...dismissed, { key: s.key, account_id: s.account_id, match: s.match, frequency: s.frequency }];
       toast(`Okay, ${s.name} won’t be suggested again`);
+    } catch (err) { toast.error((err as Error).message); }
+  }
+  // Putting one back makes it a suggestion again (if it still looks recurring), so look the lists up again.
+  async function restoreSuggestion(d: DismissedSuggestion) {
+    try {
+      await api("/api/recurring/suggestions/restore", { method: "POST", body: { key: d.key } });
+      await loadSuggestions();
+      toast.success(`${d.match} can be suggested again`);
     } catch (err) { toast.error((err as Error).message); }
   }
   function toggle(id: number, open: boolean) { if (open) openRecurring.add(String(id)); else openRecurring.delete(String(id)); }
 </script>
 
-<div class="mb-6 flex items-center justify-between gap-4">
-  <p class="text-sm text-muted-foreground">The paychecks and bills the forecast expects.</p>
+<div class="mb-6 flex items-center justify-end gap-4">
   <Button onclick={openForm}><Plus />Add</Button>
 </div>
 
@@ -97,12 +112,35 @@
   {/if}
 {/snippet}
 
+{#snippet dismissedList()}
+  {#if dismissed.length}
+    <section class="text-sm text-muted-foreground" aria-label="Dismissed suggestions">
+      <p>{dismissed.length} dismissed ·
+        <button type="button" class={linkCls} aria-expanded={showDismissed} onclick={() => (showDismissed = !showDismissed)}>{showDismissed ? "Hide" : "Show"}</button></p>
+      {#if showDismissed}
+        <ul class="mt-2 flex flex-col gap-1.5">
+          {#each dismissed as d (d.key)}
+            <li class="flex items-center gap-3">
+              <span class="flex min-w-0 flex-1 flex-col">
+                <span class="truncate text-foreground">{d.match}</span>
+                <span class="text-xs">{nb(FREQ[d.frequency] ?? d.frequency)}{d.account_name ? ` · ${d.account_name}` : ""}</span>
+              </span>
+              <Button variant="outline" size="sm" aria-label={`Restore ${d.match}`} onclick={() => restoreSuggestion(d)}>Restore</Button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+  {/if}
+{/snippet}
+
 {#snippet suggestionsCard()}
-  {#if suggestions.length}
+  {#if !suggestions.length && dismissed.length}
+    <div class="mb-6">{@render dismissedList()}</div>
+  {:else if suggestions.length}
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title><h2>Spotted in your history</h2></Card.Title>
-        <Card.Description>Payments that look like they repeat. Add one to check the details first, or say it isn’t recurring.</Card.Description>
       </Card.Header>
       <Card.Content class="flex flex-col">
         {#each suggestions as s (s.key)}
@@ -119,6 +157,7 @@
             </span>
           </div>
         {/each}
+        {#if dismissed.length}<div class="border-t pt-3">{@render dismissedList()}</div>{/if}
       </Card.Content>
     </Card.Root>
   {/if}

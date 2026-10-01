@@ -71,7 +71,6 @@
           </tbody>
         </table>
       </div>
-      <p class="mt-3 text-sm text-muted-foreground">Savings rate is the share of money in that wasn't spent. The current month is still going.</p>
     </Card.Content>
   </Card.Root>
 {/if}

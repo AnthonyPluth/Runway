@@ -59,6 +59,12 @@ export function five24Line(f: Five24 | undefined): { count: string; next: string
   return { count, next: "Nothing counts right now" };
 }
 
+// Categories an issuer's travel portal books (travel, or one named for flights, hotels and the like, or under one): only
+// these offer a portal-only rate.
+const TRAVEL = /travel|flight|airfare|airline|hotel|lodging|car rental|rental car|cruise|vacation/i;
+export const isTravel = (name: string | null | undefined, parent?: string | null): boolean =>
+  !!name && (TRAVEL.test(name) || (!!parent && TRAVEL.test(parent)));
+
 export const STATUS_LABEL: Record<string, string> = { open: "Open", closed: "Closed", product_changed: "Product changed" };
 export const BANK_STATUS_LABEL: Record<string, string> = { open: "Open", pending: "Requirements met", received: "Bonus received", closed: "Closed" };
 export const BANK_TYPE_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", business: "Business" };
@@ -74,10 +80,11 @@ export function bankOrder(a: BankBonus, b: BankBonus): number {
   return rank[a.state] - rank[b.state] || b.opened_on.localeCompare(a.opened_on) || a.id - b.id;
 }
 
-/** Annual fees due in the next `days` days: the total and how many. */
-export function feesDue(cards: ChurnCard[], today: string, days = 90): { total: number; count: number } {
+/** Annual fees due in the next `days` days: the total, how many, and how many of those have no plan yet (a card you're
+ * keeping, or plan to close or change, is decided; only an undecided one needs asking about). */
+export function feesDue(cards: ChurnCard[], today: string, days = 90): { total: number; count: number; undecided: number } {
   const due = cards.filter((c) => c.fee_due && daysUntil(c.fee_due, today) <= days);
-  return { total: due.reduce((s, c) => s + (c.annual_fee || 0), 0), count: due.length };
+  return { total: due.reduce((s, c) => s + (c.annual_fee || 0), 0), count: due.length, undecided: due.filter((c) => (c.plan ?? "undecided") === "undecided").length };
 }
 
 /** Bank bonus requirements that aren't met yet, in words: "$200 more direct deposits · 3 more debit purchases". */
@@ -263,3 +270,23 @@ export function benefitBoard(cards: ChurnCard[]): BenefitBoard {
   board.perks.sort((x, y) => x.card.product.localeCompare(y.card.product) || benefitOrder(x.b, y.b));   // a card's lounges, then its status
   return board;
 }
+
+// What each collapsed part of the card form says it holds (see Section.svelte).
+const num = (x: unknown) => (x == null || x === "" ? 0 : Number(x));
+
+export function ratesSummary(rows: unknown[], currencyName: string, currencyKey: string, earnNote: string, base: string | number | null): string {
+  const parts = [];
+  if (rows.length) parts.push(`${rows.length} ${rows.length === 1 ? "rate" : "rates"}`);
+  if (currencyKey !== "cash") parts.push(currencyName);
+  if (earnNote.trim()) parts.push(earnNote.trim());
+  return parts.length ? parts.join(" · ") : `${num(base) || 1}x on everything`;
+}
+
+/** "60k Ultimate Rewards after $4,000 in 3 months"; "None" without a bonus. */
+export function bonusSummary(bonus: string | number | null, spend: string | number | null, months: string | number | null, currencyKey: string, currencyName: string): string {
+  if (!num(bonus) && !num(spend)) return "None";
+  const got = num(bonus) ? bonusLabel(num(bonus), currencyKey, currencyName) : "Bonus";
+  return num(spend) ? `${got} after ${fmt0(num(spend))}${num(months) ? ` in ${num(months)} months` : ""}` : got;
+}
+
+export const benefitsSummary = (n: number) => (n ? `${n} ${n === 1 ? "benefit" : "benefits"}` : "None");
