@@ -62,6 +62,8 @@ describe("InvestmentsView", () => {
       page([acct({})], [{ id: "vw", name: "Vestwell 401k", positions: 0, fields: [] }]);
       render(InvestmentsView);
       const line = await screen.findByTestId("hand-tracked");
+      expect(line).not.toHaveAttribute("open");   // folded away at the bottom
+      expect(screen.getByTestId("hand-tracked-summary")).toHaveTextContent("1 account");
       expect(line).toHaveTextContent("Vestwell 401k · balance only ·");
       await fireEvent.click(within(line).getByRole("button", { name: "Enter holdings" }));
       expect(await screen.findByText("What this account holds")).toBeInTheDocument();
@@ -75,6 +77,7 @@ describe("InvestmentsView", () => {
       expect(line).toHaveTextContent("entered by hand");
       expect(within(line).getByRole("button", { name: "Edit holdings" })).toBeInTheDocument();
       expect(within(line).getByText(/12\.3% off the synced balance/)).toBeInTheDocument();
+      expect(screen.getByTestId("hand-tracked-summary")).toHaveTextContent("1 account · 1 to update");
     });
 
     it("shows no drift warning when the funds match, and no line for an account SimpleFIN sends positions for", async () => {

@@ -186,7 +186,6 @@
     <Card.Header><Card.Title>Holdings</Card.Title></Card.Header>
     <Card.Content>
       <HoldingsTable holdings={d.holdings} onchanged={load} />
-      <HandTracked accounts={d.accounts} seen={status.simplefin_seen} onchanged={load} />
     </Card.Content>
   </Card.Root>
 
@@ -286,4 +285,6 @@
       {:else}<p class="py-6 text-center text-sm text-muted-foreground">No activity.</p>{/if}
     </Card.Content>
   </Card.Root>
+
+  <HandTracked accounts={d.accounts} seen={status.simplefin_seen} onchanged={load} />
 {/if}
