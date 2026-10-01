@@ -296,6 +296,15 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
     });
 
+    it("says what equity still vesting comes to once it's all vested", () => {
+      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: null, owed: 0,
+        value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
+      const done = { ...acme, key: "equity:done", name: "Doneco", value: 5000, value_by_year: [5000] };
+      setup(data({ assets: [acme, done] }));
+      expect(screen.getByText("$10,000 vested today · $40,000 once all vested")).toBeInTheDocument();
+      expect(screen.getByText("$5,000")).toBeInTheDocument();   // all vested already: just what it's worth
+    });
+
     it("leaves the rules for selling and loans to Settings → Assumptions", () => {
       setup(data({ assets: [home] }));
       expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();

@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import insert, update
 
 from runway import equity, loans, planner
-from runway.models import Account, Asset, LoanTerms
+from runway.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms
 from tests.shared import TODAY, LedgerCase
 
 
@@ -209,6 +209,37 @@ class SellableTests(LedgerCase):
                                             "vest_months": 48, "exercised": 300, "expires_on": "2026-01-01"})
         old = next(a for a in planner.sellable(self.conn, TODAY) if a["name"] == "Oldco")
         self.assertEqual(old["value_by_year"], [600])
+
+    def test_carta_grants_go_on_vesting_from_what_carta_reported(self):
+        # As Carta sends them: no vesting start (the schedule runs from the grant date), and what's vested as Carta
+        # reported it two days ago, ahead of the schedule from the grant date (9,450 then). It goes on vesting from
+        # there, every year, until it's all vested in November 2028 as the schedule has it, and stays there after.
+        today = date(2026, 10, 1)
+        self.conn.execute(insert(EquityCompany).values(id="c", name="Startup", share_price=12, in_networth=1, source="carta"))
+        self.conn.execute(insert(EquityGrant), [
+            {"id": "g1", "company_id": "c", "kind": "iso", "label": "ES-452", "granted_on": "2024-11-23", "quantity": 20619,
+             "strike": 3.5, "vest_start": None, "vest_months": 48, "cliff_months": 12, "vest_every": 1, "exercised": 0,
+             "vested_reported": 11168, "vested_reported_on": "2026-09-29", "expires_on": "2034-11-22", "source": "carta"},
+            {"id": "g2", "company_id": "c", "kind": "iso", "label": "ES-858", "granted_on": "2026-01-23", "quantity": 3002,
+             "strike": 4.78, "vest_start": "2026-01-23", "vest_months": 12, "cliff_months": 0, "vest_every": 1, "exercised": 0,
+             "vested_reported": None, "vested_reported_on": None, "expires_on": "2036-01-23", "source": "carta"}])
+        e = next(a for a in planner.sellable(self.conn, today) if a["key"] == "equity:c")
+        by_year = e["value_by_year"]
+        es858 = 3002 * (12 - 4.78)   # all vested by January 2027
+        self.assertEqual(by_year[0], round(11168 * 8.5 + 3002 * 8 / 12 * 7.22, 2))   # today: Carta's 11,168 and 8 of 12 months
+        self.assertEqual(len(by_year), 4)   # 2026, 2027, 2028 still vesting (until November), then flat
+        self.assertTrue(by_year[0] < by_year[1] < by_year[2] < by_year[3])
+        self.assertEqual(by_year[3], round(20619 * 8.5 + es858, 2))
+        # a year out, the 9,451 still to vest has vested as the schedule vests its last 11,169: 4,362 more
+        self.assertAlmostEqual(by_year[1], (11168 + 9451 * 5154.75 / 11168.625) * 8.5 + es858, delta=0.05)
+        # all vested in November 2028, not before
+        g = equity.overview(self.conn, today)["companies"][0]["grants"][0]
+        self.assertLess(equity.vested_later(g, date(2028, 11, 22), today), 20619)
+        self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
+        # Carta behind the schedule: never below what the schedule has vested
+        g = {**g, "vested_reported": 5000}
+        self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
+        self.assertGreaterEqual(equity.vested_later(g, date(2027, 10, 1), today), 5000)
 
     def test_a_grant_whose_schedule_cant_be_worked_out_stays_at_today(self):
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})

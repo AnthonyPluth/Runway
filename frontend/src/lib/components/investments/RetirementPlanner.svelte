@@ -147,6 +147,8 @@
     keep();
   }
   const pastYear = (s: RetirementPlan["assets"][number]) => num(s.sell_year) < year;
+  // Equity still vesting: what it comes to once it's all vested, at today's share price (value_by_year's last entry).
+  const vestsTo = (a: PlanAsset) => (a.kind === "equity" && (a.value_by_year?.length ?? 0) > 1 ? a.value_by_year![a.value_by_year!.length - 1] : null);
   // What the plan counts, and what it lists only for a loan's payment (vehicles).
   const plannable = $derived(data.assets.filter(counted));
   const vehicles = $derived(data.assets.filter((a) => !counted(a)));
@@ -342,7 +344,7 @@
         <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <label class="flex min-w-40 flex-1 items-center gap-2">
             <input type="checkbox" class="size-4 cursor-pointer accent-primary" checked={!!s} onchange={(e) => toggleSale(a.key, e.currentTarget.checked)} />
-            <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}</span></span>
+            <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}{vestsTo(a) != null ? ` vested today · ${fmt0(vestsTo(a)!)} once all vested` : ""}</span></span>
           </label>
           {#if s}
             {@const at = saleYear(num(s.sell_year), year)}
