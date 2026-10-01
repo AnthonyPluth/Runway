@@ -1116,7 +1116,6 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         recurring.auto_match(conn)  # pick up matches for items created before this version
         sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
         categories.flatten(conn)      # subcategories are one level deep
-        plaid.hide_all_duplicates(conn)  # an institution linked through both Plaid and SimpleFIN is counted once
         for r in conn.execute(select(PlaidItem.item_id)
                               .where(func.coalesce(PlaidItem.products, "investments").like("%investments%"))).fetchall():
             plaid.update_investment_accounts(conn, r["item_id"])   # investment accounts from Plaid in your accounts

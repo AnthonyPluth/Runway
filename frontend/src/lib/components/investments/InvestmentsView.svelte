@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import BarChart from "$lib/components/investments/BarChart.svelte";
+  import HandTracked from "$lib/components/investments/HandTracked.svelte";
   import HoldingsTable from "$lib/components/investments/HoldingsTable.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import LiveDot from "$lib/components/investments/LiveDot.svelte";
@@ -183,7 +184,10 @@
 
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>Holdings</Card.Title></Card.Header>
-    <Card.Content><HoldingsTable holdings={d.holdings} onchanged={load} /></Card.Content>
+    <Card.Content>
+      <HoldingsTable holdings={d.holdings} onchanged={load} />
+      <HandTracked accounts={d.accounts} seen={status.simplefin_seen} onchanged={load} />
+    </Card.Content>
   </Card.Root>
 
   <div class="mb-6 grid gap-6 lg:grid-cols-2">

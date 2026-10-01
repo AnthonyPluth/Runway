@@ -607,9 +607,9 @@ class PlaidBankTests(DbCase):
         self.assertEqual((inv["bank"], inv["products"], inv["env"]), (False, ["investments"], "sandbox"))
         self.assertEqual(inv["accounts"], [
             {"id": "w2", "name": "Individual", "official_name": None, "subtype": "brokerage", "mask": None, "balance": 5.0,
-             "hidden": 0, "account_id": None},
+             "account_id": None},
             {"id": "w1", "name": "Roth IRA", "official_name": "Roth", "subtype": "roth", "mask": "3639", "balance": 1000.0,
-             "hidden": 0, "account_id": "sf-wf"}])
+             "account_id": "sf-wf"}])
         self.assertEqual(inv["candidates"], [{"id": "sf-wf", "name": "Wealthfront Roth", "display_name": None, "org": "Wealthfront",
                                               "balance": 990.0, "linked_to": "w1"}])
         self.assertEqual((s["inv_accounts"], s["configured"], s["env"], s["client_id"]), (3, True, "production", "cid"))
@@ -747,29 +747,6 @@ class PlaidBankTests(DbCase):
             self.assertEqual(plaid.sync_all(self.c), {"items": 1, "errors": []})
         with self.assertRaises(plaid.PlaidError):
             plaid.sync_item(self.c, "nope", TODAY)
-
-    def test_simplefin_copies_of_a_plaid_brokerage_are_hidden_once(self):
-        self.c.execute(insert(PlaidItem), [{"item_id": "et", "access_token": "tok",
-                                            "institution_name": "E*TRADE from Morgan Stanley",
-                                            "products": "investments"},
-                                           {"item_id": "bk", "access_token": "tok", "institution_name": "Chase",
-                                            "products": "transactions"},
-                                           {"item_id": "x", "access_token": "tok", "institution_name": "Ally",
-                                            "products": None}])
-        self.c.execute(insert(InvAccount), [{"id": "s1", "item_id": "sf", "name": "E*Trade Brokerage",
-                                             "source": "simplefin", "institution": "E*Trade"},
-                                            {"id": "s2", "item_id": "sf", "name": "Chase Invest",
-                                             "source": "simplefin", "institution": "Chase"},
-                                            {"id": "s3", "item_id": "sf", "name": "Ally Invest", "source": "simplefin",
-                                             "institution": "Ally Invest"}])
-        # Chase is a bank connection; Ally's (no products listed) counts as investments.
-        self.assertEqual(plaid.hide_all_duplicates(self.c), ["E*Trade Brokerage", "Ally Invest"])
-        self.assertEqual([tuple(r) for r in self.c.execute(select(InvAccount.id, InvAccount.hidden)
-                                                           .order_by(InvAccount.id))],
-                         [("s1", 1), ("s2", 0), ("s3", 1)])
-        self.c.execute(update(InvAccount).values(hidden=0))
-        self.assertEqual(plaid.hide_all_duplicates(self.c), [])   # once only
-        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "nope"), [])
 
     def test_removing_an_investment_connection_removes_its_data(self):
         self.c.execute(insert(PlaidItem), [{"item_id": "inv", "access_token": "tok", "products": "investments"},

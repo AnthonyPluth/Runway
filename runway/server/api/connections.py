@@ -52,7 +52,7 @@ def api_plaid_status(conn, _q, _b):
         else:
             it["accounts"] = db.rows(conn.execute(
                 select(InvAccount.id, InvAccount.name, InvAccount.official_name, InvAccount.subtype, InvAccount.mask,
-                       InvAccount.balance, InvAccount.hidden, InvAccount.account_id)
+                       InvAccount.balance, InvAccount.account_id)
                 .where(InvAccount.item_id == it["item_id"]).order_by(InvAccount.name)))
             it["candidates"] = plaid.investment_candidates(conn, it["item_id"])   # what each account could be
     return {"configured": plaid.configured(conn), "env": db.get_setting(conn, sk.PLAID_ENV, "production"),
@@ -157,7 +157,6 @@ def _sync_new_item(conn, item_id: str, body: dict) -> dict:
         if plaidbank.is_bank_item(item):
             n = len(res.pop("new", []))
             return {"ok": True, "item_id": item_id, "bank": True, "new_transactions": n, **res}
-        res["hidden_simplefin"] = plaid.hide_simplefin_duplicates(conn, item_id)
         res["prices"] = refresh_prices(conn)
         return {"ok": True, "item_id": item_id, **res}
     except plaid.PlaidError as e:

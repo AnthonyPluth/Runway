@@ -184,7 +184,7 @@ def match_investment(conn, inv_id: str, target: str, today: date | None = None) 
         db.upsert(conn, Account, {"id": own, "name": name, "org": inv["institution_name"], "kind": "investment",
                                   "balance": inv["balance"] or 0.0, "balance_date": (today or date.today()).isoformat(),
                                   "provider": "plaid", "provider_since": (today or date.today()).isoformat()},
-                  key=["id"], update=lambda ex: {"balance": ex.balance, "hidden": 0})
+                  key=["id"], update=lambda ex: {"balance": ex.balance})
         conn.execute(update(InvAccount).where(InvAccount.id == inv_id).values(account_id=own))
         return {"ok": True, "account_id": own}
     if target and target != "ignore":
@@ -339,33 +339,3 @@ def sync_all(conn) -> dict:
         except PlaidError as e:
             out["errors"].append(f"{row['institution_name'] or 'Connection'}: {e}")
     return out
-
-
-def hide_simplefin_duplicates(conn, item_id: str) -> list[str]:
-    """When an institution is linked through Plaid, hide the same institution's SimpleFIN account on the Investments
-    page (Plaid has the fuller data). Net worth keeps using the SimpleFIN balance, so nothing is counted twice."""
-    compact = lambda v: re.sub(r"[^a-z0-9]", "", (v or "").lower())   # "E*TRADE" -> "etrade"
-    key = compact(re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (_institution(conn, item_id) or "").lower()))
-    if len(key) < 4:
-        return []
-    hidden = []
-    for a in conn.execute(select(InvAccount.id, InvAccount.name, InvAccount.institution)
-                          .where(InvAccount.source == "simplefin", InvAccount.hidden == 0)).fetchall():
-        inst = compact(re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (a["institution"] or "").lower()))
-        # "E*TRADE from Morgan Stanley" (Plaid) and "E*Trade" (SimpleFIN) are the same place
-        if len(inst) >= 4 and (key in inst or inst in key):
-            conn.execute(update(InvAccount).where(InvAccount.id == a["id"]).values(hidden=1))
-            hidden.append(a["name"])
-    return hidden
-
-
-def hide_all_duplicates(conn) -> list[str]:
-    """Run the duplicate check for every Plaid connection, once (later changes are yours to make on the page)."""
-    if db.get_setting(conn, sk.DEDUPE_SIMPLEFIN_V2):
-        return []
-    hidden = []
-    for item_id in conn.execute(select(PlaidItem.item_id)
-                                .where(func.coalesce(PlaidItem.products, "investments").like("%investments%"))).scalars():
-        hidden += hide_simplefin_duplicates(conn, item_id)
-    db.set_setting(conn, sk.DEDUPE_SIMPLEFIN_V2, "1")
-    return hidden

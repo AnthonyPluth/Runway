@@ -4,7 +4,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, portfolio, prices, sfinvest, simplefin
 from runway.models import (Account, Holding, HoldingSnapshot, InvAccount, ManualContribution, ManualPosition,
-                           ManualState, PlaidItem, Price, PriceMeta, Security)
+                           ManualState, Price, PriceMeta, Security)
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -244,25 +244,6 @@ class SnapshotHistoryTests(Base):
         self.assertEqual(h["estimated_before"], "2026-09-10")
         self.assertEqual(at("value", "2026-09-01"), 2000.0)          # 20 VTI at $100, not a flat balance
         self.assertAlmostEqual(h["twr"][-1], 0.21, places=6)
-
-
-class PlaidDuplicateTests(Base):
-    def test_linking_through_plaid_hides_the_simplefin_copy(self):
-        from runway import plaid
-        simplefin.store_payload(self.c, {"accounts": [account("vw", "Retirement Savings 401k", "333069.97"),
-                                                      account("wf", "Roth IRA", "4935.94", [VTI]),
-                                                      account("et", "Individual Brokerage", "154756.49", [VTI])]}, TODAY)
-        for iid, inst in (("sf:vw", "Vestwell"), ("sf:wf", "Wealthfront Alex"), ("sf:et", "E*Trade")):
-            self.c.execute(update(InvAccount).where(InvAccount.id == iid).values(institution=inst))
-        self.c.execute(insert(PlaidItem), [{"item_id": "it", "access_token": "tok", "institution_name": "Vestwell"},
-                                           {"item_id": "it2", "access_token": "tok2",
-                                            "institution_name": "E*TRADE from Morgan Stanley"}])
-        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it"), ["Retirement Savings 401k"])
-        self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "it2"), ["Individual Brokerage"])
-        hidden = dict(self.c.execute(select(InvAccount.id, InvAccount.hidden)).fetchall())
-        self.assertEqual((hidden["sf:vw"], hidden["sf:wf"], hidden["sf:et"]), (1, 0, 1))
-        self.assertEqual(self.c.execute(select(Account.hidden).where(Account.id == "vw")).fetchone()[0], 0)   # net worth unaffected
-
 
 
 class TrackedHoldingsTests(Base):

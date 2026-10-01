@@ -869,6 +869,16 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.assertIn("et-6702", portfolio._visible_ids(self.c))
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
 
+    def test_a_simplefin_401k_at_a_plaid_institution_is_not_a_twin_and_is_shown(self):
+        self.c.execute(insert(PlaidItem).values(item_id="fid", access_token="t", institution_name="Fidelity Investments",
+                                                products="investments"))
+        self.c.execute(insert(InvAccount).values(id="fid-1", item_id="fid", name="Brokerage", mask="1234", balance=50000))
+        self.c.execute(insert(InvAccount).values(id="sf:k", item_id="sf", name="Fidelity 401(k)", balance=80000, hidden=1,   # the old column decides nothing
+                                                 source="simplefin", institution="Fidelity"))
+        by_id = {a["id"]: a for a in portfolio._accounts(self.c)}
+        self.assertEqual((by_id["sf:k"]["duplicate_of"], by_id["sf:k"]["hidden"]), (None, 0))
+        self.assertIn("sf:k", portfolio._visible_ids(self.c))
+
     def test_a_simplefin_account_links_to_one_plaid_account(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)
         self.inv("roth", "Roth IRA", 4943.43)

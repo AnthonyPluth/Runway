@@ -80,7 +80,7 @@ def _accounts(conn) -> list[dict]:
         a["duplicate_of"] = t["id"] if t else None
         if t:
             also.add(t["id"])
-        a["hidden"] = 1 if a["hidden"] or a["hidden_in_accounts"] or t else 0
+        a["hidden"] = 1 if a["hidden_in_accounts"] or t else 0
     for a in rows:
         a["also_simplefin"] = a["id"] in also
     return rows

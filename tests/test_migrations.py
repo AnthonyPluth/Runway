@@ -333,24 +333,24 @@ class MigrationTests(unittest.TestCase):
             recurring.auto_match(conn, [1])
             self.assertEqual(conn.execute(select(Transaction.recurring_id).where(Transaction.id == "chk|8")).scalar(), 1)
 
-    def test_0033_shows_accounts_left_out_on_investments_again_but_not_duplicates(self):
+    def test_0033_clears_hidden_on_every_investment_account(self):
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0032")
         with db.engine(self.path).begin() as c:
             c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES "
-                              "('et', 't', 'E*TRADE from Morgan Stanley', 'investments')")
+                              "('fid', 't', 'Fidelity Investments', 'investments')")
             c.exec_driver_sql("INSERT INTO inv_accounts(id, item_id, name, hidden, source, institution, account_id) VALUES "
-                              "('p1', 'et', 'Left out by me', 1, 'plaid', NULL, NULL), "
-                              "('p2', 'et', 'Shown', 0, 'plaid', NULL, NULL), "
-                              "('sf:dup', 'sf', 'Brokerage (6702)', 1, 'simplefin', 'E*Trade', NULL), "
-                              "('sf:mine', 'sf', 'Left out by me too', 1, 'simplefin', 'Robinhood', NULL)")
+                              "('p1', 'fid', 'Left out by me', 1, 'plaid', NULL, NULL), "
+                              "('p2', 'fid', 'Shown', 0, 'plaid', NULL, NULL), "
+                              "('sf:dup', 'sf', 'Brokerage (6702)', 1, 'simplefin', 'Fidelity', NULL), "
+                              "('sf:401k', 'sf', 'Fidelity 401(k)', 1, 'simplefin', 'Fidelity NetBenefits', NULL)")
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
             self.assertEqual(dict(conn.execute(select(InvAccount.id, InvAccount.hidden)).fetchall()),
-                             {"p1": 0, "p2": 0, "sf:dup": 1, "sf:mine": 0})   # the SimpleFIN copy of a Plaid account stays out
+                             {"p1": 0, "p2": 0, "sf:dup": 0, "sf:401k": 0})   # real twins are left out by portfolio, not by this
 
     def test_0034_gives_brands_their_names_and_leaves_yours(self):
         from alembic import command

@@ -34,7 +34,6 @@ PLAID_SECRET = "plaid_secret"
 PLAID_ENV = "plaid_env"
 PLAID_REDIRECT_URI = "plaid_redirect_uri"
 PLAID_PENDING_LINK = "plaid_pending_link"      # JSON: the Link session in progress
-DEDUPE_SIMPLEFIN_V2 = "dedupe_simplefin_v2"    # set once the one-time SimpleFIN/Plaid duplicate cleanup ran
 
 
 def plaid_stmt_note(item_id: str) -> str:

@@ -40,7 +40,7 @@ export async function openPlaidLink(itemId: string | null, kind = "investments")
   return runPlaidLink(lt.link_token, itemId, lt.kind || kind);
 }
 
-type Linked = { sync_deferred?: boolean; message?: string; bank?: boolean; accounts: number; matched?: string[]; statements?: number; holdings?: number; transactions?: number; hidden_simplefin?: string[] };
+type Linked = { sync_deferred?: boolean; message?: string; bank?: boolean; accounts: number; matched?: string[]; statements?: number; holdings?: number; transactions?: number };
 const s = (n: number | undefined, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Runs Plaid Link. receivedRedirectUri: continuing after a bank's own sign-in page sent you back (OAuth). */
@@ -61,8 +61,7 @@ export function runPlaidLink(token: string, itemId: string | null, kind: string,
           } else toast.success(r.bank
             ? `Found ${s(r.accounts, "account")}` + (r.matched?.length ? ` · matched ${r.matched.join(", ")}` : "") +
               (r.statements ? ` · ${s(r.statements, "card statement")}` : "")
-            : `Synced ${s(r.accounts, "account")}, ${r.holdings} holdings, ${r.transactions} activities` +
-              (r.hidden_simplefin?.length ? ` · hid the SimpleFIN copy of ${r.hidden_simplefin.join(", ")}` : ""));
+            : `Synced ${s(r.accounts, "account")}, ${r.holdings} holdings, ${r.transactions} activities`);
         } catch (err) { toast.error((err as Error).message); }
         resolve(true);
       },
