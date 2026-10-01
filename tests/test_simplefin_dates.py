@@ -1,4 +1,4 @@
-"""SimpleFIN's timestamps to calendar days, wherever Runway runs (TZ decides "today", and defaults to America/Chicago)."""
+"""SimpleFIN's timestamps to calendar days, wherever Runway runs (TZ decides "today", and defaults to America/New_York)."""
 import os
 import time
 import unittest

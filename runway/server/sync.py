@@ -15,7 +15,7 @@ from ..models import Holding, InvAccount, InvTransaction, ManualPosition, PlaidI
 from .common import ApiError
 
 DAILY_SYNC_HOUR = 7          # banks and cards (SimpleFIN and Plaid) sync once a day, on the first check after this hour
-                             # (local time; the image's TZ is America/Chicago): late enough for overnight ACH, early
+                             # (local time; the image's TZ is America/New_York): late enough for overnight ACH, early
                              # enough to review in the morning. Opening Runway only catches up a missed one.
 PLAID_SYNC_HOUR = DAILY_SYNC_HOUR   # Plaid's quota is small, so opening Runway or pressing Sync doesn't ask it again
                              # that day; a connection's own Sync button in Settings still does.

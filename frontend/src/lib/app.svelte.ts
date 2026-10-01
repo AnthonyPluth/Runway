@@ -92,23 +92,47 @@ let syncWatch: ReturnType<typeof setInterval> | null = null;
 export async function syncOnVisit(): Promise<void> {
   try {
     const r = await api<{ started: boolean }>("/api/sync/auto", { method: "POST", background: true });
-    if (!r.started || syncWatch) return;
-    if (app.state) app.state.syncing = true;
-    const before = app.state?.last_sync_ok;
-    syncWatch = setInterval(async () => {
-      try { await refreshState(true); }
-      catch (err) {   // keep checking through a blip, but not once signed out
-        console.error(err);
-        if (app.sessionExpired) { clearInterval(syncWatch!); syncWatch = null; }
-        return;
-      }
-      if (app.state?.syncing) return;
-      clearInterval(syncWatch!); syncWatch = null;
-      const synced = app.state?.last_sync_ok !== before && app.state?.last_log?.ok;
-      if (!editing()) { if (synced) toast.success(`Synced · ${app.state?.last_log?.message ?? ""}`); reload(); }
-      else if (synced) toast(`Synced · ${app.state?.last_log?.message ?? ""}. Change page to see the new data.`);
-    }, 3000);
+    if (r.started) watchSync();
   } catch (err) { console.error(err); }
+}
+
+/** Watch a sync that's running on the server until it ends, then say how it went and load the page again. */
+function watchSync(): void {
+  if (syncWatch) return;
+  if (app.state) app.state.syncing = true;
+  const before = app.state?.last_sync_ok;
+  syncWatch = setInterval(async () => {
+    try { await refreshState(true); }
+    catch (err) {   // keep checking through a blip, but not once signed out
+      console.error(err);
+      if (app.sessionExpired) { clearInterval(syncWatch!); syncWatch = null; }
+      return;
+    }
+    if (app.state?.syncing) return;
+    clearInterval(syncWatch!); syncWatch = null;
+    const synced = app.state?.last_sync_ok !== before && app.state?.last_log?.ok;
+    if (!editing()) { if (synced) toast.success(`Synced · ${app.state?.last_log?.message ?? ""}`); reload(); }
+    else if (synced) toast(`Synced · ${app.state?.last_log?.message ?? ""}. Change page to see the new data.`);
+  }, 3000);
+}
+
+/** The Sync button: sync the banks now (SimpleFIN always; Plaid only if it hasn't been asked today), say how it went,
+ *  and load the page again. A sync that's already running (the daily one, or another tab's) is watched instead. */
+export async function syncNow(): Promise<void> {
+  if (app.state?.syncing) return;
+  if (app.state) app.state.syncing = true;
+  try {
+    const r = await api<{ new: number; bank_messages?: string[] }>("/api/sync", { method: "POST" });
+    await refreshState().catch(console.error);
+    toast.success(`Synced · ${r.new} new ${r.new === 1 ? "transaction" : "transactions"}`);
+    if (r.bank_messages?.length) toast.warning(r.bank_messages.join("; "));
+    if (!editing()) reload();
+  } catch (err) {
+    if ((err as { status?: number }).status === 409) { toast("A sync is already running. Runway will show the result when it's done."); watchSync(); return; }
+    if (app.state) app.state.syncing = false;
+    toast.error((err as Error).message);
+    await refreshState().catch(console.error);   // the failure is in the log now, and the sidebar says so
+  }
 }
 
 // If Runway can't be reached when the app opens (offline, or the server is restarting), say so and keep trying

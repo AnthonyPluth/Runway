@@ -210,7 +210,7 @@ def _ts_to_date(ts) -> str | None:
     if ts <= 0:
         return None
     # Bank dates are calendar days, which banks stamp at midnight UTC (or midnight where they are: still that day in UTC).
-    # Read a stamp in the morning hours of UTC as that UTC day, so a server in the US (TZ=America/Chicago is the default)
+    # Read a stamp in the morning hours of UTC as that UTC day, so a server in the US (TZ=America/New_York is the default)
     # doesn't call Monday's midnight-UTC stamp Sunday evening. Later in the day it carries a real time (a card swipe): the
     # server's own time zone is the best guess at the day it happened.
     moment = datetime.fromtimestamp(ts, UTC)
