@@ -1,9 +1,7 @@
-import os
-import tempfile
-import unittest
 from datetime import date, timedelta
 
-from runway import db, portfolio, prices, sfinvest, simplefin
+from runway import portfolio, prices, sfinvest, simplefin
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 RECENT = (date.today() - timedelta(days=1)).isoformat()   # a price the checks still count as current, whenever the tests run
@@ -22,17 +20,7 @@ VTI = {"id": "h1", "symbol": "VTI", "description": "Vanguard Total Stock Market 
 MMF = {"id": "h2", "symbol": "SPAXX", "description": "Fidelity Government Money Market", "shares": "200", "market_value": "200"}
 
 
-class Base(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
-
+class Base(DbCase):
     def price(self, ticker, d, close):
         self.c.execute("INSERT INTO prices(ticker, date, close, adjclose) VALUES (?,?,?,?) "
                        "ON CONFLICT(ticker, date) DO UPDATE SET close=excluded.close, adjclose=excluded.adjclose", (ticker, d, close, close))

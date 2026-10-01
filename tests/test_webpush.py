@@ -9,7 +9,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from runway import db, webpush as w
+from runway import webpush as w
+from tests.shared import DbCase
 
 
 def receiver():
@@ -38,7 +39,7 @@ class PushService(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-class WebPushTests(unittest.TestCase):
+class WebPushTests(DbCase):
     @classmethod
     def setUpClass(cls):
         os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
@@ -48,17 +49,6 @@ class WebPushTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.srv.shutdown()
-
-    def setUp(self):
-        import tempfile
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def test_key_is_made_once_and_kept(self):
         _v1, pub1 = w.vapid_keys(self.c)

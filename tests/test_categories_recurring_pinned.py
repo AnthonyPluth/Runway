@@ -1,8 +1,6 @@
 """Pins behavior of categories, rules, categorization and recurring items that other tests don't reach: what a
 removal or rename cascades to, the recurring list and its edits, auto-matching edge cases, and bulk edits."""
 import json
-import os
-import tempfile
 import unittest
 from datetime import date
 
@@ -10,21 +8,15 @@ from runway import categories, categorize, db, recurring, rules
 from runway.server.api import categories as api_categories
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
+from tests.shared import DbCase
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "p.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance, owner) VALUES ('chk','Checking','checking',0,'Sara'),"
                        "('cc','Card','credit',0,NULL)")
         self.n = 0
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, amount, desc, acct="chk", posted=None, category=None, source=None, review=0, payee=None):
         self.n += 1

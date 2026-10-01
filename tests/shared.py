@@ -12,6 +12,7 @@ by its own names and ids, never by clearing a table.
 import fcntl
 import os
 import tempfile
+import unittest
 import uuid
 from contextlib import contextmanager
 from unittest import mock
@@ -71,3 +72,13 @@ def own_database(case, **env) -> str:
     session.start()
     case.addCleanup(session.stop)
     return path
+
+
+class DbCase(unittest.TestCase):
+    """A test with a database of its own (own_database) and a connection to it, self.c."""
+
+    def setUp(self):
+        from runway import db
+        self.path = own_database(self)
+        self.c = db.connect(self.path)
+        self.addCleanup(self.c.close)   # cleanups run last first: the connection closes before the directory goes

@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from runway import categories, categorize, db, forecast, recurring, server, simplefin, splits
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 
@@ -19,16 +20,10 @@ def ts(d: date) -> int:
     return int(datetime(d.year, d.month, d.day, 12, tzinfo=UTC).timestamp())
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.conn = db.connect(self.path)
-
-    def tearDown(self):
-        self.conn.close()
-        self.tmp.cleanup()
+        super().setUp()
+        self.conn = self.c
 
     def acct(self, id, kind, balance, **kw):
         cols = {"id": id, "name": id, "kind": kind, "balance": balance, "balance_date": TODAY.isoformat(), **kw}

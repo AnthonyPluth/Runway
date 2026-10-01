@@ -1,13 +1,12 @@
 """Card benefits (runway/churn_benefits.py): periods on the calendar and the cardmember year, what's left of a credit,
 what the benefits are worth a year against the annual fee, reminders, and the quick-add presets."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
 from runway import churn_benefits as cb
-from runway import churning, db, notify
+from runway import churning, notify
 from runway.churning import ChurnError
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
 
@@ -75,18 +74,11 @@ class PeriodTests(unittest.TestCase):
                 self.assertTrue(p["group"])
 
 
-class BenefitDbTests(unittest.TestCase):
+class BenefitDbTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         self.card = churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Platinum",
                                                 "opened_on": "2025-11-10", "annual_fee": 695})
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def card_out(self, today=TODAY):
         return next(c for c in churning.overview(self.c, today)["cards"] if c["id"] == self.card)

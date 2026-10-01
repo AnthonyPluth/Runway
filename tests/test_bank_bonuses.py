@@ -1,13 +1,12 @@
 """Bank account bonuses (runway/bank_bonuses.py): direct deposits counted, deadlines, safe to close, eligibility,
 the Upcoming items, bonus income per year and the push alert."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
 from runway import bank_bonuses as bb
-from runway import churning, db, notify
+from runway import churning, notify
 from runway.churning import ChurnError
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
 CATS = {"Paycheck": {"is_transfer": 0, "is_income": 1, "top": "Income"}, "Refunds": {"is_transfer": 0, "is_income": 1, "top": "Refunds"},
@@ -85,18 +84,11 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(bb.eligibility(sams, [old, sams], TODAY)["status"], "now")
 
 
-class DbTests(unittest.TestCase):
+class DbTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk', 'Chase Total', 'checking', 1600)")
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Card', 'credit')")
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def test_overview_upcoming_income_and_alerts(self):
         a = bb.save(self.c, {"owner": "Alex", "bank": "Chase", "opened_on": "2026-08-01", "bonus": 300, "account_id": "chk",

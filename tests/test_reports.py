@@ -1,17 +1,13 @@
 """Reports: spending over time, merchants, income against spending, and the breakdown."""
-import os
-import tempfile
 import unittest
 
-from runway import categories, db, reports, splits
+from runway import categories, reports, splits
+from tests.shared import DbCase
 
 
-class ReportTests(unittest.TestCase):
+class ReportTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "r.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk','Checking','checking',0), ('cc','Card','credit',0), "
                        "('old','Old','credit',0)")
         self.c.execute("UPDATE accounts SET hidden=1 WHERE id='old'")
@@ -35,10 +31,6 @@ class ReportTests(unittest.TestCase):
             self.tx(acct, day, amt, payee, cat)
         target = self.tx("cc", "2026-09-15", -100, "Target", "Shopping")
         splits.set_splits(self.c, target, [{"amount": -60, "category": "Groceries"}, {"amount": -40, "category": "Shopping"}])
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, acct, day, amt, payee, cat):
         self.n += 1
