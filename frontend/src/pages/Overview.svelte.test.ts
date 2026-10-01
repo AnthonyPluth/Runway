@@ -140,7 +140,17 @@ describe("Overview on a phone", () => {
     serve(() => fc({ accounts: [], total: [], events: [] }));
     render(Overview);
     expect(await screen.findByText(/No account to forecast yet/)).toBeInTheDocument();
-    expect(screen.getByText("Open Runway on a computer to choose your main checking account.")).toBeInTheDocument();
+    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /No account to forecast/ })).not.toBeInTheDocument();
+  });
+
+  it("shows alerts that are put right in Settings as text, and keeps the others as links", async () => {
+    viewport.phone = true;
+    serve(() => fc({ warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" },
+      { text: "2 payments over $1,000 aren’t in the forecast.", href: "#budget/recurring" }] }));
+    render(Overview);
+    expect(await screen.findByText(/Visa: choose which account pays it/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Visa: choose which account/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#budget/recurring");
   });
 });

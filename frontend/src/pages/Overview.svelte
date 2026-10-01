@@ -83,12 +83,21 @@
 
 </script>
 
+<!-- An alert links to where it's put right; on a phone, one that's put right in Settings (or the forecast's settings)
+     says to do it on a computer instead of opening a page phones don't show. -->
 {#snippet attention(text: string, href: string)}
-  <a class="cell" {href}>
-    <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
-    <span class="min-w-0 flex-1 text-sm">{text}</span>
-    <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-  </a>
+  {#if isPhone() && /#(setup\/(?!notifications)|overview\?forecast)/.test(href)}
+    <div class="cell">
+      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+      <span class="min-w-0 flex-1 text-sm">{text} <DesktopOnly what="put this right" class="inline" /></span>
+    </div>
+  {:else}
+    <a class="cell" {href}>
+      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+      <span class="min-w-0 flex-1 text-sm">{text}</span>
+      <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    </a>
+  {/if}
 {/snippet}
 
 {#if !connected}
@@ -134,11 +143,7 @@
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
         {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
         {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
-        {#if !fc.accounts.length}
-          {#if isPhone()}
-            <div class="cell"><span class="min-w-0 flex-1 text-sm">No account to forecast yet. <DesktopOnly what="choose your main checking account" class="inline" /></span></div>
-          {:else}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
-        {/if}
+        {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
       </Group>
     {/if}
     {#if setupLeft}<SetupChecklist />{/if}
