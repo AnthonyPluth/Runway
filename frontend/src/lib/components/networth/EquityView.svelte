@@ -74,15 +74,7 @@
 {#if error && !d}<p class="text-sm text-destructive">{error}</p>
 {:else if !d || !c}<div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
-  <p class="text-sm text-muted-foreground">{lastRead ? `From Carta, last read ${fmtDate(lastRead)}. ` : ""}Only what has vested counts toward net worth.</p>
-  <details class="mt-1 mb-6 text-sm text-muted-foreground">
-    <summary class="w-fit cursor-pointer underline underline-offset-2 hover:text-foreground">How is this valued?</summary>
-    <p class="mt-2 max-w-prose">
-      Stock options, RSUs and shares: enter them here, or read them from Carta with Runway’s browser extension
-      (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Connections</a>).
-      Only what has vested counts toward net worth, at each company’s latest share price (its 409A value, for a private company).
-    </p>
-  </details>
+  {#if lastRead}<p class="mb-6 text-sm text-muted-foreground">From Carta, last read {fmtDate(lastRead)}.</p>{/if}
   {#if c.last_error}
     <Alert.Root variant="destructive" class="mb-6"><TriangleAlert /><Alert.Description>Carta: {c.last_error}</Alert.Description></Alert.Root>
   {/if}

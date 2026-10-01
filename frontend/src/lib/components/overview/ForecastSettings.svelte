@@ -66,7 +66,6 @@
   <Sheet.Content>
     <Sheet.Header>
       <Sheet.Title>Forecast settings</Sheet.Title>
-      <Sheet.Description>Which account the forecast shows, what it takes out, and how far ahead it looks.</Sheet.Description>
     </Sheet.Header>
     <div class="flex flex-col gap-4 px-4 pb-4">
       <label class={fieldCls}>Primary account
@@ -83,14 +82,12 @@
               {accounts.length > 1 ? `${a.name}: subtract average everyday spending` : "Subtract average everyday spending"}
             </label>
           {/each}
-          <p class={helpCls}>Card swipes, cash and other spending that isn’t a bill or a transfer, spread evenly over each day.{#if lately.length}
-            {" "}Over the last 90 days: {lately.join(", ")}.{/if}</p>
+          {#if lately.length}<p class={helpCls}>Over the last 90 days: {lately.join(", ")}.</p>{/if}
         </div>
       {/if}
       <label class={fieldCls}>Default forecast length (days)
         <input class={inputCls} type="number" min="14" max="365" value={st.horizon_days} use:autosave={setHorizon} />
       </label>
-      <p class={helpCls}>The 1M–6M buttons under the chart change the range for now; this is the length Overview opens with.</p>
     </div>
   </Sheet.Content>
 </Sheet.Root>

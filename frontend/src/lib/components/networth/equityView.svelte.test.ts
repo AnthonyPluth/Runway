@@ -99,7 +99,8 @@ describe("#networth/equity", () => {
     expect(screen.getByText("Vested now")).toBeInTheDocument();
     expect(screen.getAllByText("Still to vest").length).toBeGreaterThan(0);
     expect(screen.getByText("Acme Robotics")).toBeInTheDocument();
-    expect(screen.getByText("How is this valued?")).toBeInTheDocument();
+    expect(screen.queryByText("How is this valued?")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Only what has vested counts/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync from Carta" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

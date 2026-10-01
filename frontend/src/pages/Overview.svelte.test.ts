@@ -45,6 +45,13 @@ beforeEach(() => {
 afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
 
 describe("Overview", () => {
+  it("links to the forecast's assumptions instead of explaining what it counts", async () => {
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByRole("link", { name: "Assumptions" })).toHaveAttribute("href", "#setup/assumptions/forecast");
+    expect(screen.queryByText(/Includes 1 bill/)).not.toBeInTheDocument();
+  });
+
   it("links each warning to where it's put right", async () => {
     serve(() => fc({
       warnings: ["Enter Visa’s latest statement so its payment is in the forecast.", "Amex: choose which account pays it in Settings."],
@@ -62,19 +69,19 @@ describe("Overview", () => {
     expect(await screen.findByRole("link", { name: /No account to forecast yet/ })).toHaveAttribute("href", "/#overview?forecast");
   });
 
-  it("says what the verdict leaves out, and turns everyday spending on in place", async () => {
+  it("turns everyday spending on in place, from the forecast settings", async () => {
     let on = false;
     serve(() => fc({ accounts: [{ ...fc().accounts[0], daily_spend_on: on, daily_spend: on ? 30 : 0 }] }));
     const user = userEvent.setup();
     render(Overview);
-    expect(await screen.findByText(/Includes 1 bill\. Everyday spending isn’t included/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Turn on" }));
+    expect(screen.queryByText(/Everyday spending isn’t included/)).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Forecast settings" }));
     const box = await screen.findByRole("checkbox", { name: "Subtract average everyday spending" });
     on = true;
     await user.click(box);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/chk", { method: "POST", body: { daily_spend: 1 } }));
     // The page loads its figures again without being drawn afresh, so the sheet stays open.
-    expect(await screen.findByText(/Includes 1 bill and everyday spending of about \$30 a day/)).toBeInTheDocument();
+    expect(await screen.findByText(/about \$30 a day/)).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 

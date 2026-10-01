@@ -133,7 +133,6 @@
 <Card.Root class="mb-6" id="churning-planned">
   <Card.Header>
     <Card.Title>Planned</Card.Title>
-    <Card.Description>Cards and bank bonuses you want, in the order you'd go, and what's in the way of each.</Card.Description>
     <Card.Action><Button size="sm" variant="outline" onclick={() => (form = "new")}>Plan a card or bonus</Button></Card.Action>
   </Card.Header>
   <Card.Content>

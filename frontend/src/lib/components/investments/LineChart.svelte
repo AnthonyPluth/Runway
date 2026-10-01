@@ -108,7 +108,7 @@
 
 <div class="relative" bind:clientWidth={width}>
   {#if n < 2}
-    <p class="py-6 text-center text-sm text-muted-foreground">Not enough history yet.</p>
+    <p class="py-6 text-center text-sm text-muted-foreground">Nothing to chart yet.</p>
   {:else if !vals.length}
     <p class="py-6 text-center text-sm text-muted-foreground">No data for this period yet.</p>
   {:else}

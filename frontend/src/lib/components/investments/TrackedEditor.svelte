@@ -55,7 +55,6 @@
 
 <div bind:this={box} class="rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">What this account holds</h3>
-  <p class="mt-1 text-sm text-muted-foreground">Each fund's ticker and shares (or value, if it has no ticker) and your contribution split, from your plan's website.</p>
   {#if err}<p class="mt-2 text-sm text-destructive">{err}</p>
   {:else if !t}<div class="mt-3 h-20 animate-pulse rounded-md bg-muted"></div>
   {:else}

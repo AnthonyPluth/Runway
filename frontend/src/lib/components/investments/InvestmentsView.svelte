@@ -113,7 +113,7 @@
 {:else if !status.inv_accounts || !d}
   <Card.Root class="mb-6" data-testid="getting-started">
     <Card.Content class="flex flex-col gap-3">
-      <p class="text-sm text-muted-foreground">Your brokerage and retirement accounts in one place: value and gains over time, return against the S&amp;P 500, holdings, allocation, dividends and activity.</p>
+      <p class="text-sm text-muted-foreground">Connect a brokerage or retirement account to see it here.</p>
       <div class="flex flex-wrap gap-2">
         <Button size="sm" href="#setup/connections">Connect an investment account</Button>
       </div>
@@ -143,10 +143,10 @@
   <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     {#snippet totalSub()}{d!.accounts.filter((a) => !a.hidden).length} accounts · {d!.holdings.length} holdings{/snippet}
     {@render tile("Total value", fmt0(d.total), totalSub)}
-    {#snippet todaySub()}{d!.day_change_pct == null ? "no prices for today yet" : `${pct(d!.day_change_pct, 2)} since the last close`}{/snippet}
+    {#snippet todaySub()}{d!.day_change_pct == null ? "" : `${pct(d!.day_change_pct, 2)} since the last close`}{/snippet}
     {@render tile("Today", d.day_change == null ? "—" : signed(d.day_change), todaySub, gainCls(d.day_change))}
     {#snippet gainSub()}
-      {d!.cost_basis ? `${pct(d!.unrealized_gain! / d!.cost_basis)} on ${fmt0(d!.cost_basis)} invested` : "no cost basis yet"}
+      {d!.cost_basis ? `${pct(d!.unrealized_gain! / d!.cost_basis)} on ${fmt0(d!.cost_basis)} invested` : ""}
       {#if d!.cost_missing} · <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d!.cost_missing} holding{d!.cost_missing === 1 ? "" : "s"} ({fmt0(d!.cost_missing_value)}) need a cost basis</a>{/if}
     {/snippet}
     {@render tile("Total gain", d.unrealized_gain == null ? "—" : signed(d.unrealized_gain), gainSub, gainCls(d.unrealized_gain))}

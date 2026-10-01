@@ -95,8 +95,7 @@
   function toggle(id: number, open: boolean) { if (open) openRecurring.add(String(id)); else openRecurring.delete(String(id)); }
 </script>
 
-<div class="mb-6 flex items-center justify-between gap-4">
-  <p class="text-sm text-muted-foreground">The paychecks and bills the forecast expects.</p>
+<div class="mb-6 flex items-center justify-end gap-4">
   <Button onclick={openForm}><Plus />Add</Button>
 </div>
 
@@ -142,7 +141,6 @@
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title><h2>Spotted in your history</h2></Card.Title>
-        <Card.Description>Payments that look like they repeat. Add one to check the details first, or say it isn’t recurring.</Card.Description>
       </Card.Header>
       <Card.Content class="flex flex-col">
         {#each suggestions as s (s.key)}

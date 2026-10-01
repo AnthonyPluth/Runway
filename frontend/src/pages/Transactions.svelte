@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, refreshState } from "$lib/app.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
@@ -139,10 +140,13 @@
 </script>
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-  <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-tight font-bold tracking-tight outline-none">
-    Transactions
-    <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
-  </h1>
+  <div class="flex items-center gap-1">
+    <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-tight font-bold tracking-tight outline-none">
+      Transactions
+      <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
+    </h1>
+    <AssumptionsLink group="transactions" />
+  </div>
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}
       title={app.state?.has_api_key ? undefined : "Add an OpenRouter key in Settings → Connections first"}>

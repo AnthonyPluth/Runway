@@ -1,5 +1,6 @@
 <script lang="ts">
   import { app } from "$lib/app.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import BudgetView from "$lib/components/budget/BudgetView.svelte";
   import RecurringView from "$lib/components/recurring/RecurringView.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
@@ -14,7 +15,10 @@
   const tab = $derived(sub === "recurring" ? "recurring" : "budget");
 </script>
 
-<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
+<div class="mb-4 flex items-center gap-1">
+  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
+  <AssumptionsLink group="budget" />
+</div>
 <SubTabs label="Budget" current={tab} tabs={TABS} />
 {#if !app.state?.connected}
   <NotConnected title={tab === "recurring" ? "Connect a bank to track your bills and income" : "Connect a bank to set a budget"}

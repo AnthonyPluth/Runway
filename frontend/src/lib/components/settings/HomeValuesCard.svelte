@@ -22,8 +22,7 @@
 </script>
 
 <ServiceRow name="Home values" purpose="Realie · keeps each home’s value current" on={configured}>
-  <p class={helpCls}>A free <a class={linkCls} href="https://www.realie.ai/real-estate-data-api" target="_blank" rel="noopener">Realie key</a> keeps home
-    values current. Runway looks each home up once a week at most and stays within the 25 free lookups a month.</p>
+  <p class={helpCls}>Get a free <a class={linkCls} href="https://www.realie.ai/real-estate-data-api" target="_blank" rel="noopener">Realie key</a>.</p>
   <div class={rowCls}>
     <label class={`${fieldCls} w-full sm:w-72`}>Realie API key
       <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "paste your key"} use:autosave={saveKey} /></label>

@@ -62,7 +62,6 @@
 <Card.Root class="mb-6">
   <Card.Header>
     <Card.Title>Rewards</Card.Title>
-    <Card.Description>{view === "balances" ? "What you have now: the balances you enter, with an estimate of today's." : "What linked cards earned this year, estimated from their spending and earning rates, and bonuses."}</Card.Description>
     <Card.Action class="flex flex-wrap items-center gap-2">
       <Segmented label="Rewards view" bind:value={view} options={[{ value: "balances", label: "Balances" }, { value: "earned", label: "Earned this year" }]} />
       <Button size="sm" variant="outline" onclick={() => (values = !values)} aria-expanded={values}>Point values</Button>
@@ -72,7 +71,7 @@
     {#if values}
       <div class="mb-5 rounded-lg bg-muted/40 p-4">
         <h3 class="mb-1 font-semibold">What a point is worth to you</h3>
-        <p class="mb-3 text-sm text-muted-foreground">In cents. Point values are estimates; set your own. {d.values_note}</p>
+        <p class="mb-3 text-sm text-muted-foreground">Each point’s value, in cents.</p>
         {#each groups as g (g.kind)}
           <h4 class="mt-3 mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{g.label}</h4>
           <div class="grid gap-x-6 gap-y-2 sm:grid-cols-2">

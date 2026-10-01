@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
@@ -63,7 +64,6 @@
     const inRange = d.history.filter((h) => h.date >= cutoff);
     return inRange.length >= 2 ? inRange : d.history;
   });
-  const since = $derived(d?.first_snapshot ? fmtDate(d.first_snapshot, { month: "short", day: "numeric", year: "numeric" }) : null);
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
   const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
 
@@ -156,7 +156,10 @@
   {/each}
 {/snippet}
 
-<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
+<div class="mb-4 flex items-center gap-1">
+  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
+  <AssumptionsLink group={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "networth"} />
+</div>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
   ...(isPhone() ? [] : [{ id: "investments", label: "Investments", href: "#networth/investments" }, { id: "equity", label: "Equity", href: "#networth/equity" }]),
@@ -192,16 +195,14 @@
     <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt0(d.net)}</div>
     {#if d.history.length >= 2}
       <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <p class={cn("text-[15px] tabular-nums", ch != null && ch > 0 ? "text-emerald-500" : "text-muted-foreground")}>
-          {ch != null ? `${signed(ch)} ${changeFrom ? `since ${changeFrom}` : `in the last ${rangeLabel}`}` : "Not enough history for a change yet"}
-        </p>
+        {#if ch != null}
+          <p class={cn("text-[15px] tabular-nums", ch > 0 ? "text-emerald-500" : "text-muted-foreground")}>
+            {signed(ch)} {changeFrom ? `since ${changeFrom}` : `in the last ${rangeLabel}`}
+          </p>
+        {/if}
         <Segmented label="Change over" value={range} onchange={(v) => (picked = v as typeof picked)}
           options={RANGES.map(([value]) => ({ value, label: value, disabled: d!.change[value] == null }))} />
       </div>
-    {:else}
-      <p class="mt-2 text-[15px] text-muted-foreground">
-        {since ? `Tracking since ${since}. ` : ""}The chart fills in as the days go by.
-      </p>
     {/if}
     <StatStrip class="mt-5" items={[
       { label: "Assets", value: fmt0(d.assets), sub: assetGroups.map((g) => g.label).join(" · ") },
@@ -252,7 +253,6 @@
               onclick={() => (showExcluded = !showExcluded)}>Manage</button>
           </p>
           {#if showExcluded}
-            <p class="mt-2 text-xs">These accounts stay in the rest of Runway (transactions, the forecast, Investments) but aren’t counted here.</p>
             <ul class="mt-1 divide-y text-sm text-foreground">
               {#each d.excluded as a (a.id)}
                 <li class="flex items-center justify-between gap-3 py-2">

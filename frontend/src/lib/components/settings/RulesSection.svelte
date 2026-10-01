@@ -28,7 +28,7 @@
   import { toast } from "svelte-sonner";
   import RuleEditor from "./RuleEditor.svelte";
   import type { RulePreview } from "./types";
-  import { helpCls, inputCls } from "./ui";
+  import { inputCls } from "./ui";
 
   // Settings → Rules: what each rule matches → what it does, with Edit / Apply / Remove, and a new-rule editor
   // (already open when there are no rules yet). Apply says how many past transactions it would change (the editor's
@@ -78,8 +78,6 @@
     <Card.Action><Button variant="outline" size="sm" onclick={() => (adding = !adding)}>Add</Button></Card.Action>
   </Card.Header>
   <Card.Content class="flex flex-col gap-4">
-    <p class={helpCls}>When a transaction matches everything a rule asks for, the rule acts on it. Rules run on new transactions as
-      they sync; <b class="text-foreground">Apply</b> runs one over past ones too (it won't change a category you picked yourself). The most specific rule wins.</p>
     {#if adding}<RuleEditor rule={null} {accounts} onclose={() => (adding = false)} />{/if}
     {#if rules.length}
       <input class={`${inputCls} w-full sm:max-w-sm`} type="search" placeholder={`Search ${rules.length} rules`} aria-label="Search rules" bind:value={filter} />

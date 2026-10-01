@@ -62,7 +62,7 @@
       <p class="text-xs text-muted-foreground">Entered by you</p>
     {/if}
   {:else}
-    <p class="text-sm text-muted-foreground">{note ? `${note} ` : ""}Enter the latest statement from the card’s website or app, so its payment is in the forecast.</p>
+    <p class="text-sm text-muted-foreground">{note ? `${note} ` : ""}Enter the latest statement from the card’s website or app.</p>
   {/if}
   {#if showForm}
     <form class={rowCls} aria-label="Enter a statement" onsubmit={save}>

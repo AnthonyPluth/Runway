@@ -179,7 +179,7 @@ describe("card form", () => {
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ plan: "product_change" }));
     await userEvent.click(screen.getByLabelText("Don't show this card in Upcoming"));
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ hide_upcoming: true }));
-    expect(screen.getByText(/the day before the next annual fee posts/)).toBeInTheDocument();
+    expect(screen.getByText(/Left blank: the day before the next annual fee/)).toBeInTheDocument();
   });
 
   describe("from an account found on your accounts", () => {
@@ -193,7 +193,7 @@ describe("card form", () => {
       expect(screen.getByLabelText("Bank")).toHaveValue("chase");
       expect(screen.getByLabelText("Annual fee")).toHaveValue(795);
       expect(screen.queryByLabelText("Fee posts in")).toBeNull();
-      expect(screen.getByTestId("fee-month")).toHaveTextContent("The fee posts each March, the month the card was opened.");
+      expect(screen.queryByTestId("fee-month")).toBeNull();
       expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
       expect(screen.getByTestId("opened-guess")).toHaveTextContent("opened on or before this day");
       expect(calls(/./)).toHaveLength(0);

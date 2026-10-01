@@ -49,9 +49,6 @@
   }
 </script>
 
-<p class="text-sm text-muted-foreground">Choose the forecast’s account with “Use for the forecast” on a checking or savings account, or in
-  <a class={linkCls} href="#overview?forecast">Overview’s forecast settings</a>, which also set how far ahead it looks.</p>
-
 <NewFromPlaid {waiting} left={ignoredAccounts(plaid)} {mine} />
 
 <Card.Root>

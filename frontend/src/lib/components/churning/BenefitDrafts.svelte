@@ -48,6 +48,5 @@
       {/each}
       <option value="custom">Something else…</option>
     </NativeSelect>
-    {#if !rows.length}<p class="mt-2 text-xs text-muted-foreground">Lounge access, travel and hotel credits. They’re saved with the card.</p>{/if}
   {/if}
 </div>

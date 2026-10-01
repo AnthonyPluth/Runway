@@ -10,11 +10,12 @@ import InvestmentsView from "./InvestmentsView.svelte";
 beforeEach(() => { vi.mocked(api).mockReset(); });
 
 describe("InvestmentsView", () => {
-  it("with no investment accounts, says what the tab shows and links to Connections", async () => {
+  it("with no investment accounts, asks you to connect one, with a link to Connections", async () => {
     vi.mocked(api).mockResolvedValue({ inv_accounts: 0, items: [] } as never);
     render(InvestmentsView);
     const block = await screen.findByTestId("getting-started");
-    expect(within(block).getByText(/holdings, allocation, dividends and activity/)).toBeInTheDocument();
+    expect(within(block).getByText(/Connect a brokerage or retirement account/)).toBeInTheDocument();
+    expect(within(block).queryByText(/holdings, allocation, dividends and activity/)).toBeNull();
     expect(within(block).getByRole("link", { name: "Connect an investment account" })).toHaveAttribute("href", "#setup/connections");
     expect(screen.queryByText("No investment accounts yet")).toBeNull();
   });

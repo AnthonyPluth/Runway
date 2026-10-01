@@ -17,9 +17,9 @@
   const board = $derived(benefitBoard(cards));
   const sections = $derived([
     { key: "expiring", title: "Expiring soon", note: "Money left, and the period ends soon.", rows: board.expiring },
-    { key: "available", title: "Still to use", note: "Not used up this period.", rows: board.available },
-    { key: "used", title: "Used this period", note: "Nothing left to claim until it resets.", rows: board.used },
-    { key: "perks", title: "Lounges & perks", note: "On all year: lounge networks with who gets in free, bags and status.", rows: board.perks },
+    { key: "available", title: "Still to use", rows: board.available },
+    { key: "used", title: "Used this period", rows: board.used },
+    { key: "perks", title: "Lounges & perks", rows: board.perks },
   ]);
   const stats = $derived([
     { label: "Expiring soon", value: String(board.expiring.length), tone: board.expiring.length ? "text-[var(--warning)]" : "" },
@@ -46,7 +46,7 @@
   {#each sections as s (s.key)}
     {#if s.rows.length}
       <Card.Root class="mb-6">
-        <Card.Header><Card.Title>{s.title} ({s.rows.length})</Card.Title><Card.Description>{s.note}</Card.Description></Card.Header>
+        <Card.Header><Card.Title>{s.title} ({s.rows.length})</Card.Title></Card.Header>
         <Card.Content>
           <ul class="divide-y" aria-label={s.title}>
             {#each s.rows as r (r.b.id)}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
+  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -106,7 +107,10 @@
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
+    <div class="flex items-center gap-1">
+      <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
+      <AssumptionsLink group="churning" />
+    </div>
     {#if d.people.length > 1}
       <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}
         options={[...d.people.map((p) => ({ value: p, label: p })), { value: "all", label: "Both" }]} />
@@ -128,7 +132,7 @@
   {#if noData}
     <Card.Root class="mb-6" data-testid="getting-started">
       <Card.Content class="flex flex-col gap-3">
-        <p class="text-sm text-muted-foreground">Track the credit cards and bank accounts you open for sign-up bonuses: your 5/24 count, annual fees, bonus spending and when you can apply again, for you and your partner.</p>
+        <p class="text-sm text-muted-foreground">Add the cards and bank accounts you open for sign-up bonuses to start tracking them.</p>
         {#if isPhone()}
           <DesktopOnly what="add your cards and bank bonuses" />
         {:else}
@@ -205,7 +209,6 @@
               <div class="mt-2"><BankList bonuses={doneBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} /></div>
             </details>
           {/if}
-          <p class="mt-4 text-xs text-muted-foreground">Linked to a Runway account, deposits categorized as income (or that look like payroll) count as direct deposits, and purchases as debit transactions. Banks decide what counts: check the offer's terms.</p>
         </Card.Content>
       </Card.Root>
     {/if}
@@ -213,7 +216,6 @@
       <Card.Root class="mb-6">
         <Card.Header>
           <Card.Title>Bonus money by year</Card.Title>
-          <Card.Description>Banks usually report account bonuses as interest on a 1099-INT, so they're usually taxable. For your records, not tax advice.</Card.Description>
         </Card.Header>
         <Card.Content>
           <table class="w-full max-w-md text-sm">

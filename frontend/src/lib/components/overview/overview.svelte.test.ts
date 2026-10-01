@@ -143,9 +143,10 @@ describe("CardsTable", () => {
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
-  it("says when there's no average yet", () => {
+  it("leaves the average out when there isn't one yet", () => {
     render(CardsTable, { cards: [card({ avg_monthly_spend: null })] });
-    expect(screen.getByText("no average yet")).toBeInTheDocument();
+    expect(screen.queryByText(/a statement/)).not.toBeInTheDocument();
+    expect(screen.getByText(/owes/)).toBeInTheDocument();
   });
 
   it("lets you correct the statement balance, and undo that", async () => {

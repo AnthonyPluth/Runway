@@ -186,14 +186,14 @@ describe("Settings → Connections, the optional services", () => {
     expect(key).toHaveAttribute("placeholder", "•••••••• saved");
   });
 
-  it("searches the web for card suggestions unless you switch it off, and says what it costs", async () => {
+  it("searches the web for card suggestions unless you switch it off", async () => {
     serve(status());
     render(ConnectionsSection);
     await screen.findByRole("button", { name: "Connect a bank or card" });
     const ai = within(card("AI categorization"));
     const web = ai.getByLabelText(/Search the web when filling in a card/);
     expect(web).toBeChecked();   // on unless switched off
-    expect(ai.getByText(/OpenRouter charges for the search/)).toBeInTheDocument();
+    expect(ai.queryByText(/OpenRouter charges for the search/)).toBeNull();   // the cost is under Settings → Assumptions
     await userEvent.click(web);
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { churn_ai_web: false } }));
   });

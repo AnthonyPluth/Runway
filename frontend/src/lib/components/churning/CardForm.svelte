@@ -14,7 +14,7 @@
   import { planDone, planUndo } from "./actions";
   import BenefitDrafts from "./BenefitDrafts.svelte";
   import CardBenefits from "./CardBenefits.svelte";
-  import { MONTHS, PLAN_ACTS, PLAN_LABEL, benefitsSummary, bonusSummary, fullDate, ratesPayload, ratesSummary, type RateRow } from "./churning";
+  import { PLAN_ACTS, PLAN_LABEL, benefitsSummary, bonusSummary, fullDate, ratesPayload, ratesSummary, type RateRow } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import RatesEditor from "./RatesEditor.svelte";
   import Section from "./Section.svelte";
@@ -190,7 +190,6 @@
   }
 
   const currencyName = $derived(d.currencies.find((x) => x.key === v.currency)?.name ?? "");
-  const feeMonth = $derived(MONTHS[Number(v.opened_on.slice(5, 7)) - 1]);
   const planSummary = $derived(PLAN_LABEL[v.plan as keyof typeof PLAN_LABEL] + (PLAN_ACTS.includes(v.plan) && v.plan_date ? ` by ${fullDate(v.plan_date)}` : ""));
   const moreSummary = $derived([v.family.trim() && `Family: ${v.family.trim()}`, v.changed_from && "Product change", v.eligible_on && `Bonus again from ${fullDate(v.eligible_on)}`, v.notes.trim() && "Notes"].filter(Boolean).join(" · ") || "Nothing added");
   const sameOwner = $derived(d.cards.filter((x) => x.owner === v.owner && x.id !== c?.id));
@@ -231,10 +230,6 @@
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card</label>
   </div>
 
-  <!-- A product change keeps the account's anniversary, which isn't this card's opened date. -->
-  {#if Number(v.annual_fee) > 0 && feeMonth && !c?.changed_from}
-    <p class="mt-1 text-xs text-muted-foreground" data-testid="fee-month">The fee posts each {feeMonth}, the month the card was opened.</p>
-  {/if}
   {#if openedGuess}
     <p class="mt-1 text-xs text-[var(--warning)]" data-testid="opened-guess">{draft?.opened_on ? "This is a guess: the card’s first transaction in Runway, so it was opened on or before this day. Change it to the day you opened it; 5/24 and the bonus rules depend on it." : "Runway can’t tell when this card was opened: enter the day. 5/24 and the bonus rules depend on it."}</p>
   {/if}
@@ -309,9 +304,7 @@
       <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.hide_upcoming} {@attach edit("hide_upcoming")} />Don't show this card in Upcoming</label>
     </div>
     {#if PLAN_ACTS.includes(v.plan)}
-      <p class="mt-1 text-xs text-muted-foreground">Left blank, the day is the day before the next annual fee posts{c?.plan_due && !v.plan_date ? ` (${fullDate(c.plan_due)})` : ""}. Keeping a card, or hiding it here, stops its fee reminders.</p>
-    {:else if v.plan === "keep"}
-      <p class="mt-1 text-xs text-muted-foreground">Keeping it: no annual-fee reminder for this card.</p>
+      <p class="mt-1 text-xs text-muted-foreground">Left blank: the day before the next annual fee{c?.plan_due && !v.plan_date ? ` (${fullDate(c.plan_due)})` : ""}.</p>
     {/if}
     {#if c && c.plan_done_on}
       <p class="mt-2 flex items-center gap-2 text-sm">Done {fullDate(c.plan_done_on)}<Button variant="link" size="sm" class="h-auto px-0" onclick={async () => { await planUndo(c.id, onchanged); changed = true; }}>Undo</Button></p>

@@ -61,9 +61,7 @@
     {:else if !status}
       <p class="text-sm text-muted-foreground">Loading…</p>
     {:else}
-      <p class={helpCls}>Let an assistant like Claude read your accounts, transactions, budget, reports, net worth, orders and churning to
-        answer questions about them. It never sees your bank connections, settings or backups. Add this address to the assistant, and
-        approve it in Runway when it asks.</p>
+      <p class={helpCls}>Add this address to your assistant and approve it here when it asks.</p>
       <span class="flex flex-wrap items-center gap-2">
         <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={url} aria-label="MCP address" />
         <Button variant="outline" size="sm" onclick={copy}>Copy</Button>

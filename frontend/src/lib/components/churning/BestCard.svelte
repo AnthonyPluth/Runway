@@ -75,7 +75,6 @@
           </li>
         {/each}
       </ol>
-      <p class="mt-2 text-xs text-muted-foreground">Return = points per dollar × what you say a point is worth. Estimates.</p>
     {/if}
   </Card.Content>
 </Card.Root>

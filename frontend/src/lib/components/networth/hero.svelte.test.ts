@@ -49,10 +49,19 @@ describe("the net worth hero", () => {
     expect(await screen.findByText(/^\+\$300\.00 since Aug\s10$/)).toBeInTheDocument();
   });
 
-  it("is a single muted line, with no chart, when there is no history yet", async () => {
+  it("shows no change, and no placeholder, when the ranges have too little history", async () => {
+    serve(nw([{ date: "2026-09-29", net: 5000 }, { date: "2026-09-30", net: 5100 }], { "30d": null, "90d": null, "1y": null }));
+    render(NetWorth);
+    expect(await screen.findByText("Net worth")).toBeInTheDocument();
+    expect(screen.queryByText(/not enough history/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/in the last|since/)).not.toBeInTheDocument();
+  });
+
+  it("has no chart and no filler line when there is no history yet", async () => {
     serve(nw([{ date: "2026-09-30", net: 5000 }], { "30d": null, "90d": null, "1y": null }));
     const { container } = render(NetWorth);
-    expect(await screen.findByText(/Tracking since Sep 30, 2026\. The chart fills in as the days go by\./)).toBeInTheDocument();
+    expect(await screen.findByText("Net worth")).toBeInTheDocument();
+    expect(screen.queryByText(/chart fills in|Tracking since/)).not.toBeInTheDocument();
     expect(container.querySelector("svg[role=img]")).toBeNull();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.queryByText("Over time")).not.toBeInTheDocument();

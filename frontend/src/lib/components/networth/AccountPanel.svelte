@@ -25,7 +25,6 @@
           {#if acct.as_of}<dt class="text-muted-foreground">Last synced</dt><dd class="text-right">{fmtDate(acct.as_of, { month: "short", day: "numeric", year: "numeric" })}</dd>{/if}
           {#if acct.synced != null}<dt class="text-muted-foreground">Balance then</dt><dd class="text-right tabular-nums">{fmt(acct.synced)}</dd>{/if}
         </dl>
-        {#if acct.synced != null}<p class="text-muted-foreground">Paid down since on its interest rate and monthly payment (from Plaid, Settings → Accounts, or recent payments).</p>{/if}
         <div class="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
           <span id="count-in-nw" class="font-medium">Count in net worth</span>
           <button type="button" role="switch" aria-checked={acct.counted} aria-labelledby="count-in-nw" onclick={() => onchange(!acct.counted)}
@@ -33,7 +32,6 @@
             <span class="block size-5 rounded-full bg-background shadow transition-transform {acct.counted ? 'translate-x-5' : 'translate-x-0'}"></span>
           </button>
         </div>
-        <p class="text-muted-foreground">Off keeps it in transactions, the forecast and Investments, and only drops it from these totals.</p>
         <a href="#setup/accounts" class="font-medium underline underline-offset-4">More account settings →</a>
       </div>
     {/if}

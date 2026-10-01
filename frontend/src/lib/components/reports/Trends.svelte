@@ -99,7 +99,6 @@
             </tbody>
           </table>
         </div>
-        <p class="mt-3 text-sm text-muted-foreground">The current month is still going. Click a row to show just that one.</p>
       </Card.Content>
     </Card.Root>
   {/if}

@@ -79,9 +79,6 @@
     <p class="text-sm text-muted-foreground">Loading…</p>
   {:else}
     {@const r = data}
-    <p class={helpCls}>Optional. Amazon, Target, Costco and Carta have no API for this, so a small extension in your browser reads your orders
-      (and your Carta equity) with the sign-in you already have there and sends them only to Runway. Runway matches each Amazon, Target or
-      Costco charge to its order (online, or in store with your Target account) and splits the transaction by what you bought.</p>
     <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
       <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
         <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
@@ -124,10 +121,7 @@
 
     <div class="flex flex-wrap items-center gap-3">
       {#if app.state?.has_api_key}
-        <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI
-          <span class="text-muted-foreground">(only item names and prices are sent)</span></label>
-      {:else}
-        <span class={helpCls}>Add an OpenRouter key under AI categorization below and Runway can categorize each item for you; until then items take the transaction's category until you pick one.</span>
+        <label class={checkCls}><input type="checkbox" checked={r.ai} onchange={setAi} /> Categorize items with AI</label>
       {/if}
       {#if r.recent.length}<Button variant="outline" size="sm" disabled={matching} onclick={matchAgain}>{matching ? "Working…" : "Match and split again"}</Button>{/if}
     </div>
