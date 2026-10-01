@@ -1,8 +1,10 @@
 """The forecast: dates and schedules, card payments, and the balance chart."""
 import unittest
+from unittest import mock
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.exc import OperationalError
 
 from runway import db, forecast, recurring
 from runway.models import Account, Budget, CardStatement, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
@@ -476,6 +478,7 @@ class ForecastAssumptionTests(LedgerCase):
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000, frequency="biweekly",
                                                    anchor_date="2026-09-09", match="acme payroll"))
         self.tx("chk", "2026-09-23", 3000.0, "ACME PAYROLL", "Income", pending=1)
+        recurring.auto_match(self.conn)   # as a sync does
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual((fc["accounts"][0]["balance"], fc["accounts"][0]["pending"]), (7625.0, 2625.0))
         self.assertEqual([e["date"] for e in fc["events"] if e["name"] == "Paycheck"], ["2026-10-07", "2026-10-21"])
@@ -520,6 +523,7 @@ class ForecastAssumptionTests(LedgerCase):
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=1000, frequency="biweekly",
                                                    anchor_date="2026-09-09", match="acme payroll"))
         self.tx("chk", "2026-09-23", 1000.0, "ACME PAYROLL", "Income", pending=1)
+        recurring.auto_match(self.conn)   # as a sync does
 
     def test_a_pending_paycheck_counts_though_the_available_balance_leaves_it_out(self):
         # Banks don't add pending deposits to the available balance: here it's the same as the balance.
@@ -589,6 +593,7 @@ class ForecastAssumptionTests(LedgerCase):
                                                    anchor_date="2026-05-15", match="gym"))
         for d in ("2026-05-15", "2026-06-15", "2026-07-15", "2026-08-15", "2026-09-15"):
             self.tx("cc", d, -30.0, "GYM", "Fitness")
+        recurring.auto_match(self.conn)   # as a sync does
         self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-600, frequency="yearly",
                                                    anchor_date="2025-10-20", match="insurer"))
         self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
@@ -605,6 +610,7 @@ class ForecastAssumptionTests(LedgerCase):
         self.conn.execute(update(Recurring).where(Recurring.name == "Streaming").values(anchor_date="2026-05-30"))
         for d in ("2026-05-30", "2026-06-30", "2026-07-30", "2026-08-30"):
             self.tx("cc", d, -15.0, "STREAMFLIX", "Subscriptions")
+        recurring.auto_match(self.conn)   # as a sync does
         card = next(c for c in forecast.build(self.conn, TODAY, 120)["cards"] if c["id"] == "cc")
         self.assertEqual(card["avg_monthly_spend"], 1111.67)
         self.assertEqual(self.estimates(days=120)["2027-01-05"], card["avg_monthly_spend"])
@@ -615,6 +621,7 @@ class ForecastAssumptionTests(LedgerCase):
         self.conn.execute(insert(Recurring).values(name="Water", account_id="cc", amount=-300, frequency="quarterly",
                                                    anchor_date="2026-07-20", match="water co"))
         self.tx("cc", "2026-07-20", -300.0, "WATER CO", "Utilities")
+        recurring.auto_match(self.conn)   # as a sync does
         fc = forecast.build(self.conn, TODAY, 120)
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual(card["avg_monthly_spend"], 1066.67)   # without it: not $100 of it in every cycle
@@ -630,6 +637,7 @@ class ForecastAssumptionTests(LedgerCase):
                                                    anchor_date="2026-07-25", match="meal kit"))
         for d in ("2026-07-25", "2026-08-25"):
             self.tx("cc", d, -90.0, "MEAL KIT", "Groceries")
+        recurring.auto_match(self.conn)   # as a sync does
         fc = forecast.build(self.conn, TODAY, 120)
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual(card["avg_monthly_spend"], 1066.67)
@@ -692,6 +700,42 @@ class ForecastAssumptionTests(LedgerCase):
         e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "cardclose:cc:2026-10-10")
         self.assertFalse(e.get("overridden"))
 
+    def no_writes(self, fail: Exception):
+        """Make every INSERT, UPDATE or DELETE on self.conn raise `fail`. Returns the patch, to stop it early."""
+        execute = self.conn.execute
+
+        def guarded(stmt, params=None):
+            if getattr(stmt, "is_dml", False):
+                raise fail
+            return execute(stmt, params)
+        patch = mock.patch.object(self.conn, "execute", guarded)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return patch
+
+    def test_building_the_forecast_writes_nothing(self):
+        # a page load mustn't wait for a sync's write lock
+        self.three_cycles()
+        self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
+                                                   anchor_date="2026-08-01", match="landlord"))
+        self.tx("chk", "2026-09-01", -2000.0, "LANDLORD LLC", "Rent")             # not linked yet
+        self.tx("chk", "2026-09-22", -40.0, "GAS STATION", "Auto", pending=1)
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc", rollover_from="2026-08"))
+        self.no_writes(AssertionError("the forecast wrote to the database"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-10-10")["amount"], -123.0)
+
+    def test_an_old_key_still_applies_when_it_cant_be_moved_yet(self):
+        self.conn.execute(insert(Override).values(key="card:cc:2026-11-05", amount=-77.0))
+        patch = self.no_writes(OperationalError("UPDATE override", {}, Exception("database is locked")))
+        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "cardclose:cc:2026-10-10")
+        self.assertEqual((e["amount"], e["overridden"]), (-77.0, True))
+        self.assertEqual(self.conn.execute(select(Override.key)).scalars(), ["card:cc:2026-11-05"])   # not yet
+        patch.stop()   # the lock's free: it moves the next time
+        forecast.build(self.conn, TODAY, 60)
+        self.assertEqual(self.conn.execute(select(Override.key)).scalars(), ["cardclose:cc:2026-10-10"])
+
     def test_an_old_key_on_a_due_date_that_is_another_closing_date_stays_put(self):
         # Closing the 31st, due the 28th: the Jan 31 statement was due Feb 28, the day the next one closes. It's paid,
         # so it has no event, and its old edit (keyed by that due date) mustn't land on the Feb 28 statement.
@@ -704,17 +748,6 @@ class ForecastAssumptionTests(LedgerCase):
                          [("cardclose:cc:2027-02-28", "2027-03-29")])   # due Mar 28, a Sunday: paid the 29th
         self.assertFalse(events[0].get("overridden"))
         self.assertEqual(events[0]["amount"], -100.0)
-
-    def test_a_payment_that_posted_today_but_isnt_linked_yet_counts_once(self):
-        for d in ("2026-08-01", "2026-09-01"):
-            self.tx("chk", d, -2000.0, "LANDLORD LLC", "Rent")
-        self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
-                                                   anchor_date="2026-08-01", match="landlord"))
-        recurring.auto_match(self.conn)
-        today = date(2026, 10, 1)
-        self.tx("chk", "2026-10-01", -2000.0, "LANDLORD LLC", "Rent")   # synced, not linked yet
-        fc = forecast.build(self.conn, today, 20)
-        self.assertEqual([e for e in fc["events"] if e["name"] == "Rent"], [])
 
     def test_a_later_payment_doesnt_count_for_an_earlier_occurrence(self):
         item = {"frequency": "monthly"}
