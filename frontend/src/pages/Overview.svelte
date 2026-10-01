@@ -132,7 +132,7 @@
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
-          {#if lowBad}Heads up · {what} dips to {fmt(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
+          {#if lowBad}Heads up · {what} dips to {fmt0Down(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
           {:else}On track · {what} stays above {fmt0Down(low.balance)} for {nb(span(shown.days))}{/if}
         </p>
         <p class="mt-1 max-w-3xl text-[15px] leading-relaxed text-muted-foreground">

@@ -16,9 +16,9 @@ describe("money", () => {
     expect(fmt0(1234.5)).toBe("$1,235");
     expect(fmt0(null)).toBe("$0");
   });
-  it("rounds a low down, so a balance said to stay above it really does", () => {
+  it("rounds a low down, so a balance said to stay above it really does, and gives a negative low to the cent", () => {
     expect(fmt0Down(4820.55)).toBe("$4,820");
-    expect(fmt0Down(-12.2)).toBe("-$13");
+    expect(fmt0Down(-12.2)).toBe("-$12.20");
     expect(fmt0Down(1000)).toBe("$1,000");
     expect(fmt0Down(null)).toBe("$0");
   });
