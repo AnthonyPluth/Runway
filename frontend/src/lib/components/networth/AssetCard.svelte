@@ -63,7 +63,8 @@
     </div>
   </div>
   <div class="mt-3 flex flex-wrap items-center gap-2">
-    <Button variant="outline" size="sm" onclick={openQuick} aria-expanded={quick}>Update value</Button>
+    <!-- A home Realie values isn't valued by hand too (the server refuses it): its next lookup would only undo it -->
+    {#if !a.realie_valued}<Button variant="outline" size="sm" onclick={openQuick} aria-expanded={quick}>Update value</Button>{/if}
     {#if canRefresh}
       {#if a.next_lookup}<span class="text-sm text-muted-foreground">{HOME_VALUES.nextLookup(a.next_lookup)}</span>
       {:else}<Button variant="outline" size="sm" disabled={looking} title={HOME_VALUES.refreshTitle} onclick={refresh}>{looking ? "Looking up…" : HOME_VALUES.refresh}</Button>{/if}
@@ -75,7 +76,7 @@
     <Button variant="link" size="sm" onclick={onedit}>Edit details</Button>
     <Button variant="link" size="sm" onclick={() => (removing = true)}>Remove</Button>
   </div>
-  {#if quick}
+  {#if quick && !a.realie_valued}
     <div class="mt-3 flex flex-wrap items-end gap-2">
       <label class="flex flex-col gap-1 text-sm">New value
         <span class="relative">

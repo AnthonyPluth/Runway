@@ -7,20 +7,22 @@ from sqlalchemy import func, select
 
 from ... import db, networth, realie
 from ... import settings_keys as sk
-from ...models import Account
+from ...models import Account, Asset
 from ..common import ApiError
 
 
 def api_networth(conn, _q, _b):
     out = networth.summary(conn)
     out["assets_list"] = networth.assets(conn)
+    configured = realie.configured(conn)
     for a in out["assets_list"]:   # homes are looked up once a week at most: when the next lookup is allowed
         nxt = realie.next_lookup(a.get("last_lookup"))
         a["next_lookup"] = nxt.isoformat() if nxt and nxt > date.today() else None
+        a["realie_valued"] = realie.values_home(configured, a)   # its value comes from Realie, not typed by hand
     name = func.coalesce(Account.display_name, Account.name).label("name")
     out["loan_accounts"] = db.rows(conn.execute(
         select(Account.id, name, Account.kind).where(Account.kind == "loan", Account.hidden == 0).order_by(name)))
-    out["realie"] = {"configured": realie.configured(conn), "used": realie.used_this_month(conn), "limit": realie.monthly_limit()}
+    out["realie"] = {"configured": configured, "used": realie.used_this_month(conn), "limit": realie.monthly_limit()}
     return out
 
 
@@ -32,6 +34,10 @@ def api_asset_add(conn, _q, body):
 
 
 def api_asset_update(conn, _q, body, asset_id):
+    if "value" in body:   # a home Realie values isn't also valued by hand: its next lookup would only undo it
+        a = db.rows(conn.execute(select(Asset.kind, Asset.source, Asset.address).where(Asset.id == int(asset_id))))
+        if a and realie.values_home(realie.configured(conn), a[0]):
+            raise ApiError("Realie values this home, so its value isn’t set by hand: use Update from Realie")
     try:
         networth.save_asset(conn, body, int(asset_id))
     except ValueError as e:
