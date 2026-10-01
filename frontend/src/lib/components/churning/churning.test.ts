@@ -1,13 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
   eligibilityText, feesDue, five24Line, guestsText, isTravel, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
   scoreProgress, spendProgress, splitWishes, usesText, valueSource, wishName,
 } from "./churning";
+import { bankFeesSummary, bankReceivedSummary, bankRequirementsSummary, fullDate, wishExpectSummary, wishTimingSummary } from "./churning";
 import { benefit, card } from "./fixtures";
 import type { BankBonus, Benefit, ChurnCard, Currency, Eligibility, Five24, Wish } from "./types";
 
 const TODAY = "2026-09-29";
+// Dates in this year come without it, so the clock is fixed.
+beforeAll(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(`${TODAY}T12:00:00`)); });
+afterAll(() => vi.useRealTimers());
 // Dates come with non-breaking spaces (so they never wrap); compare them as plain text.
 const sp = (s: string) => s.replace(/\u00a0/g, " ");
 const e = (x: Partial<Eligibility>): Eligibility => ({ status: "now", on: null, why: "", override: false, ...x });
@@ -56,7 +60,7 @@ describe("churning helpers", () => {
   it("sums up 5/24", () => {
     const f = { count: 6, under: false, under_on: "2027-01-10", next_fall_off: "2026-10-15" } as Five24;
     expect(sp(five24Line(f).next)).toBe("Under 5/24 on Jan 10, 2027");
-    expect(sp(five24Line({ ...f, count: 3, under: true, under_on: null }).next)).toBe("2/24 on Oct 15, 2026");
+    expect(sp(five24Line({ ...f, count: 3, under: true, under_on: null }).next)).toBe("2/24 on Oct 15");
     expect(five24Line(undefined).count).toBe("0/24");
     expect(five24Line(undefined).next).toBe("No cards yet");
   });
@@ -85,7 +89,7 @@ describe("churning 2 helpers", () => {
     expect(planLine(c({}))).toBe("");
     expect(planLine(c({ plan: "keep" }))).toBe("Keeping it");
     expect(sp(planLine(c({ plan: "product_change", plan_target: "Freedom", plan_due: "2026-10-20" })))).toBe("Product change to Freedom by Oct 20");
-    expect(sp(planLine(c({ plan: "close", plan_done_on: "2026-09-01" })))).toBe("Done Sep 1, 2026");
+    expect(sp(planLine(c({ plan: "close", plan_done_on: "2026-09-01" })))).toBe("Done Sep 1");
     expect(benefitSummary({ benefits: [], benefits_value: 0, net_fee: 95 })).toBe("");
     const two = [{}, {}] as Benefit[];
     expect(benefitSummary({ benefits: two, benefits_value: 650, net_fee: -100 })).toBe("Benefits $650/yr · net fee −$100");
@@ -180,5 +184,30 @@ describe("churning 2 helpers", () => {
     expect(splitWishes([w(1, "A", 1), w(2, "A", 2, { status: "applied" }), w(3, "A", 3, { status: "dropped" }), w(4, "A", 4, { status: "ready" })]).open.map((x) => x.id)).toEqual([1, 4]);
     expect(wishName({ kind: "bank_bonus", bank: "Chase", product: "Total Checking" })).toBe("Chase Total Checking");
     expect(wishName({ kind: "card", bank: null, product: "Sapphire" })).toBe("Sapphire");
+  });
+});
+
+describe("dates and form summaries", () => {
+  it("leaves the year off a date in this year", () => {
+    expect(sp(fullDate("2026-10-15"))).toBe("Oct 15");
+    expect(sp(fullDate("2027-01-10"))).toBe("Jan 10, 2027");
+    expect(sp(fullDate("2025-12-31"))).toBe("Dec 31, 2025");
+  });
+
+  it("says what a collapsed bank bonus section holds", () => {
+    expect(bankRequirementsSummary({ dd_total: "500", dd_count: "2", debit_count: "", min_balance: "", deadline_days: "90", other_reqs: "" })).toBe("$500 in direct deposits · 2 deposits · 90 days");
+    expect(bankRequirementsSummary({ dd_total: "", dd_count: "", debit_count: "", min_balance: "", deadline_days: "", other_reqs: "" })).toBe("Nothing added");
+    expect(bankFeesSummary({ monthly_fee: "15", early_close_fee: "", keep_open_days: "180" })).toBe("$15/month fee · keep open 180 days");
+    expect(sp(bankReceivedSummary({ received_on: "2026-10-05", closed_on: "", once_per_lifetime: false, repeat_months: "12", eligible_on: "" }))).toBe("Posted Oct 5 · again after 12 months");
+    expect(bankReceivedSummary({ received_on: "", closed_on: "", once_per_lifetime: true, repeat_months: "12", eligible_on: "" })).toBe("once per lifetime");
+  });
+
+  it("says what a collapsed plan section holds", () => {
+    const card = { kind: "card", annual_fee: "95", bonus: "60000", currency: "cash", bonus_spend: "4000", bonus_months: "3" };
+    expect(wishExpectSummary(card, "Cash back")).toContain("$95 fee · ");
+    expect(wishExpectSummary(card, "Cash back")).toContain("after $4,000 in 3 months");
+    expect(wishExpectSummary({ kind: "bank_bonus", bonus: "300", requirements: "", once_per_lifetime: false, repeat_months: "" }, "")).toBe("$300");
+    expect(sp(wishTimingSummary({ offer_expires_on: "2026-12-01", wait_until: "", min_score: "740", status: "wanted" }))).toBe("Offer ends Dec 1 · score 740");
+    expect(wishTimingSummary({ offer_expires_on: "", wait_until: "", min_score: "", status: "wanted" })).toBe("Nothing added");
   });
 });

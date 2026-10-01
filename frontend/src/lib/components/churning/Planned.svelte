@@ -7,6 +7,7 @@
   import { Input } from "$lib/components/ui/input";
   import { fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
+  import FoldedLine from "./FoldedLine.svelte";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
@@ -67,6 +68,8 @@
   // A credit score you looked up.
   let scoring = $state<string | null>(null);
   let score = $state(""), scoreDay = $state(""), scoreSource = $state("");
+  // Credit scores only matter to a wish that wants one (or while one is being entered).
+  const wantsScore = $derived(!!scoring || parts.open.some((w) => w.min_score != null));
   function openScore(p: string) {
     scoring = p; score = ""; scoreDay = d.today; scoreSource = d.scores[p]?.source ?? "";
   }
@@ -136,17 +139,19 @@
     <Card.Action><Button size="sm" variant="outline" onclick={() => (form = "new")}>Plan a card or bonus</Button></Card.Action>
   </Card.Header>
   <Card.Content>
-    <div class="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm" aria-label="Credit scores">
-      {#each people as p (p)}
-        {@const s = d.scores[p]}
-        <span class="inline-flex flex-wrap items-center gap-x-2">
-          <span class="text-muted-foreground">{p}'s credit score</span>
-          <b class="font-medium tabular-nums">{s ? s.score : "not entered"}</b>
-          {#if s}<span class="text-xs text-muted-foreground">as of {fullDate(s.as_of)}{s.source ? ` · ${s.source}` : ""}</span>{/if}
-          <Button variant="link" size="sm" class="h-auto px-0" aria-label={`Update ${p}'s credit score`} onclick={() => openScore(p)}>{s ? "Update" : "Add"}</Button>
-        </span>
-      {/each}
-    </div>
+    {#if wantsScore}
+      <div class="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-sm" aria-label="Credit scores">
+        {#each people as p (p)}
+          {@const s = d.scores[p]}
+          <span class="inline-flex flex-wrap items-center gap-x-2">
+            <span class="text-muted-foreground">{p}'s credit score</span>
+            <b class="font-medium tabular-nums">{s ? s.score : "not entered"}</b>
+            {#if s}<span class="text-xs text-muted-foreground">as of {fullDate(s.as_of)}{s.source ? ` · ${s.source}` : ""}</span>{/if}
+            <Button variant="link" size="sm" class="h-auto px-0" aria-label={`Update ${p}'s credit score`} onclick={() => openScore(p)}>{s ? "Update" : "Add"}</Button>
+          </span>
+        {/each}
+      </div>
+    {/if}
     {#if scoring}
       <div class="mb-4 flex flex-wrap items-end gap-3 rounded-lg bg-muted/40 p-3">
         <label class="flex flex-col gap-1 text-sm">{scoring}'s score<Input type="number" min="300" max="900" class="w-24" bind:value={score} placeholder="e.g. 720" /></label>
@@ -160,11 +165,9 @@
       <ul class="divide-y">
         {#each parts.open as w, n (w.id)}{@render item(w, n, parts.open.length)}{/each}
       </ul>
-    {:else}
-      <p class="py-4 text-center text-sm text-muted-foreground">Nothing planned. Add a card or bank bonus you're eyeing and it will tell you when you can apply.</p>
     {/if}
     {#if parts.closed.length}
-      <Button variant="link" size="sm" class="mt-1 px-0" aria-expanded={showDone} onclick={() => (showDone = !showDone)}>{showDone ? "Hide" : "Show"} applied and dropped ({parts.closed.length})</Button>
+      <FoldedLine class="mt-1" count={parts.closed.length} noun="applied or dropped" bind:open={showDone} />
       {#if showDone}<ul class={cn("divide-y text-muted-foreground")}>{#each parts.closed as w (w.id)}{@render item(w, 0, 0)}{/each}</ul>{/if}
     {/if}
   </Card.Content>

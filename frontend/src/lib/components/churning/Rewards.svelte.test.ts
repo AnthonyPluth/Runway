@@ -48,10 +48,11 @@ describe("Rewards", () => {
     expect(screen.getByLabelText("Alex's Amex Membership Rewards balance")).toBeInTheDocument();
   });
 
-  it("says so when nothing was earned this year", async () => {
+  it("shows no table when nothing was earned this year, and no placeholder either", async () => {
     setup([row({ balance: 5, balance_value: 0.08 })]);
     await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
-    expect(screen.getByText("Nothing earned yet this year.")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing earned yet this year.")).not.toBeInTheDocument();
   });
 
   it("shows the worth of the balance alone when there's also a year's earnings", async () => {
@@ -72,7 +73,8 @@ describe("Rewards", () => {
   it("takes a balance off the list, even one that is 0", async () => {
     vi.mocked(api).mockResolvedValue({});
     setup([row({ currency: "airline", name: "Other airline miles", balance: 0, balance_value: 0, as_of: "2026-09-01" })]);
-    screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }).click();
+    await userEvent.click(screen.getByRole("button", { name: "Other airline miles details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }));
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/churning/balances",
       { method: "POST", body: { owner: "Alex", currency: "airline", points: null } }));
   });
@@ -87,8 +89,11 @@ describe("rewards", () => {
     render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });
   };
 
-  it("shows the balance as of its day and a labeled estimate of the balance now", () => {
+  it("folds the day, the estimate and Remove behind the row, and shows the balance as of its day and a labeled estimate of the balance now", async () => {
     setup();
+    expect(screen.queryByLabelText("Day of Alex's American AAdvantage balance")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Estimated now/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "American AAdvantage details" }));
     expect(screen.getByLabelText("Day of Alex's American AAdvantage balance")).toHaveValue("2026-08-30");
     expect(screen.getByText(/Estimated now/)).toHaveTextContent("~41,300");
     expect(screen.getByText(/1,300 earned since/)).toBeInTheDocument();
@@ -106,7 +111,7 @@ describe("rewards", () => {
 
   it("groups the point values and marks which are estimates and which are yours", async () => {
     setup();
-    await userEvent.click(screen.getByRole("button", { name: "Point values" }));
+    await userEvent.click(screen.getByText("Point values"));
     expect(screen.getByText("Airline miles")).toBeInTheDocument();
     expect(screen.getByText("your value")).toBeInTheDocument();      // AA is overridden
     expect(screen.getAllByText(/estimate \(as of Jun 2026\)/).length).toBeGreaterThan(0);

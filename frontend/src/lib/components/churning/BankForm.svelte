@@ -9,7 +9,8 @@
   import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
-  import { BANK_STATUS_LABEL, BANK_TYPE_LABEL } from "./churning";
+  import { BANK_STATUS_LABEL, BANK_TYPE_LABEL, bankFeesSummary, bankReceivedSummary, bankRequirementsSummary } from "./churning";
+  import Section from "./Section.svelte";
   import type { BankBonus, Churning } from "./types";
 
   // Adding a bank account bonus, or editing one (each field saves as you change it; Done redraws the page).
@@ -51,7 +52,8 @@
     catch (err) { toast.error((err as Error).message); }
   }
   const lbl = "flex flex-col gap-1 text-sm";
-  const h = "mt-4 mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase";</script>
+  const open = $state({ requirements: false, fees: false, received: false });
+</script>
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{b ? `Edit ${b.bank}` : "Add a bank bonus"}</h3>
@@ -74,7 +76,7 @@
     </label>
   </div>
 
-  <h4 class={h}>Requirements</h4>
+  <Section id="requirements" title="Requirements" bind:open={open.requirements} summary={bankRequirementsSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Direct deposits total<Input type="number" min="0" step="100" class="w-32" bind:value={v.dd_total} {@attach edit("dd_total")} placeholder="$" /></label>
     <label class={lbl}>How many deposits<Input type="number" min="0" step="1" class="w-24" bind:value={v.dd_count} {@attach edit("dd_count")} /></label>
@@ -100,16 +102,18 @@
       <label class={lbl}>Debit purchases so far<Input type="number" min="0" step="1" class="w-24" bind:value={v.manual_debits} {@attach edit("manual_debits")} /></label>
     {/if}
   </div>
+  </Section>
 
-  <h4 class={h}>Fees and closing</h4>
+  <Section id="fees" title="Fees & closing" bind:open={open.fees} summary={bankFeesSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Monthly fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.monthly_fee} {@attach edit("monthly_fee")} placeholder="0" /></label>
     <label class={`${lbl} min-w-52 flex-1`}>Waived by<Input bind:value={v.fee_waiver} {@attach edit("fee_waiver")} placeholder="e.g. $500 in direct deposits a month" /></label>
     <label class={lbl}>Early-closing fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.early_close_fee} {@attach edit("early_close_fee")} placeholder="$" /></label>
     <label class={lbl}>Keep open (days)<Input type="number" min="0" step="1" class="w-24" bind:value={v.keep_open_days} {@attach edit("keep_open_days")} placeholder="e.g. 180" /></label>
   </div>
+  </Section>
 
-  <h4 class={h}>Bonus received, and again</h4>
+  <Section id="received" title="Bonus received & again" bind:open={open.received} summary={bankReceivedSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Posted on<Input type="date" class="w-40" bind:value={v.received_on} {@attach edit("received_on")} /></label>
     <label class={lbl}><span>Amount <span class="text-muted-foreground">(if not the bonus)</span></span><Input type="number" min="0" step="1" class="w-28" bind:value={v.received_amount} {@attach edit("received_amount")} placeholder="$" /></label>
@@ -118,6 +122,7 @@
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.once_per_lifetime} {@attach edit("once_per_lifetime")} />Once per lifetime</label>
     <label class={lbl}><span>Eligible again <span class="text-muted-foreground">(your date)</span></span><Input type="date" class="w-40" bind:value={v.eligible_on} {@attach edit("eligible_on")} /></label>
   </div>
+  </Section>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
   <div class="mt-4 flex flex-wrap items-center gap-2">

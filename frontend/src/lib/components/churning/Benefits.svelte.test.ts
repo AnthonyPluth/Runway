@@ -17,6 +17,21 @@ beforeEach(() => {
 });
 
 describe("benefits tab", () => {
+  it("with no benefits, is one muted line: no tiles of zeros, no prose", () => {
+    const { container } = render(Benefits, { cards: [card()], showOwner: false, onchanged: vi.fn() });
+    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(container.querySelector("dl")).toBeNull();
+    expect(screen.queryByText(/Open Runway on a computer/)).toBeNull();
+    expect(screen.queryByText(/Edit a card and add/)).toBeNull();
+  });
+
+  it("shows its totals as an unboxed strip once there are benefits", () => {
+    const { container } = render(Benefits, { cards: [card({ benefits: [benefit()] })], showOwner: false, onchanged: vi.fn() });
+    expect(container.querySelector("dl")).not.toBeNull();
+    expect(screen.getByText("Worth a year", { selector: "dt span" })).toBeInTheDocument();
+    expect(screen.queryByText("Money left, and the period ends soon.")).toBeNull();
+  });
+
   it("lists each lounge network as a perk with who gets in free, apart from the credits", () => {
     const vx = card({ benefits: [
       benefit({ id: 1, name: "Travel credit" }),

@@ -9,8 +9,9 @@
   import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
-  import { BANK_TYPE_LABEL, wishName } from "./churning";
+  import { BANK_TYPE_LABEL, wishExpectSummary, wishName, wishTimingSummary } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
+  import Section from "./Section.svelte";
   import type { Churning, Wish } from "./types";
 
   // Planning a card or a bank bonus: what you expect it to cost and pay, and what you're waiting for. Adding sends it
@@ -58,7 +59,7 @@
     catch (err) { toast.error((err as Error).message); }
   }
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
-  const h = "mt-4 mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase";
+  const open = $state({ expect: false, timing: false });
 </script>
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
@@ -88,7 +89,7 @@
     {/if}
   </div>
 
-  <h4 class={h}>What you expect</h4>
+  <Section id="expect" title="What you expect" bind:open={open.expect} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
   <div class="flex flex-wrap items-end gap-3">
     {#if v.kind === "card"}
       <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} placeholder="$" /></label>
@@ -105,8 +106,9 @@
       <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.once_per_lifetime} {@attach edit("once_per_lifetime")} />Once per lifetime</label>
     {/if}
   </div>
+  </Section>
 
-  <h4 class={h}>Timing</h4>
+  <Section id="timing" title="Timing" bind:open={open.timing} summary={wishTimingSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}><span>Offer ends <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.offer_expires_on} {@attach edit("offer_expires_on")} /></label>
     <label class={lbl}><span>Don't apply before <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.wait_until} {@attach edit("wait_until")} /></label>
@@ -120,6 +122,7 @@
       </label>
     {/if}
   </div>
+  </Section>
   <label class={`${lbl} mt-3`}><span>Application link <span class="text-muted-foreground">(optional)</span></span><Input type="url" bind:value={v.apply_url} {@attach edit("apply_url")} placeholder="https://…" /></label>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 

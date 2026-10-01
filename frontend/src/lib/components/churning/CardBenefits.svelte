@@ -9,6 +9,7 @@
   import { toast } from "svelte-sonner";
   import { benefitUnuse, benefitUse } from "./actions";
   import BenefitForm from "./BenefitForm.svelte";
+  import FoldedLine from "./FoldedLine.svelte";
   import { benefitOrder, benefitState, benefitSummary, canUse, isPerk } from "./churning";
   import type { ChurnCard, Churning } from "./types";
 
@@ -20,6 +21,7 @@
   let editing = $state<number | "new" | null>(null);
   let pick = $state("");
   let amounts = $state<Record<number, string>>({});
+  let history = $state<Record<number, boolean>>({});
   const presets = $derived(d.benefit_presets.filter((p) => !card.benefits.some((b) => b.preset === p.key)));
   const groups = $derived([...new Set(presets.map((p) => p.group))].map((g) => ({ name: g, items: presets.filter((p) => p.group === g) })));
   const summary = $derived(benefitSummary(card));
@@ -77,9 +79,9 @@
               <Button size="sm" variant="link" class="px-0" aria-label={`Edit ${b.name}`} onclick={() => (editing = b.id)}>Edit</Button>
             </div>
             {#if b.uses.length}
-              <details class="mt-1 text-xs text-muted-foreground">
-                <summary class="cursor-pointer">History ({b.uses.length})</summary>
-                <ul class="mt-1 space-y-0.5">
+              <FoldedLine class="mt-1 text-xs" count={b.uses.length} noun={b.uses.length === 1 ? "use" : "uses"} bind:open={() => history[b.id] ?? false, (v) => (history[b.id] = v)} />
+              {#if history[b.id]}
+                <ul class="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   {#each b.uses as u (u.id)}
                     <li class="flex items-center gap-2">
                       <span class="tabular-nums">{fmtDate(u.used_on, { month: "short", day: "numeric", year: "numeric" })}</span>
@@ -88,7 +90,7 @@
                     </li>
                   {/each}
                 </ul>
-              </details>
+              {/if}
             {/if}
           {/if}
         </li>

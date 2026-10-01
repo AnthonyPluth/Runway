@@ -6,9 +6,12 @@
   import { Input } from "$lib/components/ui/input";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
+  import { cn } from "$lib/utils";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { toast } from "svelte-sonner";
   import { currencyGroups, fullDate, points, valueSource } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
+  import Section from "./Section.svelte";
   import type { Churning } from "./types";
 
   // Points, in two views. Balances: what you have now (the balances you enter, each as of a day, worth what you set per point,
@@ -17,6 +20,7 @@
   // because points get spent: the year's earnings aren't a balance, so they never count toward what your balances are worth.
   let { d, people, onchanged }: { d: Churning; people: string[]; onchanged: () => void } = $props();
   let values = $state(false);
+  let rowOpen = $state<string | null>(null);
   let view = $state<"balances" | "earned">("balances");
   let newName = $state(""), newCents = $state("");
   const groups = $derived(currencyGroups(d));
@@ -64,14 +68,11 @@
     <Card.Title>Rewards</Card.Title>
     <Card.Action class="flex flex-wrap items-center gap-2">
       <Segmented label="Rewards view" bind:value={view} options={[{ value: "balances", label: "Balances" }, { value: "earned", label: "Earned this year" }]} />
-      <Button size="sm" variant="outline" onclick={() => (values = !values)} aria-expanded={values}>Point values</Button>
     </Card.Action>
   </Card.Header>
   <Card.Content>
-    {#if values}
-      <div class="mb-5 rounded-lg bg-muted/40 p-4">
-        <h3 class="mb-1 font-semibold">What a point is worth to you</h3>
-        <p class="mb-3 text-sm text-muted-foreground">Each point’s value, in cents.</p>
+    <Section id="values" title="Point values" summary="What a point is worth to you, in cents" bind:open={values}>
+      <div>
         {#each groups as g (g.kind)}
           <h4 class="mt-3 mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{g.label}</h4>
           <div class="grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -97,8 +98,8 @@
           <Button size="sm" variant="outline" onclick={addCurrency}>Add</Button>
         </div>
       </div>
-    {/if}
-    <div class="grid gap-6 lg:grid-cols-2">
+    </Section>
+    <div class="mt-5 grid gap-6 lg:grid-cols-2">
       {#each people as person (person)}
         {@const r = d.rewards[person]}
         <div class="min-w-0">
@@ -129,7 +130,7 @@
                   {/each}
                 </tbody>
               </table>
-            {:else}<p class="text-sm text-muted-foreground">Nothing earned yet this year.</p>{/if}
+            {/if}
           {:else if r?.currencies.length}
             <table class="w-full text-sm">
               <thead><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal">
@@ -139,33 +140,42 @@
                 {#each r.currencies as row (row.currency)}
                   {@const k = key(person, row.currency)}
                   <tr class="border-t align-top [&>td]:py-1.5">
-                    <td class="pr-2">{row.name}</td>
+                    <td class="pr-2">
+                      {#if row.balance != null}
+                        <button type="button" class="inline-flex cursor-pointer items-center gap-1 text-left" aria-expanded={rowOpen === k} aria-label={`${row.name} details`}
+                          onclick={() => (rowOpen = rowOpen === k ? null : k)}>{row.name}<ChevronRight class={cn("size-3.5 text-muted-foreground transition-transform", rowOpen === k && "rotate-90")} aria-hidden="true" /></button>
+                      {:else}{row.name}{/if}
+                    </td>
                     <td class="text-right">
                       <input type="number" min="0" step="1" value={row.balance ?? ""} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
                         use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
-                      {#if row.balance != null}
-                        <label class="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">as of
-                          <input type="date" max={d.today} value={row.as_of ?? d.today} aria-label={`Day of ${person}'s ${row.name} balance`}
-                            oninput={(e) => (day[k] = e.currentTarget.value)} use:autosave={setDay(person, row.currency, row.balance)}
-                            class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
-                        </label>
-                        <button type="button" class="mt-1 text-xs text-muted-foreground underline hover:text-foreground"
-                          aria-label={`Remove ${person}'s ${row.name} balance`} onclick={remove(person, row.currency)}>Remove</button>
-                        {#if row.est_balance != null}
-                          <div class="mt-1 text-xs text-muted-foreground" title={`Your balance plus the ${points(row.earned_since)} points your linked cards earned since ${row.as_of ? fullDate(row.as_of) : "then"}, at their normal rates. An estimate: redemptions and portal bookings aren't counted.`}>
-                            Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>
-                          </div>
-                        {/if}
-                      {/if}
                     </td>
-                    <td class="text-right tabular-nums">{row.balance_value == null ? "—" : fmt0(row.balance_value)}
-                      {#if row.est_value != null}<div class="mt-1 text-xs text-muted-foreground" title="Worth of the estimated balance">~{fmt0(row.est_value)} est.</div>{/if}
-                    </td>
+                    <td class="text-right tabular-nums">{row.balance_value == null ? "—" : fmt0(row.balance_value)}</td>
                   </tr>
+                  {#if row.balance != null && rowOpen === k}
+                    <tr class="[&>td]:pb-2">
+                      <td colspan="3">
+                        <div class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          {#if row.est_balance != null}
+                            <span title={`Your balance plus the ${points(row.earned_since)} points your linked cards earned since ${row.as_of ? fullDate(row.as_of) : "then"}, at their normal rates. An estimate: redemptions and portal bookings aren't counted.`}>
+                              Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>{#if row.est_value != null}<span class="tabular-nums" title="Worth of the estimated balance"> · ~{fmt0(row.est_value)}</span>{/if}
+                            </span>
+                          {/if}
+                          <label class="flex items-center gap-1">as of
+                            <input type="date" max={d.today} value={row.as_of ?? d.today} aria-label={`Day of ${person}'s ${row.name} balance`}
+                              oninput={(e) => (day[k] = e.currentTarget.value)} use:autosave={setDay(person, row.currency, row.balance)}
+                              class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
+                          </label>
+                          <button type="button" class="underline hover:text-foreground"
+                            aria-label={`Remove ${person}'s ${row.name} balance`} onclick={remove(person, row.currency)}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  {/if}
                 {/each}
               </tbody>
             </table>
-          {:else}<p class="text-sm text-muted-foreground">Nothing yet.</p>{/if}
+          {/if}
           {#if view === "balances"}<div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
             <CurrencySelect {d} blank="Add a balance…" bind:value={() => addFor[person] ?? "", (v) => (addFor[person] = v)} aria-label={`Add a balance for ${person}`}
               only={(c) => !r?.currencies.some((x) => x.currency === c)} class="h-8 py-0" />

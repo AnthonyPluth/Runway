@@ -50,7 +50,9 @@ describe("benefits", () => {
     await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({ amount: 50 }));
     await userEvent.click(screen.getByRole("button", { name: "Undo the last use of Travel credit" }));
     await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/unuse")[0])).toEqual({}));
-    expect(screen.getByText("History (1)")).toBeInTheDocument();
+    expect(screen.getByText(/1 use ·/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.getByRole("button", { name: /Undo the Sep.1 use of Travel credit/ })).toBeInTheDocument();
   });
 
   it("disables Mark used once a credit is all used, and adds a preset", async () => {

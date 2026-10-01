@@ -120,15 +120,17 @@ describe("a budget's row", () => {
 });
 
 describe("churning benefits with none yet", () => {
-  it("say to add them on a computer, where cards are edited", () => {
+  it("are one muted line, with no computer note (the Churning page says that once)", () => {
     viewport.phone = true;
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText("No benefits yet. Open Runway on a computer to add a card’s lounge access and credits.")).toBeInTheDocument();
+    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 
-  it("say to edit a card on a computer screen", () => {
+  it("are one muted line on a computer screen too, without telling you to edit a card", () => {
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText(/Edit a card and add its lounge access/)).toBeInTheDocument();
+    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.queryByText(/Edit a card and add its lounge access/)).not.toBeInTheDocument();
   });
 });
 

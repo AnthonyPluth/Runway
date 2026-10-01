@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, categoryGroups: () => [], catParentOf: () => null }));
 
 import { api } from "$lib/api";
-import { bodyOf, calls, card, churning, found, wish } from "$lib/components/churning/fixtures";
+import { benefit, bodyOf, calls, card, churning, found, wish } from "$lib/components/churning/fixtures";
 import type { BankBonus, ChurnCard } from "$lib/components/churning/types";
 import Churning from "./Churning.svelte";
 
@@ -38,7 +38,7 @@ describe("the Churning page", () => {
   });
 
   it("shows 5/24 as 0/24 with a helpful note when there are no people yet, not a blank figure", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [] }))) as never);
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [], cards: [card()] }))) as never);
     render(Churning, { sub: "" });
     const label = await screen.findByText("5/24", { selector: "dt span" });
     const stat = label.closest<HTMLElement>("div")!;
@@ -47,7 +47,7 @@ describe("the Churning page", () => {
   });
 
   it("keeps its data and place when you switch tabs (no reload)", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] }))) as never);
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card({ benefits: [benefit()] })] }))) as never);
     const { rerender } = render(Churning, { sub: "" });
     await screen.findByRole("button", { name: "Add a card" });
     const before = calls("/api/churning").length;
@@ -57,7 +57,7 @@ describe("the Churning page", () => {
   });
 
   it("shows 0/24 with a prompt when there are no people yet", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [] }))) as never);
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [], cards: [card()] }))) as never);
     render(Churning);
     expect(await screen.findByText("0/24")).toBeInTheDocument();
     expect(screen.getByText("Add cards you’ve opened in the last 24 months")).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("the Churning page", () => {
 
   it("flags a person who is over 5/24 in the stat strip", async () => {
     const five24 = { count: 6, under: false, under_on: "2027-01-10", next_fall_off: "2027-01-10" };
-    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: ["Alex"], five24: { Alex: five24 } } as never))) as never);
+    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: ["Alex"], cards: [card()], five24: { Alex: five24 } } as never))) as never);
     render(Churning);
     expect(await screen.findByText("6/24")).toHaveClass("text-[var(--warning)]");
   });
@@ -83,16 +83,17 @@ describe("the Churning page", () => {
     for (let i = 1; i < heads.length; i++) expect(heads[i - 1].compareDocumentPosition(heads[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows one getting-started block instead of the empty sections when there is nothing at all", async () => {
-    vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning())) as never);
+  it("shows only Found on your accounts and one Add a card button when there is nothing at all", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/found" ? { drafts: [found()], dismissed: [] } : path.startsWith("/api/churning/best") ? { cards: [] } : churning())) as never);
     render(Churning);
-    const block = await screen.findByTestId("getting-started");
-    expect(within(block).getByRole("button", { name: "Add a card you’ve opened" })).toBeInTheDocument();
-    expect(within(block).getByRole("button", { name: "Add a bank bonus" })).toBeInTheDocument();
+    await screen.findByTestId("found-cards");
+    expect(screen.queryByTestId("getting-started")).toBeNull();
+    expect(screen.queryByText("5/24", { selector: "dt span" })).toBeNull();   // no stat strip of zeros
     for (const t of ["Upcoming", "Planned", "Best card for…", "Rewards"]) expect(screen.queryByText(t)).toBeNull();
-    expect(screen.getByRole("button", { name: "Add a card" })).toBeInTheDocument();   // the Cards tab and its button stay
+    expect(screen.getAllByRole("button", { name: "Add a card" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Add a card you’ve opened" })).toBeNull();
     expect(calls(/best\?/)).toHaveLength(0);
-    await userEvent.click(within(block).getByRole("button", { name: "Add a card you’ve opened" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add a card" }));
     expect(await screen.findByPlaceholderText("e.g. Sapphire Preferred")).toBeInTheDocument();   // the new-card form opens
   });
 
@@ -138,6 +139,24 @@ describe("the Churning page", () => {
     expect(screen.queryByText("No bank bonuses received yet.")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Add a bank bonus" }));
     expect(await screen.findByText("Bank bonuses", { selector: "[data-slot=card-title]" })).toBeInTheDocument();   // the form opens in its card
+  });
+
+  it("groups the bank bonus form into collapsed sections, each saying what's in it", async () => {
+    serve({ cards: [card()], bank: [bankBonus({ dd_total: 500, deadline_days: 90, monthly_fee: 15 })] });
+    render(Churning, { sub: "bank" });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Chase" }));
+    for (const id of ["requirements", "fees", "received"]) expect(screen.getByTestId(`section-${id}`)).not.toHaveAttribute("open");
+    expect(screen.getByTestId("summary-requirements")).toHaveTextContent("$500 in direct deposits · 90 days");
+    expect(screen.getByTestId("summary-fees")).toHaveTextContent("$15/month fee");
+    expect(screen.getByTestId("summary-received")).toHaveTextContent("Nothing added");
+  });
+
+  it("groups the plan form into What you expect and Timing", async () => {
+    serve({ cards: [card()], wishlist: [wish({ annual_fee: 95 })] });
+    render(Churning);
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Sapphire Preferred" }));
+    expect(screen.getByTestId("summary-expect")).toHaveTextContent("$95 fee");
+    expect(screen.getByTestId("summary-timing")).toHaveTextContent("Nothing added");
   });
 
   it("shows Bonus money by year once a bank bonus was received", async () => {
@@ -201,7 +220,7 @@ describe("the Churning page", () => {
       await waitFor(() => expect(calls("/api/churning/found/acct-1/dismiss")).toHaveLength(1));
       await waitFor(() => expect(screen.queryByRole("button", { name: "Add Sapphire Reserve" })).toBeNull());
       const section = screen.getByTestId("found-cards");
-      await userEvent.click(within(section).getByText("1 dismissed"));
+      await userEvent.click(within(section).getByRole("button", { name: "Show" }));
       await userEvent.click(within(section).getByRole("button", { name: "Bring back Chase Sapphire Reserve (8814)" }));
       await waitFor(() => expect(calls("/api/churning/found/acct-1/undismiss")).toHaveLength(1));
       expect(await screen.findByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
@@ -217,21 +236,40 @@ describe("the Churning page", () => {
     });
   });
 
-  it("tucks paid and closed bank bonuses into a collapsed group and keeps the active ones shown", async () => {
+  it("tucks paid and closed bank bonuses behind an N paid or closed · Show line and keeps the active ones shown", async () => {
     serve({ cards: [card()], bank: [
       bankBonus({ id: 1, bank: "Chase" }),
       bankBonus({ id: 2, bank: "Citi", state: "received", status: "received", received_on: "2026-03-01" }),
       bankBonus({ id: 3, bank: "Ally", state: "closed", status: "closed" }),
     ] });
     render(Churning, { sub: "bank" });
-    const group = (await screen.findByTestId("done-bank")) as HTMLDetailsElement;
-    expect(within(group).getByText("2 paid or closed")).toBeInTheDocument();
-    expect(group.open).toBe(false);
-    expect(screen.getByText("Chase checking").closest("details")).toBeNull();
-    expect(screen.getByText("Citi checking").closest("details")).toBe(group);
-    expect(screen.getByText("Ally checking").closest("details")).toBe(group);
-    await userEvent.click(within(group).getByText("2 paid or closed"));
-    expect(group.open).toBe(true);
+    const group = await screen.findByTestId("done-bank");
+    expect(within(group).getByText(/2 paid or closed/)).toBeInTheDocument();
+    expect(screen.getByText("Chase checking")).toBeInTheDocument();
+    expect(screen.queryByText("Citi checking")).toBeNull();
+    expect(screen.queryByText("Ally checking")).toBeNull();
+    await userEvent.click(within(group).getByRole("button", { name: "Show" }));
+    expect(screen.getByText("Citi checking")).toBeInTheDocument();
+    expect(screen.getByText("Ally checking")).toBeInTheDocument();
+  });
+
+  it("folds closed cards behind an N closed · Show line instead of a checkbox", async () => {
+    serve({ cards: [card(), card({ id: 2, product: "Old Gold", status: "closed", closed_on: "2026-01-01" })] });
+    render(Churning);
+    await screen.findByText("Venture X");
+    expect(screen.queryByRole("checkbox", { name: "Show closed" })).toBeNull();
+    expect(screen.queryByText("Old Gold")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.getByText("Old Gold")).toBeInTheDocument();
+  });
+
+  it("no longer explains the banks' rules on the page, and tabs carry no counts", async () => {
+    serve({ cards: [card()] });
+    render(Churning);
+    await screen.findByText("Venture X");
+    expect(screen.queryByText(/About "Bonus again"/)).toBeNull();
+    expect(screen.getByRole("link", { name: "Cards" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Bank bonuses" })).toBeInTheDocument();
   });
 
   it("has no paid group when every bank bonus is still active", async () => {

@@ -2,8 +2,9 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import EmptyLine from "$lib/components/EmptyLine.svelte";
+  import StatStrip, { type Stat } from "$lib/components/StatStrip.svelte";
   import { fmt0 } from "$lib/format";
-  import { isPhone } from "$lib/phone.svelte";
   import { cn } from "$lib/utils";
   import { benefitUse } from "./actions";
   import { benefitBoard, benefitState, canUse, isPerk, usesText, type BenefitRow } from "./churning";
@@ -16,33 +17,26 @@
   let { cards, showOwner, onchanged }: { cards: ChurnCard[]; showOwner: boolean; onchanged: () => void | Promise<void> } = $props();
   const board = $derived(benefitBoard(cards));
   const sections = $derived([
-    { key: "expiring", title: "Expiring soon", note: "Money left, and the period ends soon.", rows: board.expiring },
+    { key: "expiring", title: "Expiring soon", rows: board.expiring },
     { key: "available", title: "Still to use", rows: board.available },
     { key: "used", title: "Used this period", rows: board.used },
     { key: "perks", title: "Lounges & perks", rows: board.perks },
   ]);
-  const stats = $derived([
-    { label: "Expiring soon", value: String(board.expiring.length), tone: board.expiring.length ? "text-[var(--warning)]" : "" },
-    { label: "Credits left this period", value: fmt0(board.left), tone: "" },
-    { label: "Used this period", value: fmt0(board.usedAmount), tone: "" },
-    { label: "Worth a year", value: fmt0(board.value), tone: "" },
+  const stats = $derived<Stat[]>([
+    { label: "Expiring soon", value: String(board.expiring.length), tone: board.expiring.length ? "warn" : undefined },
+    { label: "Credits left this period", value: fmt0(board.left) },
+    { label: "Used this period", value: fmt0(board.usedAmount) },
+    { label: "Worth a year", value: fmt0(board.value) },
   ]);
   const none = $derived(sections.every((s) => !s.rows.length));
   const who = (r: BenefitRow) => (showOwner ? `${r.card.product} (${r.card.owner})` : r.card.product);
   const worth = (r: BenefitRow) => (r.b.value_per_year ? `${fmt0(r.b.value_per_year)}/yr` : "—");
 </script>
 
-<div class="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-  {#each stats as s (s.label)}
-    <Card.Root class="gap-1 py-3">
-      <Card.Header class="px-4"><Card.Description>{s.label}</Card.Description><Card.Title class={cn("text-xl tabular-nums", s.tone)}>{s.value}</Card.Title></Card.Header>
-    </Card.Root>
-  {/each}
-</div>
-
 {#if none}
-  <Card.Root class="mb-6"><Card.Content><p class="py-6 text-center text-sm text-muted-foreground">{isPhone() ? "No benefits yet. Open Runway on a computer to add a card’s lounge access and credits." : "No benefits yet. Edit a card and add its lounge access and credits to track them here."}</p></Card.Content></Card.Root>
+  <EmptyLine label="Benefits" message="none yet" />
 {:else}
+  <StatStrip class="mb-6" items={stats} />
   {#each sections as s (s.key)}
     {#if s.rows.length}
       <Card.Root class="mb-6">
