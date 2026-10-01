@@ -996,18 +996,22 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             prev, close, first = close, next_after(close, card["closing_day"]), False
 
     # Cards without a statement: their budgeted charges (and what they owe today) on statements that close at each
-    # month's end, each paid in full NO_STATEMENT_DUE_DAYS later.
+    # month's end, each paid in full NO_STATEMENT_DUE_DAYS later. A credit on the card comes off the next statement and
+    # what's left of it carries on, as the bank does.
     for cid in sorted(new_cards & spend.keys()):
         card = by_id[cid]
         payer, days = card["pay_from"], spend[cid]
         prev, first = today, True
         close = clamp_day(today.year, today.month, 31)
+        owing = owed(card)   # the bank's sign, as everywhere (owed_positive): below zero is a credit
         while True:
             paid = bankdays.next_business_day(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()
             if paid > dates[-1]:
                 break
-            owed_now = max(0.0, owed(card)) if first else 0.0   # the bank's sign, as everywhere (owed_positive)
-            pay = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + owed_now
+            owed_now = max(0.0, owing) if first else 0.0
+            statement = owing + sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
+            pay = max(0.0, statement)
+            owing = statement - pay
             if pay > 0.005:
                 extra.append((payer, paid, -round(pay, 2)))
                 changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",

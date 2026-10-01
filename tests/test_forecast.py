@@ -708,14 +708,20 @@ class ForecastAssumptionTests(LedgerCase):
 
     def test_a_budget_on_a_card_with_no_statement_reads_the_banks_sign(self):
         # Plaid reports what a card owes as a positive number (owed_positive): $40 owed is in the first statement, and a
-        # $20 credit isn't taken out of checking.
+        # $20 credit comes off it, as the bank would bill it.
         self.acct("cc3", "credit", 40.0, pay_from="chk", owed_positive=1)
         self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
         card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
         self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-350.0, 40.0))
         self.conn.execute(update(Account).where(Account.id == "cc3").values(balance=-20.0))
         card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
-        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-310.0, 0.0))
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-290.0, 0.0))
+        self.assertEqual(card["2026-11-25"]["amount"], -310.0)
+        # A credit bigger than a month's charges carries on into the next statement
+        self.conn.execute(update(Account).where(Account.id == "cc3").values(balance=-400.0))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertNotIn("2026-10-26", card)                                       # $310 - $400: nothing to pay
+        self.assertEqual(card["2026-11-25"]["amount"], -220.0)                     # $310 - the $90 left
 
     def test_a_budget_on_a_card_with_no_statement_and_no_paying_account_is_skipped(self):
         self.acct("cc3", "credit", 0.0)
