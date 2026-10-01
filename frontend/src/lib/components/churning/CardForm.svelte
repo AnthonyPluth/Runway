@@ -120,7 +120,7 @@
       rateRows = s.rates.map((r) => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only }));
       rates = true;
     }
-    const have = new Set((c?.benefits ?? []).map((b) => b.name.toLowerCase()));
+    const have = new Set([...(c?.benefits ?? []), ...aiBenefits].map((b) => b.name.toLowerCase()));   // the card's, and ones already suggested
     const fresh = s.benefits.filter((b) => !have.has(b.name.toLowerCase()));
     if (!Object.keys(fields).length && !rates && !fresh.length) { toast("The AI had nothing to add for this card"); return; }
     aiBenefits = [...aiBenefits, ...fresh];

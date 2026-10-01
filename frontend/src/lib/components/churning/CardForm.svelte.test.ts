@@ -173,6 +173,17 @@ describe("card form", () => {
       expect(screen.queryByLabelText("Suggested benefit 1")).toBeNull();
     });
 
+    it("asking again doesn't suggest the same benefits twice", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await waitFor(() => expect(calls("/api/churning/suggest")).toHaveLength(2));
+      expect(within(screen.getByTestId("ai-benefits")).getAllByRole("listitem")).toHaveLength(1);
+    });
+
     it("Discard takes back only what the AI filled, not what you changed afterwards", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
