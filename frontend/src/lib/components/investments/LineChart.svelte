@@ -5,10 +5,11 @@
 
   // A small line chart, shared by Investments and Net worth: a shared y axis, each line's name at its end, and a
   // crosshair readout of every line on the day you point at. `xs` are dates (YYYY-MM-DD), or ready-made labels
-  // with `labels`. Days before `estimateUntil` are shaded: they're rebuilt from activity, not recorded.
-  let { xs, series, fmtY = String, fmtTip, height = 240, zero = false, labels = false, estimateUntil = null, table = true }: {
+  // with `labels`. Days before `estimateUntil` are shaded: they're rebuilt from activity, not recorded. `mark` draws a
+  // dashed vertical line at a (fractional) index into `xs`, with what comes after it shaded.
+  let { xs, series, fmtY = String, fmtTip, height = 240, zero = false, labels = false, estimateUntil = null, table = true, mark = null }: {
     xs: string[]; series: Series[]; fmtY?: (v: number) => string; fmtTip?: (v: number) => string; height?: number;
-    zero?: boolean; labels?: boolean; estimateUntil?: string | null; table?: boolean;
+    zero?: boolean; labels?: boolean; estimateUntil?: string | null; table?: boolean; mark?: { at: number; label: string } | null;
   } = $props();
 
   const COLOR = { "s-main": "var(--nw-1)", "s-alt": "var(--nw-2)", "s-muted": "var(--muted-foreground)" };
@@ -77,6 +78,8 @@
     return x(ei);
   });
 
+  const markX = $derived(mark && n > 1 && mark.at >= 0 && mark.at <= n - 1 ? x(mark.at) : null);
+
   // Hovering (or dragging sideways on a phone) shows every line's value on that day.
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
   // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
@@ -121,6 +124,11 @@
         <rect x={m.left} y={m.top} width={Math.max(0, estX - m.left)} height={ih} fill="var(--muted-foreground)" opacity="0.08" />
         <line x1={estX} x2={estX} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="3 3" />
         {#if estX - m.left > 70}<text x={estX - 6} y={m.top + 12} text-anchor="end" fill="var(--muted-foreground)" font-size="11">estimated</text>{/if}
+      {/if}
+      {#if markX != null && mark}
+        <rect x={markX} y={m.top} width={Math.max(0, W - m.right - markX)} height={ih} fill="var(--muted-foreground)" opacity="0.08" data-testid="mark-shade" />
+        <line x1={markX} x2={markX} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="3 3" data-testid="mark-line" />
+        <text x={markX + (W - m.right - markX > 50 ? 6 : -6)} y={m.top + 12} text-anchor={W - m.right - markX > 50 ? "start" : "end"} fill="var(--muted-foreground)" font-size="11">{mark.label}</text>
       {/if}
       {#each paths as p, k (k)}
         {#if p.area}<path d={p.area} fill={COLOR[p.s.cls]} fill-opacity="0.12" />{/if}

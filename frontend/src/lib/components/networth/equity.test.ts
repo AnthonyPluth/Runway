@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOption, shares, vestingSeries } from "./equity";
+import { isOption, shares, todayIndex, vestingSeries } from "./equity";
 import { valueSource } from "./homeValues";
 import type { Company, Grant } from "./types";
 
@@ -58,6 +58,21 @@ describe("vestingSeries", () => {
   it("counts underwater options as worth nothing", () => {
     const co = company({ share_price: 3, grants: [grant({ kind: "nso", strike: 5, schedule: [["2026-01-01", 100]] })] });
     expect(vestingSeries([co])!.lines[0].values.every((v) => v === 0)).toBe(true);
+  });
+});
+
+describe("todayIndex", () => {
+  const xs = ["2026-01-31", "2026-02-28", "2026-03-31"];
+  it("puts today between the two dates it falls in", () => {
+    expect(todayIndex(xs, "2026-01-31")).toBe(0);
+    expect(todayIndex(xs, "2026-02-28")).toBe(1);
+    expect(todayIndex(xs, "2026-02-14")).toBeCloseTo(0.5, 1);
+    expect(todayIndex(xs, "2026-03-31")).toBe(2);
+  });
+  it("is null before the first date, after the last, or with too few dates", () => {
+    expect(todayIndex(xs, "2026-01-30")).toBeNull();
+    expect(todayIndex(xs, "2026-04-01")).toBeNull();
+    expect(todayIndex(["2026-01-31"], "2026-01-31")).toBeNull();
   });
 });
 

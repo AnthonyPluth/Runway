@@ -9,10 +9,10 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
-  import { barWidth, fmt, fmt0, fmtDate, shortMoney } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, isoDay, shortMoney } from "$lib/format";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
-  import { EQ_KINDS, isOption, shares, vestingSeries } from "./equity";
+  import { EQ_KINDS, isOption, shares, todayIndex, vestingSeries } from "./equity";
   import GrantSheet from "./GrantSheet.svelte";
   import type { Company, Equity, Grant, GrantBody } from "./types";
 
@@ -27,6 +27,7 @@
   const c = $derived(d?.carta);
   const lastRead = $derived([c?.web_last, c?.last_sync].filter(Boolean).sort().at(-1));
   const chart = $derived(d?.companies.length ? vestingSeries(d.companies) : null);
+  const today = $derived(chart ? todayIndex(chart.xs, isoDay()) : null);
   const CLS = ["s-main", "s-alt", "s-muted"] as const;
   const my = (s: string | null | undefined, o: Intl.DateTimeFormatOptions = { month: "short", year: "numeric" }) => (s ? fmtDate(s, o) : "");
 
@@ -92,7 +93,7 @@
       <Card.Root class="mb-6">
         <Card.Header><Card.Title>Vesting over time</Card.Title></Card.Header>
         <Card.Content>
-          <LineChart xs={chart.xs.map((x) => fmtDate(x, { month: "short", year: "numeric" }))} labels zero height={200} fmtY={shortMoney} fmtTip={fmt}
+          <LineChart xs={chart.xs.map((x) => fmtDate(x, { month: "short", year: "numeric" }))} labels zero height={200} mark={today == null ? null : { at: today, label: "Today" }} fmtY={shortMoney} fmtTip={fmt}
             series={chart.lines.map((l, i) => ({ ...l, cls: CLS[i], step: true }))} />
         </Card.Content>
       </Card.Root>

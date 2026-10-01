@@ -25,3 +25,12 @@ export function vestingSeries(companies: Company[]): { xs: string[]; lines: { na
     lines: companies.slice(0, 3).map((co) => ({ name: co.name, values: xs.map((day) => co.grants.reduce((a, g) => a + worth(co, g, vestedAt(g, day)), 0)) })),
   };
 }
+
+/** Where today falls along the chart's dates, as a (fractional) index into them, or null when it's before the first or
+ *  after the last. Dates are YYYY-MM-DD. */
+export function todayIndex(xs: string[], today: string): number | null {
+  if (xs.length < 2 || today < xs[0] || today > xs[xs.length - 1]) return null;
+  const i = Math.min(xs.length - 2, xs.findLastIndex((d) => d <= today));
+  const a = parseDate(xs[i]).getTime(), b = parseDate(xs[i + 1]).getTime();
+  return i + (parseDate(today).getTime() - a) / (b - a);
+}
