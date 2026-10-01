@@ -44,17 +44,19 @@ describe("Services rows", () => {
 });
 
 describe("Settings tabs", () => {
-  it("lists Accounts first, and Bank connections, Browser extension, Services and Advanced", () => {
-    expect(SECTIONS.map((s) => s.id)).toEqual(["accounts", "connections", "categories", "rules", "extension", "services", "notifications", "advanced"]);
+  it("lists Accounts first, and Connections, Services and Advanced", () => {
+    expect(SECTIONS.map((s) => s.id)).toEqual(["accounts", "connections", "categories", "rules", "services", "notifications", "advanced"]);
+    expect(SECTIONS.find((s) => s.id === "connections")?.label).toBe("Connections");
   });
 
-  it("sends the old #setup/backup link to Advanced, and keeps the other ids", () => {
+  it("sends the old #setup/backup link to Advanced and #setup/extension to Connections, and keeps the other ids", () => {
     expect(resolveSection("backup", true)).toBe("advanced");
+    expect(resolveSection("extension", true)).toBe("connections");
     expect(resolveSection("connections", true)).toBe("connections");
-    expect(resolveSection("extension", false)).toBe("extension");
+    expect(resolveSection("services", false)).toBe("services");
   });
 
-  it("opens on Accounts, or on Bank connections until a bank is connected", () => {
+  it("opens on Accounts, or on Connections until a bank is connected", () => {
     expect(resolveSection("", true)).toBe("accounts");
     expect(resolveSection("", false)).toBe("connections");
     expect(resolveSection("nonsense", false)).toBe("connections");

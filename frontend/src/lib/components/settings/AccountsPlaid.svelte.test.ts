@@ -86,7 +86,7 @@ describe("Settings → Accounts: New from Plaid", () => {
     expect(await screen.findByText("1 Plaid account you're not using")).toBeInTheDocument();
     expect(screen.getByText("Old Savings")).toBeInTheDocument();
     expect(screen.queryByText(/investment account/)).toBeNull();
-    expect(screen.queryByRole("link", { name: "Bank connections" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connections" })).toBeNull();
   });
 });
 
@@ -229,7 +229,7 @@ describe("Settings → Accounts: linking from an account row", () => {
   });
 });
 
-describe("Settings → Bank connections: a Plaid connection", () => {
+describe("Settings → Connections: a Plaid connection", () => {
   const items = (it: PlaidItem) => render(PlaidItemRow, { it, items: [it] });
 
   it("has no per-account selects, just a count and a way to Accounts", () => {

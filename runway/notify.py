@@ -244,7 +244,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         if log and not log["ok"] and stale and db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL):
             # Not what the bank said: a notification shows on a lock screen, and goes through a push service.
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",
-                        "body": "The last sync failed. Open Settings → Bank connections to see what it said.", "url": "/#setup/connections"})
+                        "body": "The last sync failed. Open Settings → Connections to see what it said.", "url": "/#setup/connections"})
     out += churning.alerts(conn, today, p["churn_fee"], p["churn_bonus"], p["churn_plan"], p["churn_benefit"],
                             p["churn_apply"])
     return out

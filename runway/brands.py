@@ -59,7 +59,7 @@ def account_brands(conn) -> dict[str, dict]:
     The logo is Logo.dev's, by the institution's name (Settings → Services → Logo.dev), fetched by a sync and served by
     Runway like a merchant's: nothing is bundled, so a new bank needs nothing added to the app. `src` is None (a letter
     badge) without a Logo.dev key, or until the logo has been fetched. The institution's name is the connection's (Plaid)
-    or the bank's own (SimpleFIN's org); the connected institutions' names are noted too, for Settings → Bank connections."""
+    or the bank's own (SimpleFIN's org); the connected institutions' names are noted too, for Settings → Connections."""
     from . import merchants   # imports this module too
     out: dict[str, dict] = {}
     names: dict[str, str] = {}   # institution key -> name

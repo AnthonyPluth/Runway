@@ -38,7 +38,7 @@ $("#save").addEventListener("click", async () => {
   }
   const origin = url.origin;
   const token = $("#token").value.trim();
-  if (!token) return show("Paste the key from Runway's Settings → Browser extension.", false);
+  if (!token) return show("Paste the key from Runway's Settings → Connections.", false);
   // Permission to talk to your Runway (and nowhere else besides the two stores).
   const granted = await chrome.permissions.request({ origins: [`${origin}/*`] }).catch(() => false);
   if (!granted) return show("The extension needs permission to reach your Runway to send it your orders.", false);

@@ -4,7 +4,7 @@ Carta's API needs Carta to approve each app, so instead the extension (extension
 notes the data requests Carta's own pages make, fetches the same addresses again (reads only, same site), and sends
 the replies here. Carta's web app isn't documented, so everything is read loosely: any object that looks like a
 security (an id and a quantity, plus an exercise price, an option type, a vesting schedule or a certificate) is a
-grant, and the nearest company around it is its company. What the extension read is kept (Settings -> Browser extension ->
+grant, and the nearest company around it is its company. What the extension read is kept (Settings -> Connections -> Browser extension ->
 Carta -> download) so the reading can be improved when Carta's pages differ from what's expected.
 """
 from __future__ import annotations
@@ -224,7 +224,7 @@ def finish(conn) -> dict:
     found = read(_capture(conn))
     if not found["grants"]:
         db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, "Runway didn't find any grants in what it read from Carta. Download what "
-                                                      "it read (Settings -> Browser extension -> Carta) so the reading can be fixed.")
+                                                      "it read (Settings -> Connections -> Browser extension -> Carta) so the reading can be fixed.")
         return {"companies": 0, "grants": 0, "pages": len(_capture(conn))}
     today = date.today().isoformat()
     for c in found["companies"]:

@@ -156,7 +156,7 @@ Also in Sentry, without a variable:
 
 - Plaid: banks that sign you in on their own site (Chase, Capital One, …) send you back to
   `<RUNWAY_PUBLIC_URL>/plaid/oauth`. Add that address under **Allowed redirect URIs** in the Plaid Dashboard (Runway
-  shows it in Settings → Bank connections); it's what makes those banks work from a phone or the installed app.
+  shows it in Settings → Connections); it's what makes those banks work from a phone or the installed app.
 - Only people in `OIDC_ALLOWED_EMAILS` / `OIDC_ALLOWED_GROUPS` get in, even if your provider lets others sign in.
   Everyone who gets in shares everything: it's one household's Runway, not one account per person.
 - A session ends after 14 days without using Runway (`RUNWAY_SESSION_DAYS`); using it keeps you signed in, for up to
