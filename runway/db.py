@@ -3,8 +3,9 @@
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/schema.py) up to date: migrations run
 when Runway starts. The rest of Runway queries through the small Connection wrapper here, which works the same on
 either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
-models in runway/models.py (docs/orm.md), through its ORM Session (`conn.orm`), or, in code not yet converted, with
-plain SQL with `?` placeholders that sticks to what both databases understand (`instr()` is added to Postgres).
+models in runway/models.py (docs/src/content/docs/contributing/orm.md), through its ORM Session (`conn.orm`), or, in
+code not yet converted, with plain SQL with `?` placeholders that sticks to what both databases understand (`instr()`
+is added to Postgres).
 """
 from __future__ import annotations
 
@@ -243,9 +244,9 @@ def _postgres_sql(sql: str, has_params: bool) -> tuple[str, bool]:
 class Connection:
     """A database connection and its open transaction: one per request or sync, never shared between threads.
 
-    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see docs/orm.md),
-    or, in code not yet converted, SQL text with `?` placeholders. `orm` is an ORM Session on this same connection
-    and transaction, for loading and changing model objects. Either way, `commit()` commits everything so far (and is
+    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see
+    docs/src/content/docs/contributing/orm.md), or, in code not yet converted, SQL text with `?` placeholders. `orm`
+    is an ORM Session on this same connection and transaction, for loading and changing model objects. Either way, `commit()` commits everything so far (and is
     what code calls before a slow network request, so the write lock isn't held through it); `rollback()` undoes it.
     """
 
@@ -363,7 +364,8 @@ def session(path: str | None = None):
 
 
 # ------------------------------------------------------------------------------------------------ SQL helpers
-# Portable pieces for SQLAlchemy statements (docs/orm.md): each works the same on SQLite and Postgres.
+# Portable pieces for SQLAlchemy statements (docs/src/content/docs/contributing/orm.md): each works the same on SQLite
+# and Postgres.
 
 def dialect_insert(conn: Connection, entity):
     """An INSERT for this connection's database that can take .on_conflict_do_update()/.on_conflict_do_nothing()

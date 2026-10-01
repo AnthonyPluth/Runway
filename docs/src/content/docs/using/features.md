@@ -1,6 +1,11 @@
-# Features
+---
+title: Features
+description: What each part of Runway does and where its settings live.
+sidebar:
+  order: 1
+---
 
-The [README](../README.md) has the short list. This is what each part does and where its settings live.
+The [home page](/Runway/) has the short list. This is what each part does and where its settings live.
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget** (Budget and Bills & income), **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
@@ -41,7 +46,7 @@ On Budget → Bills & income.
 - **Rules** (Settings → Rules) with conditions and actions: when the merchant contains, is or starts with some text, the amount is in a range, the money goes out or comes in, or it's in a particular account, then set a category, rename the merchant, split it by percentages ("Costco: 70% Groceries, 30% Household") or put it in Review. The most specific rule wins, and a preview shows what a rule would match before you save it. When you pick a category, Runway asks whether to use it for that merchant from now on, including after you apply an AI suggestion, so nothing writes a rule behind your back. Built-in heuristics handle card payments and sweeps.
 - **Optional AI categorization** through OpenRouter (key under Settings → Services), guided by examples of how you've categorized before and shown with confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new categories when nothing fits. Every AI call is logged.
 - **Split transactions:** a $100 run to Target can be $60 Groceries and $40 Shopping. Budgets, reports and category filters count each part on its own; pick a single category again and the transaction goes back together.
-- **Amazon, Target and Costco orders:** a small browser extension (installed from Settings → Connections) reads your orders with the sign-in already in your browser, and Runway splits each card charge by what you bought: tax and shipping shared out, each Amazon shipment matched to its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for next time. See [extension/README.md](../extension/README.md).
+- **Amazon, Target and Costco orders:** a small browser extension (installed from Settings → Connections) reads your orders with the sign-in already in your browser, and Runway splits each card charge by what you bought: tax and shipping shared out, each Amazon shipment matched to its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for next time. See [Browser extension](/Runway/using/browser-extension/).
 - **Bulk editing:** tick transactions (shift-click for a range) to give them a category, rename their merchant or mark them reviewed at once.
 - **Categories** (Settings → Categories) have one level of subcategories, each with an emoji and a color. Anything uncategorized waits on the To review tab; there is also search and filtering. The list is grouped by day with each day's total, and loads more as you scroll.
 - **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself. With a free Logo.dev publishable key (Settings → Services), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway. The same key gives each bank or card its logo: by website for big banks Runway recognizes (Chase, Citi, Capital One, American Express and so on, also from a card's name), else by the institution's name; without it, accounts show a letter. To use a different logo for an account, or none, open the account in Settings → Accounts and click its logo.
@@ -87,7 +92,7 @@ Credit cards and bank accounts opened for their sign-up bonuses, for you and you
 ## Everyday
 
 - **A setup checklist** for new users (connect a bank, pick your main account, add paychecks and bills, set budgets).
-- A dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and it **installs as an app** on your iPhone's Home Screen. See [Deployment](deployment.md#on-your-phone).
+- A dark interface that works on a phone as well as a desktop, with a tab bar at the bottom on phones, and it **installs as an app** on your iPhone's Home Screen. See [Deployment](/Runway/start/deployment/#on-your-phone).
 - **Push notifications** (Settings → Notifications) on your phone or computer: a card payment coming up, the forecast getting low, a recurring payment that didn't show up, a large charge, syncing that keeps failing, or, for Churning, an annual fee or sign-up bonus deadline coming up, a card you planned to downgrade or close, a credit about to reset, or a card you planned that you can apply for now. Each alert is sent once. With sign-in, notifications are each person's own: their devices and what they're told about, which nobody else sees. Turn them off on a device from that device, or from the Devices list.
-- **Backups** as a single file, restorable into either database (Settings → Advanced, or the command line). Settings shows what a backup holds before you restore it, and keeps a copy of what it replaces in the data directory. See [Deployment](deployment.md#backups-migration-and-postgres).
-- **AI assistants** can read your data through Runway's [MCP endpoint](mcp.md) once you approve them (Settings → Advanced lists and revokes them), and, if you allow it, make some changes.
+- **Backups** as a single file, restorable into either database (Settings → Advanced, or the command line). Settings shows what a backup holds before you restore it, and keeps a copy of what it replaces in the data directory. See [Deployment](/Runway/start/deployment/#backups-migration-and-postgres).
+- **AI assistants** can read your data through Runway's [MCP endpoint](/Runway/using/mcp/) once you approve them (Settings → Advanced lists and revokes them), and, if you allow it, make some changes.

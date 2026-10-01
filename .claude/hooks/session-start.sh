@@ -5,7 +5,7 @@
 set -euo pipefail
 
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
-  exit 0   # on your own machine, docs/development.md says how to set up
+  exit 0   # on your own machine, docs/src/content/docs/contributing/development.md says how to set up
 fi
 cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 

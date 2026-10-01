@@ -1,4 +1,9 @@
-# Deployment
+---
+title: Deployment
+description: Running on a server, on your phone, backups, migrations and Postgres.
+sidebar:
+  order: 3
+---
 
 ## Running on a server
 
@@ -9,7 +14,7 @@ cp .env.example .env      # set RUNWAY_PUBLIC_URL, OIDC_ISSUER, OIDC_CLIENT_ID/S
 docker compose up -d
 ```
 
-**[DOCKER.md](../DOCKER.md)** is the walkthrough: registering Runway with your provider, the first start, moving your data over from another machine, putting it on the internet (HTTPS, sign-in limits, secret key, backups), day-to-day updates and optional error reports. Every environment variable is in [Configuration](configuration.md); for reporting a vulnerability and safe setup, see [SECURITY.md](../SECURITY.md).
+**[Install with Docker](/Runway/start/docker/)** is the walkthrough: registering Runway with your provider, the first start, moving your data over from another machine, putting it on the internet (HTTPS, sign-in limits, secret key, backups), day-to-day updates and optional error reports. Every environment variable is in [Configuration](/Runway/reference/configuration/); for reporting a vulnerability and safe setup, see [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md).
 
 ## On your phone
 

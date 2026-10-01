@@ -1,6 +1,11 @@
-# Development
+---
+title: Development
+description: Setting up, running the checks, changing the database, the code layout and releases.
+sidebar:
+  order: 1
+---
 
-Contributor conventions (style, tests, commit and PR rules) are in [AGENTS.md](../AGENTS.md).
+Contributor conventions (style, tests, commit and PR rules) are in [AGENTS.md](https://github.com/AnthonyPluth/Runway/blob/main/AGENTS.md).
 
 ## Setup and checks
 
@@ -25,7 +30,7 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs the checks to run before you push, each tool once: ruff and mypy, the Python tests (on SQLite), and the web app's type-check, ESLint, Vitest tests and build. `make lint`, `make test` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs the checks to run before you push, each tool once: ruff and mypy, the Python tests (on SQLite), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## The web app
 
@@ -41,6 +46,17 @@ npm run coverage                      # the same, measuring how much of the web 
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
 
+## The documentation
+
+This site is [Astro Starlight](https://starlight.astro.build) in `docs/`, published to GitHub Pages by `.github/workflows/docs.yml` on every push to `main` that changes it. Each page is a Markdown file in `docs/src/content/docs/`, in a folder per sidebar group (`start/`, `using/`, `reference/`, `contributing/`); its front matter sets the title, the description and its place in the group (`sidebar.order`). Images go in `docs/src/assets/`.
+
+```bash
+make docs          # http://localhost:4321/Runway/, reloading as you edit
+make docs-build    # builds it into docs/dist and fails on a broken link between pages
+```
+
+Link to another page by its address, base included: `[Configuration](/Runway/reference/configuration/)`, or `/Runway/start/docker/#error-reports-optional` for a heading. Link to files in the repository with their GitHub address.
+
 ## Changing the database
 
 Edit `runway/schema.py`, then generate a migration and check it over:
@@ -50,7 +66,7 @@ poetry run alembic revision --autogenerate -m "add a column"   # writes runway/m
 poetry run alembic check                                       # the schema and migrations agree
 ```
 
-Runway applies it on its next start. Queries are plain SQL with `?` placeholders that both databases understand (`INSERT … ON CONFLICT`, not `INSERT OR REPLACE`), or SQLAlchemy statements over the ORM models; [orm.md](orm.md) is the guide for converting a module.
+Runway applies it on its next start. Queries are plain SQL with `?` placeholders that both databases understand (`INSERT … ON CONFLICT`, not `INSERT OR REPLACE`), or SQLAlchemy statements over the ORM models; [Queries with SQLAlchemy](/Runway/contributing/orm/) is the guide for converting a module.
 
 ## Code layout
 
@@ -88,4 +104,4 @@ Every push to `main` runs the tests and, at the same time, builds the image for 
 
 Versions follow `vMAJOR.MINOR.PATCH`, decided by what's been merged since the last release. Pull request titles start with a type (they end up in each merge commit's message): `feat: …` bumps the minor version, `fix: …` (or anything else) the patch, and a `!` before the colon (`feat!: …`, `fix!: …`) the major version, for a change that breaks an existing setup. `#minor` or `#major` at the end of a line, or a line starting with `BREAKING CHANGE:`, work too. (A message that only mentions them mid-sentence doesn't count.) The running version is shown under **Settings → Advanced**.
 
-[Dependabot](../.github/dependabot.yml) opens weekly pull requests to keep the GitHub Actions and the Python base image up to date; each one runs the tests before it can be merged.
+[Dependabot](https://github.com/AnthonyPluth/Runway/blob/main/.github/dependabot.yml) opens weekly pull requests to keep the GitHub Actions and the Python base image up to date; each one runs the tests before it can be merged.

@@ -1,0 +1,81 @@
+---
+title: Runway
+description: A self-hosted personal finance app that tells you how much runway your cash has.
+template: splash
+hero:
+  tagline: A self-hosted personal finance app that tells you how much runway your cash has. Bank sync, a day-by-day cash-flow forecast, budgets, reports, investments and net worth, on your own hardware.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Quick start
+      link: /Runway/start/quick-start/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/AnthonyPluth/Runway
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import overview from '../../assets/screenshots/overview.png';
+import transactions from '../../assets/screenshots/transactions.png';
+import budget from '../../assets/screenshots/budget.png';
+import reports from '../../assets/screenshots/reports.png';
+
+<Image src={overview} alt="Runway's Overview page: a headline saying checking stays above $2,681 for the next 90 days, summary tiles, and a projected balance chart" />
+
+## Why Runway
+
+Most budgeting apps look backwards: what did I spend last month? Runway looks forward. It takes your checking balance, your paychecks and bills, and what each credit card will actually charge you on its due date, and draws the balance day by day for the next few months, so you can see the tightest moment before you get there.
+
+It runs on your own computer or home server, keeps its data in one database you control (SQLite, or Postgres if you prefer), and is written in Python with a handful of well-known libraries.
+
+## Features
+
+<CardGrid>
+  <Card title="Cash-flow forecast" icon="seti:line">
+    Your primary account, day by day for 30 days to 6 months, with the lowest point in plain language. Credit cards come out on their due dates using real statement balances from the issuer, and paydays and payments land on business days.
+  </Card>
+  <Card title="Bank sync, account by account" icon="random">
+    SimpleFIN or Plaid for each account, once a day and on demand. Switching providers keeps your history.
+  </Card>
+  <Card title="Bills, income and rules" icon="list-format">
+    Paychecks, bills and subscriptions on any schedule, matched automatically. Categories, splits, bulk editing, a review queue and rules, with optional AI categorization through OpenRouter.
+  </Card>
+  <Card title="Store orders" icon="puzzle">
+    A browser extension reads your Amazon, Target and Costco orders and splits each card charge by what you bought.
+  </Card>
+  <Card title="Budgets and reports" icon="pen">
+    Monthly budgets with rollover, a cash-flow Sankey, spending over time, merchants, income against spending, and a drill-down breakdown.
+  </Card>
+  <Card title="Net worth, investments and equity" icon="rocket">
+    Accounts, homes and vehicles minus debts, recorded daily; brokerage performance with live prices; stock options, RSUs and Carta grants.
+  </Card>
+  <Card title="Churning" icon="star">
+    Sign-up bonuses, 5/24, annual fees, card benefits, bank bonuses and a plan for the cards you want next.
+  </Card>
+  <Card title="An assistant-ready API" icon="comment-alt">
+    An MCP endpoint lets Claude or another assistant, once you approve it, answer questions about your money.
+  </Card>
+</CardGrid>
+
+Push notifications, autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres round it out.
+
+<CardGrid>
+  <Image src={transactions} alt="Transactions grouped by day, each with its merchant, account, category emoji and amount" />
+  <Image src={budget} alt="Budget page with a colored bar per category and one budget rolling over" />
+</CardGrid>
+
+<Image src={reports} alt="Reports page with a cash-flow Sankey chart" />
+
+<small>Screenshots use Runway's made-up demo data (`python run.py demo`).</small>
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Quick start" description="Run it with Docker or from source and connect a bank." href="/Runway/start/quick-start/" />
+  <LinkCard title="Features" description="What each page does and where its settings live." href="/Runway/using/features/" />
+  <LinkCard title="Configuration" description="Every environment variable." href="/Runway/reference/configuration/" />
+  <LinkCard title="Contributing" description="Running the tests, changing the database, the code layout and releases." href="/Runway/contributing/development/" />
+</CardGrid>

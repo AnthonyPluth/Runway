@@ -1,4 +1,9 @@
-# Queries with SQLAlchemy and the ORM models
+---
+title: Queries with SQLAlchemy
+description: Converting a module from SQL text to SQLAlchemy statements and the ORM models.
+sidebar:
+  order: 2
+---
 
 Runway is moving its database code from SQL text (`conn.execute("SELECT ... WHERE id=?", (x,))`) to SQLAlchemy
 statements built from the ORM models in `runway/models.py`. This is the guide for converting a module: what to use,
