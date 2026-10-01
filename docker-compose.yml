@@ -16,11 +16,19 @@ services:
     env_file:
       - path: .env       # every variable in it reaches Runway, so advanced ones (see the Configuration page) need no line here
         required: false
-    environment:         # only what needs a default or a check; .env fills in the rest
+    environment:         # what needs a default or a check, and what's costly to lose; .env fills in the rest
       TZ: ${TZ:-America/Chicago}                       # decides "today" for forecasts and budgets
       RUNWAY_PUBLIC_URL: ${RUNWAY_PUBLIC_URL:?Set RUNWAY_PUBLIC_URL in .env}
       OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER in .env}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in .env}
+      # Also passed through by name, so they arrive even when your settings aren't in a .env file here (a stack.env,
+      # --env-file, shell exports): without the key Runway can't read your saved bank access, and without DATABASE_URL
+      # it starts on an empty database.
+      RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
+      OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
     # depends_on: [db]            # if you use the Postgres service below
 
   # Optional Postgres, if you don't already run one. Then set in .env:

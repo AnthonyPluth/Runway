@@ -164,12 +164,29 @@ def _before_send_log(entry, _hint):
     return entry
 
 
+# Settings that once turned parts of Sentry off. They're no longer read: with a DSN everything is sent. Someone who set
+# one to off is told so when Runway starts, rather than finding out from what reaches their Sentry project.
+RETIRED = ("SENTRY_TRACES_SAMPLE_RATE", "SENTRY_PROFILE_SESSION_SAMPLE_RATE", "SENTRY_REPLAY_SAMPLE_RATE",
+           "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE", "SENTRY_LOGS", "SENTRY_METRICS", "SENTRY_CRONS", "SENTRY_FEEDBACK",
+           "SENTRY_USER", "SENTRY_AI_CONTENT")
+
+
+def retired_off() -> list[str]:
+    """The retired settings set to something other than on (0, false, off, 0.5, ...)."""
+    return [k for k in RETIRED if (v := (os.environ.get(k) or "").strip().lower()) and v not in ("1", "1.0", "true", "yes", "on")]
+
+
 def init() -> bool:
     """Start reporting if SENTRY_DSN is set. Returns whether it's on."""
     global _enabled
     dsn = (os.environ.get("SENTRY_DSN") or "").strip()
     if not dsn:
         return False
+    if off := retired_off():
+        sys.stderr.write(f"Warning: {', '.join(off)} {'is' if len(off) == 1 else 'are'} no longer read. With SENTRY_DSN set, "
+                         "Runway sends everything to Sentry: traces, profiles, replays, logs, metrics, crons, feedback, "
+                         "who's signed in (as a code) and the AI's prompts and replies. Unset SENTRY_DSN to send nothing.\n")
+        sys.stderr.flush()
     import logging
 
     import sentry_sdk   # loaded only when reporting is on, so it costs nothing otherwise
@@ -183,7 +200,7 @@ def init() -> bool:
         # Profiles hold function names and timings, no values. "trace": the profiler runs while a sampled trace does.
         profile_session_sample_rate=1.0, profile_lifecycle="trace",
         enable_logs=True, enable_metrics=True,
-        # Libraries' warnings become Sentry Logs too too; their errors are reported as before.
+        # Libraries' warnings become Sentry Logs too; their errors are reported as before.
         integrations=[LoggingIntegration(sentry_logs_level=logging.WARNING)],
         before_send=_before_send, before_send_transaction=_before_send_transaction,
         before_breadcrumb=_before_breadcrumb, before_send_log=_before_send_log,

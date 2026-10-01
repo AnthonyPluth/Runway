@@ -217,6 +217,19 @@ class MonitoringTests(unittest.TestCase):
         self.assertTrue(transport.of("log"))
         self.assertIn("runway.test", json.dumps(transport.items))
 
+    def test_a_retired_setting_set_to_off_is_warned_about(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
+        with mock.patch.dict(os.environ, {**env, "SENTRY_AI_CONTENT": "0", "SENTRY_REPLAY_SAMPLE_RATE": "0.1",
+                                          "SENTRY_LOGS": "true"}, clear=True):
+            self.assertEqual(monitoring.retired_off(), ["SENTRY_REPLAY_SAMPLE_RATE", "SENTRY_AI_CONTENT"])
+        printed = io.StringIO()
+        with mock.patch("sys.stderr", printed):
+            start({**env, "SENTRY_DSN": DSN, "SENTRY_AI_CONTENT": "off"})
+        self.assertIn("SENTRY_AI_CONTENT is no longer read", printed.getvalue())
+        with mock.patch.dict(os.environ, {**env, "SENTRY_AI_CONTENT": "0"}, clear=True), mock.patch("sys.stderr", io.StringIO()) as quiet:
+            self.assertFalse(monitoring.init())   # without a DSN nothing's sent, so there's nothing to warn about
+        self.assertEqual(quiet.getvalue(), "")
+
     def test_the_web_app_gets_no_config_without_a_dsn(self):
         with mock.patch.dict(os.environ, {"SENTRY_DSN": "", "SENTRY_BROWSER_DSN": ""}):
             self.assertIsNone(monitoring.browser_config())
