@@ -142,6 +142,8 @@ class OIDCTests(unittest.TestCase):
         status, loc, _, _ = self.req("/plaid/oauth?oauth_state_id=abc-123")   # back from a bank: keep where you were
         self.assertEqual((status, loc), (302, "/auth/login?next=%2Fplaid%2Foauth%3Foauth_state_id%3Dabc-123"))
         self.assertEqual(self.req("/page.css")[0], 200)         # the sign-in pages can still be styled
+        status, _, _, body = self.req("/logo.png")              # and the logo, for anything that links to it
+        self.assertEqual((status, body[:8]), (200, b"\x89PNG\r\n\x1a\n"))
         self.assertEqual(self.req("/healthz")[0], 200)
 
     def test_full_sign_in_and_sign_out(self):

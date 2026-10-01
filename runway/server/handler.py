@@ -37,8 +37,8 @@ from .routes import ROUTES, _match
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
 # without cookies). None of them hold any data.
-PUBLIC_FILES = {"/page.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
-                "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
+PUBLIC_FILES = {"/page.css", "/logo.svg", "/logo.png", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest",
+                "/sw.js", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
 
 # OAuth for /mcp (runway/mcp_oauth.py) that works without a Runway session: an app calls these itself. The consent
