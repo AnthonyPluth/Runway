@@ -105,8 +105,8 @@ describe("a budget's row", () => {
   it("is progress only on a phone: the figures and the bar, nothing to edit", () => {
     viewport.phone = true;
     show();
-    expect(screen.getByText("$500.00")).toBeInTheDocument();
-    expect(screen.getByText("$300.00 left")).toBeInTheDocument();
+    expect(screen.getByText("$500")).toBeInTheDocument();
+    expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "40% of budget used" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Budget for Groceries")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Roll over|Set card/ })).not.toBeInTheDocument();
