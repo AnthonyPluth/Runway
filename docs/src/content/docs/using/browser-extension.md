@@ -55,7 +55,7 @@ tab), the extension drops the stores' "don't show me in a frame" headers, and it
 in them for the length of the import. It never runs in a store tab you have open yourself.
 
 If a store won't load in a hidden frame, or looks signed out there, that import is done in a background tab instead,
-as earlier versions did, and that store keeps to tabs for a week (or until the extension is updated). A tab comes to
+and that store keeps to tabs for a week (or until the extension is updated). A tab comes to
 the front only when you need to sign in.
 
 It's written to load in Firefox 128 and later as well (`about:debugging` → **This Firefox** → **Load Temporary
