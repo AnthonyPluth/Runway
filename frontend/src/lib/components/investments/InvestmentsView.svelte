@@ -11,6 +11,7 @@
   import type { AllocKey, Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
   import type { PlaidStatus } from "$lib/components/settings/types";
   import * as Alert from "$lib/components/ui/alert";
+  import StatStrip, { type Stat, type StatTone } from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -20,7 +21,7 @@
   import Check from "@lucide/svelte/icons/check";
   import Info from "@lucide/svelte/icons/info";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
-  import { tick, type Snippet } from "svelte";
+  import { tick } from "svelte";
 
   // The page's data. A redraw (another period, a saved edit) keeps the old numbers on screen until the new ones come.
   let status = $state<PlaidStatus | null>(null);
@@ -52,7 +53,19 @@
   });
 
   const perf = $derived(d?.performance ?? {});
+  const tone = (x: number | null | undefined): StatTone | undefined => (x == null || x === 0 ? undefined : x > 0 ? "good" : "bad");
   const beat = $derived(perf.benchmark_return != null && perf.return != null ? perf.return - perf.benchmark_return : null);
+  const stats = $derived.by((): Stat[] => {
+    if (!d) return [];
+    return [
+      { label: "Total value", value: fmt0(d.total), sub: `${d.accounts.filter((a) => !a.hidden).length} accounts · ${d.holdings.length} holdings` },
+      { label: "Today", value: d.day_change == null ? "—" : signed(d.day_change), tone: tone(d.day_change), sub: d.day_change_pct == null ? undefined : `${pct(d.day_change_pct, 2)} since the last close` },
+      { label: "Total gain", value: d.unrealized_gain == null ? "—" : signed(d.unrealized_gain), tone: tone(d.unrealized_gain),
+        sub: d.cost_basis ? `${pct(d.unrealized_gain! / d.cost_basis)} on ${fmt0(d.cost_basis)} invested` : undefined },
+      { label: `Return · ${inv.period}`, value: pct(perf.return), tone: tone(perf.return),
+        sub: `S&P 500 ${pct(perf.benchmark_return)}${beat == null ? "" : beat >= 0 ? ` · ahead by ${pct(beat).slice(1)}` : ` · behind by ${pct(-beat).slice(1)}`}` },
+    ];
+  });
   const synced = $derived.by(() => {
     const last = [status?.last_inv_sync, status?.simplefin_last_sync].filter(Boolean).sort().pop();
     return last ? fmtDateTime(new Date(last)) : "never";
@@ -90,16 +103,6 @@
   const ALLOC: [AllocKey, string][] = [["asset_class", "Asset class"], ["account", "Account"], ["sector", "Sector"], ["holding", "Top holdings"]];
   const activity = $derived(d?.activity.filter((t) => !inv.activityType || t.type === inv.activityType) ?? []);
 </script>
-
-{#snippet tile(label: string, value: string, sub: Snippet, tone = "")}
-  <Card.Root class="gap-2">
-    <Card.Header>
-      <Card.Description>{label}</Card.Description>
-      <Card.Title class={cn("text-2xl tabular-nums", tone)}>{value}</Card.Title>
-    </Card.Header>
-    <Card.Content class="text-sm text-muted-foreground">{@render sub()}</Card.Content>
-  </Card.Root>
-{/snippet}
 
 {#if error && !status}
   <Card.Root>
@@ -140,19 +143,12 @@
     </Alert.Root>
   {/each}
 
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    {#snippet totalSub()}{d!.accounts.filter((a) => !a.hidden).length} accounts · {d!.holdings.length} holdings{/snippet}
-    {@render tile("Total value", fmt0(d.total), totalSub)}
-    {#snippet todaySub()}{d!.day_change_pct == null ? "" : `${pct(d!.day_change_pct, 2)} since the last close`}{/snippet}
-    {@render tile("Today", d.day_change == null ? "—" : signed(d.day_change), todaySub, gainCls(d.day_change))}
-    {#snippet gainSub()}
-      {d!.cost_basis ? `${pct(d!.unrealized_gain! / d!.cost_basis)} on ${fmt0(d!.cost_basis)} invested` : ""}
-      {#if d!.cost_missing} · <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d!.cost_missing} holding{d!.cost_missing === 1 ? "" : "s"} ({fmt0(d!.cost_missing_value)}) need a cost basis</a>{/if}
-    {/snippet}
-    {@render tile("Total gain", d.unrealized_gain == null ? "—" : signed(d.unrealized_gain), gainSub, gainCls(d.unrealized_gain))}
-    {#snippet returnSub()}S&amp;P 500 {pct(perf.benchmark_return)}{beat == null ? "" : beat >= 0 ? ` · ahead by ${pct(beat).slice(1)}` : ` · behind by ${pct(-beat).slice(1)}`}{/snippet}
-    {@render tile(`Return · ${inv.period}`, pct(perf.return), returnSub, gainCls(perf.return))}
-  </div>
+  <StatStrip class="mb-6" items={stats} />
+  {#if d.cost_missing}
+    <p class="-mt-3 mb-6 text-sm text-muted-foreground">
+      <a href="#inv-holdings" class="font-medium text-foreground underline underline-offset-4" onclick={showMissing}>{d.cost_missing} holding{d.cost_missing === 1 ? "" : "s"} ({fmt0(d.cost_missing_value)}) need a cost basis</a>
+    </p>
+  {/if}
 
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>Value</Card.Title></Card.Header>
@@ -212,11 +208,11 @@
               {/each}
             </tbody>
           </table>
-        {:else}<p class="py-6 text-center text-sm text-muted-foreground">Nothing to show.</p>{/if}
+        {/if}
       </Card.Content>
     </Card.Root>
     <Card.Root>
-      <Card.Header><Card.Title>X-ray</Card.Title></Card.Header>
+      <Card.Header><Card.Title>Checks</Card.Title></Card.Header>
       <Card.Content>
         <ul>
           {#each d.xray as r (r.name)}
@@ -282,7 +278,7 @@
         {#if activity.length > inv.activityLimit}
           <Button variant="link" size="sm" class="mt-2 px-0" onclick={() => (inv.activityLimit += 100)}>Show more ({activity.length - inv.activityLimit})</Button>
         {/if}
-      {:else}<p class="py-6 text-center text-sm text-muted-foreground">No activity.</p>{/if}
+      {/if}
     </Card.Content>
   </Card.Root>
 

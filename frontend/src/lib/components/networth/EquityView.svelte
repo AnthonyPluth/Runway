@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import EmptyLine from "$lib/components/EmptyLine.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Alert from "$lib/components/ui/alert";
@@ -63,15 +64,18 @@
   ] : []);
 </script>
 
-<div class="mb-2 flex flex-wrap items-center justify-between gap-3">
-  <h2 class="text-[34px] leading-tight font-bold tracking-tight">Equity</h2>
-  <div class="flex flex-wrap gap-2">
-    {#if c?.connected}<Button variant="outline" size="sm" disabled={syncing} onclick={sync}>{syncing ? "Reading Carta…" : "Sync from Carta"}</Button>{/if}
-    <Button size="sm" onclick={() => { adding = true; coName = ""; coPrice = ""; }}>Add a company</Button>
-  </div>
+<div class="mb-6 flex flex-wrap items-center justify-end gap-2">
+  {#if c?.connected}<Button variant="outline" size="sm" disabled={syncing} onclick={sync}>{syncing ? "Reading Carta…" : "Sync from Carta"}</Button>{/if}
+  <Button size="sm" variant="outline" onclick={() => { adding = true; coName = ""; coPrice = ""; }}>Add a company</Button>
 </div>
 
-{#if error && !d}<p class="text-sm text-destructive">{error}</p>
+{#if error && !d}
+  <Card.Root>
+    <Card.Content>
+      <p class="text-sm">Something went wrong: {error}</p>
+      <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
+    </Card.Content>
+  </Card.Root>
 {:else if !d || !c}<div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
   {#if lastRead}<p class="mb-6 text-sm text-muted-foreground">From Carta, last read {fmtDate(lastRead)}.</p>{/if}
@@ -107,7 +111,7 @@
   {/if}
 
   {#if !d.companies.length && !adding}
-    <Card.Root><Card.Content><p class="py-6 text-center text-sm text-muted-foreground">No equity yet. Add a company to track its stock options, RSUs or shares.</p></Card.Content></Card.Root>
+    <EmptyLine label="Equity" message="none yet" action="Add a company" onaction={() => { adding = true; coName = ""; coPrice = ""; }} />
   {/if}
 
   {#each d.companies as co (co.id)}
@@ -169,7 +173,7 @@
               </tbody>
             </table>
           </div>
-        {:else}<p class="text-sm text-muted-foreground">No grants yet.</p>{/if}
+        {/if}
       </Card.Content>
     </Card.Root>
   {/each}

@@ -58,19 +58,18 @@ describe("RetirementPlanner", () => {
     expect(screen.queryByText(/financial advice/)).not.toBeInTheDocument();
   });
 
-  it("on a phone, says the plan is made yours on a computer, where its fields are", () => {
+  it("on a phone, says the plan's fields are on a computer", () => {
     viewport.phone = true;
     try {
       setup(data({ is_default: true }));
-      expect(screen.getByText(/Enter\s+your birth year and retirement age on a computer to make it yours/)).toBeInTheDocument();
       expect(screen.getByText("Open Runway on a computer to change the plan.")).toBeInTheDocument();
     } finally { viewport.phone = false; }
   });
 
-  it("marks the results as a sample while it starts from Runway's own figures", () => {
+  it("shows the results muted, with no label, while it starts from Runway's own figures", () => {
     setup(data({ is_default: true }));
-    expect(screen.getByText("Sample · based on default assumptions")).toBeInTheDocument();
-    expect(screen.getByText(/Enter\s+your birth year and retirement age to make it yours/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/to make it yours/)).not.toBeInTheDocument();
     expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
     expect(screen.queryByRole("button", { name: /Start over/ })).not.toBeInTheDocument();
   });
@@ -488,11 +487,11 @@ describe("RetirementPlanner", () => {
     const p = project(plan(), 400000, 2026, []);
     const f = projectionIn(p, 2026, 0.025, "future");
 
-    it("starts in today's dollars, naming the inflation it assumes", () => {
+    it("starts in today's dollars, and leaves the inflation to Assumptions", () => {
       setup();
       expect(screen.getByRole("radio", { name: "Today’s dollars" })).toBeChecked();
       expect(screen.queryByText(/what you enter is in today’s dollars/)).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "2.5% a year" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "2.5% a year" })).not.toBeInTheDocument();
       expect(figure(/^Invested at retirement$/)).toHaveTextContent(fmt0(p.atRetirement));
     });
 
@@ -531,19 +530,12 @@ describe("RetirementPlanner", () => {
       expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(f.atRetirement));
     });
 
-    it("takes you to the inflation it assumes", async () => {
-      setup();
-      await userEvent.click(screen.getByRole("button", { name: "2.5% a year" }));
-      expect(screen.getByRole("spinbutton", { name: "Inflation" })).toHaveFocus();
-    });
-
     it("follows the inflation you set", async () => {
       setup();
       await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
       const infl = screen.getByRole("spinbutton", { name: "Inflation" });
       await userEvent.clear(infl);
       await userEvent.type(infl, "3");
-      expect(screen.getByRole("button", { name: "3% a year" })).toBeInTheDocument();
       expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(p.atRetirement * 1.03 ** 25));
     });
   });
@@ -575,15 +567,10 @@ describe("RetirementPlanner", () => {
       expect(details().querySelector("[data-summary]")).toHaveTextContent(/^Ann born 1986, Bo born 1988 · to age 95 · no retirement income yet · /);
     });
 
-    it("opens to show a new partner's birth year, and to the inflation from the dollars switch", async () => {
+    it("opens to show a new partner's birth year", async () => {
       setup();
       await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
       expect(details().open).toBe(true);
-      cleanup();
-      setup();
-      await userEvent.click(screen.getByRole("button", { name: "2.5% a year" }));
-      expect(details().open).toBe(true);
-      expect(screen.getByRole("spinbutton", { name: "Inflation" })).toHaveFocus();
     });
   });
 
@@ -609,7 +596,7 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/is what went into your investments/)).not.toBeInTheDocument();
       unmount();
       setup(data({ computed: { annual_spending: 55000, yearly_savings: 3000, expected_return: 0.05, savings_measured: true, savings_since: "2026-05-31" } }));
-      expect(screen.getByText(/only goes back to May\s31,\s2026/)).toBeInTheDocument();
+      expect(screen.getByTitle(/only goes back to May\s31,\s2026/)).toBeInTheDocument();   // a tooltip on Saves a year, not a paragraph
     });
 
     it("doesn't call a figure typed on the old card a measurement", () => {
@@ -640,7 +627,7 @@ describe("RetirementPlanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(api).toHaveBeenCalledWith("/api/investments/plan", { method: "POST", body: { plan: null } });
     await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));   // year - 40
-    expect(screen.getByText("Sample · based on default assumptions")).toBeInTheDocument();
+    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");   // the sample, muted
     expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(55000);
   });
 
