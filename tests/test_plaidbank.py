@@ -8,8 +8,11 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import sqlalchemy.exc
+from sqlalchemy import delete, insert, select, update
 
 from runway import db, forecast, plaid, plaidbank, simplefin
+from runway.models import (Account, CardStatement, Holding, InvAccount, InvSnapshot, InvTransaction, Merchant,
+                           Override, PlaidAccount, PlaidItem, Security, Transaction)
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -100,13 +103,15 @@ class PlaidBankTests(DbCase):
         MockBank.drop, MockBank.fail, MockBank.during_sync = set(), {}, None
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         # What SimpleFIN already brought in: checking and a card, with some history.
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-chk', 'Chase Checking', 'checking', 2500)")
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance, pay_from) "
-                       "VALUES ('sf-csp', 'CSP ...1234', 'credit', -812.34, 'sf-chk')")
-        self.c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)", [
-            ("sf-chk|1", "sf-chk", "2026-08-01", -40.0, "OLD GROCERY", "Old Grocery", "Groceries"),
-            ("sf-chk|2", "sf-chk", "2026-09-20", -12.5, "COFFEE", "Coffee", "Coffee & Snacks"),
-        ])
+        self.c.execute(insert(Account).values(id="sf-chk", name="Chase Checking", kind="checking", balance=2500))
+        self.c.execute(insert(Account).values(id="sf-csp", name="CSP ...1234", kind="credit", balance=-812.34,
+                                              pay_from="sf-chk"))
+        self.c.execute(insert(Transaction), [{"id": "sf-chk|1", "account_id": "sf-chk", "posted": "2026-08-01",
+                                              "amount": -40.0, "description": "OLD GROCERY", "payee": "Old Grocery",
+                                              "category": "Groceries"},
+                                             {"id": "sf-chk|2", "account_id": "sf-chk", "posted": "2026-09-20",
+                                              "amount": -12.5, "description": "COFFEE", "payee": "Coffee",
+                                              "category": "Coffee & Snacks"}])
         self.c.commit()
 
     def link(self):
@@ -120,21 +125,23 @@ class PlaidBankTests(DbCase):
         self.assertEqual(body["products"], ["transactions"])
         self.assertEqual(body["optional_products"], ["liabilities"])
         self.assertEqual(body["transactions"]["days_requested"], 730)
-        item = self.c.execute("SELECT products FROM plaid_items").fetchone()
+        item = self.c.execute(select(PlaidItem.products)).fetchone()
         self.assertEqual(item["products"], "liabilities,transactions")
 
     def test_accounts_matched_by_mask_or_balance_the_rest_wait_for_you(self):
         r = self.link()
-        got = {a["id"]: a["plaid_account_id"] for a in db.rows(self.c.execute("SELECT id, plaid_account_id FROM accounts"))}
+        got = {a["id"]: a["plaid_account_id"]
+               for a in db.rows(self.c.execute(select(Account.id, Account.plaid_account_id)))}
         self.assertEqual(got["sf-csp"], "p-csp")   # "1234" in the name
         self.assertEqual(got["sf-chk"], "p-chk")   # the only balance of 2,500
         self.assertEqual(sorted(r["matched"]), ["CSP ...1234", "Chase Checking"])
         # Freedom matches nothing; you add it as its own account.
         plaidbank.match(self.c, "p-new", "new", TODAY)
-        new = self.c.execute("SELECT * FROM accounts WHERE id='pl:p-new'").fetchone()
+        new = self.c.execute(select(Account).where(Account.id == "pl:p-new")).fetchone()
         self.assertEqual((new["kind"], new["provider"], new["owed_positive"], new["balance"]), ("credit", "plaid", 1, 50.0))
         # Nothing changes for matched accounts until you pick Plaid for them.
-        self.assertEqual(self.c.execute("SELECT provider FROM accounts WHERE id='sf-chk'").fetchone()[0], "simplefin")
+        self.assertEqual(self.c.execute(select(Account.provider)
+                                        .where(Account.id == "sf-chk")).fetchone()[0], "simplefin")
 
     def test_redirect_for_banks_that_sign_in_on_their_own_site(self):
         os.environ["RUNWAY_PUBLIC_URL"] = "https://runway.example.com"
@@ -158,16 +165,17 @@ class PlaidBankTests(DbCase):
 
     def test_matching_by_initials_words_and_institution(self):
         c = self.c
-        c.execute("DELETE FROM accounts")
+        c.execute(delete(Account))
         for aid, name, bal in [("csr", "CSR", -1203.10), ("csp", "CSP (Sara)", -455.00), ("citi", "Citi Double Cash", -88.20),
                                ("boa", "BofA Premium Rewards", -310.00)]:
-            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES (?,?,'credit',?)", (aid, name, bal))
+            c.execute(insert(Account).values(id=aid, name=name, kind="credit", balance=bal))
         def item(item_id, inst, accts):
-            c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES (?,?,?, 'liabilities')",
-                      (item_id, "t-" + item_id, inst))
+            c.execute(insert(PlaidItem).values(item_id=item_id, access_token="t-" + item_id, institution_name=inst,
+                                               products="liabilities"))
             for pid, name, official, mask, cur in accts:
-                c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, official_name, mask, type, subtype, current) "
-                          "VALUES (?,?,?,?,?,'credit','credit card',?)", (pid, item_id, name, official, mask, cur))
+                c.execute(insert(PlaidAccount).values(plaid_account_id=pid, item_id=item_id, name=name,
+                                                      official_name=official, mask=mask, type="credit",
+                                                      subtype="credit card", current=cur))
         # Balances differ a little from SimpleFIN's (pending charges), and none of the names carry the last 4 digits.
         item("chase", "Chase", [("p1", "Sapphire Preferred", "Chase Sapphire Preferred", "4417", 461.12),
                                 ("p2", "Sapphire Reserve", "Chase Sapphire Reserve", "9921", 1203.10)])
@@ -175,26 +183,27 @@ class PlaidBankTests(DbCase):
         item("boa", "Bank of America", [("p4", "Premium Rewards Visa Signature", None, "7788", 300.00)])
         for i in ("chase", "citi", "boa"):
             plaidbank.auto_match(c, i)
-        got = {r["id"]: r["plaid_account_id"] for r in c.execute("SELECT id, plaid_account_id FROM accounts")}
+        got = {r["id"]: r["plaid_account_id"] for r in c.execute(select(Account.id, Account.plaid_account_id))}
         self.assertEqual(got, {"csr": "p2", "csp": "p1", "citi": "p3", "boa": "p4"})
 
     def test_no_match_across_institutions_or_when_unsure(self):
         c = self.c
-        c.execute("DELETE FROM accounts")
-        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('citi', 'Citi Double Cash', 'credit', -50)")
-        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('c1', 'Card one', 'credit', -20)")
-        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('c2', 'Card two', 'credit', -20)")
-        c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('ch','t','Chase','liabilities')")
-        c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type, subtype, current) "
-                  "VALUES ('px','ch','Freedom Unlimited','credit','credit card',50)")
-        c.execute("INSERT INTO plaid_accounts(plaid_account_id, item_id, name, type, subtype, current) "
-                  "VALUES ('py','ch','Card','credit','credit card',20)")
+        c.execute(delete(Account))
+        c.execute(insert(Account).values(id="citi", name="Citi Double Cash", kind="credit", balance=-50))
+        c.execute(insert(Account).values(id="c1", name="Card one", kind="credit", balance=-20))
+        c.execute(insert(Account).values(id="c2", name="Card two", kind="credit", balance=-20))
+        c.execute(insert(PlaidItem).values(item_id="ch", access_token="t", institution_name="Chase",
+                                           products="liabilities"))
+        c.execute(insert(PlaidAccount).values(plaid_account_id="px", item_id="ch", name="Freedom Unlimited",
+                                              type="credit", subtype="credit card", current=50))
+        c.execute(insert(PlaidAccount).values(plaid_account_id="py", item_id="ch", name="Card", type="credit",
+                                              subtype="credit card", current=20))
         self.assertEqual(plaidbank.auto_match(c, "ch"), [])   # same balance as the Citi card, but Chase; two equal "Card"s
 
     def test_switching_to_plaid_keeps_history_and_skips_duplicates(self):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
-        self.assertIsNone(self.c.execute("SELECT cursor FROM plaid_items").fetchone()[0])   # re-read from the start
+        self.assertIsNone(self.c.execute(select(PlaidItem.cursor)).fetchone()[0])   # re-read from the start
         MockBank.pages = [{"added": [
             tx("a0", "p-chk", "2026-08-01", 40.0, "OLD GROCERY"),       # long before the switch: SimpleFIN has it
             tx("a1", "p-chk", "2026-09-21", 12.5, "COFFEE"),            # the same coffee, a day later at Plaid
@@ -203,20 +212,22 @@ class PlaidBankTests(DbCase):
             tx("c1", "p-csp", "2026-09-22", 99.0, "CARD CHARGE"),       # the card still uses SimpleFIN
         ]}]
         r = plaidbank.sync_item(self.c, "item-b", TODAY)
-        rows = {t["id"]: t for t in db.rows(self.c.execute("SELECT * FROM transactions WHERE account_id='sf-chk'"))}
+        rows = {t["id"]: t for t in db.rows(self.c.execute(select(Transaction)
+                                                           .where(Transaction.account_id == "sf-chk")))}
         self.assertEqual(sorted(rows), ["sf-chk|1", "sf-chk|2", "sf-chk|pl:a2", "sf-chk|pl:a3"])
         self.assertEqual(rows["sf-chk|pl:a2"]["amount"], 3000.0)
         self.assertEqual(sorted(r["new"]), ["sf-chk|pl:a2", "sf-chk|pl:a3"])
-        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE account_id='sf-csp'").fetchone())
-        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='sf-chk'").fetchone()[0], 2500.0)
+        self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.account_id == "sf-csp")).fetchone())
+        self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "sf-chk")).fetchone()[0], 2500.0)
         # The lunch posts: it replaces the pending one and keeps the category you gave it.
-        self.c.execute("UPDATE transactions SET category='Restaurants', category_source='manual' WHERE id='sf-chk|pl:a3'")
+        self.c.execute(update(Transaction).where(Transaction.id == "sf-chk|pl:a3")
+                       .values(category="Restaurants", category_source="manual"))
         MockBank.pages = [{"added": [tx("a4", "p-chk", "2026-09-24", 21.0, "LUNCH", pending_id="a3")], "removed": [{"transaction_id": "a3"}]}]
         r = plaidbank.sync_item(self.c, "item-b", TODAY)
         self.assertEqual(r["new"], [])
-        lunch = self.c.execute("SELECT * FROM transactions WHERE id='sf-chk|pl:a4'").fetchone()
+        lunch = self.c.execute(select(Transaction).where(Transaction.id == "sf-chk|pl:a4")).fetchone()
         self.assertEqual((lunch["amount"], lunch["category"], lunch["pending"]), (-21.0, "Restaurants", 0))
-        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id='sf-chk|pl:a3'").fetchone())
+        self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.id == "sf-chk|pl:a3")).fetchone())
 
     def test_merchants_and_their_logos_are_noted(self):
         self.link()
@@ -226,9 +237,10 @@ class PlaidBankTests(DbCase):
                "website": "joescoffee.com"}
         MockBank.pages = [{"added": [joe, tx("m2", "p-chk", "2026-09-23", 9.0, "NO LOGO SHOP")]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
-        ids = dict(self.c.execute("SELECT id, merchant_id FROM transactions WHERE id LIKE '%pl:m%'").fetchall())
+        ids = dict(self.c.execute(select(Transaction.id, Transaction.merchant_id)
+                                  .where(Transaction.id.like("%pl:m%"))).fetchall())
         self.assertEqual(ids, {"sf-chk|pl:m1": "ent-joe", "sf-chk|pl:m2": None})
-        m = self.c.execute("SELECT name, website, logo_url FROM merchants").fetchone()
+        m = self.c.execute(select(Merchant.name, Merchant.website, Merchant.logo_url)).fetchone()
         self.assertEqual(tuple(m), ("Joe's Coffee", "joescoffee.com", "https://plaid-merchant-logos.plaid.com/joes.png"))
 
     def test_simplefin_leaves_plaid_accounts_alone(self):
@@ -237,7 +249,7 @@ class PlaidBankTests(DbCase):
         payload = {"accounts": [{"id": "sf-chk", "name": "Chase Checking", "balance": "1.00", "currency": "USD",
                                  "transactions": [{"id": "9", "posted": 1790000000, "amount": "-5.00", "description": "SF ONLY"}]}]}
         self.assertEqual(simplefin.store_payload(self.c, payload, date(2026, 9, 1)), [])
-        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='sf-chk'").fetchone()[0], 2500.0)
+        self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "sf-chk")).fetchone()[0], 2500.0)
 
     def test_switching_back_to_simplefin_matches_up_the_overlap(self):
         self.link()
@@ -261,7 +273,7 @@ class PlaidBankTests(DbCase):
         ev = next(e for e in fc["events"] if e["kind"] == "card" and not e["estimated"])
         self.assertEqual((ev["date"], ev["amount"]), ("2026-10-02", -640.5))
         # A statement you enter yourself still wins.
-        self.c.execute("INSERT INTO overrides(key, amount) VALUES (?, ?)", ("stmt:sf-csp:2026-09-05", 600))
+        self.c.execute(insert(Override).values(key="stmt:sf-csp:2026-09-05", amount=600))
         c = next(x for x in forecast.build(self.c, TODAY, 30)["cards"] if x["id"] == "sf-csp")
         self.assertEqual((c["statement_balance"], c["statement_set"], c["statement_reported"]), (600, True, 640.5))
 
@@ -269,8 +281,9 @@ class PlaidBankTests(DbCase):
         MockBank.products = ["transactions"]        # Liabilities was optional and didn't show up on the Item
         self.link()
         self.assertTrue(any(p == "/liabilities/get" for p, _ in MockBank.calls))
-        self.assertIn("liabilities", self.c.execute("SELECT products FROM plaid_items").fetchone()[0])
-        self.assertTrue(self.c.execute("SELECT 1 FROM card_statements WHERE plaid_account_id='p-csp'").fetchone())
+        self.assertIn("liabilities", self.c.execute(select(PlaidItem.products)).fetchone()[0])
+        self.assertTrue(self.c.execute(select(CardStatement.plaid_account_id)
+                                       .where(CardStatement.plaid_account_id == "p-csp")).fetchone())
 
     def test_statements_only_when_transactions_isnt_enabled(self):
         MockBank.products = ["liabilities"]
@@ -288,9 +301,9 @@ class PlaidBankTests(DbCase):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
         plaid.remove_item(self.c, "item-b")
-        a = self.c.execute("SELECT provider, plaid_account_id FROM accounts WHERE id='sf-chk'").fetchone()
+        a = self.c.execute(select(Account.provider, Account.plaid_account_id).where(Account.id == "sf-chk")).fetchone()
         self.assertEqual((a["provider"], a["plaid_account_id"]), ("simplefin", None))
-        self.assertFalse(self.c.execute("SELECT 1 FROM card_statements").fetchone())
+        self.assertFalse(self.c.execute(select(CardStatement.plaid_account_id)).fetchone())
 
 
     def test_a_dropped_connection_or_timeout_is_a_plaid_error(self):
@@ -307,28 +320,29 @@ class PlaidBankTests(DbCase):
         # connection is the kind you linked, so the bank sync picks it up.
         MockBank.drop = {"/item/get"}
         item_id = plaid.exchange(self.c, "public-1", {"name": "Chase"}, "bank")
-        item = self.c.execute("SELECT access_token, products FROM plaid_items WHERE item_id=?", (item_id,)).fetchone()
+        item = self.c.execute(select(PlaidItem.access_token, PlaidItem.products)
+                              .where(PlaidItem.item_id == item_id)).fetchone()
         self.assertTrue(item["access_token"])
         self.assertEqual(item["products"], "transactions")
         self.assertTrue(plaidbank.is_bank_item(item))
         # With /item/get answering, its products win.
         MockBank.drop = set()
         plaid.exchange(self.c, "public-1", {"name": "Chase"}, "investments")
-        self.assertEqual(self.c.execute("SELECT products FROM plaid_items").fetchone()[0], "liabilities,transactions")
+        self.assertEqual(self.c.execute(select(PlaidItem.products)).fetchone()[0], "liabilities,transactions")
 
     def test_one_failing_connection_doesnt_stop_the_others(self):
         self.link()
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
-                       "VALUES ('item-a', 'access-a', 'Ally', 'transactions')")
+        self.c.execute(insert(PlaidItem).values(item_id="item-a", access_token="access-a", institution_name="Ally",
+                                                products="transactions"))
         MockBank.drop = {"/accounts/get"}
         out = plaidbank.sync_all(self.c, TODAY)
         self.assertEqual((out["items"], len(out["errors"])), (0, 2))
-        self.assertTrue(self.c.execute("SELECT error FROM plaid_items WHERE item_id='item-a'").fetchone()[0])
+        self.assertTrue(self.c.execute(select(PlaidItem.error).where(PlaidItem.item_id == "item-a")).fetchone()[0])
 
     def test_refresh_asks_each_transactions_connection(self):
         self.link()
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
-                       "VALUES ('item-c', 'access-c', 'Amex', 'liabilities')")   # statements only: nothing to refresh
+        self.c.execute(insert(PlaidItem).values(item_id="item-c", access_token="access-c", institution_name="Amex",
+                                                products="liabilities"))   # statements only: nothing to refresh
         MockBank.calls = []
         self.assertEqual(plaidbank.refresh_all(self.c), [])
         self.assertEqual([p for p, _ in MockBank.calls], ["/transactions/refresh"])
@@ -340,49 +354,55 @@ class PlaidBankTests(DbCase):
         plaidbank.match(self.c, "p-new", "new", TODAY)
         MockBank.pages = [{"added": [tx("f1", "p-new", "2026-09-20", 25.0, "BOOKS")]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
-        self.c.execute("UPDATE transactions SET category='Shopping' WHERE id='pl:p-new|pl:f1'")
+        self.c.execute(update(Transaction).where(Transaction.id == "pl:p-new|pl:f1").values(category="Shopping"))
         # It turns out to be a card SimpleFIN already has.
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('sf-free', 'Freedom', 'credit', -50)")
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description) "
-                       "VALUES ('sf-free|1', 'sf-free', '2026-09-21', -25.0, 'BOOKS')")
+        self.c.execute(insert(Account).values(id="sf-free", name="Freedom", kind="credit", balance=-50))
+        self.c.execute(insert(Transaction).values(id="sf-free|1", account_id="sf-free", posted="2026-09-21",
+                                                  amount=-25.0, description="BOOKS"))
         plaidbank.match(self.c, "p-new", "sf-free", TODAY)
-        own = self.c.execute("SELECT hidden, plaid_account_id FROM accounts WHERE id='pl:p-new'").fetchone()
+        own = self.c.execute(select(Account.hidden, Account.plaid_account_id)
+                             .where(Account.id == "pl:p-new")).fetchone()
         self.assertEqual((own["hidden"], own["plaid_account_id"]), (1, None))
-        self.assertEqual(self.c.execute("SELECT category FROM transactions WHERE id='sf-free|1'").fetchone()[0], "Shopping")
+        self.assertEqual(self.c.execute(select(Transaction.category)
+                                        .where(Transaction.id == "sf-free|1")).fetchone()[0], "Shopping")
         # Syncing no longer updates the copy.
         MockBank.pages = [{"added": [tx("f2", "p-new", "2026-09-22", 5.0, "MORE BOOKS")]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
-        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id LIKE '%pl:f2'").fetchone())
+        self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.id.like("%pl:f2"))).fetchone())
         # Adding it as its own again brings the copy back.
         plaidbank.match(self.c, "p-new", "new", TODAY)
-        own = self.c.execute("SELECT hidden, plaid_account_id FROM accounts WHERE id='pl:p-new'").fetchone()
+        own = self.c.execute(select(Account.hidden, Account.plaid_account_id)
+                             .where(Account.id == "pl:p-new")).fetchone()
         self.assertEqual((own["hidden"], own["plaid_account_id"]), (0, "p-new"))
-        self.assertIsNone(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-free'").fetchone()[0])
+        self.assertIsNone(self.c.execute(select(Account.plaid_account_id).where(Account.id == "sf-free")).fetchone()[0])
 
     def test_an_account_you_dont_use_isnt_synced(self):
         self.link()
         plaidbank.match(self.c, "p-new", "new", TODAY)
         plaidbank.match(self.c, "p-new", "ignore", TODAY)
-        self.assertEqual(self.c.execute("SELECT hidden FROM accounts WHERE id='pl:p-new'").fetchone()[0], 1)
+        self.assertEqual(self.c.execute(select(Account.hidden).where(Account.id == "pl:p-new")).fetchone()[0], 1)
         MockBank.pages = [{"added": [tx("i1", "p-new", "2026-09-22", 5.0, "IGNORED")]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
-        self.assertFalse(self.c.execute("SELECT 1 FROM transactions WHERE id LIKE '%pl:i1'").fetchone())
+        self.assertFalse(self.c.execute(select(Transaction.id).where(Transaction.id.like("%pl:i1"))).fetchone())
 
     def test_an_account_already_linked_cant_be_linked_again(self):
         self.link()   # sf-csp is linked to p-csp
         with self.assertRaises(ValueError):
             plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
-        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-csp")
-        self.assertEqual(self.c.execute("SELECT ignored FROM plaid_accounts WHERE plaid_account_id='p-new'").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(Account.plaid_account_id)
+                                        .where(Account.id == "sf-csp")).fetchone()[0], "p-csp")
+        self.assertEqual(self.c.execute(select(PlaidAccount.ignored)
+                                        .where(PlaidAccount.plaid_account_id == "p-new")).fetchone()[0], 0)
         plaidbank.match(self.c, "p-csp", "sf-csp", TODAY)   # the same link again is fine
         plaidbank.match(self.c, "p-csp", "", TODAY)         # unlinked: free for another
         plaidbank.match(self.c, "p-new", "sf-csp", TODAY)
-        self.assertEqual(self.c.execute("SELECT plaid_account_id FROM accounts WHERE id='sf-csp'").fetchone()[0], "p-new")
+        self.assertEqual(self.c.execute(select(Account.plaid_account_id)
+                                        .where(Account.id == "sf-csp")).fetchone()[0], "p-new")
 
     def test_one_plaid_account_is_one_of_your_accounts(self):
         self.link()
         with self.assertRaises(sqlalchemy.exc.IntegrityError):   # the unique index, on either database
-            self.c.execute("UPDATE accounts SET plaid_account_id='p-csp' WHERE id='sf-chk'")
+            self.c.execute(update(Account).where(Account.id == "sf-chk").values(plaid_account_id="p-csp"))
 
     def test_no_write_lock_is_held_while_plaid_answers(self):
         if os.environ.get("DATABASE_URL"):
@@ -394,14 +414,14 @@ class PlaidBankTests(DbCase):
         blocked = []
 
         def write_elsewhere():   # what an edit in the app, or the extension, does meanwhile
-            other = sqlite3.connect(self.path, timeout=0.2)
+            dbapi_conn = sqlite3.connect(self.path, timeout=0.2)
             try:
-                other.execute("UPDATE settings SET value=value WHERE key='plaid_client_id'")
-                other.commit()
+                dbapi_conn.execute("UPDATE settings SET value=value WHERE key='plaid_client_id'")
+                dbapi_conn.commit()
             except sqlite3.OperationalError as e:
                 blocked.append(str(e))
             finally:
-                other.close()
+                dbapi_conn.close()
         MockBank.during_sync = write_elsewhere
         MockBank.pages = [{"added": [tx("w1", "p-chk", "2026-09-23", 5.0, "SNACK")]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
@@ -415,8 +435,8 @@ class PlaidBankTests(DbCase):
         out = plaidbank.sync_all(self.c, TODAY)
         self.assertEqual(out["new"], ["sf-chk|pl:s1"])
         self.assertEqual(len(out["errors"]), 1)
-        self.assertEqual(self.c.execute("SELECT error FROM plaid_items").fetchone()[0], "INTERNAL_SERVER_ERROR")
-        self.assertTrue(self.c.execute("SELECT 1 FROM transactions WHERE id='sf-chk|pl:s1'").fetchone())
+        self.assertEqual(self.c.execute(select(PlaidItem.error)).fetchone()[0], "INTERNAL_SERVER_ERROR")
+        self.assertTrue(self.c.execute(select(Transaction.id).where(Transaction.id == "sf-chk|pl:s1")).fetchone())
 
     def test_holds_dropped_while_reading_everything_again_are_removed(self):
         self.link()
@@ -427,7 +447,7 @@ class PlaidBankTests(DbCase):
         plaidbank._reread(self.c, "item-b")   # e.g. another account switched to Plaid
         MockBank.pages = [{"added": [tx("h2", "p-chk", "2026-09-22", 9.0, "LUNCH", pending=True)]}]
         plaidbank.sync_item(self.c, "item-b", TODAY)
-        ids = {r[0] for r in self.c.execute("SELECT id FROM transactions WHERE id LIKE '%|pl:%'")}
+        ids = {r[0] for r in self.c.execute(select(Transaction.id).where(Transaction.id.like("%|pl:%")))}
         self.assertEqual(ids, {"sf-chk|pl:h2"})
 
     def test_syncing_a_connection_waits_for_a_running_sync(self):
@@ -449,15 +469,18 @@ class PlaidBankTests(DbCase):
         from runway import server
         self.link()
         plaidbank.match(self.c, "p-new", "new", TODAY)
-        self.c.execute("UPDATE accounts SET owner='Sara', display_name='Sapphire' WHERE id='sf-csp'")
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products, env) "
-                       "VALUES ('inv', 'tok', 'Wealthfront', 'investments', 'sandbox')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, official_name, subtype, mask, balance) "
-                       "VALUES ('w1', 'inv', 'Roth IRA', 'Roth', 'roth', '3639', 1000), ('w2', 'inv', 'Individual', NULL, 'brokerage', NULL, 5)")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, source) VALUES ('sfi', 'sf', 'Old', 'simplefin')")
-        self.c.execute("INSERT INTO accounts(id, name, org, kind, balance) VALUES ('sf-wf', 'Wealthfront Roth', 'Wealthfront', 'investment', 990)")
-        self.c.execute("INSERT INTO accounts(id, name, org, kind, balance) VALUES ('sf-v', 'Vanguard', 'Vanguard', 'investment', 1)")
-        self.c.execute("UPDATE inv_accounts SET account_id='sf-wf' WHERE id='w1'")
+        self.c.execute(update(Account).where(Account.id == "sf-csp").values(owner="Sara", display_name="Sapphire"))
+        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", institution_name="Wealthfront",
+                                                products="investments", env="sandbox"))
+        self.c.execute(insert(InvAccount), [{"id": "w1", "item_id": "inv", "name": "Roth IRA", "official_name": "Roth",
+                                             "subtype": "roth", "mask": "3639", "balance": 1000},
+                                            {"id": "w2", "item_id": "inv", "name": "Individual", "official_name": None,
+                                             "subtype": "brokerage", "mask": None, "balance": 5}])
+        self.c.execute(insert(InvAccount).values(id="sfi", item_id="sf", name="Old", source="simplefin"))
+        self.c.execute(insert(Account).values(id="sf-wf", name="Wealthfront Roth", org="Wealthfront",
+                                              kind="investment", balance=990))
+        self.c.execute(insert(Account).values(id="sf-v", name="Vanguard", org="Vanguard", kind="investment", balance=1))
+        self.c.execute(update(InvAccount).where(InvAccount.id == "w1").values(account_id="sf-wf"))
         s = server.api_plaid_status(self.c, {}, {})
         self.assertEqual([it["item_id"] for it in s["items"]], ["item-b", "inv"])
         bank, inv = s["items"]
@@ -486,9 +509,10 @@ class PlaidBankTests(DbCase):
 
     def test_status_counts_what_waits_for_you(self):
         self.link()   # Freedom matches nothing
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, products) VALUES ('inv', 'tok', 'investments')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name) VALUES ('w1', 'inv', 'Roth IRA'), ('w2', 'inv', 'Other')")
-        self.c.execute("UPDATE inv_accounts SET account_id='x' WHERE id='w2'")
+        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", products="investments"))
+        self.c.execute(insert(InvAccount), [{"id": "w1", "item_id": "inv", "name": "Roth IRA"},
+                                            {"id": "w2", "item_id": "inv", "name": "Other"}])
+        self.c.execute(update(InvAccount).where(InvAccount.id == "w2").values(account_id="x"))
         self.assertEqual(plaid.undecided_count(self.c), 2)
         plaidbank.match(self.c, "p-new", "ignore", TODAY)
         self.assertEqual(plaid.undecided_count(self.c), 1)
@@ -496,15 +520,17 @@ class PlaidBankTests(DbCase):
     def test_inv_account_hidden_and_match_goes_to_the_right_kind(self):
         from runway import server
         self.link()
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('inv', 'tok', 'Wealthfront')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES ('w1', 'inv', 'Roth IRA', '3639', 7)")
+        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", institution_name="Wealthfront"))
+        self.c.execute(insert(InvAccount).values(id="w1", item_id="inv", name="Roth IRA", mask="3639", balance=7))
         self.assertEqual(server.api_inv_account(self.c, {}, {"hidden": True}, "w1"), {"ok": True})
-        self.assertEqual(self.c.execute("SELECT hidden FROM inv_accounts WHERE id='w1'").fetchone()[0], 1)
+        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 1)
         server.api_inv_account(self.c, {}, {}, "w1")
-        self.assertEqual(self.c.execute("SELECT hidden FROM inv_accounts WHERE id='w1'").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(InvAccount.hidden).where(InvAccount.id == "w1")).fetchone()[0], 0)
         self.assertEqual(server.api_plaid_match(self.c, {}, {"plaid_account_id": "w1", "target": "new"}),
                          {"ok": True, "account_id": "pl:w1"})
-        a = dict(self.c.execute("SELECT name, org, kind, balance, provider, hidden FROM accounts WHERE id='pl:w1'").fetchone())
+        a = dict(self.c.execute(select(Account.name, Account.org, Account.kind, Account.balance, Account.provider,
+                                       Account.hidden)
+                                .where(Account.id == "pl:w1")).fetchone())
         self.assertEqual(a, {"name": "Roth IRA ••3639", "org": "Wealthfront", "kind": "investment", "balance": 7.0,
                              "provider": "plaid", "hidden": 0})
         self.assertEqual(server.api_plaid_match(self.c, {}, {"plaid_account_id": "p-new", "target": "ignore"}), {"ok": True})
@@ -514,15 +540,17 @@ class PlaidBankTests(DbCase):
     def test_bank_sync_names_the_connection_and_drops_removed_transactions(self):
         plaid.link_token(self.c, None, "bank")
         item_id = plaid.exchange(self.c, "public-1", None)
-        self.assertIsNone(self.c.execute("SELECT institution_name FROM plaid_items").fetchone()[0])
+        self.assertIsNone(self.c.execute(select(PlaidItem.institution_name)).fetchone()[0])
         plaidbank.sync_item(self.c, item_id, TODAY)
-        self.assertEqual(self.c.execute("SELECT institution_name FROM plaid_items").fetchone()[0], "Chase")
+        self.assertEqual(self.c.execute(select(PlaidItem.institution_name)).fetchone()[0], "Chase")
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
         MockBank.pages = [{"added": [tx("r1", "p-chk", "2026-09-22", 5.0, "A"), tx("r2", "p-chk", "2026-09-22", 6.0, "B")]}]
         plaidbank.sync_item(self.c, item_id, TODAY)
         MockBank.pages = [{"modified": [tx("r2", "p-chk", "2026-09-23", 7.0, "B2")], "removed": [{"transaction_id": "r1"}]}]
         self.assertEqual(plaidbank.sync_item(self.c, item_id, TODAY)["new"], [])
-        got = [tuple(r) for r in self.c.execute("SELECT id, posted, amount, description FROM transactions WHERE id LIKE '%|pl:%'")]
+        got = [tuple(r) for r in self.c.execute(select(Transaction.id, Transaction.posted, Transaction.amount,
+                                                       Transaction.description)
+                                                .where(Transaction.id.like("%|pl:%")))]
         self.assertEqual(got, [("sf-chk|pl:r2", "2026-09-23", -7.0, "B2")])
         self.assertEqual(plaidbank.statement(self.c, "sf-csp", TODAY)["last_statement_balance"], 640.5)
         self.assertIsNone(plaidbank.statement(self.c, "sf-csp", date(2026, 9, 1)))
@@ -534,19 +562,19 @@ class PlaidBankTests(DbCase):
         out = plaidbank.sync_item(self.c, "item-b", TODAY)
         self.assertNotIn("error", out)
         self.assertEqual(db.get_setting(self.c, "plaid_stmt_note:item-b"), "PRODUCTS_NOT_SUPPORTED")
-        self.assertIsNone(self.c.execute("SELECT error FROM plaid_items").fetchone()[0])
+        self.assertIsNone(self.c.execute(select(PlaidItem.error)).fetchone()[0])
         MockBank.fail = {"/accounts/get": (400, {"error_code": "ITEM_LOGIN_REQUIRED", "error_message": "log in"})}
         with self.assertRaises(plaid.PlaidError):
             plaidbank.sync_item(self.c, "item-b", TODAY)
-        self.assertEqual(self.c.execute("SELECT error FROM plaid_items").fetchone()[0], "ITEM_LOGIN_REQUIRED")
+        self.assertEqual(self.c.execute(select(PlaidItem.error)).fetchone()[0], "ITEM_LOGIN_REQUIRED")
         with self.assertRaises(plaid.PlaidError):
             plaidbank.sync_item(self.c, "nope", TODAY)
 
     def test_investment_sync_stores_holdings_snapshots_and_activity(self):
         from unittest import mock
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, products) VALUES ('inv', 'tok', 'investments')")
-        self.c.execute("INSERT INTO securities(id, ticker, name, close_price, close_as_of, sector) "
-                       "VALUES ('s1', 'VTI', 'Old name', 200, '2026-09-01', 'Mixed')")
+        self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", products="investments"))
+        self.c.execute(insert(Security).values(id="s1", ticker="VTI", name="Old name", close_price=200,
+                                               close_as_of="2026-09-01", sector="Mixed"))
         holdings = {"item": {"institution_name": "Wealthfront"}, "accounts": [
             {"account_id": "w1", "name": "Roth IRA", "type": "investment", "subtype": "roth", "mask": "3639",
              "balances": {"current": 1500.0}},
@@ -574,19 +602,26 @@ class PlaidBankTests(DbCase):
             out = plaid.sync_item(self.c, "inv", TODAY)
         self.assertEqual(out, {"accounts": 2, "holdings": 1, "transactions": 3})
         self.assertEqual([o for _, o in seen], [None, {"count": 500, "offset": 0}, {"count": 500, "offset": 2}])
-        item = self.c.execute("SELECT institution_name, error, last_sync FROM plaid_items WHERE item_id='inv'").fetchone()
+        item = self.c.execute(select(PlaidItem.institution_name, PlaidItem.error, PlaidItem.last_sync)
+                              .where(PlaidItem.item_id == "inv")).fetchone()
         self.assertEqual(item["institution_name"], "Wealthfront")
         self.assertTrue(item["last_sync"])
-        secs = {r["id"]: dict(r) for r in self.c.execute("SELECT * FROM securities")}
+        secs = {r["id"]: dict(r) for r in self.c.execute(select(Security))}
         self.assertEqual((secs["s1"]["name"], secs["s1"]["close_price"], secs["s1"]["close_as_of"], secs["s1"]["sector"]),
                          ("Vanguard Total", 200.0, "2026-09-01", "Mixed"))
         self.assertEqual((secs["s2"]["is_cash"], secs["s2"]["currency"], secs["s3"]["is_cash"]), (1, "USD", 0))
-        snaps = [tuple(r) for r in self.c.execute("SELECT date, account_id, value FROM inv_snapshots ORDER BY account_id")]
+        snaps = [tuple(r) for r in self.c.execute(select(InvSnapshot.date, InvSnapshot.account_id, InvSnapshot.value)
+                                                  .order_by(InvSnapshot.account_id))]
         self.assertEqual(snaps, [("2026-09-23", "w1", 1500.0), ("2026-09-23", "w2", 42.0)])   # w2: no holdings, its balance
-        txs = [tuple(r) for r in self.c.execute("SELECT id, quantity, amount, fees, currency FROM inv_transactions ORDER BY id")]
+        txs = [tuple(r) for r in self.c.execute(select(InvTransaction.id, InvTransaction.quantity,
+                                                       InvTransaction.amount, InvTransaction.fees,
+                                                       InvTransaction.currency)
+                                                .order_by(InvTransaction.id))]
         self.assertEqual(txs, [("t1", 5.0, 1000.0, 0.0, "USD"), ("t2", 0.0, -42.0, 0.0, "USD"), ("t3", 0.0, 0.0, 1.5, "USD")])
         # Nothing of yours at Wealthfront: both are accounts of their own.
-        accts = [tuple(r) for r in self.c.execute("SELECT id, name, kind, balance, provider FROM accounts WHERE id LIKE 'pl:%' ORDER BY id")]
+        accts = [tuple(r) for r in self.c.execute(select(Account.id, Account.name, Account.kind, Account.balance,
+                                                         Account.provider)
+                                                  .where(Account.id.like("pl:%")).order_by(Account.id))]
         self.assertEqual(accts, [("pl:w1", "Roth IRA ••3639", "investment", 1500.0, "plaid"),
                                  ("pl:w2", "Cash", "investment", 42.0, "plaid")])
         # Holdings are a full snapshot; a second sync on the same day replaces the snapshot value.
@@ -595,49 +630,58 @@ class PlaidBankTests(DbCase):
         pages[:] = [{"total_investment_transactions": 0, "investment_transactions": []}]
         with mock.patch.object(plaid, "call", side_effect=call):
             self.assertEqual(plaid.sync_item(self.c, "inv", TODAY), {"accounts": 2, "holdings": 0, "transactions": 0})
-        self.assertFalse(self.c.execute("SELECT 1 FROM holdings").fetchone())
-        self.assertEqual(self.c.execute("SELECT value FROM inv_snapshots WHERE account_id='w1'").fetchone()[0], 1600.0)
-        self.assertEqual(self.c.execute("SELECT balance FROM accounts WHERE id='pl:w1'").fetchone()[0], 1600.0)
+        self.assertFalse(self.c.execute(select(Holding.account_id)).fetchone())
+        self.assertEqual(self.c.execute(select(InvSnapshot.value)
+                                        .where(InvSnapshot.account_id == "w1")).fetchone()[0], 1600.0)
+        self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "pl:w1")).fetchone()[0], 1600.0)
         # A failure is kept on the connection.
         with mock.patch.object(plaid, "call", side_effect=plaid.PlaidError("login", "ITEM_LOGIN_REQUIRED")), \
                 self.assertRaises(plaid.PlaidError):
             plaid.sync_item(self.c, "inv", TODAY)
-        self.assertEqual(self.c.execute("SELECT error FROM plaid_items WHERE item_id='inv'").fetchone()[0], "ITEM_LOGIN_REQUIRED")
+        self.assertEqual(self.c.execute(select(PlaidItem.error)
+                                        .where(PlaidItem.item_id == "inv")).fetchone()[0], "ITEM_LOGIN_REQUIRED")
         with mock.patch.object(plaid, "call", side_effect=call):
             self.assertEqual(plaid.sync_all(self.c), {"items": 1, "errors": []})
         with self.assertRaises(plaid.PlaidError):
             plaid.sync_item(self.c, "nope", TODAY)
 
     def test_simplefin_copies_of_a_plaid_brokerage_are_hidden_once(self):
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) "
-                       "VALUES ('et', 'tok', 'E*TRADE from Morgan Stanley', 'investments'), "
-                       "('bk', 'tok', 'Chase', 'transactions'), ('x', 'tok', 'Ally', NULL)")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, source, institution) VALUES "
-                       "('s1', 'sf', 'E*Trade Brokerage', 'simplefin', 'E*Trade'), ('s2', 'sf', 'Chase Invest', 'simplefin', 'Chase'), "
-                       "('s3', 'sf', 'Ally Invest', 'simplefin', 'Ally Invest')")
+        self.c.execute(insert(PlaidItem), [{"item_id": "et", "access_token": "tok",
+                                            "institution_name": "E*TRADE from Morgan Stanley",
+                                            "products": "investments"},
+                                           {"item_id": "bk", "access_token": "tok", "institution_name": "Chase",
+                                            "products": "transactions"},
+                                           {"item_id": "x", "access_token": "tok", "institution_name": "Ally",
+                                            "products": None}])
+        self.c.execute(insert(InvAccount), [{"id": "s1", "item_id": "sf", "name": "E*Trade Brokerage",
+                                             "source": "simplefin", "institution": "E*Trade"},
+                                            {"id": "s2", "item_id": "sf", "name": "Chase Invest",
+                                             "source": "simplefin", "institution": "Chase"},
+                                            {"id": "s3", "item_id": "sf", "name": "Ally Invest", "source": "simplefin",
+                                             "institution": "Ally Invest"}])
         # Chase is a bank connection; Ally's (no products listed) counts as investments.
         self.assertEqual(plaid.hide_all_duplicates(self.c), ["E*Trade Brokerage", "Ally Invest"])
-        self.assertEqual([tuple(r) for r in self.c.execute("SELECT id, hidden FROM inv_accounts ORDER BY id")],
+        self.assertEqual([tuple(r) for r in self.c.execute(select(InvAccount.id, InvAccount.hidden)
+                                                           .order_by(InvAccount.id))],
                          [("s1", 1), ("s2", 0), ("s3", 1)])
-        self.c.execute("UPDATE inv_accounts SET hidden=0")
+        self.c.execute(update(InvAccount).values(hidden=0))
         self.assertEqual(plaid.hide_all_duplicates(self.c), [])   # once only
         self.assertEqual(plaid.hide_simplefin_duplicates(self.c, "nope"), [])
 
     def test_removing_an_investment_connection_removes_its_data(self):
-        self.c.execute("INSERT INTO plaid_items(item_id, access_token, products) VALUES ('inv', 'tok', 'investments'), "
-                       "('keep', 'tok', 'investments')")
-        self.c.execute("INSERT INTO inv_accounts(id, item_id, name, account_id) VALUES ('w1', 'inv', 'Roth', 'pl:w1'), "
-                       "('k1', 'keep', 'Other', NULL)")
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('pl:w1', 'Roth', 'investment')")
+        self.c.execute(insert(PlaidItem), [{"item_id": "inv", "access_token": "tok", "products": "investments"},
+                                           {"item_id": "keep", "access_token": "tok", "products": "investments"}])
+        self.c.execute(insert(InvAccount), [{"id": "w1", "item_id": "inv", "name": "Roth", "account_id": "pl:w1"},
+                                            {"id": "k1", "item_id": "keep", "name": "Other", "account_id": None}])
+        self.c.execute(insert(Account).values(id="pl:w1", name="Roth", kind="investment"))
         for aid in ("w1", "k1"):
-            self.c.execute("INSERT INTO holdings(account_id, security_id, value) VALUES (?, 's', 1)", (aid,))
-            self.c.execute("INSERT INTO inv_transactions(id, account_id, date) VALUES (?, ?, '2026-09-01')", ("t" + aid, aid))
-            self.c.execute("INSERT INTO inv_snapshots(date, account_id, value) VALUES ('2026-09-01', ?, 1)", (aid,))
+            self.c.execute(insert(Holding).values(account_id=aid, security_id="s", value=1))
+            self.c.execute(insert(InvTransaction).values(id="t" + aid, account_id=aid, date="2026-09-01"))
+            self.c.execute(insert(InvSnapshot).values(date="2026-09-01", account_id=aid, value=1))
         plaid.remove_item(self.c, "inv")
-        for table, col in (("holdings", "account_id"), ("inv_transactions", "account_id"), ("inv_snapshots", "account_id"),
-                           ("inv_accounts", "id"), ("plaid_items", "item_id")):
-            self.assertEqual([r[0] for r in self.c.execute(f"SELECT {col} FROM {table}")], ["keep" if table == "plaid_items" else "k1"])
-        self.assertFalse(self.c.execute("SELECT 1 FROM accounts WHERE id='pl:w1'").fetchone())
+        for col in (Holding.account_id, InvTransaction.account_id, InvSnapshot.account_id, InvAccount.id, PlaidItem.item_id):
+            self.assertEqual([r[0] for r in self.c.execute(select(col))], ["keep" if col.class_ is PlaidItem else "k1"])
+        self.assertFalse(self.c.execute(select(Account.id).where(Account.id == "pl:w1")).fetchone())
         with self.assertRaises(plaid.PlaidError):
             plaid.remove_item(self.c, "inv")
         with self.assertRaises(plaid.PlaidError):
