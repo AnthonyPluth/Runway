@@ -1,7 +1,5 @@
 """Merchant logos: noted from Plaid, downloaded from Plaid (or the icon CDN for big names), served by Runway."""
 import io
-import os
-import tempfile
 import unittest
 from datetime import date
 from unittest import mock
@@ -11,6 +9,7 @@ import urllib.request
 
 from runway import db, merchants, server
 from runway import settings_keys as sk
+from tests.shared import DbCase
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
 
@@ -21,17 +20,10 @@ class FakeResponse(io.BytesIO):
         self.headers = {"Content-Type": ctype}
 
 
-class MerchantTests(unittest.TestCase):
+class MerchantTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "m.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.asked = []
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def opener(self, replies):
         def open_(req):

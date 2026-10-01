@@ -1,12 +1,11 @@
 """Churning (runway/churning.py): 5/24, when a bonus can be earned again, annual fee dates, spending toward a bonus,
 estimated rewards, the best card for a purchase, points values and the push alerts."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
-from runway import churning, db, notify
+from runway import churning, notify
 from runway.churning import ChurnError
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
 
@@ -128,19 +127,12 @@ class RankTests(unittest.TestCase):
         self.assertIsNone(mine[0]["value"])
 
 
-class DbTests(unittest.TestCase):
+class DbTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, owner) VALUES ('cc', 'Gold ••1234', 'credit', 'Alex')")
         self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('chk', 'Checking', 'checking')")
         self.c.execute("INSERT INTO categories(name, parent) VALUES ('Takeout', 'Restaurants')")
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, id, posted, amount, category, split=0):
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, category, is_split) VALUES (?,?,?,?,?,?)",

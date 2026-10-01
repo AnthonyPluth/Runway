@@ -8,16 +8,14 @@ from datetime import date, datetime, timedelta, UTC
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from runway import db, plaid, planner, portfolio, prices
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name) VALUES ('it1','tok','Fidelity')")
         self.c.execute("INSERT INTO inv_accounts(id, item_id, name, type, subtype, balance) VALUES ('A','it1','Brokerage','investment','brokerage',0)")
         self.c.executemany("INSERT INTO securities(id, ticker, name, type, is_cash) VALUES (?,?,?,?,?)", [
@@ -25,10 +23,6 @@ class Base(unittest.TestCase):
             ("SPAXX", "SPAXX", "Fidelity Government Money Market", "mutual fund", 1),
             ("XYZ", "XYZ", "XYZ Corp", "equity", 0),
         ])
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, id, d, type_, sub, amount, sec=None, qty=0, price=None, fees=0):
         self.c.execute("INSERT INTO inv_transactions(id, account_id, security_id, date, name, type, subtype, quantity, amount, price, fees) "
@@ -284,7 +278,7 @@ class MockYahoo(BaseHTTPRequestHandler):
         self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
 
-class SyncTests(unittest.TestCase):
+class SyncTests(DbCase):
     @classmethod
     def setUpClass(cls):
         cls.plaid = HTTPServer(("127.0.0.1", 0), MockPlaid)
@@ -300,14 +294,8 @@ class SyncTests(unittest.TestCase):
         os.environ.pop("RUNWAY_PLAID_URL", None); os.environ.pop("RUNWAY_PRICES_URL", None)
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         MockPlaid.calls.clear(); MockPlaid.login_required = False
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
 
     def test_link_exchange_sync_remove(self):
         with self.assertRaises(plaid.PlaidError):
@@ -449,17 +437,8 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class DuplicateConnectionTests(unittest.TestCase):
+class DuplicateConnectionTests(DbCase):
     """The same login linked twice (two Wealthfront connections with the same accounts) is flagged, and refused at link."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "d.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
 
     def add(self, item, accounts, institution="Wealthfront", products="investments"):
         self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_id, institution_name, products) VALUES (?,?,?,?,?)",
@@ -512,18 +491,12 @@ class DuplicateConnectionTests(unittest.TestCase):
         lock.release.assert_not_called()
 
 
-class InvestmentAccountsInYourAccountsTests(unittest.TestCase):
+class InvestmentAccountsInYourAccountsTests(DbCase):
     """Investment accounts linked through Plaid show under Settings → Accounts and count in net worth, once."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "i.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO plaid_items(item_id, access_token, institution_name, products) VALUES ('wf', 't', 'Wealthfront', 'investments')")
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
 
     def inv(self, id_, name, balance):
         self.c.execute("INSERT INTO inv_accounts(id, item_id, name, mask, balance) VALUES (?, 'wf', ?, '1234', ?)", (id_, name, balance))

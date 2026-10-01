@@ -1,7 +1,5 @@
 """The API handlers for the Overview, Accounts, Budget, Transactions and push notifications, and the sync's own
 queries, called directly on the sample data (runway/demo.py) plus the cases each one handles."""
-import os
-import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from unittest import mock
@@ -10,6 +8,7 @@ from runway import categories, db, demo, splits
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
+from tests.shared import DbCase
 
 TODAY = date.today()
 
@@ -18,26 +17,10 @@ def q(**kw):
     return {k: [str(v)] for k, v in kw.items()}
 
 
-class HandlerTests(unittest.TestCase):
+class HandlerTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        env = mock.patch.dict(os.environ, {"RUNWAY_DATA": self.tmp.name})
-        env.start()
-        self.addCleanup(env.stop)
-        path = os.path.join(self.tmp.name, "runway.db")
-        db.init(path)
-        self.c = db.connect(path)
-        # The syncs open their own db.session(). Point it at this test's database: on SQLite RUNWAY_DATA already does,
-        # but on Postgres each test's schema is named after its path, and a session without one would find no tables.
-        opened = db.session
-        patch = mock.patch.object(db, "session", lambda p=None: opened(p or path))
-        patch.start()
-        self.addCleanup(patch.stop)
+        super().setUp()
         demo.seed(self.c, TODAY)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def one(self, sql, *args):
         return self.c.execute(sql, args).fetchone()

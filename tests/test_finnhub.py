@@ -3,9 +3,7 @@ stream uses it and falls back to Yahoo, and the Settings endpoints. The WebSocke
 import contextlib
 import io
 import json
-import os
 import queue
-import tempfile
 import time
 import unittest
 import urllib.error
@@ -19,6 +17,7 @@ from runway import settings_keys as sk
 from runway.models import Setting
 from runway.server.api import investments, state
 from runway.server.common import ApiError
+from tests.shared import DbCase
 
 KEY = "abcd1234efgh5678ijkl"
 OTHER_KEY = "zyxw9876vuts5432rqpo"
@@ -360,16 +359,9 @@ class QuoteStreamTests(unittest.TestCase):
         self.assertEqual((live.watched, live.unwatched), ([], 0))
 
 
-class SettingsApiTests(unittest.TestCase):
+class SettingsApiTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        env = mock.patch.dict(os.environ, {"RUNWAY_DATA": self.tmp.name})
-        env.start()
-        self.addCleanup(env.stop)
-        db.init(os.path.join(self.tmp.name, "runway.db"))
-        self.c = db.connect(os.path.join(self.tmp.name, "runway.db"))
-        self.addCleanup(self.tmp.cleanup)
-        self.addCleanup(self.c.close)
+        super().setUp()
         self.addCleanup(finnhub.feed.reset)
 
     def test_save_checks_the_key_first(self):

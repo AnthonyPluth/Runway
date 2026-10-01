@@ -1,31 +1,23 @@
 """Changing many transactions at once."""
-import os
-import tempfile
 import unittest
 
-from runway import categorize, db, rules, splits
+from runway import categorize, rules, splits
 from runway.server.api import categories as api_categories
 from runway.server.api import transactions as api_tx
+from tests.shared import DbCase
 
 
-class Fixture(unittest.TestCase):
+class Fixture(DbCase):
     """Four transactions on a card, one of them split."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "b.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('cc', 'Card', 'credit', 0)")
         for i, (amt, desc, cat, review) in enumerate([(-10, "SQ *JOES 1", None, 1), (-12, "SQ *JOES 2", "Shopping", 1),
                                                       (-100, "TARGET", "Shopping", 0), (-5, "OTHER", "Other", 1)]):
             self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source, needs_review) "
                            "VALUES (?,?,?,?,?,?,?,?,?)", (f"t{i}", "cc", "2026-09-01", amt, desc, desc, cat, "ai" if cat else None, review))
         splits.set_splits(self.c, "t2", [{"amount": -60, "category": "Groceries"}, {"amount": -40, "category": "Shopping"}])
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def rows(self):
         return {r["id"]: tuple(r)[1:] for r in self.c.execute(

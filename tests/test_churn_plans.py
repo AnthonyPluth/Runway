@@ -1,13 +1,12 @@
 """Churning (runway/churning.py), the second round: portal-only earning rates in the best-card ranking, rates sent
 with a new card, plans for a card (keep, close, product change) with Done and undo, hiding a card from Upcoming, snoozing
 a to-do, program currencies with estimated values, and whose card it is."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
-from runway import churning, db, notify
+from runway import churning, notify
 from runway.churning import ChurnError
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
 VALS = {"cash": {"name": "Cash back", "cents": 1.0}, "c1": {"name": "Capital One miles", "cents": 1.4},
@@ -63,18 +62,11 @@ class PortalRankTests(unittest.TestCase):
         self.assertEqual(unnamed[0]["note"], "4x if booked through the issuer's portal")
 
 
-class ChurnDbTests(unittest.TestCase):
+class ChurnDbTests(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, owner) VALUES ('cc', 'Venture X', 'credit', 'Alex')")
         self.c.execute("INSERT INTO categories(name, parent) VALUES ('Hotels', 'Travel')")
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def add(self, **kw):
         return churning.save_card(self.c, {"owner": "Alex", "issuer": "chase", "product": "Card", "opened_on": "2025-10-10", **kw})

@@ -2,7 +2,6 @@
 duplicates, and card statements from the bank in the forecast."""
 import json
 import os
-import tempfile
 import threading
 import unittest
 from datetime import date
@@ -11,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import sqlalchemy.exc
 
 from runway import db, forecast, plaid, plaidbank, simplefin
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 
@@ -81,7 +81,7 @@ def tx(tid, acct, day, amount, name, pending=False, pending_id=None):
             "pending": pending, "pending_transaction_id": pending_id}
 
 
-class PlaidBankTests(unittest.TestCase):
+class PlaidBankTests(DbCase):
     @classmethod
     def setUpClass(cls):
         cls.server = HTTPServer(("127.0.0.1", 0), MockBank)
@@ -94,10 +94,7 @@ class PlaidBankTests(unittest.TestCase):
         os.environ.pop("RUNWAY_PLAID_URL", None)
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         MockBank.products = ["transactions", "liabilities"]
         MockBank.pages, MockBank.calls, MockBank.reject_redirect = [], [], False
         MockBank.drop, MockBank.fail, MockBank.during_sync = set(), {}, None
@@ -111,9 +108,6 @@ class PlaidBankTests(unittest.TestCase):
             ("sf-chk|2", "sf-chk", "2026-09-20", -12.5, "COFFEE", "Coffee", "Coffee & Snacks"),
         ])
         self.c.commit()
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
 
     def link(self):
         plaid.link_token(self.c, None, "bank")

@@ -1,30 +1,19 @@
 """Planned cards and bank bonuses (runway/churn_wishlist.py): what's in the way of applying and the earliest day,
 credit scores, Upcoming items and alerts, and turning a plan into a card or a bank bonus when you apply."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
 from runway import churn_wishlist as wl
-from runway import bank_bonuses, churning, db, notify
+from runway import bank_bonuses, churning, notify
 from runway.churning import ChurnError
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
 QUIET = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False,
          "sync_failed": False, "churn_fee": False, "churn_bonus": False, "churn_plan": False, "churn_benefit": False}
 
 
-class WishlistTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
-
+class WishlistTests(DbCase):
     def card(self, opened, issuer="citi", product="Card", **kw):
         return churning.save_card(self.c, {"owner": "Alex", "issuer": issuer, "product": product, "opened_on": opened, **kw})
 

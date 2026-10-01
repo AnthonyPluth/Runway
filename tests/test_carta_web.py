@@ -1,10 +1,9 @@
 """Carta through the browser extension: finding companies and grants in whatever carta.com's pages load."""
-import os
-import tempfile
 import unittest
 from datetime import date
 
-from runway import carta, carta_web, db, equity
+from runway import carta, carta_web, equity
+from tests.shared import DbCase
 
 # Two made-up shapes, since Carta's web app isn't documented: a snake_case one with the company around its
 # securities, and a camelCase one with the company inside each security.
@@ -96,17 +95,7 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(len(found["grants"]), 2)
 
 
-class ImportTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "c.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
-
+class ImportTests(DbCase):
     def test_import(self):
         self.assertEqual(carta_web.start(self.c)["start_url"], "https://app.carta.com/")
         r = carta_web.ingest(self.c, "https://app.carta.com/api/portfolio/7/", HOLDINGS)
