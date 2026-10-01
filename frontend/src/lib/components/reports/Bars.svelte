@@ -60,12 +60,15 @@
     return out;
   });
 
-  let hover = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipX = $state(0);
+  let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipX = $state(0);
+  // The month the readout is on, while the chart still has it: on a phone the readout stays after the finger lifts,
+  // and fewer months (12 to 6) would leave it past the last column, where it threw and stopped the chart redrawing.
+  const hover = $derived(pointed != null && pointed < n ? pointed : null);
   function move(clientX: number) {
     if (!svgEl) return;
     const r = svgEl.getBoundingClientRect();
     const px = ((clientX - r.left) / r.width) * W;
-    hover = Math.max(0, Math.min(n - 1, Math.floor((px - m.left) / bw)));
+    pointed = Math.max(0, Math.min(n - 1, Math.floor((px - m.left) / bw)));
     tipX = clientX - r.left;
   }
   const rows = (i: number) => series.map((s) => ({ s, v: s.values[i] || 0 })).filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
@@ -88,7 +91,7 @@
         {/if}
       {/each}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" class="cursor-pointer" role="presentation"
-        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (hover = null)} use:scrub={move} />
+        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:scrub={move} />
     </svg>
     {#if hover != null}
       <Tip x={tipX} boxWidth={width}>
