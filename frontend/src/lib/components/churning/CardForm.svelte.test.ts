@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { app } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
 import CardForm from "./CardForm.svelte";
-import { bodyOf, calls, card, churning } from "./fixtures";
+import { bodyOf, calls, card, churning, found } from "./fixtures";
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
@@ -78,5 +79,121 @@ describe("card form", () => {
     await userEvent.click(screen.getByLabelText("Don't show this card in Upcoming"));
     await waitFor(() => expect(bodyOf(calls("/api/churning/cards/1").at(-1)!)).toEqual({ hide_upcoming: true }));
     expect(screen.getByText(/the day before the next annual fee posts/)).toBeInTheDocument();
+  });
+
+  describe("from an account found on your accounts", () => {
+    const draft = found();
+    const open = () => render(CardForm, { c: null, d: churning(), person: "", draft, onclose: vi.fn(), onchanged: vi.fn() });
+
+    it("starts pre-filled, says the opening day is a guess, and saves nothing until Add", async () => {
+      open();
+      expect(screen.getByLabelText("Card")).toHaveValue("Sapphire Reserve");
+      expect(screen.getByLabelText("Whose card")).toHaveValue("Alex");
+      expect(screen.getByLabelText("Bank")).toHaveValue("chase");
+      expect(screen.getByLabelText("Annual fee")).toHaveValue(795);
+      expect(screen.getByLabelText("Fee posts in")).toHaveValue("3");
+      expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
+      expect(screen.getByTestId("opened-guess")).toHaveTextContent("opened on or before this day");
+      expect(calls(/./)).toHaveLength(0);
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards")[0])).toMatchObject({
+        owner: "Alex", issuer: "chase", product: "Sapphire Reserve", account_id: "acct-1", opened_on: "2024-03-02", annual_fee: "795", fee_month: "3", business: false });
+    });
+
+    it("stops calling the date a guess once you change it", async () => {
+      open();
+      const opened = screen.getByLabelText("Opened (on or before)");
+      await userEvent.clear(opened);
+      await userEvent.type(opened, "2023-11-20");
+      expect(screen.getByLabelText("Opened")).toHaveValue("2023-11-20");
+      expect(screen.queryByTestId("opened-guess")).toBeNull();
+    });
+
+    it("asks for the day when the account has no transactions to guess from", () => {
+      render(CardForm, { c: null, d: churning(), person: "", draft: found({ opened_on: null }), onclose: vi.fn(), onchanged: vi.fn() });
+      expect(screen.getByTestId("opened-guess")).toHaveTextContent("can’t tell when this card was opened");
+    });
+  });
+
+  describe("Fill in the rest with AI", () => {
+    const suggestion = {
+      family: "Sapphire", currency: "ur", base_rate: 1, annual_fee: 550, portal_name: "Chase Travel",
+      rates: [{ category: "Travel", multiplier: 5, portal_only: 1 }, { category: "Restaurants", multiplier: 3, portal_only: 0 }],
+      benefits: [{ name: "Travel credit", kind: "credit", amount: 300, period: "annual" }],
+    };
+    const setup = (c = null as ReturnType<typeof card> | null) => {
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? suggestion : path.endsWith("/cards") ? { id: 7 } : { ok: true })) as never);
+      render(CardForm, { c, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+    };
+    afterEach(() => { app.state = null; });
+
+    it("is hidden without an OpenRouter key", () => {
+      app.state = { connected: true, has_api_key: false } as never;
+      setup();
+      expect(screen.queryByRole("button", { name: "Fill in the rest with AI" })).toBeNull();
+    });
+
+    it("fills the empty fields, marks them, and saves them only with the card", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup();
+      const button = screen.getByRole("button", { name: "Fill in the rest with AI" });
+      expect(button).toBeDisabled();   // it needs a name to ask about
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(button);
+      expect(bodyOf(calls("/api/churning/suggest")[0])).toEqual({ issuer: "chase", product: "Sapphire Reserve" });   // the bank and the name only
+      expect(await screen.findByTestId("ai-marked")).toHaveTextContent("Suggested by AI, check before saving");
+      expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire");
+      expect(screen.getByLabelText("Earns")).toHaveValue("ur");
+      expect(screen.getByLabelText("Annual fee")).toHaveValue(550);
+      expect(screen.getByLabelText("Category of rate 1")).toHaveValue("Travel");
+      expect(screen.getByLabelText("The portal's name")).toHaveValue("Chase Travel");
+      expect(screen.getByLabelText("Suggested benefit 1")).toHaveValue("Travel credit");
+      expect(calls("/api/churning/cards")).toHaveLength(0);   // nothing saved yet
+      await userEvent.clear(screen.getByLabelText("Amount of Travel credit"));
+      await userEvent.type(screen.getByLabelText("Amount of Travel credit"), "250");   // editable
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(calls("/api/churning/cards/7/benefits")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards")[0])).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: "550", portal_name: "Chase Travel" });
+      expect(bodyOf(calls("/api/churning/cards/7/benefits")[0])).toMatchObject({ name: "Travel credit", kind: "credit", amount: 250, period: "annual" });
+    });
+
+    it("keeps what you already entered, and Discard puts the form back", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText("Annual fee"), "95");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      expect(screen.getByLabelText("Annual fee")).toHaveValue(95);
+      await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(screen.queryByTestId("ai-marked")).toBeNull();
+      expect(screen.getByLabelText(/Family/)).toHaveValue("");
+      expect(screen.getByLabelText("Earns")).toHaveValue("cash");
+      expect(screen.queryByLabelText("Suggested benefit 1")).toBeNull();
+    });
+
+    it("on an existing card, saves only when you say so", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      expect(calls("/api/churning/cards/1")).toHaveLength(0);
+      await userEvent.click(screen.getByRole("button", { name: "Save these" }));
+      await waitFor(() => expect(calls("/api/churning/cards/1/benefits")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards/1")[0])).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: 550 });
+      expect(screen.queryByTestId("ai-marked")).toBeNull();
+    });
+
+    it("shows an error as a toast and leaves the form alone", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      vi.mocked(api).mockRejectedValue(new Error("The AI request failed after 45s: timed out"));
+      render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("The AI request failed after 45s: timed out"));
+      expect(screen.queryByTestId("ai-marked")).toBeNull();
+      expect(screen.getByRole("button", { name: "Fill in the rest with AI" })).toBeEnabled();
+    });
   });
 });

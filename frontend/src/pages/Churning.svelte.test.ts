@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {}), categories: { list: [] }, catLabel: (x: string) => x, categoryGroups: () => [] }));
 
 import { api } from "$lib/api";
-import { calls, card, churning, wish } from "$lib/components/churning/fixtures";
+import { bodyOf, calls, card, churning, found, wish } from "$lib/components/churning/fixtures";
 import Churning from "./Churning.svelte";
 
 beforeEach(() => {
@@ -124,5 +124,76 @@ describe("the Churning page", () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()], bank_income: { Alex: { "2026": 300 } } }))) as never);
     render(Churning, { sub: "bank" });
     expect(await screen.findByText("Bonus money by year")).toBeInTheDocument();
+  });
+
+  describe("Found on your accounts", () => {
+    const serve = (drafts = [found(), found({ account_id: "acct-2", account_name: "CREDIT CARD (8668)", product: "", owner: "Sam", issuer: "other", annual_fee: null, opened_on: null })], dismissed: { account_id: string; name: string }[] = []) => {
+      let current = { drafts, dismissed };
+      vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/churning/found") return current;
+        if (path.startsWith("/api/churning/found/") && opts?.method === "POST") {
+          const [, , , , id, what] = path.split("/");
+          const gone = current.drafts.find((x) => x.account_id === decodeURIComponent(id));
+          current = what === "dismiss" && gone
+            ? { drafts: current.drafts.filter((x) => x !== gone), dismissed: [...current.dismissed, { account_id: gone.account_id, name: gone.account_name }] }
+            : { drafts: [found(), ...current.drafts.filter((x) => x.account_id !== "acct-1")], dismissed: [] };
+          return { ok: true };
+        }
+        return path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card()] });
+      }) as never);
+    };
+
+    it("lists each account as a draft with Add and Dismiss", async () => {
+      serve();
+      render(Churning);
+      const section = await screen.findByTestId("found-cards");
+      expect(within(section).getByText("Found on your accounts")).toBeInTheDocument();
+      expect(within(section).getByText("Sapphire Reserve")).toBeInTheDocument();
+      expect(within(section).getByText(/\$795 annual fee/)).toBeInTheDocument();
+      expect(within(section).getByText(/opened on or before Mar 2, 2024/)).toBeInTheDocument();
+      expect(within(section).getByText("CREDIT CARD (8668)")).toBeInTheDocument();   // no product to show: the account's name
+      expect(within(section).getAllByRole("button", { name: /^Add / })).toHaveLength(2);
+    });
+
+    it("shows nothing when there is nothing found", async () => {
+      serve([]);
+      render(Churning);
+      await screen.findByRole("button", { name: "Add a card" });
+      expect(screen.queryByTestId("found-cards")).toBeNull();
+    });
+
+    it("opens the add-card form pre-filled for review, without saving", async () => {
+      serve();
+      render(Churning);
+      await userEvent.click(await screen.findByRole("button", { name: "Add Sapphire Reserve" }));
+      expect(await screen.findByLabelText("Card")).toHaveValue("Sapphire Reserve");
+      expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
+      expect(calls("/api/churning/cards")).toHaveLength(0);
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(calls("/api/churning/cards")).toHaveLength(1));
+      expect(bodyOf(calls("/api/churning/cards")[0])).toMatchObject({ account_id: "acct-1", product: "Sapphire Reserve" });
+    });
+
+    it("dismisses a draft, and brings it back", async () => {
+      serve();
+      render(Churning);
+      await userEvent.click(await screen.findByRole("button", { name: "Dismiss Sapphire Reserve" }));
+      await waitFor(() => expect(calls("/api/churning/found/acct-1/dismiss")).toHaveLength(1));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Add Sapphire Reserve" })).toBeNull());
+      const section = screen.getByTestId("found-cards");
+      await userEvent.click(within(section).getByText("1 dismissed"));
+      await userEvent.click(within(section).getByRole("button", { name: "Bring back Chase Sapphire Reserve (1034)" }));
+      await waitFor(() => expect(calls("/api/churning/found/acct-1/undismiss")).toHaveLength(1));
+      expect(await screen.findByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
+    });
+
+    it("hides the other person's drafts when one person is picked", async () => {
+      serve();
+      render(Churning);
+      await screen.findByTestId("found-cards");
+      await userEvent.click(screen.getByRole("radio", { name: "Alex" }));
+      expect(screen.queryByRole("button", { name: "Add CREDIT CARD (8668)" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
+    });
   });
 });
