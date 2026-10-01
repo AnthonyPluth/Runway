@@ -78,7 +78,7 @@
     <summary class="w-fit cursor-pointer underline underline-offset-2 hover:text-foreground">How is this valued?</summary>
     <p class="mt-2 max-w-prose">
       Stock options, RSUs and shares: enter them here, or read them from Carta with Runway’s browser extension
-      (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/extension">Settings → Browser extension</a>).
+      (<a class="font-medium text-foreground underline underline-offset-4" href="#setup/connections">Settings → Connections</a>).
       Only what has vested counts toward net worth, at each company’s latest share price (its 409A value, for a private company).
     </p>
   </details>

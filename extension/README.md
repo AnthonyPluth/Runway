@@ -28,7 +28,7 @@ happens in Runway (the extension just fetches them), so when a store changes its
 
 Chrome, Edge, Brave, Arc or any other Chromium browser:
 
-1. In Runway, open **Settings → Browser extension** (the card that makes the key) and click **Make a key**. Copy it.
+1. In Runway, open **Settings → Connections** (the card that makes the key) and click **Make a key**. Copy it.
    A key works for 90 days (Settings shows when it runs out, and when the extension last used it), then you make a
    new one; it also stops working if the person who made it can no longer sign in to Runway.
 2. Click **Download the extension** on that same card and unzip it. Go to `chrome://extensions`, turn on
@@ -84,5 +84,5 @@ Account → Orders & Purchases in that browser once and import again; if it stil
 page (`page` in that config) or the names of the values the page keeps in storage (`storage_headers`) need updating,
 which is a change in Runway only.
 
-For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Browser extension ->
+For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Connections -> Browser extension ->
 Carta -> **Download what the extension read** shows why a grant was missed.

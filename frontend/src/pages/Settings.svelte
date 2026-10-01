@@ -27,7 +27,7 @@
 
   // svelte-ignore state_referenced_locally
   lastSection = sub || lastSection;
-  // Until you've connected a bank, Settings opens on Bank connections.
+  // Until you've connected a bank, Settings opens on Connections.
   const section = resolveSection(lastSection, !!app.state?.connected);
 
   // Every tab has the accounts, rules and categories to hand, as in the classic page.
@@ -50,8 +50,7 @@
     {#if section === "accounts"}<AccountsSection accounts={d.accounts} />
     {:else if section === "categories"}<CategoriesSection />
     {:else if section === "rules"}<RulesSection rules={d.rules} accounts={d.accounts} />
-    {:else if section === "connections"}<ConnectionsSection />
-    {:else if section === "extension"}<ExtensionSection />
+    {:else if section === "connections"}<ConnectionsSection accounts={d.accounts} /><ExtensionSection />
     {:else if section === "services"}<ServicesSection />
     {:else if section === "notifications"}<NotificationsSection />
     {:else}<AdvancedSection />{/if}

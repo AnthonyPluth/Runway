@@ -4,7 +4,7 @@ The [README](../README.md) has the short list. This is what each part does and w
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget** (Budget and Bills & income), **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
-Settings has eight tabs: **Accounts**, **Bank connections** (SimpleFIN and Plaid), **Categories**, **Rules**, **Browser extension** (Amazon, Target, Costco and Carta), **Services** (OpenRouter, Realie, Finnhub and Logo.dev), **Notifications**, and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Bank connections.
+Settings has seven tabs: **Accounts**, **Connections** (SimpleFIN, Plaid and the browser extension for Amazon, Target, Costco and Carta), **Categories**, **Rules**, **Services** (OpenRouter, Realie, Finnhub and Logo.dev), **Notifications**, and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Connections.
 
 ## Cash-flow forecast
 
@@ -19,9 +19,9 @@ On the Overview page.
 - **Warnings link to their fix:** a card that isn’t linked, has no paying account or is missing a statement opens the Settings tab where that’s put right.
 - **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions.
 
-## Bank connections
+## Connections
 
-Under Settings → Bank connections, with each account's source chosen under Settings → Accounts.
+Under Settings → Connections, with each account's source chosen under Settings → Accounts.
 
 - **SimpleFIN or Plaid for each account.** Link a bank or card through Plaid, match its accounts to the ones you already have, and pick where each one's balance and transactions come from. Switching keeps your history, categories and recurring matches: transactions both providers have are matched up so nothing is counted twice.
 - Accounts only Plaid can reach can be added on their own, and a card linked through Plaid gets its statements from the issuer whichever provider its transactions come from.
@@ -41,7 +41,7 @@ On Budget → Bills & income.
 - **Rules** (Settings → Rules) with conditions and actions: when the merchant contains, is or starts with some text, the amount is in a range, the money goes out or comes in, or it's in a particular account, then set a category, rename the merchant, split it by percentages ("Costco: 70% Groceries, 30% Household") or put it in Review. The most specific rule wins, and a preview shows what a rule would match before you save it. When you pick a category, Runway asks whether to use it for that merchant from now on, including after you apply an AI suggestion, so nothing writes a rule behind your back. Built-in heuristics handle card payments and sweeps.
 - **Optional AI categorization** through OpenRouter (key under Settings → Services), guided by examples of how you've categorized before and shown with confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new categories when nothing fits. Every AI call is logged.
 - **Split transactions:** a $100 run to Target can be $60 Groceries and $40 Shopping. Budgets, reports and category filters count each part on its own; pick a single category again and the transaction goes back together.
-- **Amazon, Target and Costco orders:** a small browser extension (installed from Settings → Browser extension) reads your orders with the sign-in already in your browser, and Runway splits each card charge by what you bought: tax and shipping shared out, each Amazon shipment matched to its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for next time. See [extension/README.md](../extension/README.md).
+- **Amazon, Target and Costco orders:** a small browser extension (installed from Settings → Connections) reads your orders with the sign-in already in your browser, and Runway splits each card charge by what you bought: tax and shipping shared out, each Amazon shipment matched to its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for next time. See [extension/README.md](../extension/README.md).
 - **Bulk editing:** tick transactions (shift-click for a range) to give them a category, rename their merchant or mark them reviewed at once.
 - **Categories** (Settings → Categories) have one level of subcategories, each with an emoji and a color. Anything uncategorized waits on the To review tab; there is also search and filtering. The list is grouped by day with each day's total, and loads more as you scroll.
 - **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself. With a free Logo.dev publishable key (Settings → Services), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway. The same key gives each bank or card its logo: by website for big banks Runway recognizes (Chase, Citi, Capital One, American Express and so on, also from a card's name), else by the institution's name; without it, accounts show a letter. To use a different logo for an account, or none, open the account in Settings → Accounts and click its logo.

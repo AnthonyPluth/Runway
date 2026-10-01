@@ -78,7 +78,7 @@ def institution(name: str | None, owners) -> str | None:
 
 def connection_logos(conn) -> dict[str, str | None]:
     """{institution name: its logo's address, or None for a letter} for every bank connection (Plaid's), for Settings →
-    Bank connections: by website for the banks Runway knows, else by name, like an account's."""
+    Connections: by website for the banks Runway knows, else by name, like an account's."""
     from . import merchants   # imports this module too
     names = sorted({r["institution_name"] for r in conn.execute(
         select(PlaidItem.institution_name).where(PlaidItem.institution_name.is_not(None)))})

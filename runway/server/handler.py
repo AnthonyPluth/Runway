@@ -60,7 +60,7 @@ NOT_SAME_SITE = ("Blocked a request that didn’t come from Runway’s own addre
 NO_APP_HEADER = ("Blocked a change that didn’t come from Runway’s app (it was missing the X-Runway header). Reload the page "
                  "and try again; if you run Runway behind a proxy, make sure it passes that header on.")
 
-# Plaid Link (Settings → Bank connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
+# Plaid Link (Settings → Connections) loads its script and iframe from Plaid; nothing else comes from elsewhere.
 PLAID_ORIGINS = "https://cdn.plaid.com"
 PLAID_API = "https://production.plaid.com https://sandbox.plaid.com"
 
@@ -630,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
         q = {k: v[0] for k, v in urllib.parse.parse_qs(url.query).items()}
         if q.get("error"):
-            return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/extension", "Back to Settings"))
+            return self._page(400, "Carta wasn't connected", q.get("error_description") or q["error"], ("/#setup/connections", "Back to Settings"))
         try:
             with db.session() as conn:
                 if q.get("mock"):
@@ -639,17 +639,17 @@ class Handler(BaseHTTPRequestHandler):
                     if (db.get_setting(conn, sk.CARTA_ENV) != "mock"
                             or (self.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site"):
                         return self._page(400, "Carta wasn't connected", "Connect Carta from Settings.",
-                                          ("/#setup/extension", "Back to Settings"))
+                                          ("/#setup/connections", "Back to Settings"))
                 else:
                     carta.finish_authorize(conn, q.get("code", ""), q.get("state", ""))
             with db.session() as conn:
                 carta.sync(conn)
         except carta.CartaError as e:
-            return self._page(502, "Carta wasn't connected", str(e), ("/#setup/extension", "Back to Settings"))
+            return self._page(502, "Carta wasn't connected", str(e), ("/#setup/connections", "Back to Settings"))
         self._redirect("/#networth")
 
     def _extension(self, method: str, path: str) -> None:
-        """A call from Runway's browser extension. It carries the key made under Settings → Browser extension (a bearer
+        """A call from Runway's browser extension. It carries the key made under Settings → Connections (a bearer
         token, which a web page can't send on your behalf), so it needs no sign-in or same-site checks."""
         self._ext_call = True
         fn = EXT_ROUTES.get(path)

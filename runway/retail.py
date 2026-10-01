@@ -191,9 +191,9 @@ def check_token(conn, authorization: str | None) -> bool:
 
 
 REFUSALS = {
-    "expired": f"This key has expired (a key lasts {TOKEN_DAYS} days). Make a new one under Settings → Browser extension.",
-    "owner_gone": "The person who made this key can no longer sign in to Runway. Make a new one under Settings → Browser extension.",
-    "unknown": "Runway doesn't know this key. Make a new one under Settings → Browser extension.",
+    "expired": f"This key has expired (a key lasts {TOKEN_DAYS} days). Make a new one under Settings → Connections.",
+    "owner_gone": "The person who made this key can no longer sign in to Runway. Make a new one under Settings → Connections.",
+    "unknown": "Runway doesn't know this key. Make a new one under Settings → Connections.",
 }
 
 

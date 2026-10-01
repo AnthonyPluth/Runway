@@ -10,7 +10,7 @@ import InvestmentsView from "./InvestmentsView.svelte";
 beforeEach(() => { vi.mocked(api).mockReset(); });
 
 describe("InvestmentsView", () => {
-  it("with no investment accounts, says what the tab shows and links to Bank connections", async () => {
+  it("with no investment accounts, says what the tab shows and links to Connections", async () => {
     vi.mocked(api).mockResolvedValue({ inv_accounts: 0, items: [] } as never);
     render(InvestmentsView);
     const block = await screen.findByTestId("getting-started");

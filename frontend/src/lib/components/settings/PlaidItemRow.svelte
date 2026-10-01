@@ -12,8 +12,8 @@
   import type { PlaidItem } from "./types";
   import { linkCls, warnText } from "./ui";
 
-  // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Bank and card accounts
-  // (bank, card and investment) are matched to yours under Settings → Accounts.
+  // A Plaid connection: its bank, when it last synced (or what's wrong), Sync/Reconnect and Remove. Its accounts are
+  // matched to yours under Settings → Accounts.
   let { it, items }: { it: PlaidItem; items: PlaidItem[] } = $props();
 
   const utc = (t: string) => new Date(t.replace(" ", "T") + "Z");
@@ -45,6 +45,8 @@
   const accounts = $derived(it.bank ? it.accounts.filter((p) => p.type !== "investment") : it.accounts);
   const waiting = $derived(accounts.filter((p) => !p.account_id && !p.ignored).length);
   const problem = $derived(it.error ? plaidProblem(it.error) : null);
+  // A plain bank connection needs no label; one that only brings in card statements, or investments, says so.
+  const kind = $derived(it.bank ? (it.products.includes("transactions") ? "" : "card statements") : "investments");
 
   // What Remove does (plaid.remove_item): an investment connection's accounts go with their holdings and activity; a bank
   // connection's accounts that SimpleFIN also has go back to it, and the ones only Plaid had keep their history.
@@ -79,7 +81,7 @@
     <span class="flex min-w-0 flex-1 flex-col">
       <span class="flex flex-wrap items-center gap-1.5 font-medium">{it.institution_name || "Connection"}
         {#if it.env === "sandbox"}<Badge variant="secondary">sandbox</Badge>{/if}
-        <Badge variant="secondary">{it.bank ? (it.products.includes("transactions") ? "bank" : "card statements") : "investments"}</Badge></span>
+        {#if kind}<Badge variant="secondary">{kind}</Badge>{/if}</span>
       <span class="text-xs text-muted-foreground">{connectedOn}{#if !problem?.reconnect}{synced}{/if}{#if problem}{problem.reconnect ? "" : " · "}<span
         class={warnText}>{problem.text}</span>{/if}</span>
     </span>

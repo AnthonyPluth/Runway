@@ -96,7 +96,7 @@ def _score(pa: dict, acct: dict, institution: str | None) -> int:
 def auto_match(conn, item_id: str) -> list[str]:
     """Match this connection's unmatched accounts to your existing ones where one candidate clearly fits best: the last 4
     digits in its name, its initials ("CSR" for Chase Sapphire Reserve), shared words ("Double Cash"), the same
-    institution and a similar balance all count. Anything unclear waits for you in Settings → Bank connections."""
+    institution and a similar balance all count. Anything unclear waits for you in Settings → Accounts."""
     institution = _institution(conn, item_id)
     theirs = [p for p in db.rows(conn.execute(select(PlaidAccount).where(
         PlaidAccount.item_id == item_id, PlaidAccount.ignored == 0, PlaidAccount.plaid_account_id.not_in(_matched())))) if runway_kind(p)]

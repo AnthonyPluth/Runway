@@ -108,7 +108,7 @@ def api_plaid_oauth_resume(conn, _q, _b):
     except ValueError:
         p = {}
     if not p.get("token") or time.time() - p.get("at", 0) > 4 * 3600:
-        raise ApiError("That bank connection has expired. Start it again from Settings → Bank connections.", 404)
+        raise ApiError("That bank connection has expired. Start it again from Settings → Connections.", 404)
     return {"link_token": p["token"], "kind": p.get("kind"), "item_id": p.get("item_id")}
 
 
