@@ -626,6 +626,21 @@ def _spending(today: date):
                       t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
 
 
+def transfer_outflows(conn, today: date) -> list[dict]:
+    """Like spent_outflows, but the money out monthly_spending leaves out as a transfer (over the same months and
+    accounts): a loan's payment found here was paid but not counted as spending."""
+    start = date(today.year, today.month, 1) - relativedelta(months=6)
+    end = date(today.year, today.month, 1)
+    t = splits.parts()
+    rows = conn.execute(
+        select(t.c.posted, t.c.amount, t.c.payee, t.c.description).select_from(t)
+        .join(Account, Account.id == t.c.account_id).join(Category, Category.name == t.c.category)
+        .where(Category.is_transfer == 1, t.c.amount < 0, Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
+               t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
+    return [{"month": r["posted"][:7], "amount": -r["amount"], "text": f"{r['payee'] or ''} {r['description'] or ''}".lower()}
+            for r in rows]
+
+
 def spent_outflows(conn, today: date) -> list[dict]:
     """Each money out that monthly_spending counts: {month (YYYY-MM), amount (positive), text (its payee and
     description, lowercased)}. To tell whether a loan's payment is in the spending figure, or was left out as a

@@ -118,7 +118,7 @@ export interface RetirementPlan {
 export interface PlanLoan {
   rate: number | null; payment: number | null; source: "plaid" | "manual" | "inferred" | null;
   note: "no_rate" | "no_payment" | "payment_below_interest" | null;
-  account_id?: string; payoff_year?: number | null; payment_counted?: boolean;
+  account_id?: string; payoff_year?: number | null; payment_counted?: boolean | null;
 }
 /** A home, other asset or company equity from Net worth, which the plan holds until it's sold into it; a vehicle is
  *  listed only for its loan's payment (it loses value, so it isn't counted). `owed` is what's owed on it today (a

@@ -229,7 +229,7 @@ class FireTests(Base):
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
         self.assertEqual(house["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "mtg",
-                                         "payment_counted": False, "payoff_year": None})   # no terms: kept as it is
+                                         "payment_counted": None, "payoff_year": None})   # no terms: kept as it is
         # with its terms set, what's owed is paid down to today (as on Net worth), projected on from there
         self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", interest_rate=6, monthly_payment=1500))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
@@ -269,8 +269,11 @@ class FireTests(Base):
         self.assertTrue(counted())
         self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))   # three months left
         self.assertFalse(counted())
+        # found in neither: Runway can't tell, so it's left as it is (None), not added
+        self.c.execute(update(Transaction).where(Transaction.id.like("t%")).values(amount=-925, category="Gifts & Donations"))   # in halves
+        self.assertIsNone(counted())
         self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
-        self.assertFalse(counted())
+        self.assertIsNone(counted())
 
     def test_a_payment_that_names_the_lender_wins_over_lookalikes(self):
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}

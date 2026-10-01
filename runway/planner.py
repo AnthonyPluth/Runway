@@ -174,8 +174,10 @@ def sellable(conn, today: date) -> list[dict]:
     A loan's `loan` also says which account it is (`account_id`), the calendar year of its last payment when it's
     projected (`payoff_year`), and whether its payment is in the spending figure the plan starts from
     (`payment_counted`, see payment_counted()), so the page can take the payment
-    off spending once it's paid off or sold. One categorized as a transfer (common when the loan account is synced
-    too) wasn't in it, so the page adds it to spending instead, for as long as it's still being paid."""
+    off spending once it's paid off or sold. One found paid as a transfer instead (common when the loan account is
+    synced too) wasn't in it (False), so the page adds it to spending, for as long as it's still being paid. One found
+    in neither (a short history, payments in parts, escrow under another name) is None: Runway can't tell, and the
+    page leaves spending as it is, since adding a payment that's already in it would count it twice."""
     from . import portfolio   # imported here: portfolio imports this module
     accts = {a["id"]: a for a in db.rows(conn.execute(
         select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.org, Account.name)
@@ -183,6 +185,7 @@ def sellable(conn, today: date) -> list[dict]:
     items = networth.assets(conn, today)
     terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
     spent: list[dict] | None = None
+    moved: list[dict] | None = None
     out = []
     for a in items:
         acct = accts.get(a["loan_account_id"])
@@ -191,10 +194,13 @@ def sellable(conn, today: date) -> list[dict]:
             t = terms.get(acct["id"])
             owed = loans.owed_on(acct, t, today)
             by_year, loan = loans.owed_by_year(owed, t)
-            counted = False
+            counted: bool | None = None
             if loan["payment"]:
+                names = [acct["org"] or "", acct["name"] or ""]
                 spent = portfolio.spent_outflows(conn, today) if spent is None else spent
-                counted = payment_counted(spent, loan["payment"], [acct["org"] or "", acct["name"] or ""])
+                moved = portfolio.transfer_outflows(conn, today) if moved is None else moved
+                counted = (True if payment_counted(spent, loan["payment"], names)
+                           else False if payment_counted(moved, loan["payment"], names) else None)
             loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
                     "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
         else:   # none, or a card: what's owed today

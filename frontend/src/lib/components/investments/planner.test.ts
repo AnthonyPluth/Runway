@@ -172,6 +172,13 @@ describe("flows", () => {
     expect(flows(plan({ spending_own: true }), Y, [repay({ payment_counted: false })]).net.slice(5)).toEqual(Array(6).fill(-20_000));
   });
 
+  it("leaves spending alone for a payment Runway found neither in spending nor paid as a transfer", () => {
+    const unknown = repay({ payment_counted: null });
+    expect(flows(plan(), Y, [unknown]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(endingPayments(plan(), [unknown], Y)).toEqual([]);
+    expect(addedPayments(plan(), [unknown], Y)).toEqual([]);
+  });
+
   it("names each ending payment and why it ends", () => {
     expect(endingPayments(plan(), [repaying], Y)).toEqual([{ yearly: 12_000, from: 2032, name: "House", sold: false, counted: true }]);
     expect(endingPayments(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), [repaying], Y))

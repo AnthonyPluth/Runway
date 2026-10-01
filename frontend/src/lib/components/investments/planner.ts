@@ -85,8 +85,9 @@ export function paymentEnds(a: PlanAsset, sellYear: number | null): number | nul
 /** A loan's payment in the plan, once per loan however many assets it's against: `yearly` is twelve monthly payments
  *  (a fixed dollar amount), `from` the first year it's no longer paid (the soonest, null when it goes on past the
  *  plan), `counted` whether it's in the spending figure the plan starts from. One that is comes off spending from
- *  `from`; one that isn't (categorized as a transfer, say) is added to spending until then, as it's still being paid. */
-export interface LoanPayment { yearly: number; from: number | null; name: string; sold: boolean; counted: boolean }
+ *  `from`; one paid as a transfer instead (false) is added to spending until then, as it's still being paid; one Runway
+ *  couldn't find either way (null) is left as it is, as adding one that's already in would count it twice. */
+export interface LoanPayment { yearly: number; from: number | null; name: string; sold: boolean; counted: boolean | null }
 export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] {
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const sold = new Map(plan.assets.filter((s) => { const a = byKey.get(s.key); return !a || counted(a); })
@@ -100,7 +101,7 @@ export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear
     const from = paymentEnds(a, sellYear);
     const had = byLoan.get(l.account_id);
     if (!had || sooner(from, had.from)) {
-      byLoan.set(l.account_id, { yearly: 12 * l.payment, from, name: a.name, sold: from != null && from === sellYear, counted: !!l.payment_counted });
+      byLoan.set(l.account_id, { yearly: 12 * l.payment, from, name: a.name, sold: from != null && from === sellYear, counted: l.payment_counted ?? null });
     }
   }
   return [...byLoan.values()];
@@ -109,11 +110,11 @@ export function loanPayments(plan: RetirementPlan, assets: PlanAsset[], thisYear
 /** Loan payments in Runway's spending figure that end during the plan, and come off it then. */
 export type EndingPayment = LoanPayment & { from: number };
 export const endingPayments = (plan: RetirementPlan, assets: PlanAsset[], thisYear: number): EndingPayment[] =>
-  loanPayments(plan, assets, thisYear).filter((p): p is EndingPayment => p.counted && p.from != null);
+  loanPayments(plan, assets, thisYear).filter((p): p is EndingPayment => p.counted === true && p.from != null);
 
-/** Loan payments missing from Runway's spending figure, added to it while they're still paid. */
+/** Loan payments paid as transfers, so missing from Runway's spending figure: added to it while they're still paid. */
 export const addedPayments = (plan: RetirementPlan, assets: PlanAsset[], thisYear: number): LoanPayment[] =>
-  loanPayments(plan, assets, thisYear).filter((p) => !p.counted);
+  loanPayments(plan, assets, thisYear).filter((p) => p.counted === false);
 
 /** Which dollars the planner shows its figures in: today's (what the projection runs in) or each year's own. */
 export type Dollars = "today" | "future";
@@ -148,12 +149,14 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
   const retireYear = Math.max(...people.map((p) => p.birth_year + p.retire_age));
   // Runway's spending figure (from your history) includes the payments on loans counted as spending: a fixed dollar
   // amount, so in today's dollars each year it's worth less, and once the loan is paid off or its asset sold it comes
-  // off altogether. One that wasn't counted (a transfer) is added while it's still paid. A figure you typed yourself is
+  // off altogether. One paid as a transfer is added while it's still paid; one Runway can't place is left as it is. A
+  // figure you typed yourself is
   // taken as it is: it probably has your loans in or out as you mean them, and adjusting it would count them twice.
   const payments = plan.spending_own ? [] : loanPayments(plan, assets, thisYear);
   const deflate = (y: number) => Math.pow(1 + plan.inflation, -Math.max(0, y - thisYear));
   const spending = (y: number) => Math.max(0, plan.spending + payments.reduce((s, p) => {
     const paying = p.from == null || y < p.from;
+    if (p.counted == null) return s;
     return s + (paying ? p.yearly * deflate(y) : 0) - (p.counted ? p.yearly : 0);
   }, 0));
   const net = years.map((y, t) => {

@@ -357,9 +357,17 @@ describe("RetirementPlanner", () => {
 
     it("says when a loan's payment isn't in spending, so the plan adds it until it ends", () => {
       setup(data({ assets: [repaying({ payment_counted: false })] }));
-      expect(screen.getByText(/^Its \$1,500\/month loan payment isn’t in your spending: Runway didn’t find it in what you spent over the last six months \(a payment categorized as a transfer isn’t counted as spending\)\. So the plan adds it to your spending in retirement until it’s paid off in 2045\.$/))
+      expect(screen.getByText(/^Its \$1,500\/month loan payment isn’t in your spending: it was paid as a transfer over the last six months, and transfers aren’t counted as spending\. So the plan adds it to your spending in retirement until it’s paid off in 2045\.$/))
         .toBeInTheDocument();
       expect(screen.getByText(/It's missing the \$1,500\/month payment on Home, until it’s paid off in 2045, which the plan adds while it's still paid\./)).toBeInTheDocument();
+      expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
+    });
+
+    it("says when Runway can't tell whether a loan's payment is in spending, and leaves spending alone", () => {
+      setup(data({ assets: [repaying({ payment_counted: null })] }));
+      expect(screen.getByText(/^Runway couldn’t tell whether its \$1,500\/month loan payment is in your spending, so the plan leaves your spending as it is\./))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/which the plan adds/)).not.toBeInTheDocument();
       expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
     });
 

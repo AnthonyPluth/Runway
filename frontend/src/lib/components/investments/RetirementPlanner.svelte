@@ -190,7 +190,7 @@
 
   // What happens to a loan's monthly payment in the plan, in plain words: whether it's already in the spending figure
   // and when it stops.
-  const NOT_FOUND = "Runway didn’t find it in what you spent over the last six months (a payment categorized as a transfer isn’t counted as spending)";
+  const NOT_FOUND = "it was paid as a transfer over the last six months, and transfers aren’t counted as spending";
   function paymentLine(a: PlanAsset, sellYear: number | null): string {
     const l = a.loan!;
     const pay = `${fmt0(l.payment ?? 0)}/month`;
@@ -204,6 +204,9 @@
     if (l.payment_counted) {
       return when ? `Its ${pay} loan payment is already in your spending, ${when}; from ${ends} the plan takes it off.${why}`
         : `Its ${pay} loan payment is already in your spending, and stays in it.${why}`;
+    }
+    if (l.payment_counted == null) {
+      return `Runway couldn’t tell whether its ${pay} loan payment is in your spending, so the plan leaves your spending as it is. If it isn’t, enter your own spending figure with it in.${why}`;
     }
     return `Its ${pay} loan payment isn’t in your spending: ${NOT_FOUND}. So the plan adds it to your spending in retirement ${when ?? "for as long as the plan runs"}.${why}`;
   }
