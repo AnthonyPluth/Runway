@@ -17,11 +17,15 @@ export function deviceName(): string {
 
 export const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
-/** This device's service worker registration and push subscription, if any. */
-export async function currentSubscription(): Promise<{ reg: ServiceWorkerRegistration | null; sub: PushSubscription | null }> {
+/** This device's service worker registration and push subscription, if any. A worker that's still starting (the app
+ *  was just opened) may not know its subscription yet, so this waits for it to be ready (for a few seconds at most). */
+export async function currentSubscription(wait = 3000): Promise<{ reg: ServiceWorkerRegistration | null; sub: PushSubscription | null }> {
   if (!pushSupported() || !window.isSecureContext) return { reg: null, sub: null };
   try {
-    const reg = await navigator.serviceWorker.register("/sw.js");
+    const sw = navigator.serviceWorker;
+    let reg = (await sw.getRegistration?.()) || (await sw.register("/sw.js"));
+    if (!reg.active && sw.ready)
+      reg = await Promise.race([sw.ready, new Promise<ServiceWorkerRegistration>((ok) => setTimeout(() => ok(reg), wait))]);
     return { reg, sub: await reg.pushManager.getSubscription() };
   } catch (e) { console.warn(e); return { reg: null, sub: null }; }
 }

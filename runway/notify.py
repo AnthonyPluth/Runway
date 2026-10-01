@@ -2,9 +2,13 @@
 
 Checked after every sync (daily, and when you open Runway). Each alert has a key (e.g. the card and its due date), and
 a key is only ever sent once.
+
+With sign-in (OIDC), notifications are each person's own: their devices, what they want to hear about, and what they've
+been sent. Nobody sees or changes anyone else's. Without it there's one person, and every device is theirs.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,16 +38,19 @@ DEFAULTS = {
 LOW_BALANCE_DAYS = 30
 
 
-def prefs(conn) -> dict:
+def prefs(conn, user_sub: str | None = None) -> dict:
+    """What a person wants to be told about (everyone's, without sign-in). Someone who hasn't chosen yet has what was
+    chosen for everyone before notifications were each person's own."""
+    raw = db.get_setting(conn, sk.notify_prefs(user_sub)) if user_sub else None
     try:
-        saved = json.loads(db.get_setting(conn, sk.NOTIFY_PREFS) or "{}")
+        saved = json.loads(raw or db.get_setting(conn, sk.NOTIFY_PREFS) or "{}")
     except ValueError:
         saved = {}
     return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
 
 
-def save_prefs(conn, body: dict) -> dict:
-    p = prefs(conn)
+def save_prefs(conn, body: dict, user_sub: str | None = None) -> dict:
+    p = prefs(conn, user_sub)
     for k, v in body.items():
         if k not in DEFAULTS:
             continue
@@ -54,7 +61,7 @@ def save_prefs(conn, body: dict) -> dict:
                 p[k] = max(0, db.number(v)) if k != "card_due_days" else max(0, min(14, int(v)))
             except (TypeError, ValueError):
                 raise ValueError("Enter a number") from None
-    db.set_setting(conn, sk.NOTIFY_PREFS, json.dumps(p))
+    db.set_setting(conn, sk.notify_prefs(user_sub) if user_sub else sk.NOTIFY_PREFS, json.dumps(p))
     return p
 
 
@@ -64,6 +71,21 @@ def subscriptions(conn) -> list[dict]:
     """Every device, oldest first (after dropping those whose person was taken off the sign-in list: see lapsed)."""
     prune_lapsed(conn)
     return db.rows(conn.execute(select(PushSubscription).order_by(PushSubscription.created)))
+
+
+def person(user: dict | None) -> str | None:
+    """Whose notifications a request is about: the signed-in person's sub, or None without sign-in (one person)."""
+    return (user or {}).get("sub") if oidc.enabled() else None
+
+
+def devices(conn, user_sub: str | None) -> list[dict]:
+    """The devices a person sees under Settings → Notifications: theirs, and any turned on before there was sign-in
+    (nobody's: they get nothing until turned on again from the device, which makes them that person's). Without
+    sign-in, every device."""
+    subs = subscriptions(conn)
+    if not oidc.enabled():
+        return subs
+    return [s for s in subs if (user_sub and s["user_sub"] == user_sub) or not s["user_sub"]]
 
 
 def lapsed(conn, sub: dict, now: float | None = None) -> str | None:
@@ -143,12 +165,16 @@ def subject(conn) -> str:
     return public if public.startswith("https://") else "mailto:runway@example.com"
 
 
-def send_all(conn, message: dict, only: str | None = None) -> dict:
-    """Send to every device (or one endpoint). Dead subscriptions are removed."""
+EVERYONE = object()   # send_all: every device, whoever's
+
+
+def send_all(conn, message: dict, only: str | None = None, to: object = EVERYONE) -> dict:
+    """Send to every device, or one person's (`to`: their sub, or None for the devices of nobody in particular), or one
+    endpoint of those. Dead subscriptions are removed."""
     vapid, _pub = webpush.vapid_keys(conn)
     sent, failed = 0, []
     for s in subscriptions(conn):
-        if only and s["endpoint"] != only:
+        if (only and s["endpoint"] != only) or (to is not EVERYONE and (s["user_sub"] or None) != to):
             continue
         if not push_host_allowed(s["endpoint"]):   # from a restored backup, never checked when it was saved
             unsubscribe(conn, s["endpoint"])
@@ -250,21 +276,36 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
     return out
 
 
+def _log_key(user_sub: str | None, key: str) -> str:
+    """notify_log's key for an alert sent to a person ("@<their sub, hashed>:card:..."), or to everyone without sign-in."""
+    return f"@{hashlib.sha256(user_sub.encode()).hexdigest()[:16]}:{key}" if user_sub else key
+
+
+def recent(conn, user_sub: str | None, limit: int = 8) -> list[dict]:
+    """What was last sent to a person (without sign-in, to everyone), newest first."""
+    mine = NotifyLog.key.like(_log_key(user_sub, "") + "%") if user_sub else NotifyLog.key.not_like("@%")
+    return db.rows(conn.execute(select(NotifyLog.title, NotifyLog.sent).where(mine).order_by(NotifyLog.sent.desc()).limit(limit)))
+
+
 def run(conn, today: date | None = None) -> dict:
-    """Send anything new. Nothing is sent (or remembered) while no device is subscribed, so turning notifications on
-    later doesn't bring a flood of old alerts, except what's still true that day."""
+    """Send anything new, to each person's devices by what they want to hear about. Nothing is sent (or remembered)
+    while someone has no device subscribed, so turning notifications on later doesn't bring a flood of old alerts,
+    except what's still true that day. With sign-in, devices turned on before it (nobody's) get nothing."""
     today = today or date.today()
-    if not conn.execute(select(PushSubscription.endpoint).limit(1)).fetchone():
-        return {"sent": 0, "alerts": 0}
-    p = prefs(conn)
+    owners = {r["user_sub"] or None for r in conn.execute(select(PushSubscription.user_sub).distinct())}
+    people = sorted((o for o in owners if o), key=str) if oidc.enabled() else [None] if owners else []
     sent = 0
-    for a in alerts(conn, today, p):
-        if conn.execute(select(NotifyLog.key).where(NotifyLog.key == a["key"])).fetchone():
-            continue
-        # Saved before sending: if anything later rolled this back, the next run would send the same alert again.
-        conn.execute(insert(NotifyLog).values(key=a["key"], sent=time.time(), title=a["title"]))
-        conn.commit()
-        r = send_all(conn, {"title": a["title"], "body": a["body"], "url": a.get("url", "/"), "tag": a["key"]})
-        sent += r["sent"]
+    for who in people:
+        for a in alerts(conn, today, prefs(conn, who)):
+            key = _log_key(who, a["key"])
+            # (an alert sent before notifications were each person's own went to everyone: it counts as theirs)
+            if conn.execute(select(NotifyLog.key).where(NotifyLog.key.in_({key, a["key"]}))).fetchone():
+                continue
+            # Saved before sending: if anything later rolled this back, the next run would send the same alert again.
+            conn.execute(insert(NotifyLog).values(key=key, sent=time.time(), title=a["title"]))
+            conn.commit()
+            r = send_all(conn, {"title": a["title"], "body": a["body"], "url": a.get("url", "/"), "tag": a["key"]},
+                         to=who if oidc.enabled() else EVERYONE)
+            sent += r["sent"]
     conn.execute(delete(NotifyLog).where(NotifyLog.sent < time.time() - 120 * 86400))
     return {"sent": sent}

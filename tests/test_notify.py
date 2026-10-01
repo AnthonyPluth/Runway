@@ -131,6 +131,72 @@ class NotifyTests(unittest.TestCase):
             self.assertIsNone(notify.lapsed(self.c, {"user_sub": "u1"}))
             self.assertEqual(notify.send_all(self.c, {"title": "y"})["sent"], 2)
 
+    def add_device(self, who, n):
+        self.c.execute("INSERT INTO push_subscriptions(endpoint, p256dh, auth, device, user_sub, created) VALUES (?,?,?,?,?,?)",
+                       (self.endpoint(n), self.p256dh, webpush.b64u(b"0123456789abcdef"), f"{who}'s phone", who, n))
+
+    def endpoint(self, n):
+        return f"http://127.0.0.1:{self.srv.server_port}/p/{n}"
+
+    def test_each_person_has_their_own_notifications(self):
+        # With sign-in, each person gets alerts on their own devices, by what they chose, and sees only their own.
+        from runway.server.api import notifications as api
+        from runway.server.common import ApiError, _current
+        oidc.remember_user(self.c, "u1", "a@example.com", "A")
+        oidc.remember_user(self.c, "u2", "b@example.com", "B")
+        self.add_device("u1", 2)
+        self.add_device("u2", 3)
+        self.addCleanup(lambda: setattr(_current, "user", None))
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com,b@example.com"}):
+            _current.user = {"sub": "u2", "email": "b@example.com"}
+            api.api_push_prefs(self.c, {}, {"card_due": False, "low_balance": False})   # B only wants big charges
+            mine = api.api_push(self.c, {}, {})
+            self.assertFalse(mine["prefs"]["card_due"])
+            # their own device, and the one from before sign-in (nobody's), never A's
+            self.assertEqual([(d["device"], d["unclaimed"]) for d in mine["devices"]], [("Test phone", True), ("u2's phone", False)])
+            _current.user = {"sub": "u1", "email": "a@example.com"}
+            self.assertTrue(api.api_push(self.c, {}, {})["prefs"]["card_due"])        # A's are their own
+            self.assertEqual([d["device"] for d in api.api_push(self.c, {}, {})["devices"]], ["Test phone", "u1's phone"])
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})      # B's: as if it weren't there
+            with self.assertRaises(ApiError):
+                api.api_push_test(self.c, {}, {"endpoint": self.endpoint(3)})
+            self.assertEqual(self.c.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0], 3)
+            self.assertEqual(PushService.received, [])
+
+            notify.run(self.c, TODAY)
+            to = {p: [decrypt(b, self.ua, b"0123456789abcdef")["title"] for q, _h, b in PushService.received if q == p]
+                  for p in ("/p/1", "/p/2", "/p/3")}
+            self.assertEqual(to["/p/1"], [])                                             # nobody's: nothing
+            self.assertIn("Visa payment due Friday", to["/p/2"])
+            self.assertIn("$812.50 at Best Buy", to["/p/2"])
+            self.assertEqual(to["/p/3"], ["$812.50 at Best Buy"])
+            # each sees what they were sent
+            self.assertEqual([r["title"] for r in api.api_push(self.c, {}, {})["recent"]].count("$812.50 at Best Buy"), 1)
+            _current.user = {"sub": "u2", "email": "b@example.com"}
+            self.assertEqual([r["title"] for r in api.api_push(self.c, {}, {})["recent"]], ["$812.50 at Best Buy"])
+            n = len(PushService.received)
+            notify.run(self.c, TODAY)                                                    # nothing new for anyone
+            self.assertEqual(len(PushService.received), n)
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})      # their own: gone
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(1)})      # nobody's: anyone may remove it
+            self.assertEqual([r[0] for r in self.c.execute("SELECT device FROM push_subscriptions")], ["u1's phone"])
+
+    def test_alerts_sent_before_they_were_each_person_s_count_as_sent(self):
+        notify.run(self.c, TODAY)                                                       # without sign-in: everyone's
+        oidc.remember_user(self.c, "u1", "a@example.com", "A")
+        self.c.execute("UPDATE push_subscriptions SET user_sub='u1'")
+        n = len(PushService.received)
+        with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
+            notify.run(self.c, TODAY)
+        self.assertEqual(len(PushService.received), n)
+
+    def test_without_sign_in_every_device_is_yours(self):
+        from runway.server.api import notifications as api
+        self.add_device("u1", 2)   # turned on while sign-in was on
+        self.assertEqual([d["device"] for d in api.api_push(self.c, {}, {})["devices"]], ["Test phone", "u1's phone"])
+        notify.run(self.c, TODAY)
+        self.assertEqual({p for p, _h, _b in PushService.received}, {"/p/1", "/p/2"})
+
     def test_delivery_is_recorded_on_the_device(self):
         notify.send_all(self.c, {"title": "x"})
         s = notify.subscriptions(self.c)[0]
