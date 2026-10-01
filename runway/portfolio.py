@@ -608,13 +608,39 @@ def performance(hist: dict, bench: list, period: str, today: date) -> dict:
 def monthly_spending(conn, today: date) -> float:
     """Average monthly spending from Runway's own transactions over the last 6 full months. Counted as Reports counts
     it: every category that isn't a transfer or income, and money out with no category. A month with more money back
-    than out (a big refund) is a month of no spending, not one left out."""
+    than out (a big refund) is a month of no spending, not one left out. Averaged over the months Runway has history
+    for (history_months): with three months of transactions it's those three, not six with three empty. Without a full
+    month yet, over the months there's spending in."""
     t, counted = _spending(today)
     # Constants in the SQL, not parameters: Postgres matches the GROUP BY expression to the selected one.
     month = func.substr(t.c.posted, literal_column("1"), literal_column("7")).label("m")
     rows = conn.execute(counted.with_only_columns(month, func.sum(t.c.amount).label("s")).group_by(month)).fetchall()
-    months = [max(0.0, -(r["s"] or 0)) for r in rows]
+    spent = {r["m"]: max(0.0, -(r["s"] or 0)) for r in rows}
+    months = [spent.get(m, 0.0) for m in history_months(conn, today)] or list(spent.values())
     return round(statistics.mean(months), 2) if months else 0.0
+
+
+SPENDING_ACCOUNTS = ["checking", "savings", "credit"]   # the cash accounts spending is counted on
+
+
+def history_months(conn, today: date) -> list[str]:
+    """The full months ("2026-07") of the last 6 that Runway has history for: a transaction on a cash account (the
+    accounts spending is counted on). The month history starts in is left out unless it starts on the 1st, as the
+    month before the first sync is only partly there."""
+    start = date(today.year, today.month, 1) - relativedelta(months=6)
+    end = date(today.year, today.month, 1)
+    T = Transaction
+    cash = (select(T.posted).join(Account, Account.id == T.account_id)
+            .where(Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS)).subquery())
+    first = conn.execute(select(func.min(cash.c.posted))).scalar()
+    if not first:
+        return []
+    month = func.substr(cash.c.posted, literal_column("1"), literal_column("7")).label("m")
+    found = {r["m"] for r in conn.execute(select(month).where(cash.c.posted >= start.isoformat(),
+                                                                cash.c.posted < end.isoformat()).group_by(month))}
+    if first[8:10] != "01":
+        found.discard(first[:7])
+    return sorted(found)
 
 
 def _spending(today: date):
@@ -625,7 +651,7 @@ def _spending(today: date):
     spending = or_(and_(Category.is_transfer == 0, Category.is_income == 0), and_(Category.name.is_(None), t.c.amount < 0))
     return t, (select(t.c.amount).select_from(t)
                .join(Account, Account.id == t.c.account_id).outerjoin(Category, Category.name == t.c.category)
-               .where(spending, Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
+               .where(spending, Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS),
                       t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
 
 
@@ -638,7 +664,7 @@ def transfer_outflows(conn, today: date) -> list[dict]:
     rows = conn.execute(
         select(t.c.posted, t.c.amount, t.c.payee, t.c.description).select_from(t)
         .join(Account, Account.id == t.c.account_id).join(Category, Category.name == t.c.category)
-        .where(Category.is_transfer == 1, t.c.amount < 0, Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
+        .where(Category.is_transfer == 1, t.c.amount < 0, Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS),
                t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
     return [{"month": r["posted"][:7], "amount": -r["amount"], "text": f"{r['payee'] or ''} {r['description'] or ''}".lower()}
             for r in rows]

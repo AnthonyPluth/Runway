@@ -406,6 +406,93 @@ class MonthlySpendingTests(DbCase):
         self.assertEqual(portfolio.monthly_spending(self.c, TODAY), round((1500 + 500 + 0) / 3, 2))
 
 
+    def test_a_short_history_is_averaged_over_the_months_there_are(self):
+        # A bank linked in early July: three full months of the six (July counts, as it starts on the 1st), not six
+        # with three empty, so the figure isn't halved
+        self.c.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=0))
+        rows = [("2026-07-01", -3000), ("2026-08-03", -2400), ("2026-09-02", -3600), ("2026-10-01", -9999)]
+        self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "chk", "posted": d, "amount": a, "category": "Groceries"}
+                                             for i, (d, a) in enumerate(rows)])
+        october = date(2026, 10, 1)
+        self.assertEqual(portfolio.history_months(self.c, october), ["2026-07", "2026-08", "2026-09"])
+        self.assertEqual(portfolio.monthly_spending(self.c, october), 3000.0)
+        # history from July 20: July is only partly there, so it's left out of the average
+        self.c.execute(update(Transaction).where(Transaction.id == "t0").values(posted="2026-07-20"))
+        self.assertEqual(portfolio.history_months(self.c, october), ["2026-08", "2026-09"])
+        self.assertEqual(portfolio.monthly_spending(self.c, october), 3000.0)
+        # a month with transactions but no spending in it is a month of none
+        self.c.execute(insert(Transaction).values(id="pay", account_id="chk", posted="2026-06-01", amount=5000, category="Income"))
+        self.assertEqual(portfolio.history_months(self.c, october), ["2026-06", "2026-07", "2026-08", "2026-09"])
+        self.assertEqual(portfolio.monthly_spending(self.c, october), 2250.0)
+        # nothing yet but the month history starts in: that month's spending, as there's nothing else
+        self.c.execute(Transaction.__table__.delete())
+        self.c.execute(insert(Transaction).values(id="x", account_id="chk", posted="2026-09-12", amount=-800, category="Groceries"))
+        self.assertEqual((portfolio.history_months(self.c, october), portfolio.monthly_spending(self.c, october)), ([], 800.0))
+
+
+class ShortHistoryLoanPaymentTests(DbCase):
+    """A loan's payment in spending, when Runway has only a few months of transactions: a bank linked in July, today
+    October 1st, a mortgage paid from checking each month since (as Truist's shows on the bank statement)."""
+    OCT = date(2026, 10, 1)
+
+    def setUp(self):
+        super().setUp()
+        self.c.execute(insert(Account), [
+            {"id": "mtg", "name": "Mortgage 1588", "org": "Truist", "kind": "loan", "balance": -180000, "interest_rate": 6.5,
+             "monthly_payment": 1262.93},
+            {"id": "chk", "name": "Checking", "org": "Bank", "kind": "checking", "balance": 0, "interest_rate": None,
+             "monthly_payment": None}])
+        self.c.execute(insert(Asset).values(name="House", kind="home", value=400000, as_of=self.OCT.isoformat(),
+                                            loan_account_id="mtg"))
+        self.n = 0
+        self.spend("2026-07-01", -80, "Groceries", "KROGER")   # history starts July 1st: July is a full month
+        for d in ("2026-07-05", "2026-08-04", "2026-09-02"):
+            self.spend(d, -1262.93, "Mortgage", "DIRECT DEBIT TRUIST MORTG OLB MTGPMT (Cash)", "Truist Mortgage")
+
+    def spend(self, posted, amount, category, desc, payee=None):
+        self.n += 1
+        self.c.execute(insert(Transaction).values(id=f"t{self.n}", account_id="chk", posted=posted, amount=amount,
+                                                  category=category, description=desc, payee=payee))
+
+    def counted(self):
+        return next(a for a in planner.sellable(self.c, self.OCT) if a["name"] == "House")["loan"]["payment_counted"]
+
+    def test_paid_in_every_month_there_is(self):
+        self.assertTrue(self.counted())   # three months of three, naming the lender
+
+    def test_a_month_without_it_is_not_enough(self):
+        self.c.execute(Transaction.__table__.delete().where(Transaction.posted == "2026-08-04"))
+        self.spend("2026-08-10", -45, "Dining", "CAFE")   # August is there, but the payment isn't
+        self.assertIsNone(self.counted())
+
+    def test_a_partial_first_month_isnt_required(self):
+        # history from July 9th: the payment on the 5th was before it, and only August and September are full
+        self.c.execute(Transaction.__table__.delete().where(Transaction.posted <= "2026-07-05"))
+        self.spend("2026-07-09", -80, "Groceries", "KROGER")
+        self.assertEqual(portfolio.history_months(self.c, self.OCT), ["2026-08", "2026-09"])
+        self.assertTrue(self.counted())
+
+    def test_one_month_counts_only_when_it_names_the_lender(self):
+        self.c.execute(Transaction.__table__.delete().where(Transaction.posted < "2026-09-01"))
+        self.spend("2026-08-20", -80, "Groceries", "KROGER")   # history from August 20th: September alone is full
+        self.assertTrue(self.counted())
+        self.c.execute(update(Transaction).where(Transaction.posted == "2026-09-02").values(description="ACH DEBIT", payee=None))
+        self.assertIsNone(self.counted())   # one month of an amount that matches is too little to go on
+
+    def test_paid_as_a_transfer_in_every_month_there_is(self):
+        self.c.execute(update(Transaction).where(Transaction.category == "Mortgage").values(category="Transfer"))
+        self.assertFalse(self.counted())
+
+    def test_the_rule_by_itself(self):
+        out = lambda m, amount, text: {"month": f"2026-{m:02}", "amount": amount, "text": text}
+        two = [out(m, 350, "whole foods") for m in (8, 9)]
+        self.assertTrue(planner.payment_counted(two, 350, ["Ally"], history=["2026-08", "2026-09"]))   # by amount: two months
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-07", "2026-08", "2026-09"]))   # July missing
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-09"]))   # one month, not named
+        self.assertTrue(planner.payment_counted([out(9, 350, "ally auto")], 350, ["Ally"], history=["2026-09"]))
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=[]))   # no full month yet
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"]))
+
 # ---------------------------------------------------------------------------------------------- mock servers
 
 class MockPlaid(BaseHTTPRequestHandler):

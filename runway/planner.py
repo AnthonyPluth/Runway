@@ -25,21 +25,30 @@ PAYMENT_ESCROW = 1.5  # one that names the loan can be up to this much of its pa
                       # escrow (property tax and insurance) on top of the principal and interest the lender reports
 
 
-def payment_counted(spent: list[dict], payment: float, names: list[str], named_only: bool = False) -> bool:
+def payment_counted(spent: list[dict], payment: float, names: list[str], named_only: bool = False,
+                    history: list[str] | None = None) -> bool:
     """Whether a loan's monthly payment is in the spending figure: money out within PAYMENT_MATCH of it (from
     portfolio.spent_outflows) in at least PAYMENT_MONTHS different months, as a real payment repeats. When some of
     those name the loan (its lender or account name in the payee), only they count, so a grocery run that happens to
     be the size of a car payment doesn't; and one that names it can be more than the payment, up to PAYMENT_ESCROW
     times it, as a mortgage paid with its escrow is. With `named_only`, only ones that name it count, within
     PAYMENT_MATCH and not a card's payment: for transfers, which repeat at fixed amounts (to savings, a brokerage),
-    and whose lender is often also the bank of a card paid by transfer ("CHASE CREDIT CRD AUTOPAY")."""
+    and whose lender is often also the bank of a card paid by transfer ("CHASE CREDIT CRD AUTOPAY").
+    `history` is the full months Runway has transactions for (portfolio.history_months). With fewer than
+    PAYMENT_MONTHS of them (a bank linked lately), it's found when it's in every one of them: at least two, or a
+    single month's when it names the loan. None: the 6 months are taken as all there."""
     names = [n.lower() for n in names if n and len(n.strip()) >= 3]
     low = (1 - PAYMENT_MATCH) * payment
     high = (1 + PAYMENT_MATCH if named_only else PAYMENT_ESCROW) * payment
     named = [s for s in spent if low <= s["amount"] <= high and any(n in s["text"] for n in names)
              and not (named_only and categorize.is_card_payment(s["text"]))]
     near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
-    return len({s["month"] for s in (named if named_only else named or near)}) >= PAYMENT_MONTHS
+    months = {s["month"] for s in (named if named_only else named or near)}
+    if history is None or len(history) >= PAYMENT_MONTHS:
+        return len(months) >= PAYMENT_MONTHS
+    if len(history) == 1 and not named:   # one month of a lookalike amount is too little to go on
+        return False
+    return bool(history) and set(history) <= months
 
 # Numbers the plan keeps: (lowest, highest).
 RATES = {"return_before": (-0.2, 0.2), "return_after": (-0.2, 0.2), "volatility": (0.0, 0.5), "inflation": (-0.05, 0.2)}
@@ -180,7 +189,7 @@ def sellable(conn, today: date) -> list[dict]:
     (`payment_counted`, see payment_counted()), so the page can take the payment
     off spending once it's paid off or sold. One found paid as a transfer instead (common when the loan account is
     synced too) wasn't in it (False), so the page adds it to spending, for as long as it's still being paid. One found
-    in neither (a short history, payments in parts, escrow under another name) is None: Runway can't tell, and the
+    in neither (a month without it, payments in parts, escrow under another name) is None: Runway can't tell, and the
     page leaves spending as it is, since adding a payment that's already in it would count it twice."""
     from . import portfolio   # imported here: portfolio imports this module
     accts = {a["id"]: a for a in db.rows(conn.execute(
@@ -189,7 +198,8 @@ def sellable(conn, today: date) -> list[dict]:
     items = networth.assets(conn, today)
     terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
     spent: list[dict] | None = None
-    moved: list[dict] | None = None
+    moved: list[dict] = []
+    history: list[str] = []
     out = []
     for a in items:
         acct = accts.get(a["loan_account_id"])
@@ -201,10 +211,12 @@ def sellable(conn, today: date) -> list[dict]:
             counted: bool | None = None
             if loan["payment"]:
                 names = [acct["org"] or "", acct["name"] or ""]
-                spent = portfolio.spent_outflows(conn, today) if spent is None else spent
-                moved = portfolio.transfer_outflows(conn, today) if moved is None else moved
-                counted = (True if payment_counted(spent, loan["payment"], names)
-                           else False if payment_counted(moved, loan["payment"], names, named_only=True) else None)
+                if spent is None:
+                    spent, moved = portfolio.spent_outflows(conn, today), portfolio.transfer_outflows(conn, today)
+                    history = portfolio.history_months(conn, today)
+                counted = (True if payment_counted(spent, loan["payment"], names, history=history)
+                           else False if payment_counted(moved, loan["payment"], names, named_only=True, history=history)
+                           else None)
             loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
                     "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
         else:   # none, or a card: what's owed today
