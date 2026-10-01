@@ -31,11 +31,13 @@
     return out;
   });
 
-  let hover = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  // The year the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  const hover = $derived(pointed != null && pointed < n ? pointed : null);
   function move(clientX: number) {
     if (!svgEl) return;
     const r = svgEl.getBoundingClientRect();
-    hover = Math.max(0, Math.min(n - 1, Math.round(((((clientX - r.left) / r.width) * W - m.left) / iw) * (n - 1))));
+    pointed = Math.max(0, Math.min(n - 1, Math.round(((((clientX - r.left) / r.width) * W - m.left) / iw) * (n - 1))));
   }
   const tipLeft = $derived.by(() => {
     if (hover == null || !svgEl) return 0;
@@ -70,7 +72,7 @@
       <circle cx={x(hover)} cy={y(p.mid[hover])} r="3.5" fill="var(--nw-1)" stroke="var(--card)" stroke-width="1.5" />
     {/if}
     <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
-      onmousemove={(e) => move(e.clientX)} onmouseleave={() => (hover = null)} use:sideways={move} />
+      onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:sideways={move} />
   </svg>
   <div class="-mt-1 text-center text-xs text-muted-foreground">{names[0] === "You" ? "Your age" : `${names[0]}'s age`}</div>
   {#if hover != null}

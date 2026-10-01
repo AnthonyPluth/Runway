@@ -78,12 +78,14 @@
   });
 
   // Hovering (or dragging sideways on a phone) shows every line's value on that day.
-  let hover = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  const hover = $derived(pointed != null && pointed < n ? pointed : null);
   function move(clientX: number) {
     if (!svgEl) return;
     const r = svgEl.getBoundingClientRect();
     const px = ((clientX - r.left) / r.width) * W;
-    hover = Math.max(0, Math.min(n - 1, Math.round(((px - m.left) / iw) * (n - 1))));
+    pointed = Math.max(0, Math.min(n - 1, Math.round(((px - m.left) / iw) * (n - 1))));
   }
   const tipLeft = $derived.by(() => {
     if (hover == null || !svgEl) return 0;
@@ -136,7 +138,7 @@
         {/each}
       {/if}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
-        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (hover = null)} use:sideways={move} />
+        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:sideways={move} />
     </svg>
     {#if hover != null}
       <div bind:this={tipEl} class="pointer-events-none absolute top-0 z-10 min-w-40 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
