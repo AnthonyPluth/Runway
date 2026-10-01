@@ -25,7 +25,7 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs everything CI does before you push: ruff, mypy, the Python tests, and the web app's type-check, ESLint, tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs what CI checks before you push, each tool once: ruff and mypy, the Python tests (on SQLite), the web app's type-check, ESLint, Vitest tests and build, Bandit over `runway/` and zizmor over the workflows (offline). `make lint`, `make test`, `make frontend-check` and `make security` run one part. `make audit` checks the Python and web app dependencies for known vulnerabilities (pip-audit and npm audit, as CI does); it needs the network, so it isn't part of `make check`. Semgrep, Trivy and CodeQL run only in CI, as do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## The web app
 
