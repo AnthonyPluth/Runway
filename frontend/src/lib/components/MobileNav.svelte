@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, route } from "$lib/app.svelte";
   import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import SyncButton from "$lib/components/SyncButton.svelte";
   import { cn } from "$lib/utils";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -52,7 +53,8 @@
         {/if}
         {#if sync.detail}<span class="truncate pl-3.5">{sync.detail}</span>{/if}
       </div>
-      {#if s?.version}<span class="shrink-0">Runway {s.version}</span>{/if}
+      <SyncButton class="size-8 border border-border" />
+      {#if s?.version}<span class="shrink-0 pt-2">Runway {s.version}</span>{/if}
     </div>
     {#if user}
       <a href="/auth/logout" onclick={signOut} class="mt-3 flex items-center gap-2 text-sm text-muted-foreground"><LogOut class="size-4" />Sign out {user.email ?? ""}</a>

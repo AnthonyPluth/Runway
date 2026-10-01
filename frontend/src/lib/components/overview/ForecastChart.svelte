@@ -99,7 +99,9 @@
   });
 
   // Hovering (or dragging sideways on a phone) shows that day's balance and what happens on it.
-  let hover = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  const hover = $derived(pointed != null && pointed < n ? pointed : null);
   // Dragging sideways on a phone moves the readout; dragging up or down still scrolls the page. (Svelte's own touch
   // handlers are passive, so they couldn't stop the page scrolling sideways.)
   // Touching and holding still, then dragging, selects days to zoom into instead.
@@ -135,17 +137,17 @@
     const px = ((clientX - r.left) / r.width) * W;
     return Math.max(v0, Math.min(v1, v0 + Math.round(((px - m.left) / iw) * (v1 - v0))));
   }
-  function move(clientX: number) { if (svgEl) hover = dayAt(clientX); }
+  function move(clientX: number) { if (svgEl) pointed = dayAt(clientX); }
 
   // Dragging across the chart (with the mouse, or after a touch and hold) picks the days to zoom into.
   let brush = $state<[number, number] | null>(null);
-  function startBrush(clientX: number) { if (svgEl) { const d = dayAt(clientX); brush = [d, d]; hover = null; } }
+  function startBrush(clientX: number) { if (svgEl) { const d = dayAt(clientX); brush = [d, d]; pointed = null; } }
   function moveBrush(clientX: number) { if (brush && svgEl) brush = [brush[0], dayAt(clientX)]; }
   function endBrush() {
     if (!brush) return;
     const [a, b] = [Math.min(...brush), Math.max(...brush)];
     brush = null;
-    if (b - a >= 2) { view = [a, b]; hover = null; }   // a few days at least; a click is just a click
+    if (b - a >= 2) { view = [a, b]; pointed = null; }   // a few days at least; a click is just a click
   }
   const zoomLabel = $derived(view ? `${fmtDate(fc.dates[v0])} – ${fmtDate(fc.dates[v1])}` : "");
   const tipPos = $derived.by(() => {
@@ -211,7 +213,7 @@
       {/if}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation" class={brush ? "cursor-ew-resize" : "cursor-crosshair"}
         onmousedown={(e) => { if (e.button === 0) { e.preventDefault(); startBrush(e.clientX); } }}
-        onmousemove={(e) => { if (brush) moveBrush(e.clientX); else move(e.clientX); }} onmouseleave={() => (hover = null)}
+        onmousemove={(e) => { if (brush) moveBrush(e.clientX); else move(e.clientX); }} onmouseleave={() => (pointed = null)}
         ondblclick={() => (view = null)}
         use:sideways={move} />
     </svg>

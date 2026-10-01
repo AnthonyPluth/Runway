@@ -461,7 +461,7 @@ _IANA_ZONE = re.compile(r"(UTC|[A-Za-z]+(?:/[A-Za-z0-9_+-]+)+)")
 
 def local_timezone() -> str | None:
     """The IANA name of the zone Runway's clock runs in (the daily sync's hour is local time): TZ if it's a name like
-    America/Chicago, else the system's (/etc/localtime, /etc/timezone). None when it can't be told, as with a POSIX
+    America/New_York, else the system's (/etc/localtime, /etc/timezone). None when it can't be told, as with a POSIX
     rule in TZ (EST5EDT, CST6CDT,M3.2.0,M11.1.0)."""
     tz = (os.environ.get("TZ") or "").strip().lstrip(":")
     if tz:

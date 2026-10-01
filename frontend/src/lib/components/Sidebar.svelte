@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app } from "$lib/app.svelte";
   import { MAIN_NAV, MONEY_NAV, currentPage, signOut, signedInUser, syncDot, syncStatus, type NavItem } from "$lib/nav.svelte";
+  import SyncButton from "$lib/components/SyncButton.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { cn } from "$lib/utils";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -55,6 +56,7 @@
         {#if sync.detail}<span class="truncate pl-3">{sync.detail}</span>{/if}
       </div>
     </div>
+    <SyncButton />
     {#if user}
       <a href="/auth/logout" onclick={signOut} title="Sign out" aria-label="Sign out" class="text-muted-foreground hover:text-foreground">
         <LogOut class="size-4" />

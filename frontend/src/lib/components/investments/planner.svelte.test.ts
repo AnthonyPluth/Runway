@@ -9,7 +9,8 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 
 import { api } from "$lib/api";
 import PlannerChart from "./PlannerChart.svelte";
-import { project } from "./planner";
+import { fmt0 } from "$lib/format";
+import { project, projectionIn } from "./planner";
 import RetirementPlanner from "./RetirementPlanner.svelte";
 import type { PlanData, RetirementPlan } from "./types";
 import { viewport } from "$lib/phone.svelte";
@@ -27,7 +28,10 @@ const setup = (d = data()) => render(RetirementPlanner, { data: d });
 // Every edit schedules a save 700ms later. On real timers a test that edits and ends leaves that save pending, and it
 // lands in the next test (a second call where one is expected). Fake timers are dropped after each test, and
 // shouldAdvanceTime keeps user-event's own small delays moving.
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({}); });
+// The dollars switch is remembered in localStorage, so each test starts without a choice.
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true }); vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({}); localStorage.clear();
+});
 afterEach(() => vi.useRealTimers());
 
 describe("RetirementPlanner", () => {
@@ -123,13 +127,13 @@ describe("RetirementPlanner", () => {
       expect((vi.mocked(api).mock.lastCall![1] as { body: { plan: RetirementPlan } }).body.plan.inflation).toBeCloseTo(0.03);
     });
 
-    it("keeps inflation out of the assumptions, next to the homes it applies to", () => {
+    it("keeps inflation with the assumptions, with or without homes to sell (it also gives future dollars)", () => {
       setup(data({ assets: [{ key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0 }] }));
-      expect(screen.queryByRole("spinbutton", { name: "Inflation" })).toBeInTheDocument();
-      expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("section")).toHaveTextContent("Homes & other assets");
+      expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("section")).toHaveTextContent("Assumptions");
+      expect(screen.getByText(/taking off inflation \(2\.5% a year, under Assumptions\)/)).toBeInTheDocument();
       cleanup();
-      setup();   // no homes to sell, so nothing for inflation to do
-      expect(screen.queryByRole("spinbutton", { name: "Inflation" })).not.toBeInTheDocument();
+      setup();
+      expect(screen.getByRole("spinbutton", { name: "Inflation" })).toBeInTheDocument();
     });
 
     it("saves a pending change when you leave before the pause is up", async () => {
@@ -280,6 +284,106 @@ describe("RetirementPlanner", () => {
       setup(data({ assets: [acme] }, { inflation: 0, assets: [{ key: "equity:acme", sell_year: 2030 }] }));
       expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
+    });
+
+    describe("in future dollars", () => {
+      const future = () => userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+
+      it("shows the home's value then and the loan's balance then, not deflated", async () => {
+        const paying = { ...home, yearly_change: 0.025, owed_by_year: Array.from({ length: 26 }, (_, k) => 200000 - k * 8000),
+          loan: { rate: 6.25, payment: 1840, source: "inferred" as const, note: null } };
+        setup(data({ assets: [paying] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $406,256");   // 500k less 93,744 today
+        await future();
+        // 500k × 1.025^10, less the 120k the loan's schedule says is owed in 2036
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $520,042");
+        expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Home worth $640,042 in 2036, less $120,000 still owed on the loan at 6.25% and "
+          + "$1,840 a month from recent payments. In 2036 dollars, at 2.5% a year inflation.");
+      });
+
+      it("says what today's balance of a loan it can't project comes to then", async () => {
+        const unknown = { ...home, yearly_change: 0.025, owed_by_year: [200000], loan: { rate: null, payment: null, source: null, note: "no_rate" as const } };
+        setup(data({ assets: [unknown] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+        await future();
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $384,025");   // (500k − 200k) × 1.025^10
+        expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less the \$200,000 owed on the loan today \(\$256,017 in 2036 dollars\)\. In 2036 dollars/);
+      });
+
+      it("shows equity at today's share price, as vested", async () => {
+        const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: 0, owed: 0,
+          value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
+        setup(data({ assets: [acme] }, { assets: [{ key: "equity:acme", sell_year: 2030 }] }));
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $36,238");   // 40k / 1.025^4
+        await future();
+        expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
+        expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In 2030 dollars, at 2.5% a year inflation.");
+      });
+    });
+  });
+
+  describe("today's or future dollars", () => {
+    afterEach(() => vi.restoreAllMocks());
+    const figure = (label: RegExp) => screen.getByText(label).nextElementSibling!;
+    const p = project(plan(), 400000, 2026, []);
+    const f = projectionIn(p, 2026, 0.025, "future");
+
+    it("starts in today's dollars, saying what you enter is in them and what inflation it assumes", () => {
+      setup();
+      expect(screen.getByRole("radio", { name: "Today’s dollars" })).toBeChecked();
+      expect(screen.getByText(/what you enter is in today’s dollars/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "2.5% a year" })).toBeInTheDocument();
+      expect(figure(/^Invested at retirement$/)).toHaveTextContent(fmt0(p.atRetirement));
+    });
+
+    it("shows the figures in each year's dollars, and back", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+      expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(f.atRetirement));
+      expect(f.atRetirement).toBeCloseTo(p.atRetirement * 1.025 ** 25, 4);   // 2051 is 25 years out
+      expect(figure(/^Invested at retirement/).nextElementSibling).toHaveTextContent(`${fmt0(f.low[25])} – ${fmt0(f.high[25])} likely`);
+      expect(figure(/^Left at age 95 · 2081$/)).toHaveTextContent(fmt0(f.atEnd));
+      expect(screen.getByText(/^\d+%$/)).toHaveTextContent(`${Math.round(p.success * 100)}%`);   // the odds don't change
+      expect(screen.getByRole("img", { name: /^Projected investments by age, in each year’s dollars: median/ })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("radio", { name: "Today’s dollars" }));
+      expect(figure(/^Invested at retirement$/)).toHaveTextContent(fmt0(p.atRetirement));
+      expect(screen.getByRole("img", { name: /^Projected investments by age, in today’s dollars/ })).toBeInTheDocument();
+    });
+
+    it("remembers the choice in this browser, without saving the plan", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+      expect(localStorage.getItem("runway.planner.dollars")).toBe("future");
+      await vi.advanceTimersByTimeAsync(800);
+      expect(api).not.toHaveBeenCalled();
+      cleanup();
+      setup();
+      expect(screen.getByRole("radio", { name: "Future dollars" })).toBeChecked();
+      expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(f.atRetirement));
+    });
+
+    it("still switches when the browser won't keep it, starting from today's dollars", async () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+      setup();
+      expect(screen.getByRole("radio", { name: "Today’s dollars" })).toBeChecked();
+      await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+      expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(f.atRetirement));
+    });
+
+    it("takes you to the inflation it assumes", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("button", { name: "2.5% a year" }));
+      expect(screen.getByRole("spinbutton", { name: "Inflation" })).toHaveFocus();
+    });
+
+    it("follows the inflation you set", async () => {
+      setup();
+      await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+      const infl = screen.getByRole("spinbutton", { name: "Inflation" });
+      await userEvent.clear(infl);
+      await userEvent.type(infl, "3");
+      expect(screen.getByRole("button", { name: "3% a year" })).toBeInTheDocument();
+      expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(p.atRetirement * 1.03 ** 25));
     });
   });
 

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { fmt0, shortMoney } from "$lib/format";
   import { niceTicks, sideways } from "./numbers";
-  import type { Projection } from "./planner";
+  import type { Dollars, Projection } from "./planner";
 
   // The plan by age: the likely range (the middle half of the runs) shaded, the median run as a line, and
   // a marker at retirement. Ages along the bottom are the first person's; the readout shows everyone's.
-  let { p, names, height = 260 }: { p: Projection; names: string[]; height?: number } = $props();
+  // The figures come in the dollars chosen (planner.ts projectionIn); `dollars` only says which.
+  let { p, names, dollars = "today", height = 260 }: { p: Projection; names: string[]; dollars?: Dollars; height?: number } = $props();
+  const unit = $derived(dollars === "future" ? "each year’s dollars" : "today’s dollars");
 
   let width = $state(0);
   const m = { top: 22, right: 16, bottom: 30, left: 56 };
@@ -31,11 +33,13 @@
     return out;
   });
 
-  let hover = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
+  // The year the readout is on, while the chart still has it (a shorter one would leave it past the end).
+  const hover = $derived(pointed != null && pointed < n ? pointed : null);
   function move(clientX: number) {
     if (!svgEl) return;
     const r = svgEl.getBoundingClientRect();
-    hover = Math.max(0, Math.min(n - 1, Math.round(((((clientX - r.left) / r.width) * W - m.left) / iw) * (n - 1))));
+    pointed = Math.max(0, Math.min(n - 1, Math.round(((((clientX - r.left) / r.width) * W - m.left) / iw) * (n - 1))));
   }
   const tipLeft = $derived.by(() => {
     if (hover == null || !svgEl) return 0;
@@ -47,7 +51,7 @@
 
 <div class="relative" bind:clientWidth={width}>
   <svg bind:this={svgEl} viewBox={`0 0 ${W} ${height}`} class="block w-full select-none text-xs" role="img"
-    aria-label={`Projected investments by age: median ${fmt0(p.atEnd)} at the end of the plan`}>
+    aria-label={`Projected investments by age, in ${unit}: median ${fmt0(p.atEnd)} at the end of the plan`}>
     {#each ticks as t (t)}
       <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
       <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
@@ -70,7 +74,7 @@
       <circle cx={x(hover)} cy={y(p.mid[hover])} r="3.5" fill="var(--nw-1)" stroke="var(--card)" stroke-width="1.5" />
     {/if}
     <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
-      onmousemove={(e) => move(e.clientX)} onmouseleave={() => (hover = null)} use:sideways={move} />
+      onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:sideways={move} />
   </svg>
   <div class="-mt-1 text-center text-xs text-muted-foreground">{names[0] === "You" ? "Your age" : `${names[0]}'s age`}</div>
   {#if hover != null}
@@ -86,6 +90,7 @@
     <summary class="cursor-pointer text-xs text-muted-foreground">Show as table</summary>
     <div class="mt-2 max-h-72 overflow-auto">
       <table class="w-full max-w-lg text-sm">
+        <caption class="pb-1 text-left text-xs text-muted-foreground">In {unit}</caption>
         <thead><tr class="text-left text-xs text-muted-foreground">
           <th class="pb-1 font-medium">Year</th><th class="pb-1 font-medium">Age</th>
           <th class="pb-1 text-right font-medium">Poor markets</th><th class="pb-1 text-right font-medium">Typical</th>
