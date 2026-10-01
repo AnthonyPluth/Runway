@@ -85,6 +85,27 @@ export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): Endin
   return [...byLoan.values()];
 }
 
+/** Which dollars the planner shows its figures in: today's (what the projection runs in) or each year's own. */
+export type Dollars = "today" | "future";
+
+/** A figure for `year`, given in today's dollars, in the dollars chosen: as it is, or grown by `inflation` a year to
+ *  that year's own (future, nominal) dollars. The one place the planner converts: the projection itself stays in
+ *  today's dollars, and only what's shown changes. */
+export function inDollars(v: number, year: number, thisYear: number, inflation: number, dollars: Dollars): number {
+  return dollars === "future" ? v * Math.pow(1 + inflation, year - thisYear) : v;
+}
+
+/** The projection's dollar figures, each year's in the dollars chosen (the odds, ages and years don't change). */
+export function projectionIn(p: Projection, thisYear: number, inflation: number, dollars: Dollars): Projection {
+  if (dollars === "today") return p;
+  const each = (vals: number[]) => vals.map((v, i) => inDollars(v, p.years[i], thisYear, inflation, dollars));
+  return {
+    ...p, low: each(p.low), mid: each(p.mid), high: each(p.high),
+    atRetirement: inDollars(p.atRetirement, p.years[p.retireIndex], thisYear, inflation, dollars),
+    atEnd: inDollars(p.atEnd, p.years[p.years.length - 1], thisYear, inflation, dollars),
+  };
+}
+
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */
 export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[]) {
   const people = plan.people;
