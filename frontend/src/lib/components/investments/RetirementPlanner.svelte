@@ -151,7 +151,7 @@
   <p class="mb-3 text-sm text-muted-foreground">
     <span class="mr-2 inline-block rounded-full border px-2 py-0.5 text-xs font-medium">Sample · based on default assumptions</span>
     Starting from Runway's figures: your investments, and what you've spent and saved over the last year. <strong class="font-medium text-foreground">Enter
-    your birth year and retirement age to make it yours.</strong></p>
+    your birth year and retirement age{isPhone() ? " on a computer" : ""} to make it yours.</strong></p>
 {/if}
 
 {#if proj}
@@ -182,7 +182,7 @@
     included, and taxes aren't modeled. Not financial advice.</p>
   <div class="mt-4"><PlannerChart p={proj} {names} /></div>
 {:else}
-  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age{isPhone() ? " on a computer" : ""} to see the projection.</p>
 {/if}
 {#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
