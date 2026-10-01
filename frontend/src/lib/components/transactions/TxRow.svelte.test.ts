@@ -205,6 +205,16 @@ describe("TxRow", () => {
 
   // jsdom has no layout, so these check the classes that keep a row's text from landing on its neighbours.
   describe("narrow rows", () => {
+    it("hides the account name, chip text and recurring name in phone landscape only below lg, not on short desktop windows", () => {
+      const landscape = "max-lg:[@media(max-height:500px)]";
+      render(TxRow, props(tx({ account_name: "Shared Checking", recurring_id: 2, recurring_name: "Rent",
+        retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
+      const chipText = within(screen.getByRole("button", { name: "Target in store · 3 items" })).getByText("Target in store · 3 items");
+      expect(chipText).toHaveClass(`${landscape}:hidden!`);
+      expect(within(row()).getByText("Rent")).toHaveClass(`${landscape}:hidden!`);
+      for (const e of within(row()).getAllByText("Shared Checking")) expect(e.className).not.toMatch(/(^|\s)\[@media\(max-height:500px\)\]/);
+    });
+
     it("shows the order chip as just its icon unless the cell has room for its text", () => {
       render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
       const chip = screen.getByRole("button", { name: "Target in store · 3 items" });

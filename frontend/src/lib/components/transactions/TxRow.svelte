@@ -98,16 +98,16 @@
           title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           class={cn("inline-flex shrink-0 cursor-pointer items-center rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
-            linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15" : onHover)}>
-          ↻{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline">{t.recurring_name}</span>{/if}
+            linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!" : onHover)}>
+          ↻{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{t.recurring_name}</span>{/if}
         </button>
       {/if}
       {#if t.retail}
         <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={orderLabel(t.retail)} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
-          class="inline-flex max-w-full shrink-0 cursor-pointer items-center gap-0.5 rounded-md py-0.5 pl-0.5 text-xs font-medium text-muted-foreground hover:text-primary @sm/title:min-w-7 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-secondary @sm/title:pl-1 @sm/title:pr-2 @sm/title:text-secondary-foreground @sm/title:hover:bg-primary/15">
+          class="inline-flex max-w-full shrink-0 cursor-pointer items-center gap-0.5 rounded-md py-0.5 pl-0.5 text-xs font-medium text-muted-foreground hover:text-primary @sm/title:min-w-7 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-secondary @sm/title:pl-1 @sm/title:pr-2 @sm/title:text-secondary-foreground @sm/title:hover:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!">
           <ChevronRight class={cn("size-3.5 shrink-0 transition-transform motion-reduce:transition-none", showOrder && "rotate-90")} aria-hidden="true" />
-          <span class="hidden truncate @sm/title:inline">{orderLabel(t.retail)}</span></button>
+          <span class="hidden truncate @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{orderLabel(t.retail)}</span></button>
       {/if}
     </div>
   </div>
@@ -115,8 +115,8 @@
        is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
        text only shows once the cell is 24rem wide, so it never lands on the account. -->
   <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    <span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="[@media(max-height:500px)]:hidden" /></span>
-    {#if detail}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! [@media(max-height:500px)]:hidden!">·</span><span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! [@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
+    <span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>
+    {#if detail}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span><span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
