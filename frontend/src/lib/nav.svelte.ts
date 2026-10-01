@@ -32,10 +32,10 @@ export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? 
 /** After this long without a good sync, the data is called out as old (a day, and some slack for a late sync). */
 export const STALE_HOURS = 26;
 
-export type SyncTone = "" | "busy" | "warn" | "bad";
+type SyncTone = "" | "busy" | "warn" | "bad";
 /** The sync line: its text and tone, a visible second line (`detail`), the full story on hover (`title`), and where to
  * go about a problem (`href`, only when there is one). */
-export interface SyncStatus { text: string; tone: SyncTone; title: string; detail: string; href: string }
+interface SyncStatus { text: string; tone: SyncTone; title: string; detail: string; href: string }
 
 const FIX = "#setup/connections";
 const time = (t: Date) => t.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });

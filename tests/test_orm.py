@@ -1,24 +1,15 @@
 """The ORM session layer (runway/db.py): statements and the ORM Session share the Connection's transaction with the
 legacy SQL text, and the portable helpers (upsert, insert_ignore, instr, account_label_expr) behave as the SQL did."""
-import os
-import tempfile
 import unittest
 
 from sqlalchemy import func, insert, select, update
 
 from runway import db, splits
 from runway.models import Account, Asset, AssetValue, Rule, Setting, Transaction
+from tests.shared import DbCase
 
 
-class SessionLayerTests(unittest.TestCase):
-    def setUp(self):
-        self.path = os.path.join(tempfile.mkdtemp(), "orm.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close()
-
+class SessionLayerTests(DbCase):
     def others_see(self, sql):
         with db.session(self.path) as other:
             return other.execute(sql).fetchall()

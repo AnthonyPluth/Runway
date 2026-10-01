@@ -10,11 +10,12 @@
   import { fmt, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import type { RecurringItem } from "$lib/components/recurring/types";
   import RecurringPicker from "./RecurringPicker.svelte";
   import LogoPicker from "./LogoPicker.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import SplitEditor from "./SplitEditor.svelte";
-  import type { RecurringItem, Tx } from "./types";
+  import type { Tx } from "./types";
   import { openOrders } from "./expanded.svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
 

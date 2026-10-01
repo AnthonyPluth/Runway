@@ -2,7 +2,7 @@
   import { app } from "$lib/app.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import * as Card from "$lib/components/ui/card";
-  import { serverTime } from "$lib/format";
+  import { fmtDateTime, serverTime } from "$lib/format";
   import SimpleFinSetup from "./SimpleFinSetup.svelte";
   import type { SettingsAccount } from "./types";
   import { helpCls, linkCls } from "./ui";
@@ -17,7 +17,7 @@
   const warnings = $derived(st.sync_warnings ?? []);
   const problem = $derived(log && !log.ok ? log.message || "The last sync failed." : warnings.join("; "));
   // When it ran, in this browser's time zone; the bank messages the log line also carries are shown on their own line.
-  const when = $derived(log?.at ? serverTime(log.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
+  const when = $derived(log?.at ? fmtDateTime(serverTime(log.at)) : "");
   const summary = $derived(log?.ok ? (log.message ?? "").split(" · bank messages:")[0] : "");
   // Its accounts are the ones it syncs: not Plaid's own ("pl:…"), nor one switched to Plaid under Accounts (which keeps
   // its id). Hidden ones still sync, so they count. Its banks are their institutions.

@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from unittest import mock
 
 from runway import db, oidc, retail, splits
+from tests.shared import DbCase
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "amazon")
 ORDER = "111-6778632-7354601"   # 4 items, $57.69 + $2.99 shipping + $3.19 tax - $2.99 free shipping = $60.88
@@ -35,20 +36,15 @@ def fake_ai(answers):
 AI = fake_ai({"sash": "Shopping", "tea": "Groceries", "crucible": "Entertainment", "ziploc": "Groceries"})
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "r.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('card', 'Card', 'credit', 0)")
         self.since = mock.patch.object(retail, "since", return_value="2024-01-01")
         self.since.start()
 
     def tearDown(self):
         self.since.stop()
-        self.c.close()
-        self.tmp.cleanup()
 
     def tx(self, tid, posted, amount, desc, category=None, source=None):
         self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source) "

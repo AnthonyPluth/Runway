@@ -5,6 +5,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { fmtDateTime } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { b64uToBytes, currentSubscription, deviceName, isInstalled, isIOS, pushSupported } from "./push";
   import type { PushInfo } from "./types";
@@ -60,8 +61,8 @@
   const savePref = (k: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     await api("/api/push/prefs", { method: "POST", body: { [k]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } });
   };
-  const when = (t: number, time = true) => new Date(t * 1000).toLocaleString("en-US",
-    time ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric" });
+  const when = (t: number, time = true) =>
+    (time ? fmtDateTime(new Date(t * 1000)) : new Date(t * 1000).toLocaleString("en-US", { month: "short", day: "numeric" }));
   const RULES: { k: string; label: string; num?: [string, string, string, number] }[] = [
     { k: "card_due", label: "A card payment is coming up", num: ["card_due_days", "", " days ahead", 1] },
     { k: "low_balance", label: "The forecast gets low in the next 30 days", num: ["low_balance_below", "below $", "", 50] },

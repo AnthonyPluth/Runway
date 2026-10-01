@@ -8,23 +8,18 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from runway import db, networth, prices, realie
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
+        super().setUp()
         rows = [("chk", "Checking", "checking", 4561.10, 0, 0), ("brk", "Brokerage", "investment", 154756.49, 0, 0),
                 ("cc", "Sapphire", "credit", -1510.72, 0, 0), ("mtg", "Mortgage", "loan", -250000.0, 0, 0),
                 ("auto", "Auto loan", "loan", 12000.0, 1, 0), ("old", "Closed card", "credit", -99.0, 0, 1)]
         self.c.executemany("INSERT INTO accounts(id, name, kind, balance, owed_positive, hidden) VALUES (?,?,?,?,?,?)", rows)
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
 
 
 class NetWorthTests(Base):

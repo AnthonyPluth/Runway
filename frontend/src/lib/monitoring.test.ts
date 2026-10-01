@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const init = vi.fn();
 const addEventProcessor = vi.fn();
+const setUser = vi.fn();
 const form = { appendToDom: vi.fn(), open: vi.fn() };
 const createForm = vi.fn(async () => form);
 const named = (name: string) => vi.fn((opts?: unknown) => ({ name, opts }));
 vi.mock("@sentry/browser", () => ({
-  init, addEventProcessor, getFeedback: () => ({ createForm }),
+  init, addEventProcessor, setUser, getFeedback: () => ({ createForm }),
   breadcrumbsIntegration: named("Breadcrumbs"), browserTracingIntegration: named("BrowserTracing"),
   browserProfilingIntegration: named("BrowserProfiling"), replayIntegration: named("Replay"),
   consoleLoggingIntegration: named("ConsoleLogging"), feedbackIntegration: named("Feedback"),
@@ -25,16 +26,30 @@ const cfg = { dsn: "https://k@o.ingest/1", environment: "prod", release: "1.2.3"
 const all = { ...cfg, traces: 0.5, profiles: 1, replays: 0.1, replays_on_error: 1, logs: true, feedback: true };
 
 /** A fresh copy of the module (it starts only once), started with `config`; returns what Sentry.init was given. */
-async function started(config: typeof cfg | typeof all) {
+async function started(config: typeof cfg | typeof all | Record<string, unknown>) {
   vi.resetModules();
   init.mockClear();
   addEventProcessor.mockClear();
+  setUser.mockClear();
   const m = await import("./monitoring");
-  await m.startMonitoring(config);
+  await m.startMonitoring(config as typeof cfg);
   return { m, opts: init.mock.calls[0][0] as Options };
 }
 
 describe("startMonitoring", () => {
+  it("names who's signed in by Runway's code for them, and no one when there isn't one", async () => {
+    await started({ ...cfg, user_id: "3f2a9c1d0b7e4a65" });
+    expect(setUser).toHaveBeenCalledWith({ id: "3f2a9c1d0b7e4a65" });
+    await started({ ...cfg, user_id: null });
+    expect(setUser).not.toHaveBeenCalled();
+  });
+
+  it("records replays of visits with an error only, when that's all that's asked", async () => {
+    const { opts } = await started({ ...cfg, replays: 0, replays_on_error: 1 });
+    expect(opts).toMatchObject({ replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 1 });
+    expect(opts.integrations([]).map((i) => i.name)).toContain("Replay");
+  });
+
   it("does nothing when Runway isn't set up for error reports", async () => {
     const { startMonitoring } = await import("./monitoring");
     await startMonitoring(null);
@@ -106,6 +121,11 @@ describe("startMonitoring", () => {
       expect(e.request).toEqual({ url: "https://runway.test/#transactions" });
       expect(e).not.toHaveProperty("user");
       expect(e.message).toBe("boom");
+    });
+
+    it("keeps only the code Runway gave the user, never their name, email or address", () => {
+      const e = opts.beforeSend({ user: { id: "3f2a9c1d0b7e4a65", email: "a@b.c", username: "Ann", ip_address: "{{auto}}" } });
+      expect(e.user).toEqual({ id: "3f2a9c1d0b7e4a65" });
     });
 
     it("cleans addresses in an error's message and exception text", () => {

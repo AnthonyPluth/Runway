@@ -166,6 +166,40 @@ class MonitoringTests(unittest.TestCase):
             self.assertIsNone(monitoring.browser_origin())
 
 
+    def test_who_is_signed_in_is_a_code_that_does_not_say_who(self):
+        key = {"RUNWAY_SECRET_KEY": "k" * 40}
+        with mock.patch.dict(os.environ, key):
+            ann = monitoring.user_id({"sub": "google|1234567890", "email": "ann@example.com", "name": "Ann"})
+            self.assertRegex(ann, r"^[0-9a-f]{16}$")
+            self.assertEqual(monitoring.user_id({"sub": "google|1234567890"}), ann)   # the same person, the same code
+            self.assertNotEqual(monitoring.user_id({"sub": "google|1234567891"}), ann)
+            self.assertEqual(monitoring.user_id({"name": None, "email": None, "local": True}), "local")   # no OIDC
+            self.assertIsNone(monitoring.user_id(None))
+            self.assertIsNone(monitoring.user_id({"email": "ann@example.com"}))   # no sign-in id: nobody
+            with mock.patch.dict(os.environ, {"SENTRY_USER": "0"}):
+                self.assertIsNone(monitoring.user_id({"sub": "google|1234567890"}))
+            with mock.patch.dict(os.environ, {**ERRORS_ONLY, **key}):
+                self.assertEqual(monitoring.browser_config({"sub": "google|1234567890"})["user_id"], ann)
+                self.assertIsNone(monitoring.browser_config()["user_id"])
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "j" * 40}):   # someone else's Runway: another code
+            self.assertNotEqual(monitoring.user_id({"sub": "google|1234567890"}), ann)
+
+    def test_a_request_says_who_asked_and_nothing_else_does(self):
+        transport = start(ERRORS_ONLY)
+        ann = {"sub": "google|1234567890", "email": "ann@example.com", "name": "Ann"}
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "k" * 40}), mock.patch("sys.stderr"):
+            code = monitoring.user_id(ann)
+            monitoring.set_user(ann)   # outside a request: the scope is shared, so nothing is set
+            monitoring.report(RuntimeError("before"))
+            with monitoring.request("GET", "/api/state", {}):
+                monitoring.set_user(ann)
+                monitoring.report(RuntimeError("during"))
+            monitoring.report(RuntimeError("after"))
+        sentry_sdk.flush()
+        users = {e["exception"]["values"][0]["value"]: e.get("user") for e in transport.events}
+        self.assertEqual(users, {"before": None, "during": {"id": code}, "after": None})
+        self.assertNotIn("ann@example.com", json.dumps(transport.events))
+
     def test_the_web_app_is_told_which_features_are_on(self):
         with mock.patch.dict(os.environ, ERRORS_ONLY):
             cfg = monitoring.browser_config()
@@ -254,6 +288,7 @@ class MonitoringTests(unittest.TestCase):
         tx = txs[0]
         self.assertEqual(tx["contexts"]["trace"]["trace_id"], trace_id)   # continues the web app's trace
         self.assertEqual(tx["contexts"]["trace"]["data"]["http.response.status_code"], 200)
+        self.assertEqual(tx["user"], {"id": "local"})   # who asked (without OIDC everyone is "local"; see user_id)
         self.assertTrue(any(sp["op"] == "db" for sp in tx["spans"]))   # database queries, as spans
         self.assertNotIn("rent-money", json.dumps(tx))
         logs = json.dumps(transport.of("log"))
@@ -262,13 +297,15 @@ class MonitoringTests(unittest.TestCase):
 
     def test_spans_lose_queries_and_credentials(self):
         tx = monitoring._before_send_transaction({
-            "request": {"url": "https://runway.test/api/x?q=1", "headers": {"a": "b"}}, "user": {"id": "u"},
+            "request": {"url": "https://runway.test/api/x?q=1", "headers": {"a": "b"}},
+            "user": {"id": "3f2a9c1d0b7e4a65", "email": "a@b.c", "ip_address": "10.1.2.3"},
             "spans": [{"op": "http.client", "description": f"GET {SIMPLEFIN}/accounts?start-date=1",
                        "data": {"url": SIMPLEFIN + "/accounts", "http.query": "start-date=1", "db.params": [5]}}],
         }, {})
         text = json.dumps(tx)
-        for secret in ("secretpass", "start-date", "headers", '"user"', "db.params"):
+        for secret in ("secretpass", "start-date", "headers", "a@b.c", "10.1.2.3", "db.params"):
             self.assertNotIn(secret, text)
+        self.assertEqual(tx["user"], {"id": "3f2a9c1d0b7e4a65"})   # the code for who's signed in, and nothing else
         self.assertEqual(tx["spans"][0]["data"]["url"], "https://beta-bridge.simplefin.org/simplefin/accounts")
 
     def test_background_work_is_traced_and_timed(self):

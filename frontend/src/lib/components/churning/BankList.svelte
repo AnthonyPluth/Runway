@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt0, fmtDate } from "$lib/format";
+  import { barWidth, fmt0, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import { BANK_STATUS_LABEL, BANK_TYPE_LABEL, bankLeft, eligibilityText, fullDate, spendProgress } from "./churning";
   import type { BankBonus, Churning } from "./types";
@@ -41,7 +41,7 @@
             </div>
             <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`Direct deposits toward the ${b.bank} bonus`}
               aria-valuemin={0} aria-valuemax={b.dd_total} aria-valuenow={p.dd_total}>
-              <div class={cn("h-full rounded-full", dd.share >= 1 ? "bg-[var(--good)]" : "bg-[var(--nw-2)]")} style:width={`${(dd.share * 100).toFixed(1)}%`}></div>
+              <div class={cn("h-full rounded-full", dd.share >= 1 ? "bg-[var(--good)]" : "bg-[var(--nw-2)]")} style:width={barWidth(dd.share)}></div>
             </div>
           {/if}
           <div class="mt-1 text-xs text-muted-foreground">

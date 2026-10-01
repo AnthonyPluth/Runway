@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { flows, project, RUNS, saleProceeds } from "./planner";
-import type { Plan, PlanAsset } from "./types";
+import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
 
 // One person, 60 this year, retiring at 65 and planning to 70: eleven years, retired from the sixth.
-function plan(over: Partial<Plan> = {}): Plan {
+function plan(over: Partial<RetirementPlan> = {}): RetirementPlan {
   return {
     people: [{ name: "Alex", birth_year: Y - 60, retire_age: 65, savings: 10_000 }],
     plan_to_age: 70,

@@ -10,15 +10,15 @@
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
   import { project, saleProceeds } from "./planner";
-  import type { Plan, PlanData } from "./types";
+  import type { PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave).
   let { data }: { data: PlanData } = $props();
 
-  const copy = (p: Plan): Plan => JSON.parse(JSON.stringify(p));
+  const copy = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
   const initialPlan = () => copy(data.plan);
-  let plan = $state<Plan>(initialPlan());
+  let plan = $state<RetirementPlan>(initialPlan());
   const wasDefault = () => data.is_default;
   let isDefault = $state(wasDefault());
   let problem = $state<string | null>(null);
@@ -49,7 +49,7 @@
     isDefault = true; problem = null;
   }
   // Runway's own starting figures (what planner.default() gives).
-  const defaults = (): Partial<Plan> => ({
+  const defaults = (): Partial<RetirementPlan> => ({
     people: [{ name: "You", birth_year: year - 40, retire_age: 65, savings: data.computed.yearly_savings }],
     plan_to_age: 95, spending: data.computed.annual_spending, return_before: data.computed.expected_return,
     return_after: 0.04, volatility: 0.12, inflation: 0.025, income: [], events: [], assets: [],
@@ -63,7 +63,7 @@
   const usable = $derived(plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0);
   const proj = $derived.by(() => {
     if (!usable) return null;
-    const p = $state.snapshot(plan) as Plan;
+    const p = $state.snapshot(plan) as RetirementPlan;
     p.people = p.people.map((x) => ({ ...x, savings: num(x.savings) }));
     p.spending = num(p.spending);
     p.income = p.income.filter((i) => i.person < p.people.length).map((i) => ({ ...i, amount: num(i.amount), start_age: num(i.start_age),

@@ -1,8 +1,6 @@
 """Equity compensation: vesting, what grants are worth, net worth, and reading it from Carta."""
 import io
 import json
-import os
-import tempfile
 import time
 import unittest
 import urllib.error
@@ -10,6 +8,7 @@ import urllib.parse
 from datetime import date
 
 from runway import carta, db, equity, networth
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 27)
 
@@ -51,16 +50,8 @@ class VestingTests(unittest.TestCase):
         self.assertEqual(equity.vested_now(grant(vested_reported=1234), TODAY), 1234)
 
 
-class Base(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "e.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
+class Base(DbCase):
+    pass
 
 
 class ModelTests(Base):

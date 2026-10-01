@@ -52,7 +52,6 @@ AUTO_AI_ON_SYNC = "auto_ai_on_sync"   # "1"/"0"; on unless switched off
 PRIMARY_ACCOUNT = "primary_account"
 HORIZON_DAYS = "horizon_days"
 SETUP_DISMISSED = "setup_dismissed"
-MIGRATED_DAILY_SPEND_OFF = "migrated_daily_spend_off"   # the v4 one-time switch-off in db.init has run
 
 # Recurring items
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"

@@ -1,22 +1,12 @@
-import os
-import tempfile
 import unittest
 from datetime import date
 
 from runway import db, demo
+from tests.shared import DbCase
 
 
 @unittest.skipIf(db.using_postgres(), "needs an empty database of its own")
-class DemoTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        db.init(self.path)
-        self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
-
+class DemoTests(DbCase):
     def test_seeds_an_empty_database_once(self):
         n = demo.seed(self.c, today=date(2026, 9, 28))
         self.assertGreater(n, 100)

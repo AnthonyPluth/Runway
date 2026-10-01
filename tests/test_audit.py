@@ -1,9 +1,7 @@
 """The second security review's fixes: outbound requests, numbers, AI answers, restored data, stored secrets."""
 import base64
 import json
-import os
 import socket
-import tempfile
 import threading
 import unittest
 import urllib.request
@@ -12,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest import mock
 
 from runway import backup, categorize, db, networth, notify, oidc, rules, secretbox, simplefin, splits
+from tests.shared import DbCase
 
 
 class Redirecting(BaseHTTPRequestHandler):
@@ -69,22 +68,10 @@ class SimpleFinOutboundTests(unittest.TestCase):
         opened.assert_called_once()
 
 
-class Base(unittest.TestCase):
+class Base(DbCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "t.db")
-        self.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = self.tmp.name
-        db.init(self.path)
-        self.conn = db.connect(self.path)
-
-    def tearDown(self):
-        self.conn.close()
-        if self.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = self.saved
-        self.tmp.cleanup()
+        super().setUp()
+        self.conn = self.c
 
 
 class NumberTests(Base):

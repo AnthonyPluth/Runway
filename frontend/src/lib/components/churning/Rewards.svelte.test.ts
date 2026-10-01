@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { bodyOf, calls, churning } from "./fixtures";
 import Rewards from "./Rewards.svelte";
 import type { Churning, RewardRow } from "./types";
 
@@ -74,5 +75,41 @@ describe("Rewards", () => {
     screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }).click();
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/churning/balances",
       { method: "POST", body: { owner: "Alex", currency: "airline", points: null } }));
+  });
+});
+
+describe("rewards", () => {
+  beforeEach(() => { vi.mocked(api).mockResolvedValue({ ok: true } as never); });
+  const row = { currency: "aa", name: "American AAdvantage", earned: 0, bonuses: 0, balance: 40000, as_of: "2026-08-30", cents: 1.4, value: 0,
+    balance_value: 560, earned_since: 1300, est_balance: 41300, est_value: 578.2 };
+  const setup = () => {
+    const d = churning({ rewards: { Alex: { currencies: [row], value: 0, balance_value: 560 }, Sam: { currencies: [], value: 0, balance_value: 0 } } });
+    render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });
+  };
+
+  it("shows the balance as of its day and a labeled estimate of the balance now", () => {
+    setup();
+    expect(screen.getByLabelText("Day of Alex's American AAdvantage balance")).toHaveValue("2026-08-30");
+    expect(screen.getByText(/Estimated now/)).toHaveTextContent("~41,300");
+    expect(screen.getByText(/1,300 earned since/)).toBeInTheDocument();
+    expect(screen.getByText("$560", { selector: "td" })).toBeInTheDocument();   // Worth stays the balance you entered
+  });
+
+  it("saves a new balance as of today unless you set its day", async () => {
+    setup();
+    const box = screen.getByLabelText("Alex's American AAdvantage balance");
+    await userEvent.clear(box);
+    await userEvent.type(box, "42000");
+    await userEvent.tab();
+    await waitFor(() => expect(bodyOf(calls("/api/churning/balances")[0])).toEqual({ owner: "Alex", currency: "aa", points: "42000", as_of: "2026-09-30" }));
+  });
+
+  it("groups the point values and says which are estimates and which are yours", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Point values" }));
+    expect(screen.getByText("Airline miles")).toBeInTheDocument();
+    expect(screen.getByText("your value")).toBeInTheDocument();      // AA is overridden
+    expect(screen.getAllByText(/estimate \(as of Jun 2026\)/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Estimates, not official values/)).toBeInTheDocument();
   });
 });

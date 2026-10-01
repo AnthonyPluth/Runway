@@ -1,7 +1,7 @@
 // The shapes of the Investments page's API replies (runway/server.py, runway/portfolio.py).
 
 /** One account's share of a holding (the same fund in two accounts is one holding with two lots). */
-export interface Lot {
+interface Lot {
   account_id: string;
   security_id: string;
   account_name: string;
@@ -74,7 +74,7 @@ export interface Activity {
   account_name: string;
 }
 
-export interface Performance {
+interface Performance {
   period?: string;
   start?: string;
   start_value?: number;
@@ -85,14 +85,14 @@ export interface Performance {
   benchmark_return?: number | null;
 }
 
-export interface AllocItem { name: string; value: number; share: number }
+interface AllocItem { name: string; value: number; share: number }
 export type AllocKey = "asset_class" | "account" | "sector" | "holding";
 
 /** The retirement plan, in today's dollars (runway/planner.py keeps it; planner.ts projects it). */
-export interface PlanPerson { name: string; birth_year: number; retire_age: number; savings: number }
-export interface PlanIncome { name: string; amount: number; person: number; start_age: number; end_age: number | null }
-export interface PlanEvent { name: string; year: number; amount: number }
-export interface Plan {
+interface PlanPerson { name: string; birth_year: number; retire_age: number; savings: number }
+interface PlanIncome { name: string; amount: number; person: number; start_age: number; end_age: number | null }
+interface PlanEvent { name: string; year: number; amount: number }
+export interface RetirementPlan {
   people: PlanPerson[];
   plan_to_age: number;
   spending: number;
@@ -107,7 +107,7 @@ export interface Plan {
 /** A home, vehicle or company equity from Net worth that can be sold into the plan. */
 export interface PlanAsset { key: string; name: string; kind: string; value: number; yearly_change: number; owed: number }
 export interface PlanData {
-  plan: Plan;
+  plan: RetirementPlan;
   is_default: boolean;
   current: number;
   computed: { annual_spending: number; yearly_savings: number; expected_return: number };
@@ -115,7 +115,7 @@ export interface PlanData {
   year: number;
 }
 
-export interface XrayRule { name: string; ok: boolean; info?: boolean; detail: string }
+interface XrayRule { name: string; ok: boolean; info?: boolean; detail: string }
 
 /** GET /api/investments?period=… */
 export interface Investments {
@@ -146,18 +146,6 @@ export interface Investments {
   plan: PlanData;
   accounts: InvAccount[];
   activity: Activity[];
-}
-
-/** What SimpleFIN sends for an investment account (Settings' diagnostics). */
-export interface SimplefinSeen { id?: string; org?: string; name: string; positions: number; fields: string[] }
-
-/** GET /api/plaid/status (the parts this page uses). */
-export interface PlaidStatus {
-  items: { item_id: string; institution_name: string | null; error: string | null }[];
-  last_inv_sync: string | null;
-  simplefin_last_sync: string | null;
-  simplefin_seen: SimplefinSeen[];
-  inv_accounts: number;
 }
 
 export interface Quote { price: number; prev_close: number | null; time: number | null; type: string | null }
