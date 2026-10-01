@@ -91,8 +91,9 @@ def clean_product(name: str | None, issuer: str = "other", display_name: str | N
     s = _strip_masks(" ".join(s.split()))
     if issuer in churning.ISSUERS and issuer != "other":
         names = "|".join(re.escape(n).replace(r"\ ", r"\s+") for n in _issuer_names(issuer))
-        s = re.sub(rf"\bby\s+(?:{names})\b", " ", s, flags=re.I)   # "... Card by Citi"
-        s = re.sub(rf"\b(?:{names})\b", " ", s, flags=re.I)
+        s = re.sub(rf"\b(?:by|from)\s+(?:{names})\b", " ", s, flags=re.I)   # "... Card by Citi", "... from American Express"
+        # The issuer's name goes, except where the product is named for it: "Discover it" keeps its "Discover".
+        s = re.sub(rf"\b(?:{names})\b(?!\s+it\b)", " ", s, flags=re.I)
     s = _NOISE.sub(" ", s)
     s = re.sub(r"[/|,]+", " ", s)
     s = " ".join(s.split()).strip(" -–—:.&")

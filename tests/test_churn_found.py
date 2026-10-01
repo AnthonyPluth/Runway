@@ -27,6 +27,10 @@ class CleanProductTests(unittest.TestCase):
             ("Capital One Venture Rewards ••4321", "capital_one", None, "Venture Rewards"),
             ("Freedom Unlimited x9876", "other", None, "Freedom Unlimited"),
             ("Venture X 3030", "capital_one", None, "Venture X"),   # an X that is part of the name stays
+            ("DISCOVER IT CARD (1234)", "discover", None, "DISCOVER IT"),   # a product named for its issuer keeps it
+            ("Discover it Chrome", "discover", None, "Discover it Chrome"),
+            ("The Platinum Card® from American Express (1009)", "amex", None, "The Platinum"),
+            ("Blue Cash Preferred® Card from American Express", "amex", None, "Blue Cash Preferred"),
             ("WORLD OF HYATT (1234)", "chase", None, "WORLD OF HYATT"),   # "World" in a name stays...
             ("Chase World of Hyatt Credit Card", "chase", None, "World of Hyatt"),
             ("Ink Business Preferred World Mastercard (5555)", "chase", None, "Ink Business Preferred"),   # ...not as a tier
