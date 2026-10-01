@@ -62,8 +62,10 @@ def _text_matches(r: dict, tx: dict) -> bool:
     # but only on transactions whose bank text had transfer words cut too: not every purchase from that merchant (a
     # "paypal ach transfer" rule isn't one for PayPal purchases).
     short = payees.short_match(m)
-    return (bool(short) and " ".join((tx.get("payee") or "").lower().split()) == short
-            and payees.bank_tailed(tx.get("description")))
+    if not short or " ".join((tx.get("payee") or "").lower().split()) != short:
+        return False
+    from .categorize import tidy_payee   # here, not at the top: categorize imports this module
+    return payees.bank_tailed(tidy_payee(tx.get("description")))   # tidied: trace numbers and "(Cash)" off first
 
 
 def matches(r: dict, tx: dict) -> bool:

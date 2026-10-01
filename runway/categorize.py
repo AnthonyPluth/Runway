@@ -35,6 +35,12 @@ _TRAILING_NOISE = re.compile(
 
 
 def clean_payee(raw: str | None) -> str:
+    return payees.shorten(tidy_payee(raw))   # "Target Debit Cach Tran" -> "Target"
+
+
+def tidy_payee(raw: str | None) -> str:
+    """The bank's text without processor prefixes, order codes and trailing numbers, in title case: the payee before
+    `payees.shorten` cuts the bank's transfer words."""
     if not raw:
         return ""
     s = re.sub(r"\s+", " ", raw).strip()
@@ -53,8 +59,7 @@ def clean_payee(raw: str | None) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     if not s:
         s = re.sub(r"\s+", " ", raw).strip()
-    s = " ".join(w[:1].upper() + w[1:].lower() if w.isupper() or w.islower() else w for w in s.split(" "))
-    return payees.shorten(s)   # "Target Debit Cach Tran" -> "Target"
+    return " ".join(w[:1].upper() + w[1:].lower() if w.isupper() or w.islower() else w for w in s.split(" "))
 
 
 # ---------------------------------------------------------------------------------------------------------

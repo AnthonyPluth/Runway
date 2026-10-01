@@ -63,11 +63,11 @@ class MatchingTests(Base):
         self.rule(match="fifth third baweb pay cash", match_mode="exact", category="Loans")
         a = self.tx(-35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)")
         b = self.tx(-47.02, "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)")
-        c = self.tx(-698.38, "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)")
+        c = self.tx(-698.38, "FIFTH THIRD BAWEB PAY CASH 20251001")
         d = self.tx(-12, "TARGETED ADS LLC")                      # not Target
         e = self.tx(-20, "FIFTH THIRD MORTGAGE")                  # Fifth Third, but not the merchant the rule was for
         self.rule(match="paypal ach transfer", category="Transfer")
-        f = self.tx(-100, "PAYPAL ACH TRANSFER")
+        f = self.tx(-100, "PAYPAL ACH TRANSFER 20251001")         # a trace number after the bank's words
         g = self.tx(-25, "PAYPAL")                                # a purchase, not the transfers the rule is for
         self.assertEqual((self.row(a)["payee"], self.row(g)["payee"]), ("Target", "Paypal"))
         categorize.categorize(self.c, use_ai=False)
