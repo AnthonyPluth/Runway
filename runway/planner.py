@@ -91,6 +91,9 @@ def clean(body: dict, today: date) -> dict:
         "people": people,
         "plan_to_age": _int(body.get("plan_to_age"), "Plan until age", 60, 110),
         "spending": _num(body.get("spending"), "Spending in retirement", 0, 1e8),
+        # True once you've typed your own spending figure: loan payments aren't taken off it when they end, as it
+        # probably leaves them out already. False while it's Runway's figure from your history, which has them in.
+        "spending_own": validate.flag(body.get("spending_own")) == 1,
         **{k: _num(body.get(k), k.replace("_", " ").capitalize(), lo, hi) for k, (lo, hi) in RATES.items()},
         "income": [], "events": [], "assets": [],
     }
@@ -140,7 +143,7 @@ def default(computed: dict, today: date) -> dict:
     """A starting plan from Runway's own figures (and the old financial-independence card's, if you'd changed them)."""
     return {
         "people": [{"name": "You", "birth_year": today.year - 40, "retire_age": 65, "savings": computed["yearly_savings"]}],
-        "plan_to_age": 95, "spending": computed["annual_spending"],
+        "plan_to_age": 95, "spending": computed["annual_spending"], "spending_own": False,
         "return_before": computed["expected_return"], "return_after": 0.04, "volatility": 0.12, "inflation": 0.025,
         "income": [], "events": [], "assets": [],
     }
@@ -194,7 +197,22 @@ def sellable(conn, today: date) -> list[dict]:
     return out
 
 
+def spending_own(plan: dict, computed: dict) -> bool:
+    """Whether a saved plan's spending is a figure you typed. Plans kept before this was recorded are yours when their
+    spending is more than a dollar off Runway's figure, else Runway's."""
+    if "spending_own" in plan:
+        return bool(plan["spending_own"])
+    try:
+        return abs(float(plan.get("spending") or 0) - computed["annual_spending"]) > 1
+    except (TypeError, ValueError):
+        return True
+
+
 def overview(conn, current: float, computed: dict, today: date) -> dict:
     plan = saved(conn)
+    if plan is not None and "spending_own" not in plan:
+        # Settled once and kept, so Runway's figure moving month to month doesn't change the answer later
+        plan["spending_own"] = spending_own(plan, computed)
+        db.set_setting(conn, sk.RETIREMENT_PLAN, json.dumps(plan, separators=(",", ":")))
     return {"plan": plan or default(computed, today), "is_default": plan is None, "current": round(current, 2),
             "computed": computed, "assets": sellable(conn, today), "year": today.year}

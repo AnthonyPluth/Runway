@@ -282,6 +282,26 @@ class FireTests(Base):
         self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
         self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
 
+    def test_the_plan_knows_whether_spending_is_runways_figure_or_yours(self):
+        p = self.plan()
+        self.assertFalse(p["plan"]["spending_own"])   # the default: Runway's figure
+        planner.save(self.c, {**p["plan"], "spending": 48000, "spending_own": True}, TODAY)
+        self.assertTrue(self.plan()["plan"]["spending_own"])
+        planner.save(self.c, {**p["plan"], "spending_own": "0"}, TODAY)
+        self.assertFalse(self.plan()["plan"]["spending_own"])
+        self.assertFalse(planner.clean({**p["plan"], "spending_own": None}, TODAY)["spending_own"])   # left out: Runway's
+
+    def test_a_plan_kept_before_the_flag_is_settled_once_by_its_spending(self):
+        computed = self.plan()["computed"]
+        old = {k: v for k, v in planner.clean(self.plan()["plan"], TODAY).items() if k != "spending_own"}
+        for spending, own in ((computed["annual_spending"] + 0.6, False), (computed["annual_spending"] + 2400, True)):
+            db.set_setting(self.c, "retirement_plan", json.dumps({**old, "spending": spending}))
+            self.assertEqual(self.plan()["plan"]["spending_own"], own)
+            # kept as settled: a later change in Runway's figure doesn't flip it
+            self.assertEqual(planner.saved(self.c)["spending_own"], own)
+        self.assertTrue(planner.spending_own({"spending": "lots"}, computed))
+        self.assertFalse(planner.spending_own({"spending": 1000, "spending_own": False}, {"annual_spending": 90000}))
+
     def test_yearly_savings_says_what_it_is(self):
         p = self.plan()["computed"]
         self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))   # a year of history: the last 12 months

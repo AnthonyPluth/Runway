@@ -96,6 +96,9 @@ export interface RetirementPlan {
   people: PlanPerson[];
   plan_to_age: number;
   spending: number;
+  /** True once you've typed your own spending: loan payments then aren't taken off it when they end (it probably
+   *  leaves them out already). False (or left out) while it's Runway's figure from your history, which has them in. */
+  spending_own?: boolean;
   return_before: number;
   return_after: number;
   volatility: number;

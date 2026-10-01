@@ -9,7 +9,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { loanProjected, paymentEnds, project, sale as saleAt, saleProceeds } from "./planner";
+  import { endingPayments, loanProjected, paymentEnds, project, sale as saleAt, saleProceeds, type EndingPayment } from "./planner";
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
@@ -51,7 +51,7 @@
   // Runway's own starting figures (what planner.default() gives).
   const defaults = (): Partial<RetirementPlan> => ({
     people: [{ name: "You", birth_year: year - 40, retire_age: 65, savings: data.computed.yearly_savings }],
-    plan_to_age: 95, spending: data.computed.annual_spending, return_before: data.computed.expected_return,
+    plan_to_age: 95, spending: data.computed.annual_spending, spending_own: false, return_before: data.computed.expected_return,
     return_after: 0.04, volatility: 0.12, inflation: 0.025, income: [], events: [], assets: [],
   });
 
@@ -114,6 +114,13 @@
     payment_below_interest: "its payment doesn’t cover the interest: check the loan’s terms",
   } as const;
 
+  // Loan payments that end during the plan. They come off Runway's spending figure (from your history, so it has them
+  // in); a figure you typed is taken as it is, as it probably leaves them out already.
+  const ending = $derived(endingPayments($state.snapshot(plan) as RetirementPlan, data.assets));
+  const endingText = (e: EndingPayment) =>
+    `${fmt0(e.yearly)} a year once ${e.sold ? `${e.name} is sold in ${e.from}` : `the loan on ${e.name} is paid off in ${e.from - 1}`}`;
+  function useRunwaySpending() { plan.spending = data.computed.annual_spending; plan.spending_own = false; keep(); }
+
   // What happens to a loan's monthly payment in the plan: when it ends and comes off spending, or why it doesn't. Only
   // a payment counted in the spending the plan starts from can come off it; one left out as a transfer never was in it.
   function paymentLine(a: PlanAsset, sellYear: number | null): string {
@@ -123,7 +130,9 @@
     const notIn = "It was never in your spending (no payment like it was counted as spending in the last 6 months; a transfer isn’t), so nothing comes off.";
     if (ends != null) {
       const when = l.payoff_year == null || ends <= l.payoff_year ? "stops when it’s sold" : `ends in ${l.payoff_year}`;
-      return l.payment_counted ? `Its ${pay} loan payment ${when}, and comes off your spending from ${ends}.` : `Its ${pay} loan payment ${when}. ${notIn}`;
+      if (!l.payment_counted) return `Its ${pay} loan payment ${when}. ${notIn}`;
+      return plan.spending_own ? `Its ${pay} loan payment ${when}. Your own spending figure is taken as it is, so nothing comes off.`
+        : `Its ${pay} loan payment ${when}, and comes off your spending from ${ends}.`;
     }
     const stays = l.payment_counted ? " It stays in your spending." : ` ${notIn}`;
     if (l.note === "payment_below_interest") return `Its ${pay} loan payment doesn’t cover the interest, so it doesn’t pay the loan down.${stays}`;
@@ -234,10 +243,18 @@
     <h3 class="mb-2 font-medium">In retirement</h3>
     <div class="grid grid-cols-2 gap-3">
       <label class="flex flex-col gap-1">{@render field("Spending a year", "today's dollars")}
-        {@render money(plan.spending, (v) => (plan.spending = v), "Yearly spending in retirement")}</label>
+        {@render money(plan.spending, (v) => { plan.spending = v; plan.spending_own = true; }, "Yearly spending in retirement")}</label>
       <label class="flex flex-col gap-1">{@render field("Plan until age")}
         <Input type="number" step="1" value={plan.plan_to_age} oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
     </div>
+    {#if ending.length}
+      <p class="mt-2 text-sm text-muted-foreground">
+        {#if plan.spending_own}Your own figure, so loan payments aren't taken off it when they end: it probably leaves them out already.
+          <button type="button" class="font-medium text-foreground underline underline-offset-4" onclick={useRunwaySpending}>Use Runway's figure</button>
+          ({fmt0(data.computed.annual_spending)}, which has them in).
+        {:else}Runway's figure, from your last six months; less {ending.map(endingText).join(", and ")}.{/if}
+      </p>
+    {/if}
   </section>
 
   <section class="lg:col-span-2">

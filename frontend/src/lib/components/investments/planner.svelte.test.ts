@@ -299,6 +299,37 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText("Its $1,500/month loan payment stops when it’s sold, and comes off your spending from 2040.")).toBeInTheDocument();
     });
 
+    it("under spending, says Runway's figure is less a loan's payment once it's paid off", () => {
+      setup(data({ assets: [repaying()] }));
+      expect(screen.getByText("Runway's figure, from your last six months; less $18,000 a year once the loan on Home is paid off in 2045."))
+        .toBeInTheDocument();
+    });
+
+    it("takes nothing off a spending figure you typed, and can go back to Runway's", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup(data({ assets: [repaying()] }));
+      const field = screen.getByRole("spinbutton", { name: "Yearly spending in retirement" });
+      await user.clear(field);
+      await user.type(field, "48000");
+      expect(screen.getByText(/^Your own figure, so loan payments aren't taken off it when they end/)).toBeInTheDocument();
+      expect(screen.getByText(/ends in 2045\. Your own spending figure is taken as it is, so nothing comes off\.$/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(800);
+      let body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
+      expect([body.spending, body.spending_own]).toEqual([48000, true]);
+      await user.click(screen.getByRole("button", { name: "Use Runway's figure" }));
+      expect(field).toHaveValue(55000);
+      expect(screen.getByText(/^Runway's figure, from your last six months; less \$18,000 a year/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(800);
+      body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
+      expect([body.spending, body.spending_own]).toEqual([55000, false]);
+    });
+
+    it("keeps a saved plan's own spending figure as it is", () => {
+      setup(data({ assets: [repaying()] }, { spending_own: true }));
+      expect(screen.getByRole("button", { name: "Use Runway's figure" })).toBeInTheDocument();
+      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
+    });
+
     it("says when a loan's payment isn't in spending, so nothing comes off", () => {
       setup(data({ assets: [repaying({ payment_counted: false })] }));
       expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();

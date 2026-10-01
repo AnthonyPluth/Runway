@@ -70,15 +70,17 @@ export function paymentEnds(a: PlanAsset, sellYear: number | null): number | nul
 /** Each loan's yearly payment and the first year it's no longer spent (once per loan, however many assets it's
  *  against: the soonest). Only loans whose payment is known, ends, and was counted in the spending the plan starts
  *  from: one categorized as a transfer was never in it, so there's nothing to take off. */
-export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): { yearly: number; from: number }[] {
+export interface EndingPayment { yearly: number; from: number; name: string; sold: boolean }
+export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): EndingPayment[] {
   const sold = new Map(plan.assets.map((s) => [s.key, s.sell_year]));
-  const byLoan = new Map<string, { yearly: number; from: number }>();
+  const byLoan = new Map<string, EndingPayment>();
   for (const a of assets) {
-    const from = paymentEnds(a, sold.get(a.key) ?? null);
+    const sellYear = sold.get(a.key) ?? null;
+    const from = paymentEnds(a, sellYear);
     const l = a.loan;
     if (from == null || !l?.account_id || !l.payment || !l.payment_counted) continue;
     const had = byLoan.get(l.account_id);
-    if (!had || from < had.from) byLoan.set(l.account_id, { yearly: 12 * l.payment, from });
+    if (!had || from < had.from) byLoan.set(l.account_id, { yearly: 12 * l.payment, from, name: a.name, sold: from === sellYear });
   }
   return [...byLoan.values()];
 }
@@ -92,9 +94,10 @@ export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[
   const ages = people.map((p) => years.map((y) => y - p.birth_year));
   const byKey = new Map(assets.map((a) => [a.key, a]));
   const retireYear = Math.max(...people.map((p) => p.birth_year + p.retire_age));
-  // Spending (from your history) includes the payments on loans counted as spending; once such a loan is paid off or
-  // its asset sold, its payment comes off. The plan's own spending figure stays as you entered it.
-  const ending = endingPayments(plan, assets);
+  // Runway's spending figure (from your history) includes the payments on loans counted as spending; once such a loan
+  // is paid off or its asset sold, its payment comes off. A figure you typed yourself is taken as it is: it probably
+  // leaves the loan out already, and taking it off again would count it twice.
+  const ending = plan.spending_own ? [] : endingPayments(plan, assets);
   const spending = (y: number) => Math.max(0, plan.spending - ending.reduce((s, e) => s + (y >= e.from ? e.yearly : 0), 0));
   const net = years.map((y, t) => {
     let f = 0;

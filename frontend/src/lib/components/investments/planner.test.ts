@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flows, paymentEnds, project, RUNS, sale, saleProceeds } from "./planner";
+import { endingPayments, flows, paymentEnds, project, RUNS, sale, saleProceeds } from "./planner";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
@@ -158,6 +158,19 @@ describe("flows", () => {
     const net = flows(p, Y, [{ ...paying, yearly_change: 0 }, shares]).net;
     expect(net[2]).toBe(300_000 - 39_000);
     expect(net[5]).toBe(40_000);
+  });
+
+  it("takes a payment off Runway's spending figure only, not one you typed (it probably leaves the loan out already)", () => {
+    expect(flows(plan({ spending_own: false }), Y, [repaying]).net.slice(5)).toEqual([-20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
+    expect(flows(plan({ spending_own: true }), Y, [repaying]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    const sold = plan({ spending_own: true, assets: [{ key: "home:1", sell_year: Y + 3 }] });
+    expect(flows(sold, Y, [repaying]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("names each ending payment and why it ends", () => {
+    expect(endingPayments(plan(), [repaying])).toEqual([{ yearly: 12_000, from: 2032, name: "House", sold: false }]);
+    expect(endingPayments(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), [repaying]))
+      .toEqual([{ yearly: 12_000, from: Y + 3, name: "House", sold: true }]);
   });
 
   it("takes a loan's payment off spending from the year after it's paid off", () => {
