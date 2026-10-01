@@ -23,8 +23,8 @@ afterEach(() => vi.clearAllMocks());
 
 describe("RecurringPicker", () => {
   const items = [
-    { id: 1, name: "Coffee club", frequency: "monthly", account_id: "a1" },
-    { id: 2, name: "Gym", frequency: "weekly", account_id: "a2" },
+    { id: 1, name: "Coffee club", frequency: "monthly", account_id: "a1", amount: -20, active: 1, matched_count: 0 },
+    { id: 2, name: "Gym", frequency: "weekly", account_id: "a2", amount: -20, active: 1, matched_count: 0 },
   ];
   const setup = (t = tx(), extra = {}) => {
     const cbs = { onclose: vi.fn(), onchanged: vi.fn() };

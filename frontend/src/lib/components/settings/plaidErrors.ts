@@ -26,7 +26,7 @@ const OTHER: Record<string, string> = {
   NO_ACCOUNTS: "Plaid found no accounts at this bank that it can read",
 };
 
-export interface PlaidProblem { text: string; reconnect: boolean }
+interface PlaidProblem { text: string; reconnect: boolean }
 
 /** A connection's error as a sentence, and whether to offer Reconnect. */
 export function plaidProblem(error: string): PlaidProblem {

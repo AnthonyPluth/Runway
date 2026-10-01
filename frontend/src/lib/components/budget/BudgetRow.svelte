@@ -3,7 +3,7 @@
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { fmt, monthShort } from "$lib/format";
+  import { barWidth, fmt, monthShort } from "$lib/format";
   import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -111,7 +111,7 @@
     <div class={cn("mt-0.5 flex items-center gap-3", !sub && "sm:pl-[38px]")}>
       <div class={cn("relative min-w-28 flex-1 rounded-full bg-muted", sub ? "h-1.5 opacity-85" : "h-2")} role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
         <div class={cn("h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
-          style:width={`${Math.min(100, pct * 100).toFixed(1)}%`}></div>
+          style:width={barWidth(pct)}></div>
         {#if showPace}
           <div class="absolute -top-[3px] -bottom-[3px] w-0.5 rounded-sm bg-muted-foreground" style:left={`${(pace * 100).toFixed(1)}%`}
             title="Where you'd be at an even pace today"></div>

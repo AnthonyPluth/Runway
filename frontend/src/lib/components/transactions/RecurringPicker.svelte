@@ -1,8 +1,9 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import type { RecurringItem } from "$lib/components/recurring/types";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { toast } from "svelte-sonner";
-  import type { RecurringItem, Tx } from "./types";
+  import type { Tx } from "./types";
 
   // Link a transaction to a recurring item, start a new one from it, or mark it as not recurring. Leaving the picker
   // without choosing closes it.

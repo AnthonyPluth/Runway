@@ -8,13 +8,14 @@
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
-  import type { AllocKey, Investments, LiveQuotes, PlaidStatus, Quote } from "$lib/components/investments/types";
+  import type { AllocKey, Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
+  import type { PlaidStatus } from "$lib/components/settings/types";
   import * as Alert from "$lib/components/ui/alert";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt, fmt0, fmtDate, shortMoney } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, fmtDateTime, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
   import Check from "@lucide/svelte/icons/check";
   import Info from "@lucide/svelte/icons/info";
@@ -54,7 +55,7 @@
   const beat = $derived(perf.benchmark_return != null && perf.return != null ? perf.return - perf.benchmark_return : null);
   const synced = $derived.by(() => {
     const last = [status?.last_inv_sync, status?.simplefin_last_sync].filter(Boolean).sort().pop();
-    return last ? new Date(last).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never";
+    return last ? fmtDateTime(new Date(last)) : "never";
   });
   const liveTime = $derived(live ? new Date(live.as_of).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : "");
 
@@ -202,7 +203,7 @@
               {#each d.allocation[inv.allocTab] as a (a.name)}
                 <tr class="border-t border-border first:border-t-0 [&>td]:py-2">
                   <td class="pr-3">{a.name}</td>
-                  <td class="w-[45%] pr-3"><span class="block h-1.5 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={`${Math.min(100, a.share * 100).toFixed(1)}%`}></span></span></td>
+                  <td class="w-[45%] pr-3"><span class="block h-1.5 overflow-hidden rounded-full bg-muted"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(a.share)}></span></span></td>
                   <td class="pr-3 text-right tabular-nums">{(a.share * 100).toFixed(1)}%</td>
                   <td class="text-right text-muted-foreground tabular-nums">{fmt0(a.value)}</td>
                 </tr>

@@ -1,7 +1,7 @@
 // How the Churning page words and filters what the server worked out (runway/churning.py, runway/bank_bonuses.py).
 import { fmt0, fmtDate, parseDate } from "$lib/format";
 import type {
-  BankBonus, Benefit, Blocker, ChurnCard, ChurnRate, Churning, CreditScore, Currency, CurrencyGroup, Eligibility, Five24, Plan,
+  BankBonus, Benefit, Blocker, CardPlan, ChurnCard, ChurnRate, Churning, CreditScore, Currency, CurrencyGroup, Eligibility, Five24,
   UpcomingItem, Wish,
 } from "./types";
 
@@ -97,11 +97,11 @@ export const KIND_LABEL: Record<UpcomingItem["kind"], string> = {
   bank_post: "Bonus posting", bank_close: "Safe to close", bank_fee: "Monthly fee", bank_eligible: "Bonus again",
 };
 
-export const PLAN_LABEL: Record<Plan, string> = {
+export const PLAN_LABEL: Record<CardPlan, string> = {
   undecided: "Undecided", keep: "Keep it", close: "Close it", product_change: "Product change (downgrade or switch)",
 };
 /** Plans that mean doing something to the card, so they have a day and a reminder. */
-export const PLAN_ACTS: Plan[] = ["close", "product_change"];
+export const PLAN_ACTS: CardPlan[] = ["close", "product_change"];
 
 /** A card's plan in a few words for its row: "Keeping it", "Product change to Freedom by Oct 20", "Done Oct 3". */
 export function planLine(c: ChurnCard): string {
@@ -209,7 +209,7 @@ export function reorder(open: Wish[], id: number, dir: -1 | 1): { id: number; pr
 }
 
 export interface BenefitRow { card: ChurnCard; b: Benefit }
-export interface BenefitBoard {
+interface BenefitBoard {
   expiring: BenefitRow[];     // money left and the period ends soon, soonest first
   available: BenefitRow[];    // not used up yet, not expiring soon
   used: BenefitRow[];         // all of a credit used, or an access benefit used, this period

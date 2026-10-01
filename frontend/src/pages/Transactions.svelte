@@ -11,7 +11,8 @@
   import Upcoming from "$lib/components/transactions/Upcoming.svelte";
   import { askRemember } from "$lib/components/transactions/remember.svelte";
   import { restoreTx, type Was } from "$lib/components/transactions/restore";
-  import type { RecurringItem, RuleOffer, Tx, TxList, UpcomingEvent } from "$lib/components/transactions/types";
+  import type { RecurringItem } from "$lib/components/recurring/types";
+  import type { RuleOffer, Tx, TxList, UpcomingEvent } from "$lib/components/transactions/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";

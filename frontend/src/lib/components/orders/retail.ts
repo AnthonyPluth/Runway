@@ -1,10 +1,10 @@
 // Amazon and Target orders (runway/retail.py), shared by Transactions (an order under its charge) and Settings.
 
-export interface RetailItem {
+interface RetailItem {
   id: number; title: string; quantity: number; amount: number; department?: string | null;
   category?: string | null; category_source?: string | null; confidence?: number | null;
 }
-export interface RetailCharge {
+interface RetailCharge {
   id: string; date: string; amount: number; payment?: string | null; tx_id?: string | null; match_source?: string | null;
   applied?: "split" | "category" | null; posted?: string | null; payee?: string | null; description?: string | null; account_name?: string | null;
 }

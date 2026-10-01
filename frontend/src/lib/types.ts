@@ -1,6 +1,6 @@
 // The shapes of Runway's API replies that the pages use (see runway/server.py).
 
-export interface User { name?: string; email?: string; local?: boolean }
+interface User { name?: string; email?: string; local?: boolean }
 export interface Brand {
   institution?: string | null;
   /** The account's logo: the one you chose, else its institution's (Logo.dev's, once Runway has fetched it); null for its letter. */
@@ -10,7 +10,7 @@ export interface Brand {
   initial?: string;
 }
 /** The last sync's log line; `at` is when it ran, ISO with its UTC offset. */
-export interface SyncLog { ok: boolean; message?: string; at?: string }
+interface SyncLog { ok: boolean; message?: string; at?: string }
 
 /** GET /api/state (runway/server.py api_state). */
 export interface SentryConfig {
@@ -155,6 +155,6 @@ export interface Overview {
   } | null;
 }
 
-export interface BudgetChange {
+interface BudgetChange {
   date: string; account_id: string; kind: "budget" | "card"; name: string; amount: number; category?: string; account?: string; charged?: number;
 }
