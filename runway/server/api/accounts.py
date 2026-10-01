@@ -70,16 +70,19 @@ def api_account_update(conn, _q, body, acct_id):
 
 
 def _loan_terms(conn, acct, body) -> dict:
-    """A loan's interest rate (annual %) and monthly payment, checked. Not for a loan whose terms come from Plaid."""
+    """A loan's interest rate (annual %) and monthly payment, checked. Not a figure Plaid supplies for this loan: those
+    are the lender's, and what Plaid leaves out (a new loan's payment, say) is yours to set."""
     given = [k for k in LOAN_FIELDS if k in body]
     if not given:
         return {}
     if (body.get("kind") or acct["kind"]) != "loan":
         raise ApiError("Only a loan has an interest rate and monthly payment")
-    if acct["plaid_account_id"] and conn.execute(
-            select(LoanTerms.plaid_account_id).where(LoanTerms.plaid_account_id == acct["plaid_account_id"],
-                                                     LoanTerms.interest_rate.is_not(None))).fetchone():
-        raise ApiError("This loan's terms come from Plaid")
+    plaid = conn.execute(select(LoanTerms.interest_rate, LoanTerms.monthly_payment).where(
+        LoanTerms.plaid_account_id == acct["plaid_account_id"])).fetchone() if acct["plaid_account_id"] else None
+    if plaid and "interest_rate" in given and plaid["interest_rate"] is not None:
+        raise ApiError("This loan's interest rate comes from Plaid")
+    if plaid and "monthly_payment" in given and plaid["monthly_payment"]:
+        raise ApiError("This loan's monthly payment comes from Plaid")
     return {k: _v.number(body[k], LOAN_FIELDS[k][0], LOAN_FIELDS[k][1], LOAN_FIELDS[k][2]) for k in given}
 
 

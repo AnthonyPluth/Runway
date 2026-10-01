@@ -77,7 +77,7 @@ describe("an account's logo, from Settings", () => {
 });
 
 describe("a loan's terms, for the retirement planner", () => {
-  const terms = { rate: null, payment: null, source: null, plaid: false, set_rate: null, set_payment: null, inferred_payment: null };
+  const terms = { rate: null, payment: null, source: null, plaid: false, plaid_payment: false, set_rate: null, set_payment: null, inferred_payment: null };
   const loan = (over: Partial<NonNullable<SettingsAccount["loan"]>> = {}) =>
     acct({ id: "mtg", name: "Mortgage", kind: "loan", balance: -250000, loan: { ...terms, ...over } });
 
@@ -95,7 +95,7 @@ describe("a loan's terms, for the retirement planner", () => {
   });
 
   it("shows the lender's terms from Plaid instead, without fields to change them", () => {
-    show(loan({ plaid: true, rate: 6.125, payment: 2140.5, source: "plaid" }));
+    show(loan({ plaid: true, plaid_payment: true, rate: 6.125, payment: 2140.5, source: "plaid" }));
     expect(screen.queryByRole("textbox", { name: /Interest rate/ })).toBeNull();
     expect(screen.queryByRole("textbox", { name: /Monthly payment/ })).toBeNull();
     expect(screen.getByText("6.125%")).toBeInTheDocument();
@@ -103,9 +103,14 @@ describe("a loan's terms, for the retirement planner", () => {
     expect(screen.getAllByText("from Plaid")).toHaveLength(2);
   });
 
-  it("says when Plaid's rate comes with a payment worked out from recent ones", () => {
-    show(loan({ plaid: true, rate: 4, payment: 310, source: "inferred" }));
-    expect(screen.getByText("from recent payments")).toBeInTheDocument();
+  it("lets you set the payment when Plaid gives the rate but no payment, and saves only that", async () => {
+    show(loan({ plaid: true, rate: 4, payment: 310, source: "inferred", inferred_payment: 310 }));
+    expect(screen.queryByRole("textbox", { name: /Interest rate/ })).toBeNull();
+    expect(screen.getByText("4%")).toBeInTheDocument();
+    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
+    expect(payment).toHaveAttribute("placeholder", "310 from recent payments");
+    await userEvent.type(payment, "325{Enter}");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg", { method: "POST", body: { monthly_payment: "325" } }));
   });
 
   it("isn't asked of other accounts", () => {

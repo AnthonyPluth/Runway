@@ -84,12 +84,22 @@ class HandlerTests(DbCase):
         self.c.execute(insert(LoanTerms).values(plaid_account_id="pm", item_id="it1", kind="mortgage", interest_rate=5.5,
                                                 monthly_payment=2000))
         self.c.execute(update(Account).where(Account.id == "demo-mortgage").values(plaid_account_id="pm"))
-        with self.assertRaisesRegex(ApiError, "come from Plaid"):
-            accounts.api_account_update(self.c, {}, {"interest_rate": "4", "monthly_payment": "100"}, "demo-mortgage")
+        with self.assertRaisesRegex(ApiError, "interest rate comes from Plaid"):
+            accounts.api_account_update(self.c, {}, {"interest_rate": "4"}, "demo-mortgage")
+        with self.assertRaisesRegex(ApiError, "monthly payment comes from Plaid"):
+            accounts.api_account_update(self.c, {}, {"monthly_payment": "100"}, "demo-mortgage")
         self.assertEqual(terms(), (0, None))
         mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
-        self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["plaid"]), (5.5, 2000, True))
+        self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["plaid"], mtg["loan"]["plaid_payment"]),
+                         (5.5, 2000, True, True))
         accounts.api_account_update(self.c, {}, {"display_name": "Home loan"}, "demo-mortgage")   # the rest still saves
+        # What Plaid leaves out (a new loan's payment, or a deferred student loan's $0) is yours to set, and used.
+        self.c.execute(update(LoanTerms).where(LoanTerms.plaid_account_id == "pm").values(monthly_payment=0))
+        accounts.api_account_update(self.c, {}, {"monthly_payment": "1,950"}, "demo-mortgage")
+        self.assertEqual(terms(), (0, 1950))
+        mtg = next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-mortgage")
+        self.assertEqual((mtg["loan"]["rate"], mtg["loan"]["payment"], mtg["loan"]["source"], mtg["loan"]["plaid_payment"]),
+                         (5.5, 1950, "manual", False))
 
     # ------------------------------------------------------------------------------------------ push
 

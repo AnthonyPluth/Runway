@@ -80,11 +80,12 @@ def inferred_payments(conn, account_ids: list[str], today: date) -> dict[str, fl
 
 
 def terms(conn, today: date, account_ids: list[str] | None = None) -> dict[str, dict]:
-    """Each loan account's terms, by account id: {rate, payment, maturity, source, plaid, set_rate, set_payment,
-    inferred_payment}. `rate` (annual, percent) and `payment` are what a projection uses (None when unknown);
-    `source` says where the payment came from ("plaid", "manual" or "inferred"; None without both); `plaid` is True
-    when the terms are Plaid's (and can't be set); `set_rate`/`set_payment` are what you set; `inferred_payment` is
-    what recent payments into the account suggest."""
+    """Each loan account's terms, by account id: {rate, payment, maturity, source, plaid, plaid_payment, set_rate,
+    set_payment, inferred_payment}. `rate` (annual, percent) and `payment` are what a projection uses (None when
+    unknown); `source` says where the payment came from ("plaid", "manual" or "inferred"; None without both).
+    Each figure is Plaid's when Plaid has it, and then can't be set: `plaid` is True when the rate is Plaid's,
+    `plaid_payment` when the payment is. What Plaid leaves out (a new loan's payment, say) you can set, so
+    `set_rate`/`set_payment` are what you set; `inferred_payment` is what recent payments into the account suggest."""
     q = (select(Account.id, Account.kind, Account.balance, Account.owed_positive, Account.interest_rate,
                 Account.monthly_payment, LoanTerms.interest_rate.label("plaid_rate"),
                 LoanTerms.monthly_payment.label("plaid_payment"), LoanTerms.maturity_date)
@@ -96,11 +97,12 @@ def terms(conn, today: date, account_ids: list[str] | None = None) -> dict[str, 
     out = {}
     for a in loans:
         plaid = a["plaid_rate"] is not None
+        # Plaid's payment can be 0 (a student loan in deferment): that's not one to project with, so it's yours to set
+        plaid_payment = bool(a["plaid_payment"])
         rate = a["plaid_rate"] if plaid else a["interest_rate"]
-        # Plaid's payment can be 0 (a student loan in deferment): that's not one to project with
-        payment = (a["plaid_payment"] or None) if plaid else a["monthly_payment"]
-        source = ("plaid" if plaid else "manual") if payment is not None else None
-        maturity = a["maturity_date"] if plaid else None
+        payment = a["plaid_payment"] if plaid_payment else a["monthly_payment"]
+        source = ("plaid" if plaid_payment else "manual") if payment is not None else None
+        maturity = a["maturity_date"]
         if rate is not None and payment is None and maturity:
             try:
                 months = _months_until(today, date.fromisoformat(maturity))
@@ -113,7 +115,7 @@ def terms(conn, today: date, account_ids: list[str] | None = None) -> dict[str, 
         if rate is not None and payment is None and hint:
             payment, source = hint, "inferred"
         out[a["id"]] = {"rate": rate, "payment": payment, "maturity": maturity, "source": source if rate is not None else None,
-                        "plaid": plaid, "set_rate": a["interest_rate"], "set_payment": a["monthly_payment"],
+                        "plaid": plaid, "plaid_payment": plaid_payment, "set_rate": a["interest_rate"], "set_payment": a["monthly_payment"],
                         "inferred_payment": hint}
     return out
 

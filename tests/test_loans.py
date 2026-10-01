@@ -94,9 +94,15 @@ class TermsTests(LedgerCase):
         self.conn.execute(update(Account).where(Account.id == "mtg").values(interest_rate=3, monthly_payment=900))
         self.plaid(interest_rate=6.0, monthly_payment=None, maturity_date="2036-09-01")   # ten years from TODAY's month
         t = loans.terms(self.conn, TODAY)["mtg"]
-        self.assertEqual((t["rate"], t["source"], t["plaid"], t["maturity"]), (6.0, "plaid", True, "2036-09-01"))
+        # Plaid's rate wins over yours; it sent no payment, so the one you set is used (and can be changed)
+        self.assertEqual((t["rate"], t["payment"], t["source"], t["plaid"], t["plaid_payment"], t["maturity"]),
+                         (6.0, 900, "manual", True, False, "2036-09-01"))
+        self.assertEqual((t["set_rate"], t["set_payment"]), (3, 900))   # your rate is kept, just not used
+        # With no payment set either, Plaid's payoff date gives the payment that pays it off by then
+        self.conn.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))
+        t = loans.terms(self.conn, TODAY)["mtg"]
+        self.assertEqual(t["source"], "plaid")
         self.assertAlmostEqual(t["payment"], loans.payment_to_pay_off(250_000, 6, 120), places=2)
-        self.assertEqual((t["set_rate"], t["set_payment"]), (3, 900))   # what you'd set is kept, just not used
 
     def test_plaids_payment_when_it_has_one(self):
         self.plaid(interest_rate=6.0, monthly_payment=2_140.5, maturity_date="2052-05-01")
