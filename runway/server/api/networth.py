@@ -35,7 +35,9 @@ def api_asset_add(conn, _q, body):
 
 def api_asset_update(conn, _q, body, asset_id):
     if "value" in body:   # a home Realie values isn't also valued by hand: its next lookup would only undo it
-        a = db.rows(conn.execute(select(Asset.kind, Asset.source, Asset.address).where(Asset.id == int(asset_id))))
+        a = db.rows(conn.execute(select(Asset.kind, Asset.source, Asset.address, Asset.auto_update).where(Asset.id == int(asset_id))))
+        if a and "auto_update" in body:   # turning Realie's updates off in the same change frees the value
+            a[0]["auto_update"] = 1 if body.get("auto_update") else 0
         if a and realie.values_home(realie.configured(conn), a[0]):
             raise ApiError("Realie values this home, so its value isn’t set by hand: use Update from Realie")
     try:

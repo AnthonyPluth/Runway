@@ -3,7 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -286,7 +286,8 @@ class RealieTests(Base):
         from runway.server.api.networth import api_asset_update, api_networth
         from runway.server.common import ApiError
         address = "1 Main St, Springfield, IL 62701"
-        home = networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000, "address": address}, today=TODAY)
+        home = networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000, "address": address,
+                                            "auto_update": True}, today=TODAY)
         car = networth.save_asset(self.c, {"name": "Car", "kind": "vehicle", "value": 30000}, today=TODAY)
         valued = lambda: {a["name"]: a["realie_valued"] for a in api_networth(self.c, {}, {})["assets_list"]}
         self.assertEqual(valued(), {"House": False, "Car": False})   # no key: everything's yours to value
@@ -298,6 +299,14 @@ class RealieTests(Base):
             api_asset_update(self.c, {}, {"value": 500000}, str(home))
         self.assertEqual(self.c.execute(select(Asset.value).where(Asset.id == home)).scalar(), 431000.0)
         api_asset_update(self.c, {}, {"name": "Our house"}, str(home))   # its other details are still yours
+        # with Realie's updates off, a value from it once is yours to correct (in the same change, or after)
+        api_asset_update(self.c, {}, {"auto_update": False, "value": 433000}, str(home))
+        self.assertEqual((valued()["Our house"], self.c.execute(select(Asset.value).where(Asset.id == home)).scalar()),
+                         (False, 433000.0))
+        api_asset_update(self.c, {}, {"auto_update": True}, str(home))
+        self.assertFalse(valued()["Our house"])                 # your value, until Realie's next lookup
+        realie.refresh_asset(self.c, home, TODAY + timedelta(days=7))
+        self.assertTrue(valued()["Our house"])
         api_asset_update(self.c, {}, {"value": 28000}, str(car))         # a vehicle is always valued by hand
         # without an address Realie can use (no state), or without the key, the value is yours again
         api_asset_update(self.c, {}, {"address": "1 Main St"}, str(home))
@@ -305,7 +314,8 @@ class RealieTests(Base):
         api_asset_update(self.c, {}, {"value": 440000}, str(home))
         self.assertEqual(self.c.execute(select(Asset.value).where(Asset.id == home)).scalar(), 440000.0)
         self.assertFalse(realie.values_home(False, {"kind": "home", "source": "realie", "address": address}))
-        self.assertTrue(realie.values_home(True, {"kind": "home", "source": "realie", "address": address}))
+        self.assertTrue(realie.values_home(True, {"kind": "home", "source": "realie", "address": address, "auto_update": 1}))
+        self.assertFalse(realie.values_home(True, {"kind": "home", "source": "realie", "address": address, "auto_update": 0}))
         self.assertFalse(realie.values_home(True, {"kind": "other", "source": "realie", "address": address}))
 
 

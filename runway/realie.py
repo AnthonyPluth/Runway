@@ -87,9 +87,11 @@ def usable_address(address: str | None) -> bool:
 
 def values_home(configured: bool, a: dict) -> bool:
     """Whether Realie keeps this asset's value, so it isn't typed by hand: a home with an address Realie can use, whose
-    value came from Realie, while Realie is set up (`configured`). Anything else (a vehicle, another asset, a home
-    without such an address, or one Realie couldn't value: its value is still yours) is valued by hand."""
-    return configured and a.get("kind") == "home" and a.get("source") == "realie" and usable_address(a.get("address"))
+    value came from Realie and that Realie keeps up to date (`auto_update`), while Realie is set up (`configured`).
+    Anything else (a vehicle, another asset, a home without such an address, one Realie couldn't value, or one you
+    asked Realie about once but don't keep updated: its value is still yours) is valued by hand."""
+    return (configured and a.get("kind") == "home" and a.get("source") == "realie" and bool(a.get("auto_update"))
+            and usable_address(a.get("address")))
 
 
 def _model_value(r: dict):
