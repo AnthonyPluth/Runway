@@ -125,8 +125,9 @@
           <label class={checkCls}><input type="checkbox" checked={!!d.prefs[r.k]} use:autosave={savePref(r.k)} /> {r.label}</label>
           {#if r.num}
             {@const [k, pre, post, step] = r.num}
-            <label class="flex items-center gap-1 text-sm text-muted-foreground"><span class="whitespace-nowrap">{pre}</span><input class={`${inputCls} h-8 w-24`} type="number" min="0" {step}
-              value={d.prefs[k]} use:autosave={savePref(k)} aria-label={`${r.label}: ${pre}…${post}`.replace(": …", ": ")} />{post}</label>
+            <!-- Fixed-width prefix and suffix so the inputs line up in one column down the list. -->
+            <label class="flex items-center gap-1 text-sm text-muted-foreground sm:ml-auto"><span class="whitespace-nowrap sm:w-14 sm:text-right">{pre}</span><input class={`${inputCls} h-8 w-24`} type="number" min="0" {step}
+              value={d.prefs[k]} use:autosave={savePref(k)} aria-label={`${r.label}: ${pre}…${post}`.replace(": …", ": ")} /><span class="sm:w-20">{post}</span></label>
           {/if}
         </div>
       {/each}

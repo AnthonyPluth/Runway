@@ -101,7 +101,7 @@
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
           <td class="text-right tabular-nums">
-            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span>{(x.allocation * 100).toFixed(1)}%
+            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{(x.allocation * 100).toFixed(1)}%</span>
           </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
