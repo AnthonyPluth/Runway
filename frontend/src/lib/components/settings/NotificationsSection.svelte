@@ -63,18 +63,19 @@
   };
   const when = (t: number, time = true) =>
     (time ? fmtDateTime(new Date(t * 1000)) : new Date(t * 1000).toLocaleString("en-US", { month: "short", day: "numeric" }));
-  const RULES: { k: string; label: string; num?: [string, string, string, number] }[] = [
-    { k: "card_due", label: "A card payment is coming up", num: ["card_due_days", "", " days ahead", 1] },
-    { k: "low_balance", label: "The forecast gets low in the next 30 days", num: ["low_balance_below", "below $", "", 50] },
-    { k: "missed", label: "A recurring payment didn't show up" },
-    { k: "big_charge", label: "A large charge posts", num: ["big_charge_over", "over $", "", 50] },
-    { k: "review", label: "Transactions are waiting for a category (at most once a day)" },
-    { k: "sync_failed", label: "Syncing with your bank has been failing for a day" },
-    { k: "churn_fee", label: "A churning card's annual fee is due within 30 days (unless you're keeping it or have a plan for it)" },
-    { k: "churn_bonus", label: "A sign-up bonus deadline (card or bank) is within 14 days, with requirements left" },
-    { k: "churn_plan", label: "It's time to downgrade, close or change a card, as you planned" },
-    { k: "churn_benefit", label: "A card credit with money left is about to reset" },
-    { k: "churn_apply", label: "A card or bank bonus you planned has nothing in the way now, or its offer ends within 14 days" },
+  // `label` is the noun phrase; `hint` is the rest of the sentence, as a tooltip.
+  const RULES: { k: string; label: string; hint?: string; num?: [string, string, string, number] }[] = [
+    { k: "card_due", label: "Card payment due", hint: "A card payment is coming up", num: ["card_due_days", "", " days ahead", 1] },
+    { k: "low_balance", label: "Low forecast balance", hint: "The forecast gets low in the next 30 days", num: ["low_balance_below", "below $", "", 50] },
+    { k: "missed", label: "Missed recurring payment", hint: "A recurring payment didn't show up" },
+    { k: "big_charge", label: "Large charge", hint: "A large charge posts", num: ["big_charge_over", "over $", "", 50] },
+    { k: "review", label: "Transactions to review", hint: "Transactions are waiting for a category (at most once a day)" },
+    { k: "sync_failed", label: "Failing bank sync", hint: "Syncing with your bank has been failing for a day" },
+    { k: "churn_fee", label: "Annual fee due", hint: "A churning card's annual fee is due within 30 days (unless you're keeping it or have a plan for it)" },
+    { k: "churn_bonus", label: "Sign-up bonus deadline", hint: "A card or bank bonus deadline is within 14 days, with requirements left" },
+    { k: "churn_plan", label: "Planned card change", hint: "It's time to downgrade, close or change a card, as you planned" },
+    { k: "churn_benefit", label: "Card credit resetting", hint: "A card credit with money left is about to reset" },
+    { k: "churn_apply", label: "Planned bonus ready", hint: "A card or bank bonus you planned has nothing in the way now, or its offer ends within 14 days" },
   ];
   const b = "font-medium text-foreground";
 </script>
@@ -122,11 +123,11 @@
     <Card.Content class="flex flex-col">
       {#each RULES as r (r.k)}
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-t py-2.5 first:border-t-0">
-          <label class={checkCls}><input type="checkbox" checked={!!d.prefs[r.k]} use:autosave={savePref(r.k)} /> {r.label}</label>
+          <label class={checkCls} title={r.hint}><input type="checkbox" checked={!!d.prefs[r.k]} use:autosave={savePref(r.k)} /> {r.label}</label>
           {#if r.num}
             {@const [k, pre, post, step] = r.num}
             <!-- Fixed-width prefix and suffix so the inputs line up in one column down the list. -->
-            <label class="flex items-center gap-1 text-sm text-muted-foreground sm:ml-auto"><span class="whitespace-nowrap sm:w-14 sm:text-right">{pre}</span><input class={`${inputCls} h-8 w-24`} type="number" min="0" {step}
+            <label class="flex w-full items-center gap-1 pl-6 text-sm text-muted-foreground sm:ml-auto sm:w-auto sm:pl-0"><span class="whitespace-nowrap sm:w-14 sm:text-right">{pre}</span><input class={`${inputCls} h-8 w-24`} type="number" min="0" {step}
               value={d.prefs[k]} use:autosave={savePref(k)} aria-label={`${r.label}: ${pre}…${post}`.replace(": …", ": ")} /><span class="sm:w-20">{post}</span></label>
           {/if}
         </div>
@@ -134,10 +135,10 @@
     </Card.Content>
   </Card.Root>
 
+  {#if d.devices.length}
   <Card.Root>
     <Card.Header><Card.Title>Devices</Card.Title></Card.Header>
     <Card.Content>
-      {#if d.devices.length}
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
             <thead><tr class="text-left text-xs text-muted-foreground">
@@ -157,11 +158,9 @@
             </tbody>
           </table>
         </div>
-      {:else}
-        <p class="py-4 text-center text-sm text-muted-foreground">No devices yet. Turn notifications on from each phone or computer you want them on.</p>
-      {/if}
     </Card.Content>
   </Card.Root>
+  {/if}
 
   {#if d.recent.length}
     <Card.Root>

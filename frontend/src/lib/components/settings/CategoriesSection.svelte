@@ -39,6 +39,11 @@
       </div>
     {/if}
     <div class="flex flex-col">
+      <div class="flex items-center gap-x-2.5 border-b py-1 pr-1 pl-1 text-xs font-medium text-muted-foreground" aria-hidden="true">
+        <span class="min-w-0 flex-1 basis-48">Category</span>
+        <span class="w-10 text-right" title="Transactions in the category">Used</span>
+        <span class="max-md:hidden md:w-52"></span>
+      </div>
       {#each categories.list as c (c.name)}<CategoryRow {c} />{/each}
     </div>
   </Card.Content>

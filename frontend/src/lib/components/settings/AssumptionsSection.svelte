@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import SubTabs from "$lib/components/SubTabs.svelte";
   import * as Card from "$lib/components/ui/card";
   import { ASSUMPTION_GROUPS, DISCLAIMER } from "./assumptionGroups";
 
@@ -23,11 +24,8 @@
 
 <p class="text-sm text-muted-foreground">{DISCLAIMER}</p>
 
-<nav aria-label="Assumptions by area" class="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-  {#each ASSUMPTION_GROUPS as g (g.id)}
-    <a href={`#setup/assumptions/${g.id}`} class="font-medium text-foreground underline underline-offset-4">{g.title}</a>
-  {/each}
-</nav>
+<SubTabs label="Assumptions by area" current={current} class="mb-0"
+  tabs={ASSUMPTION_GROUPS.map((g) => ({ id: g.id, label: g.title, href: `#setup/assumptions/${g.id}` }))} />
 
 {#each ASSUMPTION_GROUPS as g (g.id)}
   <Card.Root id={`assumptions-${g.id}`} class="scroll-mt-4" data-current={g.id === current ? "true" : undefined}>

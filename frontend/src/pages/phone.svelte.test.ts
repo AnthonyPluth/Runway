@@ -24,11 +24,12 @@ afterEach(() => { cleanup(); viewport.phone = false; });
 describe("Settings", () => {
   const data = (async (path: string) => (path === "/api/accounts" || path === "/api/rules" ? [] : path === "/api/push" ? { public_key: "aGVsbG8", prefs: {}, devices: [], recent: [] } : {})) as never;
 
-  it("is Notifications and a note on a phone: no tabs, no rules, categories or connections", async () => {
+  it("is Notifications on a phone, with no banner: no tabs, no rules, categories or connections", async () => {
     viewport.phone = true;
     vi.mocked(api).mockImplementation(data);
     render(Settings, { sub: "rules" });
-    expect(await screen.findByText(/change connections, accounts, categories, rules/)).toBeInTheDocument();
+    expect(await screen.findByText("This device")).toBeInTheDocument();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Settings" })).not.toBeInTheDocument();
     expect(screen.queryByText("Add a rule")).not.toBeInTheDocument();
   });
