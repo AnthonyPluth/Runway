@@ -7,8 +7,11 @@ import sqlalchemy as sa
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from sqlalchemy import func, insert, select
 
 from runway import db, schema
+from runway.models import (Account, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask, ChurnWish,
+                           Rule, Setting)
 
 
 def drift(path):
@@ -49,9 +52,9 @@ class MigrationTests(unittest.TestCase):
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
-            row = conn.execute("SELECT name, owner, daily_spend FROM accounts").fetchone()
+            row = conn.execute(select(Account.name, Account.owner, Account.daily_spend)).fetchone()
             self.assertEqual((row["name"], row["owner"], row["daily_spend"]), ("Checking", None, 0))
-            self.assertGreater(conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 10)
+            self.assertGreater(conn.execute(select(func.count()).select_from(Category)).fetchone()[0], 10)
         db.init(self.path)   # starting again changes nothing
 
     def test_database_from_before_migrations_keeps_daily_spend_switched_back_on(self):
@@ -64,8 +67,9 @@ class MigrationTests(unittest.TestCase):
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
-            self.assertEqual(conn.execute("SELECT daily_spend FROM accounts").fetchone()[0], 1)
-            self.assertIsNone(conn.execute("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").fetchone())
+            self.assertEqual(conn.execute(select(Account.daily_spend)).fetchone()[0], 1)
+            self.assertIsNone(conn.execute(select(Setting.key)
+                                           .where(Setting.key == "migrated_daily_spend_off")).fetchone())
 
     def test_0026_switches_daily_spend_off_once(self):
         from alembic import command
@@ -84,6 +88,7 @@ class MigrationTests(unittest.TestCase):
                     c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
                     c.exec_driver_sql("DELETE FROM settings WHERE key='migrated_daily_spend_off'")
                     if flag is not None:
+                        # raw SQL: on the raw connection, with a parameter either database's driver takes
                         c.execute(sa.text("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', :v)"), {"v": flag})
                     command.upgrade(db.alembic_config(c), "head")
                 with db.engine(self.path).begin() as c:
@@ -95,7 +100,7 @@ class MigrationTests(unittest.TestCase):
             c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
         db.init(self.path)   # starting again leaves an account switched back on alone
         with db.session(self.path) as conn:
-            self.assertEqual(conn.execute("SELECT daily_spend FROM accounts WHERE id='a1'").fetchone()[0], 1)
+            self.assertEqual(conn.execute(select(Account.daily_spend).where(Account.id == "a1")).fetchone()[0], 1)
         self.assertEqual(drift(self.path), [])
 
     def test_plaid_account_counted_twice_is_retired(self):
@@ -109,7 +114,8 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
-            got = {r["id"]: (r["plaid_account_id"], r["hidden"]) for r in conn.execute("SELECT id, plaid_account_id, hidden FROM accounts")}
+            got = {r["id"]: (r["plaid_account_id"], r["hidden"])
+                   for r in conn.execute(select(Account.id, Account.plaid_account_id, Account.hidden))}
         self.assertEqual(got, {"sf": ("p1", 0), "pl:p1": (None, 1), "pl:p2": ("p2", 0)})
         self.assertEqual(drift(self.path), [])
 
@@ -130,17 +136,19 @@ class MigrationTests(unittest.TestCase):
             command.upgrade(db.alembic_config(c), "head")
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
-            rates = [tuple(r) for r in conn.execute("SELECT card_id, category, multiplier, portal_only FROM churn_rates "
-                                                    "ORDER BY category")]
+            rates = [tuple(r) for r in conn.execute(select(ChurnRate.card_id, ChurnRate.category, ChurnRate.multiplier,
+                                                           ChurnRate.portal_only)
+                                                    .order_by(ChurnRate.category))]
             self.assertEqual(rates, [(1, "Gas", 2.0, 0), (1, "Travel", 2.0, 0)])
-            card = conn.execute("SELECT currency, plan, plan_remind_days, hide_upcoming FROM churn_cards").fetchone()
+            card = conn.execute(select(ChurnCard.currency, ChurnCard.plan, ChurnCard.plan_remind_days,
+                                       ChurnCard.hide_upcoming)).fetchone()
             self.assertEqual(tuple(card), ("airline", "undecided", 14, 0))
-            self.assertIsNone(conn.execute("SELECT snooze_until FROM churn_tasks").fetchone()[0])
+            self.assertIsNone(conn.execute(select(ChurnTask.snooze_until)).fetchone()[0])
             # A portal rate beside the normal one in the same category is allowed now
-            conn.execute("INSERT INTO churn_rates(card_id, category, multiplier, portal_only) VALUES (1, 'Travel', 10, 1)")
-            conn.execute("INSERT INTO churn_benefits(card_id, name) VALUES (1, 'Lounge')")
-            conn.execute("INSERT INTO churn_wishlist(owner, product, issuer) VALUES ('Alex', 'Gold', 'amex')")
-            conn.execute("INSERT INTO churn_scores(owner, as_of, score) VALUES ('Alex', '2026-09-01', 720)")
+            conn.execute(insert(ChurnRate).values(card_id=1, category="Travel", multiplier=10, portal_only=1))
+            conn.execute(insert(ChurnBenefit).values(card_id=1, name="Lounge"))
+            conn.execute(insert(ChurnWish).values(owner="Alex", product="Gold", issuer="amex"))
+            conn.execute(insert(ChurnScore).values(owner="Alex", as_of="2026-09-01", score=720))
         db.init(self.path)   # starting again changes nothing
 
     def test_downgrade_plans_become_product_changes(self):
@@ -155,7 +163,7 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
-            plans = [r[0] for r in conn.execute("SELECT plan FROM churn_cards ORDER BY id")]
+            plans = [r[0] for r in conn.execute(select(ChurnCard.plan).order_by(ChurnCard.id))]
         self.assertEqual(plans, ["product_change", "close"])
 
     def test_0024_adds_the_oauth_tables_and_drops_the_old_key(self):
@@ -237,12 +245,12 @@ class MigrationTests(unittest.TestCase):
     def test_connection_wrapper(self):
         db.init(self.path)
         with db.session(self.path) as conn:
-            r = conn.execute("INSERT INTO rules(match, category) VALUES (?, ?)", ("50% off", "Shopping"))
+            r = conn.execute(insert(Rule).values(match="50% off", category="Shopping"))
             self.assertTrue(r.lastrowid)
-            row = conn.execute("SELECT id, match FROM rules WHERE match LIKE '50%'").fetchone()
+            row = conn.execute(select(Rule.id, Rule.match).where(Rule.match.like("50%"))).fetchone()
             self.assertEqual((row[0], row["match"], dict(row)["id"]), (r.lastrowid, "50% off", r.lastrowid))
-            self.assertEqual(conn.execute("SELECT instr('hello', 'll')").fetchone()[0], 3)
-            conn.execute("INSERT INTO settings(key, value) VALUES (?, ?)", ("n", 5))   # loose typing, as in SQLite
+            self.assertEqual(conn.execute(select(db.instr("hello", "ll"))).fetchone()[0], 3)
+            conn.execute(insert(Setting).values(key="n", value=5))   # loose typing, as in SQLite
             self.assertEqual(db.get_setting(conn, "n"), "5")
 
 
