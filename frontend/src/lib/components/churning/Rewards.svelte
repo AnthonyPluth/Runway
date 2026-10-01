@@ -83,8 +83,11 @@
                   <span class="flex items-center gap-1"><input type="number" min="0" step="0.05" value={c.cents} use:autosave={setCents(c.key)}
                     class="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />¢</span>
                 </label>
-                {#if c.custom}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)}>Remove</Button>
-                {:else if c.default != null && c.cents !== c.default}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)} title={`Back to ${c.default}¢`}>Reset</Button>{/if}
+                <!-- Always takes the space, so the inputs line up whether or not a row has Remove or Reset. -->
+                <span class="w-12 shrink-0">
+                  {#if c.custom}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)}>Remove</Button>
+                  {:else if c.default != null && c.cents !== c.default}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)} title={`Back to ${c.default}¢`}>Reset</Button>{/if}
+                </span>
               </div>
             {/each}
           </div>

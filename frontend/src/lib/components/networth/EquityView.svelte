@@ -160,7 +160,7 @@
                     <td class="min-w-32">
                       <div class="flex items-center gap-2">
                         <span class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><i class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(p)}></i></span>
-                        <span class="text-xs tabular-nums">{Math.round(p * 100)}%</span>
+                        <span class="w-8 text-right text-xs tabular-nums">{Math.round(p * 100)}%</span>
                       </div>
                       <div class="text-xs text-muted-foreground">{shares(g.vested)} of {shares(g.quantity)}{g.fully_vested_on && p < 1 ? ` · all by ${my(g.fully_vested_on)}` : ""}{g.exercised ? ` · ${shares(g.exercised)} exercised` : ""}</div>
                       {#if g.problem}<div class="text-xs text-(--low)">{g.problem}</div>{/if}
