@@ -132,7 +132,7 @@ class SimpleFinStoreTests(LedgerCase):
 
     def test_kind_guess(self):
         self.assertEqual(simplefin.guess_kind("Venture X"), "credit")
-        self.assertEqual(simplefin.guess_kind("Mortgage 1588"), "loan")
+        self.assertEqual(simplefin.guess_kind("Mortgage 4100"), "loan")
         self.assertEqual(simplefin.guess_kind("Fidelity Joint"), "checking")
 
 

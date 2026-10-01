@@ -13,10 +13,10 @@ from runway.models import Account, Merchant, PlaidAccount, PlaidItem
 
 class BrandTests(unittest.TestCase):
     def test_names(self):
-        cases = {"Chase": "chase", "JPMorgan Chase Bank": "chase", "CSP (Sara)": "chase", "Capital One": "capital-one",
-                 "Venture X (Anthony)": "capital-one", "Citi": "citibank", "American Express": "american-express",
+        cases = {"Chase": "chase", "JPMorgan Chase Bank": "chase", "CSP (Sam)": "chase", "Capital One": "capital-one",
+                 "Venture X (Alex)": "capital-one", "Citi": "citibank", "American Express": "american-express",
                  "Amex Card": "american-express", "E*TRADE from Morgan Stanley": "e-trade", "Fidelity Investments": "fidelity",
-                 "Wealthfront": None, "Mortgage 1588": None}   # which institution a name is; not logos
+                 "Wealthfront": None, "Mortgage 4100": None}   # which institution a name is; not logos
         for name, want in cases.items():
             self.assertEqual(brands.brand(name), want, name)
 
@@ -32,11 +32,11 @@ class BrandTests(unittest.TestCase):
                                                products="transactions"))
             c.execute(insert(PlaidAccount).values(plaid_account_id="p1", item_id="i", name="Double Cash"))
             c.execute(insert(Account).values(id="a1", name="My card", kind="credit", plaid_account_id="p1"))
-            c.execute(insert(Account).values(id="w", name="Roth", org="Wealthfront Sara", kind="investment",
-                                             owner="Sara"))
+            c.execute(insert(Account).values(id="w", name="Roth", org="Wealthfront Sam", kind="investment",
+                                             owner="Sam"))
             c.execute(insert(Account).values(id="f", name="Brokerage", org="Fidelity Investments", kind="investment"))
-            c.execute(insert(Account).values(id="csr", name="CSR", org="Chase Bank Anthony", kind="credit",
-                                             owner="Anthony"))
+            c.execute(insert(Account).values(id="csr", name="CSR", org="Chase Bank Alex", kind="credit",
+                                             owner="Alex"))
             c.execute(insert(Account).values(id="vx", name="Venture X", kind="credit"))   # no institution: its name says
             c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
                                                products="investments"))
@@ -89,11 +89,11 @@ class BrandTests(unittest.TestCase):
                                                           "Vestwell": "/api/merchants/brand%3Avestwell/logo"})
 
     def test_institution_drops_owners_names(self):
-        self.assertEqual(brands.institution("Citibank Anthony", {"Anthony", "Sara"}), "Citibank")
-        self.assertEqual(brands.institution("Chase Bank sara", {"Sara"}), "Chase Bank")
-        self.assertEqual(brands.institution("Sara", {"Sara"}), "Sara")             # never down to nothing
-        self.assertEqual(brands.institution("Saratoga Bank", {"Sara"}), "Saratoga Bank")
-        self.assertIsNone(brands.institution(None, {"Sara"}))
+        self.assertEqual(brands.institution("Citibank Alex", {"Alex", "Sam"}), "Citibank")
+        self.assertEqual(brands.institution("Chase Bank sam", {"Sam"}), "Chase Bank")
+        self.assertEqual(brands.institution("Sam", {"Sam"}), "Sam")             # never down to nothing
+        self.assertEqual(brands.institution("Samford Bank", {"Sam"}), "Samford Bank")
+        self.assertIsNone(brands.institution(None, {"Sam"}))
 
     def test_choosing_an_account_s_logo(self):
         from runway.server.api.accounts import api_account_logo, api_account_logo_options
@@ -156,12 +156,12 @@ class LabelTests(unittest.TestCase):
         db.init(path)
         with db.session(path) as c:
             c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o, "kind": "credit"} for i, n, d, o in [
-                ("a", "Citi AAdvantage 8312", "AAdvantage", "Sara"),     # -> AAdvantage (Sara)
-                ("b", "CSP", "CSP (Sara)", "Sara"),                       # already says so
+                ("a", "Citi AAdvantage 4400", "AAdvantage", "Sam"),     # -> AAdvantage (Sam)
+                ("b", "CSP", "CSP (Sam)", "Sam"),                       # already says so
                 ("c", "Blue Cash", None, None),                           # no owner
                 ("d", "Checking", None, "Joint")]])
             got = {r[0]: r[1] for r in c.execute(select(Account.id, db.account_label_expr()))}
             py = {r["id"]: db.account_label(r) for r in c.execute(select(Account)).fetchall()}
-        want = {"a": "AAdvantage (Sara)", "b": "CSP (Sara)", "c": "Blue Cash", "d": "Checking (Joint)"}
+        want = {"a": "AAdvantage (Sam)", "b": "CSP (Sam)", "c": "Blue Cash", "d": "Checking (Joint)"}
         self.assertEqual(got, want)
         self.assertEqual(py, want)

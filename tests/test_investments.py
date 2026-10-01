@@ -196,7 +196,7 @@ class FireTests(Base):
 
     def test_a_saved_plan_is_kept_and_can_be_forgotten(self):
         plan = {**self.plan()["plan"], "people": [
-            {"name": "Anthony", "birth_year": 1985, "retire_age": 60, "savings": 30000},
+            {"name": "Alex", "birth_year": 1985, "retire_age": 60, "savings": 30000},
             {"name": "Sam", "birth_year": 1987, "retire_age": 62, "savings": "12000"}],
             "income": [{"name": "Social Security", "amount": 28000, "person": 1, "start_age": 67}],
             "events": [{"name": "College", "year": TODAY.year + 12, "amount": -80000}]}
@@ -578,30 +578,30 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.assertEqual(ids(), {"roth"})
 
     def test_the_same_account_from_simplefin_and_plaid_is_listed_once(self):
-        # E*TRADE sends ••8933 through Plaid and "Individual Brokerage (8933)" through SimpleFIN, and neither was matched
+        # E*TRADE sends ••6702 through Plaid and "Individual Brokerage (6702)" through SimpleFIN, and neither was matched
         self.c.execute(insert(PlaidItem).values(item_id="et", access_token="t",
                                                 institution_name="E*TRADE from Morgan Stanley", products="investments"))
-        self.c.execute(insert(InvAccount).values(id="et-8933", item_id="et", name="Individual Brokerage -8933",
-                                                 mask="8933", balance=120000))
+        self.c.execute(insert(InvAccount).values(id="et-6702", item_id="et", name="Individual Brokerage -6702",
+                                                 mask="6702", balance=120000))
         self.c.execute(insert(InvAccount).values(id="et-1111", item_id="et", name="Roth IRA", mask="1111",
                                                  balance=30000))
-        for id_, name in (("sf:et1", "Individual Brokerage (8933)"), ("sf:et2", "Rollover IRA (2222)")):
+        for id_, name in (("sf:et1", "Individual Brokerage (6702)"), ("sf:et2", "Rollover IRA (2222)")):
             self.c.execute(insert(InvAccount).values(id=id_, item_id="sf", name=name, balance=1, source="simplefin",
                                                      institution="E*Trade"))
-        # "(8933)" at another firm is a different account
-        self.c.execute(insert(InvAccount).values(id="sf:rh", item_id="sf", name="Individual (8933)", balance=1,
+        # "(6702)" at another firm is a different account
+        self.c.execute(insert(InvAccount).values(id="sf:rh", item_id="sf", name="Individual (6702)", balance=1,
                                                  source="simplefin", institution="Robinhood"))
         listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"]}
         self.assertNotIn("sf:et1", listed)                                   # the SimpleFIN copy isn't listed...
-        self.assertTrue(listed["et-8933"]["also_simplefin"])                 # ...the Plaid one says so
+        self.assertTrue(listed["et-6702"]["also_simplefin"])                 # ...the Plaid one says so
         self.assertFalse(listed["et-1111"]["also_simplefin"])
         self.assertIn("sf:et2", listed)                                      # no Plaid account with 2222
         self.assertIn("sf:rh", listed)
         dup = next(a for a in portfolio._accounts(self.c) if a["id"] == "sf:et1")
-        self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-8933", 1))   # ...and never counted
-        self.c.execute(update(InvAccount).where(InvAccount.id == "et-8933").values(hidden=1))    # unticking the Plaid one: counted neither way
+        self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-6702", 1))   # ...and never counted
+        self.c.execute(update(InvAccount).where(InvAccount.id == "et-6702").values(hidden=1))    # unticking the Plaid one: counted neither way
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
-        self.assertNotIn("et-8933", portfolio._visible_ids(self.c))
+        self.assertNotIn("et-6702", portfolio._visible_ids(self.c))
 
     def test_a_simplefin_account_links_to_one_plaid_account(self):
         self.sf("sf-roth", "Roth IRA", 4943.43)

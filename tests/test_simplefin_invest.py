@@ -138,7 +138,7 @@ class BadFeedTests(Base):
         simplefin.store_payload(self.c, {"accounts": [account("fid", "Joint Checking", "4279.88", sweep)]}, TODAY)
         self.assertIsNone(self.c.execute(select(InvAccount.id)).fetchone())
         # while a new account holding real securities becomes an investment account even with a plain name
-        simplefin.store_payload(self.c, {"accounts": [account("wf2", "Individual (7J4V)", "3000", [VTI])]}, TODAY)
+        simplefin.store_payload(self.c, {"accounts": [account("wf2", "Individual (Q9ZK)", "3000", [VTI])]}, TODAY)
         self.assertEqual(self.c.execute(select(Account.kind).where(Account.id == "wf2")).fetchone()[0], "investment")
 
 
@@ -252,7 +252,7 @@ class PlaidDuplicateTests(Base):
         simplefin.store_payload(self.c, {"accounts": [account("vw", "Retirement Savings 401k", "333069.97"),
                                                       account("wf", "Roth IRA", "4935.94", [VTI]),
                                                       account("et", "Individual Brokerage", "154756.49", [VTI])]}, TODAY)
-        for iid, inst in (("sf:vw", "Vestwell"), ("sf:wf", "Wealthfront Anthony"), ("sf:et", "E*Trade")):
+        for iid, inst in (("sf:vw", "Vestwell"), ("sf:wf", "Wealthfront Alex"), ("sf:et", "E*Trade")):
             self.c.execute(update(InvAccount).where(InvAccount.id == iid).values(institution=inst))
         self.c.execute(insert(PlaidItem), [{"item_id": "it", "access_token": "tok", "institution_name": "Vestwell"},
                                            {"item_id": "it2", "access_token": "tok2",

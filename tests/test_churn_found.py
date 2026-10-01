@@ -16,17 +16,17 @@ from tests.shared import DbCase
 class CleanProductTests(unittest.TestCase):
     def test_real_account_names(self):
         for name, issuer, display, want in [
-            ("Chase Sapphire Reserve (1034)", "chase", None, "Sapphire Reserve"),
-            ("Citi®/AAdvantage® Platinum Select® World Elite Mastercard®-2136 (2136)", "citi", None, "AAdvantage Platinum Select"),
-            ("Blue Cash Everyday® (3009)", "amex", None, "Blue Cash Everyday"),
-            ("Premium Rewards Visa Signature- 5773 (5773)", "chase", None, "Premium Rewards"),
-            ("Venture X (3030)", "capital_one", None, "Venture X"),
-            ("CREDIT CARD (8668)", "chase", "CSP", "CSP"),
-            ("CREDIT CARD (8668)", "chase", None, ""),
-            ("Costco Anywhere Visa® Card by Citi-3152 (3152)", "citi", None, "Costco Anywhere"),
+            ("Chase Sapphire Reserve (8814)", "chase", None, "Sapphire Reserve"),
+            ("Citi®/AAdvantage® Platinum Select® World Elite Mastercard®-9201 (9201)", "citi", None, "AAdvantage Platinum Select"),
+            ("Blue Cash Everyday® (5508)", "amex", None, "Blue Cash Everyday"),
+            ("Premium Rewards Visa Signature- 4417 (4417)", "chase", None, "Premium Rewards"),
+            ("Venture X (7731)", "capital_one", None, "Venture X"),
+            ("CREDIT CARD (3392)", "chase", "My Visa", "My Visa"),
+            ("CREDIT CARD (3392)", "chase", None, ""),
+            ("Costco Anywhere Visa® Card by Citi-6620 (6620)", "citi", None, "Costco Anywhere"),
             ("Capital One Venture Rewards ••4321", "capital_one", None, "Venture Rewards"),
             ("Freedom Unlimited x9876", "other", None, "Freedom Unlimited"),
-            ("Venture X 3030", "capital_one", None, "Venture X"),   # an X that is part of the name stays
+            ("Venture X 7731", "capital_one", None, "Venture X"),   # an X that is part of the name stays
             ("DISCOVER IT CARD (1234)", "discover", None, "DISCOVER IT"),   # a product named for its issuer keeps it
             ("Discover it Chrome", "discover", None, "Discover it Chrome"),
             ("The Platinum Card® from American Express (1009)", "amex", None, "The Platinum"),
@@ -42,7 +42,7 @@ class CleanProductTests(unittest.TestCase):
 
 class IssuerTests(unittest.TestCase):
     def test_matches_known_issuers_by_name(self):
-        for org, want in [("Chase Bank Anthony", "chase"), ("Citibank Online", "citi"), ("Capital One Sara", "capital_one"),
+        for org, want in [("Chase Bank Alex", "chase"), ("Citibank Online", "citi"), ("Capital One Sam", "capital_one"),
                           ("American Express", "amex"), ("Bank of America", "bank_of_america"), ("U.S. Bank", "us_bank"),
                           ("Barclaycard US", "barclays"), ("Citizens Bank", "other"), (None, "other"), ("Some Credit Union", "other")]:
             with self.subTest(org=org):
@@ -54,7 +54,7 @@ class IssuerTests(unittest.TestCase):
 
 class FoundTests(DbCase):
     def account(self, id, name, **kw):
-        self.c.execute(insert(Account).values(id=id, name=name, kind="credit", owner="Anthony", org="Chase Bank Anthony", **kw))
+        self.c.execute(insert(Account).values(id=id, name=name, kind="credit", owner="Alex", org="Chase Bank Alex", **kw))
 
     def tx(self, id, account, posted, amount, payee="Shop", description=""):
         self.c.execute(insert(Transaction).values(id=id, account_id=account, posted=posted, amount=amount, payee=payee,
@@ -64,19 +64,19 @@ class FoundTests(DbCase):
         return {d["account_id"]: d for d in churn_found.found(self.c)["drafts"]}
 
     def test_prefills_a_draft_from_the_account(self):
-        self.account("a1", "Chase Sapphire Reserve (1034)")
+        self.account("a1", "Chase Sapphire Reserve (8814)")
         self.tx("t1", "a1", "2024-03-02", -10)
         self.tx("t2", "a1", "2025-03-05", -550, "ANNUAL MEMBERSHIP FEE")
         self.tx("t3", "a1", "2026-03-07", -795, description="Annual Fee")
         self.tx("t4", "a1", "2026-04-01", 795, description="Annual fee refund")   # a refund isn't the fee
         d = self.drafts()["a1"]
-        self.assertEqual((d["issuer"], d["product"], d["owner"], d["business"]), ("chase", "Sapphire Reserve", "Anthony", 0))
+        self.assertEqual((d["issuer"], d["product"], d["owner"], d["business"]), ("chase", "Sapphire Reserve", "Alex", 0))
         self.assertEqual((d["annual_fee"], d["fee_month"]), (795.0, 3))   # the latest charge
         self.assertEqual((d["opened_on"], d["opened_on_estimate"]), ("2024-03-02", True))
         self.assertNotIn("family", d)
 
     def test_no_transactions_and_no_fee(self):
-        self.account("a1", "Venture X (3030)")
+        self.account("a1", "Venture X (7731)")
         d = self.drafts()["a1"]
         self.assertEqual((d["opened_on"], d["annual_fee"], d["fee_month"]), (None, None, None))
 
@@ -98,7 +98,7 @@ class FoundTests(DbCase):
         self.account("linked", "Linked (3)")
         self.account("gone", "Dismissed (4)")
         self.c.execute(insert(Account).values(id="chk", name="Checking", kind="checking"))
-        churning.save_card(self.c, {"owner": "Anthony", "issuer": "chase", "product": "Linked", "opened_on": "2024-01-01",
+        churning.save_card(self.c, {"owner": "Alex", "issuer": "chase", "product": "Linked", "opened_on": "2024-01-01",
                                     "account_id": "linked"})
         churn_found.dismiss(self.c, "gone")
         out = churn_found.found(self.c)
@@ -116,7 +116,7 @@ class FoundTests(DbCase):
             api.api_churn_found_dismiss(self.c, {}, {}, "nope")
 
     def test_a_draft_saves_as_a_card(self):
-        self.account("a1", "Chase Sapphire Reserve (1034)")
+        self.account("a1", "Chase Sapphire Reserve (8814)")
         self.tx("t1", "a1", "2024-03-02", -10)
         d = self.drafts()["a1"]
         card_id = churning.save_card(self.c, {k: d[k] for k in ("owner", "issuer", "product", "business", "account_id", "opened_on")})
@@ -170,13 +170,13 @@ class SuggestTests(DbCase):
         self.assertEqual(out["currency"], "ur")   # by name
 
     def test_the_request_carries_the_bank_and_card_name_only(self):
-        self.c.execute(insert(Account).values(id="acct-secret-1", name="Chase Sapphire Reserve (1034)", kind="credit",
-                                              owner="Anthony", org="Chase Bank Anthony", balance=-4321.99))
-        churn_found.suggest(self.c, "chase", "Sapphire Reserve (1034)", self.caller("{}"))
+        self.c.execute(insert(Account).values(id="acct-secret-1", name="Chase Sapphire Reserve (8814)", kind="credit",
+                                              owner="Alex", org="Chase Bank Alex", balance=-4321.99))
+        churn_found.suggest(self.c, "chase", "Sapphire Reserve (8814)", self.caller("{}"))
         (prompt,) = self.prompts
         self.assertIn("Bank: Chase", prompt)
         self.assertIn('"Sapphire Reserve"', prompt)
-        for private in ("acct-secret-1", "Anthony", "4321", "1034", "sk-or-test"):
+        for private in ("acct-secret-1", "Alex", "4321", "8814", "sk-or-test"):
             self.assertNotIn(private, prompt)
 
     def test_failures(self):

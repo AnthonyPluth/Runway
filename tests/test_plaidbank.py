@@ -174,7 +174,7 @@ class PlaidBankTests(DbCase):
     def test_matching_by_initials_words_and_institution(self):
         c = self.c
         c.execute(delete(Account))
-        for aid, name, bal in [("csr", "CSR", -1203.10), ("csp", "CSP (Sara)", -455.00), ("citi", "Citi Double Cash", -88.20),
+        for aid, name, bal in [("csr", "CSR", -1203.10), ("csp", "CSP (Sam)", -455.00), ("citi", "Citi Double Cash", -88.20),
                                ("boa", "BofA Premium Rewards", -310.00)]:
             c.execute(insert(Account).values(id=aid, name=name, kind="credit", balance=bal))
         def item(item_id, inst, accts):
@@ -542,7 +542,7 @@ class PlaidBankTests(DbCase):
         from runway import server
         self.link()
         plaidbank.match(self.c, "p-new", "new", TODAY)
-        self.c.execute(update(Account).where(Account.id == "sf-csp").values(owner="Sara", display_name="Sapphire"))
+        self.c.execute(update(Account).where(Account.id == "sf-csp").values(owner="Sam", display_name="Sapphire"))
         self.c.execute(insert(PlaidItem).values(item_id="inv", access_token="tok", institution_name="Wealthfront",
                                                 products="investments", env="sandbox"))
         self.c.execute(insert(InvAccount), [{"id": "w1", "item_id": "inv", "name": "Roth IRA", "official_name": "Roth",
@@ -565,7 +565,7 @@ class PlaidBankTests(DbCase):
              "balance": 50.0, "ignored": 0, "account_id": "pl:p-new", "account_name": "Freedom ••9999", "provider": "plaid",
              "last_statement_date": None, "last_statement_balance": None, "next_due_date": None},
             {"id": "p-csp", "name": "Sapphire Preferred", "official_name": None, "subtype": "credit card", "type": "credit",
-             "mask": "1234", "balance": 812.34, "ignored": 0, "account_id": "sf-csp", "account_name": "Sapphire (Sara)",
+             "mask": "1234", "balance": 812.34, "ignored": 0, "account_id": "sf-csp", "account_name": "Sapphire (Sam)",
              "provider": "simplefin", "last_statement_date": "2026-09-05", "last_statement_balance": 640.5, "next_due_date": "2026-10-02"},
             {"id": "p-chk", "name": "Checking", "official_name": None, "subtype": "checking", "type": "depository", "mask": "0001",
              "balance": 2500.0, "ignored": 0, "account_id": "sf-chk", "account_name": "Chase Checking", "provider": "simplefin",

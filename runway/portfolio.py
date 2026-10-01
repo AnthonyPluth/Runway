@@ -66,7 +66,7 @@ def _accounts(conn) -> list[dict]:
 
     def twin(sf: dict) -> dict | None:
         """The Plaid account a SimpleFIN one also is: the one matched to it (Settings), else the only one at the same
-        institution whose last digits are in its name ("Individual Brokerage (8933)" is E*TRADE's ••8933)."""
+        institution whose last digits are in its name ("Individual Brokerage (6702)" is E*TRADE's ••6702)."""
         matched = [p for p in from_plaid if p["account_id"] and p["account_id"] == sf["id"][3:]]
         if matched:
             return matched[0]

@@ -127,7 +127,7 @@ describe("the Churning page", () => {
   });
 
   describe("Found on your accounts", () => {
-    const serve = (drafts = [found(), found({ account_id: "acct-2", account_name: "CREDIT CARD (8668)", product: "", owner: "Sam", issuer: "other", annual_fee: null, opened_on: null })], dismissed: { account_id: string; name: string }[] = []) => {
+    const serve = (drafts = [found(), found({ account_id: "acct-2", account_name: "CREDIT CARD (3392)", product: "", owner: "Sam", issuer: "other", annual_fee: null, opened_on: null })], dismissed: { account_id: string; name: string }[] = []) => {
       let current = { drafts, dismissed };
       vi.mocked(api).mockImplementation((async (path: string, opts?: { method?: string }) => {
         if (path === "/api/churning/found") return current;
@@ -151,7 +151,7 @@ describe("the Churning page", () => {
       expect(within(section).getByText("Sapphire Reserve")).toBeInTheDocument();
       expect(within(section).getByText(/\$795 annual fee/)).toBeInTheDocument();
       expect(within(section).getByText(/opened on or before Mar 2, 2024/)).toBeInTheDocument();
-      expect(within(section).getByText("CREDIT CARD (8668)")).toBeInTheDocument();   // no product to show: the account's name
+      expect(within(section).getByText("CREDIT CARD (3392)")).toBeInTheDocument();   // no product to show: the account's name
       expect(within(section).getAllByRole("button", { name: /^Add / })).toHaveLength(2);
     });
 
@@ -182,7 +182,7 @@ describe("the Churning page", () => {
       await waitFor(() => expect(screen.queryByRole("button", { name: "Add Sapphire Reserve" })).toBeNull());
       const section = screen.getByTestId("found-cards");
       await userEvent.click(within(section).getByText("1 dismissed"));
-      await userEvent.click(within(section).getByRole("button", { name: "Bring back Chase Sapphire Reserve (1034)" }));
+      await userEvent.click(within(section).getByRole("button", { name: "Bring back Chase Sapphire Reserve (8814)" }));
       await waitFor(() => expect(calls("/api/churning/found/acct-1/undismiss")).toHaveLength(1));
       expect(await screen.findByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
     });
@@ -192,7 +192,7 @@ describe("the Churning page", () => {
       render(Churning);
       await screen.findByTestId("found-cards");
       await userEvent.click(screen.getByRole("radio", { name: "Alex" }));
-      expect(screen.queryByRole("button", { name: "Add CREDIT CARD (8668)" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add CREDIT CARD (3392)" })).toBeNull();
       expect(screen.getByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
     });
   });

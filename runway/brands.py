@@ -55,7 +55,7 @@ def brand(*names: str | None) -> str | None:
 
 
 # Each institution's website, for its logo: Logo.dev has a bank's logo by website for sure, where a lookup by name
-# ("Chase Bank Sara", "Citibank Online") may find nothing, or not clearly that bank.
+# ("Chase Bank Sam", "Citibank Online") may find nothing, or not clearly that bank.
 SITES = {
     "chase": "chase.com", "capital-one": "capitalone.com", "citibank": "citi.com", "american-express": "americanexpress.com",
     "discover-card": "discover.com", "bank-of-america": "bankofamerica.com", "wells-fargo": "wellsfargo.com",
@@ -68,7 +68,7 @@ NO_LOGO = "none"   # accounts.logo: you chose a letter instead of a logo
 
 
 def institution(name: str | None, owners) -> str | None:
-    """The institution's name without the owner's that a bank connection adds to it ("Chase Bank Sara" -> "Chase Bank")."""
+    """The institution's name without the owner's that a bank connection adds to it ("Chase Bank Sam" -> "Chase Bank")."""
     words = (name or "").split()
     drop = {o.lower() for o in owners if o}
     while len(words) > 1 and words[-1].lower() in drop:
