@@ -316,14 +316,21 @@ def _citations(message: dict) -> list[str]:
     return out
 
 
+NO_PRIVATE_PROVIDER = ("No provider of this model takes requests without keeping them, so nothing was sent: choose "
+                       "another model in Settings → Connections → AI categorization")
+
+
 def call_llm(api_key: str, model: str, prompt: str) -> str:
-    """Ask a model through OpenRouter's chat completions API (no web search)."""
-    return chat(api_key, model, prompt)[0]
+    """Ask a model through OpenRouter's chat completions API (no web search) about your transactions or orders: only
+    providers that don't keep or train on what they're sent (`private`)."""
+    return chat(api_key, model, prompt, private=True)[0]
 
 
-def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple[str, list[str]]:
+def chat(api_key: str, model: str, prompt: str, web: str | None = None, private: bool = False) -> tuple[str, list[str]]:
     """Ask a model through OpenRouter's chat completions API: its reply, and the web pages it cites. `web` is None (no
-    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model."""
+    search), "tool" or "plugin" (see WEB_RESULTS). Raises ToolsUnsupported when "tool" can't be used with the model.
+    `private` asks OpenRouter for providers that don't collect what they're sent (provider.data_collection "deny"):
+    for anything about your money. A model with none of them says so (NO_PRIVATE_PROVIDER)."""
     if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
         raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
     body = json.dumps({
@@ -332,6 +339,7 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple
         "temperature": 0,
         "messages": [{"role": "user", "content": prompt}],
         **_web_request(web),
+        **({"provider": {"data_collection": "deny"}} if private else {}),
     }).encode()
     req = urllib.request.Request(
         OPENROUTER_URL,
@@ -358,10 +366,14 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None) -> tuple
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
+            if private and "data policy" in detail.lower():
+                raise RuntimeError(f"{NO_PRIVATE_PROVIDER} (OpenRouter HTTP {e.code})") from e
             raise (ToolsUnsupported if web == "tool" and _no_tools(e.code, detail) else RuntimeError)(
                 f"OpenRouter HTTP {e.code}: {detail}") from e
         if data.get("error"):
             err = data["error"]
+            if private and "data policy" in str(err).lower():
+                raise RuntimeError(NO_PRIVATE_PROVIDER)
             code = err.get("code") if isinstance(err, dict) else None
             raise (ToolsUnsupported if web == "tool" and isinstance(code, int) and _no_tools(code, str(err)) else RuntimeError)(
                 f"OpenRouter: {err}")
