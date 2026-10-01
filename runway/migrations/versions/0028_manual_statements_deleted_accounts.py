@@ -34,6 +34,7 @@ def upgrade() -> None:
                         sa.Column('plaid_account_id', sa.Text()),
                         sa.Column('inv_ids', sa.Text()),
                         sa.Column('deleted_at', sa.Text(), server_default=now_text()),
+                        sa.Column('restored_at', sa.Text()),
                         sa.PrimaryKeyConstraint('id'))
 
 

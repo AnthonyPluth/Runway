@@ -317,7 +317,9 @@ deleted_accounts = Table(
     Column('plaid_account_id', Text, doc='the Plaid account it was linked to (set ignored)'),
     Column('inv_ids', Text, doc='JSON list: its investment accounts (inv_accounts.id), which syncs leave out too'),
     Column('deleted_at', Text, server_default=now_text()),
-    info={'doc': "accounts you deleted, so a sync doesn't bring them back (restoring one removes its row)"},
+    Column('restored_at', Text, doc="set: you restored it, and it's waiting for SimpleFIN to bring it back, to be linked to "
+                                    "plaid_account_id again; then the row goes"),
+    info={'doc': "accounts you deleted, so a sync doesn't bring them back (restoring one removes its row, or marks it restored)"},
 )
 
 inv_accounts = Table(

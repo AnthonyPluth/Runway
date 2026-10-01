@@ -323,6 +323,7 @@ class DeletedAccount(Base):
     plaid_account_id: Mapped[str | None]
     inv_ids: Mapped[str | None]
     deleted_at: Mapped[str | None]
+    restored_at: Mapped[str | None]
 
 
 class InvAccount(Base):

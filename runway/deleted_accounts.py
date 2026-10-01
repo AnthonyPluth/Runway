@@ -11,6 +11,10 @@ What stops the next sync bringing it straight back is a row in deleted_accounts 
 the account, Plaid's skips its investment accounts, and its Plaid bank or card account is set ignored. Restoring removes
 the row; the next sync then brings the account back with whatever history its bank still offers (SimpleFIN: about six
 months; Plaid: up to two years). Nothing deleted comes back from Runway itself: only a backup has it.
+
+A SimpleFIN account that was linked to a Plaid account (a card whose statements come from Plaid) keeps its row when
+restored, marked restored_at: the Plaid account stays ignored (its statements held back, nothing waiting in "New from
+Plaid") until SimpleFIN brings the account back, and then it's linked again (relink) and the row goes.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from sqlalchemy import delete, func, or_, select, update
 
 from . import db, plaidbank, sfinvest
 from . import settings_keys as sk
+from .schema import now_text
 from .models import (Account, Asset, Budget, CardStatement, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount, Holding,
                      HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition, ManualState,
                      ManualStatement, Override, PlaidAccount, Recurring, RecurringDismissed, RetailCharge, Rule, Transaction,
@@ -112,29 +117,34 @@ def remove(conn, account_id: str) -> dict:
         db.set_setting(conn, sk.PRIMARY_ACCOUNT, None)
     conn.execute(delete(Account).where(Account.id == account_id))
     db.upsert(conn, DeletedAccount, {"id": account_id, "name": db.account_label(acct), "kind": acct["kind"],
-                                     "plaid_account_id": pid, "inv_ids": json.dumps(inv) if inv else None},
-              key=["id"], update=["name", "kind", "plaid_account_id", "inv_ids"])
+                                     "plaid_account_id": pid, "inv_ids": json.dumps(inv) if inv else None, "restored_at": None},
+              key=["id"], update=["name", "kind", "plaid_account_id", "inv_ids", "restored_at"])
     return {"ok": True, **gone}
 
 
 def listed(conn) -> list[dict]:
     """The accounts you deleted, latest first, for Settings."""
     d = DeletedAccount
-    return db.rows(conn.execute(select(d.id, d.name, d.kind, d.deleted_at).order_by(d.deleted_at.desc(), d.id)))
+    return db.rows(conn.execute(select(d.id, d.name, d.kind, d.deleted_at).where(d.restored_at.is_(None))
+                                .order_by(d.deleted_at.desc(), d.id)))
 
 
 def restore(conn, account_id: str, today: date | None = None) -> dict:
     """Stop keeping the account deleted. The next sync brings it back with whatever history the bank still has; an
     account of its own from Plaid comes back now (empty until that sync). Raises LookupError if it isn't deleted."""
-    row = conn.execute(select(DeletedAccount).where(DeletedAccount.id == account_id)).fetchone()
+    row = conn.execute(select(DeletedAccount).where(DeletedAccount.id == account_id, DeletedAccount.restored_at.is_(None))).fetchone()
     if not row:
         raise LookupError("That account isn't deleted.")
-    conn.execute(delete(DeletedAccount).where(DeletedAccount.id == account_id))
     pid = row["plaid_account_id"]
-    if pid and conn.execute(select(PlaidAccount.plaid_account_id).where(PlaidAccount.plaid_account_id == pid)).fetchone():
+    plaid_there = bool(pid and conn.execute(select(PlaidAccount.plaid_account_id).where(PlaidAccount.plaid_account_id == pid)).fetchone())
+    if plaid_there and not account_id.startswith("pl:"):
+        # Linked to Plaid: kept, marked restored, until SimpleFIN brings it back and relink() links it again.
+        conn.execute(update(DeletedAccount).where(DeletedAccount.id == account_id).values(restored_at=now_text()))
+    else:
+        conn.execute(delete(DeletedAccount).where(DeletedAccount.id == account_id))
+    if plaid_there and account_id == "pl:" + pid:
         conn.execute(update(PlaidAccount).where(PlaidAccount.plaid_account_id == pid).values(ignored=0))
-        if account_id == "pl:" + pid:
-            plaidbank.match(conn, pid, "new", today)   # its own account again; the next sync reads its history again
+        plaidbank.match(conn, pid, "new", today)   # its own account again; the next sync reads its history again
     if not account_id.startswith("pl:"):
         # SimpleFIN: read its whole history (BACKFILL_DAYS) again on the next sync, not just the last couple of weeks.
         st = json.loads(db.get_setting(conn, sk.SIMPLEFIN_BACKFILL) or "{}")
@@ -144,9 +154,25 @@ def restore(conn, account_id: str, today: date | None = None) -> dict:
     return {"ok": True, "name": row["name"]}
 
 
+def relink(conn, account_id: str) -> None:
+    """SimpleFIN brought back an account you restored: link it to the Plaid account it was linked to before (unless
+    that's been given to another account since), and stop keeping that one ignored."""
+    row = conn.execute(select(DeletedAccount.plaid_account_id)
+                       .where(DeletedAccount.id == account_id, DeletedAccount.restored_at.is_not(None))).fetchone()
+    if not row:
+        return
+    conn.execute(delete(DeletedAccount).where(DeletedAccount.id == account_id))
+    pid = row["plaid_account_id"]
+    if not pid or not conn.execute(select(PlaidAccount.plaid_account_id).where(PlaidAccount.plaid_account_id == pid)).fetchone() \
+            or conn.execute(select(Account.id).where(Account.plaid_account_id == pid)).fetchone():
+        return
+    conn.execute(update(PlaidAccount).where(PlaidAccount.plaid_account_id == pid).values(ignored=0))
+    conn.execute(update(Account).where(Account.id == account_id).values(plaid_account_id=pid))
+
+
 def ids(conn) -> set[str]:
-    """The accounts you deleted (accounts.id), which SimpleFIN's sync leaves out."""
-    return set(conn.execute(select(DeletedAccount.id)).scalars())
+    """The accounts you deleted (accounts.id), which SimpleFIN's sync leaves out (not the ones you restored)."""
+    return set(conn.execute(select(DeletedAccount.id).where(DeletedAccount.restored_at.is_(None))).scalars())
 
 
 def plaid_ids(conn) -> set[str]:
@@ -157,6 +183,7 @@ def plaid_ids(conn) -> set[str]:
 def inv_ids(conn) -> set[str]:
     """Investment accounts (inv_accounts.id) that belonged to an account you deleted, which Plaid's sync leaves out."""
     out: set[str] = set()
-    for v in conn.execute(select(DeletedAccount.inv_ids).where(DeletedAccount.inv_ids.is_not(None))).scalars():
+    for v in conn.execute(select(DeletedAccount.inv_ids)
+                          .where(DeletedAccount.inv_ids.is_not(None), DeletedAccount.restored_at.is_(None))).scalars():
         out.update(json.loads(v))
     return out

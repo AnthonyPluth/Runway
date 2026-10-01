@@ -248,6 +248,8 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
             continue   # this account's balance and transactions come from Plaid
         since = _plaid_overlap_since(conn, acct_id, setup)
         org, balance, existing = _upsert_account(conn, acct, acct_id)
+        if not existing:
+            deleted_accounts.relink(conn, acct_id)   # one you restored: linked to its Plaid account again
         sfinvest.capture(conn, acct, acct_id, org, balance, is_new=not existing)
         carried = _clear_pending(conn, acct_id, window_start)
         for tx in acct.get("transactions", []) or []:

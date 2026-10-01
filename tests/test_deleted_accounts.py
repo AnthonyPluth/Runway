@@ -5,7 +5,7 @@ from unittest import mock
 
 from sqlalchemy import func, insert, select
 
-from runway import db, deleted_accounts, plaid, plaidbank, simplefin
+from runway import db, deleted_accounts, forecast, plaid, plaidbank, simplefin
 from runway import settings_keys as sk
 from runway.models import (Account, Asset, Budget, CardStatement, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount,
                            Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition,
@@ -202,6 +202,31 @@ class StaysDeletedTests(LedgerCase):
         self.assertIsNone(c.execute(select(PlaidItem.cursor)).scalar())
         self.plaid_sync()
         self.assertEqual((self.count(Account), self.count(Transaction), self.count(CardStatement)), (1, 1, 1))
+
+    def test_a_simplefin_card_linked_to_plaid_comes_back_linked(self):
+        c = self.conn
+        c.execute(insert(PlaidItem).values(item_id="item", access_token="x", institution_name="Chase", products="transactions,liabilities"))
+        simplefin.store_payload(c, self.simplefin_payload(), TODAY)
+        self.plaid_sync()
+        plaidbank.match(c, "p-cc", "A1", TODAY)
+        self.plaid_sync()
+        self.assertEqual(forecast.build(c, TODAY, 30)["cards"][0]["statement_source"], "plaid")
+        api.api_account_remove(c, {}, {}, "A1")
+        api.api_account_restore(c, {}, {}, "A1")
+        self.assertEqual(api.api_accounts_deleted(c, {}, {}), [])                  # not listed as deleted any more
+        self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)      # but nothing waiting in New from Plaid
+        self.assertEqual(plaid.undecided_count(c), 0)
+        self.plaid_sync()                                                           # Plaid first: still held back
+        self.assertEqual((self.count(Account), self.count(CardStatement)), (0, 0))
+        simplefin.store_payload(c, self.simplefin_payload(), TODAY)                # SimpleFIN brings it back: linked again
+        acct = c.execute(select(Account.id, Account.plaid_account_id)).fetchone()
+        self.assertEqual(tuple(acct), ("A1", "p-cc"))
+        self.assertEqual((c.execute(select(PlaidAccount.ignored)).scalar(), self.count(DeletedAccount)), (0, 0))
+        self.plaid_sync()
+        card = forecast.build(c, TODAY, 30)["cards"][0]
+        self.assertEqual((card["id"], card["statement_source"], card["statement_balance"]), ("A1", "plaid", 40.0))
+        self.assertEqual(plaid.undecided_count(c), 0)
+        self.assertEqual([r[0] for r in c.execute(select(Account.id))], ["A1"])   # no second, Plaid-only card
 
     def test_choosing_a_deleted_plaid_account_again_restores_it(self):
         c = self.conn
