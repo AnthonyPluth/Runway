@@ -8,7 +8,8 @@
   import { applyLiveQuotes, livePrices } from "$lib/components/investments/live";
   import { gainCls, pct, signed } from "$lib/components/investments/numbers";
   import { inv } from "$lib/components/investments/state.svelte";
-  import type { AllocKey, Investments, LiveQuotes, PlaidStatus, Quote } from "$lib/components/investments/types";
+  import type { AllocKey, Investments, LiveQuotes, Quote } from "$lib/components/investments/types";
+  import type { PlaidStatus } from "$lib/components/settings/types";
   import * as Alert from "$lib/components/ui/alert";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";

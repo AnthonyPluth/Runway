@@ -15,11 +15,11 @@ export interface Eligibility {
 // sends it, it's optional so a rate built in a form before saving type-checks.
 export interface ChurnRate { category: string; multiplier: number; portal_only?: boolean }
 
-export type Plan = "undecided" | "keep" | "close" | "product_change";
+export type CardPlan = "undecided" | "keep" | "close" | "product_change";
 
-export type BenefitKind = "credit" | "access" | "status" | "other";
-export type BenefitPeriod = "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time";
-export type BenefitBasis = "calendar" | "anniversary";
+type BenefitKind = "credit" | "access" | "status" | "other";
+type BenefitPeriod = "monthly" | "quarterly" | "semiannual" | "annual" | "every_4_years" | "one_time";
+type BenefitBasis = "calendar" | "anniversary";
 
 // A card benefit (runway/churn_benefits.py), as stored plus this period's figures.
 export interface Benefit {
@@ -51,7 +51,7 @@ export interface Benefit {
   uses: { id: number; amount_used: number | null; used_on: string }[];
 }
 
-export interface BenefitPreset { group: string; key: string; name: string; kind: BenefitKind; period: BenefitPeriod; basis: BenefitBasis }
+interface BenefitPreset { group: string; key: string; name: string; kind: BenefitKind; period: BenefitPeriod; basis: BenefitBasis }
 
 export interface ChurnCard {
   id: number;
@@ -80,7 +80,7 @@ export interface ChurnCard {
   eligible_on: string | null;
   notes: string | null;
   portal_name: string | null;
-  plan: Plan;
+  plan: CardPlan;
   plan_target: string | null;
   plan_date: string | null;        // as set; see plan_due for the day in effect
   plan_remind_days: number;
@@ -109,7 +109,7 @@ export interface ChurnCard {
   value_ytd: number | null;
 }
 
-export interface BankProgress {
+interface BankProgress {
   dd_total: number;
   dd_count: number | null;
   debits: number;
@@ -169,7 +169,7 @@ export interface Five24 {
   timeline: { date: string; count: number }[];
 }
 
-export type UpcomingKind = "task" | "fee" | "plan" | "bonus" | "benefit" | "five24" | "eligible" | "apply" | "offer_ends"
+type UpcomingKind = "task" | "fee" | "plan" | "bonus" | "benefit" | "five24" | "eligible" | "apply" | "offer_ends"
   | "bank_due" | "bank_hold" | "bank_post" | "bank_close" | "bank_fee" | "bank_eligible";
 
 export interface UpcomingItem {
@@ -181,14 +181,14 @@ export interface UpcomingItem {
   benefit_id?: number;             // kind "benefit"
   remaining?: number;              // kind "benefit": dollars left
   wish_id?: number;                // kinds "apply" and "offer_ends"
-  plan?: Plan;                     // kinds "fee" and "plan"
+  plan?: CardPlan;                     // kinds "fee" and "plan"
   owner: string | null;
   title: string;
   detail: string;
   warn: boolean;
 }
 
-export type CurrencyKind = "bank" | "airline" | "hotel" | "cash" | "other";
+type CurrencyKind = "bank" | "airline" | "hotel" | "cash" | "other";
 
 // cents: in effect. default: the built-in estimate (null for your own currencies). overridden: you set your own
 // value for a built-in one. estimate: still the built-in estimate (as of `as_of`).
@@ -207,7 +207,7 @@ export interface RewardRow {
   earned_since?: number; est_balance?: number | null; est_value?: number | null;
 }
 
-export interface Task {
+interface Task {
   id: number; card_id: number; due_on: string; action: string; done: number; snooze_until: string | null;
   product: string | null; owner: string | null;
 }
@@ -254,7 +254,7 @@ export interface CreditScore {
   history: { score: number; as_of: string; source: string | null }[];
 }
 
-export interface AlertPref { key: "churn_fee" | "churn_bonus" | "churn_plan" | "churn_benefit" | "churn_apply"; label: string; on: boolean }
+interface AlertPref { key: "churn_fee" | "churn_bonus" | "churn_plan" | "churn_benefit" | "churn_apply"; label: string; on: boolean }
 
 export interface Churning {
   today: string;
@@ -272,7 +272,7 @@ export interface Churning {
   values_as_of: string;
   values_note: string;
   issuers: { key: string; name: string; rule: string }[];
-  plans: Plan[];
+  plans: CardPlan[];
   categories: { name: string; parent: string | null }[];   // spending categories, for earning rates
   base_marker: string;
   benefit_presets: BenefitPreset[];
@@ -286,7 +286,7 @@ export interface Churning {
   bank_accounts: { id: string; name: string; owner: string | null }[];
 }
 
-export interface PortalOption { multiplier: number; return_pct: number; portal_name: string | null; value: number | null; note: string }
+interface PortalOption { multiplier: number; return_pct: number; portal_name: string | null; value: number | null; note: string }
 
 // GET /api/churning/best?category=&owner=&amount=&portal=1 → { category, portal, cards: BestCard[] }
 export interface BestCard {
@@ -301,6 +301,6 @@ export interface BestCard {
 
 // POST /api/churning/cards/{id}/plan/done and /plan/undo
 export interface PlanResult {
-  id: number; plan: Plan; plan_done_on: string | null; status: ChurnCard["status"]; closed_on: string | null;
+  id: number; plan: CardPlan; plan_done_on: string | null; status: ChurnCard["status"]; closed_on: string | null;
   new_card_id: number | null; changes: string[];
 }
