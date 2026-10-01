@@ -16,8 +16,12 @@ export interface SettingsAccount extends Account {
   networth_hidden?: number;
   provider?: string | null;
   plaid_account_id?: string | null;
-  plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: boolean | number;
+  plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: string | boolean | number | null;
     statement_note?: string | null } | null;
+  /** Cards: the statement the forecast uses (Plaid's, else the latest you entered), or null for none. */
+  statement?: CardStatementInfo | null;
+  /** Cards: the statements you entered, newest first. */
+  statements?: ManualStatement[];
   /** Loans: the terms the retirement planner projects what's owed with (runway/loans.py terms()). */
   loan?: LoanTerms;
 }
@@ -29,6 +33,19 @@ export interface LoanTerms {
   rate: number | null; payment: number | null; maturity?: string | null; source: "plaid" | "manual" | "inferred" | null;
   plaid: boolean; plaid_payment: boolean; set_rate: number | null; set_payment: number | null; inferred_payment: number | null;
 }
+
+export interface CardStatementInfo {
+  source: "plaid" | "manual"; closed: string; due?: string | null; balance?: number | null; minimum?: number | null;
+  /** Plaid's: the bank it's from. */
+  institution?: string | null;
+  /** One you entered: whether a newer one should have been entered by now, and when it's expected to close. */
+  stale?: boolean; next_close?: string;
+}
+export interface ManualStatement { statement_date: string; balance: number; due_date: string; minimum_payment?: number | null }
+/** GET /api/accounts/{id}/removal: what deleting it takes with it. */
+export interface AccountRemoval { name: string; transactions: number; recurring: number; rules: number; statements: number; holdings: number; plaid: boolean }
+/** GET /api/accounts/deleted */
+export interface DeletedAccount { id: string; name?: string | null; kind?: string | null; deleted_at?: string | null }
 
 interface SplitPart { category: string; percent: number | string }
 

@@ -308,6 +308,27 @@ class CardStatement(Base):
     purchase_apr: Mapped[float | None]
 
 
+class ManualStatement(Base):
+    __table__ = schema.manual_statements
+    account_id: Mapped[str]
+    statement_date: Mapped[str]
+    balance: Mapped[float]
+    due_date: Mapped[str]
+    minimum_payment: Mapped[float | None]
+    entered_at: Mapped[str | None]
+
+
+class DeletedAccount(Base):
+    __table__ = schema.deleted_accounts
+    id: Mapped[str]
+    name: Mapped[str | None]
+    kind: Mapped[str | None]
+    plaid_account_id: Mapped[str | None]
+    inv_ids: Mapped[str | None]
+    deleted_at: Mapped[str | None]
+    restored_at: Mapped[str | None]
+
+
 class LoanTerms(Base):
     __table__ = schema.loan_terms
     plaid_account_id: Mapped[str]

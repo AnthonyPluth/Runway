@@ -11,6 +11,7 @@ from sqlalchemy import insert, or_, select
 
 from .. import categorize, db, merchants, monitoring, networth, notify, plaid, plaidbank, portfolio, prices, realie, recurring, retail, sfinvest, simplefin
 from .. import settings_keys as sk
+from ..banks import bank_configured, plaid_banks
 from ..models import Holding, InvAccount, InvTransaction, ManualPosition, PlaidItem, Security, SyncLog
 from .common import ApiError
 
@@ -27,15 +28,6 @@ CRON_SLUG = "runway-bank-sync"   # the bank sync's Sentry Cron Monitor (see run_
 _sync_lock = threading.Lock()
 _inv_lock = threading.Lock()
 AUTO_SYNC = True             # False with --no-sync: no daily sync and no sync on opening the app
-
-
-def plaid_banks(conn) -> bool:
-    return plaid.configured(conn) and any(plaidbank.is_bank_item(r) for r in conn.execute(select(PlaidItem.products)).fetchall())
-
-
-def bank_configured(conn) -> bool:
-    """Whether there's anything to sync bank accounts from: SimpleFIN, or a Plaid bank or card connection."""
-    return bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)) or plaid_banks(conn)
 
 
 def run_sync() -> dict:

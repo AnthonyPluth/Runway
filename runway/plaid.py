@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, null, or_, select, union_all, update
 
-from . import db, plaidbank, secretbox
+from . import db, deleted_accounts, plaidbank, secretbox
 from . import settings_keys as sk
 # Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
 from .models import Account, Holding, InvAccount, InvSnapshot, InvTransaction, PlaidAccount, PlaidItem, Security
@@ -270,7 +270,10 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         raise
     if not item["institution_name"] and (h.get("item") or {}).get("institution_name"):
         conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(institution_name=h["item"]["institution_name"]))
-    for a in h.get("accounts", []):
+    deleted = deleted_accounts.inv_ids(conn)   # accounts you deleted stay deleted until you restore them
+    accounts = [a for a in h.get("accounts", []) if a.get("account_id") not in deleted]
+    held = [x for x in h.get("holdings", []) if x.get("account_id") not in deleted]
+    for a in accounts:
         bal = a.get("balances") or {}
         db.upsert(conn, InvAccount, {"id": a["account_id"], "item_id": item_id, "name": a.get("name"),
                                      "official_name": a.get("official_name"), "type": a.get("type"), "subtype": a.get("subtype"),
@@ -279,10 +282,10 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
                   key=["id"], update=["name", "official_name", "type", "subtype", "mask", "balance", "currency"])
     _store_securities(conn, h.get("securities", []))
     update_investment_accounts(conn, item_id, today)
-    account_ids = [a["account_id"] for a in h.get("accounts", [])]
+    account_ids = [a["account_id"] for a in accounts]
     for aid in account_ids:  # holdings are a full snapshot: replace
         conn.execute(delete(Holding).where(Holding.account_id == aid))
-    for x in h.get("holdings", []):
+    for x in held:
         db.upsert(conn, Holding, {"account_id": x["account_id"], "security_id": x["security_id"], "quantity": x.get("quantity"),
                                   "price": x.get("institution_price"), "price_as_of": x.get("institution_price_as_of"),
                                   "value": x.get("institution_value"), "cost_basis": x.get("cost_basis"),
@@ -306,6 +309,8 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
         _store_securities(conn, res.get("securities", []))
         txs = res.get("investment_transactions", [])
         for t in txs:
+            if t.get("account_id") in deleted:
+                continue
             db.upsert(conn, InvTransaction, {
                 "id": t["investment_transaction_id"], "account_id": t["account_id"], "security_id": t.get("security_id"),
                 "date": t["date"], "name": t.get("name"), "type": t.get("type"), "subtype": t.get("subtype"),
@@ -320,7 +325,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
                  .values(last_sync=datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"), error=None))
     conn.commit()
-    return {"accounts": len(account_ids), "holdings": len(h.get("holdings", [])), "transactions": fetched}
+    return {"accounts": len(account_ids), "holdings": len(held), "transactions": fetched}
 
 
 def sync_all(conn) -> dict:

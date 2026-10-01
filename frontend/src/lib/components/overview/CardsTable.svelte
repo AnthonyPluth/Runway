@@ -26,7 +26,7 @@
 
 <!-- One row per card, for a grouped list. -->
 {#if !cards.length}
-  <p class="cell text-sm text-muted-foreground">Link your cards through Plaid in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to see their statements and due dates.</p>
+  <p class="cell text-sm text-muted-foreground">Enter each card’s latest statement in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> (or link it through Plaid) to see what’s due and when.</p>
 {:else}
   {#each cards as c (c.id)}
     {@const soon = (c.payment ?? c.remaining) > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}
@@ -34,7 +34,8 @@
       <div class="min-w-0 flex-1">
         <div class="text-[15px]"><AcctLabel id={c.id} name={c.name} /></div>
         <div class="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
-          owes {fmt(c.owed_now)} now ·
+          owes {fmt(c.owed_now)} now ·{#if c.statement_source === "manual"}
+            <span title="You entered this statement in Settings → Accounts">entered by hand</span> ·{/if}
           <span title={c.avg_cycles ? `Average per statement over the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}; used to forecast future payments` : "Not enough history yet; using recent daily spending"}>
             {c.avg_monthly_spend != null ? `about ${fmt(c.avg_monthly_spend)} a statement` : "no average yet"}</span>
         </div>
