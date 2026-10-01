@@ -3,7 +3,10 @@ import os
 import tempfile
 import unittest
 
+from sqlalchemy import insert, select, update
+
 from runway import categories, categorize, db, rules, splits
+from runway.models import Account, Rule, Transaction
 from tests.shared import DbCase
 
 
@@ -11,22 +14,22 @@ class Base(DbCase):
     def setUp(self):
         super().setUp()
         for aid, kind in (("chk", "checking"), ("cc", "credit")):
-            self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES (?,?,?,0)", (aid, aid.upper(), kind))
+            self.c.execute(insert(Account).values(id=aid, name=aid.upper(), kind=kind, balance=0))
         self.n = 0
 
     def tx(self, amount, desc, acct="chk", category=None, source=None):
         self.n += 1
         tid = f"{acct}|{self.n}"
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source) "
-                       "VALUES (?,?,?,?,?,?,?,?)", (tid, acct, f"2026-09-{self.n:02d}", amount, desc,
-                                                    categorize.clean_payee(desc), category, source))
+        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=f"2026-09-{self.n:02d}",
+                                                  amount=amount, description=desc, payee=categorize.clean_payee(desc),
+                                                  category=category, category_source=source))
         return tid
 
     def rule(self, **kw):
         return rules.save(self.c, kw)
 
     def row(self, tid):
-        return self.c.execute("SELECT * FROM transactions WHERE id=?", (tid,)).fetchone()
+        return self.c.execute(select(Transaction).where(Transaction.id == tid)).fetchone()
 
 
 class MatchingTests(Base):
@@ -56,7 +59,7 @@ class MatchingTests(Base):
     def test_rename_feeds_history(self):
         self.rule(match="sq *joes", rename="Joe's Coffee")
         old = self.tx(-4, "SQ *JOES 123", category="Coffee & Snacks", source="manual")
-        self.c.execute("UPDATE transactions SET payee=? WHERE id=?", ("Joe's Coffee", old))
+        self.c.execute(update(Transaction).where(Transaction.id == old).values(payee="Joe's Coffee"))
         new = self.tx(-5, "SQ *JOES 456")
         categorize.categorize(self.c, [new], use_ai=False)
         self.assertEqual((self.row(new)["payee"], self.row(new)["category"], self.row(new)["category_source"]),
@@ -79,8 +82,9 @@ class MatchingTests(Base):
         parts = rules.split_parts(-250.0, [{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}])
         self.assertEqual(round(sum(p["amount"] for p in parts), 2), -250.0)
         import json
-        self.c.execute("INSERT INTO rules(match, split) VALUES ('costco', ?)",
-                       (json.dumps([{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}]),))
+        self.c.execute(insert(Rule).values(match="costco",
+                                           split=json.dumps([{"category": "Groceries", "percent": 60.01},
+                                                             {"category": "Shopping", "percent": 40}])))
         t = self.tx(-250, "COSTCO WHSE")
         categorize.categorize(self.c, use_ai=False)
         self.assertEqual(round(sum(p["amount"] for p in splits.get(self.c, t)), 2), -250.0)

@@ -11,7 +11,10 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
+from sqlalchemy import select, update
+
 from runway import db, oidc, server
+from runway.models import AuthPending, AuthSession
 
 # A throwaway 2048-bit RSA key used only by these tests to sign fake ID tokens.
 N = 0xf0e468c25263ab5b85ed863374cc64adae8284623519e21e7cbf01e2554656a58f8f69140ff8e701322655b598044841a7839a25b81c3737ee8141ee25ba7e6a46706540e49f61b7a321ad1e53d9bf44770558691d32aafb0edb49104ad0e9cc29074e856c22d864d285dbad96d228fb509f00b7d065ba0188d8c511efaee63001347fbe9939df1497b5efaf2e0d54626c6d1b3152397d3737b0e35141e1e58da75badd4f9897236e4d4c9b35ec9a0037c19152f1f7dc2cea916100588f76fd5ad4668da24e037339e9d34ab75ba37b91037a62ba7800df275f48651e231f021d7eb1c48006b016c1daff8d6d40a7446a8209b9666a85e5c04b999c38b3003a1
@@ -154,7 +157,8 @@ class OIDCTests(unittest.TestCase):
         self.assertEqual(json.loads(body)["user"]["email"], "me@example.com")
         self.assertIn("Anthony", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
         with db.session() as conn:   # only a hash of the token is stored
-            self.assertIsNone(conn.execute("SELECT 1 FROM auth_sessions WHERE token_hash=?", (ck["runway_session"],)).fetchone())
+            self.assertIsNone(conn.execute(select(AuthSession.token_hash)
+                                           .where(AuthSession.token_hash == ck["runway_session"])).fetchone())
         # Signing out takes a POST from Runway's own page: a link, or a POST without the app's header, does nothing.
         self.assertEqual(self.req("/auth/logout", session)[0], 405)
         self.assertEqual(self.req("/auth/logout", session, "POST")[0], 403)
@@ -217,7 +221,8 @@ class OIDCTests(unittest.TestCase):
         session = {"runway_session": token}
         self.assertNotIn("runway_session", self.req("/api/state", session)[2])   # just signed in: nothing to renew
         with db.session() as conn:
-            conn.execute("UPDATE auth_sessions SET expires=? WHERE token_hash=?", (time.time() + 86400, oidc._hash(token)))
+            conn.execute(update(AuthSession).where(AuthSession.token_hash == oidc._hash(token))
+                         .values(expires=time.time() + 86400))
         r = urllib.request.Request(self.base + "/api/state", headers={"Cookie": f"runway_session={token}"})
         with urllib.request.urlopen(r, timeout=10) as resp:
             cookies = resp.headers.get_all("Set-Cookie")
@@ -241,13 +246,14 @@ class OIDCTests(unittest.TestCase):
     def test_expired_session(self):
         _, _, ck, _ = self.sign_in()
         with db.session() as conn:
-            conn.execute("UPDATE auth_sessions SET expires=?", (time.time() - 1,))
+            conn.execute(update(AuthSession).values(expires=time.time() - 1))
         self.assertEqual(self.req("/api/state", {"runway_session": ck["runway_session"]})[0], 401)
 
     def test_open_redirect_blocked(self):
         with db.session() as conn:
             _, state = oidc.start_login(conn, "//evil.com/x")
-            self.assertEqual(conn.execute("SELECT next FROM auth_pending WHERE state=?", (state,)).fetchone()[0], "/")
+            self.assertEqual(conn.execute(select(AuthPending.next)
+                                          .where(AuthPending.state == state)).fetchone()[0], "/")
 
 
 class TokenChecks(unittest.TestCase):

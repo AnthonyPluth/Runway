@@ -1,9 +1,12 @@
 """Changing many transactions at once."""
 import unittest
 
+from sqlalchemy import insert, select, update
+
 from runway import categorize, rules, splits
 from runway.server.api import categories as api_categories
 from runway.server.api import transactions as api_tx
+from runway.models import Account, Transaction
 from tests.shared import DbCase
 
 
@@ -12,16 +15,19 @@ class Fixture(DbCase):
 
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('cc', 'Card', 'credit', 0)")
+        self.c.execute(insert(Account).values(id="cc", name="Card", kind="credit", balance=0))
         for i, (amt, desc, cat, review) in enumerate([(-10, "SQ *JOES 1", None, 1), (-12, "SQ *JOES 2", "Shopping", 1),
                                                       (-100, "TARGET", "Shopping", 0), (-5, "OTHER", "Other", 1)]):
-            self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source, needs_review) "
-                           "VALUES (?,?,?,?,?,?,?,?,?)", (f"t{i}", "cc", "2026-09-01", amt, desc, desc, cat, "ai" if cat else None, review))
+            self.c.execute(insert(Transaction).values(id=f"t{i}", account_id="cc", posted="2026-09-01", amount=amt,
+                                                      description=desc, payee=desc, category=cat,
+                                                      category_source="ai" if cat else None, needs_review=review))
         splits.set_splits(self.c, "t2", [{"amount": -60, "category": "Groceries"}, {"amount": -40, "category": "Shopping"}])
 
     def rows(self):
         return {r["id"]: tuple(r)[1:] for r in self.c.execute(
-            "SELECT id, payee, category, category_source, needs_review, is_split FROM transactions ORDER BY id")}
+            select(Transaction.id, Transaction.payee, Transaction.category, Transaction.category_source,
+                   Transaction.needs_review, Transaction.is_split)
+            .order_by(Transaction.id))}
 
 
 class BulkTests(Fixture):
@@ -59,7 +65,7 @@ class BulkTests(Fixture):
         # A bank's payee isn't tidied like a rename: double spaces and length survive an undo.
         long = "ACH WEB SINGLE CO NAME " * 5
         for tid, payee in (("t0", "SQ *JOES  COFFEE"), ("t1", long)):
-            self.c.execute("UPDATE transactions SET payee=? WHERE id=?", (payee, tid))
+            self.c.execute(update(Transaction).where(Transaction.id == tid).values(payee=payee))
         was = api_tx.snapshot(self.c, ["t0", "t1"])
         categorize.bulk_update(self.c, ["t0", "t1"], payee="Joe")
         self.assertEqual(api_tx.restore(self.c, was), 2)
@@ -84,7 +90,7 @@ class BulkTests(Fixture):
 
 class RuleApplyTests(Fixture):
     def test_apply_says_what_changed_so_it_can_be_undone(self):
-        self.c.execute("UPDATE transactions SET category_source='manual' WHERE id='t1'")   # yours: the rule leaves it alone
+        self.c.execute(update(Transaction).where(Transaction.id == "t1").values(category_source="manual"))   # yours: the rule leaves it alone
         rid = rules.save(self.c, {"match": "joes", "category": "Coffee & Snacks", "rename": "Joe's"})
         before = self.rows()
         r = api_categories.api_rule_apply(self.c, None, None, str(rid))

@@ -1,16 +1,20 @@
 """Reports: spending over time, merchants, income against spending, and the breakdown."""
 import unittest
 
+from sqlalchemy import insert, update
+
 from runway import categories, reports, splits
+from runway.models import Account, Transaction
 from tests.shared import DbCase
 
 
 class ReportTests(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk','Checking','checking',0), ('cc','Card','credit',0), "
-                       "('old','Old','credit',0)")
-        self.c.execute("UPDATE accounts SET hidden=1 WHERE id='old'")
+        self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0},
+                                         {"id": "cc", "name": "Card", "kind": "credit", "balance": 0},
+                                         {"id": "old", "name": "Old", "kind": "credit", "balance": 0}])
+        self.c.execute(update(Account).where(Account.id == "old").values(hidden=1))
         categories.add(self.c, "Fast food", parent="Restaurants")
         self.n = 0
         rows = [
@@ -35,8 +39,8 @@ class ReportTests(DbCase):
     def tx(self, acct, day, amt, payee, cat):
         self.n += 1
         tid = f"t{self.n}"
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)",
-                       (tid, acct, day, amt, payee.upper(), payee, cat))
+        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=day, amount=amt,
+                                                  description=payee.upper(), payee=payee, category=cat))
         return tid
 
     def test_month_pace(self):

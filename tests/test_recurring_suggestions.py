@@ -2,10 +2,13 @@
 import json
 import unittest
 
+from sqlalchemy import select
+
 from runway import db, forecast
 from runway import settings_keys as sk
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
+from runway.models import Recurring
 from tests.shared import TODAY, LedgerCase
 
 
@@ -69,7 +72,7 @@ class AmountSignTests(LedgerCase):
     def add(self, amount):
         r = api_recurring.api_recurring_add(self.conn, None, {"name": "x", "account_id": "chk", "amount": amount,
                                                               "anchor_date": "2026-09-06"})
-        return self.conn.execute("SELECT amount FROM recurring WHERE id=?", (r["id"],)).fetchone()[0]
+        return self.conn.execute(select(Recurring.amount).where(Recurring.id == r["id"])).fetchone()[0]
 
     def test_signed_amounts_are_stored_as_given(self):
         self.assertEqual(self.add(-120), -120.0)
