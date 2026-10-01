@@ -377,6 +377,8 @@ class MigrationTests(unittest.TestCase):
                  "payee": "Uber Eats"},                                       # the brand's name already
                 {"id": "chk|9", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY*USA 877-778-1161",
                  "payee": "Spotify Usa"},                                     # the bank's words, not its run of text
+                {"id": "chk|12", "account_id": "chk", "posted": "2026-09-10", "amount": -40.00, "description": "WAL-MART SUPERCENTER #1234",
+                 "payee": "Walmart Supercenter"},                             # the provider's own name, not the bank's text
             ]
             conn.execute(insert(Transaction), [{"recurring_id": None, "merchant_id": None, **t} for t in txs])
             conn.execute(insert(Rule).values(match="target", rename="Target T-1234"))
@@ -399,7 +401,8 @@ class MigrationTests(unittest.TestCase):
         with db.session(self.path) as conn:
             self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.payee)).fetchall()), {
                 "chk|1": "Amazon", "chk|2": "Amazon", "chk|3": "Walmart", "chk|4": "Birthday Gift", "chk|5": "Target T-1234",
-                "chk|pl:6": "Amzn Mktp Us", "chk|7": "Costco Gas", "chk|8": "Uber Eats", "chk|9": "Spotify"})
+                "chk|pl:6": "Amzn Mktp Us", "chk|7": "Costco Gas", "chk|8": "Uber Eats", "chk|9": "Spotify",
+                "chk|12": "Walmart Supercenter"})
             # Each description still has the bank's text: an item matching it keeps its text (written out when it matched
             # by name), without taking in every Amazon order. Spotify's bank text doesn't have "spotify usa": it matches
             # the brand's name too.

@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import categories, categorize, db, payees, server, simplefin
+from runway import settings_keys as sk
 from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
 from tests.shared import TODAY, LedgerCase, ts
 
@@ -169,6 +170,21 @@ class BrandNameApiTests(LedgerCase):
                 {"id": "n1", "posted": ts(TODAY), "amount": "-3.00", "description": "AMZN Mktp US*1Q2W3E"},
                 {"id": "n2", "posted": ts(TODAY), "amount": "-3.00", "description": "WM SUPERCENTER #9"}]}]}, TODAY)
         self.assertEqual((self.payees()["chk|n1"], self.payees()["chk|n2"]), ("Amzn Mktp Us", "Walmart"))
+        # a payee SimpleFIN named itself, other than the bank's text, stays as it was: a rule made from it still matches
+        db.set_setting(self.conn, sk.BRAND_NAMES_OFF, "[]")
+        self.conn.execute(insert(Rule).values(match="walmart supercenter", match_mode="exact", category="Groceries"))
+        simplefin.store_payload(self.conn, {"errors": [], "accounts": [{
+            "org": {"name": "Chase"}, "id": "chk", "name": "Checking", "currency": "USD", "balance": "100",
+            "balance-date": ts(TODAY), "transactions": [
+                {"id": "n3", "posted": ts(TODAY), "amount": "-40.00", "payee": "Walmart Supercenter",
+                 "description": "WAL-MART SUPERCENTER #1234"},
+                {"id": "n4", "posted": ts(TODAY), "amount": "-5.00", "payee": "AMZN Mktp US", "description": "AMZN Mktp US*9Z8Y7X"}]}]}, TODAY)
+        self.assertEqual((self.payees()["chk|n3"], self.payees()["chk|n4"]), ("Walmart Supercenter", "Amazon"))
+        categorize.categorize(self.conn, ["chk|n3"], use_ai=False)
+        self.assertEqual(self.conn.execute(select(Transaction.category).where(Transaction.id == "chk|n3")).scalar(), "Groceries")
+        self.conn.execute(delete(Rule))
+        self.conn.execute(delete(Transaction).where(Transaction.id.in_(["chk|n3", "chk|n4"])))
+        db.set_setting(self.conn, sk.BRAND_NAMES_OFF, '["Amazon"]')
         # Undo puts back the names and the brand's own
         self.conn.execute(delete(Transaction).where(Transaction.id.in_(["chk|n1", "chk|n2"])))
         server.api_tx_bulk(self.conn, {}, {"restore": r["was"], "keep_bank": r["keep_bank"]})

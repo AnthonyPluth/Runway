@@ -18,7 +18,7 @@ from sqlalchemy import delete, insert, select, update
 
 from . import db, deleted_accounts, payees, plaidbank, sfinvest, splits
 from . import settings_keys as sk
-from .categorize import clean_payee, kept_bank_names
+from .categorize import bank_payee, clean_payee, kept_bank_names
 from .models import Account, Transaction
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
@@ -317,7 +317,11 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
     posted = _ts_to_date(tx.get("posted")) or _ts_to_date(tx.get("transacted_at")) or date.today().isoformat()
     amount = _to_float(tx.get("amount")) or 0.0
     desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
-    payee = clean_payee(tx.get("payee") or desc, keep_bank)
+    raw = tx.get("payee") or desc
+    # The brand's name only for a payee the bank's text gives (as rules' and the details' brand checks work it out):
+    # one SimpleFIN named on its own ("Walmart Supercenter" for "WAL-MART SUPERCENTER #1234") stays as it was.
+    same = " ".join(bank_payee(raw).lower().split()) == " ".join(bank_payee(desc).lower().split())
+    payee = clean_payee(raw, keep_bank) if same else bank_payee(raw)
     key = f"{acct_id}|{tx['id']}"
     row = conn.execute(select(Transaction.id, Transaction.pending, Transaction.is_split).where(Transaction.id == key)).fetchone()
     if row:

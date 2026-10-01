@@ -152,14 +152,11 @@ def merchant_name(payee: str | None) -> str | None:
     return None
 
 
-# payees.from_bank, as in 0032
-def _plain(word: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", word.lower())
-
-
+# Whether a payee is (a tidied piece of) the bank's text: each of its words in the description as written, so a name
+# the provider gave of its own ("Walmart Supercenter" for "WAL-MART SUPERCENTER #1234") stays, as a sync keeps it.
 def from_bank(payee: str | None, description: str | None) -> bool:
-    desc = re.sub(r"[^a-z0-9 ]", "", (description or "").lower())   # plain like the payee's words ("joe's" -> "joes")
-    return bool(desc) and all(_plain(w) in desc for w in (payee or "").split())
+    desc = (description or "").lower()
+    return bool(desc) and all(w in desc for w in (payee or "").lower().split())
 
 
 def _key(s: str) -> str:
