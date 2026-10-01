@@ -73,6 +73,9 @@ def card_apr(card_id: str) -> str:
 # Recurring items
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"
 
+# Churning
+CHURN_FOUND_DISMISSED = "churn_found_dismissed"   # JSON: ids of credit card accounts marked "not a churning card" (found on your accounts)
+
 # Notifications
 NOTIFY_PREFS = "notify_prefs"             # JSON: without sign-in, and where a person who hasn't chosen yet starts from
 

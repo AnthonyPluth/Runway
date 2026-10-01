@@ -6,7 +6,7 @@ from datetime import date
 
 from sqlalchemy import select
 
-from ... import bank_bonuses, churn_benefits, churn_wishlist, churning, db, notify
+from ... import bank_bonuses, churn_benefits, churn_found, churn_wishlist, churning, db, notify
 from ...models import Category
 from ..common import ApiError, _current
 from .state import owner_choices
@@ -52,6 +52,32 @@ def api_churning_best(conn, q, _b):
     portal = (q.get("portal", [""])[0] or "").strip().lower() in ("1", "true", "on", "yes")
     return {"category": category, "portal": portal,
             "cards": churning.best(conn, date.today(), category, owner, amount, portal)}
+
+
+def api_churning_found(conn, _q, _b):
+    """Credit card accounts that aren't churning cards yet, as drafts for the add-card form, and the dismissed ones."""
+    return churn_found.found(conn)
+
+
+def api_churn_found_dismiss(conn, _q, _b, account_id):
+    _churn(churn_found.dismiss, conn, account_id)
+    return {"ok": True}
+
+
+def api_churn_found_undismiss(conn, _q, _b, account_id):
+    _churn(churn_found.dismiss, conn, account_id, True)
+    return {"ok": True}
+
+
+def api_churn_suggest(conn, _q, body):
+    """What the AI knows of a card, from its bank and name only (nothing else is sent), for the form to offer."""
+    body = body or {}
+    try:
+        return churn_found.suggest(conn, str(body.get("issuer") or ""), str(body.get("product") or ""))
+    except churning.ChurnError as e:
+        raise ApiError(str(e)) from e
+    except RuntimeError as e:
+        raise ApiError(str(e), 502) from e
 
 
 def api_churn_card_add(conn, _q, body):

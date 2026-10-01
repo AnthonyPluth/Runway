@@ -15,6 +15,7 @@ from .api.churning import (
     api_bank_bonus_add, api_bank_bonus_remove, api_bank_bonus_update, api_churn_balance, api_churn_benefit_add,
     api_churn_benefit_remove, api_churn_benefit_unuse, api_churn_benefit_update, api_churn_benefit_use,
     api_churn_card_add, api_churn_card_remove, api_churn_card_update, api_churn_currency, api_churn_currency_remove,
+    api_churn_found_dismiss, api_churn_found_undismiss, api_churn_suggest, api_churning_found,
     api_churn_plan_done, api_churn_plan_undo, api_churn_rate, api_churn_task_add, api_churn_task_remove,
     api_churn_score, api_churn_task_snooze, api_churn_task_update, api_churn_wish_add, api_churn_wish_applied,
     api_churn_wish_remove, api_churn_wish_update, api_churning, api_churning_best
@@ -151,6 +152,10 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/equity/grants/{id}/remove", api_equity_grant_remove),
     ("GET", "/api/churning", api_churning),
     ("GET", "/api/churning/best", api_churning_best),
+    ("GET", "/api/churning/found", api_churning_found),
+    ("POST", "/api/churning/found/{id}/dismiss", api_churn_found_dismiss),
+    ("POST", "/api/churning/found/{id}/undismiss", api_churn_found_undismiss),
+    ("POST", "/api/churning/suggest", api_churn_suggest),
     ("POST", "/api/churning/cards", api_churn_card_add),
     ("POST", "/api/churning/cards/{id}", api_churn_card_update),
     ("POST", "/api/churning/cards/{id}/remove", api_churn_card_remove),
