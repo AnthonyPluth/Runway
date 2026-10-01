@@ -62,6 +62,14 @@ describe("an order's items", () => {
     expect(screen.getByText(NOTE("see what was in an order"))).toBeInTheDocument();
     expect(api).not.toHaveBeenCalled();
   });
+
+  it("load once the screen counts as a computer (widened or turned)", async () => {
+    viewport.phone = true;
+    render(OrderDetail, { orderId: "x" });
+    viewport.phone = false;
+    await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/retail/orders/x", { keep: true }));
+    expect(api).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("a recurring item's fields", () => {
