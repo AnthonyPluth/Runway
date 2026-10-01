@@ -64,11 +64,14 @@ describe("an order's items", () => {
   });
 
   it("load once the screen counts as a computer (widened or turned)", async () => {
+    vi.mocked(api).mockResolvedValue({ id: "x", retailer: "target", channel: "store", order_number: "1", placed: "2026-09-26", total: 10,
+      items: [], charges: [], url: "https://www.target.com/orders" } as never);
     viewport.phone = true;
     render(OrderDetail, { orderId: "x" });
     viewport.phone = false;
-    await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/retail/orders/x", { keep: true }));
+    expect(await screen.findByRole("link", { name: "Open on target.com" })).toBeInTheDocument();
     expect(api).toHaveBeenCalledTimes(1);
+    expect(api).toHaveBeenCalledWith("/api/retail/orders/x", { keep: true });
   });
 });
 
