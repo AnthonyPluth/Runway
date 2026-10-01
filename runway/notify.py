@@ -119,10 +119,11 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
     if not webpush.valid_public_key(keys["p256dh"]):
         raise ValueError("That isn't a push subscription.")
     # The same browser subscribing again is whoever is signed in there now: the device becomes theirs. Only that
-    # browser can give it away (it sends the keys Runway has), not someone who merely knows its address.
+    # browser can give it away (it sends the keys Runway has), not someone who merely knows its address, whether
+    # it's someone else's or nobody's yet (turned on before sign-in).
     had = conn.execute(select(PushSubscription.user_sub, PushSubscription.p256dh, PushSubscription.auth)
                        .where(PushSubscription.endpoint == endpoint)).fetchone()
-    if had and had["user_sub"] and had["user_sub"] != user_sub and (had["p256dh"], had["auth"]) != (keys["p256dh"], keys["auth"]):
+    if had and (had["user_sub"] or None) != user_sub and (had["p256dh"], had["auth"]) != (keys["p256dh"], keys["auth"]):
         raise ValueError("That device gets someone else's notifications. Turn them off there first.")
     db.upsert(conn, PushSubscription, {"endpoint": endpoint, "p256dh": keys["p256dh"], "auth": keys["auth"],
                                        "device": (device or "This device")[:80], "user_sub": user_sub, "created": time.time()},

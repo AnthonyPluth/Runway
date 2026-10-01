@@ -103,6 +103,14 @@ class NotifyTests(unittest.TestCase):
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "iPhone · app", "u2")
         self.assertEqual(self.c.execute("SELECT p256dh, user_sub FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[:],
                          (p256dh2, "u2"))
+        # nor a device from before sign-in (nobody's), which only its own browser can claim
+        old = "https://fcm.googleapis.com/fcm/send/old"
+        notify.subscribe(self.c, {"endpoint": old, "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "Old phone", None)
+        with self.assertRaises(ValueError):
+            notify.subscribe(self.c, {"endpoint": old, "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "x", "u1")
+        notify.subscribe(self.c, {"endpoint": old, "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "Old phone", "u1")
+        self.assertEqual(self.c.execute("SELECT user_sub FROM push_subscriptions WHERE endpoint=?", (old,)).fetchone()[0], "u1")
+        notify.unsubscribe(self.c, old)
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "iPhone · app"])   # oldest first
         notify.unsubscribe(self.c, "https://fcm.googleapis.com/fcm/send/1")
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone"])
