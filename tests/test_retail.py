@@ -9,7 +9,10 @@ import urllib.request
 from datetime import date, datetime, timedelta
 from unittest import mock
 
+from sqlalchemy import delete, func, insert, select, update
+
 from runway import db, oidc, retail, splits
+from runway.models import Account, AiLog, Category, RetailCharge, RetailItem, RetailOrder, Transaction
 from tests.shared import DbCase
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "amazon")
@@ -39,7 +42,7 @@ AI = fake_ai({"sash": "Shopping", "tea": "Groceries", "crucible": "Entertainment
 class Base(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('card', 'Card', 'credit', 0)")
+        self.c.execute(insert(Account).values(id="card", name="Card", kind="credit", balance=0))
         self.since = mock.patch.object(retail, "since", return_value="2024-01-01")
         self.since.start()
 
@@ -47,11 +50,12 @@ class Base(DbCase):
         self.since.stop()
 
     def tx(self, tid, posted, amount, desc, category=None, source=None):
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, category_source) "
-                       "VALUES (?,?,?,?,?,?,?,?)", (tid, "card", posted, amount, desc, desc, category, source))
+        self.c.execute(insert(Transaction).values(id=tid, account_id="card", posted=posted, amount=amount,
+                                                  description=desc, payee=desc, category=category,
+                                                  category_source=source))
 
     def row(self, tid):
-        return self.c.execute("SELECT * FROM transactions WHERE id=?", (tid,)).fetchone()
+        return self.c.execute(select(Transaction).where(Transaction.id == tid)).fetchone()
 
     def parts(self, tid):
         return [(p["category"], p["amount"]) for p in splits.get(self.c, tid)]
@@ -66,17 +70,18 @@ class AmazonPagesTests(Base):
         r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
         self.assertEqual(r["orders"], ["123-4567890-1234567"])            # its items are still to be read
         self.assertIn("ppw-widgetState", r["next_form"])                   # and there's another page
-        charges = self.c.execute("SELECT date, amount, payment FROM retail_charges ORDER BY date").fetchall()
+        charges = self.c.execute(select(RetailCharge.date, RetailCharge.amount, RetailCharge.payment)
+                                 .order_by(RetailCharge.date)).fetchall()
         self.assertEqual([tuple(c) for c in charges],
                          [("2024-10-09", -28.79, "Mastercard ****1234"), ("2024-10-11", -45.19, "Visa ****1234")])
         retail.amazon_transactions(self.c, fixture("transactions-page.html"))   # the same page again changes nothing
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM retail_charges").fetchone()[0], 2)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 2)
 
     def test_stops_paging_at_the_start_date(self):
         with mock.patch.object(retail, "since", return_value="2024-10-10"):
             r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
         self.assertIsNone(r["next_form"])
-        self.assertEqual([tuple(c) for c in self.c.execute("SELECT date FROM retail_charges")], [("2024-10-11",)])
+        self.assertEqual([tuple(c) for c in self.c.execute(select(RetailCharge.date))], [("2024-10-11",)])
 
     def test_signed_out(self):
         with self.assertRaises(retail.RetailError):
@@ -84,10 +89,10 @@ class AmazonPagesTests(Base):
 
     def test_order_details(self):
         self.assertEqual(retail.amazon_order(self.c, ORDER, fixture(f"order-details-{ORDER}.html")), {"read": True, "items": 4})
-        o = self.c.execute("SELECT * FROM retail_orders").fetchone()
+        o = self.c.execute(select(RetailOrder)).fetchone()
         self.assertEqual((o["placed"], o["total"], o["subtotal"], o["tax"], o["payment"], o["details"]),
                          ("2024-09-08", 60.88, 57.69, 3.19, "Prime Visa 1111", 1))
-        items = self.c.execute("SELECT title, amount FROM retail_items ORDER BY position").fetchall()
+        items = self.c.execute(select(RetailItem.title, RetailItem.amount).order_by(RetailItem.position)).fetchall()
         self.assertEqual([i["amount"] for i in items], [7.49, 18.95, 9.98, 21.27])
         self.assertTrue(items[2]["title"].startswith("The Crucible"))
 
@@ -118,12 +123,12 @@ class AmazonPagesTests(Base):
             retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=False)
         self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [ORDER])
         retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=True)
-        self.assertEqual(self.c.execute("SELECT attempts FROM retail_orders").fetchone()[0], 1)
+        self.assertEqual(self.c.execute(select(RetailOrder.attempts)).fetchone()[0], 1)
 
     def test_same_charge_on_two_pages_is_two_charges(self):
         r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
         retail.amazon_transactions(self.c, fixture("transactions-page.html"), r["seen"])   # as if it were the next page
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM retail_charges").fetchone()[0], 4)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 4)
 
     def test_reads_back_to_amazon_orders_whose_details_never_came(self):
         self.since.stop()
@@ -134,7 +139,7 @@ class AmazonPagesTests(Base):
             oid = retail._save_order(self.c, "amazon", ORDER)   # from the transactions page: no placed date yet
             retail._save_charge(self.c, f"amazon|{ORDER}|1", oid, old, -60.88, None)
             self.assertEqual(retail.since(self.c, "amazon"), old)
-            self.c.execute("UPDATE retail_orders SET attempts=?", (retail.MAX_ATTEMPTS,))
+            self.c.execute(update(RetailOrder).values(attempts=retail.MAX_ATTEMPTS))
             self.assertEqual(retail.since(self.c, "amazon"), usual)
         finally:
             self.since.start()
@@ -170,7 +175,7 @@ class SplitTests(Base):
         self.assertEqual((out["items"]["left"], out["category"], out["split"]), (4, 0, 0))   # nothing to go on: left as it was
         self.assertEqual(tuple(self.row("t1"))[6:8], ("Shopping", "rule"))
         # Once you categorize one item, the rest share the transaction's category.
-        item = self.c.execute("SELECT id FROM retail_items WHERE title LIKE 'Organic%'").fetchone()["id"]
+        item = self.c.execute(select(RetailItem.id).where(RetailItem.title.like("Organic%"))).fetchone()["id"]
         retail.set_item_category(self.c, item, "Groceries")
         self.assertEqual(self.parts("t1"), [("Shopping", -40.88), ("Groceries", -20.0)])
 
@@ -180,7 +185,7 @@ class SplitTests(Base):
         db.set_setting(self.c, "openrouter_api_key", "k")
         retail.finish(self.c, "amazon", caller=AI)
         self.assertEqual((self.row("t1")["category"], self.row("t1")["is_split"]), ("Gifts & Donations", 0))
-        charge = self.c.execute("SELECT id, tx_id FROM retail_charges").fetchone()
+        charge = self.c.execute(select(RetailCharge.id, RetailCharge.tx_id)).fetchone()
         self.assertEqual(charge["tx_id"], "t1")                            # matched, just not changed
         self.assertEqual(retail.apply(self.c, charge["id"], force=True), "split")   # unless you ask
 
@@ -190,7 +195,7 @@ class SplitTests(Base):
         db.set_setting(self.c, "openrouter_api_key", "k")
         retail.finish(self.c, "amazon", caller=AI)
         splits.set_splits(self.c, "t1", [{"amount": -30.88, "category": "Groceries"}, {"amount": -30, "category": "Shopping"}])
-        item = self.c.execute("SELECT id FROM retail_items WHERE title LIKE 'The Crucible%'").fetchone()["id"]
+        item = self.c.execute(select(RetailItem.id).where(RetailItem.title.like("The Crucible%"))).fetchone()["id"]
         retail.set_item_category(self.c, item, "Shopping")
         self.assertEqual(self.parts("t1"), [("Groceries", -30.88), ("Shopping", -30.0)])
 
@@ -200,21 +205,21 @@ class SplitTests(Base):
         self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US")                  # no category yet
         db.set_setting(self.c, "openrouter_api_key", "k")
         retail.finish(self.c, "amazon", caller=AI)
-        charge = self.c.execute("SELECT id FROM retail_charges").fetchone()["id"]
+        charge = self.c.execute(select(RetailCharge.id)).fetchone()["id"]
         t = self.row("t1")
         self.assertEqual((t["category"], t["is_split"]), ("Groceries", 1))   # a split names its first part
         self.assertEqual(retail.apply(self.c, charge), "same")               # nothing changed since
         # Every item the same category now: the split goes and the transaction just takes it.
-        self.c.execute("UPDATE retail_items SET category='Shopping'")
+        self.c.execute(update(RetailItem).values(category="Shopping"))
         self.assertEqual(retail.apply(self.c, charge), "category")
         t = self.row("t1")
         self.assertEqual((t["category"], t["category_source"], t["is_split"], self.parts("t1")), ("Shopping", "retail", 0, []))
-        self.assertEqual(json.loads(self.c.execute("SELECT applied FROM retail_charges").fetchone()[0]),
+        self.assertEqual(json.loads(self.c.execute(select(RetailCharge.applied)).fetchone()[0]),
                          {"parts": [], "category": "Shopping", "prev": {"category": None, "source": None}})
         self.assertEqual(retail.apply(self.c, charge), "same")
-        self.c.execute("UPDATE retail_charges SET amount=5")                  # a refund keeps its category
+        self.c.execute(update(RetailCharge).values(amount=5))                  # a refund keeps its category
         self.assertEqual(retail.apply(self.c, charge), "same")
-        self.c.execute("DELETE FROM transactions")
+        self.c.execute(delete(Transaction))
         self.assertEqual(retail.apply(self.c, charge), "unmatched")
 
     def test_a_model_that_fails_leaves_items_to_their_departments(self):
@@ -226,7 +231,7 @@ class SplitTests(Base):
         def broken(*_a):
             raise RuntimeError("model is down")
         self.assertEqual(retail.categorize_items(self.c, caller=broken), {"memory": 0, "ai": 0, "department": 1, "left": 1})
-        log = self.c.execute("SELECT purpose, ok, message FROM ai_log").fetchone()
+        log = self.c.execute(select(AiLog.purpose, AiLog.ok, AiLog.message)).fetchone()
         self.assertEqual(tuple(log), ("orders", 0, "model is down"))
 
     def test_item_category_is_remembered_and_resplits(self):
@@ -234,14 +239,16 @@ class SplitTests(Base):
         self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US", "Shopping", "rule")
         db.set_setting(self.c, "openrouter_api_key", "k")
         retail.finish(self.c, "amazon", caller=AI)
-        item = self.c.execute("SELECT id, title FROM retail_items WHERE title LIKE 'The Crucible%'").fetchone()
+        item = self.c.execute(select(RetailItem.id, RetailItem.title)
+                              .where(RetailItem.title.like("The Crucible%"))).fetchone()
         retail.set_item_category(self.c, item["id"], "Shopping")
         self.assertEqual(self.parts("t1"), [("Groceries", -42.44), ("Shopping", -18.44)])
         # The same book in another order gets Shopping without asking the model.
         oid = retail._save_order(self.c, "amazon", "112-0000000-0000000", details=1)
         retail._save_items(self.c, oid, [{"title": item["title"], "amount": 9.98}])
         retail.categorize_items(self.c, caller=fake_ai({}))
-        self.assertEqual(tuple(self.c.execute("SELECT category, category_source FROM retail_items WHERE order_id=?", (oid,)).fetchone()),
+        self.assertEqual(tuple(self.c.execute(select(RetailItem.category, RetailItem.category_source)
+                                              .where(RetailItem.order_id == oid)).fetchone()),
                          ("Shopping", "memory"))
 
     def test_unlink_restores_and_isnt_matched_again(self):
@@ -249,12 +256,12 @@ class SplitTests(Base):
         self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US", "Shopping", "rule")
         db.set_setting(self.c, "openrouter_api_key", "k")
         retail.finish(self.c, "amazon", caller=AI)
-        charge = self.c.execute("SELECT id FROM retail_charges").fetchone()["id"]
+        charge = self.c.execute(select(RetailCharge.id)).fetchone()["id"]
         retail.unlink(self.c, charge)
         t = self.row("t1")
         self.assertEqual((t["is_split"], t["category"], t["category_source"]), (0, "Shopping", "rule"))
         retail.match_and_apply(self.c)
-        self.assertIsNone(self.c.execute("SELECT tx_id FROM retail_charges").fetchone()["tx_id"])
+        self.assertIsNone(self.c.execute(select(RetailCharge.tx_id)).fetchone()["tx_id"])
         self.assertEqual(retail.link(self.c, charge, "t1"), "split")   # you can still pick it yourself
 
     def test_pending_transaction_that_posts_is_matched_again(self):
@@ -265,9 +272,9 @@ class SplitTests(Base):
         # The bank replaces the pending transaction with a posted one (its parts carry over, as a sync does).
         self.tx("posted", "2024-09-11", -60.88, "AMZN Mktp US", "Shopping", "rule")
         splits.carry_over(self.c, "pend", "posted", -60.88)
-        self.c.execute("DELETE FROM transactions WHERE id='pend'")
+        self.c.execute(delete(Transaction).where(Transaction.id == "pend"))
         retail.match_and_apply(self.c)
-        self.assertEqual(self.c.execute("SELECT tx_id FROM retail_charges").fetchone()["tx_id"], "posted")
+        self.assertEqual(self.c.execute(select(RetailCharge.tx_id)).fetchone()["tx_id"], "posted")
         self.assertEqual(len(self.parts("posted")), 3)
 
     def test_closest_date_wins(self):
@@ -276,7 +283,7 @@ class SplitTests(Base):
         self.tx("near", "2024-09-10", -60.88, "AMZN Mktp US")
         self.tx("early", "2024-09-01", -60.88, "AMZN Mktp US")       # before the window
         retail.match(self.c)
-        self.assertEqual(self.c.execute("SELECT tx_id FROM retail_charges").fetchone()["tx_id"], "near")
+        self.assertEqual(self.c.execute(select(RetailCharge.tx_id)).fetchone()["tx_id"], "near")
 
     def test_two_orders_that_could_be_either_transaction_are_left_to_you(self):
         other = "111-0000000-0000001"
@@ -287,10 +294,11 @@ class SplitTests(Base):
         self.tx("b", "2024-09-12", -60.88, "AMZN Mktp US")
         self.assertEqual(retail.match(self.c), 0)
         # Far enough apart that each has its own: matched.
-        self.c.execute("UPDATE retail_charges SET date='2024-10-01' WHERE order_id=?", (retail.order_key("amazon", other),))
+        self.c.execute(update(RetailCharge)
+                       .where(RetailCharge.order_id == retail.order_key("amazon", other)).values(date="2024-10-01"))
         self.tx("c", "2024-10-02", -60.88, "AMZN Mktp US")
         self.assertEqual(retail.match(self.c), 2)
-        got = {r["order_id"]: r["tx_id"] for r in self.c.execute("SELECT order_id, tx_id FROM retail_charges")}
+        got = {r["order_id"]: r["tx_id"] for r in self.c.execute(select(RetailCharge.order_id, RetailCharge.tx_id))}
         self.assertEqual(got, {retail.order_key("amazon", ORDER): "a", retail.order_key("amazon", other): "c"})
 
 
@@ -298,15 +306,16 @@ class TransactionsListTests(Base):
     def test_charges_and_refunds_carry_their_order(self):
         from runway import server
         oid = retail.order_key("amazon", "111-2222222-3333333")
-        self.c.execute("INSERT INTO retail_orders(id, retailer, order_number, details) VALUES (?, 'amazon', '111-2222222-3333333', 1)", (oid,))
-        self.c.execute("INSERT INTO retail_items(order_id, position, title, quantity, amount) VALUES (?, 0, 'Cable', 1, 12.99)", (oid,))
+        self.c.execute(insert(RetailOrder).values(id=oid, retailer="amazon", order_number="111-2222222-3333333",
+                                                  details=1))
+        self.c.execute(insert(RetailItem).values(order_id=oid, position=0, title="Cable", quantity=1, amount=12.99))
         self.tx("buy", "2024-09-09", -12.99, "AMAZON MKTPL")
         self.tx("back", "2024-09-20", 12.99, "AMAZON REFUND")
         self.tx("other", "2024-09-10", -5.00, "COFFEE")
         retail._save_charge(self.c, "c1", oid, "2024-09-09", -12.99, None)
         retail._save_charge(self.c, "c2", oid, "2024-09-20", 12.99, None)
-        self.c.execute("UPDATE retail_charges SET tx_id='buy' WHERE id='c1'")
-        self.c.execute("UPDATE retail_charges SET tx_id='back' WHERE id='c2'")
+        self.c.execute(update(RetailCharge).where(RetailCharge.id == "c1").values(tx_id="buy"))
+        self.c.execute(update(RetailCharge).where(RetailCharge.id == "c2").values(tx_id="back"))
         by = {t["id"]: t["retail"] for t in server.api_transactions(self.c, {}, None)["items"]}
         self.assertEqual((by["buy"]["order_id"], by["buy"]["items"], by["buy"]["retailer"]), (oid, 1, "amazon"))
         self.assertEqual(by["back"]["order_id"], oid)          # a refund shows the order it came from, too
@@ -318,7 +327,7 @@ class AppViewsTests(Base):
 
     def setUp(self):
         super().setUp()
-        self.c.execute("UPDATE accounts SET display_name='My Card', owner='Sara' WHERE id='card'")
+        self.c.execute(update(Account).where(Account.id == "card").values(display_name="My Card", owner="Sara"))
         self.amazon_order_with_charge()
         self.tx("t1", "2024-09-11", -60.88, "AMAZON MKTPL*ZX81J2", "Shopping", "rule")
         self.tx("t2", "2024-09-12", -60.88, "SHELL OIL")
@@ -457,15 +466,17 @@ class TargetTests(Base):
         r = retail.target_history(self.c, self.HISTORY, "ONLINE")
         self.assertFalse(r["more"])                                          # reached back past the start date
         self.assertEqual(r["orders"], ["5555-0123-4567-8901"])              # the receipt's items are still to come
-        online = self.c.execute("SELECT * FROM retail_orders WHERE order_number='912001234567'").fetchone()
+        online = self.c.execute(select(RetailOrder).where(RetailOrder.order_number == "912001234567")).fetchone()
         self.assertEqual((online["channel"], online["placed"], online["total"], online["details"]), ("online", "2024-09-02", 31.8, 1))
-        items = self.c.execute("SELECT title, quantity, amount, department FROM retail_items ORDER BY position").fetchall()
+        items = self.c.execute(select(RetailItem.title, RetailItem.quantity, RetailItem.amount, RetailItem.department)
+                               .order_by(RetailItem.position)).fetchall()
         self.assertEqual([tuple(i) for i in items], [("Good & Gather Whole Milk 1gal", 2.0, 7.98, "GROCERY"),
                                                      ("Threshold Bath Towel", 1.0, 21.99, None)])
         receipt = {"order_number": "5555-0123-4567-8901", "order_lines": [
             {"item": {"description": "Tide Pods 42ct"}, "original_quantity": 1, "total_price": {"amount": 12.49}}]}
         self.assertEqual(retail.target_order(self.c, "5555-0123-4567-8901", receipt), {"read": True})
-        store = self.c.execute("SELECT channel, details FROM retail_orders WHERE order_number='5555-0123-4567-8901'").fetchone()
+        store = self.c.execute(select(RetailOrder.channel, RetailOrder.details)
+                               .where(RetailOrder.order_number == "5555-0123-4567-8901")).fetchone()
         self.assertEqual(tuple(store), ("store", 1))
 
     # Trimmed from a real /post_orders/v1/{order} reply: one line picked up, one package cancelled (out of stock).
@@ -493,11 +504,13 @@ class TargetTests(Base):
                                                    "summary": {"grand_total": 4.65}}]}, "ONLINE")
         self.assertEqual(retail._need(self.c, "target", [n]), [n])
         self.assertEqual(retail.target_order(self.c, n, self.POST_ORDER), {"read": True})
-        items = self.c.execute("SELECT i.title, i.quantity, i.amount, i.department FROM retail_items i "
-                               "JOIN retail_orders o ON o.id=i.order_id WHERE o.order_number=?", (n,)).fetchall()
+        items = self.c.execute(select(RetailItem.title, RetailItem.quantity, RetailItem.amount, RetailItem.department)
+                               .join(RetailOrder, RetailOrder.id == RetailItem.order_id)
+                               .where(RetailOrder.order_number == n)).fetchall()
         self.assertEqual([tuple(i) for i in items],
                          [("Garlic Parsley Mini Creamer Potatoes - 16oz - Good & Gather\u2122", 1.0, 4.89, "GROCERY")])
-        order = self.c.execute("SELECT total, channel FROM retail_orders WHERE order_number=?", (n,)).fetchone()
+        order = self.c.execute(select(RetailOrder.total, RetailOrder.channel)
+                               .where(RetailOrder.order_number == n)).fetchone()
         self.assertEqual(tuple(order), (4.65, "online"))
 
     def test_reads_back_to_orders_whose_items_are_still_to_come(self):
@@ -508,7 +521,8 @@ class TargetTests(Base):
             old = (date.fromisoformat(usual) - timedelta(days=60)).isoformat()
             retail._save_order(self.c, "target", "912000000009", placed=old, total=5.0)   # listed, items never read
             self.assertEqual(retail.since(self.c, "target"), old)
-            self.c.execute("UPDATE retail_orders SET attempts=? WHERE order_number='912000000009'", (retail.MAX_ATTEMPTS,))
+            self.c.execute(update(RetailOrder)
+                           .where(RetailOrder.order_number == "912000000009").values(attempts=retail.MAX_ATTEMPTS))
             self.assertEqual(retail.since(self.c, "target"), usual)                        # given up on: not again
         finally:
             self.since.start()
@@ -520,7 +534,7 @@ class TargetTests(Base):
             self.assertEqual(retail._need(self.c, "target", [n]), [n])
             self.assertEqual(retail.target_order(self.c, n, {}), {"read": False})
         self.assertEqual(retail._need(self.c, "target", [n]), [])           # given up on
-        row = self.c.execute("SELECT total, raw FROM retail_orders WHERE order_number=?", (n,)).fetchone()
+        row = self.c.execute(select(RetailOrder.total, RetailOrder.raw).where(RetailOrder.order_number == n)).fetchone()
         self.assertEqual(row["total"], 12.49)                                # what the history said is kept
         self.assertIn("STORE", row["raw"])
 
@@ -536,7 +550,8 @@ class TargetTests(Base):
         for p in reply["packages"]:
             p["order_number"] = n
         self.assertEqual(retail.target_order(self.c, n, reply), {"read": True})
-        self.assertEqual(self.c.execute("SELECT total FROM retail_orders WHERE order_number=?", (n,)).fetchone()[0], 4.65)
+        self.assertEqual(self.c.execute(select(RetailOrder.total)
+                                        .where(RetailOrder.order_number == n)).fetchone()[0], 4.65)
 
     def test_an_import_that_stopped_early_reads_the_same_stretch_next_time(self):
         retail.finish(self.c, "target", complete=False)
@@ -551,8 +566,8 @@ class TargetTests(Base):
         out = retail.finish(self.c, "target")
         self.assertEqual(out["items"]["department"], 1)
         self.assertEqual(self.parts("t1"), [("Shopping", -23.33), ("Groceries", -8.47)])
-        self.assertEqual(self.c.execute("SELECT tx_id FROM retail_charges WHERE order_id=?",
-                                        (retail.order_key("target", "5555-0123-4567-8901"),)).fetchone()["tx_id"], "t2")
+        key = retail.order_key("target", "5555-0123-4567-8901")
+        self.assertEqual(self.c.execute(select(RetailCharge.tx_id).where(RetailCharge.order_id == key)).fetchone()["tx_id"], "t2")
         self.assertEqual(self.row("t2")["is_split"], 0)                     # no items yet: left as it was
 
 
@@ -569,9 +584,9 @@ class CostcoTests(Base):
     def test_receipt_items_take_their_instant_savings_off(self):
         r = retail.costco_history(self.c, {"data": {"receiptsWithCounts": {"receipts": [self.RECEIPT]}}})
         self.assertEqual((r["read"], r["saved"]), (1, 1))
-        rows = {x["title"]: x["amount"] for x in self.c.execute("SELECT title, amount FROM retail_items")}
+        rows = {x["title"]: x["amount"] for x in self.c.execute(select(RetailItem.title, RetailItem.amount))}
         self.assertEqual(rows, {"KS PAPER TOWEL": 20.0, "ROTISSERIE CHICKEN": 6.0, "BANANAS": 14.0})
-        order = self.c.execute("SELECT * FROM retail_orders").fetchone()
+        order = self.c.execute(select(RetailOrder)).fetchone()
         self.assertEqual((order["retailer"], order["channel"], order["total"], order["details"]), ("costco", "store", 41.98, 1))
 
     def test_costco_items_are_categorized_by_the_ai_with_the_receipt_codes_taken_off(self):
@@ -590,17 +605,17 @@ class CostcoTests(Base):
             return json.dumps([{"i": it["i"], "category": "Groceries", "confidence": 0.8} for it in items])
         out = retail.finish(self.c, "costco", caller=model)
         self.assertEqual(out["items"]["ai"], 4)
-        self.assertEqual({r["category_source"] for r in self.c.execute("SELECT category_source FROM retail_items")}, {"ai"})
+        self.assertEqual({r["category_source"] for r in self.c.execute(select(RetailItem.category_source))}, {"ai"})
         self.assertIn("KS is Kirkland Signature", asked[0])
         sent = [it["item"] for it in json.loads(asked[0].split("Items (JSON):\n", 1)[1].split("\n", 1)[0])]
         self.assertEqual(sent, ["CLOROX WAND", "WHITE QUESO 32OZ", "BURATTA", "CREST PRO 5PK/5.9OZ"])
         # what's stored is the receipt's own wording
-        self.assertIn("CLOROX WAND P=120", [r["title"] for r in self.c.execute("SELECT title FROM retail_items")])
+        self.assertIn("CLOROX WAND P=120", [r["title"] for r in self.c.execute(select(RetailItem.title))])
 
     def test_the_ai_suggests_categories_for_an_order_and_a_new_one_when_nothing_fits(self):
         from runway import server
         retail.costco_history(self.c, {"data": {"receiptsWithCounts": {"receipts": [self.RECEIPT]}}})
-        oid = self.c.execute("SELECT id FROM retail_orders").fetchone()[0]
+        oid = self.c.execute(select(RetailOrder.id)).fetchone()[0]
         with self.assertRaisesRegex(retail.RetailError, "OpenRouter key"):
             retail.suggest_for_order(self.c, oid)
         db.set_setting(self.c, "openrouter_api_key", "k")
@@ -614,16 +629,21 @@ class CostcoTests(Base):
                                for it in items])
         out = retail.suggest_for_order(self.c, oid, caller=model)
         self.assertIn("propose a new one", asked[0])
-        by = {self.c.execute("SELECT title FROM retail_items WHERE id=?", (r["item_id"],)).fetchone()[0]: r for r in out}
+        by = {self.c.execute(select(RetailItem.title)
+                             .where(RetailItem.id == r["item_id"])).fetchone()[0]: r for r in out}
         self.assertEqual(by["BANANAS"]["category"], "Groceries")
         self.assertEqual(by["KS PAPER TOWEL"]["new_category"], {"name": "Paper Goods", "parent": "Groceries"})
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM retail_items WHERE category IS NOT NULL").fetchone()[0], 0)   # nothing saved
+        self.assertEqual(self.c.execute(select(func.count())
+                                        .select_from(RetailItem)
+                                        .where(RetailItem.category.is_not(None))).fetchone()[0], 0)   # nothing saved
         # accepting the new one creates it and uses it for the item
         item = by["KS PAPER TOWEL"]["item_id"]
         got = server.api_retail_item(self.c, {}, {"new_category": by["KS PAPER TOWEL"]["new_category"]}, str(item))
         self.assertEqual((got["category"], got["created"]), ("Paper Goods", True))
-        self.assertEqual(self.c.execute("SELECT parent FROM categories WHERE name='Paper Goods'").fetchone()["parent"], "Groceries")
-        self.assertEqual(self.c.execute("SELECT category, category_source FROM retail_items WHERE id=?", (item,)).fetchone()[:], ("Paper Goods", "manual"))
+        self.assertEqual(self.c.execute(select(Category.parent)
+                                        .where(Category.name == "Paper Goods")).fetchone()["parent"], "Groceries")
+        self.assertEqual(self.c.execute(select(RetailItem.category, RetailItem.category_source)
+                                        .where(RetailItem.id == item)).fetchone()[:], ("Paper Goods", "manual"))
         again = server.api_retail_item(self.c, {}, {"new_category": {"name": "paper goods"}}, str(by["ROTISSERIE CHICKEN"]["item_id"]))
         self.assertEqual((again["category"], again["created"]), ("Paper Goods", False))   # it exists now: used, not made twice
         # only items without a category are asked about
@@ -717,8 +737,8 @@ class ExtensionApiTests(unittest.TestCase):
         code, r = self.req("POST", "/api/ext/amazon/order", {"order_number": ORDER, "html": "<html></html>", "final": False}, ext)
         self.assertEqual((code, r), (200, {"read": False}))
         with db.session() as conn:
-            self.assertEqual(conn.execute("SELECT attempts FROM retail_orders WHERE id=?",
-                                          (retail.order_key("amazon", ORDER),)).fetchone()[0] or 0, 0)
+            self.assertEqual(conn.execute(select(RetailOrder.attempts)
+                                          .where(RetailOrder.id == retail.order_key("amazon", ORDER))).fetchone()[0] or 0, 0)
         # Stopped early: the last import's date stays put. Categorizing carries on after the answer.
         with mock.patch.object(retail, "categorize_and_apply") as later:
             code, r = self.req("POST", "/api/ext/finish", {"retailer": "amazon", "complete": False}, ext)
