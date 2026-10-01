@@ -4,9 +4,8 @@ A $100 run to Target can be $60 of Groceries and $40 of Shopping. The transactio
 its amount, its account and the category it had — but it's marked `is_split`, and the parts in `tx_splits` are what
 budgets and reports count. Remove the parts and the transaction goes back to counting as itself.
 
-Anything that adds up spending by category reads `PARTS` (in SQL text) or `parts()` (in SQLAlchemy statements)
-instead of the transactions table: it's the same rows, except a split transaction appears once per part, with that
-part's amount and category.
+Anything that adds up spending by category reads `parts()` instead of the transactions table: it's the same rows,
+except a split transaction appears once per part, with that part's amount and category.
 """
 from __future__ import annotations
 
@@ -16,19 +15,9 @@ from .models import Category, Transaction, TxSplit
 
 CENT = 0.005
 
-PARTS = """(
-    SELECT id, account_id, posted, amount, payee, description, category, category_source, needs_review,
-           pending, recurring_id
-      FROM transactions WHERE COALESCE(is_split, 0)=0
-    UNION ALL
-    SELECT t.id, t.account_id, t.posted, s.amount, t.payee, t.description, s.category, 'split', 0,
-           t.pending, t.recurring_id
-      FROM transactions t JOIN tx_splits s ON s.tx_id=t.id WHERE t.is_split=1
-)"""
-
-
 def parts(name: str = "t"):
-    """PARTS as a SQLAlchemy subquery: `p = splits.parts(); select(p.c.category, func.sum(p.c.amount))...`."""
+    """The transactions, a split one as its parts (category_source 'split', needs_review 0), as a subquery:
+    `p = splits.parts(); select(p.c.category, func.sum(p.c.amount))...`."""
     t, s = Transaction, TxSplit
     whole = select(t.id, t.account_id, t.posted, t.amount, t.payee, t.description, t.category, t.category_source,
                    t.needs_review, t.pending, t.recurring_id).where(func.coalesce(t.is_split, 0) == 0)

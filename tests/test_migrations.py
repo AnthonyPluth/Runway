@@ -196,7 +196,7 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
-            self.assertEqual(tuple(conn.execute("SELECT name, guests FROM churn_benefits").fetchone()), ("Lounge access", None))
+            self.assertEqual(tuple(conn.execute(select(ChurnBenefit.name, ChurnBenefit.guests)).fetchone()), ("Lounge access", None))
         self.assertEqual(drift(self.path), [])
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")

@@ -25,6 +25,7 @@ class SessionLayerTests(DbCase):
         self.assertEqual(list(whole), [c.name for c in schema.accounts.c])
         self.assertEqual((whole["id"], whole["name"], whole["kind"], whole["display_name"]), ("a", "Checking", "checking", None))
         self.assertEqual(db.as_dict(self.c.orm.get(Account, "a")), whole)
+        self.assertRaisesRegex(TypeError, "SQL text isn't supported", self.c.execute, "SELECT * FROM accounts")   # only statements
 
     def test_insert_gives_lastrowid_and_rowcount(self):
         r = self.c.execute(insert(Rule).values(match="coffee", category="Coffee & Snacks"))

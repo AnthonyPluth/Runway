@@ -3,8 +3,8 @@
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/schema.py) up to date: migrations run
 when Runway starts. The rest of Runway queries through the small Connection wrapper here, which works the same on
 either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
-models in runway/models.py (docs/orm.md), through its ORM Session (`conn.orm`), or, in code not yet converted, with
-plain SQL with `?` placeholders that sticks to what both databases understand (`instr()` is added to Postgres).
+models in runway/models.py (docs/orm.md), or through its ORM Session (`conn.orm`). SQL text isn't taken: a statement
+is compiled for whichever database the connection is on.
 """
 from __future__ import annotations
 
@@ -216,37 +216,13 @@ class Result:
         return [r[0] for r in self.fetchall()]
 
 
-def _outside_quotes(sql: str, fn) -> str:
-    parts = re.split(r"('(?:[^']|'')*')", sql)
-    return "".join(p if i % 2 else fn(p) for i, p in enumerate(parts))
-
-
-_pg_sql: dict[tuple, tuple[str, bool]] = {}
-
-
-def _postgres_sql(sql: str, has_params: bool) -> tuple[str, bool]:
-    """`?` placeholders become psycopg's `%s`; inserts into tables with an auto-numbered id return it."""
-    key = (sql, has_params)
-    if key not in _pg_sql:
-        # psycopg reads % as the start of a placeholder even without parameters (SQLAlchemy always passes some).
-        q = sql.replace("%", "%%")
-        if has_params:
-            q = _outside_quotes(q, lambda p: p.replace("?", "%s"))
-        m = re.match(r"\s*INSERT INTO (\w+)", q, re.I)
-        want_id = bool(m and m.group(1) in schema.AUTO_ID and "RETURNING" not in q.upper())
-        if want_id:
-            q = q.rstrip().rstrip(";") + " RETURNING id"
-        _pg_sql[key] = (q, want_id)
-    return _pg_sql[key]
-
-
 class Connection:
     """A database connection and its open transaction: one per request or sync, never shared between threads.
 
-    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see docs/orm.md),
-    or, in code not yet converted, SQL text with `?` placeholders. `orm` is an ORM Session on this same connection
-    and transaction, for loading and changing model objects. Either way, `commit()` commits everything so far (and is
-    what code calls before a slow network request, so the write lock isn't held through it); `rollback()` undoes it.
+    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see docs/orm.md).
+    `orm` is an ORM Session on this same connection and transaction, for loading and changing model objects. Either
+    way, `commit()` commits everything so far (and is what code calls before a slow network request, so the write lock
+    isn't held through it); `rollback()` undoes it. `sa` is the SQLAlchemy connection underneath.
     """
 
     def __init__(self, sa_conn):
@@ -268,7 +244,7 @@ class Connection:
         return self._orm
 
     def _before(self) -> None:
-        # SQL run here doesn't go through the Session: write out its pending changes first, so the SQL sees them.
+        # A statement run here doesn't go through the Session: write out its pending changes first, so it sees them.
         if self._orm is not None:
             self._orm.flush()
 
@@ -277,19 +253,10 @@ class Connection:
         if self._orm is not None and self._orm.identity_map:
             self._orm.expire_all()
 
-    def execute(self, sql, params=None) -> Result:
-        """Run a statement. `sql` is a SQLAlchemy statement (params: a dict, or a list of dicts for many rows), or
-        legacy SQL text with `?` placeholders (params: a sequence)."""
-        if not isinstance(sql, str):
-            return self._execute_statement(sql, params)
-        self._before()
-        try:
-            return self._execute_text(sql, tuple(params) if params is not None else ())
-        finally:
-            if self._orm is not None and sql.lstrip()[:6].upper() != "SELECT":
-                self._after_write()
-
-    def _execute_statement(self, stmt, params) -> Result:
+    def execute(self, stmt, params=None) -> Result:
+        """Run a SQLAlchemy statement (params: a dict, or a list of dicts for many rows)."""
+        if isinstance(stmt, str):
+            raise TypeError("SQL text isn't supported; build a statement (docs/orm.md)")
         if isinstance(params, list) and not params:   # no rows: nothing to do (not one row of defaults)
             return Result(rows=[])
         self._before()
@@ -305,28 +272,6 @@ class Connection:
         if getattr(stmt, "is_dml", False):
             self._after_write()
         return Result(res, lastrowid)
-
-    def _execute_text(self, sql: str, params: tuple) -> Result:
-        if not self.postgres:
-            res = self.sa.exec_driver_sql(sql, params)
-            return Result(res, res.lastrowid if res.lastrowid else None)
-        if sql.lstrip()[:6].upper() == "PRAGMA":   # SQLite settings: nothing to do on Postgres
-            return Result(rows=[])
-        q, want_id = _postgres_sql(sql, bool(params))
-        res = self.sa.exec_driver_sql(q, params)
-        if want_id:
-            row = res.fetchone()
-            return Result(res, row[0] if row else None, rows=[])
-        return Result(res)
-
-    def executemany(self, sql: str, seq) -> None:
-        seq = [tuple(p) for p in seq]
-        if not seq:
-            return
-        q = _postgres_sql(sql, True)[0].replace(" RETURNING id", "") if self.postgres else sql
-        self._before()
-        self.sa.exec_driver_sql(q, seq)
-        self._after_write()
 
     def commit(self) -> None:
         if self._orm is not None:
@@ -517,19 +462,15 @@ def private_files(path: str) -> None:
             os.chmod(path + suffix, 0o600)
 
 
-# Categories the app itself relies on; they can't be renamed or removed.
-# Transactions in investment accounts (buys, sells, dividends) live on the Investments page, not in Transactions,
-# Review or the review count. A condition on transactions.account_id, for a WHERE clause.
-NOT_INVESTMENT = "account_id NOT IN (SELECT id FROM accounts WHERE kind='investment')"
-
-
 def not_investment(account_id=None):
-    """NOT_INVESTMENT for SQLAlchemy statements: `.where(db.not_investment())` (or pass the account id column, e.g.
-    a subquery's `p.c.account_id`; the default is Transaction.account_id)."""
+    """Transactions in investment accounts (buys, sells, dividends) live on the Investments page, not in Transactions,
+    Review or the review count: this is the condition that leaves them out, `.where(db.not_investment())` (or pass
+    the account id column, e.g. a subquery's `p.c.account_id`; the default is Transaction.account_id)."""
     col = Transaction.account_id if account_id is None else account_id
     return col.not_in(select(Account.id).where(Account.kind == "investment"))
 
 
+# Categories the app itself relies on; they can't be renamed or removed.
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
 
@@ -572,13 +513,6 @@ def account_label(a) -> str:
     name = a["display_name"] or a["name"]
     owner = a["owner"] if "owner" in a.keys() else None   # a row: `in` alone would search its values  # noqa: SIM118
     return f"{name} ({owner})" if owner and owner.lower() not in name.lower() else name
-
-
-def label_sql(alias: str = "a") -> str:
-    """account_label as SQL (SQLite and Postgres)."""
-    n = f"COALESCE({alias}.display_name, {alias}.name)"
-    return (f"({n} || CASE WHEN {alias}.owner IS NOT NULL AND {alias}.owner <> '' AND instr(lower({n}), lower({alias}.owner)) = 0 "
-            f"THEN ' (' || {alias}.owner || ')' ELSE '' END)")
 
 
 def rows(cur) -> list[dict]:
