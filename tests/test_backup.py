@@ -9,7 +9,10 @@ import urllib.error
 import urllib.request
 from datetime import date
 
+from sqlalchemy import func, insert, select
+
 from runway import backup, db, networth, server
+from runway.models import Account, AuthSession, Budget, OAuthClient, OAuthGrant, OAuthToken, Rule, Transaction
 from tests.shared import own_database
 
 
@@ -25,16 +28,16 @@ class BackupTests(unittest.TestCase):
 
     def fill(self, path):
         c = db.connect(path)
-        c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk', 'Checking', 'checking', 1234.5)")
-        c.executemany("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES (?,?,?,?,?,?,?)",
-                      [(f"chk|{i}", "chk", f"2026-09-{i + 1:02d}", -10.25 * i, f"SHOP {i}", "Shop", "Shopping") for i in range(20)])
-        c.execute("INSERT INTO rules(match, category) VALUES ('shop', 'Shopping')")
+        c.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=1234.5))
+        c.execute(insert(Transaction), [{"id": f"chk|{i}", "account_id": "chk", "posted": f"2026-09-{i + 1:02d}", "amount": -10.25 * i,
+                                         "description": f"SHOP {i}", "payee": "Shop", "category": "Shopping"} for i in range(20)])
+        c.execute(insert(Rule).values(match="shop", category="Shopping"))
         networth.save_asset(c, {"name": "House", "kind": "home", "value": 400000}, today=date(2026, 9, 1))
         db.set_setting(c, "openrouter_api_key", "sk-secret")
-        c.execute("INSERT INTO auth_sessions(token_hash, sub, created, expires) VALUES ('h', 's', 0, 9e9)")
-        c.execute("INSERT INTO oauth_clients(id, name, redirect_uris, auth_method, created) VALUES ('rwc_x', 'App', '[]', 'none', 0)")
-        c.execute("INSERT INTO oauth_grants(client_id, scope, resource, created) VALUES ('rwc_x', 'read', 'https://r/mcp', 0)")
-        c.execute("INSERT INTO oauth_tokens(token_hash, kind, grant_id, created, expires) VALUES ('t', 'access', 1, 0, 9e9)")
+        c.execute(insert(AuthSession).values(token_hash="h", sub="s", created=0, expires=9e9))
+        c.execute(insert(OAuthClient).values(id="rwc_x", name="App", redirect_uris="[]", auth_method="none", created=0))
+        c.execute(insert(OAuthGrant).values(client_id="rwc_x", scope="read", resource="https://r/mcp", created=0))
+        c.execute(insert(OAuthToken).values(token_hash="t", kind="access", grant_id=1, created=0, expires=9e9))
         c.commit()
         return c
 
@@ -47,17 +50,17 @@ class BackupTests(unittest.TestCase):
         for t in ("oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"):
             self.assertNotIn(t, data["tables"])                    # nor assistants connected with OAuth
         dst = db.connect(self.b)
-        dst.execute("INSERT INTO accounts(id, name) VALUES ('old', 'Old stuff')")   # replaced, not merged
+        dst.execute(insert(Account).values(id="old", name="Old stuff"))   # replaced, not merged
         counts = backup.restore(dst, data)
         dst.commit()
         self.assertEqual(counts["transactions"], 20)
-        self.assertEqual([r[0] for r in dst.execute("SELECT id FROM accounts")], ["chk"])
-        self.assertEqual(dst.execute("SELECT SUM(amount) FROM transactions").fetchone()[0],
-                         src.execute("SELECT SUM(amount) FROM transactions").fetchone()[0])
+        self.assertEqual([r[0] for r in dst.execute(select(Account.id))], ["chk"])
+        self.assertEqual(dst.execute(select(func.sum(Transaction.amount))).fetchone()[0],
+                         src.execute(select(func.sum(Transaction.amount))).fetchone()[0])
         self.assertEqual(db.get_setting(dst, "openrouter_api_key"), "sk-secret")
         # auto-numbered ids carry on after the restored ones
-        dst.execute("INSERT INTO rules(match, category) VALUES ('grocer', 'Groceries')")
-        ids = [r[0] for r in dst.execute("SELECT id FROM rules ORDER BY id")]
+        dst.execute(insert(Rule).values(match="grocer", category="Groceries"))
+        ids = [r[0] for r in dst.execute(select(Rule.id).order_by(Rule.id))]
         self.assertEqual(len(set(ids)), 2)
         src.close(); dst.close()
 
@@ -76,24 +79,24 @@ class BackupTests(unittest.TestCase):
         t["columns"].append("column_from_the_future"); [r.append(1) for r in t["rows"]]
         dst = db.connect(self.b)
         backup.restore(dst, data)
-        self.assertEqual(dst.execute("SELECT name FROM accounts").fetchone()[0], "Checking")
+        self.assertEqual(dst.execute(select(Account.name)).fetchone()[0], "Checking")
         src.close(); dst.close()
 
     def test_a_column_only_the_database_has_travels(self):
         src = self.fill(self.a)
-        src.execute("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")
-        src.execute("UPDATE accounts SET legacy_note='kept'")
+        src.sa.exec_driver_sql("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")   # not in the schema: SQL on the raw connection
+        src.sa.exec_driver_sql("UPDATE accounts SET legacy_note='kept'")
         data = backup.load(backup.dump(src))
         self.assertIn("legacy_note", data["tables"]["accounts"]["columns"])
         dst = db.connect(self.b)
-        dst.execute("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")
+        dst.sa.exec_driver_sql("ALTER TABLE accounts ADD COLUMN legacy_note TEXT")
         backup.restore(dst, data)
-        self.assertEqual(dst.execute("SELECT name, legacy_note FROM accounts").fetchall(), [("Checking", "kept")])
+        self.assertEqual(dst.sa.exec_driver_sql("SELECT name, legacy_note FROM accounts").fetchall(), [("Checking", "kept")])
         src.close(); dst.close()
 
     def test_preview_says_what_a_backup_holds(self):
         src = self.fill(self.a)
-        src.execute("INSERT INTO budgets(category, amount) VALUES ('Shopping', 200)")
+        src.execute(insert(Budget).values(category="Shopping", amount=200))
         src.commit()
         data = backup.load(backup.dump(src))
         data["tables"]["table_from_the_future"] = {"columns": ["x"], "rows": [[1], [2]]}   # not counted: it isn't restored
@@ -122,7 +125,7 @@ class BackupTests(unittest.TestCase):
             kept = backup.load(f.read())
         self.assertEqual(len(kept["tables"]["transactions"]["rows"]), 20)
         backup.restore(empty, kept)                                          # and it restores like any backup
-        self.assertEqual(empty.execute("SELECT COUNT(*) FROM transactions").fetchone()[0], 20)
+        self.assertEqual(empty.execute(select(func.count()).select_from(Transaction)).fetchone()[0], 20)
         src.close(); empty.close()
 
 
@@ -156,9 +159,9 @@ class BackupServerTests(unittest.TestCase):
 
     def test_inspect_then_restore_keeps_a_copy(self):
         with db.session() as c:
-            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('test:bk', 'Checking', 'checking', 10)")
-            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description) "
-                      "VALUES ('test:bk|1', 'test:bk', '2026-09-01', -5, 'COFFEE')")
+            c.execute(insert(Account).values(id="test:bk", name="Checking", kind="checking", balance=10))
+            c.execute(insert(Transaction).values(id="test:bk|1", account_id="test:bk", posted="2026-09-01", amount=-5,
+                                                 description="COFFEE"))
         with db.session() as c:
             raw, here = backup.dump(c), backup.counts(c)
         code, got = self.post("/api/backup/inspect", raw)
