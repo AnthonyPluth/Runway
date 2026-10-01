@@ -8,13 +8,14 @@
   import BankList from "$lib/components/churning/BankList.svelte";
   import Benefits from "$lib/components/churning/Benefits.svelte";
   import BestCard from "$lib/components/churning/BestCard.svelte";
+  import FoundCards from "$lib/components/churning/FoundCards.svelte";
   import CardForm from "$lib/components/churning/CardForm.svelte";
   import CardList from "$lib/components/churning/CardList.svelte";
   import Planned from "$lib/components/churning/Planned.svelte";
   import Rewards from "$lib/components/churning/Rewards.svelte";
   import Upcoming from "$lib/components/churning/Upcoming.svelte";
   import { BOTH, bankOrder, cardOrder, feesDue, five24Line, mine } from "$lib/components/churning/churning";
-  import type { Churning, Wish } from "$lib/components/churning/types";
+  import type { Churning, Found, FoundDraft, Wish } from "$lib/components/churning/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
@@ -32,7 +33,15 @@
     try { d = await api<Churning>("/api/churning"); error = null; version++; }
     catch (err) { error = (err as Error).message; }
   }
+  // Credit card accounts that aren't churning cards yet: an extra on the page, so it never blocks it.
+  let found = $state.raw<Found | null>(null);
+  async function loadFound() {
+    try { const f = await api<Found>("/api/churning/found"); found = Array.isArray(f?.drafts) ? f : null; }
+    catch { found = null; }
+  }
+  const refresh = () => Promise.all([load(), loadFound()]);
   load();
+  loadFound();
   loadCategories().catch(() => {});
 
   // Whose cards to show: one person, or everyone (the default when there's more than one).
@@ -52,7 +61,7 @@
   const hasRewards = $derived(people.some((p) => d?.rewards[p]?.currencies.some((r) => r.earned + r.bonuses > 0 || r.balance != null)));
   // With nothing to show, Rewards is one line; "Add a balance" opens the card, which is where balances are entered.
   let addingBalance = $state(false);
-  const startCard = () => { bankFormId = null; formId = "new"; location.hash = "#churning"; };
+  const startCard = () => { addCard(); location.hash = "#churning"; };
   const startBank = () => { formId = null; bankFormId = "new"; location.hash = "#churning/bank"; };
 
   // Over 5/24 is a warning; someone with no cards on file isn't.
@@ -67,10 +76,13 @@
   // The open form is remembered by id, so it keeps its place when the data behind it is reloaded (a benefit was marked
   // used, a plan checked off) and shows the card's new figures.
   let formId = $state<number | "new" | null>(null);
+  let draft = $state<FoundDraft | null>(null);   // a found account being added: the new-card form starts from it
+  const addCard = (x: FoundDraft | null = null) => { bankFormId = null; draft = x; formId = "new"; };
+  const drafts = $derived((found?.drafts ?? []).filter((x) => !person || !x.owner || x.owner === person));
   let bankFormId = $state<number | "new" | null>(null);
   const form = $derived(formId === "new" ? "new" : (d?.cards.find((c) => c.id === formId) ?? null));
   const bankForm = $derived(bankFormId === "new" ? "new" : (d?.bank.find((b) => b.id === bankFormId) ?? null));
-  const closeForm = (changed: boolean) => { formId = null; bankFormId = null; if (changed) load(); };
+  const closeForm = (changed: boolean) => { formId = null; draft = null; bankFormId = null; if (changed) refresh(); };
   // "I applied" on a planned item: the new card or bank bonus opens in its form, in its tab, to fill in the rest.
   async function applied(kind: Wish["kind"], id: number) {
     await load();
@@ -139,12 +151,13 @@
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title>Cards</Card.Title>
-        <Card.Action><Button size="sm" onclick={() => (formId = "new")}>Add a card</Button></Card.Action>
+        <Card.Action><Button size="sm" onclick={() => addCard()}>Add a card</Button></Card.Action>
       </Card.Header>
       <Card.Content>
-        {#if form}{#key formId}<CardForm c={form === "new" ? null : form} {d} {person} onclose={closeForm} onchanged={load} />{/key}{/if}
+        {#if form}{#key `${formId}:${draft?.account_id ?? ""}`}<CardForm c={form === "new" ? null : form} {d} {person} {draft} onclose={closeForm} onchanged={load} />{/key}{/if}
+        {#if found && (drafts.length || found.dismissed.length)}<FoundCards found={{ ...found, drafts }} {d} onadd={(x) => addCard(x)} onchanged={loadFound} />{/if}
         {#if visibleCards.length}
-          <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => (formId = c.id)} onchanged={load} />
+          <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => { draft = null; formId = c.id; }} onchanged={load} />
         {:else}
           <p class="py-6 text-center text-sm text-muted-foreground">{cards.length ? "No open cards. Tick Show closed to see the rest." : "No cards yet. Add the cards you've opened in the last few years: 5/24 and the bonus rules need them."}</p>
         {/if}

@@ -1,7 +1,7 @@
 // Churning data for component tests: a page's reply with just enough in it, each piece overridable.
 import { api } from "$lib/api";
 import { vi } from "vitest";
-import type { Benefit, ChurnCard, Churning, Wish } from "./types";
+import type { Benefit, ChurnCard, Churning, FoundDraft, Wish } from "./types";
 
 /** The requests made to a path (or paths matching a pattern), from a test file that mocks `$lib/api`. */
 export const calls = (path: string | RegExp) =>
@@ -25,6 +25,11 @@ export const card = (over: Partial<ChurnCard> = {}): ChurnCard => ({
   net_fee: 395, points_note: null, rates: [], currency_name: "Capital One miles", cents: 1.4, bonus_value: null, fee_due: "2027-03-14",
   deadline: null, spent: null, spend_source: "manual", bonus_state: null, counts_524: true, falls_off: "2027-03-14",
   eligibility: { status: "now", on: null, why: "", override: false }, points_ytd: null, value_ytd: null, ...over,
+});
+
+export const found = (over: Partial<FoundDraft> = {}): FoundDraft => ({
+  account_id: "acct-1", account_name: "Chase Sapphire Reserve (1034)", org: "Chase Bank Alex", owner: "Alex", issuer: "chase",
+  product: "Sapphire Reserve", business: 0, annual_fee: 795, fee_month: 3, opened_on: "2024-03-02", opened_on_estimate: true, ...over,
 });
 
 export const wish = (over: Partial<Wish> = {}): Wish => ({
