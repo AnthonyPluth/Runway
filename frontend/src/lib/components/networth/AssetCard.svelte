@@ -67,7 +67,7 @@
     {#if !a.realie_valued}<Button variant="outline" size="sm" onclick={openQuick} aria-expanded={quick}>Update value</Button>{/if}
     {#if canRefresh}
       {#if a.next_lookup}<span class="text-sm text-muted-foreground">{HOME_VALUES.nextLookup(a.next_lookup)}</span>
-      {:else}<Button variant="outline" size="sm" disabled={looking} title={HOME_VALUES.refreshTitle} onclick={refresh}>{looking ? "Looking up…" : HOME_VALUES.refresh}</Button>{/if}
+      {:else}<Button variant="outline" size="sm" disabled={looking} onclick={refresh}>{looking ? "Looking up…" : HOME_VALUES.refresh}</Button>{/if}
       <span class="text-xs text-muted-foreground">· {HOME_VALUES.lookups(d.realie.used, d.realie.limit)}</span>
     {/if}
     {#if link}

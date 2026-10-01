@@ -4,7 +4,6 @@ import { fmt0, fmtDate } from "$lib/format";
 
 export const HOME_VALUES = {
   refresh: "Update from Realie",
-  refreshTitle: "Runway looks each home up once a week at most",
   auto: "Update from Realie weekly",
   nextLookup: (day: string) => `Next Realie lookup ${fmtDate(day)}`,
   lookups: (used: number, limit: number) => `${used} of ${limit} free lookups used this month`,

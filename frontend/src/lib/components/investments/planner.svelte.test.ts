@@ -52,9 +52,10 @@ describe("RetirementPlanner", () => {
     expect(screen.getByRole("img", { name: /Projected investments by age/ })).toBeInTheDocument();
   });
 
-  it("says what the figures are based on, and that it isn't advice", () => {
+  it("leaves what the figures are based on, and the disclaimer, to Settings → Assumptions", () => {
     setup();
-    expect(screen.getByText(/Based on your \$400,000 in investments today\./)).toHaveTextContent(/taxes aren't modeled\. Not financial advice\./);
+    expect(screen.queryByText(/Based on your/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/financial advice/)).not.toBeInTheDocument();
   });
 
   it("on a phone, says the plan is made yours on a computer, where its fields are", () => {
@@ -97,7 +98,7 @@ describe("RetirementPlanner", () => {
 
   it("warns that the money runs out when the plan can't last", () => {
     setup(data({ current: 1000 }, { spending: 200000, people: [{ name: "Ann", birth_year: 1961, retire_age: 65, savings: 0 }] }));
-    expect(screen.getByText("Typically runs out")).toBeInTheDocument();
+    expect(screen.getByText("Runs out")).toBeInTheDocument();
     expect(screen.getByText(/^age \d+$/)).toBeInTheDocument();
   });
 
@@ -138,7 +139,7 @@ describe("RetirementPlanner", () => {
     it("keeps inflation with the assumptions, with or without homes to sell (it also gives future dollars)", () => {
       setup(data({ assets: [homeAsset()] }));
       expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("details")).toHaveTextContent("Assumptions");
-      expect(screen.getByText(/taking off inflation \(2\.5% a year, under Assumptions\)/)).toBeInTheDocument();
+      expect(screen.queryByText(/taking off inflation/)).not.toBeInTheDocument();
       cleanup();
       setup();
       expect(screen.getByRole("spinbutton", { name: "Inflation" })).toBeInTheDocument();
@@ -246,9 +247,10 @@ describe("RetirementPlanner", () => {
   describe("assets", () => {
     const home = homeAsset({ owed: 200000 });
 
-    it("explains where assets come from when there are none", () => {
+    it("has no assets section when there are none", () => {
       setup();
-      expect(screen.getByText(/can be sold into the plan here/)).toBeInTheDocument();
+      expect(screen.queryByText(/can be sold into the plan here/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Homes/ })).not.toBeInTheDocument();
     });
 
     it("lists an asset with what it's worth after its loan and lets you sell it in a year", async () => {
@@ -277,13 +279,13 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/; the loan \(5% and \$9,000 a month from Plaid\) is paid off by then\./);
     });
 
-    it("asks for the loan's interest rate when it can't project it, and counts today's balance", () => {
+    it("counts today's balance when the loan can't be projected, without a note about it", () => {
       const unknown = { ...home, yearly_change: 0.025, owed_by_year: [200000], loan: { rate: null, payment: null, source: null, note: "no_rate" as const } };
       setup(data({ assets: [unknown] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
       expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");
       expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less \$200,000 owed on the loan today\./);
-      expect(screen.getByText(/add the loan’s interest rate in/)).toHaveTextContent(/to project it\.$/);
-      expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+      expect(screen.queryByText(/to project it/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Settings → Accounts" })).not.toBeInTheDocument();
     });
 
     it("shows equity vested by the year it's sold", () => {
@@ -294,10 +296,10 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
     });
 
-    it("says proceeds are before selling costs and tax, and how a loan is handled", () => {
+    it("leaves the rules for selling and loans to Settings → Assumptions", () => {
       setup(data({ assets: [home] }));
-      expect(screen.getByText(/Proceeds are before selling costs \(often 6–8% of a home’s price\) and tax/)).toBeInTheDocument();
-      expect(screen.getByText(/a loan’s payment comes off your spending once it’s paid off or sold, if it was counted as spending/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();
       expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
     });
 
@@ -315,17 +317,17 @@ describe("RetirementPlanner", () => {
         .toBeInTheDocument();
     });
 
-    it("under spending, says Runway's figure includes a loan's payment until it ends", () => {
+    it("under spending, has no note about Runway's figure while it's the one in use", () => {
       setup(data({ assets: [repaying()] }));
-      expect(screen.getByText(/^Runway's figure, from your last six months\. It includes the \$1,500\/month payment on Home, until it’s paid off in 2045: the plan takes it off once it ends\.$/))
-        .toBeInTheDocument();
+      expect(screen.queryByText(/Runway's figure, from your last six months/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Use Runway's figure" })).not.toBeInTheDocument();
     });
 
     it("in future dollars, says the same about loan payments; the projection's odds don't change", async () => {
       setup(data({ assets: [repaying()] }));
       const odds = screen.getByText(/^\d+%$/).textContent;
       await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
-      expect(screen.getByText(/It includes the \$1,500\/month payment on Home, until it’s paid off in 2045/)).toBeInTheDocument();
+      expect(screen.getByText(/Its \$1,500\/month loan payment is already in your spending, until it’s paid off in 2045/)).toBeInTheDocument();
       expect(screen.getByText(/^\d+%$/).textContent).toBe(odds);
     });
 
@@ -335,15 +337,15 @@ describe("RetirementPlanner", () => {
       const field = screen.getByRole("spinbutton", { name: "Yearly spending in retirement" });
       await user.clear(field);
       await user.type(field, "48000");
-      expect(screen.getByText(/^Your own figure, taken as it is: loan payments aren't added to it or taken off it\./)).toBeInTheDocument();
-      expect(screen.getByText(/goes on until it’s paid off in 2045\. Your own spending figure is taken as it is, so make sure it has the payment in for those years\.$/))
-        .toBeInTheDocument();
+      expect(screen.queryByText(/taken as it is/)).not.toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment goes on until it’s paid off in 2045.")).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(800);
       let body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
       expect([body.spending, body.spending_own]).toEqual([48000, true]);
       await user.click(screen.getByRole("button", { name: "Use Runway's figure" }));
       expect(field).toHaveValue(55000);
-      expect(screen.getByText(/^Runway's figure, from your last six months\. It includes the \$1,500\/month payment/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Use Runway's figure" })).not.toBeInTheDocument();
+      expect(screen.getByText(/already in your spending, until it’s paid off in 2045/)).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(800);
       body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
       expect([body.spending, body.spending_own]).toEqual([55000, false]);
@@ -357,15 +359,16 @@ describe("RetirementPlanner", () => {
 
     it("says when a loan's payment isn't in spending, so the plan adds it until it ends", () => {
       setup(data({ assets: [repaying({ payment_counted: false })] }));
-      expect(screen.getByText(/^Its \$1,500\/month loan payment isn’t in your spending: it was paid as a transfer over the last six months, and transfers aren’t counted as spending\. So the plan adds it to your spending in retirement until it’s paid off in 2045\.$/))
+      expect(screen.getByText("Its $1,500/month loan payment was paid as a transfer, so it isn’t in your spending and the plan adds it to your spending in retirement until it’s paid off in 2045."))
         .toBeInTheDocument();
-      expect(screen.getByText(/It's missing the \$1,500\/month payment on Home, until it’s paid off in 2045, which the plan adds while it's still paid\./)).toBeInTheDocument();
+      expect(screen.queryByText(/It's missing/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/categorized as a transfer/)).not.toBeInTheDocument();
       expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
     });
 
     it("says when Runway can't tell whether a loan's payment is in spending, and leaves spending alone", () => {
       setup(data({ assets: [repaying({ payment_counted: null })] }));
-      expect(screen.getByText(/^Runway couldn’t tell whether its \$1,500\/month loan payment is in your spending, so the plan leaves your spending as it is\./))
+      expect(screen.getByText("Runway couldn’t tell whether its $1,500/month loan payment is in your spending, so the plan leaves your spending as it is."))
         .toBeInTheDocument();
       expect(screen.queryByText(/which the plan adds/)).not.toBeInTheDocument();
       expect(screen.queryByText(/the plan takes it off/)).not.toBeInTheDocument();
@@ -462,10 +465,10 @@ describe("RetirementPlanner", () => {
     const p = project(plan(), 400000, 2026, []);
     const f = projectionIn(p, 2026, 0.025, "future");
 
-    it("starts in today's dollars, saying what you enter is in them and what inflation it assumes", () => {
+    it("starts in today's dollars, naming the inflation it assumes", () => {
       setup();
       expect(screen.getByRole("radio", { name: "Today’s dollars" })).toBeChecked();
-      expect(screen.getByText(/what you enter is in today’s dollars/)).toBeInTheDocument();
+      expect(screen.queryByText(/what you enter is in today’s dollars/)).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "2.5% a year" })).toBeInTheDocument();
       expect(figure(/^Invested at retirement$/)).toHaveTextContent(fmt0(p.atRetirement));
     });
@@ -578,9 +581,9 @@ describe("RetirementPlanner", () => {
   });
 
   describe("what the figures mean", () => {
-    it("says what yearly savings is, and when the history is shorter than a year", () => {
+    it("says when the investment history is shorter than a year, and leaves what savings is to Assumptions", () => {
       const { unmount } = setup();
-      expect(screen.getByText(/\$18,000 a year, is what went into your investments in the last 12 months\. A rollover/)).toBeInTheDocument();
+      expect(screen.queryByText(/is what went into your investments/)).not.toBeInTheDocument();
       unmount();
       setup(data({ computed: { annual_spending: 55000, yearly_savings: 3000, expected_return: 0.05, savings_measured: true, savings_since: "2026-05-31" } }));
       expect(screen.getByText(/only goes back to May\s31,\s2026/)).toBeInTheDocument();
@@ -591,11 +594,12 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/what went into your investments/)).not.toBeInTheDocument();
     });
 
-    it("with two people, says pay covers living costs until both have retired", async () => {
+    it("leaves who's covered while still working to Assumptions, with one person or two", async () => {
       setup();
       expect(screen.queryByText(/still working is assumed to cover/)).not.toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
-      expect(screen.getByText(/the pay of whoever's still working is assumed to cover your living costs/)).toBeInTheDocument();
+      expect(screen.queryByText(/still working is assumed to cover/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Savings stop at/)).not.toBeInTheDocument();
     });
   });
 

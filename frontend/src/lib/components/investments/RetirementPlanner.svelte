@@ -13,7 +13,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, tick } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { addedPayments, counted, type Dollars, endingPayments, inDollars, type LoanPayment, loanProjected, paymentEnds, project,
+  import { addedPayments, counted, type Dollars, endingPayments, inDollars, loanProjected, paymentEnds, project,
     projectionIn, sale as saleAt, saleProceeds, saleYear } from "./planner";
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
@@ -150,7 +150,6 @@
   // What the plan counts, and what it lists only for a loan's payment (vehicles).
   const plannable = $derived(data.assets.filter(counted));
   const vehicles = $derived(data.assets.filter((a) => !counted(a)));
-  const holds = $derived(plannable.length > 0);
   // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
   const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
   // In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then.
@@ -171,26 +170,15 @@
     const unit = dollars === "future" ? `In ${sellYear} dollars, at ${inflationPct} a year inflation.` : "In today’s dollars.";
     return `${worth}${loan}. ${unit}`;
   }
-  // Why a loan's balance isn't projected (what's owed today is used instead), and what would fix it.
-  const LOAN_NOTES = {
-    no_rate: "add the loan’s interest rate", no_payment: "add the loan’s monthly payment",
-    payment_below_interest: "its payment doesn’t cover the interest: check the loan’s terms",
-  } as const;
-
   // Loan payments and Runway's spending figure (planner.ts flows): one that's in the figure comes off it once the loan
   // is paid off or its asset sold; one that isn't (a payment categorized as a transfer) is added to it while it's
   // still paid. A figure you typed is taken as it is.
   const ending = $derived(endingPayments($state.snapshot(plan) as RetirementPlan, data.assets, year));
   const added = $derived(addedPayments($state.snapshot(plan) as RetirementPlan, data.assets, year));
-  const monthly = (p: LoanPayment) => `${fmt0(p.yearly / 12)}/month`;
-  const untilText = (p: LoanPayment) => p.from == null ? "for as long as it’s paid"
-    : p.sold ? `until ${p.name} is sold in ${p.from}` : `until it’s paid off in ${p.from - 1}`;
-  const paymentText = (p: LoanPayment) => `the ${monthly(p)} payment on ${p.name}, ${untilText(p)}`;
   function useRunwaySpending() { plan.spending = data.computed.annual_spending; plan.spending_own = false; keep(); }
 
   // What happens to a loan's monthly payment in the plan, in plain words: whether it's already in the spending figure
   // and when it stops.
-  const NOT_FOUND = "it was paid as a transfer over the last six months, and transfers aren’t counted as spending";
   function paymentLine(a: PlanAsset, sellYear: number | null): string {
     const l = a.loan!;
     const pay = `${fmt0(l.payment ?? 0)}/month`;
@@ -199,16 +187,16 @@
     const why = l.note === "payment_below_interest" ? " It doesn’t cover the interest, so it never pays the loan down."
       : l.note === "no_rate" ? " Add the loan’s interest rate in Settings → Accounts to see when it ends." : "";
     if (plan.spending_own) {
-      return `Its ${pay} loan payment goes on ${when ?? "past the end of the plan"}.${why} Your own spending figure is taken as it is, so make sure it has the payment in for those years.`;
+      return `Its ${pay} loan payment goes on ${when ?? "past the end of the plan"}.${why}`;
     }
     if (l.payment_counted) {
       return when ? `Its ${pay} loan payment is already in your spending, ${when}; from ${ends} the plan takes it off.${why}`
         : `Its ${pay} loan payment is already in your spending, and stays in it.${why}`;
     }
     if (l.payment_counted == null) {
-      return `Runway couldn’t tell whether its ${pay} loan payment is in your spending, so the plan leaves your spending as it is. If it isn’t, enter your own spending figure with it in.${why}`;
+      return `Runway couldn’t tell whether its ${pay} loan payment is in your spending, so the plan leaves your spending as it is.${why}`;
     }
-    return `Its ${pay} loan payment isn’t in your spending: ${NOT_FOUND}. So the plan adds it to your spending in retirement ${when ?? "for as long as the plan runs"}.${why}`;
+    return `Its ${pay} loan payment was paid as a transfer, so it isn’t in your spending and the plan adds it to your spending in retirement ${when ?? "for as long as the plan runs"}.${why}`;
   }
 
   // An event is typed as money in or out plus a positive amount; it's kept signed.
@@ -244,8 +232,7 @@
 {#if sample}
   <p class="mb-3 text-sm text-muted-foreground">
     <span class="mr-2 inline-block rounded-full border px-2 py-0.5 text-xs font-medium">Sample · based on default assumptions</span>
-    Starting from Runway's figures: your investments, and what you've spent and saved over the last year. <strong class="font-medium text-foreground">Enter
-    your birth year and retirement age{isPhone() ? " on a computer" : ""} to make it yours.</strong></p>
+    <strong class="font-medium text-foreground">Enter your birth year and retirement age{isPhone() ? " on a computer" : ""} to make it yours.</strong></p>
 {/if}
 
 {#if shown}
@@ -254,7 +241,7 @@
     <Segmented label="Show amounts in" value={dollars} onchange={setDollars}
       options={[{ value: "today", label: "Today’s dollars" }, { value: "future", label: "Future dollars" }]} />
     <span class="text-sm text-muted-foreground">at <button type="button" class="font-medium text-foreground underline underline-offset-4"
-      title="Set it under Assumptions" onclick={toInflation}>{inflationPct} a year</button> inflation · what you enter is in today’s dollars</span>
+      title="Set it under Assumptions" onclick={toInflation}>{inflationPct} a year</button> inflation</span>
   </div>
   <div class="flex flex-wrap gap-x-8 gap-y-3">
     <div>
@@ -269,19 +256,15 @@
     </div>
     <div>
       {#if shown.runsOutAge != null}
-        <div class="text-sm text-muted-foreground">Typically runs out</div>
+        <div class="text-sm text-muted-foreground">Runs out</div>
         <div class={`text-2xl font-semibold tabular-nums ${sample ? "text-muted-foreground" : "text-[var(--low)]"}`}>age {shown.runsOutAge}</div>
-        <div class="text-sm text-muted-foreground">save more, spend less or retire later</div>
       {:else}
         <div class="text-sm text-muted-foreground">Left at age {plan.plan_to_age}{future ? ` · ${shown.years[shown.years.length - 1]}` : ""}</div>
         <div class="text-2xl font-semibold tabular-nums">{fmt0(shown.atEnd)}</div>
-        <div class="text-sm text-muted-foreground">{shown.lowRunsOutAge != null ? `in poor markets it runs out at ${shown.lowRunsOutAge}`
-          : `typically; in ${future ? "that year’s" : "today’s"} dollars`}</div>
+        {#if shown.lowRunsOutAge != null}<div class="text-sm text-muted-foreground">in poor markets it runs out at {shown.lowRunsOutAge}</div>{/if}
       {/if}
     </div>
   </div>
-  <p class="mt-3 text-sm text-muted-foreground">Based on your {fmt0(data.current)} in investments today. Cash isn't
-    included, and taxes aren't modeled. Not financial advice.</p>
   <div class="mt-4"><PlannerChart p={shown} {names} {dollars} /></div>
 {:else}
   <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age{isPhone() ? " on a computer" : ""} to see the projection.</p>
@@ -309,13 +292,9 @@
     {:else}
       <Button variant="ghost" size="sm" onclick={removePartner}><X /> Remove {names[1]}</Button>
     {/if}
-    <p class="mt-2 text-sm text-muted-foreground">Savings stop at each person's retirement. Spending comes from the investments once everyone has
-      retired{#if plan.people.length > 1}; until then, the pay of whoever's still working is assumed to cover your living costs{/if}.</p>
-    {#if data.computed.savings_measured !== false}
-      <p class="mt-2 text-sm text-muted-foreground">Runway's figure for saving, {fmt0(data.computed.yearly_savings)} a year, is what went into your
-        investments in the last 12 months{#if data.computed.savings_since}, and your investment history only goes back to
-        {fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}{/if}. A rollover or a one-off lump sum counts too, so
-        change it if that isn't how much you usually save.</p>
+    {#if data.computed.savings_measured !== false && data.computed.savings_since}
+      <p class="mt-2 text-sm text-muted-foreground">Your investment history only goes back to
+        {fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}.</p>
     {/if}
   </section>
 
@@ -324,13 +303,8 @@
     <label class="flex max-w-60 flex-col gap-1">{@render field("Spending a year", "today’s dollars")}
       {@render money(plan.spending, (v) => { plan.spending = v; plan.spending_own = true; }, "Yearly spending in retirement")}</label>
     {#if plan.spending_own && (ending.length || added.length)}
-      <p class="mt-2 text-sm text-muted-foreground">Your own figure, taken as it is: loan payments aren't added to it or taken off it.
-        <button type="button" class="font-medium text-foreground underline underline-offset-4" onclick={useRunwaySpending}>Use Runway's figure</button>
-        ({fmt0(data.computed.annual_spending)}, from your last six months), which Runway adjusts for loan payments as they end.</p>
-    {:else if ending.length || added.length}
-      <p class="mt-2 text-sm text-muted-foreground">Runway's figure, from your last six months.{#if ending.length}
-        {" "}It includes {ending.map(paymentText).join(", and ")}: the plan takes {ending.length > 1 ? "each" : "it"} off once it ends.{/if}{#if added.length}
-        {" "}It's missing {added.map(paymentText).join(", and ")}, which the plan adds while {added.length > 1 ? "they're" : "it's"} still paid.{/if}</p>
+      <p class="mt-2 text-sm"><button type="button" class="font-medium text-foreground underline underline-offset-4" onclick={useRunwaySpending}>Use Runway's figure</button>
+        <span class="text-muted-foreground">({fmt0(data.computed.annual_spending)})</span></p>
     {/if}
   </section>
 
@@ -357,61 +331,46 @@
       </div>
     {/each}
     <Button variant="outline" size="sm" onclick={addEvent}><Plus /> Add an event</Button>
-    <p class="mt-2 text-sm text-muted-foreground">A home purchase, college, a wedding, an inheritance: money in or out in one year,
-      in today’s dollars.</p>
   </section>
 
+  {#if data.assets.length}
   <section class="lg:col-span-2">
     <h3 class="mb-2 font-medium">Homes &amp; other assets</h3>
-    {#if data.assets.length}
-      <ul class="space-y-2">
-        {#each plannable as a (a.key)}
-          {@const s = sale(a.key)}
-          <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <label class="flex min-w-40 flex-1 items-center gap-2">
-              <input type="checkbox" class="size-4 cursor-pointer accent-primary" checked={!!s} onchange={(e) => toggleSale(a.key, e.currentTarget.checked)} />
-              <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}</span></span>
-            </label>
-            {#if s}
-              {@const at = saleYear(num(s.sell_year), year)}
-              <label class="flex items-center gap-2 text-sm">Sell in
-                <Input type="number" step="1" min={year} max={year + 100} class="w-24" value={s.sell_year} aria-invalid={pastYear(s)}
-                  oninput={(e) => setSellYear(s, e.currentTarget.value)} /></label>
-              <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
-              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, at)}>≈ {fmt0(shownIn(saleProceeds(a, at, year, plan.inflation), at))}</span>
-              {#if s.was != null}
-                <p class="basis-full pl-6 text-xs text-[var(--warning)]">Was {s.was}, now past: counted as sold in {year}.</p>
-              {:else if pastYear(s)}
-                <p class="basis-full pl-6 text-xs text-destructive">Sell in {year} or later.</p>
-              {/if}
-              {#if a.owed > 0 && a.loan?.note}
-                <p class="basis-full pl-6 text-xs text-muted-foreground">Counts what’s owed today: {LOAN_NOTES[a.loan.note]} in
-                  <a class="font-medium whitespace-nowrap text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to project it.</p>
-              {/if}
+    <ul class="space-y-2">
+      {#each plannable as a (a.key)}
+        {@const s = sale(a.key)}
+        <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label class="flex min-w-40 flex-1 items-center gap-2">
+            <input type="checkbox" class="size-4 cursor-pointer accent-primary" checked={!!s} onchange={(e) => toggleSale(a.key, e.currentTarget.checked)} />
+            <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}</span></span>
+          </label>
+          {#if s}
+            {@const at = saleYear(num(s.sell_year), year)}
+            <label class="flex items-center gap-2 text-sm">Sell in
+              <Input type="number" step="1" min={year} max={year + 100} class="w-24" value={s.sell_year} aria-invalid={pastYear(s)}
+                oninput={(e) => setSellYear(s, e.currentTarget.value)} /></label>
+            <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
+            <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, at)}>≈ {fmt0(shownIn(saleProceeds(a, at, year, plan.inflation), at))}</span>
+            {#if s.was != null}
+              <p class="basis-full pl-6 text-xs text-[var(--warning)]">Was {s.was}, now past: counted as sold in {year}.</p>
+            {:else if pastYear(s)}
+              <p class="basis-full pl-6 text-xs text-destructive">Sell in {year} or later.</p>
             {/if}
-            {#if a.loan?.payment}
-              <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? saleYear(num(s.sell_year), year) : null)}</p>
-            {/if}
-          </li>
-        {/each}
-        {#each vehicles as a (a.key)}
-          <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">Vehicle</span></span>
-            {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null)}</p>{/if}
-          </li>
-        {/each}
-      </ul>
-      {#if holds}
-        <p class="mt-2 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say downsizing. Its value grows
-          by the yearly change set on the Net worth page, a loan is paid down on its terms and equity keeps vesting until then. The
-          plan counts the sale in today’s dollars, taking off inflation ({inflationPct} a year, under Assumptions). A loan’s payment
-          comes off your spending once it’s paid off or sold, if it was counted as spending rather than as a transfer. Proceeds are
-          before selling costs (often 6–8% of a home’s price) and tax.</p>
-      {/if}
-    {:else}
-      <p class="text-sm text-muted-foreground">Homes and company equity you add on the Net worth page can be sold into the plan here.</p>
-    {/if}
+          {/if}
+          {#if a.loan?.payment}
+            <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? saleYear(num(s.sell_year), year) : null)}</p>
+          {/if}
+        </li>
+      {/each}
+      {#each vehicles as a (a.key)}
+        <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">Vehicle</span></span>
+          {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null)}</p>{/if}
+        </li>
+      {/each}
+    </ul>
   </section>
+  {/if}
 
   <details class="group rounded-xl border lg:col-span-2" bind:open={assumptionsOpen}>
     <summary class="flex min-h-14 cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-2 select-none [&::-webkit-details-marker]:hidden">
@@ -462,7 +421,6 @@
           <Button variant="outline" size="sm" onclick={() => addIncome("Pension", 65)}><Plus /> Pension</Button>
           <Button variant="outline" size="sm" onclick={() => addIncome("", 60)}><Plus /> Other income</Button>
         </div>
-        <p class="mt-2 text-sm text-muted-foreground">Yearly amounts in today’s dollars, like the Social Security estimate at ssa.gov/myaccount.</p>
       </section>
 
       <section>
@@ -478,13 +436,9 @@
           <label class="flex flex-col justify-between gap-1">{@render field("Inflation", "yearly")}
             {@render percent(plan.inflation, (s) => setPct("inflation", s), "Inflation", `${uid}-inflation`)}</label>
         </div>
-        <p class="mt-2 text-sm text-muted-foreground">
-          Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year’s return around these averages, which are
-          already after inflation (the plan runs in today’s dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
-          about 15%, a balanced one about 10%). Inflation turns a sale into today’s dollars, and today’s into future ones when you show those.
-          Enter spending as what you'd withdraw before tax.
-          {#if !isDefault}<ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton>{/if}
-        </p>
+        {#if !isDefault}
+          <p class="mt-2 text-sm"><ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton></p>
+        {/if}
       </section>
     </div>
   </details>

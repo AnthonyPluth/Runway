@@ -19,7 +19,7 @@
   <Sheet.Content>
     <Sheet.Header>
       <Sheet.Title>{title}</Sheet.Title>
-      <Sheet.Description>{a ? `${ASSET_KIND_LABEL[a.kind] ?? a.kind} · ${fmt0(a.current_value)}` : "What it’s worth counts toward your net worth."}</Sheet.Description>
+      {#if a}<Sheet.Description>{`${ASSET_KIND_LABEL[a.kind] ?? a.kind} · ${fmt0(a.current_value)}`}</Sheet.Description>{/if}
     </Sheet.Header>
     <div class="overflow-y-auto px-4 pb-4">
       {#if !a}

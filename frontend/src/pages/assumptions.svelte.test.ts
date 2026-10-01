@@ -47,8 +47,12 @@ describe("Settings → Assumptions", () => {
     vi.mocked(api).mockImplementation(settingsData);
     render(Settings, { sub: "assumptions" });
     expect(await screen.findByText(/Only what has vested counts toward net worth, at each company’s latest share price/)).toBeInTheDocument();
-    expect(screen.getByText(/Each person’s saving stops at their own retirement/)).toBeInTheDocument();
+    expect(screen.getByText(/Savings stop at each person’s retirement/)).toBeInTheDocument();
     expect(screen.getByText(/Only the date, amount, merchant and account type of each transaction are sent/)).toBeInTheDocument();
+    expect(screen.getByText(/The projection runs once in today’s dollars/)).toBeInTheDocument();
+    expect(screen.getByText(/Runway’s spending figure is the average of the last six full months/)).toBeInTheDocument();
+    expect(screen.getByText(/Sale proceeds are before selling costs/)).toBeInTheDocument();
+    expect(screen.getByText(/homes you don’t keep updated are valued by hand/)).toBeInTheDocument();
   });
 
   it("scrolls to the group the address names", async () => {
