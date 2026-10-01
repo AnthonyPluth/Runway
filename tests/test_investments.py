@@ -486,7 +486,10 @@ class ShortHistoryLoanPaymentTests(DbCase):
     def test_the_rule_by_itself(self):
         out = lambda m, amount, text: {"month": f"2026-{m:02}", "amount": amount, "text": text}
         two = [out(m, 350, "whole foods") for m in (8, 9)]
-        self.assertTrue(planner.payment_counted(two, 350, ["Ally"], history=["2026-08", "2026-09"]))   # by amount: two months
+        # a lookalike amount in every month of a short history isn't the payment (a grocery run the size of it)
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-08", "2026-09"]))
+        named = [out(m, 350, "ally auto") for m in (8, 9)]
+        self.assertTrue(planner.payment_counted(two + named, 350, ["Ally"], history=["2026-08", "2026-09"]))   # named: two months
         self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-07", "2026-08", "2026-09"]))   # July missing
         self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-09"]))   # one month, not named
         self.assertTrue(planner.payment_counted([out(9, 350, "ally auto")], 350, ["Ally"], history=["2026-09"]))

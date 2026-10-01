@@ -36,8 +36,8 @@ def payment_counted(spent: list[dict], payment: float, names: list[str], named_o
     PAYMENT_MATCH and not a card's payment: for transfers, which repeat at fixed amounts (to savings, a brokerage),
     and whose lender is often also the bank of a card paid by transfer ("CHASE CREDIT CRD AUTOPAY").
     `history` is the full months Runway has transactions for (portfolio.history_months). With fewer than
-    PAYMENT_MONTHS of them (a bank linked lately), it's found when it's in every one of them: at least two, or a
-    single month's when it names the loan. None: the 6 months are taken as all there."""
+    PAYMENT_MONTHS of them (a bank linked lately), it's found when a payment naming the loan is in every one of them
+    (a lookalike amount alone still needs PAYMENT_MONTHS months). None: the 6 months are taken as all there."""
     names = [n.lower() for n in names if n and len(n.strip()) >= 3]
     low = (1 - PAYMENT_MATCH) * payment
     high = (1 + PAYMENT_MATCH if named_only else PAYMENT_ESCROW) * payment
@@ -47,9 +47,8 @@ def payment_counted(spent: list[dict], payment: float, names: list[str], named_o
     months = {s["month"] for s in (named if named_only else named or near)}
     if history is None or len(history) >= PAYMENT_MONTHS:
         return len(months) >= PAYMENT_MONTHS
-    if len(history) == 1 and not named:   # one month of a lookalike amount is too little to go on
-        return False
-    return bool(history) and set(history) <= months
+    # a short history: only a payment naming the loan, every month of it (a grocery run the size of it isn't enough)
+    return bool(history) and set(history) <= {s["month"] for s in named}
 
 # Numbers the plan keeps: (lowest, highest).
 RATES = {"return_before": (-0.2, 0.2), "return_after": (-0.2, 0.2), "volatility": (0.0, 0.5), "inflation": (-0.05, 0.2)}
