@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
-  eligibilityText, feesDue, five24Line, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
-  scoreProgress, spendProgress, splitWishes, valueSource, wishName,
+  KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
+  eligibilityText, feesDue, five24Line, guestsText, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
+  scoreProgress, spendProgress, splitWishes, usesText, valueSource, wishName,
 } from "./churning";
 import { benefit, card } from "./fixtures";
 import type { BankBonus, Benefit, ChurnCard, Currency, Eligibility, Five24, Wish } from "./types";
@@ -119,11 +119,28 @@ describe("churning 2 helpers", () => {
     const b = (x: Partial<Benefit>) => ({ kind: "credit", period: "annual", amount: 300, used: 0, remaining: 300, used_count: 0, period_end: "2026-12-31", ...x }) as Benefit;
     expect(sp(benefitState(b({})))).toBe("$0 of $300 used · resets Dec 31");
     expect(sp(benefitState(b({ used: 300, remaining: 0 })))).toBe("All $300 used · resets Dec 31");
-    expect(benefitState(b({ kind: "access", amount: null, period_end: null }))).toBe("Not used this period");
-    expect(benefitState(b({ kind: "access", amount: null, period_end: null, used_count: 2 }))).toBe("Used 2 times this period");
+    expect(benefitState(b({ kind: "other", amount: null, period_end: null }))).toBe("Not used this period");
+    expect(benefitState(b({ kind: "other", amount: null, period_end: null, used_count: 3 }))).toBe("Used 3 times this period");
+    expect(sp(benefitState(b({ kind: "other", amount: null, used_count: 1 })))).toBe("Used once this period · resets Dec 31");
+    // A perk: who gets in, and how often you've been; never "not used".
+    expect(benefitState(b({ kind: "access", amount: null, guests: 2 }))).toBe("Cardholder + 2 guests");
+    expect(benefitState(b({ kind: "access", amount: null, guests: 0, used_count: 2 }))).toBe("Cardholder only · used twice this period");
+    expect(benefitState(b({ kind: "access", amount: null, guests: null, used_count: 1 }))).toBe("Used once this period");
+    expect(benefitState(b({ kind: "status", amount: null, guests: 1 }))).toBe("Included");   // guests are a lounge's, not status's
     expect(canUse(b({}))).toBe(true);
     expect(canUse(b({ used: 300, remaining: 0 }))).toBe(false);
-    expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(false);
+    expect(canUse(b({ kind: "other", amount: null, used_count: 1 }))).toBe(false);
+    expect(canUse(b({ kind: "access", amount: null, used_count: 1 }))).toBe(true);   // another lounge visit
+  });
+
+  it("words guests and uses, and orders a card's benefits credits first", () => {
+    expect([guestsText(null), guestsText(0), guestsText(1), guestsText(2)]).toEqual(["", "Cardholder only", "Cardholder + 1 guest", "Cardholder + 2 guests"]);
+    expect(usesText(benefit({ uses: [] }))).toBe("");
+    expect(sp(usesText(benefit({ uses: [{ id: 1, amount_used: 100, used_on: "2026-09-01" }, { id: 2, amount_used: 50, used_on: "2026-09-20" }] })))).toBe("Used $100 on Sep 1, $50 on Sep 20");
+    expect(sp(usesText(benefit({ uses: [{ id: 1, amount_used: null, used_on: "2026-09-01" }] })))).toBe("Used Sep 1");
+    const list = [benefit({ name: "Priority Pass lounges", kind: "access" }), benefit({ name: "Hotel status", kind: "status" }),
+      benefit({ name: "Free night", kind: "other" }), benefit({ name: "Travel credit" }), benefit({ name: "Capital One Lounges", kind: "access" })];
+    expect(list.sort(benefitOrder).map((x) => x.name)).toEqual(["Travel credit", "Free night", "Capital One Lounges", "Priority Pass lounges", "Hotel status"]);
   });
 
   it("sorts every open card's benefits into expiring, still to use and used", () => {
@@ -132,11 +149,14 @@ describe("churning 2 helpers", () => {
     const open = benefit({ id: 3, name: "Hotel", amount: 300, remaining: 150, used: 150 });
     const done = benefit({ id: 4, name: "Dining", amount: 100, remaining: 0, used: 100, value_per_year: 100 });
     const off = benefit({ id: 5, name: "Old", active: 0 });
+    const pp = benefit({ id: 7, name: "Priority Pass lounges", kind: "access", amount: null, used: null, remaining: null, value_per_year: 0, guests: 2 });
+    const c1 = benefit({ id: 8, name: "Capital One Lounges", kind: "access", amount: null, used: null, remaining: null, value_per_year: 0, used_count: 1 });
     const closedCard = card({ id: 2, status: "closed", benefits: [benefit({ id: 6, name: "Gone" })] });
-    const b = benefitBoard([card({ benefits: [soon, later, open, done, off] }), closedCard]);
+    const b = benefitBoard([card({ benefits: [soon, later, open, done, off, pp, c1] }), closedCard]);
     expect(b.expiring.map((r) => r.b.name)).toEqual(["Uber", "Lyft"]);   // soonest first
     expect(b.available.map((r) => r.b.name)).toEqual(["Hotel"]);
     expect(b.used.map((r) => r.b.name)).toEqual(["Dining"]);
+    expect(b.perks.map((r) => r.b.name)).toEqual(["Capital One Lounges", "Priority Pass lounges"]);   // on all year, used or not
     expect([b.left, b.usedAmount, b.value]).toEqual([460, 250, 1000]);   // left 10+300+150; used 150+100; worth 300×3+100
   });
 

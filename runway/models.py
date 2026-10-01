@@ -684,6 +684,7 @@ class ChurnBenefit(Base):
     period: Mapped[str | None]
     basis: Mapped[str | None]
     annual_value: Mapped[float | None]
+    guests: Mapped[int | None]
     counts: Mapped[int | None]
     remind: Mapped[int | None]
     remind_days: Mapped[int | None]

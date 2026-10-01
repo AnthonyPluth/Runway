@@ -162,17 +162,44 @@ export function valueSource(c: Currency, valuesAsOf: string): string {
   return day ? `estimate (as of ${fmtDate(day.length === 7 ? `${day}-01` : day, { month: "short", year: "numeric" })})` : "estimate";
 }
 
-/** A benefit's current period in words: "$150 of $300 used · resets Dec 31", "Not used this period". */
+/** Access and status (a lounge network, free bags, hotel status): on all year, nothing to use up. */
+export const isPerk = (b: Pick<Benefit, "kind">) => b.kind === "access" || b.kind === "status";
+
+/** Who gets into a lounge: "Cardholder only", "Cardholder + 2 guests"; empty when it isn't set. */
+export function guestsText(guests: number | null | undefined): string {
+  if (guests == null) return "";
+  return guests === 0 ? "Cardholder only" : `Cardholder + ${guests} guest${guests === 1 ? "" : "s"}`;
+}
+
+/** A benefit's current period in words: "$150 of $300 used · resets Dec 31", "Not used this period"; a perk's guests
+ * and visits: "Cardholder + 2 guests · used twice this period". */
 export function benefitState(b: Benefit): string {
+  const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+  if (isPerk(b)) {
+    const parts = [b.kind === "access" ? guestsText(b.guests) : "", b.used_count ? `used ${times(b.used_count)} this period` : ""].filter(Boolean);
+    const line = parts.join(" · ") || "Included";
+    return line[0].toUpperCase() + line.slice(1);
+  }
   const resets = b.period_end ? ` · ${b.period === "one_time" ? "expires" : "resets"} ${fmtDate(b.period_end)}` : "";
   if (b.kind === "credit" && b.amount != null) {
     return (b.remaining ?? 0) <= 0.005 ? `All ${fmt0(b.amount)} used${resets}` : `${fmt0(b.used ?? 0)} of ${fmt0(b.amount)} used${resets}`;
   }
-  return b.used_count ? `Used ${b.used_count > 1 ? `${b.used_count} times` : "once"} this period${resets}` : `Not used this period${resets}`;
+  return b.used_count ? `Used ${times(b.used_count)} this period${resets}` : `Not used this period${resets}`;
 }
 
-/** Whether a benefit has something left to mark used this period: a credit with money left, or one not used yet. */
-export const canUse = (b: Benefit) => (b.kind === "credit" && b.amount != null ? (b.remaining ?? 0) > 0.005 : b.used_count === 0);
+/** This period's uses in a line: "Used $100 on Sep 1, $50 on Sep 20", "Used Sep 1"; empty when none. */
+export const usesText = (b: Pick<Benefit, "uses">) =>
+  b.uses.length ? `Used ${b.uses.map((u) => (u.amount_used != null ? `${fmt0(u.amount_used)} on ` : "") + fmtDate(u.used_on)).join(", ")}` : "";
+
+/** Whether a benefit has something left to mark used this period: a credit with money left, one not used yet, or a
+ * perk (a lounge visit can be logged any number of times). */
+export const canUse = (b: Benefit) => (isPerk(b) ? true : b.kind === "credit" && b.amount != null ? (b.remaining ?? 0) > 0.005 : b.used_count === 0);
+
+/** A card's benefits in reading order: credits, then other one-offs, then perks (lounges by network), each by name. */
+export function benefitOrder(a: Benefit, b: Benefit): number {
+  const rank = { credit: 0, other: 1, access: 2, status: 3 };
+  return rank[a.kind] - rank[b.kind] || a.name.localeCompare(b.name);
+}
 
 export const BLOCKER_LABEL: Record<Blocker["kind"], string> = {
   five24: "5/24", bonus_rule: "Bonus rule", held: "Still open", wait: "Waiting", score: "Credit score", offer: "Offer",
@@ -212,25 +239,27 @@ export interface BenefitRow { card: ChurnCard; b: Benefit }
 interface BenefitBoard {
   expiring: BenefitRow[];     // money left and the period ends soon, soonest first
   available: BenefitRow[];    // not used up yet, not expiring soon
-  used: BenefitRow[];         // all of a credit used, or an access benefit used, this period
+  used: BenefitRow[];         // all of a credit used, or a one-off (a free night) used, this period
+  perks: BenefitRow[];        // access and status, on all year: lounges, free bags, hotel status
   left: number;               // dollars of credits still unused this period
   usedAmount: number;         // dollars of credits used this period
   value: number;              // a year, the benefits that count
 }
 
 /** The benefits of these cards (open ones, the benefits still active) sorted into expiring soon, still to use and used this
- * period, with the dollars behind each figure. */
+ * period, and perks that are simply on, with the dollars behind each figure. */
 export function benefitBoard(cards: ChurnCard[]): BenefitBoard {
   const rows = cards.filter((c) => c.status === "open").flatMap((card) => card.benefits.filter((b) => b.active).map((b) => ({ card, b })));
   const byName = (x: BenefitRow, y: BenefitRow) => x.card.product.localeCompare(y.card.product) || x.b.name.localeCompare(y.b.name);
-  const board: BenefitBoard = { expiring: [], available: [], used: [], left: 0, usedAmount: 0, value: 0 };
+  const board: BenefitBoard = { expiring: [], available: [], used: [], perks: [], left: 0, usedAmount: 0, value: 0 };
   for (const r of rows) {
     if (r.b.kind === "credit" && r.b.amount != null) { board.left += r.b.remaining ?? 0; board.usedAmount += r.b.used ?? 0; }
     if (r.b.counts) board.value += r.b.value_per_year;
-    (r.b.expiring ? board.expiring : canUse(r.b) ? board.available : board.used).push(r);
+    (r.b.expiring ? board.expiring : isPerk(r.b) ? board.perks : canUse(r.b) ? board.available : board.used).push(r);
   }
   board.expiring.sort((x, y) => (x.b.days_left ?? 0) - (y.b.days_left ?? 0) || byName(x, y));
   board.available.sort(byName);
   board.used.sort(byName);
+  board.perks.sort((x, y) => x.card.product.localeCompare(y.card.product) || benefitOrder(x.b, y.b));   // a card's lounges, then its status
   return board;
 }

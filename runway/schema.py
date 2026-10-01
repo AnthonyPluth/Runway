@@ -710,6 +710,7 @@ churn_benefits = Table(
     Column('basis', Text, server_default=text("'calendar'"),
            doc="calendar (resets Jan 1, the 1st of the month...) | anniversary (the cardmember year, from opened_on)"),
     Column('annual_value', Float, doc="what it's worth to you a year, instead of amount times periods (access: the only value)"),
+    Column('guests', Integer, doc='access: guests you can bring in free each visit (0: the cardholder only; NULL: not set)'),
     Column('counts', Integer, server_default=text('1'), doc="1: you'll use it, so it counts against the annual fee"),
     Column('remind', Integer, server_default=text('1'), doc='1: remind you before a credit with money left resets'),
     Column('remind_days', Integer, doc='... this many days ahead (NULL = 14 for monthly and quarterly, else 30)'),

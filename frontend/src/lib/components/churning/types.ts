@@ -31,6 +31,7 @@ export interface Benefit {
   period: BenefitPeriod;
   basis: BenefitBasis;
   annual_value: number | null;     // your own figure a year (access: its only value)
+  guests: number | null;           // access: guests in free with you each visit (0: just you; null: not set)
   counts: number;                  // 1: counts against the annual fee (you'll use it)
   remind: number;
   remind_days: number | null;      // null: 14 for monthly/quarterly, else 30 (see lead_days)

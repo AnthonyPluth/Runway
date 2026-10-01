@@ -18,7 +18,7 @@
     const s = b;
     return {
       name: str(s?.name), kind: s?.kind ?? "credit", amount: str(s?.amount), period: s?.period ?? "annual", basis: s?.basis ?? "calendar",
-      annual_value: str(s?.annual_value), counts: s ? !!s.counts : true, remind: s ? !!s.remind : true, remind_days: str(s?.remind_days),
+      annual_value: str(s?.annual_value), guests: str(s?.guests), counts: s ? !!s.counts : true, remind: s ? !!s.remind : true, remind_days: str(s?.remind_days),
       expires_on: str(s?.expires_on), notes: str(s?.notes),
     };
   };
@@ -47,10 +47,15 @@
 <div class="my-2 rounded-lg border bg-background p-3" data-editor>
   <h5 class="text-sm font-semibold">{b ? `Edit ${b.name}` : `Add a benefit to ${card.product}`}</h5>
   <div class="mt-2 flex flex-wrap items-end gap-3">
-    <label class={`${lbl} min-w-48 flex-1`}>Benefit<Input bind:ref={first} bind:value={v.name} {@attach edit("name")} placeholder="e.g. Lyft credit" /></label>
+    <label class={`${lbl} min-w-48 flex-1`}>Benefit<Input bind:ref={first} bind:value={v.name} {@attach edit("name")} placeholder="e.g. Lyft credit, Priority Pass lounges" /></label>
     <label class={lbl}>Kind
       <NativeSelect bind:value={v.kind} {@attach edit("kind")}>{#each d.benefit_kinds as k (k.key)}<option value={k.key}>{k.name}</option>{/each}</NativeSelect>
     </label>
+    {#if v.kind === "access"}
+      <label class={lbl}><span>Guests free <span class="text-muted-foreground">(0: just you)</span></span>
+        <Input type="number" min="0" max="20" step="1" class="w-24" bind:value={v.guests} {@attach edit("guests")} placeholder="—" />
+      </label>
+    {/if}
     {#if v.kind === "credit"}
       <label class={lbl}>Amount<Input type="number" min="0" step="5" class="w-24" bind:value={v.amount} {@attach edit("amount")} placeholder="$" /></label>
     {/if}

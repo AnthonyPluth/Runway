@@ -56,8 +56,8 @@ def _transactions(fetch: Fetch, a: dict) -> Any:
 CARD_FIELDS = ("id", "owner", "issuer", "product", "status", "opened_on", "closed_on", "annual_fee", "fee_due", "authorized_user", "business",
                "currency_name", "bonus", "bonus_spend", "bonus_deadline", "bonus_state", "spent", "plan", "plan_target", "plan_due",
                "plan_done_on", "eligibility", "benefits_value", "net_fee", "counts_524", "falls_off")
-BENEFIT_FIELDS = ("name", "kind", "period", "amount", "used", "remaining", "period_end", "days_left", "expiring", "used_count",
-                  "value_per_year", "counts")
+BENEFIT_FIELDS = ("id", "name", "kind", "period", "amount", "guests", "used", "remaining", "period_end", "days_left", "expiring",
+                  "used_count", "value_per_year", "counts")
 
 
 def _churning(fetch: Fetch) -> dict:
@@ -86,6 +86,11 @@ def churning_five24(fetch: Fetch, a: dict) -> Any:
     return {"today": d["today"], "five24": {o: v for o, v in d["five24"].items() if not a.get("owner") or o == a["owner"]}}
 
 
+def _perk(b: dict) -> bool:
+    """Access and status: on all year, nothing to use up (as the Benefits tab groups them)."""
+    return b.get("kind") in ("access", "status")
+
+
 def _can_use(b: dict) -> bool:
     if b.get("kind") == "credit" and b.get("amount") is not None:
         return (b.get("remaining") or 0) > 0.005
@@ -93,9 +98,10 @@ def _can_use(b: dict) -> bool:
 
 
 def churning_benefits(fetch: Fetch, a: dict) -> Any:
-    """Every open card's active benefits, sorted the way the Benefits tab does: expiring soon, still to use, used."""
+    """Every open card's active benefits, sorted the way the Benefits tab does: expiring soon, still to use, used, and
+    perks (lounges, status) that are simply on."""
     d = _churning(fetch)
-    out: dict[str, list] = {"expiring": [], "available": [], "used": []}
+    out: dict[str, list] = {"expiring": [], "available": [], "used": [], "perks": []}
     for c in _mine(d["cards"], a.get("owner")):
         if c.get("status") != "open":
             continue
@@ -103,7 +109,7 @@ def churning_benefits(fetch: Fetch, a: dict) -> Any:
             if not b.get("active"):
                 continue
             row = {"card": c["product"], "owner": c["owner"], **{k: b.get(k) for k in BENEFIT_FIELDS}}
-            out["expiring" if b.get("expiring") else "available" if _can_use(b) else "used"].append(row)
+            out["expiring" if b.get("expiring") else "perks" if _perk(b) else "available" if _can_use(b) else "used"].append(row)
     out["expiring"].sort(key=lambda r: r["days_left"] if r["days_left"] is not None else 1e9)
     show = a.get("show") or "all"
     return {"today": d["today"], **(out if show == "all" else {show: out[show]})}
@@ -175,8 +181,8 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "churning_upcoming", "description": "What's coming up for churning: annual fees, bonus deadlines, benefits about to reset, planned actions.",
      "inputSchema": _schema({"owner": _OWNER}), "run": churning_upcoming},
     {"name": "churning_benefits", "description": "Every open card's benefits: which are expiring soon, which are still to use this "
-     "period, and which are used.",
-     "inputSchema": _schema({"owner": _OWNER, "show": {"type": "string", "enum": ["all", "expiring", "available", "used"], "description": "Which group (default all)."}}),
+     "period, which are used, and the perks that are simply on (lounge networks with how many guests come in free, status).",
+     "inputSchema": _schema({"owner": _OWNER, "show": {"type": "string", "enum": ["all", "expiring", "available", "used", "perks"], "description": "Which group (default all)."}}),
      "run": churning_benefits},
     {"name": "churning_five24", "description": "Each person's 5/24 count and when it next drops.", "inputSchema": _schema({"owner": _OWNER}), "run": churning_five24},
     {"name": "churning_best_card", "description": "Which card to use for a purchase, by earning rate.",

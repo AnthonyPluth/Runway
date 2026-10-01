@@ -177,6 +177,20 @@ class MigrationTests(unittest.TestCase):
                                  set(sa.inspect(c).get_table_names()))
         self.assertEqual(drift(self.path), [])
 
+    def test_0027_adds_benefit_guests(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0026")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("guests", {col["name"] for col in sa.inspect(c).get_columns("churn_benefits")})
+            c.exec_driver_sql("INSERT INTO churn_benefits(id, card_id, name, kind) VALUES (1, 1, 'Lounge access', 'access')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(tuple(conn.execute("SELECT name, guests FROM churn_benefits").fetchone()), ("Lounge access", None))
+        self.assertEqual(drift(self.path), [])
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating
