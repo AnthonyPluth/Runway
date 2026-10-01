@@ -21,7 +21,7 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDateTime, nb } from "$lib/format";
+  import { fmt, fmt0, fmtDateTime, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -50,10 +50,15 @@
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
   let spend = $state(!!init.daily_spend);
+  let rate = $state(init.loan?.set_rate != null ? String(init.loan.set_rate) : "");
+  let payment = $state(init.loan?.set_payment != null ? String(init.loan.set_payment) : "");
   let changingType = $state(false);
   let open = $state(openAccounts.has(init.id));
 
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
+  // A loan's terms, for the retirement planner: the lender's through Plaid when it shares them, else yours.
+  const loan = $derived(a.kind === "loan" ? a.loan : undefined);
+  const hint = $derived(loan?.inferred_payment ? `about ${fmt0(loan.inferred_payment)} from recent payments` : "e.g. 1,850");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
@@ -129,6 +134,11 @@
     } catch (err) { if (rerender) toast.error((err as Error).message); else throw err; }
   }
 
+  // A loan's interest rate and monthly payment (saved together; an empty payment is worked out from recent payments).
+  async function saveLoan() {
+    await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body: { interest_rate: rate, monthly_payment: payment } });
+  }
+
   async function setProvider(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     try {
@@ -196,6 +206,25 @@
           <option value="">—</option>
           {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
         </select>
+      </label>
+    {/if}
+    {#if loan?.plaid}
+      <div class={fieldCls}>Interest rate
+        <span class="flex h-9 items-center gap-2 text-foreground">{+(loan.rate ?? 0).toFixed(3)}%<span class="text-xs text-muted-foreground">from Plaid</span></span>
+      </div>
+      <div class={fieldCls}>Monthly payment
+        <span class="flex h-9 items-center gap-2 text-foreground">{#if loan.payment != null}{fmt(loan.payment)}<span class="text-xs text-muted-foreground"
+          >{loan.source === "inferred" ? "from recent payments" : "from Plaid"}</span>{:else}—{/if}</span>
+      </div>
+    {:else if loan}
+      <label class={fieldCls} title="The loan’s annual interest rate. The retirement planner uses it to work out what’s still owed when you sell.">Interest rate
+        <span class="relative">
+          <input class={`${inputCls} w-full pr-7`} inputmode="decimal" bind:value={rate} placeholder="e.g. 6.25" use:autosave={saveLoan} />
+          <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
+        </span>
+      </label>
+      <label class={fieldCls} title="Left empty, it’s worked out from the payments into this account lately">Monthly payment
+        <input class={inputCls} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />
       </label>
     {/if}
     {#if showSource}

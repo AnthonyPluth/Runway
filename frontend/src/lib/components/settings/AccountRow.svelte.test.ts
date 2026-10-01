@@ -75,3 +75,41 @@ describe("an account's logo, from Settings", () => {
     await waitFor(() => expect(refreshState).toHaveBeenCalled());
   });
 });
+
+describe("a loan's terms, for the retirement planner", () => {
+  const terms = { rate: null, payment: null, source: null, plaid: false, set_rate: null, set_payment: null, inferred_payment: null };
+  const loan = (over: Partial<NonNullable<SettingsAccount["loan"]>> = {}) =>
+    acct({ id: "mtg", name: "Mortgage", kind: "loan", balance: -250000, loan: { ...terms, ...over } });
+
+  it("lets you set the interest rate and payment, suggesting the payment from recent ones", async () => {
+    show(loan({ set_rate: 6.25, inferred_payment: 1840 }));
+    const rate = screen.getByRole("textbox", { name: /Interest rate/ });
+    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
+    expect(rate).toHaveValue("6.25");
+    expect(payment).toHaveValue("");
+    expect(payment).toHaveAttribute("placeholder", "about $1,840 from recent payments");
+    await userEvent.type(payment, "1,900{Enter}");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg",
+      { method: "POST", body: { interest_rate: "6.25", monthly_payment: "1,900" } }));
+    expect(screen.queryByText("from Plaid")).toBeNull();
+  });
+
+  it("shows the lender's terms from Plaid instead, without fields to change them", () => {
+    show(loan({ plaid: true, rate: 6.125, payment: 2140.5, source: "plaid" }));
+    expect(screen.queryByRole("textbox", { name: /Interest rate/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /Monthly payment/ })).toBeNull();
+    expect(screen.getByText("6.125%")).toBeInTheDocument();
+    expect(screen.getByText("$2,140.50")).toBeInTheDocument();
+    expect(screen.getAllByText("from Plaid")).toHaveLength(2);
+  });
+
+  it("says when Plaid's rate comes with a payment worked out from recent ones", () => {
+    show(loan({ plaid: true, rate: 4, payment: 310, source: "inferred" }));
+    expect(screen.getByText("from recent payments")).toBeInTheDocument();
+  });
+
+  it("isn't asked of other accounts", () => {
+    show(acct({ id: "cc", kind: "credit" }));
+    expect(screen.queryByText(/Interest rate/)).toBeNull();
+  });
+});
