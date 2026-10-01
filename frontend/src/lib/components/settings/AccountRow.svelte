@@ -45,6 +45,11 @@
   let name = $state(init.display_name || "");
   let owner = $state(init.owner || "");
   let payFrom = $state(init.pay_from || "");
+  // How the card's statements are paid, for the forecast: in full, the minimum, or a fixed amount (and its APR, for the
+  // interest on what that leaves to carry over).
+  let payMode = $state(init.pay_mode || "full");
+  let payAmount = $state<number | null>(init.pay_amount ?? null);
+  let apr = $state<number | null>(init.apr ?? null);
   let kind = $state(init.kind);
   let hidden = $state(!!init.hidden);
   let counted = $state(!init.networth_hidden);
@@ -92,6 +97,9 @@
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
+      if (a.pay_mode === "minimum") bits.push({ text: "pays the minimum" });
+      else if (a.pay_mode === "fixed")
+        bits.push(a.pay_amount != null ? { text: `pays ${fmt(a.pay_amount)} a statement` } : { text: "no fixed amount", warn: true, title: "Paid in full until you enter one" });
       if (!link) bits.push({ text: "not linked to Plaid", warn: true }, { text: "Link…", link: true });
       else if (!link.closed) bits.push({ text: `no statement from ${link.institution || "the bank"} yet`, warn: true, title: statementNote(link.statement_note) });
     }
@@ -117,10 +125,10 @@
     if (open) openAccounts.add(a.id); else openAccounts.delete(a.id);
   }
 
-  // Saves the whole row. Fields that change the row's summary (owner, paying account, hidden, net worth, type) redraw the page.
+  // Saves the whole row. Fields that change the row's summary (owner, paying account, how it's paid, hidden, net worth, type) redraw the page.
   async function save(rerender: boolean) {
     const body: Record<string, unknown> = { display_name: name, kind, hidden: hidden ? 1 : 0, networth_hidden: counted ? 0 : 1, owner };
-    if (a.kind === "credit") body.pay_from = payFrom;
+    if (a.kind === "credit") Object.assign(body, { pay_from: payFrom, pay_mode: payMode, pay_amount: payAmount ?? "", apr: apr ?? "" });
     if (owes) body.owed_positive = sign ? 1 : 0;
     if (a.kind === "checking" || a.kind === "savings") body.daily_spend = spend ? 1 : 0;
     try {
@@ -199,6 +207,23 @@
           {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
         </select>
       </label>
+      <label class={fieldCls} title="How much of each statement the forecast pays; what isn't paid carries into the next one">Pay
+        <select class={selectCls} bind:value={payMode} use:autosave={() => save(true)}>
+          <option value="full">full statement</option>
+          <option value="minimum">minimum</option>
+          <option value="fixed">a fixed amount</option>
+        </select>
+      </label>
+      {#if payMode === "fixed"}
+        <label class={fieldCls}>Amount each statement
+          <input type="number" inputmode="decimal" min="0" step="0.01" class={inputCls} bind:value={payAmount} placeholder="$" use:autosave={() => save(true)} />
+        </label>
+      {/if}
+      {#if payMode !== "full"}
+        <label class={fieldCls} title="For the interest on what carries over; without it, the forecast leaves interest out">APR (%)
+          <input type="number" inputmode="decimal" min="0" max="100" step="0.01" class={inputCls} bind:value={apr} use:autosave={() => save(false)} />
+        </label>
+      {/if}
     {/if}
     {#if showSource}
       <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source" bind:this={sourceBox}>

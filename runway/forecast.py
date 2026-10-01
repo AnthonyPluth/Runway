@@ -10,6 +10,10 @@ A card's statement balance comes from the issuer (or it's the amount you entered
 haven't closed yet are estimated from the card's average spending over its last 3 statement cycles (for the cycle in
 progress, what's already been charged plus the average's share of the days left), plus the recurring charges on the
 card the average doesn't have, and flagged as estimates.
+
+Each card is paid the way you pay it (Settings → Accounts): the whole statement (the default), the issuer's minimum, or
+a fixed amount. What isn't paid carries into the next statement, with a month's interest at the card's APR if you've
+entered one.
 """
 from __future__ import annotations
 
@@ -34,6 +38,9 @@ from .models import Account, Budget, Category, Override, PlaidAccount, Recurring
 SPEND_WINDOW_DAYS = 90
 AVG_CYCLES = 3           # statement cycles averaged to estimate a card's future statements
 ONE_OFF_LIMIT = 1000.0   # single outflows larger than this are treated as one-offs, not everyday spending
+PAY_MODES = ("full", "minimum", "fixed")   # how a card's statements are paid (payment_plan)
+MIN_PAYMENT_FLOOR = 25.0   # without the issuer's minimum: the larger of this and MIN_PAYMENT_RATE of the statement
+MIN_PAYMENT_RATE = 0.02
 
 
 # ------------------------------------------------------------------------------------------------ dates
@@ -288,6 +295,41 @@ def in_transit(conn, card: dict, last_close: date) -> float:
     return total
 
 
+def _amount(value: str | None) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def payment_plan(conn, card_id: str) -> dict:
+    """How a card's statements are paid, as set in Settings → Accounts: pay_mode "full" (the default), "minimum" (the
+    issuer's minimum payment) or "fixed" (pay_amount toward each statement), and the card's APR in percent (None if it
+    hasn't been entered)."""
+    mode = db.get_setting(conn, sk.card_pay_mode(card_id)) or "full"
+    return {"pay_mode": mode if mode in PAY_MODES else "full",
+            "pay_amount": _amount(db.get_setting(conn, sk.card_pay_amount(card_id))),
+            "apr": _amount(db.get_setting(conn, sk.card_apr(card_id)))}
+
+
+def statement_payment(plan: dict, statement: float, minimum: float | None = None) -> float:
+    """What a payment plan (payment_plan) pays toward a statement: all of it; the minimum (the issuer's, else the larger
+    of MIN_PAYMENT_FLOOR and MIN_PAYMENT_RATE of the statement); or the fixed amount (all of it until one is entered).
+    Never more than the statement."""
+    if plan["pay_mode"] == "minimum":
+        due = minimum if minimum is not None else max(MIN_PAYMENT_FLOOR, statement * MIN_PAYMENT_RATE)
+    elif plan["pay_mode"] == "fixed" and plan["pay_amount"] is not None:
+        due = plan["pay_amount"]
+    else:
+        due = statement
+    return max(0.0, min(statement, due))
+
+
+def interest(plan: dict, carried: float) -> float:
+    """A statement cycle's interest on a balance carried from the one before, at the card's APR (none without one)."""
+    return carried * plan["apr"] / 100 / 12 if plan["apr"] and carried > 0 else 0.0
+
+
 def card_cycle(conn, card: dict, today: date, bank) -> dict:
     """Where a card stands in its billing cycle today, from its latest statement at the bank (see bank_statement)."""
     transfers = _transfer_categories(conn)
@@ -308,6 +350,10 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
     due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
         else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
+    remaining = max(0.0, statement - paid)
+    plan = payment_plan(conn, card["id"])
+    # What the plan pays toward this statement, less what's been paid since it closed; the rest carries into the next.
+    payment = min(remaining, max(0.0, statement_payment(plan, statement, bank["minimum_payment"]) - paid))
     return {
         "last_close": last_close.isoformat(),
         "statement_balance": round(statement, 2),
@@ -320,7 +366,12 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         # the close of the oldest cycle averaged: a recurring charge first paid after it isn't in every cycle of the average
         "avg_first_close": spend["cycles"][-1]["end"] if spend["cycles"] else None,
         "paid_since_close": round(paid, 2),
-        "remaining": round(max(0.0, statement - paid), 2),
+        "remaining": round(remaining, 2),
+        **plan,
+        "payment": round(payment, 2),               # what the forecast pays on the due date
+        "carried": round(remaining - payment, 2),   # what that leaves to carry into the next statement
+        # paying the minimum, but the issuer didn't say what it is (statement_payment's estimate is used)
+        "minimum_estimated": plan["pay_mode"] == "minimum" and bank["minimum_payment"] is None,
         "due_date": due.isoformat(),
         "new_charges": round(new_charges, 2),
         "daily_rate": round(daily_spend_rate(conn, card["id"], today), 2),
@@ -366,6 +417,16 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     def warn(text: str, href: str) -> None:
         warnings.append({"text": text, "href": href})
+
+    # One-off edits you've made to specific upcoming items.
+    overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
+
+    def paying(info: dict, owes: float, planned: float, key: str, old_key: str) -> float:
+        """What's paid toward a card statement that still owes `owes`, for what carries into the next one: what its
+        payment plan pays (`planned`), or, when you've edited that payment on the Overview, what you entered, up to what's
+        owed. A card paid in full carries nothing either way, as before."""
+        edit = overrides.get(key, overrides.get(old_key))
+        return min(owes, abs(edit)) if info["pay_mode"] != "full" and edit is not None else planned
 
     def not_averaged(item_id: int, since: str) -> bool:
         """Whether a card's spending average (over cycles from the one closing on `since`) leaves out this recurring
@@ -414,6 +475,11 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             continue
         info = card_cycle(conn, card, today, bank)
         info.update({"id": card["id"], "name": label, "owed_now": round(max(0.0, owed(card)), 2)})
+        due = _d(info["due_date"])
+        key = f"card:{card['id']}:{info['last_close']}"
+        old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
+        payment = paying(info, info["remaining"], info["payment"], key, old_keys[key])
+        info.update(payment=round(payment, 2), carried=round(info["remaining"] - payment, 2))
         card_status.append(info)
         payer = by_id.get(card["pay_from"] or "")
         if not payer:
@@ -421,24 +487,29 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             continue
         if payer not in cash:
             continue  # paid from an account that isn't being forecast
-        due = _d(info["due_date"])
+        if info["pay_mode"] == "fixed" and info["pay_amount"] is None:
+            warn(f"{label}: no amount entered for its fixed payment, so the forecast pays each statement in full.", "#setup/accounts")
+        if info["minimum_estimated"] and info["remaining"] > 0.005:
+            warn(f"{label}: the bank didn’t report a minimum payment, so the forecast pays the larger of "
+                 f"${MIN_PAYMENT_FLOOR:,.0f} and {MIN_PAYMENT_RATE:.0%} of the statement.", "#setup/accounts")
         pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
-        if pays >= today and info["remaining"] > 0.005:
-            key = f"card:{card['id']}:{info['last_close']}"
-            old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
+        if pays >= today and info["payment"] > 0.005:
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
-                           "amount": -info["remaining"], "kind": "card", "estimated": False,
+                           "amount": -info["payment"], "kind": "card", "estimated": False,
                            "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
-        elif pays < today and info["remaining"] > 0.005:
-            warn(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
+        elif pays < today and info["payment"] > 0.005:
+            warn(f"{label}: ${info['payment']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
         # Future statements: the card's average spending per cycle over its last few statements (for the cycle in
         # progress, what's been charged already plus the average's share of the days left). Without enough history,
         # the recent daily rate. Either way, plus the recurring charges on the card the estimate doesn't already have.
+        # A statement that isn't paid in full carries the rest into the next one, with a month's interest on it.
         close = next_after(_d(info["last_close"]), card["closing_day"])
         prev_close = _d(info["last_close"])
         first = True
         avg = info["avg_monthly_spend"]
         stale = False
+        carried = info["carried"]
+        carries = carried > 0.005   # whether any statement in the forecast carries a balance
         while True:
             due_k = next_after(close, card["due_day"])
             if due_k > end:
@@ -458,19 +529,26 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 # The recent daily rate leaves out recurring charges on the card, so add all of them.
                 est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle \
                     + max(0.0, -sum(e["amount"] for e in upcoming))
+            statement = carried + interest(info, carried) + est
+            key = f"card:{card['id']}:{close.isoformat()}"
+            old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
+            pay = paying(info, statement, statement_payment(info, statement), key, old_keys[key])
+            carried = statement - pay
+            carries = carries or carried > 0.005
             pays_k = bankdays.next_business_day(due_k)
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
-            elif est > 0.005:
-                key = f"card:{card['id']}:{close.isoformat()}"
-                old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
+            elif pay > 0.005:
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
-                               "amount": -round(est, 2), "kind": "card", "estimated": True,
+                               "amount": -round(pay, 2), "kind": "card", "estimated": True,
                                "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
             warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
                  "payment isn't in the forecast.", "#setup/connections")
+        if carries and info["apr"] is None:
+            warn(f"{label}: the forecast carries part of its statements to the next one, but doesn’t count the interest "
+                 "on it: enter the card’s APR in Settings.", "#setup/accounts")
 
     def listed(names):
         return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
@@ -503,8 +581,6 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
              f"{'isn’t' if one else 'aren’t'} in the forecast{named}; add {'it as a recurring item' if one else 'them as recurring items'}.",
              "#budget/recurring")
 
-    # One-off edits you've made to specific upcoming items.
-    overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
     for new, old in old_keys.items():
         # A card payment's edit saved while its key was the due date moves to its key now, so it still applies (and
         # putting it back, which removes the event's key, removes it).
@@ -618,7 +694,8 @@ def budget_plan(conn, today: date) -> list[dict]:
 def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash: list[dict], by_id: dict,
                     card_status: list[dict], events: list[dict]) -> dict | None:
     """The forecast if you spend exactly your budgets: budgeted spending is charged day by day to each category's
-    account; spending on cards is paid on each card's due date. Recurring items and statements that have already closed
+    account; spending on cards is paid on each card's due date, as much of each statement as the card's payment plan
+    pays (payment_plan; the rest carries over, as in the forecast). Recurring items and statements that have already closed
     stay as they are; estimated future statements are replaced by the budgeted charges.
 
     A budget includes its category's recurring payments: the ones the forecast already takes out of its accounts are
@@ -693,17 +770,21 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         days = spend.get(cid, {})
         prev = _d(info["last_close"])
         close, first = next_after(prev, card["closing_day"]), True
+        carried = info["carried"]   # paid the way the forecast pays it: what that doesn't pay carries over, with interest
         while True:
             due = next_after(close, card["due_day"])
             if due.isoformat() > dates[-1]:
                 break
             amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
-            if amt > 0.005:
+            statement = carried + interest(info, carried) + amt
+            pay = statement_payment(info, statement)
+            carried = statement - pay
+            if pay > 0.005:
                 paid = bankdays.next_business_day(due).isoformat()
-                extra.append((payer, paid, -round(amt, 2)))
+                extra.append((payer, paid, -round(pay, 2)))
                 if paid <= dates[-1]:
                     changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",
-                                    "amount": -round(amt, 2), "account": db.account_label(by_id[payer]),
+                                    "amount": -round(pay, 2), "account": db.account_label(by_id[payer]),
                                     # what it's made of: charges already on the card (first statement), plus budgeted ones
                                     "charged": round(info["new_charges"], 2) if first else 0.0})
             prev, close, first = close, next_after(close, card["closing_day"]), False

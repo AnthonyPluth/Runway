@@ -61,6 +61,28 @@ class HandlerTests(DbCase):
         self.assertEqual(tuple(row), ("Everyday Checking", "Daily", 1, None, 0))
         self.assertEqual(accounts.api_account_update(self.c, {}, {}, "demo-checking"), {"ok": True})
 
+    def test_card_payment_plan(self):
+        plan = lambda: {k: v for k, v in next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-card").items()
+                        if k in ("pay_mode", "pay_amount", "apr")}
+        self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
+        self.assertNotIn("pay_mode", next(a for a in accounts.api_accounts(self.c, {}, {}) if a["id"] == "demo-checking"))
+        accounts.api_account_update(self.c, {}, {"pay_mode": "fixed", "pay_amount": "312.50", "apr": 24.99}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
+        # anything wrong is refused before anything is saved
+        for bad in ({"pay_mode": "revolve"}, {"pay_amount": "lots"}, {"pay_amount": -5}, {"apr": "nan"}, {"apr": 150}):
+            with self.assertRaises(ApiError):
+                accounts.api_account_update(self.c, {}, {"display_name": "Changed", **bad}, "demo-card")
+        self.assertIsNone(self.one(select(Account.display_name).where(Account.id == "demo-card"))[0])
+        self.assertEqual(plan(), {"pay_mode": "fixed", "pay_amount": 312.5, "apr": 24.99})
+        # back to paying in full, and blanks clear the amount and the APR
+        accounts.api_account_update(self.c, {}, {"pay_mode": "full", "pay_amount": "", "apr": None}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "full", "pay_amount": None, "apr": None})
+        accounts.api_account_update(self.c, {}, {"pay_mode": "minimum", "apr": "0"}, "demo-card")
+        self.assertEqual(plan(), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
+        # which is what the forecast reads
+        from runway import forecast
+        self.assertEqual(forecast.payment_plan(self.c, "demo-card"), {"pay_mode": "minimum", "pay_amount": None, "apr": 0.0})
+
     # ------------------------------------------------------------------------------------------ push
 
     def test_push_recent(self):

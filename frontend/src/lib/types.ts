@@ -119,6 +119,11 @@ export interface CardSummary {
   last_close: string;
   remaining: number;
   minimum_payment?: number | null;
+  /** How the forecast pays the statement (Settings → Accounts): what it pays on the due date out of what's left
+   *  (remaining), and what that leaves to carry into the next statement. */
+  pay_mode?: "full" | "minimum" | "fixed";
+  payment?: number;
+  carried?: number;
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;

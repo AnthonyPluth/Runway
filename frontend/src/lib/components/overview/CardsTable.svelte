@@ -9,7 +9,8 @@
   import type { CardSummary } from "$lib/types";
   import { toast } from "svelte-sonner";
 
-  // Each card's latest statement (click it to correct the bank's figure), when it's due and its usual spending.
+  // Each card's latest statement (click it to correct the bank's figure), when it's due and its usual spending, and, for
+  // a card that isn't paid in full, how much of it the forecast pays.
   let { cards }: { cards: CardSummary[] } = $props();
   const today = parseDate(isoDay());
 
@@ -28,7 +29,7 @@
   <p class="cell text-sm text-muted-foreground">Link your cards through Plaid in <a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to see their statements and due dates.</p>
 {:else}
   {#each cards as c (c.id)}
-    {@const soon = c.remaining > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}
+    {@const soon = (c.payment ?? c.remaining) > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}
     <div class="cell items-start">
       <div class="min-w-0 flex-1">
         <div class="text-[15px]"><AcctLabel id={c.id} name={c.name} /></div>
@@ -47,7 +48,9 @@
         <span class="text-[13px] text-muted-foreground">
           {#if c.remaining > 0}
             <span class={soon ? "font-medium text-amber-400" : ""}>due {fmtDate(c.due_date)}</span>
-            {c.remaining < c.statement_balance - 0.005 ? ` · ${fmt(c.remaining)} left` : ""}{#if c.minimum_payment} · {nb(`min ${fmt(c.minimum_payment)}`)}{/if}
+            {#if c.pay_mode && c.pay_mode !== "full"}
+              · <span title={`The rest, ${fmt(c.carried ?? 0)}, carries into the next statement`}>{nb(`pays ${fmt(c.payment ?? 0)} of ${fmt(c.remaining)}`)}</span>
+            {:else}{c.remaining < c.statement_balance - 0.005 ? ` · ${fmt(c.remaining)} left` : ""}{/if}{#if c.minimum_payment} · {nb(`min ${fmt(c.minimum_payment)}`)}{/if}
           {:else}<span class="text-emerald-400">Paid ✓</span>{/if}
           {#if c.statement_set} · <Button variant="link" size="sm" class="h-auto p-0 text-xs" title={`Go back to the bank's figure (${fmt(c.statement_reported)})`} onclick={() => reset(c)}>reset</Button>{/if}
         </span>

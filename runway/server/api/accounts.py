@@ -1,9 +1,9 @@
-"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo)."""
+"""Accounts: the list, and the changes you make to one (its name, type, owner, provider, logo, and how a card is paid)."""
 from __future__ import annotations
 
 from sqlalchemy import func, select, update
 
-from ... import brands, db, merchants, plaidbank
+from ... import brands, db, forecast, merchants, plaidbank
 from ... import settings_keys as sk
 from ...models import Account, CardStatement, PlaidAccount, PlaidItem
 from ..common import ApiError
@@ -14,6 +14,8 @@ ACCOUNT_FIELDS = {
     "in_forecast": int, "daily_spend": int, "hidden": int, "networth_hidden": int, "owed_positive": int, "owner": str,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
+# How a card's statements are paid, for the forecast (forecast.payment_plan): kept in settings, not on the account.
+PAY_FIELDS = {"pay_mode": sk.card_pay_mode, "pay_amount": sk.card_pay_amount, "apr": sk.card_apr}
 
 
 def api_accounts(conn, _q, _b):
@@ -30,12 +32,37 @@ def api_accounts(conn, _q, _b):
                             "transactions": "transactions" in (it["products"] or ""),
                             "closed": it["last_statement_date"], "due": it["next_due_date"],
                             "statement_note": db.get_setting(conn, sk.plaid_stmt_note(it['item_id']))} if it else None)
+        if a["kind"] == "credit":
+            a.update(forecast.payment_plan(conn, a["id"]))
     return accts
+
+
+def _pay_settings(body: dict) -> dict[str, str | None]:
+    """The card payment fields in an update, checked, as the settings values to save (None: back to the default)."""
+    out: dict[str, str | None] = {}
+    for k in PAY_FIELDS.keys() & body.keys():
+        v = body[k]
+        if v in ("", None):
+            out[k] = None
+        elif k == "pay_mode":
+            if v not in forecast.PAY_MODES:
+                raise ApiError("Unknown payment mode")
+            out[k] = None if v == "full" else v
+        else:
+            try:
+                n = db.number(v)
+            except (TypeError, ValueError):
+                raise ApiError("Enter an amount" if k == "pay_amount" else "Enter the APR as a percentage") from None
+            if n < 0 or (k == "apr" and n > 100):
+                raise ApiError("Enter an amount of zero or more" if k == "pay_amount" else "Enter an APR between 0 and 100")
+            out[k] = str(n)
+    return out
 
 
 def api_account_update(conn, _q, body, acct_id):
     if not conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone():
         raise ApiError("Account not found", 404)
+    pay = _pay_settings(body)   # checked before anything is saved
     sets = {}
     for k, v in body.items():
         if k not in ACCOUNT_FIELDS:
@@ -51,6 +78,8 @@ def api_account_update(conn, _q, body, acct_id):
         sets[k] = v   # only ACCOUNT_FIELDS' columns
     if sets:
         conn.execute(update(Account).where(Account.id == acct_id).values(**sets))
+    for k, v in pay.items():
+        db.set_setting(conn, PAY_FIELDS[k](acct_id), v)
     if body.get("provider"):
         try:
             plaidbank.set_provider(conn, acct_id, body["provider"])
