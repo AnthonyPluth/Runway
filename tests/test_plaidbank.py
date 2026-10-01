@@ -257,6 +257,20 @@ class PlaidBankTests(DbCase):
         self.assertEqual(dict(self.c.execute(select(Transaction.id, Transaction.payee).where(Transaction.id.like("%pl:%"))).fetchall()),
                          {"sf-chk|pl:b1": "Birthday Gifts", "sf-chk|pl:b2": "Joe's Coffee"})
 
+    def test_a_big_merchant_gets_the_brands_name_unless_plaid_named_it(self):
+        self.link()
+        plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)
+        MockBank.pages = [{"added": [{**tx("c1", "p-chk", "2026-09-23", 20.0, "AMZN Mktp US*2K3AB1"), "merchant_name": None},
+                                     {**tx("c2", "p-chk", "2026-09-23", 20.0, "AMZN Mktp US*7Y6T5R"), "merchant_name": "Amazon Marketplace"},
+                                     {**tx("c3", "p-chk", "2026-09-23", 20.0, "WM SUPERCENTER #123"), "merchant_name": None}]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        db.set_setting(self.c, "brand_names_off", '["Walmart"]')   # Use the bank's name, for all of Walmart's
+        MockBank.pages = [{"added": [{**tx("c4", "p-chk", "2026-09-24", 20.0, "WM SUPERCENTER #123"), "merchant_name": None}]}]
+        plaidbank.sync_item(self.c, "item-b", TODAY)
+        self.assertEqual(dict(self.c.execute(select(Transaction.id, Transaction.payee).where(Transaction.id.like("%pl:c%"))).fetchall()),
+                         {"sf-chk|pl:c1": "Amazon", "sf-chk|pl:c2": "Amazon Marketplace", "sf-chk|pl:c3": "Walmart",
+                          "sf-chk|pl:c4": "Wm Supercenter"})
+
     def test_merchants_and_their_logos_are_noted(self):
         self.link()
         plaidbank.set_provider(self.c, "sf-chk", "plaid", TODAY)

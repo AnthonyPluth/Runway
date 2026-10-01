@@ -21,7 +21,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from . import brands, db, merchants, payees, splits
 from . import settings_keys as sk
-from .categorize import clean_payee
+from .categorize import bank_payee, clean_payee, kept_bank_names
 from .models import Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Transaction
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
@@ -393,6 +393,7 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
     ).scalars())
     new_ids: list[str] = []
     claimed: set[str] = set()
+    keep_bank = kept_bank_names(conn)
     for t in added + modified:
         acct = accts.get(t.get("account_id"))
         if not acct:
@@ -402,7 +403,8 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         posted = t.get("date") or t.get("authorized_date") or today.isoformat()
         amount = -float(t.get("amount") or 0)       # Plaid: positive = money out; Runway: positive = money in
         desc = (t.get("original_description") or t.get("name") or "").strip()
-        payee = clean_payee(t.get("merchant_name") or t.get("name") or desc)
+        # Plaid's merchant name is the merchant's own already; without one, a big merchant gets the brand's name.
+        payee = bank_payee(t["merchant_name"]) if t.get("merchant_name") else clean_payee(t.get("name") or desc, keep_bank)
         pending = 1 if t.get("pending") else 0
         merchant = merchants.note(conn, t)
         known = conn.execute(select(Transaction.is_split).where(Transaction.id == key)).fetchone()

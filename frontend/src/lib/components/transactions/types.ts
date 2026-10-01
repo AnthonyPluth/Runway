@@ -24,7 +24,11 @@ export interface Tx {
   splits?: Split[];
   retail?: (OrderSummary & { order_id: string }) | null;
   logo?: string | null;
+  /** A big merchant's: the brand's name a sync gave it ("Amazon") and the one the bank's text gives ("Amzn Mktp Us"),
+   *  and which of them it has. */
+  brand?: BrandChoice | null;
 }
+export interface BrandChoice { brand: string; bank_name: string; using: "brand" | "bank" }
 export interface TxList { items: Tx[]; total: number }
 
 /** POST /api/transactions/{id}/category (and /api/ai/apply) may offer to remember the category for the merchant. */

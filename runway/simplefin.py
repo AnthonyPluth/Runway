@@ -18,7 +18,7 @@ from sqlalchemy import delete, insert, select, update
 
 from . import db, deleted_accounts, payees, plaidbank, sfinvest, splits
 from . import settings_keys as sk
-from .categorize import clean_payee
+from .categorize import clean_payee, kept_bank_names
 from .models import Account, Transaction
 
 CHUNK_DAYS = 85          # bridge limit is 90 days per request
@@ -239,6 +239,7 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     new_ids: list[str] = []
     claimed: set = set()
     deleted = deleted_accounts.ids(conn)
+    keep_bank = kept_bank_names(conn)
     for acct in payload.get("accounts", []):
         acct_id = str(acct["id"])
         if acct_id in deleted:
@@ -253,7 +254,7 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
         sfinvest.capture(conn, acct, acct_id, org, balance, is_new=not existing)
         carried = _clear_pending(conn, acct_id, window_start)
         for tx in acct.get("transactions", []) or []:
-            key = _store_transaction(conn, acct_id, tx, carried, since, claimed)
+            key = _store_transaction(conn, acct_id, tx, carried, since, claimed, keep_bank)
             if key:
                 new_ids.append(key)
     splits.prune(conn)
@@ -307,14 +308,16 @@ def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
     return carried
 
 
-def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list], since: str | None, claimed: set) -> str | None:
+def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list], since: str | None, claimed: set,
+                       keep_bank: set[str] | frozenset[str] = frozenset()) -> str | None:
     """Save one transaction. Returns its id if it's new and needs categorizing; None if it was already here, is a
-    copy of one Plaid brought in, or took over a pending item's category."""
+    copy of one Plaid brought in, or took over a pending item's category. A big merchant gets the brand's name, unless
+    it's one of `keep_bank` (categorize.clean_payee)."""
     pending = 1 if tx.get("pending") else 0
     posted = _ts_to_date(tx.get("posted")) or _ts_to_date(tx.get("transacted_at")) or date.today().isoformat()
     amount = _to_float(tx.get("amount")) or 0.0
     desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
-    payee = clean_payee(tx.get("payee") or desc)
+    payee = clean_payee(tx.get("payee") or desc, keep_bank)
     key = f"{acct_id}|{tx['id']}"
     row = conn.execute(select(Transaction.id, Transaction.pending, Transaction.is_split).where(Transaction.id == key)).fetchone()
     if row:

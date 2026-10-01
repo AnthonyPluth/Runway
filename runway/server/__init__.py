@@ -68,5 +68,5 @@ from .api.state import (
 )
 from .api.transactions import (
     api_ai_apply, api_ai_log, api_ai_suggest, api_recategorize, api_transactions, api_tx_accept, api_tx_bulk,
-    api_tx_category, api_tx_split, tx_logos
+    api_tx_brand_name, api_tx_category, api_tx_split, tx_logos
 )

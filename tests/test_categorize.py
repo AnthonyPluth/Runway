@@ -3,11 +3,11 @@ import json
 import unittest
 from datetime import date, timedelta
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 
-from runway import categories, categorize, db, payees, server
+from runway import categories, categorize, db, payees, server, simplefin
 from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
-from tests.shared import LedgerCase
+from tests.shared import TODAY, LedgerCase, ts
 
 
 class PayeeTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class PayeeTests(unittest.TestCase):
             "": "",
         }
         for raw, want in cases.items():
-            self.assertEqual(categorize.clean_payee(raw), want, raw)
+            self.assertEqual(categorize.bank_payee(raw), want, raw)
 
     def test_the_banks_transfer_words_come_off_the_merchant(self):
         cases = {
@@ -50,7 +50,7 @@ class PayeeTests(unittest.TestCase):
         for name in ("Apple Cash", "Apple Pay", "Charlotte's Web", "Vitamin C", "Target C", "Discover Credit", "Ach Payment",
                      "Direct Deposit Acme Payroll", "Cash App", "Chase Bill Pay", "Bach Pay", "Coach", "Ppd", "Target"):
             self.assertEqual(payees.shorten(name), name, name)
-            self.assertEqual(categorize.clean_payee(name.upper()), name, name)
+            self.assertEqual(categorize.bank_payee(name.upper()), name, name)
 
     def test_a_payee_from_the_banks_text_or_from_you(self):
         self.assertTrue(payees.from_bank("Target Cach Tran Cash", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
@@ -61,6 +61,137 @@ class PayeeTests(unittest.TestCase):
         self.assertTrue(payees.from_bank("Trader Joe's", "TRADER JOE'S #123"))
         self.assertTrue(payees.from_bank("At&t", "AT&T BILL PAYMENT"))
         self.assertTrue(payees.from_bank("Amazon.com", "AMAZON.COM*2K3AB1"))
+
+
+class BrandNameTests(unittest.TestCase):
+    def test_big_merchants_get_the_brands_name(self):
+        cases = {
+            "amzn mktp us*2k3": "Amazon", "AMZN Mktp US*2K3AB1": "Amazon", "amazon.com*xyz": "Amazon",
+            "AMZN Digital*AB12CD": "Amazon", "WM SUPERCENTER #123": "Walmart", "Wal-Mart Super Center": "Walmart",
+            "Walmart.com 8009256278": "Walmart", "SQ *STARBUCKS": "Starbucks", "STARBUCKS STORE 12345": "Starbucks",
+            "TARGET T-1234": "Target", "COSTCO WHSE #0123": "Costco", "NETFLIX.COM": "Netflix", "SPOTIFY USA": "Spotify",
+            "MCDONALD'S F1234": "McDonald’s", "APPLE.COM/BILL 866-712-7753 CA": "Apple", "Disney Plus 888-905-7888": "Disney+",
+            "Delta Air Lines 0062": "Delta Air Lines",
+            # The sub-brands stay apart
+            "PRIME VIDEO*2K3AB1": "Prime Video", "Amazon Prime*2K3AB1": "Amazon Prime", "AUDIBLE*2K3AB1": "Audible",
+            "UBER *EATS PENDING": "Uber Eats", "UBER *TRIP": "Uber", "UBER *ONE": "Uber One",
+        }
+        for raw, want in cases.items():
+            self.assertEqual(categorize.clean_payee(raw), want, raw)
+
+    def test_not_every_mention_of_a_brand_is_the_brand(self):
+        # A wrong brand is worse than a long name: the payee has to start with the brand, as a whole word, and not be a
+        # payment, a part of the business worth telling apart, or a word other businesses use too.
+        for raw in ("PAYMENT TO AMAZON", "AMAZONIA CAFE", "AMAZON CORP SYF PAYMNT", "AMAZON.COM SVCS PAYROLL PPD ID: 123",
+                    "COSTCO GAS #123", "TARGET CARD SRVC", "APPLE CASH", "APPLE PAY", "APPLE MUSIC", "UBER *PASS",
+                    "PEACOCK CAFE", "HILTON HEAD PIZZA", "SOUTHWEST GAS", "DD *DOORDASH MCDONALDS", "VENMO *JOHN",
+                    "CLAUDE'S BARBER", "TARGETED MARKETING", "GOOGLE *YOUTUBE", "COMCAST WEB PAY", "KINDLE SVCS*2K3AB1"):
+            self.assertEqual(categorize.clean_payee(raw), categorize.bank_payee(raw), raw)
+
+    def test_brands_you_chose_keep_the_banks_name(self):
+        self.assertEqual(categorize.clean_payee("AMZN Mktp US*2K3AB1", keep_bank={"Amazon"}), "Amzn Mktp Us")
+        self.assertEqual(categorize.clean_payee("WM SUPERCENTER #123", keep_bank={"Amazon"}), "Walmart")
+
+    def test_what_the_details_offer(self):
+        choice = categorize.brand_choice
+        mktp = "AMZN Mktp US*2K3AB1"
+        self.assertEqual(choice({"payee": "Amazon", "description": mktp}),
+                         {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "brand"})
+        self.assertEqual(choice({"payee": "Amzn Mktp Us", "description": mktp}),
+                         {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "bank"})
+        self.assertIsNone(choice({"payee": "Birthday Gift", "description": mktp}))             # a name you gave it
+        self.assertIsNone(choice({"payee": "Amazon", "description": mktp, "merchant_id": "m"}))  # Plaid's
+        self.assertIsNone(choice({"payee": "Uber Eats", "description": "UBER *EATS"}))          # the bank's says it already
+        self.assertIsNone(choice({"payee": "Costco Gas", "description": "COSTCO GAS #1"}))
+        self.assertIsNone(choice({"payee": "Amazon", "description": None}))
+
+    def test_a_rule_made_from_the_banks_name_still_matches(self):
+        from runway import rules
+        mktp = {"payee": "Amazon", "description": "AMZN Mktp US*2K3AB1", "amount": -20}
+        other = {"payee": "Amazon", "description": "AMAZON.COM*ZZ9QW1", "amount": -20}
+        for mode in ("exact", "starts", "contains"):
+            r = {"match": "amzn mktp us", "match_mode": mode}
+            self.assertTrue(rules.matches(r, mktp), mode)
+            self.assertFalse(rules.matches(r, other), mode)   # not every Amazon order
+        # Not one you renamed "Amazon" by hand from someone else's text, nor one whose text names another brand.
+        r = {"match": "amzn mktp us", "match_mode": "exact"}
+        self.assertFalse(rules.matches(r, {"payee": "Amazon", "description": "WM SUPERCENTER #1", "amount": -5}))
+        self.assertFalse(rules.matches(r, {"payee": "Walmart", "description": "AMZN Mktp US*2K3AB1 X", "amount": -5}))
+        # A rule for a text that isn't a brand's name learns nothing new.
+        r = {"match": "costco gas", "match_mode": "exact"}
+        self.assertFalse(rules.matches(r, {"payee": "Costco", "description": "COSTCO WHSE #1", "amount": -5}))
+
+
+class BrandNameApiTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        self.acct("chk", "checking", 100.0)
+        for desc in ("AMZN Mktp US*2K3AB1", "AMAZON.COM*ZZ9QW1", "AMZN Digital*RT4QW2", "WM SUPERCENTER #1"):
+            self.tx("chk", "2026-09-01", -10.0, desc)
+        self.tx("chk", "2026-09-02", -10.0, "AMZN Mktp US*9P8O7I")
+        self.tx("chk", "2026-09-02", -10.0, "AMZN Mktp US*1A2S3D")
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|5").values(payee="Gift For Sam"))   # yours
+
+    def payees(self):
+        return dict(self.conn.execute(select(Transaction.id, Transaction.payee)).fetchall())
+
+    def call(self, tx_id, **body):
+        return server.api_tx_brand_name(self.conn, {}, body, tx_id)
+
+    def test_the_list_says_which_name_it_uses(self):
+        items = {t["id"]: t["brand"] for t in server.api_transactions(self.conn, {}, None)["items"]}
+        self.assertEqual(items["chk|0"], {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "brand"})
+        self.assertIsNone(items["chk|5"])
+
+    def test_the_banks_name_for_one_and_undo(self):
+        before = self.payees()
+        r = self.call("chk|0", use="bank")
+        self.assertEqual((r["updated"], r["payee"], r["brand"]), (1, "Amzn Mktp Us", "Amazon"))
+        self.assertEqual(self.payees(), {**before, "chk|0": "Amzn Mktp Us"})
+        self.assertEqual(categorize.kept_bank_names(self.conn), set())   # just this one
+        server.api_tx_bulk(self.conn, {}, {"restore": r["was"], "keep_bank": r["keep_bank"]})
+        self.assertEqual(self.payees(), before)
+        # And back to the brand's
+        self.call("chk|0", use="bank")
+        self.assertEqual(self.call("chk|0", use="brand")["payee"], "Amazon")
+
+    def test_the_banks_name_for_all_and_from_now_on(self):
+        before = self.payees()
+        r = self.call("chk|0", use="bank", all=True)
+        self.assertEqual(r["updated"], 4)
+        self.assertEqual(self.payees(), {"chk|0": "Amzn Mktp Us", "chk|1": "Amazon.com", "chk|2": "Amzn Digital",
+                                         "chk|3": "Walmart", "chk|4": "Amzn Mktp Us", "chk|5": "Gift For Sam"})
+        self.assertEqual(categorize.kept_bank_names(self.conn), {"Amazon"})
+        # The next sync keeps the bank's name for Amazon, and only Amazon.
+        simplefin.store_payload(self.conn, {"errors": [], "accounts": [{
+            "org": {"name": "Chase"}, "id": "chk", "name": "Checking", "currency": "USD", "balance": "100",
+            "balance-date": ts(TODAY), "transactions": [
+                {"id": "n1", "posted": ts(TODAY), "amount": "-3.00", "description": "AMZN Mktp US*1Q2W3E"},
+                {"id": "n2", "posted": ts(TODAY), "amount": "-3.00", "description": "WM SUPERCENTER #9"}]}]}, TODAY)
+        self.assertEqual((self.payees()["chk|n1"], self.payees()["chk|n2"]), ("Amzn Mktp Us", "Walmart"))
+        # Undo puts back the names and the brand's own
+        self.conn.execute(delete(Transaction).where(Transaction.id.in_(["chk|n1", "chk|n2"])))
+        server.api_tx_bulk(self.conn, {}, {"restore": r["was"], "keep_bank": r["keep_bank"]})
+        self.assertEqual(self.payees(), before)
+        self.assertEqual(categorize.kept_bank_names(self.conn), set())
+        # "Use Amazon" for all goes back to the brand's name, from now on too
+        self.call("chk|0", use="bank", all=True)
+        r = self.call("chk|4", use="brand", all=True)
+        self.assertEqual((r["updated"], r["keep_bank"]), (4, {"brand": "Amazon", "keep": True}))
+        self.assertEqual(self.payees(), before)
+        self.assertEqual(categorize.kept_bank_names(self.conn), set())
+
+    def test_what_cant_be_renamed(self):
+        for tx_id, body in (("chk|5", {"use": "bank"}),        # a name you gave it
+                            ("nope", {"use": "bank"}), ("chk|0", {"use": "sideways"})):
+            with self.assertRaises(server.ApiError):
+                self.call(tx_id, **body)
+        self.assertEqual(self.payees()["chk|5"], "Gift For Sam")
+        # A broken setting reads as none, and is replaced the next time
+        db.set_setting(self.conn, "brand_names_off", "{oops")
+        self.assertEqual(categorize.kept_bank_names(self.conn), set())
+        self.call("chk|0", use="bank", all=True)
+        self.assertEqual(categorize.kept_bank_names(self.conn), {"Amazon"})
 
 
 class CategorizeTests(LedgerCase):

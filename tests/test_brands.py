@@ -131,7 +131,7 @@ class BrandTests(unittest.TestCase):
 class MerchantLogoTests(unittest.TestCase):
     def test_every_website_is_one(self):
         from runway import merchants
-        for _p, site in brands.MERCHANT_PATTERNS:
+        for _p, site, _name in brands.MERCHANT_PATTERNS:
             self.assertEqual(merchants.site(site), site)
 
     def test_names(self):

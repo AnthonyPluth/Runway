@@ -75,7 +75,7 @@ class RecurringTests(LedgerCase):
         tid = self.conn.execute(select(Transaction.id).where(Transaction.description.like("NETFLIX%"))).fetchone()[0]
         rid = recurring.create_from_transaction(self.conn, tid, "monthly")
         item = self.conn.execute(select(Recurring).where(Recurring.id == rid)).fetchone()
-        self.assertEqual((item["amount"], item["frequency"], item["match"]), (-15.99, "monthly", "netflix.com"))
+        self.assertEqual((item["amount"], item["frequency"], item["match"]), (-15.99, "monthly", "netflix"))   # the brand's name the payee has
         # an item without merchant text learns it from the first link
         self.conn.execute(insert(Recurring).values(name="Store", account_id="chk", amount=-60, frequency="monthly",
                                                    anchor_date="2026-09-10"))

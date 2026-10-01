@@ -8,12 +8,13 @@ import ssl
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Collection
 
 from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_coerce, update
 
 from . import categories as catmod
 from . import settings_keys as sk
-from . import db, monitoring, payees, rules as rulesmod, splits
+from . import brands, db, monitoring, payees, rules as rulesmod, splits
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
@@ -36,8 +37,81 @@ _TRAILING_NOISE = re.compile(
 )
 
 
-def clean_payee(raw: str | None) -> str:
-    return payees.shorten(tidy_payee(raw))   # "Target Debit Cach Tran" -> "Target"
+def bank_payee(raw: str | None) -> str:
+    """The payee the bank's text gives on its own: tidied, without its transfer words ("Target Debit Cach Tran" ->
+    "Target"), but not yet the brand's name ("Amzn Mktp Us")."""
+    return payees.shorten(tidy_payee(raw))
+
+
+def clean_payee(raw: str | None, keep_bank: Collection[str] = ()) -> str:
+    """The payee a sync gives a transaction from the bank's text: `bank_payee`, or the brand's own name for a big
+    merchant ("AMZN Mktp US*2K3" -> "Amazon": brands.merchant_name), except for the brands in `keep_bank` (the ones
+    you chose to keep the bank's name for: kept_bank_names)."""
+    name = bank_payee(raw)
+    brand = brands.merchant_name(name)
+    return brand if brand and brand not in keep_bank else name
+
+
+def kept_bank_names(conn) -> set[str]:
+    """The brands whose transactions keep the bank's name instead of the brand's (Use the bank's name, for all)."""
+    try:
+        names = json.loads(db.get_setting(conn, sk.BRAND_NAMES_OFF) or "[]")
+    except ValueError:
+        return set()
+    return {n for n in names if isinstance(n, str)} if isinstance(names, list) else set()
+
+
+def keep_bank_name(conn, brand: str, keep: bool) -> None:
+    """Keep the bank's name for this brand's transactions from now on (or go back to the brand's)."""
+    names = kept_bank_names(conn)
+    names = names | {brand} if keep else names - {brand}
+    db.set_setting(conn, sk.BRAND_NAMES_OFF, json.dumps(sorted(names)))
+
+
+def _key(s: str | None) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def brand_choice(tx: dict) -> dict | None:
+    """For a transaction's details: {"brand", "bank_name", "using"} when its payee is a brand's name made from the
+    bank's text ("using": "brand", with the name the bank's text gives, to go back to), or that bank's name where a
+    brand's could be ("using": "bank"); None otherwise (a name Plaid gave it, one you gave it, or no brand)."""
+    if tx.get("merchant_id") or not tx.get("description"):
+        return None
+    bank = bank_payee(tx["description"])
+    brand = brands.merchant_name(bank)
+    if not brand or _key(brand) == _key(bank):
+        return None
+    payee = _key(tx.get("payee"))
+    using = "brand" if payee == _key(brand) else "bank" if payee == _key(bank) else None
+    return {"brand": brand, "bank_name": bank, "using": using} if using else None
+
+
+def brand_renames(conn, tx_id: str, use: str, everywhere: bool) -> tuple[str, dict[str, str]]:
+    """What "Use the bank's name" (use="bank") or "Use <brand>" (use="brand") renames: (the brand, {transaction id:
+    its new payee}). This transaction, and with `everywhere` every other one of the brand's named the other way (not
+    one Plaid named, nor one you named something else)."""
+    if use not in ("bank", "brand"):
+        raise ValueError("Choose the bank’s name or the brand’s")
+    t = Transaction
+    row = conn.execute(select(t.id, t.payee, t.description, t.merchant_id).where(t.id == tx_id)).fetchone()
+    if not row:
+        raise ValueError("Transaction not found")
+    choice = brand_choice(dict(row))
+    if not choice:
+        raise ValueError("This transaction’s name isn’t a brand’s")
+    brand = choice["brand"]
+    out = {tx_id: choice["bank_name"] if use == "bank" else brand}
+    if everywhere:
+        q = select(t.id, t.payee, t.description, t.merchant_id).where(
+            t.merchant_id.is_(None), t.description.is_not(None), t.id != tx_id)
+        if use == "bank":
+            q = q.where(func.lower(t.payee) == brand.lower())
+        for r in conn.execute(q):
+            c = brand_choice(dict(r))
+            if c and c["brand"] == brand and c["using"] != use:
+                out[r["id"]] = c["bank_name"] if use == "bank" else brand
+    return brand, out
 
 
 def tidy_payee(raw: str | None) -> str:

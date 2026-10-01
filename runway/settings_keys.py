@@ -71,6 +71,9 @@ def card_apr(card_id: str) -> str:
     return f"card_apr:{card_id}"
 
 
+# Merchant names
+BRAND_NAMES_OFF = "brand_names_off"   # JSON: brands whose transactions keep the bank's name (categorize.keep_bank_name)
+
 # Recurring items
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"
 
