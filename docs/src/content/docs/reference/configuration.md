@@ -27,7 +27,7 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_NO_SYNC` | | `1` turns off the automatic background sync. |
 | `TZ` | America/New_York (Docker image); the system's otherwise | Decides what "today" is for forecasts and budgets, and when the daily sync runs. |
 
-Reporting to Sentry is off unless you set `SENTRY_DSN` (your own Sentry project's key); then everything is sent, at full rate: errors, tracing, profiling, replays, logs, metrics, cron monitoring, feedback and the AI's prompts, never your amounts, merchants or credentials. `SENTRY_BROWSER_DSN` sends the web app's reports to a separate project, and `SENTRY_ENVIRONMENT` names the environment (default `production`). See [Error reports](/Runway/start/docker/#error-reports-optional).
+Reporting to Sentry is off unless you set `SENTRY_DSN` (your own Sentry project's key); then everything is sent, at full rate: errors, tracing, profiling, logs, metrics, cron monitoring, feedback and the AI's prompts, never your amounts, merchants or credentials. Runway never records sessions or sends replays. `SENTRY_BROWSER_DSN` sends the web app's reports to a separate project, and `SENTRY_ENVIRONMENT` names the environment (default `production`). See [Error reports](/Runway/start/docker/#error-reports-optional).
 
 With no `OIDC_ISSUER`, Runway refuses to listen beyond `localhost` unless `RUNWAY_ALLOW_NO_AUTH` is set. See [Deployment](/Runway/start/deployment/) and [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md).
 

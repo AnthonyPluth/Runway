@@ -1,7 +1,8 @@
 // The web app's reports to Sentry, only when Runway is set up for them (SENTRY_DSN; see runway/monitoring.py), with
-// everything on: tracing, profiling, replays, logs and feedback. Loaded on demand, so nothing of Sentry's is fetched otherwise.
+// everything on: tracing, profiling, logs and feedback. Loaded on demand, so nothing of Sentry's is fetched otherwise.
 // What's sent never holds what's on the page: no console or click breadcrumbs (they'd hold amounts and names), no query
-// strings, no merchant names in addresses, and replays with every piece of text, input and image masked.
+// strings, no merchant names in addresses. Runway never records sessions or sends replays: Session Replay isn't used
+// (replayIntegration is never imported, so it isn't in the bundle), and the SDK's replay events are dropped.
 import type { SentryConfig } from "./types";
 
 let started = false;
@@ -57,35 +58,25 @@ export const onlyId = <E extends { user?: { id?: unknown } | null }>(event: E): 
 };
 
 type Event = {
-  type?: string; request?: { url?: string }; user?: { id?: unknown } | null; urls?: string[];
+  type?: string; request?: { url?: string }; user?: { id?: unknown } | null;
   contexts?: { feedback?: { url?: string; message?: string } };
 };
 
-/** Feedback and replays (they don't go through beforeSend): addresses cleaned wherever they're kept. */
+/** Feedback (it doesn't go through beforeSend): addresses cleaned wherever they're kept. */
 function scrubEvent<E extends Event>(event: E): E {
   if (event.request) event.request = { url: pathOnly(event.request.url) };
   onlyId(event);
   if (event.contexts?.feedback?.url) event.contexts.feedback.url = pathOnly(event.contexts.feedback.url);
-  if (event.urls) event.urls = event.urls.map((u) => pathOnly(u) ?? u);
   return event;
-}
-
-// Replay's recording: the page's address (meta), and the network and navigation entries it keeps (custom events).
-type RecordingEvent = { type: number; data?: { href?: string; payload?: { description?: string; data?: Data } } };
-function scrubRecording(e: RecordingEvent): RecordingEvent {
-  if (e.type === 4 && e.data?.href) e.data.href = pathOnly(e.data.href);
-  if (e.type === 5 && e.data?.payload) {
-    e.data.payload.description = scrubText(e.data.payload.description);
-    cleanData(e.data.payload.data);
-  }
-  return e;
 }
 
 export async function startMonitoring(cfg: SentryConfig | null | undefined): Promise<void> {
   if (!cfg || started) return;
   started = true;
-  const Sentry = await import("@sentry/browser");
-  Sentry.init({
+  // Only what is named here is bundled (a whole-module import would carry all of the SDK, Session Replay included).
+  const { init, breadcrumbsIntegration, browserTracingIntegration, browserProfilingIntegration, consoleLoggingIntegration,
+          feedbackIntegration, setUser, addEventProcessor } = await import("@sentry/browser");
+  init({
     dsn: cfg.dsn, environment: cfg.environment, release: cfg.release,
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
     tracesSampleRate: 1,
@@ -93,27 +84,18 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
     tracePropagationTargets: [/^\/(?!\/)/, new RegExp("^" + location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(/|$)")],
     // The browser's own profiler (Chrome and Edge), while a sampled trace runs; the page asks for it with a header.
     profileSessionSampleRate: 1, profileLifecycle: "trace",
-    replaysSessionSampleRate: 1, replaysOnErrorSampleRate: 1,
-    // No console breadcrumbs (Console) or click breadcrumbs (Breadcrumbs' dom): they'd carry what's on screen.
+    // No console breadcrumbs (Console) or click breadcrumbs (Breadcrumbs' dom): they'd carry what's on screen. And never
+    // Session Replay, should a version of the SDK ever count it among its defaults.
     integrations: (defaults) => [
-      ...defaults.filter((i) => i.name !== "Console" && i.name !== "Breadcrumbs"),
-      Sentry.breadcrumbsIntegration({ dom: false }),
+      ...defaults.filter((i) => !["Console", "Breadcrumbs", "Replay", "ReplayCanvas"].includes(i.name)),
+      breadcrumbsIntegration({ dom: false }),
       // Pages are the hash (#budget/recurring), so name page loads and navigations by it, never by what's searched.
-      Sentry.browserTracingIntegration({ beforeStartSpan: (o) => ({ ...o, name: pageName() }) }),
-      Sentry.browserProfilingIntegration(),
-      Sentry.replayIntegration({
-        // Every piece of text, every input and every image masked: a replay shows the layout and what was clicked.
-        maskAllText: true, maskAllInputs: true, blockAllMedia: true,
-        maskAttributes: ["title", "placeholder", "aria-label", "alt", "href", "value", "label", "data-value"],
-        networkDetailAllowUrls: [],   // no request or response bodies or headers
-        // The compression worker would be a blob: script, which the page's Content-Security-Policy doesn't allow.
-        useCompression: false,
-        beforeAddRecordingEvent: (e) => scrubRecording(e as RecordingEvent) as typeof e,
-      }),
+      browserTracingIntegration({ beforeStartSpan: (o) => ({ ...o, name: pageName() }) }),
+      browserProfilingIntegration(),
       // Console warnings and errors as Sentry Logs (their text is Runway's own messages, cleaned like the rest).
-      Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
+      consoleLoggingIntegration({ levels: ["warn", "error"] }),
       // "Send feedback" in Settings opens it: anonymous (the name and email fields are hidden), and no screenshot.
-      Sentry.feedbackIntegration({
+      feedbackIntegration({
         autoInject: false, showName: false, showEmail: false, enableScreenshot: false, showBranding: false,
         colorScheme: "system", formTitle: "Send feedback", messagePlaceholder: "What's wrong, or what would make Runway better?",
       }),
@@ -143,10 +125,13 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
       return crumb;
     },
   });
-  // Who's signed in, as Runway's code for them: errors, traces, profiles and replays count people, not "anonymous".
-  if (cfg.user_id) Sentry.setUser({ id: cfg.user_id });
-  // Feedback and replays don't go through beforeSend; this runs for every event.
-  Sentry.addEventProcessor((event) => (event.type === "feedback" || event.type === "replay_event" ? scrubEvent(event as Event) as typeof event : event));
+  // Who's signed in, as Runway's code for them: errors, traces and profiles count people, not "anonymous".
+  if (cfg.user_id) setUser({ id: cfg.user_id });
+  // Feedback doesn't go through beforeSend; this runs for every event. A replay is never sent, whatever starts one.
+  addEventProcessor((event) => {
+    if ((event.type as string | undefined) === "replay_event") return null;
+    return event.type === "feedback" ? scrubEvent(event as Event) as typeof event : event;
+  });
 }
 
 /** Whether "Send feedback" can be offered (reporting has started). */
@@ -155,8 +140,8 @@ export const feedbackAvailable = () => started;
 /** Open Sentry's feedback form. */
 export async function openFeedback(): Promise<void> {
   if (!feedbackAvailable()) return;
-  const Sentry = await import("@sentry/browser");
-  const form = await Sentry.getFeedback()?.createForm();
+  const { getFeedback } = await import("@sentry/browser");
+  const form = await getFeedback()?.createForm();
   form?.appendToDom();
   form?.open();
 }

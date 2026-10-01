@@ -135,8 +135,6 @@ Everything is sent once there's a DSN, at full rate (it's your own Sentry projec
   (`GET /api/transactions/{id}/category`, never the ids or what was searched), its database queries (without their
   values) and calls to banks and services; the daily sync; page loads and navigations with Web Vitals. A page's trace
   continues into the server's. The browser's profiler is Chrome's and Edge's.
-- **Session Replay**, with every piece of text, every input and every image masked: a replay shows the layout, the
-  clicks and the pages, not your data.
 - **Logs and metrics:** Runway's log lines as Sentry Logs (one per request, with its route and timing but not your
   address) and the web app's console warnings and errors; how long syncs take and whether they fail, new transactions
   per sync, and the AI's tokens.
@@ -146,12 +144,16 @@ Everything is sent once there's a DSN, at full rate (it's your own Sentry projec
   (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug.
 - **"Send feedback"** at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a
   screenshot.
-- **Who's signed in**, so Sentry counts the people an error, a slow page, a profile or a replay affects instead of
+- **Who's signed in**, so Sentry counts the people an error, a slow page or a profile affects instead of
   calling everyone "anonymous user". Each person is a 16-character code made from their sign-in id and Runway's key
   (`RUNWAY_SECRET_KEY`, or `secret.key`): the same every time, but it doesn't say who it is, and Sentry never gets a
   name, email or address. Without OIDC everyone is `local`. A new key gives everyone new codes.
 - **The AI's prompts and replies** on its spans in Sentry's Agent Tracing (the merchants, amounts and dates it's asked
   about, which the AI provider sees anyway).
+
+Runway never records sessions or sends replays: Sentry's Session Replay isn't used, and isn't an option. If
+`SENTRY_REPLAY_SAMPLE_RATE` or `SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE` is still set, Runway warns at startup that it's
+no longer read.
 
 Also in Sentry, without a variable:
 

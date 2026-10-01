@@ -10,7 +10,7 @@ const named = (name: string) => vi.fn((opts?: unknown) => ({ name, opts }));
 vi.mock("@sentry/browser", () => ({
   init, addEventProcessor, setUser, getFeedback: () => ({ createForm }),
   breadcrumbsIntegration: named("Breadcrumbs"), browserTracingIntegration: named("BrowserTracing"),
-  browserProfilingIntegration: named("BrowserProfiling"), replayIntegration: named("Replay"),
+  browserProfilingIntegration: named("BrowserProfiling"),
   consoleLoggingIntegration: named("ConsoleLogging"), feedbackIntegration: named("Feedback"),
 }));
 
@@ -59,15 +59,28 @@ describe("startMonitoring", () => {
 
   it("turns everything on, at full rate", async () => {
     const { m, opts } = await started(cfg);
-    expect(opts).toMatchObject({ tracesSampleRate: 1, profileSessionSampleRate: 1, profileLifecycle: "trace",
-                                 replaysSessionSampleRate: 1, replaysOnErrorSampleRate: 1 });
+    expect(opts).toMatchObject({ tracesSampleRate: 1, profileSessionSampleRate: 1, profileLifecycle: "trace" });
     const list = opts.integrations([]);
-    expect(list.map((i) => i.name)).toEqual(["Breadcrumbs", "BrowserTracing", "BrowserProfiling", "Replay", "ConsoleLogging", "Feedback"]);
-    expect(list.find((i) => i.name === "Replay")?.opts).toMatchObject({
-      maskAllText: true, maskAllInputs: true, blockAllMedia: true, networkDetailAllowUrls: [], useCompression: false });
+    expect(list.map((i) => i.name)).toEqual(["Breadcrumbs", "BrowserTracing", "BrowserProfiling", "ConsoleLogging", "Feedback"]);
     expect(list.find((i) => i.name === "Feedback")?.opts).toMatchObject({ autoInject: false, showName: false, showEmail: false, enableScreenshot: false });
     expect(list.find((i) => i.name === "ConsoleLogging")?.opts).toEqual({ levels: ["warn", "error"] });
     expect(m.feedbackAvailable()).toBe(true);
+  });
+
+  it("never turns on Session Replay: no replay integration and no replay sample rates", async () => {
+    const { opts } = await started(cfg);
+    expect(Object.keys(opts).filter((k) => /replay/i.test(k))).toEqual([]);
+    // Not even one the SDK offers among its defaults.
+    const list = opts.integrations([{ name: "Replay" }, { name: "ReplayCanvas" }, { name: "Dedupe" }]);
+    expect(list.map((i) => i.name).filter((n) => /replay/i.test(n))).toEqual([]);
+    expect(list.map((i) => i.name)).toContain("Dedupe");
+    // (The mocked SDK has no replayIntegration, so calling it anywhere would fail these tests.)
+  });
+
+  it("isn't written to use Session Replay", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(`${process.cwd()}/src/lib/monitoring.ts`, "utf8");
+    expect(source).not.toMatch(/replayIntegration\(|replaysSessionSampleRate|replaysOnErrorSampleRate/);
   });
 
   it("sends trace headers to Runway only", async () => {
@@ -147,26 +160,19 @@ describe("startMonitoring", () => {
       expect(logo.name).toBe("https://runway.test/api/merchants/{id}/logo");
     });
 
-    it("cleans console logs, and feedback and replay events", () => {
+    it("cleans console logs and feedback events", () => {
       const log = opts.beforeSendLog({ message: "fetch /api/transactions?q=rent failed", attributes: { "sentry.message.parameter.0": "https://u:p@x.test/a?b=1" } });
       expect(JSON.stringify(log)).not.toMatch(/rent|u:p|b=1/);
       const processor = addEventProcessor.mock.calls[0][0] as (e: Record<string, unknown>) => Record<string, unknown>;
       const fb = processor({ type: "feedback", contexts: { feedback: { url: "https://runway.test/#transactions?q=rent", message: "It's slow" } } });
       expect(fb.contexts).toEqual({ feedback: { url: "https://runway.test/#transactions", message: "It's slow" } });
-      const replay = processor({ type: "replay_event", urls: ["https://runway.test/#reports?merchant=Starbucks"] });
-      expect(replay.urls).toEqual(["https://runway.test/#reports"]);
       const error = { message: "x?y=1" };
       expect(processor(error)).toBe(error);   // errors have beforeSend
     });
 
-    it("cleans addresses in replay recordings", () => {
-      const replay = opts.integrations([]).find((i) => i.name === "Replay")!;
-      const clean = replay.opts!.beforeAddRecordingEvent as (e: unknown) => unknown;
-      expect(clean({ type: 4, data: { href: "https://runway.test/#transactions?q=rent", width: 1 } }))
-        .toEqual({ type: 4, data: { href: "https://runway.test/#transactions", width: 1 } });
-      expect(JSON.stringify(clean({ type: 5, data: { tag: "performanceSpan", payload: {
-        op: "navigation.push", description: "https://runway.test/#transactions?q=rent", data: { previous: "https://runway.test/#reports?m=target" } } } })))
-        .not.toMatch(/rent|target/);
+    it("never sends a replay", () => {
+      const processor = addEventProcessor.mock.calls[0][0] as (e: Record<string, unknown>) => Record<string, unknown> | null;
+      expect(processor({ type: "replay_event", urls: ["https://runway.test/#reports"] })).toBeNull();
     });
   });
 
@@ -190,7 +196,7 @@ describe("scrubText", () => {
     expect(scrubText("GET /api/tx?q=rent and https://a:b@x.test/y?z=1")).toBe("GET /api/tx?[Filtered] and https://[Filtered]@x.test/y?[Filtered]");
     expect(scrubText("/api/merchants/name:costco/logo")).toBe("/api/merchants/{id}/logo");
     expect(scrubText("Really? Yes.")).toBe("Really? Yes.");
-    // The app's searches are in the hash (replay keeps these addresses for navigations).
+    // The app's searches are in the hash.
     expect(scrubText("http://localhost:8799/#transactions?q=Grocer")).toBe("http://localhost:8799/#transactions?[Filtered]");
     expect(scrubText("went /#reports/merchants?name=Target then #budget?m=1")).toBe("went /#reports/merchants?[Filtered] then #budget?[Filtered]");
     expect(scrubText(undefined)).toBeUndefined();

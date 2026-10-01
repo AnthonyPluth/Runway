@@ -157,6 +157,9 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(monitoring.browser_config()["dsn"], DSN)
             self.assertIn("connect-src 'self' https://production.plaid.com https://o123.ingest.us.sentry.io;",
                           server.content_security_policy("n").replace(server.PLAID_API, "https://production.plaid.com"))
+            # Workers are the service worker (/sw.js) only: no blob: scripts, which a replay's compression worker would need.
+            self.assertIn("worker-src 'self';", server.content_security_policy("n"))
+            self.assertNotIn("blob:", server.content_security_policy("n"))
         with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN, "RUNWAY_SENTRY_BROWSER": "0"}):
             self.assertIsNone(monitoring.browser_config())
         with mock.patch.dict(os.environ, {"SENTRY_DSN": "http://k@evil.example/1"}):   # not https: never allowed
@@ -201,6 +204,7 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {**env, "SENTRY_DSN": DSN}, clear=True):
             cfg = monitoring.browser_config()
             self.assertEqual(set(cfg), {"dsn", "environment", "release", "user_id"})   # the web app turns on all of its own
+            self.assertNotIn("replay", json.dumps(cfg).lower())   # and never Session Replay
             self.assertEqual(cfg["environment"], "production")
             self.assertTrue(monitoring.browser_profiling())
         transport = start({**env, "SENTRY_DSN": DSN})
@@ -229,11 +233,27 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {**env, "SENTRY_AI_CONTENT": "0"}, clear=True), mock.patch("sys.stderr", io.StringIO()) as quiet:
             self.assertFalse(monitoring.init())   # without a DSN nothing's sent, so there's nothing to warn about
         self.assertEqual(quiet.getvalue(), "")
-        # The web app reports with its own DSN alone, replays included, so that's warned about too.
+        # The web app reports with its own DSN alone, so that's warned about too.
         with mock.patch.dict(os.environ, {**env, "SENTRY_BROWSER_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "0"}, clear=True), \
                 mock.patch("sys.stderr", io.StringIO()) as browser_only:
             self.assertFalse(monitoring.init())
         self.assertIn("SENTRY_REPLAY_SAMPLE_RATE is no longer read", browser_only.getvalue())
+
+    def test_a_replay_setting_is_warned_about_whatever_its_value(self):
+        # Runway never sends replays, so a replay rate is warned about even set to on, not quietly ignored.
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
+        for value in ("1", "1.0", "true", "on", "0", "0.25"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {**env, "SENTRY_REPLAY_SAMPLE_RATE": value,
+                                                                         "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE": value}, clear=True):
+                self.assertEqual(monitoring.retired_off(), ["SENTRY_REPLAY_SAMPLE_RATE", "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE"])
+        printed = io.StringIO()
+        with mock.patch("sys.stderr", printed):
+            start({**env, "SENTRY_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "1"})
+        self.assertIn("SENTRY_REPLAY_SAMPLE_RATE is no longer read", printed.getvalue())
+        self.assertIn("never records sessions or sends replays", printed.getvalue())
+        self.assertNotIn("replays,", printed.getvalue())   # replays aren't among what's sent
+        with mock.patch.dict(os.environ, {**env, "SENTRY_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "1"}, clear=True):
+            self.assertNotIn("replay", json.dumps(monitoring.browser_config()).lower())
 
     def test_the_web_app_gets_no_config_without_a_dsn(self):
         with mock.patch.dict(os.environ, {"SENTRY_DSN": "", "SENTRY_BROWSER_DSN": ""}):
