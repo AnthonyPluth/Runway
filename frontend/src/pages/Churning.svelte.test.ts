@@ -9,7 +9,19 @@ vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {})
 
 import { api } from "$lib/api";
 import { bodyOf, calls, card, churning, found, wish } from "$lib/components/churning/fixtures";
+import type { BankBonus, ChurnCard } from "$lib/components/churning/types";
 import Churning from "./Churning.svelte";
+
+const serve = (over: Parameters<typeof churning>[0]) =>
+  vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning(over))) as never);
+const bankBonus = (over: Partial<BankBonus> = {}) => ({
+  id: 1, owner: "Alex", bank: "Chase", account_type: "checking", account_id: null, opened_on: "2026-01-05", bonus: 300, dd_total: 500, dd_count: null,
+  debit_count: null, min_balance: null, hold_until: null, other_reqs: null, deadline_days: 90, deadline: "2026-04-05", post_days: 30, manual_dd: null,
+  manual_debits: null, status: "open", received_on: null, received_amount: null, closed_on: null, monthly_fee: 0, fee_waiver: null, early_close_fee: null,
+  keep_open_days: null, repeat_months: null, once_per_lifetime: 0, eligible_on: null, notes: null,
+  progress: { dd_total: 0, dd_count: 0, debits: 0, balance: null, balance_ok: null, source: "auto" }, state: "active", due: "2026-12-05", expected_on: null,
+  safe_close_on: null, fee_reminder: null, eligibility: { status: "now", on: null, why: "", override: false }, ...over,
+}) as unknown as BankBonus;
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
@@ -194,6 +206,59 @@ describe("the Churning page", () => {
       await userEvent.click(screen.getByRole("radio", { name: "Alex" }));
       expect(screen.queryByRole("button", { name: "Add CREDIT CARD (3392)" })).toBeNull();
       expect(screen.getByRole("button", { name: "Add Sapphire Reserve" })).toBeInTheDocument();
+    });
+  });
+
+  it("tucks paid and closed bank bonuses into a collapsed group and keeps the active ones shown", async () => {
+    serve({ cards: [card()], bank: [
+      bankBonus({ id: 1, bank: "Chase" }),
+      bankBonus({ id: 2, bank: "Citi", state: "received", status: "received", received_on: "2026-03-01" }),
+      bankBonus({ id: 3, bank: "Ally", state: "closed", status: "closed" }),
+    ] });
+    render(Churning, { sub: "bank" });
+    const group = (await screen.findByTestId("done-bank")) as HTMLDetailsElement;
+    expect(within(group).getByText("2 paid or closed")).toBeInTheDocument();
+    expect(group.open).toBe(false);
+    expect(screen.getByText("Chase checking").closest("details")).toBeNull();
+    expect(screen.getByText("Citi checking").closest("details")).toBe(group);
+    expect(screen.getByText("Ally checking").closest("details")).toBe(group);
+    await userEvent.click(within(group).getByText("2 paid or closed"));
+    expect(group.open).toBe(true);
+  });
+
+  it("has no paid group when every bank bonus is still active", async () => {
+    serve({ cards: [card()], bank: [bankBonus()] });
+    render(Churning, { sub: "bank" });
+    await screen.findByText("Chase checking");
+    expect(screen.queryByTestId("done-bank")).toBeNull();
+  });
+
+  it("no longer shows the bank bonuses in the year tile, and keeps Bonus money by year", async () => {
+    serve({ cards: [card()], bank_income: { Alex: { "2026": 300 } } });
+    render(Churning, { sub: "bank" });
+    expect(await screen.findByText("Bonus money by year")).toBeInTheDocument();
+    expect(screen.queryByText(/Bank bonuses in 2026/)).toBeNull();
+  });
+
+  it("doesn't list each category's earning rate on a card row", async () => {
+    serve({ cards: [card({ rates: [{ category: "Travel", multiplier: 5 }] })] });
+    render(Churning);
+    await screen.findByRole("button", { name: "Add a card" });
+    expect(screen.queryByText(/^Earns /)).toBeNull();
+  });
+
+  describe("the annual fee tile", () => {
+    const due = (over: Partial<ChurnCard>) => card({ fee_due: "2026-10-20", annual_fee: 95, ...over });
+    it("doesn't ask keep, downgrade or close when every card due has a plan", async () => {
+      serve({ cards: [due({ id: 1, plan: "keep" }), due({ id: 2, plan: "close", plan_active: true }), due({ id: 3, plan: "product_change", plan_active: true })] });
+      render(Churning);
+      expect(await screen.findByText("3 cards, each with a plan")).toBeInTheDocument();
+      expect(screen.queryByText(/keep, downgrade or close/)).toBeNull();
+    });
+    it("still asks about the cards with no plan", async () => {
+      serve({ cards: [due({ id: 1, plan: "keep" }), due({ id: 2, plan: "undecided" })] });
+      render(Churning);
+      expect(await screen.findByText("1 card: keep, downgrade or close?")).toBeInTheDocument();
     });
   });
 });

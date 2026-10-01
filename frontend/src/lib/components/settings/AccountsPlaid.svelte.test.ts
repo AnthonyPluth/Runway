@@ -34,6 +34,29 @@ const serve = (st: PlaidStatus | Error) => vi.mocked(api).mockImplementation(asy
 beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(reload).mockClear(); vi.mocked(toast.success).mockClear(); });
 const matchCall = () => vi.mocked(api).mock.calls.find(([p]) => p === "/api/plaid/match");
 
+describe("Settings → Accounts: hidden accounts", () => {
+  it("collapses them into a counted line that expands, leaving the others shown", async () => {
+    serve(status([]));
+    render(AccountsSection, { accounts: [acct(), acct({ id: "old1", name: "Old checking", hidden: 1 }), acct({ id: "old2", name: "Old savings", kind: "savings", hidden: 1 })] });
+    const section = await screen.findByRole("region", { name: "Hidden accounts" });
+    expect(section).toHaveTextContent("2 hidden accounts");
+    expect(screen.getByText("Checking")).toBeInTheDocument();
+    expect(screen.queryByText("Old checking")).toBeNull();
+    await userEvent.click(within(section).getByRole("button", { name: "Show" }));
+    expect(within(section).getByText("Old checking")).toBeInTheDocument();
+    expect(within(section).getByText("Old savings")).toBeInTheDocument();
+    await userEvent.click(within(section).getByRole("button", { name: "Collapse" }));
+    expect(screen.queryByText("Old checking")).toBeNull();
+  });
+
+  it("shows no hidden line when none are hidden", async () => {
+    serve(status([]));
+    render(AccountsSection, { accounts: [acct()] });
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/deleted"));
+    expect(screen.queryByRole("region", { name: "Hidden accounts" })).toBeNull();
+  });
+});
+
 describe("Settings → Accounts: deleted accounts", () => {
   it("counts them, and restores one, saying the next sync brings it back", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
