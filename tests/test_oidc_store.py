@@ -183,5 +183,13 @@ class OIDCStoreTests(DbCase):
                                         ("u2", "kept@example.com", "Kept", "Kept", 5.0)])
 
 
+class OwnerTests(unittest.TestCase):
+    def test_first_names(self):
+        from runway import oidc
+        self.assertEqual(oidc.first_name("Anthony Pluth", "a@x.com"), "Anthony")
+        self.assertEqual(oidc.first_name(None, "sara.smith@x.com"), "Sara")
+        self.assertEqual(oidc.first_name("sara@x.com", "sara@x.com", "Sara Jane"), "Sara")
+
+
 if __name__ == "__main__":
     unittest.main()

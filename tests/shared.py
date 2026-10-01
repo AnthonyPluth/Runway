@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import uuid
 from contextlib import contextmanager
+from datetime import UTC, date, datetime
 from unittest import mock
 
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
@@ -82,3 +83,45 @@ class DbCase(unittest.TestCase):
         self.path = own_database(self)
         self.c = db.connect(self.path)
         self.addCleanup(self.c.close)   # cleanups run last first: the connection closes before the directory goes
+
+
+TODAY = date(2026, 9, 23)
+
+
+def ts(d: date) -> int:
+    return int(datetime(d.year, d.month, d.day, 12, tzinfo=UTC).timestamp())
+
+
+class LedgerCase(DbCase):
+    """A database (DbCase) with helpers that add accounts, card statements and transactions, dated around TODAY;
+    self.conn is the connection."""
+
+    def setUp(self):
+        super().setUp()
+        self.conn = self.c
+
+    def acct(self, id, kind, balance, **kw):
+        cols = {"id": id, "name": id, "kind": kind, "balance": balance, "balance_date": TODAY.isoformat(), **kw}
+        self.conn.execute(
+            f"INSERT INTO accounts({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", list(cols.values())
+        )
+
+    def stmt(self, card, balance, closed, due, minimum=None):
+        """The card issuer's latest statement, as Plaid Liabilities reports it."""
+        self.conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (f"p-{card}", card))
+        self.conn.execute("DELETE FROM card_statements WHERE plaid_account_id=?", (f"p-{card}",))
+        self.conn.execute("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_balance, last_statement_date, "
+                          "next_due_date, minimum_payment) VALUES (?,?,?,?,?,?)", (f"p-{card}", "item", balance, closed, due, minimum))
+
+    def cycle(self, card_id, today=None):
+        from runway import forecast
+        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id=?", (card_id,)).fetchone())
+        return forecast.card_cycle(self.conn, card, today or TODAY, forecast.bank_statement(self.conn, card, today or TODAY))
+
+    def tx(self, acct, posted, amount, desc="x", category=None, pending=0):
+        from runway import categorize
+        n = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        self.conn.execute(
+            "INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, pending) VALUES (?,?,?,?,?,?,?,?)",
+            (f"{acct}|{n}", acct, posted, amount, desc, categorize.clean_payee(desc), category, pending),
+        )
