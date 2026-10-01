@@ -84,12 +84,17 @@ class ForecastTests(LedgerCase):
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual((card["avg_monthly_spend"], card["avg_cycles"]), (1066.67, 3))
         est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
-        self.assertEqual(est["2026-11-05"], 1066.67)   # cycle in progress: 300 charged so far, so the average wins
-        self.assertEqual(est["2026-12-07"], 1066.67)   # Dec 5 is a Saturday: paid Monday
-        # if the cycle in progress is already past the average, it's at least what's been charged
+        # cycle in progress (Sep 10 to Oct 10, 17 of its 30 days left): the 300 charged so far plus the average's share
+        # of the days left
+        self.assertEqual(est["2026-11-05"], round(300 + 1066.67 * 17 / 30, 2))
+        self.assertEqual(est["2026-12-07"], 1066.67)   # later cycles: the average. Dec 5 is a Saturday: paid Monday
+        # the day before the close, it's nearly all what's been charged
+        est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, date(2026, 10, 9), 90)["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], round(300 + 1066.67 / 30, 2))
+        # charges already past the average stay in, and the days left add to them
         self.tx("cc", "2026-09-21", -2000.0, "LAPTOP", "Shopping")
         est = {e["date"]: -e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e["estimated"]}
-        self.assertEqual(est["2026-11-05"], 2300.0)
+        self.assertEqual(est["2026-11-05"], round(2300 + 1066.67 * 17 / 30, 2))
 
     def test_sticking_to_the_budget(self):
         # $500/month on Groceries, paid with the card. $200 already spent in September, so $300 over Sep 24-30.
@@ -126,10 +131,11 @@ class ForecastTests(LedgerCase):
         self.assertAlmostEqual(drop, 10.0 - sum(e["amount"] for e in fc["events"] if e["date"] == "2026-10-15"), places=2)
 
     def grocery_box(self, link=True):
-        """A $100 grocery box from checking on the 1st of each month (Oct 1, Nov 1 in the forecast)."""
+        """A $100 grocery box from checking on the 1st of each month (Oct 1, Nov 1 in the forecast). Not linked, the
+        September one was a $60 first box: too far from $100 to be linked on its own."""
         self.conn.execute(insert(Recurring).values(id=7, name="Grocery box", account_id="chk", amount=-100,
                                                    frequency="monthly", anchor_date="2026-09-01"))
-        self.tx("chk", "2026-09-01", -100.0, "GROCERY BOX", "Groceries")
+        self.tx("chk", "2026-09-01", -100.0 if link else -60.0, "GROCERY BOX", "Groceries")
         if link:
             self.conn.execute(update(Transaction)
                               .where(Transaction.description == "GROCERY BOX").values(recurring_id=7))
@@ -275,7 +281,20 @@ class ForecastTests(LedgerCase):
         self.tx("chk", "2026-09-01", -2500.0, "MORTGAGE CO", "Mortgage")  # recurring, excluded by match
         self.tx("chk", "2026-09-02", -700.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
         self.tx("chk", "2026-09-03", -60.0, "NETFLIX", "Subscriptions")
-        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, ["netflix"])
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{"match": "netflix", "amount": -60}])
+        self.assertAlmostEqual(rate, 300 / 30, places=2)
+
+    def test_daily_spend_only_leaves_out_what_looks_like_the_recurring_payment(self):
+        for i in range(30):
+            self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -10.0, "TARGET", "Groceries")
+        self.tx("chk", "2026-09-05", -14.99, "AMAZON PRIME", "Subscriptions")    # the Prime fee: its recurring item's
+        self.tx("chk", "2026-09-06", -35.0, "AMAZON MKTPLACE", "Shopping")       # orders: everyday spending
+        self.tx("chk", "2026-09-08", -85.0, "AMAZON.COM", "Shopping")
+        prime = {"name": "Prime", "match": "amazon", "amount": -14.99, "amount_mode": "fixed"}
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [prime])
+        self.assertAlmostEqual(rate, (300 + 35 + 85) / 30, places=2)
+        # an item without an amount can't tell them apart: everything with its text is left out, as before
+        rate = forecast.daily_spend_rate(self.conn, "chk", TODAY, [{**prime, "amount": 0}])
         self.assertAlmostEqual(rate, 300 / 30, places=2)
 
     def test_suggest_recurring(self):
@@ -425,6 +444,178 @@ class ForecastEdgeTests(LedgerCase):
         days = forecast.occurrences(item, date(2026, 10, 1), date(2026, 10, 31))
         self.assertEqual(len(days), 2)
         self.assertEqual(days[0], days[1])
+
+
+class ForecastAssumptionTests(LedgerCase):
+    """What the forecast assumes about pending transactions, card cycles, everyday spending and the budget scenario."""
+    card_setup = ForecastTests.card_setup
+
+    def setUp(self):
+        super().setUp()
+        self.card_setup()
+
+    def estimates(self, today=TODAY, days=90):
+        return {e["date"]: -e["amount"] for e in forecast.build(self.conn, today, days)["events"] if e["estimated"]}
+
+    def three_cycles(self):
+        """Spending history on the card for an average of 1066.67 over the cycles closing Jul 10, Aug 10 and Sep 10."""
+        self.tx("cc", "2026-06-05", -50.0, "OLD", "Shopping")
+        self.tx("cc", "2026-06-20", -1200.0, "TRIP", "Travel")
+        self.tx("cc", "2026-07-20", -800.0, "STORE", "Shopping")
+        self.tx("cc", "2026-08-20", -400.0, "GROCER", "Groceries")
+
+    def test_pending_transactions_are_in_the_starting_balance(self):
+        self.tx("chk", "2026-09-22", -400.0, "HARDWARE STORE", "Shopping", pending=1)
+        self.tx("chk", "2026-09-23", 25.0, "STORE REFUND", "Refunds", pending=1)
+        fc = forecast.build(self.conn, TODAY, 30)
+        acct = fc["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (4625.0, -375.0))
+        self.assertEqual(fc["total"][0], 4625.0)
+        self.assertEqual(fc["events"][0]["balance_after"], 4625.0 + fc["events"][0]["amount"])
+        # a pending paycheck already linked to its recurring item is in the balance, and not again as an event
+        self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000, frequency="biweekly",
+                                                   anchor_date="2026-09-09", match="acme payroll"))
+        self.tx("chk", "2026-09-23", 3000.0, "ACME PAYROLL", "Income", pending=1)
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual((fc["accounts"][0]["balance"], fc["accounts"][0]["pending"]), (7625.0, 2625.0))
+        self.assertEqual([e["date"] for e in fc["events"] if e["name"] == "Paycheck"], ["2026-10-07", "2026-10-21"])
+        # the budget scenario starts from the same balance
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.assertEqual(forecast.build(self.conn, TODAY, 30)["budget"]["total"][0], 7625.0)
+
+    def test_an_overpayment_comes_off_the_next_statement(self):
+        # $1,200 paid on the $800 statement (the current balance, say), with $100 of new charges since the close
+        self.conn.execute(update(Transaction).where(Transaction.description == "GROCER").values(posted="2026-09-01"))
+        self.conn.execute(update(Transaction).where(Transaction.description == "PAYMENT THANK YOU").values(amount=1200.0))
+        info = self.cycle("cc")
+        self.assertEqual((info["paid_since_close"], info["remaining"], info["new_charges"]), (1200.0, 0.0, 0.0))
+        # $500 charged since: $400 of it is paid already
+        self.tx("cc", "2026-09-20", -400.0, "GROCER", "Groceries")
+        self.assertEqual(self.cycle("cc")["new_charges"], 100.0)
+        # paying less than the statement leaves the new charges alone
+        self.conn.execute(update(Transaction).where(Transaction.amount == 1200.0).values(amount=500.0))
+        self.assertEqual((self.cycle("cc")["remaining"], self.cycle("cc")["new_charges"]), (300.0, 500.0))
+
+    def test_large_one_offs_are_flagged(self):
+        self.tx("chk", "2026-08-01", -2000.0, "LANDLORD LLC", "Rent")
+        self.tx("chk", "2026-09-01", -2000.0, "LANDLORD LLC", "Rent")
+        self.tx("chk", "2026-08-15", -5000.0, "STATE UNIVERSITY", "Education")
+        self.tx("chk", "2026-09-10", -1500.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")   # a transfer
+        self.tx("chk", "2026-05-01", -9000.0, "ROOFING CO", "Home")                                 # over 90 days ago
+        self.tx("chk", "2026-09-12", -900.0, "DR SMITH DDS", "Medical")                             # under $1,000
+        self.tx("chk", "2026-09-14", -3000.0, "PENDING THING", "Shopping", pending=1)
+        fc = forecast.build(self.conn, TODAY, 30)
+        text = "3 payments over $1,000 in the last 90 days aren’t in the forecast (State University, Landlord Llc); " \
+               "add them as recurring items."
+        self.assertIn({"text": text, "href": "#budget/recurring"}, fc["warning_links"])
+        # rent as a recurring item: it links, and only the tuition is left
+        self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
+                                                   anchor_date="2026-08-01", match="landlord"))
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertIn("1 payment over $1,000 in the last 90 days isn’t in the forecast (State University); "
+                      "add it as a recurring item.", fc["warnings"])
+        # marked "not recurring": it's a one-off, and no longer flagged
+        self.conn.execute(update(Transaction).where(Transaction.description == "STATE UNIVERSITY").values(recurring_id=0))
+        self.assertFalse(any("over $1,000" in w for w in forecast.build(self.conn, TODAY, 30)["warnings"]))
+        # more than three payees: the three biggest, and an ellipsis
+        for i, name in enumerate(["ALPHA", "BRAVO", "CHARLIE", "DELTA"]):
+            self.tx("chk", f"2026-09-0{i + 2}", -1100.0 - 100 * i, name, "Shopping")
+        self.assertIn("4 payments over $1,000 in the last 90 days aren’t in the forecast (Delta, Charlie, Bravo…); "
+                      "add them as recurring items.", forecast.build(self.conn, TODAY, 30)["warnings"])
+
+    def test_recurring_charges_the_average_leaves_out(self):
+        self.three_cycles()
+        # a gym the card has paid every month since June (in the average), a yearly insurance premium, and a new
+        # subscription that hasn't charged yet
+        self.conn.execute(insert(Recurring).values(name="Gym", account_id="cc", amount=-30, frequency="monthly",
+                                                   anchor_date="2026-06-15", match="gym"))
+        for d in ("2026-06-15", "2026-07-15", "2026-08-15", "2026-09-15"):
+            self.tx("cc", d, -30.0, "GYM", "Fitness")
+        self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-600, frequency="yearly",
+                                                   anchor_date="2025-10-20", match="insurer"))
+        self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30", match="streamflix"))
+        fc = forecast.build(self.conn, TODAY, 120)
+        card = next(c for c in fc["cards"] if c["id"] == "cc")
+        avg, charged = card["avg_monthly_spend"], card["new_charges"]
+        self.assertEqual((avg, charged), (1096.67, 330.0))
+        est = {e["date"]: -e["amount"] for e in fc["events"] if e["estimated"]}
+        self.assertEqual(est["2026-11-05"], round(charged + avg * 17 / 30 + 15, 2))   # Streaming on Sep 30
+        self.assertEqual(est["2026-12-07"], round(avg + 600 + 15, 2))                # Insurance Oct 20, Streaming Oct 30
+        self.assertEqual(est["2027-01-05"], round(avg + 15, 2))                      # Streaming Nov 30
+        # once the subscription's been on the card since before the averaged cycles, it's in the average
+        self.conn.execute(update(Recurring).where(Recurring.name == "Streaming").values(anchor_date="2026-06-30"))
+        for d in ("2026-06-30", "2026-07-30", "2026-08-30"):
+            self.tx("cc", d, -15.0, "STREAMFLIX", "Subscriptions")
+        card = next(c for c in forecast.build(self.conn, TODAY, 120)["cards"] if c["id"] == "cc")
+        self.assertEqual(self.estimates(days=120)["2027-01-05"], card["avg_monthly_spend"])
+
+    def test_a_budget_on_a_card_paid_from_outside_the_forecast_is_skipped(self):
+        self.acct("sav", "savings", 20000.0)    # not forecast: checking is the only checking account
+        self.acct("cc2", "credit", -50.0, pay_from="sav")
+        self.stmt("cc2", 50.0, "2026-09-10", "2026-10-05")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc2"))
+        b = forecast.build(self.conn, TODAY, 60)["budget"]
+        self.assertEqual(b["used"], [])
+        self.assertEqual(b["skipped"], [{"category": "Groceries", "reason": "its card isn't paid from a forecast account"}])
+        self.assertEqual(b["monthly"], 0.0)
+
+    def test_a_budget_spends_what_it_carried_over(self):
+        # $310 a month from checking, rolling over since August, when $250 was spent: $60 carried into September
+        self.tx("chk", "2026-08-12", -250.0, "GROCER", "Groceries")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, pay_with="chk", rollover_from="2026-08"))
+        b = forecast.build(self.conn, TODAY, 40)["budget"]
+        out = {c["date"]: -c["amount"] for c in b["changes"] if c["kind"] == "budget"}
+        self.assertEqual(out["2026-09-24"], round((310 + 60 - 200) / 7, 2))   # $200 spent in September, over Sep 24-30
+        self.assertEqual(out["2026-10-15"], 10.0)                             # October: 310 / 31 (its carry-over isn't known yet)
+
+    def test_a_payment_in_transit_waits_for_a_card_without_a_paying_account(self):
+        self.tx("chk", "2026-09-22", -600.0, "CHASE CREDIT CRD AUTOPAY", "Credit Card Payment")
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 800.0)
+        self.acct("cc2", "credit", -600.0)      # a new card, not told yet which account pays it: could be this one's
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
+        self.acct("sav", "savings", 100.0)
+        self.conn.execute(update(Account).where(Account.id == "cc2").values(pay_from="sav"))
+        self.assertEqual(self.cycle("cc")["paid_since_close"], 800.0)
+
+    def test_card_payments_are_keyed_by_their_closing_date(self):
+        events = [e for e in forecast.build(self.conn, TODAY, 90)["events"] if e["kind"] == "card"]
+        self.assertEqual([(e["date"], e["key"]) for e in events],
+                         [("2026-10-05", "card:cc:2026-09-10"), ("2026-11-05", "card:cc:2026-10-10"),
+                          ("2026-12-07", "card:cc:2026-11-10")])
+        # an amount set on the October statement's estimate still applies when the bank's statement has a different
+        # due date
+        self.conn.execute(insert(Override).values(key="card:cc:2026-10-10", amount=-123.0))
+        self.assertEqual(self.estimates()["2026-11-05"], 123.0)
+        self.stmt("cc", 500.0, "2026-10-10", "2026-11-06")
+        self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-500.0))
+        e = next(e for e in forecast.build(self.conn, date(2026, 10, 12), 30)["events"] if e["kind"] == "card")
+        self.assertEqual((e["date"], e["key"], e["amount"], e["overridden"]), ("2026-11-06", "card:cc:2026-10-10", -123.0, True))
+
+    def test_an_amount_set_under_the_old_due_date_key_still_applies(self):
+        self.conn.execute(insert(Override).values(key="card:cc:2026-11-05", amount=-77.0))
+        self.conn.execute(insert(Override).values(key="card:cc:2026-10-05", amount=-66.0))
+        fc = forecast.build(self.conn, TODAY, 60)
+        self.assertEqual({e["key"]: e["amount"] for e in fc["events"] if e["kind"] == "card"},
+                         {"card:cc:2026-09-10": -66.0, "card:cc:2026-10-10": -77.0})
+
+    def test_a_payment_that_posted_today_but_isnt_linked_yet_counts_once(self):
+        for d in ("2026-08-01", "2026-09-01"):
+            self.tx("chk", d, -2000.0, "LANDLORD LLC", "Rent")
+        self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
+                                                   anchor_date="2026-08-01", match="landlord"))
+        recurring.auto_match(self.conn)
+        today = date(2026, 10, 1)
+        self.tx("chk", "2026-10-01", -2000.0, "LANDLORD LLC", "Rent")   # synced, not linked yet
+        fc = forecast.build(self.conn, today, 20)
+        self.assertEqual([e for e in fc["events"] if e["name"] == "Rent"], [])
+
+    def test_a_later_payment_doesnt_count_for_an_earlier_occurrence(self):
+        item = {"frequency": "monthly"}
+        history = [{"posted": "2026-10-01"}]
+        self.assertTrue(recurring.already_happened(item, date(2026, 10, 4), history, date(2026, 10, 5)))    # early
+        self.assertTrue(recurring.already_happened(item, date(2026, 9, 27), history, date(2026, 10, 5)))    # a little late
+        self.assertFalse(recurring.already_happened(item, date(2026, 9, 1), history, date(2026, 10, 5)))    # October's
 
 
 if __name__ == "__main__":

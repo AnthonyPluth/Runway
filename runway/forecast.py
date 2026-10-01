@@ -1,15 +1,15 @@
 """Cash-flow projection.
 
 Model, per cash account (checking/savings marked "in forecast"):
-  start balance
+  start balance (the bank's posted balance plus what's pending)
   + recurring items (paychecks, mortgage, bills) on their dates
   - each credit card's payment on its due date, sized to the statement balance
   - average everyday spending, spread evenly per day
 
-A card's statement balance is worked out from its transactions: the balance on the closing day equals
-today's balance minus everything that posted after the close (or it's the amount you entered, if you know it).
-Statements that haven't closed yet are estimated from the card's average spending over its last 3 statement
-cycles (for the cycle in progress, at least what's already been charged), and flagged as estimates.
+A card's statement balance comes from the issuer (or it's the amount you entered, if you know it). Statements that
+haven't closed yet are estimated from the card's average spending over its last 3 statement cycles (for the cycle in
+progress, what's already been charged plus the average's share of the days left), plus the recurring charges on the
+card the average doesn't have, and flagged as estimates.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from dateutil.relativedelta import relativedelta
 from dateutil.rrule import MONTHLY, WEEKLY, YEARLY, rrule, rruleset
 from sqlalchemy import func, or_, select
 
-from . import bankdays, db, plaidbank, splits
+from . import bankdays, budgets, db, plaidbank, splits
 from . import categories as catmod
 from . import settings_keys as sk
 from . import recurring as rec
@@ -155,8 +155,22 @@ def owed(account: dict, balance: float | None = None) -> float:
     return b if account.get("owed_positive") else -b
 
 
-def daily_spend_rate(conn, account_id: str, today: date, exclude_matches: list[str] | None = None) -> float:
-    """Average everyday outflow per day over the last SPEND_WINDOW_DAYS (or the history available)."""
+def paid_by_recurring(items: list[dict]):
+    """A test for whether a transaction looks like a payment for one of these recurring items without being linked to
+    it: its payee or description has the item's match text and its amount is close to the item's (recurring.amount_range,
+    the tolerance linking uses; any amount for an item without one). So a "Prime" item matching "amazon" leaves the rest
+    of the Amazon orders alone."""
+    rules = [(m, rec.amount_range(r)) for r in items if (m := rec.match_text(r))]
+
+    def test(t: dict) -> bool:
+        hay = f"{t['payee'] or ''} {t['description'] or ''}".lower()
+        return any(m in hay and (span is None or span[0] <= abs(t["amount"]) <= span[1]) for m, span in rules)
+    return test
+
+
+def daily_spend_rate(conn, account_id: str, today: date, recurring: list[dict] | None = None) -> float:
+    """Average everyday outflow per day over the last SPEND_WINDOW_DAYS (or the history available), leaving out
+    payments for the account's recurring items (`recurring`), which the forecast has on their own dates."""
     transfers = _transfer_categories(conn)
     since = today - timedelta(days=SPEND_WINDOW_DAYS)
     T = Transaction
@@ -169,19 +183,37 @@ def daily_spend_rate(conn, account_id: str, today: date, exclude_matches: list[s
         return 0.0
     first = min(_d(t["posted"]) for t in txs)
     days = max(14, (today - first).days + 1)  # avoid inflating the rate from a few days of data
-    matches = [m.lower() for m in (exclude_matches or []) if m]
+    is_recurring = paid_by_recurring(recurring or [])
     total = 0.0
     for t in txs:
-        if t["category"] in transfers:
-            continue
-        hay = f"{t['payee'] or ''} {t['description'] or ''}".lower()
-        if any(m in hay for m in matches):
+        if t["category"] in transfers or is_recurring(t):
             continue
         if t["amount"] < 0 and -t["amount"] <= ONE_OFF_LIMIT:
             total += -t["amount"]
         elif t["amount"] > 0 and t["category"] == "Refunds":
             total -= t["amount"]
     return max(0.0, total / days)
+
+
+def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[dict]) -> list[dict]:
+    """Outflows over ONE_OFF_LIMIT in the last SPEND_WINDOW_DAYS that everyday spending leaves out and no recurring item
+    accounts for: not transfers, not linked to an item (nor marked "not recurring"), and not a likely payment for one."""
+    transfers = _transfer_categories(conn)
+    T = Transaction
+    txs = db.rows(conn.execute(
+        select(T.account_id, T.amount, T.payee, T.description, T.category)
+        .where(T.account_id.in_(account_ids), T.posted > (today - timedelta(days=SPEND_WINDOW_DAYS)).isoformat(),
+               T.posted <= today.isoformat(), T.pending == 0, T.amount < -ONE_OFF_LIMIT, T.recurring_id.is_(None))
+        .order_by(T.amount)))
+    tests = {a: paid_by_recurring([r for r in recurring if r["account_id"] == a]) for a in account_ids}
+    return [t for t in txs if t["category"] not in transfers and not tests[t["account_id"]](t)]
+
+
+def pending_total(conn, account_id: str) -> float:
+    """What's pending on an account (money out negative): the bank's posted balance doesn't have it yet."""
+    T = Transaction
+    return conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
+                        .where(T.account_id == account_id, T.pending == 1)).scalar() or 0.0
 
 
 def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
@@ -202,7 +234,7 @@ def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
         cycles.append({"start": start.isoformat(), "end": end.isoformat(), "spent": round(max(0.0, spent), 2)})
         end = start
     avg = sum(c["spent"] for c in cycles) / len(cycles) if cycles else None
-    return {"average": round(avg, 2) if avg is not None else None, "cycles": cycles}
+    return {"average": round(avg, 2) if avg is not None else None, "cycles": cycles}   # newest cycle first
 
 
 def statement_override(conn, card_id: str, close: date) -> float | None:
@@ -225,11 +257,13 @@ def bank_statement(conn, card: dict, today: date):
 
 def in_transit(conn, card: dict, last_close: date) -> float:
     """Card payments that have left the paying account since the close but haven't reached the card yet. Only
-    counted when that account pays no other card, so a payment can't be mistaken for another card's."""
+    counted when that account pays no other card, so a payment can't be mistaken for another card's (a card that
+    hasn't been given a paying account yet could be paid from it too)."""
     payer = card.get("pay_from")
     if not payer or conn.execute(
             select(func.count()).select_from(Account)
-            .where(Account.kind == "credit", Account.hidden == 0, Account.pay_from == payer, Account.id != card["id"])).fetchone()[0]:
+            .where(Account.kind == "credit", Account.hidden == 0, or_(Account.pay_from == payer, Account.pay_from.is_(None)),
+                   Account.id != card["id"])).fetchone()[0]:
         return 0.0
     T = Transaction
     sent = conn.execute(select(T.posted, T.amount)
@@ -268,7 +302,9 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
     statement = known if known is not None else reported   # a figure you entered wins over the bank's
     paid = sum(t["amount"] for t in txs if t["amount"] > 0 and t["category"] in transfers)
     paid += in_transit(conn, card, last_close)
-    new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers))
+    # Paying more than the statement (the current balance, say) pays off some of the next one already.
+    over = max(0.0, paid - statement)
+    new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers) - over)
     due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
         else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
@@ -281,6 +317,8 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         "statement_key": f"stmt:{card['id']}:{last_close.isoformat()}",
         "avg_monthly_spend": spend["average"],
         "avg_cycles": len(spend["cycles"]),
+        # the close of the oldest cycle averaged: a recurring charge first paid after it isn't in every cycle of the average
+        "avg_first_close": spend["cycles"][-1]["end"] if spend["cycles"] else None,
         "paid_since_close": round(paid, 2),
         "remaining": round(max(0.0, statement - paid), 2),
         "due_date": due.isoformat(),
@@ -304,18 +342,41 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         cash = [a for a in cash_like if a["kind"] == "checking"]  # only one checking account: that's the primary
     else:
         cash = [a for a in cash_like if a["in_forecast"]]
+    # Each account starts from the bank's posted balance plus what's pending on it, money in and out. A pending payment
+    # already linked to a recurring item counts as having happened (see below), so it's in the balance and not again
+    # as an event.
+    pending = {a["id"]: round(pending_total(conn, a["id"]), 2) for a in cash}
+    cash = [dict(a, balance=a["balance"] + pending[a["id"]]) for a in cash]
+    by_id.update({a["id"]: a for a in cash})
     cards = [a for a in accounts if a["kind"] == "credit"]
+    # Link anything that's come in since the last sync's matching (a payment that posted today), so it isn't
+    # forecast again as still to come. One UPDATE per item, over unlinked transactions.
+    rec.auto_match(conn)
     recurring = db.rows(conn.execute(select(Recurring).where(Recurring.active == 1)))
+    items_by_id = {r["id"]: r for r in recurring}
     T = Transaction
     most_used = (func.count().desc(), func.max(T.posted).desc())   # the category used most (then most recently)
 
     events: list[dict] = []
     warnings: list[dict] = []   # {"text", "href"}: what's wrong, and the page where it's put right
     card_status: list[dict] = []
+    old_keys: dict[str, str] = {}   # card payment key -> the key it had before keys followed the closing date
+    first_paid: dict[int, str | None] = {}   # recurring item -> its first linked payment's date
     unlinked: list[dict] = []   # cards without statements from the issuer (not linked through Plaid yet)
 
     def warn(text: str, href: str) -> None:
         warnings.append({"text": text, "href": href})
+
+    def not_averaged(item_id: int, since: str) -> bool:
+        """Whether a card's spending average (over cycles from the one closing on `since`) leaves out this recurring
+        charge: it comes less often than monthly (a yearly insurance premium), or its first payment came after that
+        oldest cycle (a new subscription)."""
+        if items_by_id[item_id]["frequency"] not in ("weekly", "biweekly", "semimonthly", "monthly"):
+            return True
+        if item_id not in first_paid:
+            first_paid[item_id] = conn.execute(select(func.min(T.posted)).where(T.recurring_id == item_id)).scalar()
+        started = first_paid[item_id]
+        return not started or started[:10] > since
 
     for item in recurring:
         if item["account_id"] not in by_id:
@@ -363,13 +424,16 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         due = _d(info["due_date"])
         pays = bankdays.next_business_day(due)   # a due date on a weekend or holiday is paid the next business day
         if pays >= today and info["remaining"] > 0.005:
+            key = f"card:{card['id']}:{info['last_close']}"
+            old_keys[key] = f"card:{card['id']}:{due.isoformat()}"
             events.append({"date": pays.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                            "amount": -info["remaining"], "kind": "card", "estimated": False,
-                           "key": f"card:{card['id']}:{due.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
+                           "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
         elif pays < today and info["remaining"] > 0.005:
             warn(f"{label}: ${info['remaining']:,.2f} was due {due:%b %-d} and no payment has shown up yet.", "#setup/accounts")
-        # Future statements: the card's average spending per cycle over its last few statements (for the cycle
-        # in progress, at least what's been charged already). Without enough history, the recent daily rate.
+        # Future statements: the card's average spending per cycle over its last few statements (for the cycle in
+        # progress, what's been charged already plus the average's share of the days left). Without enough history,
+        # the recent daily rate. Either way, plus the recurring charges on the card the estimate doesn't already have.
         close = next_after(_d(info["last_close"]), card["closing_day"])
         prev_close = _d(info["last_close"])
         first = True
@@ -379,21 +443,30 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             due_k = next_after(close, card["due_day"])
             if due_k > end:
                 break
+            # The card's recurring charges due this cycle that haven't posted yet (events are dated today or later).
+            upcoming = [e for e in events if e["account_id"] == card["id"] and e["kind"] == "recurring"
+                        and prev_close.isoformat() < e["date"] <= close.isoformat()]
             if avg is not None:
-                est = max(info["new_charges"], avg) if first else avg
+                if first:
+                    left = max(0, (close - today).days) / max(1, (close - prev_close).days)
+                    est = info["new_charges"] + avg * min(1.0, left)
+                else:
+                    est = avg
+                est += max(0.0, -sum(e["amount"] for e in upcoming if not_averaged(e["recurring_id"], info["avg_first_close"])))
             else:
                 days_in_cycle = max(0, (close - max(today, prev_close)).days)
-                # The recent daily rate leaves out recurring charges on the card, so add the ones due this cycle.
-                upcoming = -sum(e["amount"] for e in events if e["account_id"] == card["id"] and e["kind"] == "recurring"
-                                and max(today, prev_close).isoformat() < e["date"] <= close.isoformat())
-                est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle + max(0.0, upcoming)
+                # The recent daily rate leaves out recurring charges on the card, so add all of them.
+                est = (info["new_charges"] if first else 0.0) + info["daily_rate"] * days_in_cycle \
+                    + max(0.0, -sum(e["amount"] for e in upcoming))
             pays_k = bankdays.next_business_day(due_k)
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
             elif est > 0.005:
+                key = f"card:{card['id']}:{close.isoformat()}"
+                old_keys[key] = f"card:{card['id']}:{due_k.isoformat()}"
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(est, 2), "kind": "card", "estimated": True,
-                               "key": f"card:{card['id']}:{due_k.isoformat()}", "category": "Credit Card Payment", "card_id": card["id"]})
+                               "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
         if stale:
             warn(f"{label}: the bank hasn't sent the statement after {_d(info['last_close']):%b %-d} yet, so its "
@@ -419,12 +492,24 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         one = len(no_statement) == 1
         warn(f"Plaid hasn’t sent a statement for {listed(no_statement)} yet, so {'its payments aren’t' if one else 'their payments aren’t'} "
              "in the forecast. It usually arrives with the next sync.", "#setup/connections")
+    # Everyday spending leaves out big one-off payments; if they come back (rent paid by hand, tuition), they need to
+    # be recurring items to be in the forecast.
+    big = large_one_offs(conn, [a["id"] for a in cash], today, recurring)
+    if big:
+        payees = [p for p in dict.fromkeys((t["payee"] or t["description"] or "").strip() for t in big) if p]   # biggest first
+        one = len(big) == 1
+        named = f" ({', '.join(payees[:3])}{'…' if len(payees) > 3 else ''})" if payees else ""
+        warn(f"{len(big)} payment{'' if one else 's'} over ${ONE_OFF_LIMIT:,.0f} in the last {SPEND_WINDOW_DAYS} days "
+             f"{'isn’t' if one else 'aren’t'} in the forecast{named}; add {'it as a recurring item' if one else 'them as recurring items'}.",
+             "#budget/recurring")
 
     # One-off edits you've made to specific upcoming items.
     overrides = {r["key"]: r["amount"] for r in conn.execute(select(Override.key, Override.amount))}
     for e in events:
-        if e.get("key") in overrides:
-            e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
+        # A card payment's edit saved while its key was the due date still applies.
+        k = e.get("key") if e.get("key") in overrides else old_keys.get(e.get("key") or "")
+        if k in overrides:
+            e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[k], 2), True
     # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
 
@@ -432,8 +517,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     rates: dict[str, float] = {}
     usual: dict[str, float] = {}   # each account's everyday spending, taken out or not (for "about $42 a day")
     for a in cash:
-        matches = [r["match"] or r["name"] for r in recurring if r["account_id"] == a["id"]]
-        spent = daily_spend_rate(conn, a["id"], today, matches)
+        spent = daily_spend_rate(conn, a["id"], today, [r for r in recurring if r["account_id"] == a["id"]])
         usual[a["id"]] = round(spent, 2)
         rate = spent if a["daily_spend"] else 0.0
         rates[a["id"]] = round(rate, 2)
@@ -480,6 +564,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "dates": dates,
         "accounts": [
             {"id": a["id"], "name": db.account_label(a), "kind": a["kind"], "balance": round(a["balance"], 2),
+             "pending": pending[a["id"]],   # in the balance already: the bank's posted balance plus this
              "daily_spend": rates.get(a["id"], 0.0), "daily_spend_on": bool(a["daily_spend"]),
              "daily_spend_estimate": usual[a["id"]], "series": series_by_acct[a["id"]],
              "low": low(series_by_acct[a["id"]])}
@@ -549,18 +634,27 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         if e["kind"] == "recurring" and e["amount"] < 0 and e["account_id"] in cash_ids and e.get("category"):
             recurring[(e["category"], e["date"][:7])] += -e["amount"]
     this_month = today.isoformat()[:7]
+    # A budget that rolls over has this month's carry-over to spend too, as the Budget page's "available" says.
+    carried = budgets.budget_carry(conn, [c for c in catmod.all_categories(conn) if not c["is_transfer"] and not c["is_income"]],
+                                   {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}, today.replace(day=1))
 
     def covered(p: dict, month: str) -> float:
         return sum(recurring.get((n, month), 0.0) for n in p["names"])
 
     def left(p: dict, month: str) -> float:
-        """The month's budget not already covered by its recurring payments (this month: nor spent)."""
-        return max(0.0, p["amount"] - (p["spent"] if month == this_month else 0.0) - covered(p, month))
+        """The month's budget not already covered by its recurring payments (this month: plus what's carried over, less
+        what's been spent)."""
+        if month == this_month:
+            return max(0.0, p["amount"] + carried.get(p["category"], 0.0) - p["spent"] - covered(p, month))
+        return max(0.0, p["amount"] - covered(p, month))
 
     for p in plan:
         acct = p["pay_with"] or p["usual"] or cash[0]["id"]
         if acct not in cash_ids and acct not in cards:
             skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
+            continue
+        if acct in cards and by_id[acct]["pay_from"] not in cash_ids:
+            skipped.append({"category": p["category"], "reason": "its card isn't paid from a forecast account"})
             continue
         months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
         if all(left(p, m) < 0.005 for m in months if m != this_month) and any(covered(p, m) for m in months):
