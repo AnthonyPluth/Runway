@@ -22,7 +22,7 @@
   import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt, fmt0, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
+  import { fmt, fmt0, fmt0Down, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
   import { balanceAsOf } from "$lib/nav.svelte";
   import type { Overview } from "$lib/types";
   import { cn } from "$lib/utils";
@@ -132,8 +132,8 @@
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
-          {#if lowBad}Heads up · {what} dips to {fmt0(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
-          {:else}On track · {what} stays above {fmt0(low.balance)} for {nb(span(shown.days))}{/if}
+          {#if lowBad}Heads up · {what} dips to {fmt0Down(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
+          {:else}On track · {what} stays above {fmt0Down(low.balance)} for {nb(span(shown.days))}{/if}
         </p>
         <p class="mt-1 max-w-3xl text-[15px] leading-relaxed text-muted-foreground">
           {#if low.date === fc.today}Today is the tightest point in the forecast.
@@ -154,7 +154,7 @@
           <div class="mb-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
             <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's account or card, in place of estimated card statements. A budget's recurring payments count toward it, so only the rest is spent on top of them.${budgetSkipped(fc.budget.skipped)}`}>
-              <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
+              <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0Down(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
             </span>
           </div>
         {/if}

@@ -77,6 +77,22 @@ describe("Overview", () => {
     expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 
+  it("rounds a low the balance stays above down, and says a negative low to the cent", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === "/api/overview?days=90") return forecast(90, 4820.55) as never;
+      return new Promise(() => {}) as never;
+    });
+    const { unmount } = render(Overview);
+    expect(await screen.findByText(/stays above \$4,820 for 90\sdays/)).toBeInTheDocument();
+    unmount();
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === "/api/overview?days=90") return forecast(90, -12.2) as never;
+      return new Promise(() => {}) as never;
+    });
+    render(Overview);
+    expect(await screen.findByText(/dips to -\$12\.20 today/)).toBeInTheDocument();
+  });
+
   it("keeps the forecast on screen while another length loads", async () => {
     let answer: (fc: OverviewData) => void = () => {};
     vi.mocked(api).mockImplementation(async (path: string) => {

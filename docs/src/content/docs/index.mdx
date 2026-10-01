@@ -23,7 +23,7 @@ import transactions from '../../assets/screenshots/transactions.png';
 import budget from '../../assets/screenshots/budget.png';
 import reports from '../../assets/screenshots/reports.png';
 
-<Image src={overview} alt="Runway's Overview page: a headline saying checking stays above $2,681 for the next 90 days, summary tiles, and a projected balance chart" />
+<Image src={overview} alt="Runway's Overview page: an “On track” status for checking over the next 90 days, its $4,820.55 balance, and a projected balance chart" />
 
 ## Why Runway
 
@@ -63,13 +63,11 @@ It runs on your own computer or home server, keeps its data in one database you 
 Push notifications, autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres round it out.
 
 <CardGrid>
-  <Image src={transactions} alt="Transactions grouped by day, each with its merchant, account, category emoji and amount" />
-  <Image src={budget} alt="Budget page with a colored bar per category and one budget rolling over" />
+  <Image src={transactions} alt="Transactions page with projected upcoming items, then past transactions grouped by day, each with its merchant, category, account and amount" />
+  <Image src={budget} alt="Budget page for September with a colored progress bar for each budgeted category" />
 </CardGrid>
 
-<Image src={reports} alt="Reports page with a cash-flow Sankey chart" />
-
-<small>Screenshots use Runway's made-up demo data (`python run.py demo`).</small>
+<Image src={reports} alt="Reports page with September money in, money out and a cash-flow Sankey chart" />
 
 ## Where to go next
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fmt, fmt0, fmtDate, fmtDow, parseDate, shortMoney } from "$lib/format";
+  import { fmt, fmt0, fmt0Down, fmtDate, fmtDow, parseDate, shortMoney } from "$lib/format";
   import type { ForecastEvent, Overview } from "$lib/types";
 
   // The projected balance, day by day: the low point, where estimated spending starts, and what each day brings.
@@ -184,11 +184,7 @@
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
       {#if estIndex > v0 && estIndex <= v1}
         {@const ex = x(estIndex)}
-        {@const right = ex < W - m.right - 150}
         <line x1={ex} x2={ex} y1={m.top - 6} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="2 3" />
-        <text x={ex + (right ? 6 : -6)} y={m.top - 10} text-anchor={right ? "start" : "end"} fill="var(--muted-foreground)">
-          {right ? "Estimated new spending from here →" : "← Estimated new spending from here"}
-        </text>
       {/if}
       {#if lowIndex >= 0 && inView(lowIndex)}
         {@const lx = x(lowIndex)}
@@ -197,7 +193,7 @@
         <circle cx={lx} cy={ly} r="5.5" fill={lowColor} stroke="var(--card)" stroke-width="2" />
         {#if lowBox}<rect x={lowBox.x - 7} y={lowBox.y - 4} width={lowBox.width + 14} height={lowBox.height + 8} rx="6" fill="var(--popover)" />{/if}
         <text bind:this={lowLabel} x={lx + (anchor === "start" ? 10 : anchor === "end" ? -10 : 0)} y={ly + (ly > m.top + ih - 30 ? -14 : 24)}
-          text-anchor={anchor} fill={lowColor} font-weight="600">Low {fmt0(series[lowIndex])} · {fmtDate(fc.low.date)}</text>
+          text-anchor={anchor} fill={lowColor} font-weight="600">Low {fmt0Down(series[lowIndex])} · {fmtDate(fc.low.date)}</text>
       {/if}
       {#if showEnd}
         {#if endBox}<rect x={endBox.x - 6} y={endBox.y - 3} width={endBox.width + 12} height={endBox.height + 6} rx="5" fill="var(--card)" />{/if}
