@@ -73,6 +73,10 @@ class PeriodTests(unittest.TestCase):
                 self.assertNotIn("amount", p)   # amounts differ by card: you fill them in
                 self.assertTrue(p["name"])
                 self.assertTrue(p["group"])
+        # Each lounge network is a benefit of its own, so a card with two (Priority Pass and its bank's) lists both.
+        lounges = {p["key"] for p in cb.PRESETS if p["group"] == "Lounges"}
+        self.assertLessEqual({"priority_pass", "capital_one_lounge", "sapphire_lounge", "centurion_lounge", "lounge"}, lounges)
+        self.assertTrue(all(cb.PRESET_KEYS[k]["kind"] == "access" for k in lounges))
 
 
 class BenefitDbTests(unittest.TestCase):
@@ -170,7 +174,8 @@ class BenefitDbTests(unittest.TestCase):
         for bad, msg in (({"name": ""}, "name"), ({"name": "X", "kind": "perk"}, "kind"),
                          ({"name": "X", "period": "weekly"}, "resets"), ({"name": "X", "basis": "moon"}, "calendar"),
                          ({"name": "X", "amount": -1}, "between"), ({"preset": "nope"}, "preset"),
-                         ({"name": "X", "remind_days": 1.5}, "whole"), ({"name": "X", "expires_on": "later"}, "date")):
+                         ({"name": "X", "remind_days": 1.5}, "whole"), ({"name": "X", "expires_on": "later"}, "date"),
+                         ({"name": "X", "guests": -1}, "guests"), ({"name": "X", "guests": 1.5}, "whole")):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 cb.save(self.c, bad, self.card)
         with self.assertRaisesRegex(ChurnError, "Card not found"):
@@ -187,6 +192,17 @@ class BenefitDbTests(unittest.TestCase):
         out = self.card_out()
         self.assertEqual(out["benefits_value"], 0)   # inactive: not counted
         self.assertEqual(out["benefits"][0]["amount"], 60)
+
+    def test_lounge_guests(self):
+        pp = cb.save(self.c, {"preset": "priority_pass", "guests": 2}, self.card)
+        c1 = cb.save(self.c, {"preset": "capital_one_lounge", "guests": 0}, self.card)
+        other = cb.save(self.c, {"preset": "lounge"}, self.card)
+        guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
+        self.assertEqual((guests[pp], guests[c1], guests[other]), (2, 0, None))   # 0: just you; None: not set
+        cb.save(self.c, {"guests": None}, None, pp)
+        cb.save(self.c, {"guests": "1"}, None, c1)
+        guests = {b["id"]: b["guests"] for b in self.card_out()["benefits"]}
+        self.assertEqual((guests[pp], guests[c1]), (None, 1))
 
 
 if __name__ == "__main__":

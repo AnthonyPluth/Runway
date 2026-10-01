@@ -2,7 +2,7 @@
 import type { Benefit, ChurnCard, Churning, Wish } from "./types";
 
 export const benefit = (over: Partial<Benefit> = {}): Benefit => ({
-  id: 1, card_id: 1, name: "Travel credit", kind: "credit", amount: 300, period: "annual", basis: "anniversary", annual_value: null,
+  id: 1, card_id: 1, name: "Travel credit", kind: "credit", amount: 300, period: "annual", basis: "anniversary", annual_value: null, guests: null,
   counts: 1, remind: 1, remind_days: null, expires_on: null, preset: "travel_credit", notes: null, active: 1, period_start: "2026-03-14",
   period_end: "2027-03-13", used: 0, used_count: 0, remaining: 300, value_per_year: 300, lead_days: 30, days_left: 165, expiring: false,
   remind_now: false, uses: [], ...over,

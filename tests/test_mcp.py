@@ -323,7 +323,9 @@ CHURNING = {
             {"name": "Lyft", "kind": "credit", "amount": 10, "remaining": 10, "used": 0, "active": 1, "expiring": True, "days_left": 5},
             {"name": "Travel", "kind": "credit", "amount": 300, "remaining": 150, "used": 150, "active": 1, "expiring": False, "days_left": 90},
             {"name": "Dining", "kind": "credit", "amount": 100, "remaining": 0, "used": 100, "active": 1, "expiring": False, "days_left": 30},
-            {"name": "Lounge", "kind": "access", "amount": None, "used_count": 1, "active": 1, "expiring": False, "days_left": None},
+            {"id": 14, "name": "Lounge", "kind": "access", "amount": None, "guests": 2, "used_count": 1, "active": 1, "expiring": False,
+             "days_left": None},
+            {"name": "Free night", "kind": "other", "amount": None, "used_count": 1, "active": 1, "expiring": False, "days_left": 100},
             {"name": "Old", "kind": "credit", "amount": 5, "remaining": 5, "active": 0}]},
         {"id": 2, "owner": "Sam", "product": "Ink", "status": "open", "benefits": [{"name": "Hotel", "kind": "access", "active": 1, "used_count": 0}]},
         {"id": 3, "owner": "Alex", "product": "Old card", "status": "closed", "benefits": [{"name": "Gone", "kind": "access", "active": 1}]},
@@ -634,8 +636,9 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(list(text(ask("tools/call", {"name": "churning_five24", "arguments": {"owner": "Alex"}}))["five24"]), ["Alex"])
         b = text(ask("tools/call", {"name": "churning_benefits", "arguments": {}}))
         self.assertEqual([r["name"] for r in b["expiring"]], ["Lyft"])
-        self.assertEqual(sorted(r["name"] for r in b["available"]), ["Hotel", "Travel"])
-        self.assertEqual(sorted(r["name"] for r in b["used"]), ["Dining", "Lounge"])           # not the inactive one, nor a closed card's
+        self.assertEqual(sorted(r["name"] for r in b["available"]), ["Travel"])
+        self.assertEqual(sorted(r["name"] for r in b["used"]), ["Dining", "Free night"])       # not the inactive one, nor a closed card's
+        self.assertEqual([(r["id"], r["name"], r["guests"]) for r in b["perks"]], [(14, "Lounge", 2), (None, "Hotel", None)])   # on all year
         only = text(ask("tools/call", {"name": "churning_benefits", "arguments": {"show": "expiring"}}))
         self.assertEqual(list(only), ["today", "expiring"])
 

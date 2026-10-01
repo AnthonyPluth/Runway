@@ -1,5 +1,8 @@
 """Churning: a card's benefits (lounge access, Uber and airline credits, a free night...) and their use.
 
+Access and status (a lounge network, free bags, hotel status) are perks you have all year rather than something to
+use up; a lounge benefit also says how many guests come in free with you.
+
 For each benefit it works out the current period (a calendar month, quarter, half or year, or the cardmember year that
 starts on the day the card was opened), what's left of a credit this period, when it resets (use it or lose it),
 and what it's worth a year. A card's net annual fee is its fee less what the benefits you'll actually use are worth.
@@ -36,23 +39,35 @@ WARN_DAYS = 7
 
 # Quick-add: kinds of benefit many cards have, grouped for the drop-down. Deliberately without amounts (they differ by card, and change).
 PRESETS: list[dict[str, Any]] = [
-    {"group": "Lounges & airline", "key": "lounge", "name": "Lounge access (Priority Pass or other)", "kind": "access", "period": "annual", "basis": "anniversary"},
-    {"group": "Lounges & airline", "key": "airline_credit", "name": "Airline incidental credit", "kind": "credit", "period": "annual", "basis": "calendar"},
-    {"group": "Lounges & airline", "key": "global_entry", "name": "Global Entry / TSA PreCheck credit", "kind": "credit", "period": "every_4_years",
+    # Each lounge network is its own benefit (a card often gets more than one, each with its own guest rules).
+    {"group": "Lounges", "key": "priority_pass", "name": "Priority Pass lounges", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "capital_one_lounge", "name": "Capital One Lounges", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "sapphire_lounge", "name": "Chase Sapphire Lounges", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "centurion_lounge", "name": "Amex Centurion Lounges", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "aa_lounge", "name": "American Airlines Admirals Club", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "united_club", "name": "United Club", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "sky_club", "name": "Delta Sky Club", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Lounges", "key": "lounge", "name": "Other lounge access", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Airline", "key": "airline_credit", "name": "Airline incidental credit", "kind": "credit", "period": "annual", "basis": "calendar"},
+    {"group": "Airline", "key": "global_entry", "name": "Global Entry / TSA PreCheck credit", "kind": "credit", "period": "every_4_years",
      "basis": "anniversary"},
-    {"group": "Lounges & airline", "key": "aa_lounge", "name": "American Airlines Admirals Club access", "kind": "access", "period": "annual", "basis": "anniversary"},
-    {"group": "Lounges & airline", "key": "clear", "name": "CLEAR+ membership credit", "kind": "credit", "period": "annual", "basis": "calendar"},
-    {"group": "Lounges & airline", "key": "companion", "name": "Companion pass or certificate", "kind": "other", "period": "annual", "basis": "anniversary"},
+    {"group": "Airline", "key": "clear", "name": "CLEAR+ membership credit", "kind": "credit", "period": "annual", "basis": "calendar"},
+    {"group": "Airline", "key": "checked_bag", "name": "Free checked bags", "kind": "access", "period": "annual", "basis": "anniversary"},
+    {"group": "Airline", "key": "companion", "name": "Companion pass or certificate", "kind": "other", "period": "annual", "basis": "anniversary"},
     {"group": "Travel & hotels", "key": "hotel_credit", "name": "Annual hotel credit", "kind": "credit", "period": "annual", "basis": "anniversary"},
     {"group": "Travel & hotels", "key": "travel_credit", "name": "Travel credit", "kind": "credit", "period": "annual", "basis": "anniversary"},
     {"group": "Travel & hotels", "key": "chase_travel", "name": "Chase Travel portal credit", "kind": "credit", "period": "annual", "basis": "anniversary"},
     {"group": "Travel & hotels", "key": "chase_edit", "name": "Chase Travel: The Edit credit", "kind": "credit", "period": "semiannual", "basis": "calendar"},
     {"group": "Travel & hotels", "key": "hotel_benefit", "name": "Annual hotel benefit", "kind": "other", "period": "annual", "basis": "anniversary"},
     {"group": "Travel & hotels", "key": "free_night", "name": "Free night certificate", "kind": "other", "period": "annual", "basis": "anniversary"},
+    {"group": "Travel & hotels", "key": "anniversary_bonus", "name": "Anniversary bonus points or miles", "kind": "other", "period": "annual",
+     "basis": "anniversary"},
+    {"group": "Travel & hotels", "key": "elite_status", "name": "Hotel or rental car elite status", "kind": "status", "period": "annual", "basis": "anniversary"},
     {"group": "Rides & delivery", "key": "lyft", "name": "Lyft credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
     {"group": "Rides & delivery", "key": "instacart", "name": "Instacart credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
     {"group": "Rides & delivery", "key": "blacklane", "name": "Blacklane credit", "kind": "credit", "period": "semiannual", "basis": "calendar"},
     {"group": "Rides & delivery", "key": "uber", "name": "Uber / Uber Eats credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
+    {"group": "Rides & delivery", "key": "doordash", "name": "DoorDash credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
     {"group": "Rides & delivery", "key": "dashpass", "name": "DoorDash DashPass", "kind": "access", "period": "annual", "basis": "anniversary"},
     {"group": "Dining & entertainment", "key": "dining", "name": "Dining credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
     {"group": "Dining & entertainment", "key": "streaming", "name": "Streaming credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
@@ -61,7 +76,9 @@ PRESETS: list[dict[str, Any]] = [
     {"group": "Dining & entertainment", "key": "entertainment_semiannual", "name": "Entertainment credit (twice a year)", "kind": "credit", "period": "semiannual",
      "basis": "calendar"},
     {"group": "Dining & entertainment", "key": "entertainment_annual", "name": "Entertainment credit (yearly)", "kind": "credit", "period": "annual", "basis": "calendar"},
+    {"group": "Dining & entertainment", "key": "fitness", "name": "Fitness credit", "kind": "credit", "period": "monthly", "basis": "calendar"},
     {"group": "Other", "key": "splurge", "name": "Annual splurge credit", "kind": "credit", "period": "annual", "basis": "calendar"},
+    {"group": "Other", "key": "phone_protection", "name": "Cell phone protection", "kind": "other", "period": "annual", "basis": "anniversary"},
 ]
 PRESET_KEYS = {p["key"]: p for p in PRESETS}
 
@@ -240,6 +257,8 @@ def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = 
     for key in ("counts", "remind", "active"):
         if new or key in body:
             f[key] = _flag(body.get(key, 1))
+    if "guests" in body:
+        f["guests"] = churning._int(body.get("guests"), "number of guests", 0, 20)
     if "remind_days" in body:
         f["remind_days"] = churning._int(body.get("remind_days"), "days ahead to remind you", 0, 365)
     if "expires_on" in body:

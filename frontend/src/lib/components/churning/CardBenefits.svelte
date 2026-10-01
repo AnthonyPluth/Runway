@@ -9,7 +9,7 @@
   import { toast } from "svelte-sonner";
   import { benefitUnuse, benefitUse } from "./actions";
   import BenefitForm from "./BenefitForm.svelte";
-  import { benefitState, benefitSummary, canUse } from "./churning";
+  import { benefitOrder, benefitState, benefitSummary, canUse, isPerk } from "./churning";
   import type { ChurnCard, Churning } from "./types";
 
   // A card's benefits (lounge access, travel and Lyft credits, hotel credits): what each is worth a year, this period's
@@ -23,6 +23,7 @@
   const presets = $derived(d.benefit_presets.filter((p) => !card.benefits.some((b) => b.preset === p.key)));
   const groups = $derived([...new Set(presets.map((p) => p.group))].map((g) => ({ name: g, items: presets.filter((p) => p.group === g) })));
   const summary = $derived(benefitSummary(card));
+  const benefits = $derived([...card.benefits].sort(benefitOrder));
   const kindName = (k: string) => d.benefit_kinds.find((x) => x.key === k)?.name ?? k;
   const periodName = (p: string) => d.benefit_periods.find((x) => x.key === p)?.name ?? p;
 
@@ -45,7 +46,7 @@
   {#if summary}<p class="mb-2 text-sm text-muted-foreground">{summary}{" "}<span class="text-xs">(the annual fee, {fmt0(card.annual_fee)}, less the benefits you'll use)</span></p>{/if}
   {#if card.benefits.length}
     <ul class="divide-y rounded-lg border bg-background">
-      {#each card.benefits as b (b.id)}
+      {#each benefits as b (b.id)}
         <li class="p-3">
           {#if editing === b.id}
             {#key b.id}<BenefitForm {card} {d} {b} onclose={closeForm} />{/key}
@@ -54,7 +55,7 @@
               <div class="flex flex-wrap items-center gap-1.5 text-sm font-medium">
                 {b.name}
                 <Badge variant="outline">{kindName(b.kind)}</Badge>
-                <span class="text-xs font-normal text-muted-foreground">{periodName(b.period)}</span>
+                {#if !isPerk(b)}<span class="text-xs font-normal text-muted-foreground">{periodName(b.period)}</span>{/if}
                 {#if !b.counts}<Badge variant="secondary">Not counted</Badge>{/if}
               </div>
               <span class="text-xs text-muted-foreground tabular-nums">{b.value_per_year ? `${fmt0(b.value_per_year)}/yr` : "no value set"}</span>
