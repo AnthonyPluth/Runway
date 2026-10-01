@@ -197,22 +197,11 @@ def sellable(conn, today: date) -> list[dict]:
     return out
 
 
-def spending_own(plan: dict, computed: dict) -> bool:
-    """Whether a saved plan's spending is a figure you typed. Plans kept before this was recorded are yours when their
-    spending is more than a dollar off Runway's figure, else Runway's."""
-    if "spending_own" in plan:
-        return bool(plan["spending_own"])
-    try:
-        return abs(float(plan.get("spending") or 0) - computed["annual_spending"]) > 1
-    except (TypeError, ValueError):
-        return True
-
-
 def overview(conn, current: float, computed: dict, today: date) -> dict:
     plan = saved(conn)
-    if plan is not None and "spending_own" not in plan:
-        # Settled once and kept, so Runway's figure moving month to month doesn't change the answer later
-        plan["spending_own"] = spending_own(plan, computed)
-        db.set_setting(conn, sk.RETIREMENT_PLAN, json.dumps(plan, separators=(",", ":")))
+    if plan is not None:
+        # A plan kept before this was recorded is taken as Runway's figure: it was saved whole whenever anything
+        # changed, so its spending can't tell a typed figure from Runway's. The page records a real edit from now on.
+        plan["spending_own"] = bool(plan.get("spending_own"))
     return {"plan": plan or default(computed, today), "is_default": plan is None, "current": round(current, 2),
             "computed": computed, "assets": sellable(conn, today), "year": today.year}

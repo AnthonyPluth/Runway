@@ -291,16 +291,16 @@ class FireTests(Base):
         self.assertFalse(self.plan()["plan"]["spending_own"])
         self.assertFalse(planner.clean({**p["plan"], "spending_own": None}, TODAY)["spending_own"])   # left out: Runway's
 
-    def test_a_plan_kept_before_the_flag_is_settled_once_by_its_spending(self):
+    def test_a_plan_kept_before_the_flag_is_runways_figure(self):
+        # Saved whole on every change, its spending can't tell a typed figure from Runway's: taken as Runway's,
+        # however far it is from today's figure, and nothing is written back on reading it
         computed = self.plan()["computed"]
         old = {k: v for k, v in planner.clean(self.plan()["plan"], TODAY).items() if k != "spending_own"}
-        for spending, own in ((computed["annual_spending"] + 0.6, False), (computed["annual_spending"] + 2400, True)):
-            db.set_setting(self.c, "retirement_plan", json.dumps({**old, "spending": spending}))
-            self.assertEqual(self.plan()["plan"]["spending_own"], own)
-            # kept as settled: a later change in Runway's figure doesn't flip it
-            self.assertEqual(planner.saved(self.c)["spending_own"], own)
-        self.assertTrue(planner.spending_own({"spending": "lots"}, computed))
-        self.assertFalse(planner.spending_own({"spending": 1000, "spending_own": False}, {"annual_spending": 90000}))
+        for spending in (computed["annual_spending"], computed["annual_spending"] + 2400):
+            raw = json.dumps({**old, "spending": spending})
+            db.set_setting(self.c, "retirement_plan", raw)
+            self.assertFalse(self.plan()["plan"]["spending_own"])
+            self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)
 
     def test_yearly_savings_says_what_it_is(self):
         p = self.plan()["computed"]
