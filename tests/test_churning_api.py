@@ -2,9 +2,12 @@
 import unittest
 from datetime import date, timedelta
 
+from sqlalchemy import insert
+
 from runway import demo
 from runway.server.api import churning as api
 from runway.server.common import ApiError
+from runway.models import User
 from tests.shared import DbCase
 
 TODAY = date.today()
@@ -18,7 +21,7 @@ class ChurningApiTests(DbCase):
     def setUp(self):
         super().setUp()
         demo.seed(self.c, TODAY)
-        self.c.execute("INSERT INTO users(sub, first_name, last_seen) VALUES ('u1', 'Alex', 1)")
+        self.c.execute(insert(User).values(sub="u1", first_name="Alex", last_seen=1))
 
     def add(self, **body):
         return api.api_churn_card_add(self.c, {}, {"owner": "Alex", "issuer": "chase", "opened_on": TODAY.isoformat(), **body})["id"]

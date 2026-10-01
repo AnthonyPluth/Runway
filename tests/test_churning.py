@@ -3,8 +3,11 @@ estimated rewards, the best card for a purchase, points values and the push aler
 import unittest
 from datetime import date
 
+from sqlalchemy import func, insert, select
+
 from runway import churning, notify
 from runway.churning import ChurnError
+from runway.models import Account, Category, ChurnBalance, ChurnCard, ChurnTask, Transaction, TxSplit
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
@@ -130,13 +133,13 @@ class RankTests(unittest.TestCase):
 class DbTests(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, owner) VALUES ('cc', 'Gold ••1234', 'credit', 'Alex')")
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('chk', 'Checking', 'checking')")
-        self.c.execute("INSERT INTO categories(name, parent) VALUES ('Takeout', 'Restaurants')")
+        self.c.execute(insert(Account).values(id="cc", name="Gold ••1234", kind="credit", owner="Alex"))
+        self.c.execute(insert(Account).values(id="chk", name="Checking", kind="checking"))
+        self.c.execute(insert(Category).values(name="Takeout", parent="Restaurants"))
 
     def tx(self, id, posted, amount, category, split=0):
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, category, is_split) VALUES (?,?,?,?,?,?)",
-                       (id, "cc", posted, amount, category, split))
+        self.c.execute(insert(Transaction).values(id=id, account_id="cc", posted=posted, amount=amount,
+                                                  category=category, is_split=split))
 
     def test_spending_toward_the_bonus_and_points(self):
         gold = churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Gold", "opened_on": "2026-08-01",
@@ -150,7 +153,8 @@ class DbTests(DbCase):
         self.tx("t4", "2026-08-20", 1200, "Credit Card Payment")  # a payment isn't spending
         self.tx("t5", "2026-09-01", -300, None)                 # not categorized yet: still a purchase
         self.tx("t6", "2026-09-02", -500, "Groceries", split=1)  # split: $400 groceries, $100 a transfer
-        self.c.execute("INSERT INTO tx_splits(tx_id, amount, category) VALUES ('t6', -400, 'Groceries'), ('t6', -100, 'Transfer')")
+        self.c.execute(insert(TxSplit), [{"tx_id": "t6", "amount": -400, "category": "Groceries"},
+                                         {"tx_id": "t6", "amount": -100, "category": "Transfer"}])
         s = churning.overview(self.c, TODAY, ["Alex", "Sam"])
         g = s["cards"][0]
         self.assertEqual(g["spent"], 1000 + 200 - 50 + 300 + 400)
@@ -194,8 +198,10 @@ class DbTests(DbCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 churning.save_card(self.c, {**base, **bad})
         cid = churning.save_card(self.c, {**base, "authorized_user": True, "fee_month": "", "notes": "  hi "})
-        row = self.c.execute("SELECT authorized_user, business, fee_month, notes, status, bonus_months, base_rate, currency "
-                             "FROM churn_cards WHERE id=?", (cid,)).fetchone()
+        row = self.c.execute(select(ChurnCard.authorized_user, ChurnCard.business, ChurnCard.fee_month,
+                                    ChurnCard.notes, ChurnCard.status, ChurnCard.bonus_months, ChurnCard.base_rate,
+                                    ChurnCard.currency)
+                             .where(ChurnCard.id == cid)).fetchone()
         self.assertEqual(tuple(row), (1, 0, None, "hi", "open", 3, 1.0, "cash"))
         with self.assertRaisesRegex(ChurnError, "not found"):
             churning.save_card(self.c, {"product": "X"}, 999)
@@ -223,8 +229,8 @@ class DbTests(DbCase):
         churning.set_rate(self.c, ff, "Restaurants", 3)
         churning.save_task(self.c, {"card_id": csp, "due_on": "2026-10-01", "action": "x"})
         churning.remove_card(self.c, csp)
-        self.assertIsNone(self.c.execute("SELECT changed_from FROM churn_cards WHERE id=?", (ff,)).fetchone()[0])
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM churn_tasks").fetchone()[0], 0)
+        self.assertIsNone(self.c.execute(select(ChurnCard.changed_from).where(ChurnCard.id == ff)).fetchone()[0])
+        self.assertEqual(self.c.execute(select(func.count()).select_from(ChurnTask)).fetchone()[0], 0)
         self.assertEqual(churning.overview(self.c, TODAY)["cards"][0]["rates"], [{"category": "Restaurants", "multiplier": 3.0, "portal_only": False}])
 
     def test_point_values_and_balances(self):
@@ -252,7 +258,9 @@ class DbTests(DbCase):
         churning.remove_currency(self.c, "ur")   # back to the default
         self.assertEqual(churning.values(self.c)["ur"]["cents"], 1.5)
         churning.set_balance(self.c, "Alex", "ur", "", TODAY)
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM churn_balances WHERE currency='ur'").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(func.count())
+                                        .select_from(ChurnBalance)
+                                        .where(ChurnBalance.currency == "ur")).fetchone()[0], 0)
         with self.assertRaisesRegex(ChurnError, "Unknown"):
             churning.set_balance(self.c, "Alex", "nope", 1, TODAY)
 

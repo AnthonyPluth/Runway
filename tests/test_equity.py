@@ -7,7 +7,10 @@ import urllib.error
 import urllib.parse
 from datetime import date
 
+from sqlalchemy import func, select, update
+
 from runway import carta, db, equity, networth
+from runway.models import EquityGrant, Setting
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 27)
@@ -85,7 +88,7 @@ class ModelTests(Base):
                 equity.save_grant(self.c, cid, bad)
         # one saved before the limits doesn't take the page (or the sync) down with it
         gid = equity.save_grant(self.c, cid, {"kind": "rsu", "quantity": 10, "vest_start": "2024-01-01", "vest_months": 12})
-        self.c.execute("UPDATE equity_grants SET vest_months=200000 WHERE id=?", (gid,))
+        self.c.execute(update(EquityGrant).where(EquityGrant.id == gid).values(vest_months=200000))
         self.c.commit()
         g = equity.overview(self.c, TODAY)["companies"][0]["grants"][0]
         self.assertEqual((g["vested"], g["fully_vested_on"], g["schedule"]), (0.0, None, []))
@@ -139,7 +142,7 @@ class CartaTests(Base):
         state = db.get_setting(self.c, "carta_oauth_state").split(" ")[0]
         carta.finish_authorize(self.c, "code-1", state, opener=api)
         self.assertEqual(api.token_posts[0]["redirect_uri"], "https://runway.example.com/carta/callback")
-        raw = self.c.execute("SELECT value FROM settings WHERE key='carta_access_token'").fetchone()[0]
+        raw = self.c.execute(select(Setting.value).where(Setting.key == "carta_access_token")).fetchone()[0]
         self.assertTrue(raw.startswith("enc:"))                                     # kept encrypted
         out = carta.sync(self.c, opener=api)
         self.assertEqual(out, {"companies": 1, "grants": 2})
@@ -154,7 +157,7 @@ class CartaTests(Base):
         self.assertEqual(shares["vested"], 500)
         self.assertEqual(acme["vested_value"], round(3300 * 3.25 + 500 * 4.25, 2))
         carta.sync(self.c, opener=api)   # again: updated, not duplicated
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM equity_grants").fetchone()[0], 2)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(EquityGrant)).fetchone()[0], 2)
 
     def test_refresh_and_refusal(self):
         api = FakeCarta()

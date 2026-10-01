@@ -3,9 +3,12 @@ the Upcoming items, bonus income per year and the push alert."""
 import unittest
 from datetime import date
 
+from sqlalchemy import insert, select
+
 from runway import bank_bonuses as bb
 from runway import churning, notify
 from runway.churning import ChurnError
+from runway.models import Account, ChurnBankBonus, Transaction
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
@@ -87,8 +90,8 @@ class LogicTests(unittest.TestCase):
 class DbTests(DbCase):
     def setUp(self):
         super().setUp()
-        self.c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('chk', 'Chase Total', 'checking', 1600)")
-        self.c.execute("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Card', 'credit')")
+        self.c.execute(insert(Account).values(id="chk", name="Chase Total", kind="checking", balance=1600))
+        self.c.execute(insert(Account).values(id="cc", name="Card", kind="credit"))
 
     def test_overview_upcoming_income_and_alerts(self):
         a = bb.save(self.c, {"owner": "Alex", "bank": "Chase", "opened_on": "2026-08-01", "bonus": 300, "account_id": "chk",
@@ -98,7 +101,8 @@ class DbTests(DbCase):
                          "received_on": "2025-03-01", "received_amount": 275, "repeat_months": 24})
         bb.save(self.c, {"owner": "Sam", "bank": "Citi", "opened_on": "2025-12-01", "bonus": 500, "status": "closed",
                          "received_on": "2026-02-01"})
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, category) VALUES ('t1', 'chk', '2026-08-15', 300, 'Income')")
+        self.c.execute(insert(Transaction).values(id="t1", account_id="chk", posted="2026-08-15", amount=300,
+                                                  category="Income"))
         out = churning.overview(self.c, TODAY)
         self.assertEqual(out["people"], ["Alex", "Sam"])
         self.assertEqual(out["five24"]["Sam"]["count"], 0)
@@ -128,11 +132,14 @@ class DbTests(DbCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ChurnError, msg):
                 bb.save(self.c, {**base, **bad})
         bid = bb.save(self.c, base)
-        row = self.c.execute("SELECT account_type, deadline_days, post_days, monthly_fee, status, once_per_lifetime "
-                             "FROM churn_bank_bonuses WHERE id=?", (bid,)).fetchone()
+        row = self.c.execute(select(ChurnBankBonus.account_type, ChurnBankBonus.deadline_days,
+                                    ChurnBankBonus.post_days, ChurnBankBonus.monthly_fee, ChurnBankBonus.status,
+                                    ChurnBankBonus.once_per_lifetime)
+                             .where(ChurnBankBonus.id == bid)).fetchone()
         self.assertEqual(tuple(row), ("checking", 90, 60, 0.0, "open", 0))
         bb.save(self.c, {"received_on": "2026-10-01"}, bid)   # a day it posted: received
-        self.assertEqual(self.c.execute("SELECT status FROM churn_bank_bonuses WHERE id=?", (bid,)).fetchone()[0], "received")
+        self.assertEqual(self.c.execute(select(ChurnBankBonus.status)
+                                        .where(ChurnBankBonus.id == bid)).fetchone()[0], "received")
         with self.assertRaisesRegex(ChurnError, "not found"):
             bb.save(self.c, {"bank": "X"}, 999)
 

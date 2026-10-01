@@ -3,9 +3,12 @@ what the benefits are worth a year against the annual fee, reminders, and the qu
 import unittest
 from datetime import date
 
+from sqlalchemy import func, select
+
 from runway import churn_benefits as cb
 from runway import churning, notify
 from runway.churning import ChurnError
+from runway.models import ChurnBenefit, ChurnBenefitUse
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 29)
@@ -128,8 +131,8 @@ class BenefitDbTests(DbCase):
         cb.remove(self.c, hotel)
         self.assertNotIn(hotel, [x["id"] for x in self.card_out()["benefits"]])
         churning.remove_card(self.c, self.card)
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM churn_benefits").fetchone()[0], 0)
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM churn_benefit_uses").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(ChurnBenefit)).fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(ChurnBenefitUse)).fetchone()[0], 0)
 
     def benefit(self, bid):
         return next(x for x in self.card_out()["benefits"] if x["id"] == bid)
@@ -177,8 +180,9 @@ class BenefitDbTests(DbCase):
         with self.assertRaisesRegex(ChurnError, "Benefit not found"):
             cb.use(self.c, 999, {}, TODAY)
         bid = cb.save(self.c, {"preset": "dining", "name": "Resy credit", "amount": 50, "period": "quarterly"}, self.card)
-        row = self.c.execute("SELECT name, kind, period, basis, preset, counts, remind, active FROM churn_benefits "
-                             "WHERE id=?", (bid,)).fetchone()
+        row = self.c.execute(select(ChurnBenefit.name, ChurnBenefit.kind, ChurnBenefit.period, ChurnBenefit.basis,
+                                    ChurnBenefit.preset, ChurnBenefit.counts, ChurnBenefit.remind, ChurnBenefit.active)
+                             .where(ChurnBenefit.id == bid)).fetchone()
         self.assertEqual(tuple(row), ("Resy credit", "credit", "quarterly", "calendar", "dining", 1, 1, 1))
         cb.save(self.c, {"active": False, "amount": 60}, None, bid)
         out = self.card_out()

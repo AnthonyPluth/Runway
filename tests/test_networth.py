@@ -7,7 +7,10 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from sqlalchemy import func, insert, select, update
+
 from runway import db, networth, prices, realie
+from runway.models import Account, Asset, AssetValue, NetworthSnapshot, Transaction
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -19,7 +22,7 @@ class Base(DbCase):
         rows = [("chk", "Checking", "checking", 4561.10, 0, 0), ("brk", "Brokerage", "investment", 154756.49, 0, 0),
                 ("cc", "Sapphire", "credit", -1510.72, 0, 0), ("mtg", "Mortgage", "loan", -250000.0, 0, 0),
                 ("auto", "Auto loan", "loan", 12000.0, 1, 0), ("old", "Closed card", "credit", -99.0, 0, 1)]
-        self.c.executemany("INSERT INTO accounts(id, name, kind, balance, owed_positive, hidden) VALUES (?,?,?,?,?,?)", rows)
+        self.c.execute(insert(Account), [dict(zip(("id", "name", "kind", "balance", "owed_positive", "hidden"), r, strict=True)) for r in rows])
 
 
 class NetWorthTests(Base):
@@ -39,13 +42,14 @@ class NetWorthTests(Base):
         self.assertEqual((house["equity"], house["loan"]["name"]), (175000.0, "Mortgage"))
         # a snapshot per day; change since 30 days needs an older snapshot
         self.assertIsNone(s["change"]["30d"])
-        self.c.execute("INSERT INTO networth_snapshots(date, assets, liabilities, net) VALUES ('2026-08-20', 0, 0, 300000)")
+        self.c.execute(insert(NetworthSnapshot).values(date="2026-08-20", assets=0, liabilities=0, net=300000))
         s2 = networth.summary(self.c, TODAY)
         self.assertEqual(s2["change"]["30d"], round(s2["net"] - 300000, 2))
         self.assertEqual(len(s2["history"]), 2)
         # updating the value keeps a history
         networth.save_asset(self.c, {"value": 440000}, home, today=date(2026, 10, 1))
-        vals = self.c.execute("SELECT date, value FROM asset_values WHERE asset_id=? ORDER BY date", (home,)).fetchall()
+        vals = self.c.execute(select(AssetValue.date, AssetValue.value)
+                              .where(AssetValue.asset_id == home).order_by(AssetValue.date)).fetchall()
         self.assertEqual([tuple(v) for v in vals], [("2026-09-23", 425000.0), ("2026-10-01", 440000.0)])
         networth.remove_asset(self.c, car)
         self.assertEqual(len(networth.assets(self.c, TODAY)), 1)
@@ -72,7 +76,7 @@ class NetWorthTests(Base):
         # a liability left out makes net worth go up; the account is still there for everything else
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1510.72)
-        self.assertEqual(self.c.execute("SELECT hidden FROM accounts WHERE id='cc'").fetchone()[0], 0)
+        self.assertEqual(self.c.execute(select(Account.hidden).where(Account.id == "cc")).fetchone()[0], 0)
         # a hidden account isn't offered to bring back (Settings hides it everywhere)
         api_account_update(self.c, {}, {"networth_hidden": 1}, "old")
         self.assertEqual({a["id"] for a in networth.summary(self.c, TODAY, save=False)["excluded"]}, {"brk", "cc"})
@@ -148,7 +152,7 @@ class RealieTests(Base):
         db.set_setting(self.c, "realie_api_key", "rl-key")
         est = realie.refresh_asset(self.c, home, TODAY)
         self.assertEqual((est["value"], est["low"], est["high"]), (431000.0, None, None))
-        a = self.c.execute("SELECT value, source, last_lookup FROM assets WHERE id=?", (home,)).fetchone()
+        a = self.c.execute(select(Asset.value, Asset.source, Asset.last_lookup).where(Asset.id == home)).fetchone()
         self.assertEqual(tuple(a), (431000.0, "realie", "2026-09-23"))
         self.assertIn("address=1+Main+St&state=IL", MockRealie.calls[-1][0])
         self.assertEqual(MockRealie.calls[-1][1], "rl-key")
@@ -163,10 +167,10 @@ class RealieTests(Base):
         # the newer nested reply, a week on
         MockRealie.nested = True
         self.assertEqual(realie.refresh_due(self.c, date(2026, 9, 30)), 1)
-        self.assertEqual(self.c.execute("SELECT value FROM assets WHERE id=?", (home,)).fetchone()[0], 445000.0)
+        self.assertEqual(self.c.execute(select(Asset.value).where(Asset.id == home)).fetchone()[0], 445000.0)
         # bad address, another town, no estimate, and the free-plan cap (lookups on later days)
         TODAY2 = date(2026, 9, 30)
-        self.c.execute("UPDATE assets SET last_lookup=NULL WHERE id=?", (home,))
+        self.c.execute(update(Asset).where(Asset.id == home).values(last_lookup=None))
         networth.save_asset(self.c, {"address": "Nowhere, Springfield, IL"}, home, today=TODAY)
         with self.assertRaises(realie.RealieError) as cm:
             realie.refresh_asset(self.c, home, TODAY2)
@@ -200,9 +204,12 @@ class NewCategoryTests(Base):
     def test_ai_can_propose_and_create_a_category(self):
         from runway import categorize, server
         db.set_setting(self.c, "openrouter_api_key", "k")
-        self.c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, needs_review) VALUES "
-                       "('t1','chk','2026-09-10',-45,'PETSMART #123','Petsmart',1), ('t2','chk','2026-09-11',-12,'STARBUCKS','Starbucks',1),"
-                       "('t3','chk','2026-09-12',-30,'CHEWY.COM','Chewy',1)")
+        self.c.execute(insert(Transaction), [{"id": "t1", "account_id": "chk", "posted": "2026-09-10", "amount": -45,
+                                              "description": "PETSMART #123", "payee": "Petsmart", "needs_review": 1},
+                                             {"id": "t2", "account_id": "chk", "posted": "2026-09-11", "amount": -12,
+                                              "description": "STARBUCKS", "payee": "Starbucks", "needs_review": 1},
+                                             {"id": "t3", "account_id": "chk", "posted": "2026-09-12", "amount": -30,
+                                              "description": "CHEWY.COM", "payee": "Chewy", "needs_review": 1}])
         seen = {}
 
         def fake(key, model, prompt):
@@ -227,7 +234,9 @@ class NewCategoryTests(Base):
         self.assertEqual((r["category"], r["created"], r["updated"]), ("Pets", True, 1))
         r2 = server.api_ai_apply(self.c, None, {"tx_ids": sug["Chewy"]["tx_ids"], "new_category": sug["Chewy"]["new_category"], "direction": "out"})
         self.assertEqual((r2["category"], r2["created"]), ("Pets", False))                   # second proposal reuses it
-        self.assertEqual(self.c.execute("SELECT COUNT(*) FROM transactions WHERE category='Pets'").fetchone()[0], 2)
+        self.assertEqual(self.c.execute(select(func.count())
+                                        .select_from(Transaction)
+                                        .where(Transaction.category == "Pets")).fetchone()[0], 2)
         # the automatic path during sync never gets to create categories
         self.assertNotIn("new_category", categorize.build_prompt(["A"], [], []))
 
