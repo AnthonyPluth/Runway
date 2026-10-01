@@ -211,15 +211,16 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
 
 def pending_total(conn, account: dict) -> float:
     """What's pending on an account (money out negative) that its balance doesn't have yet. Most banks' balance leaves
-    pending out, but some include it. Banks take pending debits out of the available balance but not pending credits,
-    so when the bank reports one, pending debits are only added if that brings the balance closer to it (otherwise the
-    balance evidently has them already); pending credits are always added."""
+    pending out, but some include it. Banks take pending debits out of the available balance (not pending credits,
+    which are always added), so when it's at or below the balance and doesn't reflect the debits, the balance has them
+    already and they aren't added. An available balance above the balance (one with an overdraft line in it) says
+    nothing about them: they're added, as they are without one."""
     T = Transaction
     out, came_in = (conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
                                  .where(T.account_id == account["id"], T.pending == 1, cond)).scalar() or 0.0
                     for cond in (T.amount < 0, T.amount > 0))
-    available = account.get("available")
-    if available is not None and abs(account["balance"] + out - available) >= abs(account["balance"] - available):
+    available, balance = account.get("available"), account["balance"]
+    if available is not None and available <= balance + 0.005 and available > balance + out + 0.005:
         out = 0.0
     return out + came_in
 

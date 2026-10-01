@@ -494,6 +494,15 @@ class ForecastAssumptionTests(LedgerCase):
         acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
         self.assertEqual((acct["balance"], acct["pending"]), (5000.0, 0.0))
 
+    def test_pending_is_added_when_the_available_balance_has_an_overdraft_line_in_it(self):
+        # A $500 overdraft line in the available balance puts it above the balance, so it can't tell whether the
+        # balance has the pending debit: it's added, as it would be without an available balance.
+        self.tx("chk", "2026-09-22", -400.0, "HARDWARE STORE", "Shopping", pending=1)
+        for available in (5100.0, 5500.0):   # the debit taken out of it, or not
+            self.conn.execute(update(Account).where(Account.id == "chk").values(available=available))
+            acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+            self.assertEqual((acct["balance"], acct["pending"]), (4600.0, -400.0), available)
+
     def paycheck_pending(self):
         """A biweekly $1,000 paycheck, today's pending (and linked to it once the forecast matches it)."""
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=1000, frequency="biweekly",
