@@ -1,4 +1,6 @@
-# Dependabot keeps the build's moving parts up to date with weekly pull requests.
+# Dependabot keeps the build's moving parts up to date with weekly pull requests. Each waits until a release is a week
+# old (cooldown): the merge gate merges Dependabot's pull requests by itself, and a compromised release is usually
+# caught and pulled within days. Security updates for a known vulnerability don't wait.
 version: 2
 updates:
   # Python dependencies (pyproject.toml / poetry.lock)
@@ -7,6 +9,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       python:
         update-types: [minor, patch]   # one PR for routine updates; major versions get their own
@@ -19,6 +23,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
@@ -31,6 +37,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     groups:
       web:
         update-types: [minor, patch]
@@ -48,5 +56,7 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: docker
