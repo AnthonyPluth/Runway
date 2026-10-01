@@ -44,12 +44,12 @@ On Budget → Bills & income.
 ## Transactions and categorization
 
 - **Rules** (Settings → Rules) with conditions and actions: when the merchant contains, is or starts with some text, the amount is in a range, the money goes out or comes in, or it's in a particular account, then set a category, rename the merchant, split it by percentages ("Costco: 70% Groceries, 30% Household") or put it in Review. The most specific rule wins, and a preview shows what a rule would match before you save it. When you pick a category, Runway asks whether to use it for that merchant from now on, including after you apply an AI suggestion, so nothing writes a rule behind your back. Built-in heuristics handle card payments and sweeps.
-- **Optional AI categorization** through OpenRouter (key under Settings → Services), guided by examples of how you've categorized before and shown with confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new categories when nothing fits. Every AI call is logged.
+- **Optional AI categorization** through OpenRouter (key under Settings → Connections), guided by examples of how you've categorized before and shown with confidence scores. Confident answers can be applied during sync; the rest wait for you, and it can propose new categories when nothing fits. Every AI call is logged.
 - **Split transactions:** a $100 run to Target can be $60 Groceries and $40 Shopping. Budgets, reports and category filters count each part on its own; pick a single category again and the transaction goes back together.
 - **Amazon, Target and Costco orders:** a small browser extension (installed from Settings → Connections) reads your orders with the sign-in already in your browser, and Runway splits each card charge by what you bought: tax and shipping shared out, each Amazon shipment matched to its own items. Items are categorized by the AI if you've set it up, and a category you pick for an item sticks for next time. See [Browser extension](/Runway/using/browser-extension/).
 - **Bulk editing:** tick transactions (shift-click for a range) to give them a category, rename their merchant or mark them reviewed at once.
 - **Categories** (Settings → Categories) have one level of subcategories, each with an emoji and a color. Anything uncategorized waits on the To review tab; there is also search and filtering. The list is grouped by day with each day's total, and loads more as you scroll.
-- **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself. With a free Logo.dev publishable key (Settings → Services), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway. The same key gives each bank or card its logo: by website for big banks Runway recognizes (Chase, Citi, Capital One, American Express and so on, also from a card's name), else by the institution's name; without it, accounts show a letter. To use a different logo for an account, or none, open the account in Settings → Accounts and click its logo.
+- **Merchant logos** for merchants Plaid knows, downloaded once from Plaid and served by Runway itself. With a free Logo.dev publishable key (Settings → Connections), merchants Plaid has no logo for get one from Logo.dev by their website (Plaid's, or for about 95 big names like Target, Amazon and Walmart, one Runway knows): downloaded during a sync, re-checked monthly, served by Runway. The same key gives each bank or card its logo: by website for big banks Runway recognizes (Chase, Citi, Capital One, American Express and so on, also from a card's name), else by the institution's name; without it, accounts show a letter. To use a different logo for an account, or none, open the account in Settings → Accounts and click its logo.
 
 ## Budget and reports
 
@@ -62,7 +62,7 @@ On Budget → Bills & income.
 On Net worth → Investments.
 
 - Holdings and performance for brokerage and retirement accounts, modeled on Ghostfolio: time-weighted return, a comparison with the S&P 500, gain per holding and allocation.
-- **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Services) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
+- **Near-real-time prices** while the market is open, with each holding's gain today. With a free [Finnhub](https://finnhub.io) key (Settings → Connections) they become real trades, pushed the moment they happen for up to 50 of your stocks and ETFs. Runway holds one connection to Finnhub for the whole app and your browser never sees the key. Yahoo takes over for anything else, or if Finnhub can't be reached.
 - Positions from SimpleFIN, or optionally from Plaid for accounts SimpleFIN only knows the balance of. Accounts that neither can see into, like some 401(k)s, can be **tracked by hand**: enter shares and your contribution split, and Runway invests each new deposit accordingly.
 - Editable cost basis, per share.
 
@@ -75,7 +75,7 @@ On Net worth → Retirement.
 
 ## Net worth and equity
 
-- **Summary:** every account plus homes, vehicles and anything else you own, minus cards and loans, recorded daily. Optional automated home values through Realie (key under Settings → Services; each home is looked up once a week at most, within the free tier).
+- **Summary:** every account plus homes, vehicles and anything else you own, minus cards and loans, recorded daily. Optional automated home values through Realie (key under Settings → Connections; each home is looked up once a week at most, within the free tier).
 - **Equity:** stock options (ISO/NSO), RSUs, restricted stock and shares, each with its vesting schedule (cliff, monthly or quarterly), exercise price and exercises. Runway shows what has vested and what's still to come at each company's latest share price, and counts the vested part in net worth. Enter grants by hand, or read them from **Carta** with the browser extension (with your Carta sign-in, like Amazon and Target) or with Carta's Portfolio API if Carta approves your app.
 
 ## Churning

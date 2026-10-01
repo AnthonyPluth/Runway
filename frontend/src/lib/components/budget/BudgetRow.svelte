@@ -117,7 +117,8 @@
             title="Where you'd be at an even pace today"></div>
         {/if}
       </div>
-      <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:min-w-28">
+      <!-- Fixed width so the bars end at the same x whether the text says "left", "over" or "ahead of pace". -->
+      <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:w-48">
         {#if over}<span class="font-semibold text-destructive">▲ {fmt(c.spent - avail!)} over</span>
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{fmt(c.left)} left · ahead of pace</span>
         {:else}<span class="text-muted-foreground">{fmt(c.left)} left</span>{/if}
