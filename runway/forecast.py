@@ -4,7 +4,9 @@ Model, per cash account (checking/savings marked "in forecast"):
   start balance (the bank's posted balance plus what's pending)
   + recurring items (paychecks, mortgage, bills) on their dates
   - each credit card's payment on its due date, sized to the statement balance
-  - average everyday spending, spread evenly per day
+
+Nothing is taken out for everyday spending from the cash accounts themselves: only scheduled items and card payments
+move the balance.
 
 A card's statement balance comes from the issuer (or it's the amount you entered, if you know it). Statements that
 haven't closed yet are estimated from the card's average spending over its last 3 statement cycles (for the cycle in
@@ -213,7 +215,7 @@ def daily_spend_rate(conn, account_id: str, today: date, recurring: list[dict] |
 
 
 def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[dict]) -> list[dict]:
-    """Outflows over ONE_OFF_LIMIT in the last SPEND_WINDOW_DAYS that everyday spending leaves out and no recurring item
+    """Outflows over ONE_OFF_LIMIT in the last SPEND_WINDOW_DAYS from the forecast's accounts that no recurring item
     accounts for: not transfers, not linked to an item (nor marked "not recurring"), and not a likely payment for one."""
     transfers = _transfer_categories(conn)
     T = Transaction
@@ -750,8 +752,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         if waiting:   # cards Plaid already has are matched in Settings → Accounts, and then send their statements
             warn(f"Plaid has {waiting} card{'s' if waiting != 1 else ''} waiting to be matched: in Settings → Accounts, "
                  "choose “Same as …” for each under “New from Plaid”.", "#setup/accounts")
-    # Everyday spending leaves out big one-off payments; if they come back (rent paid by hand, tuition), they need to
-    # be recurring items to be in the forecast.
+    # Big one-off payments from a forecast account aren't in it; if they come back (rent paid by hand, tuition), they
+    # need to be recurring items to be.
     big = large_one_offs(conn, [a["id"] for a in cash], today, recurring)
     if big:
         payees = [p for p in dict.fromkeys((t["payee"] or t["description"] or "").strip() for t in big) if p]   # biggest first
@@ -781,13 +783,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
 
     series_by_acct: dict[str, list[float]] = {}
-    rates: dict[str, float] = {}
-    usual: dict[str, float] = {}   # each account's everyday spending, taken out or not (for "about $42 a day")
     for a in cash:
-        spent = daily_spend_rate(conn, a["id"], today, [r for r in recurring if r["account_id"] == a["id"]])
-        usual[a["id"]] = round(spent, 2)
-        rate = spent if a["daily_spend"] else 0.0
-        rates[a["id"]] = round(rate, 2)
         by_day: dict[str, float] = {}
         for e in events:
             if e["account_id"] == a["id"]:
@@ -796,7 +792,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         series = [round(bal, 2)]
         for i in range(1, horizon_days + 1):
             when = (today + timedelta(days=i)).isoformat()
-            bal += by_day.get(when, 0.0) - rate
+            bal += by_day.get(when, 0.0)
             series.append(round(bal, 2))
         series_by_acct[a["id"]] = series
 
@@ -813,21 +809,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
-    # Balance of the item's account right after it lands (same-day items apply in the order listed), and, on the first
-    # item of its day, the everyday spending the forecast takes out of that account since its last item (or today), so
-    # a list of the items adds up.
+    # Balance of the item's account right after it lands (same-day items apply in the order listed).
     index = {d: i for i, d in enumerate(dates)}
     running: dict[tuple, float] = {}
-    last: dict[str, int] = {}
     for e in events:
         i, acct = index[e["date"]], e["account_id"]
         k = (acct, e["date"])
         if k not in running:
-            running[k] = by_id[acct]["balance"] if i == 0 else series_by_acct[acct][i - 1] - rates.get(acct, 0.0)
-            days = i - last.get(acct, 0)
-            if days > 0 and rates.get(acct, 0.0) > 0:
-                e["everyday_before"] = {"days": days, "amount": -round(rates[acct] * days, 2)}
-            last[acct] = i
+            running[k] = by_id[acct]["balance"] if i == 0 else series_by_acct[acct][i - 1]
         running[k] += e["amount"]
         e["balance_after"] = round(running[k], 2)
         e["account"] = db.account_label(by_id[acct])
@@ -839,8 +828,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         "accounts": [
             {"id": a["id"], "name": db.account_label(a), "kind": a["kind"], "balance": round(a["balance"], 2),
              "pending": pending[a["id"]],   # in the balance already: the bank's posted balance plus this
-             "daily_spend": rates.get(a["id"], 0.0), "daily_spend_on": bool(a["daily_spend"]),
-             "daily_spend_estimate": usual[a["id"]], "series": series_by_acct[a["id"]],
+             "series": series_by_acct[a["id"]],
              "low": low(series_by_acct[a["id"]])}
             for a in cash
         ],

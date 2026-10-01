@@ -97,8 +97,6 @@ export interface ForecastEvent {
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
   balance_after?: number;
-  /** On the first item of its day: the everyday spending taken out of its account since the item before (or today). */
-  everyday_before?: { days: number; amount: number };
   account_id?: string | null;
   account?: string | null;
   /** Its merchant's logo (a recurring item's: from its last matched transaction). */
@@ -153,12 +151,9 @@ export interface Overview {
   dates: string[];
   total: number[];
   low: { date: string; balance: number };
-  /** balance: the bank's posted balance plus what's pending on the account (pending, money out negative);
-   *  daily_spend: the everyday spending the forecast takes out of the account each day (when that's turned on, which
-   *  daily_spend_on says); daily_spend_estimate: what that would be, on or off. */
+  /** balance: the bank's posted balance plus what's pending on the account (pending, money out negative). */
   accounts: {
     id: string; name: string; kind: string; balance: number; pending?: number; balance_date?: string | null;
-    daily_spend?: number; daily_spend_on?: boolean; daily_spend_estimate?: number;
   }[];
   events: ForecastEvent[];
   /** Churning cards' annual fees: charges on cards, listed with what's coming up but not in events or the balances

@@ -224,38 +224,14 @@ class ForecastTests(LedgerCase):
                 self.assertAlmostEqual(fc["total"][fc["dates"].index(e["date"])], bal, places=2)
         self.assertEqual(next(e for e in fc["events"] if e["kind"] == "card")["category"], "Credit Card Payment")
 
-    def test_a_list_of_the_items_adds_up_with_everyday_spending(self):
-        # With everyday spending on, each day's first item says what was taken out since the item before (or today), so
-        # starting balance + everyday spending + items = each item's balance, as a list of them shows it.
-        for i in range(60):
-            self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
-        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
-        self.conn.execute(insert(Recurring).values(name="Gym", account_id="chk", amount=-50, frequency="monthly",
-                                                   anchor_date="2026-09-05"))
-        fc = forecast.build(self.conn, TODAY, 60)
-        rate = fc["accounts"][0]["daily_spend"]
-        self.assertGreater(rate, 0)
-        bal, seen = 5000.0, set()
-        for e in fc["events"]:
-            ev = e.get("everyday_before")
-            if e["date"] in seen:
-                self.assertIsNone(ev)                         # only the day's first item carries it
-            else:
-                seen.add(e["date"])
-                if e["date"] != fc["dates"][0]:
-                    self.assertAlmostEqual(ev["amount"], -rate * ev["days"], places=2)
-                    bal += ev["amount"]
-            bal += e["amount"]
-            self.assertAlmostEqual(e["balance_after"], bal, places=2, msg=e["name"])
-        first = fc["events"][0]
-        self.assertEqual(first["everyday_before"]["days"], fc["dates"].index(first["date"]))   # since today
-
     def test_primary_only_and_flat_between_events(self):
         self.acct("sav", "savings", 20000.0)
         self.acct("chk2", "checking", 300.0)
         for i in range(60):  # plenty of everyday spending in history
             self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
-        db.set_setting(self.conn, "primary_account", "chk")   # chk's everyday-spending drain is off (the default)
+        # an account still marked for everyday spending by an older version: nothing is taken out for it any more
+        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
+        db.set_setting(self.conn, "primary_account", "chk")
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual([a["id"] for a in fc["accounts"]], ["chk"])
         self.assertEqual(fc["primary_id"], "chk")
@@ -264,16 +240,8 @@ class ForecastTests(LedgerCase):
         for i in range(1, len(s)):
             if dates[i] not in event_days:
                 self.assertEqual(s[i], s[i - 1], f"balance moved on {dates[i]} with nothing scheduled")
-        # switched off, the forecast still says what it would take out, for Overview's "about $25 a day"
-        acct = fc["accounts"][0]
-        self.assertEqual((acct["daily_spend"], acct["daily_spend_on"]), (0.0, False))
-        self.assertGreater(acct["daily_spend_estimate"], 0)
-        # opting back in brings the drain back
-        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
-        fc = forecast.build(self.conn, TODAY, 30)
-        self.assertGreater(fc["accounts"][0]["daily_spend"], 0)
-        self.assertTrue(fc["accounts"][0]["daily_spend_on"])
-        self.assertEqual(fc["accounts"][0]["daily_spend"], fc["accounts"][0]["daily_spend_estimate"])
+        self.assertFalse({"daily_spend", "daily_spend_on", "daily_spend_estimate"} & set(fc["accounts"][0]))
+        self.assertFalse(any("everyday_before" in e for e in fc["events"]))
 
     def test_card_without_bank_statements_warns(self):
         self.conn.execute(delete(CardStatement))
@@ -491,7 +459,7 @@ class ForecastEdgeTests(LedgerCase):
 
 
 class ForecastAssumptionTests(LedgerCase):
-    """What the forecast assumes about pending transactions, card cycles, everyday spending and the budget scenario."""
+    """What the forecast assumes about pending transactions, card cycles and the budget scenario."""
     card_setup = ForecastTests.card_setup
 
     def setUp(self):

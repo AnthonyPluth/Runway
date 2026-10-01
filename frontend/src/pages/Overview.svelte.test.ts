@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,7 @@ import Overview from "./Overview.svelte";
 const TODAY = "2026-09-30";
 const fc = (extra: Partial<OverviewData> = {}): OverviewData => ({
   today: TODAY, dates: [TODAY, "2026-10-01"], total: [1000, 900], low: { date: "2026-10-01", balance: 900 },
-  accounts: [{ id: "chk", name: "Checking", kind: "checking", balance: 1000, balance_date: TODAY, daily_spend: 0, daily_spend_on: false, daily_spend_estimate: 30 }],
+  accounts: [{ id: "chk", name: "Checking", kind: "checking", balance: 1000, balance_date: TODAY }],
   events: [{ date: "2026-10-01", name: "Rent", amount: -100, kind: "recurring", key: "rec:1:2026-10-01", balance_after: 900, recurring_id: 1 }],
   cards: [], unlinked_cards: [], warnings: [], warning_links: [], missed: [], budget: null, ...extra,
 });
@@ -67,22 +67,6 @@ describe("Overview", () => {
     serve(() => fc({ accounts: [], total: [], events: [] }));
     render(Overview);
     expect(await screen.findByRole("link", { name: /No account to forecast yet/ })).toHaveAttribute("href", "/#overview?forecast");
-  });
-
-  it("turns everyday spending on in place, from the forecast settings", async () => {
-    let on = false;
-    serve(() => fc({ accounts: [{ ...fc().accounts[0], daily_spend_on: on, daily_spend: on ? 30 : 0 }] }));
-    const user = userEvent.setup();
-    render(Overview);
-    expect(screen.queryByText(/Everyday spending isn’t included/)).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Forecast settings" }));
-    const box = await screen.findByRole("checkbox", { name: "Subtract average everyday spending" });
-    on = true;
-    await user.click(box);
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/chk", { method: "POST", body: { daily_spend: 1 } }));
-    // The page loads its figures again without being drawn afresh, so the sheet stays open.
-    expect(await screen.findByText(/about \$30 a day/)).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 
   it("says how much of the balance is pending", async () => {

@@ -6,7 +6,7 @@
 
   // The chart as a table, day by day: what goes in or out of the forecast's accounts, and the balance after it, in
   // the forecast and (when there are budgets) if you stick to your budget. Items that count in only one of the two
-  // say so: the forecast's estimated card statements and everyday spending, and the budget's own spending and cards.
+  // say so: the forecast's estimated card statements, and the budget's own spending and cards.
   let { fc }: { fc: Overview } = $props();
 
   type Item = { name: string; amount: number; note?: string; only?: "forecast" | "budget" };
@@ -14,7 +14,6 @@
   // The budget line equals the forecast until the first day they differ; it is shown from there on.
   const firstDiff = $derived(alt ? alt.findIndex((v, i) => Math.abs(v - fc.total[i]) >= 0.005) : -1);
   const showAlt = $derived(alt != null && firstDiff >= 0);
-  const everyday = $derived(fc.accounts.reduce((s, a) => s + (a.daily_spend ?? 0), 0));
 
   const rows = $derived.by(() => {
     const byDate: Record<string, Item[]> = {};
@@ -25,8 +24,6 @@
         only: alt && estCard ? "forecast" : undefined,
         note: alt && estCard ? "the budget line pays this card from its budgets instead" : undefined });
     }
-    if (everyday > 0) fc.dates.slice(1).forEach((d) => add(d, { name: "Everyday spending (estimate)", amount: -everyday, only: alt ? "forecast" : undefined,
-      note: "what you usually spend day to day from this account, beyond the items listed" }));
     if (alt) {
       // budgets paid from a forecast account come out a little each day: one line a day, with each budget's share
       const spend: Record<string, { total: number; parts: string[] }> = {};

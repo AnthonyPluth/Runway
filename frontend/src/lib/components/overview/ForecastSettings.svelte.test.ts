@@ -8,7 +8,6 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
-import type { Overview } from "$lib/types";
 import ForecastSettings from "./ForecastSettings.svelte";
 import { forecastSheet, openForecastSettings } from "./forecastSheet.svelte";
 
@@ -88,31 +87,11 @@ describe("ForecastSettings", () => {
     expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 
-  describe("everyday spending", () => {
-    type Acct = Overview["accounts"][number];
-    const acct = (extra: Partial<Acct> = {}): Acct => ({ id: "chk", name: "Checking", kind: "checking", balance: 100, daily_spend: 0, daily_spend_on: false, daily_spend_estimate: 42.3, ...extra });
-
-    it("turns it on for the forecast's account, saving the same field as Settings → Accounts", async () => {
-      const onchange = vi.fn();
-      const user = userEvent.setup();
-      render(ForecastSettings, { label: "Checking", accounts: [acct()], onchange });
-      await user.click(screen.getByRole("button", { name: "Forecast settings" }));
-      expect(await screen.findByText(/Over the last 90 days: about \$42 a day\./)).toBeInTheDocument();
-      const box = screen.getByRole("checkbox", { name: "Subtract average everyday spending" });
-      expect(box).not.toBeChecked();
-      await user.click(box);
-      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/chk", { method: "POST", body: { daily_spend: 1 } }));
-      expect(onchange).toHaveBeenCalled();
-    });
-
-    it("has one box per account when several are combined", async () => {
-      const user = userEvent.setup();
-      render(ForecastSettings, { label: "Checking + Savings", accounts: [acct({ daily_spend_on: true }), acct({ id: "sav", name: "Savings", daily_spend_estimate: 0 })] });
-      await user.click(screen.getByRole("button", { name: "Forecast settings" }));
-      expect(await screen.findByRole("checkbox", { name: "Checking: subtract average everyday spending" })).toBeChecked();
-      await user.click(screen.getByRole("checkbox", { name: "Savings: subtract average everyday spending" }));
-      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/sav", { method: "POST", body: { daily_spend: 1 } }));
-      expect(screen.getByText(/Checking about \$42 a day, Savings none\./)).toBeInTheDocument();
-    });
+  it("has no everyday-spending setting", async () => {
+    const user = userEvent.setup();
+    render(ForecastSettings, { label: "Checking" });
+    await user.click(screen.getByRole("button", { name: "Forecast settings" }));
+    expect(await screen.findByLabelText("Primary account")).toBeInTheDocument();
+    expect(screen.queryByText(/everyday spending/i)).not.toBeInTheDocument();
   });
 });
