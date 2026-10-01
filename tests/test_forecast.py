@@ -504,6 +504,13 @@ class ForecastAssumptionTests(LedgerCase):
             acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
             self.assertEqual((acct["balance"], acct["pending"]), (4600.0, -400.0), available)
 
+    def test_old_pending_rows_are_left_out(self):
+        # A sync only re-reads the last 14 days, so a pending row older than that may be one that dropped off.
+        self.tx("chk", (TODAY - timedelta(days=20)).isoformat(), -300.0, "OLD HOLD", "Shopping", pending=1)
+        self.tx("chk", (TODAY - timedelta(days=14)).isoformat(), -50.0, "GAS STATION", "Auto", pending=1)
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (4950.0, -50.0))
+
     def paycheck_pending(self):
         """A biweekly $1,000 paycheck, today's pending (and linked to it once the forecast matches it)."""
         self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=1000, frequency="biweekly",
