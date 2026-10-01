@@ -253,10 +253,13 @@ class FireTests(Base):
                                           "monthly_payment": None}])
         self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(), loan_account_id="mtg"))
         counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
-        pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
-            id=id, account_id="chk", posted=posted, amount=amount, category=category))
-        for m in range(3, 9):   # paid every month, but as a transfer: not in spending
-            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer")
+        pay = lambda id, posted, amount, category, desc=None: self.c.execute(insert(Transaction).values(
+            id=id, account_id="chk", posted=posted, amount=amount, category=category, description=desc))
+        for m in range(3, 9):   # a steady move to savings about the payment's size: not taken for the payment
+            pay(f"s{m}", f"2026-{m:02}-20", -2000, "Transfer", "TO SAVINGS")
+        self.assertIsNone(counted())
+        for m in range(3, 9):   # paid every month, but as a transfer naming it: not in spending
+            pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer", "MORTGAGE PMT")
         pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
         pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
         pay("p4", "2026-07-15", -1900, "Groceries")  # within 10% of it once: a one-off, not a payment

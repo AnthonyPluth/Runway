@@ -25,17 +25,18 @@ PAYMENT_ESCROW = 1.5  # one that names the loan can be up to this much of its pa
                       # escrow (property tax and insurance) on top of the principal and interest the lender reports
 
 
-def payment_counted(spent: list[dict], payment: float, names: list[str]) -> bool:
+def payment_counted(spent: list[dict], payment: float, names: list[str], named_only: bool = False) -> bool:
     """Whether a loan's monthly payment is in the spending figure: money out within PAYMENT_MATCH of it (from
     portfolio.spent_outflows) in at least PAYMENT_MONTHS different months, as a real payment repeats. When some of
     those name the loan (its lender or account name in the payee), only they count, so a grocery run that happens to
     be the size of a car payment doesn't; and one that names it can be more than the payment, up to PAYMENT_ESCROW
-    times it, as a mortgage paid with its escrow is."""
+    times it, as a mortgage paid with its escrow is. With `named_only`, only ones that name it count: for transfers,
+    which repeat at fixed amounts (to savings, a brokerage) and so look like a payment by size alone."""
     names = [n.lower() for n in names if n and len(n.strip()) >= 3]
     low = (1 - PAYMENT_MATCH) * payment
     named = [s for s in spent if low <= s["amount"] <= PAYMENT_ESCROW * payment and any(n in s["text"] for n in names)]
     near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
-    return len({s["month"] for s in (named or near)}) >= PAYMENT_MONTHS
+    return len({s["month"] for s in (named if named_only else named or near)}) >= PAYMENT_MONTHS
 
 # Numbers the plan keeps: (lowest, highest).
 RATES = {"return_before": (-0.2, 0.2), "return_after": (-0.2, 0.2), "volatility": (0.0, 0.5), "inflation": (-0.05, 0.2)}
@@ -200,7 +201,7 @@ def sellable(conn, today: date) -> list[dict]:
                 spent = portfolio.spent_outflows(conn, today) if spent is None else spent
                 moved = portfolio.transfer_outflows(conn, today) if moved is None else moved
                 counted = (True if payment_counted(spent, loan["payment"], names)
-                           else False if payment_counted(moved, loan["payment"], names) else None)
+                           else False if payment_counted(moved, loan["payment"], names, named_only=True) else None)
             loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
                     "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
         else:   # none, or a card: what's owed today
