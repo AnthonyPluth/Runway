@@ -210,17 +210,19 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
 
 
 def pending_total(conn, account: dict, today: date) -> float:
-    """What's pending on an account (money out negative) that its balance doesn't have yet, from the last
-    simplefin.REFRESH_DAYS: older pending rows aren't re-read by a sync, so one that dropped off or posted under a new
-    id could linger. Most banks' balance leaves
-    pending out, but some include it. Banks take pending debits out of the available balance (not pending credits,
-    which are always added), so when it's at or below the balance and doesn't reflect the debits, the balance has them
-    already and they aren't added. An available balance above the balance (one with an overdraft line in it) says
-    nothing about them: they're added, as they are without one."""
+    """What's pending on an account (money out negative) that its balance doesn't have yet. SimpleFIN's pending rows
+    count from the last simplefin.REFRESH_DAYS only: older ones aren't re-read by a sync, so one that dropped off or
+    posted under a new id could linger. Plaid's are kept accurate (a sync deletes the ones it no longer has), so an old
+    one is a real hold and counts.
+
+    Most banks' balance leaves pending out, but some include it. Banks take pending debits out of the available balance
+    (not pending credits, which are always added), so when it's at or below the balance and doesn't reflect the debits,
+    the balance has them already and they aren't added. An available balance above the balance (one with an overdraft
+    line in it) says nothing about them: they're added, as they are without one."""
     T = Transaction
+    recent = or_(T.id.like(plaidbank.PLAID_IDS), T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())
     out, came_in = (conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
-                                 .where(T.account_id == account["id"], T.pending == 1, cond,
-                                        T.posted >= (today - timedelta(days=simplefin.REFRESH_DAYS)).isoformat())).scalar() or 0.0
+                                 .where(T.account_id == account["id"], T.pending == 1, cond, recent)).scalar() or 0.0
                     for cond in (T.amount < 0, T.amount > 0))
     available, balance = account.get("available"), account["balance"]
     if available is not None and available <= balance + 0.005 and available > balance + out + 0.005:

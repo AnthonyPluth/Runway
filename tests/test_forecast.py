@@ -509,6 +509,11 @@ class ForecastAssumptionTests(LedgerCase):
         self.tx("chk", (TODAY - timedelta(days=14)).isoformat(), -50.0, "GAS STATION", "Auto", pending=1)
         acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
         self.assertEqual((acct["balance"], acct["pending"]), (4950.0, -50.0))
+        # Plaid deletes pending rows it no longer has, so a 20-day-old one of its own is a real hold (a hotel, say)
+        self.conn.execute(insert(Transaction).values(id="chk|pl:hold1", account_id="chk", amount=-200.0, pending=1,
+                                                     posted=(TODAY - timedelta(days=20)).isoformat(), description="HOTEL"))
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (4750.0, -250.0))
 
     def paycheck_pending(self):
         """A biweekly $1,000 paycheck, today's pending (and linked to it once the forecast matches it)."""
