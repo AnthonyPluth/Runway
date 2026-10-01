@@ -6,9 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 
 import { api } from "$lib/api";
+import { monthLabel, thisMonth } from "$lib/format";
 import Cashflow from "./Cashflow.svelte";
 import Status from "./Status.svelte";
-import Tile from "./Tile.svelte";
 import { reportState } from "./state.svelte";
 import type { Cashflow as Flow } from "./types";
 
@@ -40,6 +40,24 @@ describe("Cashflow report", () => {
     const label = await screen.findByText("▲ Spent more than came in", { selector: "div" });
     expect(label).toHaveClass("text-destructive");
     expect(screen.getByText("$500", { selector: "div" })).toHaveClass("text-destructive");   // shown without the sign
+  });
+
+  it("frames a month still under way as so far, in muted text, even when more went out than came in", async () => {
+    reportState.month = thisMonth();
+    vi.mocked(api).mockResolvedValue(flow({ month: thisMonth(), total_in: 0, total_out: 2140, net: -2140 }));
+    render(Cashflow);
+    const short = monthLabel(thisMonth()).split(" ")[0];
+    const label = await screen.findByText(`Spent more than came in so far in ${short}`, { selector: "div" });
+    expect(label).not.toHaveClass("text-destructive");
+    expect(screen.getByText("$2,140", { selector: "div" })).not.toHaveClass("text-destructive");
+    expect(screen.queryByText(/▲/)).not.toBeInTheDocument();
+  });
+
+  it("says what's left so far in the month under way", async () => {
+    reportState.month = thisMonth();
+    vi.mocked(api).mockResolvedValue(flow({ month: thisMonth() }));
+    render(Cashflow);
+    expect(await screen.findByText(`Left so far in ${monthLabel(thisMonth()).split(" ")[0]}`, { selector: "div" })).toBeInTheDocument();
   });
 
   it("lists the same numbers as a table with shares and subcategories", async () => {
@@ -93,18 +111,12 @@ describe("Cashflow report", () => {
   });
 });
 
-describe("report Tile and Status", () => {
-  it("Tile shows its label, value and note, and turns red when alerting", () => {
-    render(Tile, { label: "Spent", value: "$5", sub: "note", alert: true });
-    expect(screen.getByText("Spent")).toHaveClass("text-destructive");
-    expect(screen.getByText("$5")).toHaveClass("text-destructive");
-    expect(screen.getByText("note")).toBeInTheDocument();
-  });
-
-  it("Status says Loading until there's an error, then offers a retry", async () => {
+describe("report Status", () => {
+  it("Status shows a placeholder block until there's an error, then offers a retry", async () => {
     const retry = vi.fn();
     const { unmount } = render(Status, { error: null, retry });
-    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading…");
+    expect(screen.getByRole("status")).toHaveClass("animate-pulse");
     unmount();
     render(Status, { error: new Error("bad"), retry });
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));

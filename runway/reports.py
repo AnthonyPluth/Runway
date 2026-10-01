@@ -33,6 +33,15 @@ def _bounds(months: list[str]) -> tuple[str, str]:
     return f"{months[0]}-01", (date(y, m, 1) + relativedelta(months=1)).isoformat()
 
 
+def _with_data(conn, ms: list[str]) -> list[str]:
+    """The months from the first one with a transaction in an account the reports count: before it there's no history,
+    not $0 of spending. The last month always stays, so a new install still shows this month."""
+    first = conn.execute(select(func.min(Transaction.posted)).select_from(Transaction)
+                         .join(Account, Account.id == Transaction.account_id).where(*SCOPE)).scalar()
+    start = (first or "")[:7] or ms[-1]
+    return [m for m in ms if m >= start] or ms[-1:]
+
+
 def _rows(conn, start: str, end: str) -> list[dict]:
     t = splits.parts()
     return db.rows(conn.execute(
@@ -78,10 +87,11 @@ def _group_key(row, group: str, kinds: _Kinds) -> str:
 
 
 def spending_over_time(conn, end: str, months: int = 12, group: str = "category") -> dict:
-    """Spending per month, by top-level category, merchant or account: the biggest few by name, the rest together."""
+    """Spending per month, by top-level category, merchant or account: the biggest few by name, the rest together.
+    Months before the first transaction are left out."""
     if group not in GROUPS:
         raise ValueError("Group by category, merchant or account")
-    ms = month_list(end, max(2, min(months, 36)))
+    ms = _with_data(conn, month_list(end, max(2, min(months, 36))))
     kinds = _Kinds(conn)
     per: dict[str, dict[str, float]] = {}
     for r in _rows(conn, *_bounds(ms)):
@@ -108,8 +118,9 @@ def spending_over_time(conn, end: str, months: int = 12, group: str = "category"
 
 
 def income_vs_spending(conn, end: str, months: int = 12) -> dict:
-    """Money in and money out each month, what was left, and the share of income kept (savings rate)."""
-    ms = month_list(end, max(2, min(months, 36)))
+    """Money in and money out each month, what was left, and the share of income kept (savings rate). Months before the
+    first transaction are left out, so the year's count of months is the months with history."""
+    ms = _with_data(conn, month_list(end, max(2, min(months, 36))))
     kinds = _Kinds(conn)
     inc = {m: 0.0 for m in ms}
     out = {m: 0.0 for m in ms}

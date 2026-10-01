@@ -83,6 +83,27 @@ class ReportTests(DbCase):
         self.assertAlmostEqual(sept["rate"], 2798 / 3100, places=4)
         self.assertEqual((d["year"]["income"], d["year"]["spending"]), (9100.0, 532.0))
 
+    def test_months_before_the_first_transaction_are_left_out(self):
+        # History starts in July: a 12-month view is July to September, and the year counts three months, not nine
+        d = reports.income_vs_spending(self.c, "2026-09", 12)
+        self.assertEqual([m["month"] for m in d["months"]], ["2026-07", "2026-08", "2026-09"])
+        self.assertEqual((d["year"]["months"], d["year"]["income"]), (3, 9100.0))
+        s = reports.spending_over_time(self.c, "2026-09", 12)
+        self.assertEqual(s["months"], ["2026-07", "2026-08", "2026-09"])
+        self.assertEqual(s["totals"], [100.0, 130.0, 302.0])
+        # A hidden account's older transactions don't stretch the history back
+        self.tx("old", "2026-01-03", -5, "Old shop", "Shopping")
+        self.assertEqual(reports.income_vs_spending(self.c, "2026-09", 12)["year"]["months"], 3)
+        # A gap after the first transaction is a real $0 month, so it stays
+        self.assertEqual(len(reports.income_vs_spending(self.c, "2026-11", 12)["months"]), 5)
+
+    def test_no_transactions_yet_shows_just_this_month(self):
+        self.c.execute(Transaction.__table__.delete())
+        d = reports.income_vs_spending(self.c, "2026-09", 12)
+        self.assertEqual([m["month"] for m in d["months"]], ["2026-09"])
+        self.assertEqual(d["year"]["months"], 1)
+        self.assertEqual(reports.spending_over_time(self.c, "2026-09", 6)["months"], ["2026-09"])
+
     def test_merchants_and_one_merchant(self):
         d = reports.merchants(self.c, "2026-07-01", "2026-10-01")
         top = d["merchants"][0]

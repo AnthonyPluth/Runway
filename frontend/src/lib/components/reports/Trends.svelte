@@ -3,7 +3,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { catColor } from "$lib/categories.svelte";
-  import { fmt, fmt0, monthLabel, thisMonth } from "$lib/format";
+  import { fmt, fmt0, monthLabel, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import X from "@lucide/svelte/icons/x";
   import Bars from "./Bars.svelte";
@@ -14,6 +14,8 @@
   import type { SpendingReport } from "./types";
 
   // Over time: each month's spending, stacked by category, merchant or account. Click a row to show only that one.
+  // Averages are over the full months: the last one is this month, still under way. The server sends only months from the
+  // first transaction on, so months before there was any history don't pull them down.
   const GROUPS = { category: "Category", merchant: "Merchant", account: "Account" };
   const report = new Report(() => api<SpendingReport>(`/api/reports/spending?end=${thisMonth()}&months=${st.months}&group=${st.group}`));
 
@@ -46,11 +48,13 @@
   {@const n = d.months.length}
   {@const cur = n - 1}
   {@const lastYear = n >= 13 ? n - 13 : null}
-  {@const avg = (s: { values: number[] }) => s.values.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, n - 1)}
+  {@const avg = (values: number[]) => values.slice(0, -1).reduce((a, b) => a + b, 0) / Math.max(1, n - 1)}
   <Card.Root class="mb-6">
     <Card.Header class="flex flex-wrap items-baseline justify-between gap-2">
       <Card.Title>{focus ? focus.name : "Spending"} by month</Card.Title>
-      <span class="text-sm text-muted-foreground">{fmt0(d.totals.reduce((a, b) => a + b, 0) / n)} a month on average</span>
+      {#if n > 1}
+        <span class="text-sm text-muted-foreground" title={`Average of the ${plural(n - 1, "full month")} before this one`}>{fmt0(avg(d.totals))} a month on average</span>
+      {/if}
     </Card.Header>
     <Card.Content>
       {#if d.series.length}
@@ -75,9 +79,9 @@
             <thead>
               <tr class="text-left text-xs text-muted-foreground [&>th]:pb-2 [&>th]:font-medium [&>th+th]:pl-4">
                 <th>{GROUPS[st.group]}</th><th class="text-right">{monthTick(d.months[cur])}</th>
-                <th class="text-right">vs {monthTick(d.months[cur - 1])}</th>
+                {#if n > 1}<th class="text-right">vs {monthTick(d.months[cur - 1])}</th>{/if}
                 {#if lastYear != null}<th class="text-right max-sm:hidden">vs {monthTick(d.months[lastYear], true)}</th>{/if}
-                <th class="text-right max-sm:hidden">Monthly average</th><th class="text-right">{n} months</th>
+                {#if n > 1}<th class="text-right max-sm:hidden">Monthly average</th>{/if}<th class="text-right">{n} months</th>
               </tr>
             </thead>
             <tbody>
@@ -90,9 +94,9 @@
                       title={`Show only ${s.name}`} aria-pressed={on} onclick={() => toggle(s.name)}><Swatch color={s.color} />{s.name}</button>
                   </td>
                   <td class="text-right tabular-nums">{fmt(s.values[cur])}</td>
-                  <td class={cn("text-right tabular-nums", c != null && c > 0.1 ? "text-(--low)" : "text-muted-foreground")}>{pctTxt(c)}</td>
+                  {#if n > 1}<td class={cn("text-right tabular-nums", c != null && c > 0.1 ? "text-(--low)" : "text-muted-foreground")}>{pctTxt(c)}</td>{/if}
                   {#if lastYear != null}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{pctTxt(change(s.values[cur], s.values[lastYear]))}</td>{/if}
-                  <td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{fmt(avg(s))}</td>
+                  {#if n > 1}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{fmt(avg(s.values))}</td>{/if}
                   <td class="text-right tabular-nums">{fmt(s.total)}</td>
                 </tr>
               {/each}
