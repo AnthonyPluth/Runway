@@ -9,7 +9,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
-  import { fmt, fmt0, fmtDate, shortMoney } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, shortMoney } from "$lib/format";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
   import { EQ_KINDS, isOption, shares, vestingSeries } from "./equity";
@@ -159,7 +159,7 @@
                     <td class="text-right text-muted-foreground tabular-nums max-[700px]:hidden">{isOption(g.kind) ? fmt(g.strike) : "—"}</td>
                     <td class="min-w-32">
                       <div class="flex items-center gap-2">
-                        <span class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><i class="block h-full rounded-full bg-[var(--nw-1)]" style:width={`${(p * 100).toFixed(1)}%`}></i></span>
+                        <span class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><i class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(p)}></i></span>
                         <span class="text-xs tabular-nums">{Math.round(p * 100)}%</span>
                       </div>
                       <div class="text-xs text-muted-foreground">{shares(g.vested)} of {shares(g.quantity)}{g.fully_vested_on && p < 1 ? ` · all by ${my(g.fully_vested_on)}` : ""}{g.exercised ? ` · ${shares(g.exercised)} exercised` : ""}</div>

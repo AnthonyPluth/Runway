@@ -2,7 +2,7 @@
 // (returns are after inflation). Each run draws a return for every year; the middle half of a thousand runs is the
 // likely range, and the share of runs that never run dry is the chance the money lasts. The draws come from a fixed
 // seed, so the same plan always shows the same picture and typing a figure moves it only by what you changed.
-import type { Plan, PlanAsset } from "./types";
+import type { PlanAsset, RetirementPlan } from "./types";
 
 export const RUNS = 1000;
 
@@ -41,7 +41,7 @@ export function saleProceeds(a: PlanAsset, year: number, thisYear: number, infla
 }
 
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */
-export function flows(plan: Plan, thisYear: number, assets: PlanAsset[]) {
+export function flows(plan: RetirementPlan, thisYear: number, assets: PlanAsset[]) {
   const people = plan.people;
   const last = Math.max(...people.map((p) => p.birth_year + plan.plan_to_age));
   const years: number[] = [];
@@ -68,7 +68,7 @@ export function flows(plan: Plan, thisYear: number, assets: PlanAsset[]) {
   return { years, ages, net, retired, retireIndex: Math.min(years.length - 1, Math.max(0, retireYear - thisYear)) };
 }
 
-export function project(plan: Plan, current: number, thisYear: number, assets: PlanAsset[], runs = RUNS): Projection {
+export function project(plan: RetirementPlan, current: number, thisYear: number, assets: PlanAsset[], runs = RUNS): Projection {
   const { years, ages, net, retired, retireIndex } = flows(plan, thisYear, assets);
   const n = years.length;
   const values = Array.from({ length: n }, () => new Float64Array(runs));

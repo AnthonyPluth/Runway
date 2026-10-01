@@ -1,5 +1,5 @@
 """Which test modules one CI shard runs: `python tests/shard.py 2/3` prints unittest -k arguments for the second of three
-shards (e.g. `-k tests.test_runway. -k tests.test_notify.`).
+shards (e.g. `-k tests.test_forecast. -k tests.test_notify.`).
 
 The Postgres tests are split across runners, each with its own Postgres, because on one runner they mostly wait on each
 other (one shared schema, the settings lock in tests/shared.py): four workers there ran only 1.8× faster than one.

@@ -14,7 +14,7 @@ export interface SettingsAccount extends Account {
     statement_note?: string | null } | null;
 }
 
-export interface SplitPart { category: string; percent: number | string }
+interface SplitPart { category: string; percent: number | string }
 
 /** GET /api/rules */
 export interface Rule {
@@ -50,12 +50,16 @@ export interface PlaidItem {
   accounts: PlaidAccount[];
   candidates?: { id: string; name: string; display_name?: string | null; balance?: number | null; linked_to?: string | null }[];
 }
-/** GET /api/plaid/status */
+/** What SimpleFIN sends for an investment account (Settings' diagnostics). */
+export interface SimplefinSeen { id?: string; org?: string; name: string; positions: number; fields: string[]; at?: string }
+/** GET /api/plaid/status: Plaid's connections, and how investment syncing stands (Plaid's and SimpleFIN's). */
 export interface PlaidStatus {
   configured: boolean; env: string; client_id: string; items: PlaidItem[]; redirect_uri?: string | null;
+  last_inv_sync: string | null; syncing: boolean; inv_accounts: number;
+  simplefin_connected: boolean; simplefin_last_sync: string | null; simplefin_seen: SimplefinSeen[];
 }
 
-export interface StoreStatus { name: string; last?: string | null; orders: number; read: number; matched: number; unmatched: number }
+interface StoreStatus { name: string; last?: string | null; orders: number; read: number; matched: number; unmatched: number }
 export interface RecentOrder {
   id: string; retailer: string; order_number: string; channel?: string | null; placed?: string | null; total?: number | null;
   details?: number; items?: number; charges?: number; matched?: number;
@@ -72,7 +76,7 @@ export interface CartaStatus {
   web_last?: string | null; web_error?: string | null; web_capture?: boolean;
 }
 
-export type PushPrefs = Record<string, boolean | number>;
+type PushPrefs = Record<string, boolean | number>;
 export interface PushDevice {
   endpoint: string; device?: string | null; created?: number | null; last_ok?: number | null; last_error?: string | null;
   /** Turned on before there was sign-in: nobody's, so it gets nothing until it's turned on again from the device. */

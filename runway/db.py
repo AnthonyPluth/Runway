@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, insert, inspect, select, update
+from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, insert, inspect, select
 from sqlalchemy.dialects import postgresql as pg_dialect
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import Engine
@@ -31,7 +31,6 @@ from sqlalchemy.schema import CreateColumn
 from sqlalchemy.sql.expression import FunctionElement
 
 from . import monitoring, schema, secretbox
-from . import settings_keys as sk
 from .models import Account, Category, Setting, Transaction
 
 BASELINE = "0001"   # the first migration: the schema as it was before Runway used migrations
@@ -505,10 +504,6 @@ def init(path: str | None = None) -> None:
     if not using_postgres():
         private_files(path or db_path())
     with session(path) as conn:
-        # v4: the smooth daily "everyday spending" drain became opt-in; switch it off for existing accounts once.
-        if not get_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF):
-            conn.execute(update(Account).values(daily_spend=0))
-            set_setting(conn, sk.MIGRATED_DAILY_SPEND_OFF, "1")
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
         if conn.execute(select(func.count()).select_from(Category)).fetchone()[0] == 0:
             conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])

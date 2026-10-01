@@ -5,13 +5,13 @@ Contributor conventions (style, tests, commit and PR rules) are in [AGENTS.md](.
 ## Setup and checks
 
 ```bash
-poetry install --no-root                               # dependencies, into .venv
+poetry install --no-root                               # dependencies and the tools CI runs (ruff, mypy, ...), into .venv
 poetry run python run.py --no-sync                     # run without touching your bank
 poetry run python -m unittest discover tests           # the test suite (SQLite)
 DATABASE_URL=postgresql://... poetry run python -m unittest discover tests   # the same tests against Postgres
-poetry run pip install coverage && poetry run coverage run -m unittest discover tests && poetry run coverage report   # how much they cover
-poetry run pip install unittest-parallel && poetry run unittest-parallel -t . -s tests -j 4   # the same suite across 4 processes (what CI does): about 3x faster
-poetry run pip install mypy types-python-dateutil && poetry run mypy   # type-check the Python (settings in pyproject.toml)
+poetry run coverage run -m unittest discover tests && poetry run coverage report   # how much they cover
+poetry run unittest-parallel -t . -s tests -j 4   # the same suite across 4 processes (what CI does): about 3x faster
+poetry run mypy                                        # type-check the Python (settings in pyproject.toml)
 poetry add <package>                                   # add a dependency (updates pyproject.toml and poetry.lock)
 ```
 
@@ -25,7 +25,7 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs everything CI does before you push: ruff, mypy, the Python tests, and the web app's type-check, ESLint, tests and build (`make lint`, `make test` and `make frontend-check` run one part). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs what CI checks before you push, each tool once: ruff and mypy, the Python tests (on SQLite), the web app's type-check, ESLint, Vitest tests and build, Bandit over `runway/` and zizmor over the workflows and Dependabot's settings (offline). `make lint`, `make test`, `make frontend-check` and `make security` run one part. `make audit` checks the Python and web app dependencies for known vulnerabilities (pip-audit and npm audit, as CI does); it needs the network, so it isn't part of `make check`. Semgrep, Trivy and CodeQL run only in CI, as do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
 
 ## The web app
 

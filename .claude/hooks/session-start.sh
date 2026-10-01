@@ -24,11 +24,8 @@ if ! command -v poetry >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 poetry env use --quiet "$py" >/dev/null
+# Runway's dependencies and the tools CI runs (ruff, mypy, Bandit, zizmor, ...: pyproject.toml's dev group).
 poetry install --no-root --no-interaction
-
-# The tools CI pins (docker.yml): ruff and mypy for `make lint`, unittest-parallel for running tests as CI does.
-poetry run pip install --quiet --disable-pip-version-check \
-  "ruff==0.16.9" "mypy==2.3.1" "types-python-dateutil==2.9.0.20260807" "unittest-parallel==1.8.6"
 
 # The web app's packages (npm install, not ci: the container's cache keeps them between sessions).
 (cd frontend && npm install --no-audit --no-fund)

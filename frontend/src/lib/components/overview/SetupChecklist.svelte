@@ -3,6 +3,7 @@
   import { app, refreshState } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { barWidth } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import Check from "@lucide/svelte/icons/check";
@@ -43,7 +44,7 @@
   <Card.Content>
     <div class="mb-4 flex items-center gap-3">
       <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={4} aria-valuenow={doneCount} aria-label="Setup progress">
-        <div class="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style:width={`${(doneCount / 4) * 100}%`}></div>
+        <div class="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style:width={barWidth(doneCount / 4)}></div>
       </div>
       <span class="text-xs text-muted-foreground tabular-nums">{doneCount} of 4 done</span>
     </div>

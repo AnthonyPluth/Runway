@@ -17,8 +17,12 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=1024"]
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # The same ruff version CI pins (.github/workflows/docker.yml), so a commit that passes here passes there.
-    rev: v0.16.9
+  # Ruff from the Poetry environment: the version poetry.lock pins, the one CI runs, so a commit that passes here
+  # passes there.
+  - repo: local
     hooks:
       - id: ruff-check
+        name: ruff check
+        entry: poetry run ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]

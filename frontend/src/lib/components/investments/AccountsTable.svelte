@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import type { SimplefinSeen } from "$lib/components/settings/types";
   import * as Alert from "$lib/components/ui/alert";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -7,7 +8,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
   import TrackedEditor from "./TrackedEditor.svelte";
-  import type { InvAccount, SimplefinSeen } from "./types";
+  import type { InvAccount } from "./types";
 
   // The investment accounts, and where to enter the funds of a SimpleFIN account that only sends a balance. Accounts
   // aren't left out here any more (leave one out of net worth on that page); one you had hidden can be shown again. An account connected through both Plaid and SimpleFIN is listed once, as its Plaid one.

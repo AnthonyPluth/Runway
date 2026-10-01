@@ -22,7 +22,7 @@ import type { PlaidItem, PlaidStatus, SettingsAccount } from "./types";
 const item = (over: Partial<PlaidItem> = {}): PlaidItem => ({
   item_id: "it1", institution_name: "Chase", products: ["transactions"], bank: true, last_sync: "2026-09-30 15:00:00",
   accounts: [{ id: "pa1", name: "Freedom", type: "credit", account_id: null }], ...over });
-const status = (items: PlaidItem[] = [], over: Partial<PlaidStatus> = {}): PlaidStatus => ({ configured: true, env: "production", client_id: "cid", items, ...over });
+const status = (items: PlaidItem[] = [], over: Partial<PlaidStatus> = {}): PlaidStatus => ({ configured: true, env: "production", client_id: "cid", items, last_inv_sync: null, syncing: false, inv_accounts: 0, simplefin_connected: false, simplefin_last_sync: null, simplefin_seen: [], ...over });
 const serve = (st: PlaidStatus | Error) => vi.mocked(api).mockImplementation(async (path: string) => {
   if (path === "/api/plaid/status") { if (st instanceof Error) throw st; return st; }
   return { ok: true, new: 3 };

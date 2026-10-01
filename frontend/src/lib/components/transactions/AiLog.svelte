@@ -6,6 +6,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import * as Card from "$lib/components/ui/card";
+  import { fmtDateTime } from "$lib/format";
   import { cn } from "$lib/utils";
   import type { AiLogRow } from "./types";
 
@@ -22,8 +23,10 @@
   /** Load the log again; `show` opens it (after a failed request, so you see why). */
   export function refresh(show = false) { if (show) open = true; if (Array.isArray(rows)) get(); else rows = get(); }
 
-  const when = (at: string, seconds = false) => new Date(at.replace(" ", "T")).toLocaleString("en-US",
-    { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}) });
+  const when = (at: string, seconds = false) => {
+    const d = new Date(at.replace(" ", "T"));
+    return seconds ? d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" }) : fmtDateTime(d);
+  };
   const what = (p: string) => (p === "review" ? "Suggest button" : p === "orders" ? "Amazon and Target items" : "Automatic, during sync");
 </script>
 

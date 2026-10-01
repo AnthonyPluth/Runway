@@ -17,6 +17,7 @@ from . import settings_keys as sk
 # Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
 from .models import Account, Holding, InvAccount, InvSnapshot, InvTransaction, PlaidAccount, PlaidItem, Security
 from .plaidapi import HOSTS as HOSTS, PlaidError as PlaidError, base_url as base_url, call as call, configured as configured
+from .plaidbank import _institution
 
 HISTORY_DAYS = 730      # Plaid keeps up to 24 months of investment activity
 REFRESH_DAYS = 45       # window re-read on routine syncs
@@ -167,11 +168,6 @@ def investment_candidates(conn, item_id: str) -> list[dict]:
         select(Account.id, Account.name, Account.display_name, Account.org, Account.balance, linked_to.label("linked_to"))
         .where(Account.kind == "investment", Account.id.not_like("pl:%")).order_by(Account.name)).fetchall()
         if _same_institution(a["org"] or a["name"], inst)]
-
-
-def _institution(conn, item_id: str) -> str | None:
-    """A connection's institution name (None if there's no such connection)."""
-    return conn.execute(select(PlaidItem.institution_name).where(PlaidItem.item_id == item_id)).scalar()
 
 
 def match_investment(conn, inv_id: str, target: str, today: date | None = None) -> dict:

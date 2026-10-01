@@ -4,7 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { fmt0, fmtDate } from "$lib/format";
+  import { barWidth, fmt0, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import { benefitUnuse, benefitUse } from "./actions";
@@ -64,7 +64,7 @@
             {#if b.kind === "credit" && b.amount}
               <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`${b.name} used this period`}
                 aria-valuemin={0} aria-valuemax={b.amount} aria-valuenow={b.used ?? 0}>
-                <div class="h-full rounded-full bg-[var(--nw-1)]" style:width={`${Math.min(100, ((b.used ?? 0) / b.amount) * 100).toFixed(1)}%`}></div>
+                <div class="h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth((b.used ?? 0) / b.amount)}></div>
               </div>
             {/if}
             <div class="mt-2 flex flex-wrap items-center gap-2">

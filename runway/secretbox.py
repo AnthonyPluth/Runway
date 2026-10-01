@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import functools
 import hashlib
+import hmac
 import os
 import threading
 from typing import Literal, TypeGuard, overload
@@ -118,6 +119,14 @@ def _primary() -> Fernet:
     """The key new secrets are encrypted with (the first of _box's keys)."""
     env = os.environ.get("RUNWAY_SECRET_KEY") or ""
     return Fernet(_from_passphrase(env) if env else _read_or_make_key_file(create=True))
+
+
+def derived_key(purpose: str) -> bytes:
+    """A key for something other than encrypting, from the current one: never that key itself, and a different one for
+    each purpose (so what's made with it can't be checked against another's). It changes when the key does."""
+    env = os.environ.get("RUNWAY_SECRET_KEY") or ""
+    base = _from_passphrase(env) if env else _read_or_make_key_file(create=True)
+    return hmac.new(base, b"runway:" + purpose.encode(), hashlib.sha256).digest()
 
 
 def is_encrypted(value: object) -> TypeGuard[str]:

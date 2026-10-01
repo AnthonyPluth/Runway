@@ -1,5 +1,4 @@
 import os
-import tempfile
 import threading
 import time
 import unittest
@@ -9,11 +8,12 @@ from unittest import mock
 
 from runway import db, notify, oidc, webpush
 from tests.test_webpush import PushService, decrypt, receiver
+from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
 
 
-class NotifyTests(unittest.TestCase):
+class NotifyTests(DbCase):
     @classmethod
     def setUpClass(cls):
         os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
@@ -25,10 +25,7 @@ class NotifyTests(unittest.TestCase):
         cls.srv.shutdown()
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        path = os.path.join(self.tmp.name, "t.db")
-        db.init(path)
-        self.c = db.connect(path)
+        super().setUp()
         self.c.execute("INSERT INTO accounts(id, name, kind, balance, balance_date) VALUES ('chk','Checking','checking',700,'2026-09-23')")
         # Card closes on the 1st, due on the 25th (two days away), $400 statement unpaid.
         self.c.execute("INSERT INTO accounts(id, name, kind, balance, balance_date, pay_from, plaid_account_id) "
@@ -47,10 +44,6 @@ class NotifyTests(unittest.TestCase):
                        (f"http://127.0.0.1:{self.srv.server_port}/p/1", self.p256dh,
                         webpush.b64u(b"0123456789abcdef"), "Test phone"))
         PushService.received.clear()
-
-    def tearDown(self):
-        self.c.close()
-        self.tmp.cleanup()
 
     def titles(self):
         return [decrypt(b, self.ua, b"0123456789abcdef")["title"] for _p, _h, b in PushService.received]

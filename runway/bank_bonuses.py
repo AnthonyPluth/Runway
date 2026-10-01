@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import delete, insert, select
 
 # churning imports this module too; its helpers are read when called, so either can be imported first.
-from . import categories, churning, db
+from . import categories, churning, db, validate
 from .models import Account, ChurnBankBonus, Transaction
 
 TYPES = ("checking", "savings", "business")
@@ -274,7 +274,7 @@ def save(conn, body: dict, bonus_id: int | None = None) -> int:
             raise churning.ChurnError("Status must be open, pending, received or closed")
         f["status"] = status
     if "once_per_lifetime" in body or new:
-        f["once_per_lifetime"] = 1 if body.get("once_per_lifetime") in (True, 1, "1", "true", "on") else 0
+        f["once_per_lifetime"] = validate.flag(body.get("once_per_lifetime"))
     if "account_id" in body:
         acct = str(body.get("account_id") or "") or None
         if acct and not conn.execute(select(Account.id).where(Account.id == acct, Account.kind.in_(["checking", "savings"]))).fetchone():

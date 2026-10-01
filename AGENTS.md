@@ -14,10 +14,11 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 
 Python goes through Poetry (Python 3.14).
 
-- `make check`: everything CI checks (lint, tests, frontend checks). Run it before pushing.
+- `make check`: what CI checks, each tool once: ruff, mypy, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, Bandit and zizmor. Run it before pushing. It doesn't cover the dependency audits (`make audit`: pip-audit and npm audit, which need the network) or Semgrep, Trivy and CodeQL, which run only in CI.
 - `make lint`: ruff, mypy, and ESLint.
 - `make test`: `poetry run python -m unittest discover tests`.
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
+- `make security`: Bandit over `runway/` and zizmor over the workflows and Dependabot's settings.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
 
 ## Conventions

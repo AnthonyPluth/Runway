@@ -20,6 +20,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  POETRY_VERSION: "2.5.1"   # the Poetry the Python jobs install the scanners with, as docker.yml's does
+
 # bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
 # the last command in a pipeline counts, and a failed gh or curl passes silently).
 defaults:
@@ -37,8 +40,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        id: python
+        with:
+          python-version: "3.14"
+      # Bandit at the version poetry.lock pins (pyproject.toml's dev group), the same as `poetry install` gives you.
+      - name: Install Poetry and Bandit
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          pipx install --python "$PYTHON_PATH" "poetry==$POETRY_VERSION"
+          poetry install --no-root --only dev --no-interaction
       - name: Bandit (settings in pyproject.toml)
-        run: pipx run "bandit[toml]==1.9.4" -c pyproject.toml -r runway -ll
+        run: poetry run bandit -c pyproject.toml -r runway -ll
       - name: Semgrep
         run: >
           pipx run "semgrep==1.146.0" scan --metrics=off --sarif --output semgrep.sarif
@@ -112,10 +126,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        id: python
+        with:
+          python-version: "3.14"
+      # zizmor at the version poetry.lock pins (pyproject.toml's dev group), the same as `poetry install` gives you.
+      - name: Install Poetry and zizmor
+        env:
+          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+        run: |
+          pipx install --python "$PYTHON_PATH" "poetry==$POETRY_VERSION"
+          poetry install --no-root --only dev --no-interaction
       - name: Audit the workflows
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pipx run "zizmor==1.30.1" --format sarif . > zizmor.sarif
+        run: poetry run zizmor --format sarif . > zizmor.sarif
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2   # v4.38.2
         if: ${{ !cancelled() && hashFiles('zizmor.sarif') != '' }}
         with:
