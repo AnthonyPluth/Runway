@@ -105,11 +105,11 @@ export async function matchPlaidAccount(plaidAccountId: string, target: string, 
   } catch (err) { toast.error((err as Error).message); return false; }
 }
 
-/** The Connect buttons: opens Link, and once a bank is connected, lands on Settings → Accounts where its accounts wait for a decision. */
+/** The Connect buttons: opens Link and stays where you are. A new bank's connection row links to the accounts
+ *  waiting for a decision in Settings → Accounts. */
 export async function connectPlaid(kind: string): Promise<void> {
   try {
     if (!(await openPlaidLink(null, kind))) return;
-    if (kind === "bank") location.hash = "#setup/accounts";
     reload();
   } catch (err) { toast.error((err as Error).message); }
 }

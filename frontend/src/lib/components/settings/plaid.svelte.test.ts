@@ -136,14 +136,14 @@ describe("resumePlaidOAuth", () => {
 });
 
 describe("connectPlaid", () => {
-  it("lands on Accounts after connecting a bank, where its accounts wait for a decision", async () => {
+  it("stays on Connections after connecting a bank", async () => {
     location.hash = "#setup/connections";
     vi.mocked(api).mockResolvedValue({ link_token: "tok-1" });
     const p = connectPlaid("bank");
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     opts.onSuccess("public", {});
     await p;
-    expect(location.hash).toBe("#setup/accounts");
+    expect(location.hash).toBe("#setup/connections");
     expect(reload).toHaveBeenCalled();
   });
 
