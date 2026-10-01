@@ -1,7 +1,14 @@
 // The shapes of Runway's API replies that the pages use (see runway/server.py).
 
 export interface User { name?: string; email?: string; local?: boolean }
-export interface Brand { institution?: string; /** Logo.dev's logo for the institution, once Runway has fetched it. */ src?: string | null; initial?: string }
+export interface Brand {
+  institution?: string | null;
+  /** The account's logo: the one you chose, else its institution's (Logo.dev's, once Runway has fetched it); null for its letter. */
+  src?: string | null;
+  /** The institution's logo, which a choice replaces. */
+  auto?: string | null;
+  initial?: string;
+}
 /** The last sync's log line; `at` is when it ran, ISO with its UTC offset. */
 export interface SyncLog { ok: boolean; message?: string; at?: string }
 
@@ -17,6 +24,8 @@ export interface SentryConfig {
 export interface AppState {
   connected: boolean;
   brands?: Record<string, Brand>;
+  /** Each bank connection's logo by its institution's name (null: its letter). */
+  connection_logos?: Record<string, string | null>;
   simplefin?: boolean;
   has_api_key?: boolean;
   llm_model?: string;

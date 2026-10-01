@@ -73,6 +73,10 @@ export interface CartaStatus {
 }
 
 export type PushPrefs = Record<string, boolean | number>;
-export interface PushDevice { endpoint: string; device?: string | null; created?: number | null; last_ok?: number | null; last_error?: string | null }
+export interface PushDevice {
+  endpoint: string; device?: string | null; created?: number | null; last_ok?: number | null; last_error?: string | null;
+  /** Turned on before there was sign-in: nobody's, so it gets nothing until it's turned on again from the device. */
+  unclaimed?: boolean;
+}
 /** GET /api/push */
 export interface PushInfo { public_key: string; prefs: PushPrefs; devices: PushDevice[]; recent: { title: string; sent: number }[] }

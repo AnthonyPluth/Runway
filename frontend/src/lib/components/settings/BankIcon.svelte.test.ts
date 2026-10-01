@@ -34,4 +34,12 @@ describe("a bank's icon", () => {
     expect(on.container.querySelector("img")).toBeNull();
     expect(on.container).toHaveTextContent("F");
   });
+
+  it("uses the logo the state has for a connection, by website for a bank Runway knows", () => {
+    app.state = { connected: true, logodev_configured: true, connection_logos: { "Citibank Online": "/api/merchants/site%3Aciti.com/logo", Vestwell: null } } as never;
+    expect(render(BankIcon, { name: "Citibank Online" }).container.querySelector("img")).toHaveAttribute("src", "/api/merchants/site%3Aciti.com/logo");
+    const none = render(BankIcon, { name: "Vestwell" });
+    expect(none.container.querySelector("img")).toBeNull();
+    expect(none.container).toHaveTextContent("V");
+  });
 });

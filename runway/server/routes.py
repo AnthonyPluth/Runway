@@ -5,7 +5,7 @@ import urllib.parse
 from collections.abc import Callable
 from typing import Any
 
-from .api.accounts import api_account_update, api_accounts
+from .api.accounts import api_account_logo, api_account_logo_options, api_account_update, api_accounts
 from .api.budget import api_budget, api_budget_set
 from .api.categories import (
     api_categories, api_category_add, api_category_look, api_category_move, api_category_remove, api_category_rename,
@@ -64,6 +64,8 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/overview", api_overview),
     ("GET", "/api/accounts", api_accounts),
     ("POST", "/api/accounts/{id}", api_account_update),
+    ("GET", "/api/accounts/{id}/logo-options", api_account_logo_options),
+    ("POST", "/api/accounts/{id}/logo", api_account_logo),
     ("GET", "/api/transactions", api_transactions),
     ("POST", "/api/transactions/bulk", api_tx_bulk),
     ("POST", "/api/transactions/{id}/category", api_tx_category),

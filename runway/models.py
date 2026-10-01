@@ -50,6 +50,7 @@ class Account(Base):
     provider: Mapped[str | None]
     plaid_account_id: Mapped[str | None]
     provider_since: Mapped[str | None]
+    logo: Mapped[str | None]
 
     transactions: Mapped[list[Transaction]] = _rel("Transaction", "foreign(Transaction.account_id) == Account.id")
 

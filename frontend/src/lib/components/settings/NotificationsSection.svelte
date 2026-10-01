@@ -10,7 +10,8 @@
   import type { PushInfo } from "./types";
   import { checkCls, inputCls } from "./ui";
 
-  // Settings → Notifications: turn them on for this device, what to be told about, and every device that gets them.
+  // Settings → Notifications: turn them on or off for this device, what to be told about, and the devices that get
+  // them. With sign-in they're each person's own: your devices and choices, never anyone else's.
   type Loaded = { d: PushInfo; reg: ServiceWorkerRegistration | null; sub: PushSubscription | null };
   let data = $state<Promise<Loaded>>(load());
   async function load(): Promise<Loaded> {
@@ -52,6 +53,7 @@
     try {
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: ep } });
       if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => {});
+      toast.success("Notifications are off on that device");
     } catch (err) { toast.error((err as Error).message); }
     again();
   }
@@ -81,7 +83,8 @@
 {:then l}
   {@const d = l.d}
   {@const sub = l.sub}
-  {@const mine = sub && d.devices.find((x) => x.endpoint === sub.endpoint)}
+  {@const here = sub && d.devices.find((x) => x.endpoint === sub.endpoint)}
+  {@const mine = here && !here.unclaimed ? here : null}
   <Card.Root>
     <Card.Header><Card.Title>This device</Card.Title></Card.Header>
     <Card.Content class="flex flex-col gap-3 text-sm leading-relaxed">
@@ -106,6 +109,7 @@
           <Button variant="outline" onclick={() => turnOff(sub)}>Turn off on this device</Button>
         </div>
       {:else}
+        {#if here}<p>Notifications were turned on here before there was sign-in. Turn them on again to get yours.</p>{/if}
         <p>Get a notification on this {isIOS() ? (/iPad/.test(navigator.userAgent) ? "iPad" : "iPhone") : "device"} when something needs your attention.</p>
         <div><Button disabled={busy} onclick={() => turnOn(l)}>Turn on notifications</Button></div>
       {/if}
@@ -141,10 +145,11 @@
               {#each d.devices as x (x.endpoint)}
                 <tr class="border-t align-top">
                   <td class="py-2 pr-3">{x.device || "Device"}{#if sub && x.endpoint === sub.endpoint}{" "}<Badge variant="secondary">this one</Badge>{/if}
+                    {#if x.unclaimed}{" "}<Badge variant="outline" title="Turned on before there was sign-in: it gets nothing until it's turned on again from the device">from before sign-in</Badge>{/if}
                     {#if x.last_error}<div class="text-xs text-destructive">{x.last_error}</div>{/if}</td>
                   <td class="py-2 pr-3 whitespace-nowrap text-muted-foreground">{x.created ? when(x.created, false) : ""}</td>
                   <td class="py-2 pr-3 whitespace-nowrap text-muted-foreground">{x.last_ok ? when(x.last_ok) : "—"}</td>
-                  <td class="py-1 text-right"><ConfirmButton confirm="Remove?" onconfirm={() => removeDevice(x.endpoint, sub)}>Remove</ConfirmButton></td>
+                  <td class="py-1 text-right"><ConfirmButton confirm="Turn off?" title="Stop notifications on this device" onconfirm={() => removeDevice(x.endpoint, sub)}>Turn off</ConfirmButton></td>
                 </tr>
               {/each}
             </tbody>

@@ -58,7 +58,14 @@ MIGRATED_DAILY_SPEND_OFF = "migrated_daily_spend_off"   # the v4 one-time switch
 RECURRING_SUGGESTIONS_DISMISSED = "recurring_suggestions_dismissed"   # JSON: keys of suggestions marked "not recurring"
 
 # Notifications
-NOTIFY_PREFS = "notify_prefs"             # JSON
+NOTIFY_PREFS = "notify_prefs"             # JSON: without sign-in, and where a person who hasn't chosen yet starts from
+
+
+def notify_prefs(user_sub: str) -> str:
+    """What one signed-in person wants to be told about (JSON, like NOTIFY_PREFS)."""
+    return f"notify_prefs:{user_sub}"
+
+
 VAPID_PRIVATE_KEY = "vapid_private_key"   # web push signing key, made on first use
 
 # Retirement planner

@@ -63,3 +63,15 @@ describe("choosing the forecast's account, from Settings", () => {
     expect(screen.queryByRole("button", { name: "Use for the forecast" })).toBeNull();
   });
 });
+
+describe("an account's logo, from Settings", () => {
+  it("opens the logo picker for this account, and refreshes the state after a change", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ choice: null, searchable: false, configured: true, candidates: [], error: null } as never);
+    show(acct({ display_name: "Rainy day" }));
+    await userEvent.click(screen.getByRole("button", { name: "Logo for Rainy day" }));
+    expect(api).toHaveBeenCalledWith("/api/accounts/sav/logo-options");
+    await userEvent.type(await screen.findByRole("textbox", { name: "The website whose logo to use" }), "ally.com{Enter}");
+    await waitFor(() => expect(api).toHaveBeenLastCalledWith("/api/accounts/sav/logo", { method: "POST", body: { website: "ally.com" } }));
+    await waitFor(() => expect(refreshState).toHaveBeenCalled());
+  });
+});
