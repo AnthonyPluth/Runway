@@ -68,7 +68,7 @@ describe("Recurring page", () => {
     serve([]);
     render(Recurring);
     expect(await screen.findByRole("heading", { name: "Add a recurring item" })).toBeInTheDocument();
-    expect(screen.getByText(/No recurring items yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/No recurring items yet/)).not.toBeInTheDocument();   // no empty-state prose: the form is the empty state
     expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
     expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
   });
@@ -184,12 +184,19 @@ describe("Recurring page", () => {
       expect(screen.getByRole("textbox", { name: /Name/ })).toHaveAttribute("aria-required", "true");
     });
 
-    it("keeps account, amount to forecast and merchant text under More options, with a line of help each", async () => {
+    it("keeps account, amount to forecast and merchant text under More options, says what's in it, and puts the help in tooltips", async () => {
       await open();
       expect(screen.getByText("More options")).toBeInTheDocument();
-      expect(screen.getByText("Text on the bank statement, e.g. COMED. One per line to match any of them; blank uses the name.")).toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveDescription(/Use the recent payments/);
+      expect(screen.getByText("Checking · always the amount above · matches the name")).toBeInTheDocument();
+      expect(screen.queryByText(/Text on the bank statement/)).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: /Merchant text/ })).toHaveAttribute("title", expect.stringMatching(/^Text on the bank statement/));
+      expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveAttribute("title", expect.stringMatching(/^Use the recent payments/));
       expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
+    });
+
+    it("drops the required-fields sentence: the stars mark them", async () => {
+      await open();
+      expect(screen.queryByText(/Fields marked \* are required/)).not.toBeInTheDocument();
     });
 
     it("says what's missing next to each field instead of only in a toast, and doesn't send anything", async () => {
@@ -251,7 +258,7 @@ describe("Recurring page", () => {
   });
 
   describe("suggestions", () => {
-    const form = () => within(screen.getByRole("heading", { name: "Add a recurring item" }).closest<HTMLElement>("[data-slot=card]")!);
+    const form = () => within(screen.getByRole("heading", { name: "Add a recurring item" }).closest<HTMLElement>("section")!);
     const posts = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { method?: string } | undefined)?.method === "POST");
 
     it("lists what's spotted in your history, and Add fills the form to adjust rather than adding at once", async () => {
@@ -352,12 +359,12 @@ describe("Recurring page", () => {
       expect(screen.getByText("Netflix")).toBeInTheDocument();
     });
 
-    it("puts suggestions above the empty state when there are no items", async () => {
+    it("puts suggestions above the add form when there are no items", async () => {
       serve([], [suggestion()]);
       render(Recurring);
       const spotted = await screen.findByRole("heading", { name: "Spotted in your history" });
-      const empty = screen.getByText(/No recurring items yet/);
-      expect(spotted.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const adding = screen.getByRole("heading", { name: "Add a recurring item" });
+      expect(spotted.compareDocumentPosition(adding) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("doesn't look for any when no bank is connected", async () => {
