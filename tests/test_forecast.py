@@ -801,6 +801,30 @@ class PaymentModeTests(LedgerCase):
         self.assertEqual((self.card(fc)["payment"], self.card(fc)["carried"]), (600.0, 0.0))
         self.assertEqual(self.payments(fc)["2026-10-05"], 500.0)
 
+    def test_a_credit_on_the_card_carries_into_the_next_statement(self):
+        # A $1,000 refund since the close against $300 of charges: a $700 credit, even paying in full
+        self.tx("cc", "2026-09-22", 1000.0, "STORE REFUND", "Refunds")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        c = self.card(fc)
+        self.assertEqual((c["pay_mode"], c["new_charges"], c["credit"], c["payment"], c["carried"]), ("full", 0.0, 700.0, 600.0, 0.0))
+        # Oct 10's statement comes out below zero (-700 + the average's share of the days left): nothing to pay, and
+        # what's left of the credit comes off Nov 10's
+        s1 = -700 + 1066.67 * 17 / 30
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-12-07": round(s1 + self.EST2, 2)})
+        self.assertTrue(all(e["amount"] < 0 for e in fc["events"] if e["kind"] == "card"))   # never a negative payment
+        self.assertFalse(self.interest_warned(fc))   # a credit isn't a balance carried
+        # the budget line too: Oct 10's statement is the credit plus budgeted charges, still below zero
+        card = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "card"}
+        s1 = -700 + 300 + 500 / 31 * 10
+        self.assertNotIn("2026-11-05", card)
+        self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
+        # not paying in full, an edit to the payment on a statement below zero doesn't turn the credit into a balance
+        self.pay("fixed", amount="5000")
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-50.0))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 + self.EST2, 2))
+
     def test_the_budget_scenario_pays_the_same_way(self):
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
         self.pay("minimum")

@@ -355,7 +355,8 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
     paid += in_transit(conn, card, last_close)
     # Paying more than the statement (the current balance, say) pays off some of the next one already.
     over = max(0.0, paid - statement)
-    new_charges = max(0.0, -sum(t["amount"] for t in txs if t["category"] not in transfers) - over)
+    net = -sum(t["amount"] for t in txs if t["category"] not in transfers) - over
+    new_charges = max(0.0, net)
     due = _d(bank["next_due_date"]) if bank["next_due_date"] and _d(bank["next_due_date"]) > last_close \
         else next_after(last_close, card["due_day"])
     spend = card_monthly_spend(conn, card, last_close)
@@ -383,6 +384,8 @@ def card_cycle(conn, card: dict, today: date, bank) -> dict:
         "minimum_estimated": plan["pay_mode"] == "minimum" and bank["minimum_payment"] is None,
         "due_date": due.isoformat(),
         "new_charges": round(new_charges, 2),
+        # More refunds (or overpayment) than charges since the close: a credit the issuer takes off the next statement.
+        "credit": round(max(0.0, -net), 2),
         "daily_rate": round(daily_spend_rate(conn, card["id"], today), 2),
     }
 
@@ -436,7 +439,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         payment plan pays (`planned`), or, when you've edited that payment on the Overview, what you entered, up to what's
         owed. A card paid in full carries nothing either way, as before."""
         edit = overrides.get(key, overrides.get(old_key))
-        return min(owes, abs(edit)) if info["pay_mode"] != "full" and edit is not None else planned
+        return max(0.0, min(owes, abs(edit))) if info["pay_mode"] != "full" and edit is not None else planned
 
     def not_averaged(item_id: int, since: str) -> bool:
         """Whether a card's spending average (over cycles from the one closing on `since`) leaves out this recurring
@@ -518,8 +521,11 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         first = True
         avg = info["avg_monthly_spend"]
         stale = False
-        carried = info["carried"]
-        carries = carried > 0.005   # whether any statement in the forecast carries a balance
+        # What carries into the statement in progress: what the closed one leaves unpaid, less any credit on the card.
+        # A statement that comes out at or below zero pays nothing and carries its credit on to the next one, in every
+        # mode (a card paid in full too, as the issuer does).
+        carries = info["carried"] > 0.005   # whether any statement in the forecast carries a balance
+        carried = info["carried"] - info["credit"]
         while True:
             due_k = next_after(close, card["due_day"])
             if due_k > end:
@@ -780,7 +786,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         days = spend.get(cid, {})
         prev = _d(info["last_close"])
         close, first = next_after(prev, card["closing_day"]), True
-        carried = info["carried"]   # paid the way the forecast pays it: what that doesn't pay carries over, with interest
+        # paid the way the forecast pays it: what that doesn't pay carries over, with interest, and a credit carries too
+        carried = info["carried"] - info["credit"]
         while True:
             due = next_after(close, card["due_day"])
             if due.isoformat() > dates[-1]:

@@ -124,6 +124,8 @@ export interface CardSummary {
   pay_mode?: "full" | "minimum" | "fixed";
   payment?: number;
   carried?: number;
+  /** More refunds (or overpayment) than charges since the close: a credit that comes off the next statement. */
+  credit?: number;
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;
