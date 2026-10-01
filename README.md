@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/src/assets/screenshots/overview.png" alt="Runway's Overview page: an “On track” status saying checking stays above $4,821 for 90 days, the $4,820.55 balance, and a projected balance chart" width="900">
+  <img src="docs/src/assets/screenshots/overview.png" alt="Runway's Overview page: an “On track” status for checking over the next 90 days, its $4,820.55 balance, and a projected balance chart" width="900">
 </p>
 
 ---

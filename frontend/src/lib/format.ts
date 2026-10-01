@@ -4,6 +4,8 @@ const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD
 const money0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 export const fmt = (n: number | null | undefined) => money.format(n ?? 0);
 export const fmt0 = (n: number | null | undefined) => money0.format(n ?? 0);
+/** Whole dollars rounded down, for a low a balance stays above: $4,820.55 is "$4,820", never "$4,821". */
+export const fmt0Down = (n: number | null | undefined) => money0.format(Math.floor(n ?? 0));
 
 /** "$1.2k", "−$350" for chart axes. */
 export function shortMoney(v: number): string {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { barWidth, fmt, fmt0, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
+import { barWidth, fmt, fmt0, fmt0Down, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
@@ -15,6 +15,12 @@ describe("money", () => {
   it("formats whole dollars", () => {
     expect(fmt0(1234.5)).toBe("$1,235");
     expect(fmt0(null)).toBe("$0");
+  });
+  it("rounds a low down, so a balance said to stay above it really does", () => {
+    expect(fmt0Down(4820.55)).toBe("$4,820");
+    expect(fmt0Down(-12.2)).toBe("-$13");
+    expect(fmt0Down(1000)).toBe("$1,000");
+    expect(fmt0Down(null)).toBe("$0");
   });
   it("shortens amounts for chart axes", () => {
     expect(shortMoney(0)).toBe("$0");
