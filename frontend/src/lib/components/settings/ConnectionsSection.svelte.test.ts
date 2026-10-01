@@ -27,7 +27,7 @@ const serve = (st: PlaidStatus | Error) => vi.mocked(api).mockImplementation(asy
   if (path === "/api/plaid/status") { if (st instanceof Error) throw st; return st; }
   return { ok: true, new: 3 };
 });
-const acct = (id: string, org: string | null): SettingsAccount => ({ id, name: id, kind: "checking", org });
+const acct = (id: string, org: string | null, provider = "simplefin"): SettingsAccount => ({ id, name: id, kind: "checking", org, provider });
 const state = app.state as unknown as Record<string, unknown>;
 const card = (title: string) => screen.getByText(title, { selector: "[data-slot=card-title]" }).closest("[data-slot=card]") as HTMLElement;
 
@@ -49,7 +49,8 @@ describe("Settings → Connections", () => {
   it("shows SimpleFIN's last sync and which banks it brings in, with the accounts managed under Accounts", async () => {
     state.simplefin = true; state.last_log = { at: "2026-09-30T14:00:00+00:00", ok: true, message: "12 new" };
     serve(status());
-    render(ConnectionsSection, { accounts: [acct("sf1", "Discover"), acct("sf2", "Ally Bank"), acct("sf3", "Ally Bank"), acct("pl:x", "Chase")] });
+    render(ConnectionsSection, { accounts: [acct("sf1", "Discover"), acct("sf2", "Ally Bank"), acct("sf3", "Ally Bank"), acct("pl:x", "Chase"),
+      acct("sf4", "Amex", "plaid")] });   // switched to Plaid under Accounts: SimpleFIN no longer brings it in
     const sf = card("SimpleFIN");
     expect(within(sf).getByText("connected")).toBeInTheDocument();
     expect(within(sf).getByText(/^Last sync Sep 30, 10:00\sAM · 12 new$/)).toBeInTheDocument();   // in this browser's time zone

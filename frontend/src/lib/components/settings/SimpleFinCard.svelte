@@ -19,8 +19,9 @@
   // When it ran, in this browser's time zone; the bank messages the log line also carries are shown on their own line.
   const when = $derived(log?.at ? serverTime(log.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "");
   const summary = $derived(log?.ok ? (log.message ?? "").split(" · bank messages:")[0] : "");
-  // Its accounts are every one that isn't Plaid's own ("pl:…"); its banks, their institutions.
-  const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:")));
+  // Its accounts are the ones it syncs: not Plaid's own ("pl:…"), nor one switched to Plaid under Accounts (which keeps
+  // its id). Hidden ones still sync, so they count. Its banks are their institutions.
+  const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:") && a.provider !== "plaid"));
   const banks = $derived([...new Set(mine.map((a) => a.org?.trim()).filter(Boolean))].sort((a, b) => a!.localeCompare(b!)));
   let replacing = $state(false);
 </script>
