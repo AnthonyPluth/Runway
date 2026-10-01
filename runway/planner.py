@@ -37,7 +37,7 @@ def payment_counted(spent: list[dict], payment: float, names: list[str], named_o
     low = (1 - PAYMENT_MATCH) * payment
     high = (1 + PAYMENT_MATCH if named_only else PAYMENT_ESCROW) * payment
     named = [s for s in spent if low <= s["amount"] <= high and any(n in s["text"] for n in names)
-             and not (named_only and categorize.CARD_PAYMENT_OUT.search(s["text"]))]
+             and not (named_only and categorize.is_card_payment(s["text"]))]
     near = [s for s in spent if abs(s["amount"] - payment) <= PAYMENT_MATCH * payment]
     return len({s["month"] for s in (named if named_only else named or near)}) >= PAYMENT_MONTHS
 

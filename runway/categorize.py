@@ -70,9 +70,15 @@ CARD_PAYMENT_OUT = re.compile(r"crcardpmt|card ?pmt|credit ?card|cardmember|paym
 # "autopay" and "epay" are just as often a utility, insurer or loan: only a card payment when something says card.
 _AUTOPAY = re.compile(r"autopay|e-?pay", re.I)
 _CARD_WORDS = re.compile(r"card|visa|mastercard|amex|american express|discover|citi|chase|barclay|synchrony|capital one", re.I)
-_NOT_CARD = re.compile(r"auto fin|auto loan|mortgage|\bloan\b|lease|insurance", re.I)
+_NOT_CARD = re.compile(r"auto fin|auto loan|\bauto\b|mortg|\bloan\b|lease|insurance", re.I)   # "\bauto\b": not "autopay"
 _CARD_PAYMENT_IN = re.compile(r"payment|autopay|thank you|pymt|pmt", re.I)
 _SWEEP = re.compile(r"core account|money market|spaxx|fdrxx|sweep", re.I)
+
+
+def is_card_payment(text: str) -> bool:
+    """Whether money out with this text pays a credit card ("CHASE CREDIT CRD AUTOPAY"), not a loan or a bill from the
+    same bank ("CAPITAL ONE AUTO PMT")."""
+    return not _NOT_CARD.search(text) and bool(CARD_PAYMENT_OUT.search(text) or (_AUTOPAY.search(text) and _CARD_WORDS.search(text)))
 
 
 def heuristic_category(tx: dict, account_kind: str) -> str | None:
@@ -84,8 +90,7 @@ def heuristic_category(tx: dict, account_kind: str) -> str | None:
         return "Ignore"
     if account_kind == "credit" and amt > 0 and _CARD_PAYMENT_IN.search(desc):
         return "Credit Card Payment"
-    if account_kind in ("checking", "savings") and amt < 0 and not _NOT_CARD.search(desc) and (
-            CARD_PAYMENT_OUT.search(desc) or (_AUTOPAY.search(desc) and _CARD_WORDS.search(desc))):
+    if account_kind in ("checking", "savings") and amt < 0 and is_card_payment(desc):
         return "Credit Card Payment"
     return None
 

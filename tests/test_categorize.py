@@ -409,7 +409,7 @@ class CategorizeFixTests(LedgerCase):
     def test_autopay_needs_a_card(self):
         cat = lambda d: categorize.heuristic_category({"description": d, "amount": -100}, "checking")
         for bill in ("COMCAST XFINITY AUTOPAY", "STATE FARM AUTOPAY", "CITY WATER EPAY", "CAPITAL ONE AUTO FINANCE PMT",
-                     "CHASE MORTGAGE AUTOPAY"):
+                     "CHASE MORTGAGE AUTOPAY", "CAPITAL ONE AUTO PMT", "TRUIST MORTG OLB MTGPMT"):
             self.assertIsNone(cat(bill), bill)
         for card in ("CHASE CREDIT CRD AUTOPAY", "CAPITAL ONE MOBILE PMT", "AMEX EPAYMENT ACH PMT", "DISCOVER E-PAYMENT",
                      "CITI AUTOPAY PAYMENT", "BARCLAYCARD US AUTOPAY", "APPLECARD GSBANK PAYMENT"):

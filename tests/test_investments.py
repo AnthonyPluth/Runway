@@ -297,6 +297,8 @@ class FireTests(Base):
         # past 10% of it (an escrow allowance is for spending only)
         self.assertFalse(planner.payment_counted([out(m, 600, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
         self.assertTrue(planner.payment_counted([out(m, 500, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
+        # a loan from a card issuer, paid by transfer, is still the loan's payment
+        self.assertTrue(planner.payment_counted([out(m, 500, "capital one auto pmt") for m in months], 500, ["Capital One"], named_only=True))
 
     def test_a_mortgage_paid_with_its_escrow_is_still_its_payment(self):
         # The lender reports $1,850 of principal and interest; the bank shows $2,450 going out, taxes and insurance in
