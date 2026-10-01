@@ -328,7 +328,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
             db.set_setting(conn, sk.plaid_stmt_note(item_id), stmt_error.code)
         else:
             error = stmt_error
-            out["error"] = f"card statements: {stmt_error}"
+            out["error"] = f"card statements and loan terms: {stmt_error}"
     conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
                  .values(last_sync=_now(), error=(error.code or str(error)) if error else None))
     return out
