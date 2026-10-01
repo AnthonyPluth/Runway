@@ -180,13 +180,14 @@ def init() -> bool:
     """Start reporting if SENTRY_DSN is set. Returns whether it's on."""
     global _enabled
     dsn = (os.environ.get("SENTRY_DSN") or "").strip()
+    if (dsn or browser_dsn()) and (off := retired_off()):   # the web app can report with its own DSN alone
+        sys.stderr.write(f"Warning: {', '.join(off)} {'is' if len(off) == 1 else 'are'} no longer read. With a Sentry DSN "
+                         "set, Runway sends everything to Sentry: traces, profiles, replays, logs, metrics, crons, feedback, "
+                         "who's signed in (as a code) and the AI's prompts and replies. Unset SENTRY_DSN and "
+                         "SENTRY_BROWSER_DSN to send nothing.\n")
+        sys.stderr.flush()
     if not dsn:
         return False
-    if off := retired_off():
-        sys.stderr.write(f"Warning: {', '.join(off)} {'is' if len(off) == 1 else 'are'} no longer read. With SENTRY_DSN set, "
-                         "Runway sends everything to Sentry: traces, profiles, replays, logs, metrics, crons, feedback, "
-                         "who's signed in (as a code) and the AI's prompts and replies. Unset SENTRY_DSN to send nothing.\n")
-        sys.stderr.flush()
     import logging
 
     import sentry_sdk   # loaded only when reporting is on, so it costs nothing otherwise

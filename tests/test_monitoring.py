@@ -229,6 +229,11 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {**env, "SENTRY_AI_CONTENT": "0"}, clear=True), mock.patch("sys.stderr", io.StringIO()) as quiet:
             self.assertFalse(monitoring.init())   # without a DSN nothing's sent, so there's nothing to warn about
         self.assertEqual(quiet.getvalue(), "")
+        # The web app reports with its own DSN alone, replays included, so that's warned about too.
+        with mock.patch.dict(os.environ, {**env, "SENTRY_BROWSER_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "0"}, clear=True), \
+                mock.patch("sys.stderr", io.StringIO()) as browser_only:
+            self.assertFalse(monitoring.init())
+        self.assertIn("SENTRY_REPLAY_SAMPLE_RATE is no longer read", browser_only.getvalue())
 
     def test_the_web_app_gets_no_config_without_a_dsn(self):
         with mock.patch.dict(os.environ, {"SENTRY_DSN": "", "SENTRY_BROWSER_DSN": ""}):
