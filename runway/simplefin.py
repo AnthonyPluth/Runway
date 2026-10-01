@@ -16,7 +16,7 @@ from datetime import date, datetime, timedelta, UTC
 
 from sqlalchemy import delete, insert, select, update
 
-from . import db, plaidbank, sfinvest, splits
+from . import db, deleted_accounts, plaidbank, sfinvest, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
 from .models import Account, Transaction
@@ -238,8 +238,11 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
     """Upsert accounts and transactions. Returns ids of newly inserted transactions."""
     new_ids: list[str] = []
     claimed: set = set()
+    deleted = deleted_accounts.ids(conn)
     for acct in payload.get("accounts", []):
         acct_id = str(acct["id"])
+        if acct_id in deleted:
+            continue   # you deleted it: it stays deleted until you restore it (deleted_accounts.py)
         setup = conn.execute(select(Account.provider, Account.provider_since).where(Account.id == acct_id)).fetchone()
         if setup and setup["provider"] == "plaid":
             continue   # this account's balance and transactions come from Plaid

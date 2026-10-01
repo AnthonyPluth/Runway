@@ -21,7 +21,7 @@ from sqlalchemy import delete, func, insert, select, update
 from . import brands, db, merchants, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
-from .models import Account, CardStatement, PlaidAccount, PlaidItem, Transaction
+from .models import Account, CardStatement, DeletedAccount, PlaidAccount, PlaidItem, Transaction
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
 HISTORY_DAYS = 730     # transaction history to ask for when linking (Plaid's maximum)
@@ -156,6 +156,8 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
         _retire_own_account(conn, plaid_account_id, target if target not in ("ignore", "") else None)
     if target in ("ignore", ""):
         return {"ok": True}
+    # Used again: an account you'd deleted that it belonged to isn't kept deleted any more (deleted_accounts.py).
+    conn.execute(delete(DeletedAccount).where(DeletedAccount.plaid_account_id == plaid_account_id))
     if target == "new":
         kind = runway_kind(pa) or "checking"
         aid = "pl:" + plaid_account_id
@@ -449,7 +451,10 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
 
 def store_statements(conn, item, res: dict) -> int:
     n = 0
+    deleted = set(conn.execute(select(DeletedAccount.plaid_account_id).where(DeletedAccount.plaid_account_id.is_not(None))).scalars())
     for c in ((res.get("liabilities") or {}).get("credit") or []):
+        if c.get("account_id") in deleted:
+            continue   # a card you deleted (deleted_accounts.py)
         stmt = {"last_statement_balance": c.get("last_statement_balance"), "last_statement_date": c.get("last_statement_issue_date"),
                 "next_due_date": c.get("next_payment_due_date"), "minimum_payment": c.get("minimum_payment_amount"),
                 "last_payment_amount": c.get("last_payment_amount"), "last_payment_date": c.get("last_payment_date"),
