@@ -96,6 +96,18 @@ describe("SyncButton", () => {
     input.remove();
   });
 
+  it("keeps watching a sync a proxy gave up on (a 504) while the server carried on", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => {
+      if (path === "/api/sync") throw new ApiError("Couldn't reach Runway", 504);
+      return state({ syncing: true });
+    });
+    render(SyncButton);
+    await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't reach Runway"));
+    expect(app.state?.syncing).toBe(true);
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();   // watched until it's done
+  });
+
   it("is disabled while the server is syncing (the daily sync, or a visit's)", () => {
     app.state = state({ syncing: true });
     render(SyncButton);

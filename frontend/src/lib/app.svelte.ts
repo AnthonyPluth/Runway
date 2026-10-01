@@ -137,6 +137,8 @@ export async function syncNow(): Promise<void> {
     if (app.state) app.state.syncing = false;
     toast.error((err as Error).message);
     await refreshState().catch(console.error);   // the failure is in the log now, and the sidebar says so
+    // A proxy can give up on a long sync (a 504) while it carries on: still running, so watch it to the end.
+    if (app.state?.syncing) watchSync(true);
   }
 }
 
