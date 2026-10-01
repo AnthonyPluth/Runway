@@ -64,9 +64,17 @@
     for (const k of skipped) (by[k.reason] ||= []).push(k.category);
     return " Left out: " + Object.entries(by).map(([reason, cats]) => {
       const why = reason.startsWith("a recurring") ? (cats.length > 1 ? "which recurring items already cover" : "which a recurring item already covers")
-        : reason.startsWith("its account") ? (cats.length > 1 ? "whose accounts aren't in the forecast" : "whose account isn't in the forecast") : reason;
+        : reason.startsWith("its account") ? (cats.length > 1 ? "whose accounts aren't in the forecast" : "whose account isn't in the forecast")
+        : reason.startsWith("its card") ? (cats.length > 1 ? "whose cards aren't paid from a forecast account" : "whose card isn't paid from a forecast account") : reason;
       return `${list(cats)}, ${why}`;
     }).join("; ") + ".";
+  }
+
+  // "Balance as of today, 7:02 AM, including −$375.00 pending": the balance is the bank's plus what's pending.
+  function balanceNote(asOf: string | undefined, pending: number): string {
+    if (Math.abs(pending) < 0.005) return asOf ?? "";
+    const p = `${pending < 0 ? "−" : ""}${fmt(Math.abs(pending))} pending`;
+    return asOf ? `${asOf}, including ${p}` : `Including ${p}`;
   }
 
 </script>
@@ -103,6 +111,7 @@
     {@const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount)}
     {@const nextIn = fc.events.find((e) => e.amount > 0 && e.date > low.date)}
     {@const asOf = balanceAsOf(fc.accounts.map((a) => a.balance_date), fc.today, app.state?.last_sync_ok)}
+    {@const note = balanceNote(asOf?.text, fc.accounts.reduce((s, a) => s + (a.pending ?? 0), 0))}
     {@const alerts = fc.warning_links.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
     {@const assumed = assumptions(fc)}
 
@@ -128,7 +137,7 @@
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} accounts={fc.accounts}
         onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
-      {#if asOf}<p class={cn("mt-1.5 text-[13px]", asOf.stale ? "text-amber-500" : "text-muted-foreground")}>{asOf.text}</p>{/if}
+      {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-amber-500" : "text-muted-foreground")}>{note}</p>{/if}
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
@@ -153,7 +162,7 @@
         {#if fc.budget}
           <div class="mb-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
-            <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's account or card, in place of estimated card statements. A budget's recurring payments count toward it, so only the rest is spent on top of them.${budgetSkipped(fc.budget.skipped)}`}>
+            <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's account or card, in place of estimated card statements. A budget's recurring payments count toward it, so only the rest is spent on top of them, and a budget that rolls over spends what it carried into this month too.${budgetSkipped(fc.budget.skipped)}`}>
               <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0Down(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
             </span>
           </div>

@@ -75,8 +75,8 @@ class ManualStatementForecastTests(LedgerCase):
         c = fc["cards"][0]
         self.assertEqual((c["last_close"], c["statement_balance"]), ("2026-09-12", 800.0))
         keys = [k for k, *_ in self.card_events(fc)]
-        # closes on the 12th, due on the 7th (Nov 7 is a Saturday: paid Monday, but the key is the due date)
-        self.assertEqual(keys[:3], ["card:cc:2026-10-07", "card:cc:2026-11-07", "card:cc:2026-12-07"])
+        # closes on the 12th, due on the 7th: each payment is keyed by the statement's closing date
+        self.assertEqual(keys[:3], ["cardclose:cc:2026-09-12", "cardclose:cc:2026-10-12", "cardclose:cc:2026-11-12"])
 
     def test_a_stale_statement_counts_only_up_to_its_due_date(self):
         # Closed Aug 10, due Sep 30. The next one should have closed Sep 10, and five days later it's late.
@@ -88,7 +88,7 @@ class ManualStatementForecastTests(LedgerCase):
         fc = forecast.build(self.conn, date(2026, 9, 16), 90)
         c = fc["cards"][0]
         self.assertTrue(c["statement_stale"])
-        self.assertEqual(self.card_events(fc), [("card:cc:2026-09-30", "2026-09-30", -600.0, False)])   # its own payment (less $200 paid)
+        self.assertEqual(self.card_events(fc), [("cardclose:cc:2026-08-10", "2026-09-30", -600.0, False)])   # its own payment (less $200 paid)
         self.assertEqual(fc["warning_links"], [{"text": "Enter cc’s latest statement so its payment stays in the forecast.",
                                                 "href": "#setup/accounts?account=cc"}])
         fc = forecast.build(self.conn, date(2026, 10, 2), 90)                     # past its due date: nothing at all

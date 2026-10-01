@@ -13,12 +13,9 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `OIDC_ISSUER` | | Your identity provider's issuer URL. Setting it turns sign-in on. |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | | The client registered with your provider. Leave the secret empty for a public (PKCE-only) client. |
 | `OIDC_ALLOWED_EMAILS` | | Comma-separated emails allowed in. An email counts only if your provider marks it verified (`email_verified`). Taking an email off ends that person's sessions, the AI assistants they approved ([MCP](/Runway/using/mcp/)), the browser extension key they made and their devices' notifications. |
-| `OIDC_TRUST_UNVERIFIED_EMAIL` | | `1` lets `OIDC_ALLOWED_EMAILS` match an email your provider doesn't mark verified. Only for a provider where nobody can register or change their own email (Microsoft Entra ID never sends `email_verified`). |
 | `OIDC_ALLOWED_GROUPS` | | Comma-separated groups (from the `groups` claim) allowed in. Groups are checked at sign-in, so an AI assistant someone approved keeps working until `RUNWAY_SESSION_DAYS` after they last signed in. |
 | `OIDC_ALLOW_ANY_USER` | | `1` lets in anyone your provider signs in. Only for a provider you fully control. |
-| `OIDC_SCOPES` | `openid email profile` | Add `groups` if your provider needs it to send group membership. |
 | `RUNWAY_SESSION_DAYS` | `14` | Days a session lasts unused. Using Runway keeps it going, for up to 90 days after signing in. |
-| `RUNWAY_ALLOWED_HOSTS` | | Extra host names Runway answers to (local IPs, `*.local`, bare names and Tailscale names always work). |
 | `RUNWAY_PUSH_HOSTS` | | Extra push-service hosts notifications may be sent to (Google, Mozilla, Apple and Windows push always work), e.g. a self-hosted UnifiedPush server. |
 | `RUNWAY_SECRET_KEY` | | Encrypts the bank access and API keys Runway saves (at least 32 characters: `openssl rand -base64 32`). Without it, Runway makes `secret.key` in `RUNWAY_DATA`. |
 | `RUNWAY_SECRET_KEY_OLD` | | The previous key, for one start after changing `RUNWAY_SECRET_KEY`; everything is re-encrypted with the new one. Also the way to restore a backup made under an earlier key: keep old keys as long as you keep backups made with them. |
@@ -28,8 +25,18 @@ Settings that belong to the app (bank connections, API keys, categories, rules) 
 | `RUNWAY_DATA` | `./data` (`/data` in Docker) | Where the SQLite database lives. |
 | `RUNWAY_HOST` / `RUNWAY_PORT` | `127.0.0.1` / `8765` | Address and port to listen on (`0.0.0.0` in Docker). |
 | `RUNWAY_NO_SYNC` | | `1` turns off the automatic background sync. |
-| `TZ` | system | Decides what "today" is for forecasts and budgets, and when the daily sync runs. |
+| `TZ` | America/New_York (Docker image); the system's otherwise | Decides what "today" is for forecasts and budgets, and when the daily sync runs. Images before October 2026 defaulted to America/Chicago: if you never set `TZ` and are in Central time, set `TZ=America/Chicago` to keep your sync time and dates as they were. |
 
-Reporting to Sentry is off unless you set `SENTRY_DSN`: then errors, tracing, profiling, replays, logs, metrics, cron monitoring, feedback and Agent Tracing (with the AI's prompts), each of which you can turn off. See [Error reports](/Runway/start/docker/#error-reports-optional) for the variables.
+Reporting to Sentry is off unless you set `SENTRY_DSN` (your own Sentry project's key); then everything is sent, at full rate: errors, tracing, profiling, replays, logs, metrics, cron monitoring, feedback and the AI's prompts, never your amounts, merchants or credentials. `SENTRY_BROWSER_DSN` sends the web app's reports to a separate project, and `SENTRY_ENVIRONMENT` names the environment (default `production`). See [Error reports](/Runway/start/docker/#error-reports-optional).
 
 With no `OIDC_ISSUER`, Runway refuses to listen beyond `localhost` unless `RUNWAY_ALLOW_NO_AUTH` is set. See [Deployment](/Runway/start/deployment/) and [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md).
+
+## Advanced
+
+Rarely needed, so `.env.example` leaves them out. They work when set in `.env` (Docker passes everything in it to Runway) or in the environment.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OIDC_SCOPES` | `openid email profile` | Add `groups` if your provider needs it to send group membership. |
+| `OIDC_TRUST_UNVERIFIED_EMAIL` | | `1` lets `OIDC_ALLOWED_EMAILS` match an email your provider doesn't mark verified. Only for a provider where nobody can register or change their own email (Microsoft Entra ID never sends `email_verified`). |
+| `RUNWAY_ALLOWED_HOSTS` | | Extra host names Runway answers to (local IPs, `*.local`, bare names and Tailscale names always work). |

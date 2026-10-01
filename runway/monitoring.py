@@ -3,28 +3,17 @@
 Runway holds bank access and your transactions, so what's sent carries only what it takes to find a bug or a slow
 spot: errors and their stack traces (without the values of variables), request methods and route names, timings, and
 the release. Never request bodies, cookies, headers or query strings, nor the values bound to database queries (what's
-sent to the AI only on its own spans, with SENTRY_AI_CONTENT below); credentials in addresses (a SimpleFIN access URL has them) and Plaid tokens are blanked wherever
-they turn up.
+sent to the AI only on its own spans: its prompts and replies); credentials in addresses (a SimpleFIN access URL has
+them) and Plaid tokens are blanked wherever they turn up.
 
-Once SENTRY_DSN is set, everything below is on; turn any of it off with a rate of 0, or =0:
+Once SENTRY_DSN is set, everything is on, at full rate (it's your own Sentry project, for your own household): errors,
+tracing, profiling, session replays (text, inputs and images masked), Sentry Logs, metrics (sync durations, new
+transactions, AI tokens), a Cron Monitor for the daily bank sync, a "Send feedback" link in Settings, who's signed in
+(as a stable code that doesn't say who; see user_id) and the AI's prompts and replies on its spans. The settings:
 
-  SENTRY_DSN                          the server's reports (from your Sentry project's Client Keys)
-  SENTRY_BROWSER_DSN                  the web app's reports; defaults to SENTRY_DSN (RUNWAY_SENTRY_BROWSER=0 turns them off)
-  SENTRY_ENVIRONMENT                  e.g. production (the default) or staging
-  SENTRY_TRACES_SAMPLE_RATE           share of requests, syncs and page views to trace for performance, 0 to 1 (the default)
-  SENTRY_PROFILE_SESSION_SAMPLE_RATE  share of server runs and browser visits to profile while tracing, 0 to 1 (the default)
-  SENTRY_REPLAY_SAMPLE_RATE           share of browser visits to record as a replay (text, inputs and images masked), 0 to 1
-                                      (the default)
-  SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE  share of visits with an error whose last minute is sent as a replay, 0 to 1 (the default)
-  SENTRY_LOGS                         Runway's log lines (and the web app's console warnings and errors) as Sentry Logs
-  SENTRY_METRICS                      a few counters and timings: sync durations, new transactions, AI tokens
-  SENTRY_AI_CONTENT                   the prompts sent to the AI and its replies, on its spans (Agent Tracing's
-                                      Conversations): the merchants, amounts and dates of the transactions it's asked
-                                      about, which the AI provider sees anyway. Off, only models, timings and tokens.
-  SENTRY_CRONS                        a Cron Monitor for the daily bank sync, so a missed or failed one alerts you
-  SENTRY_FEEDBACK                     a "Send feedback" link in Settings
-  SENTRY_USER                         who's signed in, as a stable code that doesn't say who (see user_id), so Sentry counts
-                                      the people an error or a slow page affects instead of calling everyone anonymous
+  SENTRY_DSN           the server's reports (from your Sentry project's Client Keys)
+  SENTRY_BROWSER_DSN   the web app's reports; defaults to SENTRY_DSN (RUNWAY_SENTRY_BROWSER=0 turns them off)
+  SENTRY_ENVIRONMENT   e.g. production (the default) or staging
 """
 from __future__ import annotations
 
@@ -43,7 +32,6 @@ from collections.abc import Iterator
 from typing import Any, overload
 
 _enabled = False
-_opts: dict[str, Any] = {}   # which of the optional features are on (see init)
 _agent: contextvars.ContextVar[str | None] = contextvars.ContextVar("runway_ai_agent", default=None)
 _in_request: contextvars.ContextVar[bool] = contextvars.ContextVar("runway_sentry_request", default=False)
 
@@ -57,7 +45,7 @@ _PLAID_TOKEN = re.compile(r"\b(access|public|link|processor)-(sandbox|developmen
 _DATA_COLLECTION: Any = {
     "user_info": False, "cookies": {"mode": "off"}, "http_headers": {"request": {"mode": "off"}}, "http_bodies": [],
     "url_query_params": {"mode": "off"}, "graphql": {"document": False, "variables": False},
-    "gen_ai": {"inputs": False, "outputs": False}, "database_query_data": False, "queues": False,   # (see ai_content)
+    "gen_ai": {"inputs": False, "outputs": False}, "database_query_data": False, "queues": False,   # (the AI's prompts and replies go on its own spans)
     "stack_frame_variables": False, "frame_context_lines": 5,
 }
 
@@ -176,60 +164,50 @@ def _before_send_log(entry, _hint):
     return entry
 
 
-def _rate(name: str) -> float:
-    """A share from 0 to 1: all (1) when it's not set, none when it's not a number."""
-    raw = (os.environ.get(name) or "").strip()
-    if not raw:
-        return 1.0
-    try:
-        return min(1.0, max(0.0, float(raw)))
-    except ValueError:
-        return 0.0
+# Settings that once turned parts of Sentry off. They're no longer read: with a DSN everything is sent. Someone who set
+# one to off is told so when Runway starts, rather than finding out from what reaches their Sentry project.
+RETIRED = ("SENTRY_TRACES_SAMPLE_RATE", "SENTRY_PROFILE_SESSION_SAMPLE_RATE", "SENTRY_REPLAY_SAMPLE_RATE",
+           "SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE", "SENTRY_LOGS", "SENTRY_METRICS", "SENTRY_CRONS", "SENTRY_FEEDBACK",
+           "SENTRY_USER", "SENTRY_AI_CONTENT")
 
 
-def _on(name: str) -> bool:
-    """On unless it's set to something else than 1, true, yes or on (see the top of this file)."""
-    raw = (os.environ.get(name) or "").strip().lower()
-    return not raw or raw in ("1", "true", "yes", "on")
-
-
-def _profiles(traces: float) -> float:
-    return _rate("SENTRY_PROFILE_SESSION_SAMPLE_RATE") if traces else 0.0
+def retired_off() -> list[str]:
+    """The retired settings set to something other than on (0, false, off, 0.5, ...)."""
+    return [k for k in RETIRED if (v := (os.environ.get(k) or "").strip().lower()) and v not in ("1", "1.0", "true", "yes", "on")]
 
 
 def init() -> bool:
     """Start reporting if SENTRY_DSN is set. Returns whether it's on."""
-    global _enabled, _opts
+    global _enabled
     dsn = (os.environ.get("SENTRY_DSN") or "").strip()
+    if (dsn or browser_dsn()) and (off := retired_off()):   # the web app can report with its own DSN alone
+        sys.stderr.write(f"Warning: {', '.join(off)} {'is' if len(off) == 1 else 'are'} no longer read. With a Sentry DSN "
+                         "set, Runway sends everything to Sentry: traces, profiles, replays, logs, metrics, crons, feedback, "
+                         "who's signed in (as a code) and the AI's prompts and replies. Unset SENTRY_DSN and "
+                         "SENTRY_BROWSER_DSN to send nothing.\n")
+        sys.stderr.flush()
     if not dsn:
         return False
     import logging
 
     import sentry_sdk   # loaded only when reporting is on, so it costs nothing otherwise
     from sentry_sdk.integrations.logging import LoggingIntegration
-    traces = _rate("SENTRY_TRACES_SAMPLE_RATE")
-    _opts = {"traces": traces, "profiles": _profiles(traces),
-             "logs": _on("SENTRY_LOGS"), "metrics": _on("SENTRY_METRICS"), "crons": _on("SENTRY_CRONS"),
-             "ai_content": _on("SENTRY_AI_CONTENT")}
     sentry_sdk.init(
         dsn=dsn, release=os.environ.get("RUNWAY_VERSION") or "dev",
         environment=os.environ.get("SENTRY_ENVIRONMENT") or "production",
         server_name="runway", data_collection=_DATA_COLLECTION, max_request_body_size="never",
-        traces_sample_rate=traces,
+        traces_sample_rate=1.0,
         trace_propagation_targets=[],   # never add trace headers to calls to banks, Plaid or the AI
         # Profiles hold function names and timings, no values. "trace": the profiler runs while a sampled trace does.
-        profile_session_sample_rate=_opts["profiles"], profile_lifecycle="trace",
-        enable_logs=_opts["logs"], enable_metrics=_opts["metrics"],
-        # Libraries' warnings become Sentry Logs too (with SENTRY_LOGS); their errors are reported as before.
+        profile_session_sample_rate=1.0, profile_lifecycle="trace",
+        enable_logs=True, enable_metrics=True,
+        # Libraries' warnings become Sentry Logs too; their errors are reported as before.
         integrations=[LoggingIntegration(sentry_logs_level=logging.WARNING)],
         before_send=_before_send, before_send_transaction=_before_send_transaction,
         before_breadcrumb=_before_breadcrumb, before_send_log=_before_send_log,
     )
     _enabled = True
-    on = [name for name, v in (("tracing", traces), ("profiling", _opts["profiles"]), ("logs", _opts["logs"]),
-                               ("metrics", _opts["metrics"]), ("crons", _opts["crons"]),
-                               ("AI prompts and replies", _opts["ai_content"])) if v]
-    log(f"Error reports go to Sentry (SENTRY_DSN is set){'; also ' + ', '.join(on) if on else ''}.")
+    log("Error reports, tracing and the rest go to Sentry (SENTRY_DSN is set).")
     return True
 
 
@@ -238,7 +216,7 @@ def enabled() -> bool:
 
 
 def tracing() -> bool:
-    return _enabled and bool(_opts.get("traces"))
+    return _enabled
 
 
 def report(e: BaseException | None = None, **tags) -> None:
@@ -259,15 +237,15 @@ def report(e: BaseException | None = None, **tags) -> None:
 # ------------------------------------------------------------------------------------------------ logs and metrics
 
 def log(message: str, level: str = "info", *, remote: str | None = None, stderr: bool = False, **attrs) -> None:
-    """Print a line to Runway's log, and send it to Sentry Logs when those are on: `remote` instead of the line when the
+    """Print a line to Runway's log, and send it to Sentry Logs when reporting is on: `remote` instead of the line when the
     line itself holds more than Sentry should see."""
     print(message, file=sys.stderr if stderr else sys.stdout, flush=True)
     send_log(remote if remote is not None else message, level, **attrs)
 
 
 def send_log(message: str, level: str = "info", **attrs) -> None:
-    """A Sentry Log only (with SENTRY_LOGS), for a line that's printed differently or not at all."""
-    if not (_enabled and _opts.get("logs")):
+    """A Sentry Log only, for a line that's printed differently or not at all."""
+    if not _enabled:
         return
     from sentry_sdk import logger
     send = {"debug": logger.debug, "info": logger.info, "warning": logger.warning, "error": logger.error}.get(level, logger.info)
@@ -275,9 +253,9 @@ def send_log(message: str, level: str = "info", **attrs) -> None:
 
 
 def metric(kind: str, name: str, value: float, unit: str | None = None, /, **attrs) -> None:
-    """A counter ("count"), "gauge" or "distribution" (with SENTRY_METRICS). Names start runway.; attributes are labels,
+    """A counter ("count"), "gauge" or "distribution". Names start runway.; attributes are labels,
     never amounts or names."""
-    if not (_enabled and _opts.get("metrics")):
+    if not _enabled:
         return
     from sentry_sdk import metrics
     getattr(metrics, kind)(name, value, unit=unit, attributes=attrs or None)
@@ -299,9 +277,6 @@ def request(method: str, name: str, headers) -> Iterator[Any]:
         scope.clear_breadcrumbs()
         in_request = _in_request.set(True)   # set_user may name who's asking, on this request's scope only
         try:
-            if not _opts.get("traces"):
-                yield None
-                return
             incoming = {k: headers.get(k) for k in ("sentry-trace", "baggage") if headers.get(k)}
             tx = sentry_sdk.continue_trace(incoming, op="http.server", name=f"{method} {name}", source="route",
                                            origin="manual")
@@ -313,9 +288,9 @@ def request(method: str, name: str, headers) -> Iterator[Any]:
 
 
 def user_id(user: dict | None) -> str | None:
-    """Who's signed in, as Sentry sees them (with SENTRY_USER): a code made from their sign-in id and Runway's key, the
+    """Who's signed in, as Sentry sees them: a code made from their sign-in id and Runway's key, the
     same each time but useless for finding out who it is. Without OIDC (everyone is "local"), "local"."""
-    if not user or not _on("SENTRY_USER"):
+    if not user:
         return None
     if user.get("local"):
         return "local"
@@ -380,7 +355,7 @@ def trace_meta() -> str:
 
 
 # AI calls (Sentry's Agent Tracing): each of Runway's AI tasks is an agent, each request to the model a chat inside it.
-# The model, timings and token counts are always there; the prompt and reply only with SENTRY_AI_CONTENT.
+# The model, timings and token counts, and the prompt and reply, are all there.
 
 @contextlib.contextmanager
 def ai_agent(name: str, pipeline: str | None = None) -> Iterator[None]:
@@ -406,19 +381,15 @@ def ai_agent(name: str, pipeline: str | None = None) -> Iterator[None]:
         _agent.reset(token)
 
 
-def ai_content() -> bool:
-    return _enabled and bool(_opts.get("ai_content"))
-
-
 @contextlib.contextmanager
 def ai_call(model: str, prompt: str | None = None, provider: str = "openrouter", **request) -> Iterator[Any]:
-    """One request to a model (a chat span): `request` holds its settings (max_tokens, temperature). The prompt is only
-    recorded with SENTRY_AI_CONTENT."""
+    """One request to a model (a chat span): `request` holds its settings (max_tokens, temperature). The prompt is
+    recorded on the span too (the AI provider sees it anyway)."""
     data: dict[str, Any] = {"gen_ai.operation.name": "chat", "gen_ai.request.model": model, "gen_ai.provider.name": provider,
                             **{f"gen_ai.request.{k}": v for k, v in request.items()}}
     if _agent.get():
         data["gen_ai.agent.name"] = _agent.get()
-    if prompt is not None and ai_content():
+    if prompt is not None:
         data["gen_ai.input.messages"] = json.dumps([{"role": "user", "parts": [{"type": "text", "content": prompt}]}])
     with span("gen_ai.chat", f"chat {model}", **data) as s:
         try:
@@ -431,7 +402,7 @@ def ai_call(model: str, prompt: str | None = None, provider: str = "openrouter",
 
 def ai_result(s, reply: dict, model: str, text: str | None = None) -> None:
     """Record what an OpenAI-style chat reply says about itself: the model that answered, why it stopped and the tokens
-    it took (and its text, with SENTRY_AI_CONTENT)."""
+    it took (and its text)."""
     reply = reply if isinstance(reply, dict) else {}
     raw = reply.get("usage")
     usage: dict[str, Any] = raw if isinstance(raw, dict) else {}
@@ -453,7 +424,7 @@ def ai_result(s, reply: dict, model: str, text: str | None = None) -> None:
         cached = details.get("cached_tokens") if isinstance(details, dict) else None
         if isinstance(cached, int):
             s.set_data("gen_ai.usage.cache_read.input_tokens", cached)
-        if text is not None and ai_content():
+        if text is not None:
             s.set_data("gen_ai.output.messages", json.dumps([{"role": "assistant", "parts": [{"type": "text", "content": text}]}]))
     for kind, n in tokens.items():
         if isinstance(n, int):
@@ -490,7 +461,7 @@ _IANA_ZONE = re.compile(r"(UTC|[A-Za-z]+(?:/[A-Za-z0-9_+-]+)+)")
 
 def local_timezone() -> str | None:
     """The IANA name of the zone Runway's clock runs in (the daily sync's hour is local time): TZ if it's a name like
-    America/Chicago, else the system's (/etc/localtime, /etc/timezone). None when it can't be told, as with a POSIX
+    America/New_York, else the system's (/etc/localtime, /etc/timezone). None when it can't be told, as with a POSIX
     rule in TZ (EST5EDT, CST6CDT,M3.2.0,M11.1.0)."""
     tz = (os.environ.get("TZ") or "").strip().lstrip(":")
     if tz:
@@ -507,11 +478,11 @@ def local_timezone() -> str | None:
 
 
 def cron_start(slug: str, schedule: str | None, margin_minutes: int = 30, max_runtime_minutes: int = 60) -> dict | None:
-    """A Cron Monitor check-in (with SENTRY_CRONS) that a job has started; finish it with cron_finish. With a schedule,
+    """A Cron Monitor check-in that a job has started; finish it with cron_finish. With a schedule,
     Sentry creates the monitor on the first one, in Runway's time zone, and alerts when one is missed or fails. Without
     one (the job isn't on a schedule here), or when the zone can't be told (the schedule would be off by hours), the
     check-in carries no monitor_config: it goes to a monitor set up in Sentry with the same slug, and makes none."""
-    if not (_enabled and _opts.get("crons")):
+    if not _enabled:
         return None
     from sentry_sdk.crons import capture_checkin
     zone = local_timezone() if schedule else None
@@ -543,18 +514,14 @@ def browser_config(user: dict | None = None) -> dict | None:
     dsn = browser_dsn()
     if not dsn or not browser_origin():   # the page may only send to an https address it's been told about
         return None
-    traces = _rate("SENTRY_TRACES_SAMPLE_RATE")
     return {"dsn": dsn, "environment": os.environ.get("SENTRY_ENVIRONMENT") or "production",
             "release": os.environ.get("RUNWAY_VERSION") or "dev",
-            "traces": traces, "profiles": _profiles(traces),
-            "replays": _rate("SENTRY_REPLAY_SAMPLE_RATE"), "replays_on_error": _rate("SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE"),
-            "logs": _on("SENTRY_LOGS"), "feedback": _on("SENTRY_FEEDBACK"), "user_id": user_id(user)}
+            "user_id": user_id(user)}
 
 
 def browser_profiling() -> bool:
     """Whether the page needs Document-Policy: js-profiling (the browser's profiler is only there with it)."""
-    cfg = browser_config()
-    return bool(cfg and cfg["profiles"])
+    return browser_config() is not None
 
 
 def browser_origin() -> str | None:

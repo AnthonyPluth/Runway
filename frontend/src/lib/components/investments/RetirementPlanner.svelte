@@ -4,17 +4,20 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
+  import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { loanProjected, project, sale as saleAt, saleProceeds } from "./planner";
+  import { type Dollars, inDollars, loanProjected, project, projectionIn, sale as saleAt, saleProceeds } from "./planner";
   import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
-  // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave).
+  // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
+  // Changes are kept a moment after you stop typing (or when you leave).
   let { data }: { data: PlanData } = $props();
+  const uid = $props.id();
 
   const copy = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
   const initialPlan = () => copy(data.plan);
@@ -72,6 +75,27 @@
     return project(p, data.current, year, data.assets);
   });
   const names = $derived(plan.people.map((p, i) => p.name || (i ? "Partner" : "You")));
+
+  // Today's or future dollars: a way of looking at the plan rather than part of it, so each browser remembers its own
+  // choice (the plan is the household's, and switching shouldn't save it). Without storage it starts in today's dollars.
+  const DOLLARS_KEY = "runway.planner.dollars";
+  function storedDollars(): Dollars {
+    try { return localStorage.getItem(DOLLARS_KEY) === "future" ? "future" : "today"; } catch { return "today"; }
+  }
+  let dollars = $state<Dollars>(storedDollars());
+  function setDollars(v: string) {
+    dollars = v === "future" ? "future" : "today";
+    try { localStorage.setItem(DOLLARS_KEY, dollars); } catch { /* not remembered; it still switches */ }
+  }
+  // A figure for a year in the dollars chosen, and the projection with each year's figures in them (planner.ts).
+  const shownIn = (v: number, y: number) => inDollars(v, y, year, num(plan.inflation), dollars);
+  const shown = $derived(proj && projectionIn(proj, year, num(plan.inflation), dollars));
+  const inflationPct = $derived(`${pctIn(num(plan.inflation))}%`);
+  function toInflation() {
+    const el = document.getElementById(`${uid}-inflation`);
+    el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    el?.focus({ preventScroll: true });
+  }
   // Nothing invested and no plan of your own yet: nothing to project from. With investments but still Runway's guesses,
   // the results are a sample, so they're shown muted rather than as a verdict.
   const empty = $derived(data.current <= 0 && isDefault);
@@ -96,8 +120,10 @@
   }
   // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
   const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
+  // In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then.
   function saleTitle(a: PlanAsset, sellYear: number): string {
-    const { value, owed } = saleAt(a, sellYear, year, plan.inflation);
+    const real = saleAt(a, sellYear, year, plan.inflation);
+    const value = shownIn(real.value, sellYear), owed = shownIn(real.owed, sellYear);
     const worth = a.kind === "equity" ? `${a.name}: ${fmt0(value)} vested by ${sellYear}, at today’s share price`
       : `${a.name} worth ${fmt0(value)} in ${sellYear}`;
     const l = a.loan;
@@ -105,8 +131,12 @@
     if (l && loanProjected(a)) {
       const terms = `${+(l.rate ?? 0).toFixed(3)}% and ${fmt0(l.payment ?? 0)} a month ${PAYMENT_FROM[l.source ?? "manual"]}`;
       loan = owed > 0 ? `, less ${fmt0(owed)} still owed on the loan at ${terms}` : `; the loan (${terms}) is paid off by then`;
-    } else if (a.owed) loan = `, less ${fmt0(owed)} owed on the loan today`;
-    return `${worth}${loan}. In today’s dollars.`;
+    } else if (a.owed) {   // held at today's balance in today's dollars, so it grows with inflation in future ones
+      loan = dollars === "future" ? `, less the ${fmt0(a.owed)} owed on the loan today (${fmt0(owed)} in ${sellYear} dollars)`
+        : `, less ${fmt0(owed)} owed on the loan today`;
+    }
+    const unit = dollars === "future" ? `In ${sellYear} dollars, at ${inflationPct} a year inflation.` : "In today’s dollars.";
+    return `${worth}${loan}. ${unit}`;
   }
   // Why a loan's balance isn't projected (what's owed today is used instead), and what would fix it.
   const LOAN_NOTES = {
@@ -129,10 +159,10 @@
       oninput={(e) => { set(Number(e.currentTarget.value) || 0); keep(); }} />
   </span>
 {/snippet}
-{#snippet percent(value: number, set: (s: string) => void, label: string)}
+{#snippet percent(value: number, set: (s: string) => void, label: string, id?: string)}
   <span class="relative">
     <span class="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">%</span>
-    <Input type="number" step="0.5" class="pr-7" aria-label={label} value={pctIn(value)} oninput={(e) => set(e.currentTarget.value)} />
+    <Input type="number" step="0.5" class="pr-7" {id} aria-label={label} value={pctIn(value)} oninput={(e) => set(e.currentTarget.value)} />
   </span>
 {/snippet}
 
@@ -151,33 +181,41 @@
     your birth year and retirement age to make it yours.</strong></p>
 {/if}
 
-{#if proj}
+{#if shown}
+  {@const future = dollars === "future"}
+  <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <Segmented label="Show amounts in" value={dollars} onchange={setDollars}
+      options={[{ value: "today", label: "Today’s dollars" }, { value: "future", label: "Future dollars" }]} />
+    <span class="text-sm text-muted-foreground">at <button type="button" class="font-medium text-foreground underline underline-offset-4"
+      title="Set it under Assumptions" onclick={toInflation}>{inflationPct} a year</button> inflation · what you enter is in today’s dollars</span>
+  </div>
   <div class="flex flex-wrap gap-x-8 gap-y-3">
     <div>
       <div class="text-sm text-muted-foreground">Chance your money lasts</div>
-      <div class={`text-2xl font-semibold tabular-nums ${successCls(proj.success)}`}>{Math.round(proj.success * 100)}%</div>
+      <div class={`text-2xl font-semibold tabular-nums ${successCls(shown.success)}`}>{Math.round(shown.success * 100)}%</div>
       <div class="text-sm text-muted-foreground">to age {plan.plan_to_age}, across 1,000 markets</div>
     </div>
     <div>
-      <div class="text-sm text-muted-foreground">Invested at retirement</div>
-      <div class="text-2xl font-semibold tabular-nums">{fmt0(proj.atRetirement)}</div>
-      <div class="text-sm text-muted-foreground">{fmt0(proj.low[proj.retireIndex])} – {fmt0(proj.high[proj.retireIndex])} likely</div>
+      <div class="text-sm text-muted-foreground">Invested at retirement{future ? ` · ${shown.years[shown.retireIndex]}` : ""}</div>
+      <div class="text-2xl font-semibold tabular-nums">{fmt0(shown.atRetirement)}</div>
+      <div class="text-sm text-muted-foreground">{fmt0(shown.low[shown.retireIndex])} – {fmt0(shown.high[shown.retireIndex])} likely</div>
     </div>
     <div>
-      {#if proj.runsOutAge != null}
+      {#if shown.runsOutAge != null}
         <div class="text-sm text-muted-foreground">Typically runs out</div>
-        <div class={`text-2xl font-semibold tabular-nums ${sample ? "text-muted-foreground" : "text-[var(--low)]"}`}>age {proj.runsOutAge}</div>
+        <div class={`text-2xl font-semibold tabular-nums ${sample ? "text-muted-foreground" : "text-[var(--low)]"}`}>age {shown.runsOutAge}</div>
         <div class="text-sm text-muted-foreground">save more, spend less or retire later</div>
       {:else}
-        <div class="text-sm text-muted-foreground">Left at age {plan.plan_to_age}</div>
-        <div class="text-2xl font-semibold tabular-nums">{fmt0(proj.atEnd)}</div>
-        <div class="text-sm text-muted-foreground">{proj.lowRunsOutAge != null ? `in poor markets it runs out at ${proj.lowRunsOutAge}` : "typically; in today's dollars"}</div>
+        <div class="text-sm text-muted-foreground">Left at age {plan.plan_to_age}{future ? ` · ${shown.years[shown.years.length - 1]}` : ""}</div>
+        <div class="text-2xl font-semibold tabular-nums">{fmt0(shown.atEnd)}</div>
+        <div class="text-sm text-muted-foreground">{shown.lowRunsOutAge != null ? `in poor markets it runs out at ${shown.lowRunsOutAge}`
+          : `typically; in ${future ? "that year’s" : "today’s"} dollars`}</div>
       {/if}
     </div>
   </div>
   <p class="mt-3 text-sm text-muted-foreground">Based on your {fmt0(data.current)} in investments today. Cash, home equity and equity comp aren't
     included, and taxes aren't modeled. Not financial advice.</p>
-  <div class="mt-4"><PlannerChart p={proj} {names} /></div>
+  <div class="mt-4"><PlannerChart p={shown} {names} {dollars} /></div>
 {:else}
   <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
 {/if}
@@ -209,7 +247,7 @@
   <section>
     <h3 class="mb-2 font-medium">In retirement</h3>
     <div class="grid grid-cols-2 gap-3">
-      <label class="flex flex-col gap-1">{@render field("Spending a year", "today's dollars")}
+      <label class="flex flex-col gap-1">{@render field("Spending a year", "today’s dollars")}
         {@render money(plan.spending, (v) => (plan.spending = v), "Yearly spending in retirement")}</label>
       <label class="flex flex-col gap-1">{@render field("Plan until age")}
         <Input type="number" step="1" value={plan.plan_to_age} oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
@@ -244,7 +282,7 @@
       <Button variant="outline" size="sm" onclick={() => addIncome("Pension", 65)}><Plus /> Pension</Button>
       <Button variant="outline" size="sm" onclick={() => addIncome("", 60)}><Plus /> Other income</Button>
     </div>
-    <p class="mt-2 text-sm text-muted-foreground">Your Social Security estimate is at ssa.gov/myaccount, in today's dollars.</p>
+    <p class="mt-2 text-sm text-muted-foreground">Yearly amounts in today’s dollars, like the Social Security estimate at ssa.gov/myaccount.</p>
   </section>
 
   <section class="lg:col-span-2">
@@ -270,7 +308,8 @@
       </div>
     {/each}
     <Button variant="outline" size="sm" onclick={addEvent}><Plus /> Add an event</Button>
-    <p class="mt-2 text-sm text-muted-foreground">A home purchase, college, a wedding, an inheritance: money in or out in one year.</p>
+    <p class="mt-2 text-sm text-muted-foreground">A home purchase, college, a wedding, an inheritance: money in or out in one year,
+      in today’s dollars.</p>
   </section>
 
   <section class="lg:col-span-2">
@@ -288,7 +327,7 @@
               <label class="flex items-center gap-2 text-sm">Sell in
                 <Input type="number" step="1" class="w-24" value={s.sell_year} oninput={(e) => { s.sell_year = Number(e.currentTarget.value); keep(); }} /></label>
               <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
-              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, num(s.sell_year))}>≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
+              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, num(s.sell_year))}>≈ {fmt0(shownIn(saleProceeds(a, num(s.sell_year), year, plan.inflation), num(s.sell_year)))}</span>
               {#if a.owed > 0 && a.loan?.note}
                 <p class="basis-full pl-6 text-xs text-muted-foreground">Counts what’s owed today: {LOAN_NOTES[a.loan.note]} in
                   <a class="font-medium whitespace-nowrap text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to project it.</p>
@@ -297,13 +336,9 @@
           </li>
         {/each}
       </ul>
-      <p class="mt-2 flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say
-        downsizing. Its value grows by the yearly change set on the Net worth page, a loan is paid down on its terms and
-        equity keeps vesting until then, and sale proceeds are reduced by
-        <span class="relative inline-block w-20">
-          <span class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
-          <Input type="number" step="0.5" class="h-7 pr-6 text-sm" aria-label="Inflation" value={pctIn(plan.inflation)} oninput={(e) => setPct("inflation", e.currentTarget.value)} />
-        </span> a year of inflation.</p>
+      <p class="mt-2 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say downsizing. Its value grows
+        by the yearly change set on the Net worth page, a loan is paid down on its terms and equity keeps vesting until then. The
+        plan counts the sale in today’s dollars, taking off inflation ({inflationPct} a year, under Assumptions).</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}
@@ -311,18 +346,22 @@
 
   <section class="lg:col-span-2">
     <h3 class="mb-2 font-medium">Assumptions</h3>
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-      <label class="flex flex-col gap-1">{@render field("Return while saving", "after inflation")}
+    <!-- Labels that wrap push their box down, so each label spreads to the row's height and the boxes line up at the bottom -->
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <label class="flex flex-col justify-between gap-1">{@render field("Return while saving", "after inflation")}
         {@render percent(plan.return_before, (s) => setPct("return_before", s), "Return while saving")}</label>
-      <label class="flex flex-col gap-1">{@render field("Return in retirement", "after inflation")}
+      <label class="flex flex-col justify-between gap-1">{@render field("Return in retirement", "after inflation")}
         {@render percent(plan.return_after, (s) => setPct("return_after", s), "Return in retirement")}</label>
-      <label class="flex flex-col gap-1">{@render field("Ups and downs", "yearly")}
+      <label class="flex flex-col justify-between gap-1">{@render field("Ups and downs", "yearly")}
         {@render percent(plan.volatility, (s) => setPct("volatility", s), "Ups and downs")}</label>
+      <label class="flex flex-col justify-between gap-1">{@render field("Inflation", "yearly")}
+        {@render percent(plan.inflation, (s) => setPct("inflation", s), "Inflation", `${uid}-inflation`)}</label>
     </div>
     <p class="mt-2 text-sm text-muted-foreground">
-      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year's return around these averages, which are
-      already after inflation (everything is in today's dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
-      about 15%, a balanced one about 10%). Enter spending as what you'd withdraw before tax.
+      Starts from the {fmt0(data.current)} you have invested. Each of the 1,000 runs draws every year’s return around these averages, which are
+      already after inflation (the plan runs in today’s dollars); "ups and downs" is how far a year typically strays (a stock-heavy portfolio is
+      about 15%, a balanced one about 10%). Inflation turns a sale into today’s dollars, and today’s into future ones when you show those.
+      Enter spending as what you'd withdraw before tax.
       {#if !isDefault}<ConfirmButton confirm="Start over? This clears everything you entered here." class="h-auto px-1" onconfirm={startOver}>Start over from Runway's figures</ConfirmButton>{/if}
     </p>
   </section>

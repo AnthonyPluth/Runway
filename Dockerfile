@@ -48,7 +48,7 @@ ENV RUNWAY_VERSION=$VERSION \
     RUNWAY_DATA=/data \
     RUNWAY_HOST=0.0.0.0 \
     RUNWAY_PORT=8765 \
-    TZ=America/Chicago
+    TZ=America/New_York
 
 # Debian's security fixes that came out after the base image was built (OpenSSL's, most often), and no pip: nothing
 # runs it, and the libraries it bundles (msgpack, setuptools) are flagged by the image scan. ensurepip's copy goes too.

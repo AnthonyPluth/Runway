@@ -1,11 +1,10 @@
-// The web app's reports to Sentry, only when Runway is set up for them (SENTRY_DSN; see runway/monitoring.py), and
-// each feature only when it's switched on there. Loaded on demand, so nothing of Sentry's is fetched otherwise.
+// The web app's reports to Sentry, only when Runway is set up for them (SENTRY_DSN; see runway/monitoring.py), with
+// everything on: tracing, profiling, replays, logs and feedback. Loaded on demand, so nothing of Sentry's is fetched otherwise.
 // What's sent never holds what's on the page: no console or click breadcrumbs (they'd hold amounts and names), no query
 // strings, no merchant names in addresses, and replays with every piece of text, input and image masked.
 import type { SentryConfig } from "./types";
 
 let started = false;
-let feedbackOn = false;
 
 // Merchant logos are at /api/merchants/<id>/logo, and a merchant's id can be its name ("name:starbucks").
 const MERCHANT_LOGO = /(\/api\/merchants\/)[^/?#\s"']+(\/logo)/g;
@@ -86,26 +85,23 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
   if (!cfg || started) return;
   started = true;
   const Sentry = await import("@sentry/browser");
-  const traces = cfg.traces ?? 0;
-  const replays = (cfg.replays ?? 0) > 0 || (cfg.replays_on_error ?? 0) > 0;
-  feedbackOn = !!cfg.feedback;
   Sentry.init({
     dsn: cfg.dsn, environment: cfg.environment, release: cfg.release,
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
-    tracesSampleRate: traces,
+    tracesSampleRate: 1,
     // Trace headers only to Runway itself, so its server's trace joins the page's.
     tracePropagationTargets: [/^\/(?!\/)/, new RegExp("^" + location.origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(/|$)")],
     // The browser's own profiler (Chrome and Edge), while a sampled trace runs; the page asks for it with a header.
-    profileSessionSampleRate: traces ? (cfg.profiles ?? 0) : 0, profileLifecycle: "trace",
-    replaysSessionSampleRate: cfg.replays ?? 0, replaysOnErrorSampleRate: cfg.replays_on_error ?? 0,
+    profileSessionSampleRate: 1, profileLifecycle: "trace",
+    replaysSessionSampleRate: 1, replaysOnErrorSampleRate: 1,
     // No console breadcrumbs (Console) or click breadcrumbs (Breadcrumbs' dom): they'd carry what's on screen.
     integrations: (defaults) => [
       ...defaults.filter((i) => i.name !== "Console" && i.name !== "Breadcrumbs"),
       Sentry.breadcrumbsIntegration({ dom: false }),
       // Pages are the hash (#budget/recurring), so name page loads and navigations by it, never by what's searched.
-      ...(traces ? [Sentry.browserTracingIntegration({ beforeStartSpan: (o) => ({ ...o, name: pageName() }) })] : []),
-      ...(traces && cfg.profiles ? [Sentry.browserProfilingIntegration()] : []),
-      ...(replays ? [Sentry.replayIntegration({
+      Sentry.browserTracingIntegration({ beforeStartSpan: (o) => ({ ...o, name: pageName() }) }),
+      Sentry.browserProfilingIntegration(),
+      Sentry.replayIntegration({
         // Every piece of text, every input and every image masked: a replay shows the layout and what was clicked.
         maskAllText: true, maskAllInputs: true, blockAllMedia: true,
         maskAttributes: ["title", "placeholder", "aria-label", "alt", "href", "value", "label", "data-value"],
@@ -113,14 +109,14 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
         // The compression worker would be a blob: script, which the page's Content-Security-Policy doesn't allow.
         useCompression: false,
         beforeAddRecordingEvent: (e) => scrubRecording(e as RecordingEvent) as typeof e,
-      })] : []),
+      }),
       // Console warnings and errors as Sentry Logs (their text is Runway's own messages, cleaned like the rest).
-      ...(cfg.logs ? [Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] })] : []),
+      Sentry.consoleLoggingIntegration({ levels: ["warn", "error"] }),
       // "Send feedback" in Settings opens it: anonymous (the name and email fields are hidden), and no screenshot.
-      ...(cfg.feedback ? [Sentry.feedbackIntegration({
+      Sentry.feedbackIntegration({
         autoInject: false, showName: false, showEmail: false, enableScreenshot: false, showBranding: false,
         colorScheme: "system", formTitle: "Send feedback", messagePlaceholder: "What's wrong, or what would make Runway better?",
-      })] : []),
+      }),
     ],
     beforeSend(event) {
       if (event.request) event.request = { url: pathOnly(event.request.url) };
@@ -153,8 +149,8 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
   Sentry.addEventProcessor((event) => (event.type === "feedback" || event.type === "replay_event" ? scrubEvent(event as Event) as typeof event : event));
 }
 
-/** Whether "Send feedback" can be offered (Runway is set up for it, and reporting has started). */
-export const feedbackAvailable = () => started && feedbackOn;
+/** Whether "Send feedback" can be offered (reporting has started). */
+export const feedbackAvailable = () => started;
 
 /** Open Sentry's feedback form. */
 export async function openFeedback(): Promise<void> {

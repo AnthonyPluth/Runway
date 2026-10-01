@@ -230,7 +230,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
         for c in fc["cards"]:
             days = (date.fromisoformat(c["due_date"]) - today).days
             if c["remaining"] > 0.005 and 0 <= days <= p["card_due_days"]:
-                pay = next((e for e in fc["events"] if e.get("kind") == "card" and e.get("key") == f"card:{c['id']}:{c['due_date']}"
+                pay = next((e for e in fc["events"] if e.get("kind") == "card" and e.get("key") == f"cardclose:{c['id']}:{c['last_close']}"
                             and e["name"].startswith(c["name"])), None)
                 out.append({"key": f"card:{c['id']}:{c['due_date']}", "title": f"{c['name']} payment due {_when(c['due_date'], today)}",
                             "body": f"{_fmt(c['remaining'])}" + (f" comes out of {pay['account']}." if pay else " is left to pay on this statement."),

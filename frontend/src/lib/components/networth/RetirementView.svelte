@@ -29,7 +29,7 @@
   <Card.Root class="mb-6">
     <Card.Header>
       <Card.Title>Retirement planner</Card.Title>
-      <Card.Description>What retirement looks like for you: your plan run through 1,000 possible markets, in today's dollars.</Card.Description>
+      <Card.Description>What retirement looks like for you: your plan run through 1,000 possible markets.</Card.Description>
     </Card.Header>
     <Card.Content><RetirementPlanner data={plan} /></Card.Content>
   </Card.Root>

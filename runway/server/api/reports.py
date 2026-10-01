@@ -7,8 +7,8 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 
 from ... import categories, reports
+from ...budgets import month_totals
 from ..common import ApiError, _month_range
-from .budget import _month_totals
 
 
 def api_month_pace(conn, _q, _b):
@@ -18,7 +18,7 @@ def api_month_pace(conn, _q, _b):
 def api_cashflow(conn, q, _b):
     """Where money came from and went in a month, for the Sankey report."""
     start, end = _month_range(q)
-    totals = _month_totals(conn, start, end)
+    totals = month_totals(conn, start, end)
     cats = categories.all_categories(conn)
     kind = {c["name"]: c for c in cats}
     income: dict[str, float] = {}

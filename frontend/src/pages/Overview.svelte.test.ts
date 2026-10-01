@@ -77,6 +77,23 @@ describe("Overview", () => {
     expect(screen.getByRole("dialog", { name: "Forecast settings" })).toBeInTheDocument();
   });
 
+  it("says how much of the balance is pending", async () => {
+    serve(() => fc({ accounts: [{ ...fc().accounts[0], balance: 625, pending: -375 }] }));
+    const { unmount } = render(Overview);
+    expect(await screen.findByText("Balance as of today, including −$375.00 pending")).toBeInTheDocument();
+    unmount();
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByText("Balance as of today")).toBeInTheDocument();
+  });
+
+  it("says why a budget on a card paid from outside the forecast is left out", async () => {
+    serve(() => fc({ budget: { total: [1000, 900], low: { date: "2026-10-01", balance: 900 }, monthly: 0, changes: [],
+      skipped: [{ category: "Groceries", reason: "its card isn't paid from a forecast account" }] } }));
+    render(Overview);
+    expect(await screen.findByTitle(/Left out: Groceries, whose card isn't paid from a forecast account\./)).toBeInTheDocument();
+  });
+
   it("rounds a low the balance stays above down, and says a negative low to the cent", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === "/api/overview?days=90") return forecast(90, 4820.55) as never;
