@@ -49,8 +49,11 @@ def api_push_prefs(conn, _q, body):
 
 def api_push_test(conn, _q, body):
     endpoint = str(body.get("endpoint") or "")
-    if endpoint and not _mine(conn, endpoint):
+    device = _mine(conn, endpoint) if endpoint else None
+    if endpoint and not device:
         raise ApiError("Nothing was delivered. That device isn't one of yours.")
+    if device and oidc.enabled() and not device["user_sub"]:
+        raise ApiError("Nothing was delivered. That device was turned on before sign-in: turn notifications on again from it.")
     r = notify.send_all(conn, {"title": "Runway notifications are on", "body": "You'll hear about card payments, low balances and missed bills here.",
                                "url": "/#overview", "tag": "test"}, only=endpoint or None,
                         to=_me() if oidc.enabled() else notify.EVERYONE)

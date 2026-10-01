@@ -16,7 +16,7 @@ import time
 import urllib.parse
 from datetime import date, timedelta
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 
 from . import churning, db, forecast, oidc, recurring, webpush
 from . import settings_keys as sk
@@ -118,7 +118,12 @@ def subscribe(conn, sub: dict, device: str, user_sub: str | None) -> None:
         raise ValueError("That push service isn't one Runway knows. Add its host to RUNWAY_PUSH_HOSTS if you trust it.")
     if not webpush.valid_public_key(keys["p256dh"]):
         raise ValueError("That isn't a push subscription.")
-    # The same browser subscribing again is whoever is signed in there now: the device becomes theirs.
+    # The same browser subscribing again is whoever is signed in there now: the device becomes theirs. Only that
+    # browser can give it away (it sends the keys Runway has), not someone who merely knows its address.
+    had = conn.execute(select(PushSubscription.user_sub, PushSubscription.p256dh, PushSubscription.auth)
+                       .where(PushSubscription.endpoint == endpoint)).fetchone()
+    if had and had["user_sub"] and had["user_sub"] != user_sub and (had["p256dh"], had["auth"]) != (keys["p256dh"], keys["auth"]):
+        raise ValueError("That device gets someone else's notifications. Turn them off there first.")
     db.upsert(conn, PushSubscription, {"endpoint": endpoint, "p256dh": keys["p256dh"], "auth": keys["auth"],
                                        "device": (device or "This device")[:80], "user_sub": user_sub, "created": time.time()},
               key=["endpoint"], update=["p256dh", "auth", "device", "user_sub"])
@@ -283,7 +288,8 @@ def _log_key(user_sub: str | None, key: str) -> str:
 
 def recent(conn, user_sub: str | None, limit: int = 8) -> list[dict]:
     """What was last sent to a person (without sign-in, to everyone), newest first."""
-    mine = NotifyLog.key.like(_log_key(user_sub, "") + "%") if user_sub else NotifyLog.key.not_like("@%")
+    # (and what went to everyone before notifications were each person's own)
+    mine = or_(NotifyLog.key.like(_log_key(user_sub, "") + "%"), NotifyLog.key.not_like("@%")) if user_sub else NotifyLog.key.not_like("@%")
     return db.rows(conn.execute(select(NotifyLog.title, NotifyLog.sent).where(mine).order_by(NotifyLog.sent.desc()).limit(limit)))
 
 

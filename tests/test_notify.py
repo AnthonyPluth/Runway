@@ -90,14 +90,20 @@ class NotifyTests(unittest.TestCase):
             notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": webpush.b64u(b"\x04" + bytes(64)), "auth": "x"}}, "d", None)
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
         self.assertEqual(self.c.execute("SELECT device FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[0], "iPhone · app")
-        # subscribing again (new keys) updates the device and whose it is, but keeps when it was added
+        # subscribing again from that browser (its keys) makes it whoever is signed in there now, but keeps when it was added
         created = self.c.execute("SELECT created FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[0]
-        _ua2, p256dh2, _ = receiver()
-        notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "", "u2")
+        notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "", "u2")
         row = self.c.execute("SELECT p256dh, auth, device, user_sub, created FROM push_subscriptions "
                              "WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()
-        self.assertEqual(tuple(row), (p256dh2, "ZGVm", "This device", "u2", created))   # whoever is signed in there now
-        self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "This device"])   # oldest first
+        self.assertEqual(tuple(row), (self.p256dh, "YWJj", "This device", "u2", created))
+        # someone who only knows its address can't take it (new keys), but its owner can renew them
+        _ua2, p256dh2, _ = receiver()
+        with self.assertRaises(ValueError):
+            notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "x", "u1")
+        notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "iPhone · app", "u2")
+        self.assertEqual(self.c.execute("SELECT p256dh, user_sub FROM push_subscriptions WHERE endpoint='https://fcm.googleapis.com/fcm/send/1'").fetchone()[:],
+                         (p256dh2, "u2"))
+        self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "iPhone · app"])   # oldest first
         notify.unsubscribe(self.c, "https://fcm.googleapis.com/fcm/send/1")
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone"])
 
@@ -160,6 +166,9 @@ class NotifyTests(unittest.TestCase):
             api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})      # B's: as if it weren't there
             with self.assertRaises(ApiError):
                 api.api_push_test(self.c, {}, {"endpoint": self.endpoint(3)})
+            with self.assertRaises(ApiError) as e:                                       # nobody's: says how to get it back
+                api.api_push_test(self.c, {}, {"endpoint": self.endpoint(1)})
+            self.assertIn("before sign-in", str(e.exception))
             self.assertEqual(self.c.execute("SELECT COUNT(*) FROM push_subscriptions").fetchone()[0], 3)
             self.assertEqual(PushService.received, [])
 
@@ -188,6 +197,7 @@ class NotifyTests(unittest.TestCase):
         n = len(PushService.received)
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
             notify.run(self.c, TODAY)
+            self.assertEqual(len(notify.recent(self.c, "u1")), min(n, 8))              # still listed as sent
         self.assertEqual(len(PushService.received), n)
 
     def test_without_sign_in_every_device_is_yours(self):
