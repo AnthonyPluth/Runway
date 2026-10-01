@@ -189,8 +189,8 @@ def parse_ai_reply(text: str, categories: list[str], allow_new: bool = False) ->
     return out
 
 
-def call_llm(api_key: str, model: str, prompt: str, timeout: int = 120) -> str:
-    """Ask a model through OpenRouter's chat completions API (giving up after `timeout` seconds)."""
+def call_llm(api_key: str, model: str, prompt: str) -> str:
+    """Ask a model through OpenRouter's chat completions API."""
     if not OPENROUTER_URL.lower().startswith(("https://", "http://")):   # urllib would open file: and other schemes
         raise RuntimeError("RUNWAY_OPENROUTER_URL must be an http(s) address.")
     body = json.dumps({
@@ -220,8 +220,7 @@ def call_llm(api_key: str, model: str, prompt: str, timeout: int = 120) -> str:
     # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
     with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0) as span:
         try:
-            # The address is the server's own RUNWAY_OPENROUTER_URL, held to http(s) above; nothing a user sends reaches it.
-            with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:   # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]

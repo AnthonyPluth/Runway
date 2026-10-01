@@ -181,7 +181,6 @@ def dismiss(conn, account_id: str, undo: bool = False) -> None:
 
 # ------------------------------------------------------------------------------------------------ the AI's suggestions
 
-SUGGEST_TIMEOUT = 45          # seconds: this is a button someone is waiting on
 MAX_RATE = 20.0               # points per dollar
 MAX_FEE = 10000.0
 MAX_CREDIT = 5000.0           # dollars a period
@@ -300,7 +299,7 @@ def suggest(conn, issuer: str, product: str, caller=None) -> dict:
     began = time.time()
     try:
         with monitoring.ai_agent("Card suggestions", "churning"):
-            reply = (caller or categorize.call_llm)(api_key, model, prompt, timeout=SUGGEST_TIMEOUT)
+            reply = (caller or categorize.call_llm)(api_key, model, prompt)
     except Exception as e:   # network, timeout or API error (its text quotes OpenRouter's answer: kept scrubbed)
         said = monitoring.public_text(str(e)) or type(e).__name__
         raise RuntimeError(f"The AI request failed after {time.time() - began:.0f}s: {said}"[:300]) from e

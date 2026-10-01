@@ -145,7 +145,9 @@
   function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; }
   async function saveSuggestions() {
     try {
-      await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: { ...aiFields, ...(aiRates ? ratesBody() : {}) } });
+      // What the form holds now for the fields the AI filled: you may have corrected one since.
+      const now = Object.fromEntries(Object.keys(aiFields).map((k) => [k, k === "portal_name" ? portalName : (v as Record<string, unknown>)[k]]));
+      await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: { ...now, ...(aiRates ? ratesBody() : {}) } });
       await saveBenefits(c!.id);
       aiBenefits = []; aiFields = {}; aiRates = false; aiUndo = null; aiMarked = false; changed = true;
       toast("Saved the suggestions");

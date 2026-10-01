@@ -198,8 +198,22 @@ describe("card form", () => {
       expect(calls("/api/churning/cards/1")).toHaveLength(0);
       await userEvent.click(screen.getByRole("button", { name: "Save these" }));
       await waitFor(() => expect(calls("/api/churning/cards/1/benefits")).toHaveLength(1));
-      expect(bodyOf(calls("/api/churning/cards/1")[0])).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: 550 });
+      expect(bodyOf(calls("/api/churning/cards/1")[0])).toMatchObject({ family: "Sapphire", currency: "ur", annual_fee: "550" });
       expect(screen.queryByTestId("ai-marked")).toBeNull();
+    });
+
+    it("on an existing card, Save these sends what the form holds, not what the AI first said", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup(card({ currency: "cash", annual_fee: 0, rates: [] }));
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      await userEvent.clear(screen.getByLabelText("Annual fee"));
+      await userEvent.type(screen.getByLabelText("Annual fee"), "95");   // the AI said 550
+      await userEvent.click(screen.getByRole("button", { name: "Save these" }));
+      await waitFor(() => expect(calls("/api/churning/cards/1/benefits")).toHaveLength(1));
+      const saved = calls("/api/churning/cards/1").map(bodyOf).find((b) => "family" in (b as object));
+      expect(saved).toMatchObject({ family: "Sapphire" });
+      expect(Number((saved as { annual_fee: unknown }).annual_fee)).toBe(95);
     });
 
     it("shows an error as a toast and leaves the form alone", async () => {
