@@ -203,3 +203,15 @@ def api_recurring_suggestion_dismiss(conn, _q, body):
         raise ApiError("Unknown suggestion")
     forecast.dismiss_suggestion(conn, key)
     return {"ok": True}
+
+
+def api_recurring_suggestions_dismissed(conn, _q, _b):
+    return forecast.list_dismissed_suggestions(conn)
+
+
+def api_recurring_suggestion_restore(conn, _q, body):
+    """Bring a dismissed suggestion back, so it's offered again if it still looks recurring."""
+    key = body.get("key")
+    if not isinstance(key, str) or not forecast.restore_suggestion(conn, key):
+        raise ApiError("That suggestion isn’t dismissed")
+    return {"ok": True}

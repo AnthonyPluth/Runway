@@ -50,7 +50,7 @@ On Budget → Bills & income.
 - **Paid in parts:** the payments for one date are added up. When money in (a paycheck in two deposits), or money out paid less than half (a small charge near a renewal), comes to less than a fixed amount by more than 10%, the rest is still expected, on the date or today if that’s passed, until the payment’s window closes (4 days either side for twice a month, 6 for monthly); after that it isn’t, and nothing is counted late. A bill that just came in cheaper, or one whose amount is learned from the payments, is simply done. Runway **flags payments that didn't happen** only when nothing came.
 - When a fixed amount’s last few payments (since you last set it) all came to something else, more than 30% off and close to each other, the item offers what they came to instead (“The last payments were about $2,100, not $5,000. Use $2,100”); the forecast keeps the amount you set until you take it.
 - Adding one asks for a name, money out or money in (a bill or a paycheck), a positive amount, how often and the next date (today unless you change it); the account, the amount to forecast (the fixed amount, the last payment or the average of the last three), the merchant texts and the amount range are under More options.
-- Suggestions for recurring items it spots in your history. Add fills the form so you can adjust it first; Not recurring hides a suggestion for good.
+- Suggestions for recurring items it spots in your history. Add fills the form so you can adjust it first; Not recurring hides a suggestion, and a quiet “N dismissed · Show” under the suggestions lists those so you can Restore one to be offered again.
 
 ## Transactions and categorization
 

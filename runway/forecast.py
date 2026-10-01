@@ -900,6 +900,28 @@ def dismiss_suggestion(conn, key: str) -> None:
     db.set_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps(sorted(dismissed_suggestions(conn) | {key})))
 
 
+def restore_suggestion(conn, key: str) -> bool:
+    """Take a suggestion off the dismissed list so it can be offered again; False when it wasn't dismissed."""
+    keys = dismissed_suggestions(conn)
+    if key not in keys:
+        return False
+    db.set_setting(conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps(sorted(keys - {key})))
+    return True
+
+
+def list_dismissed_suggestions(conn) -> list[dict]:
+    """The suggestions marked "not recurring", as far as their key tells (the amount isn't kept), for putting one back."""
+    names = dict(conn.execute(select(Account.id, db.account_label_expr())).fetchall())
+    out = []
+    for key in sorted(dismissed_suggestions(conn)):
+        account_id, _, rest = key.partition("|")
+        match, _, frequency = rest.rpartition("|")
+        if not match:
+            continue
+        out.append({"key": key, "account_id": account_id, "account_name": names.get(account_id), "match": match, "frequency": frequency})
+    return out
+
+
 def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150) -> list[dict]:
     """Payees on cash accounts that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
     today = today or date.today()

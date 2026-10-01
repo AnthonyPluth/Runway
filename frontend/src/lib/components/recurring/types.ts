@@ -57,6 +57,16 @@ export interface Suggestion {
   count: number;
 }
 
+/** GET /api/recurring/suggestions/dismissed: a suggestion marked "Not recurring". Only what its key holds is kept, so no amount. */
+export interface DismissedSuggestion {
+  key: string;
+  account_id: string;
+  account_name?: string | null;
+  /** The merchant text, lowercased. */
+  match: string;
+  frequency: string;
+}
+
 /** A matched transaction, as GET /api/transactions?recurring=… lists it. */
 export interface MatchedTx {
   id: string; posted: string; description: string; amount: number; category?: string | null;
