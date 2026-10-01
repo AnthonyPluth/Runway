@@ -1006,12 +1006,12 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             paid = bankdays.next_business_day(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()
             if paid > dates[-1]:
                 break
-            owed = max(0.0, -(card["balance"] or 0.0)) if first else 0.0
-            pay = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + owed
+            owed_now = max(0.0, owed(card)) if first else 0.0   # the bank's sign, as everywhere (owed_positive)
+            pay = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + owed_now
             if pay > 0.005:
                 extra.append((payer, paid, -round(pay, 2)))
                 changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",
-                                "amount": -round(pay, 2), "account": db.account_label(by_id[payer]), "charged": round(owed, 2),
+                                "amount": -round(pay, 2), "account": db.account_label(by_id[payer]), "charged": round(owed_now, 2),
                                 "assumed_cycle": True})
             prev, first = close, False
             close = clamp_day(close.year + close.month // 12, close.month % 12 + 1, 31)
