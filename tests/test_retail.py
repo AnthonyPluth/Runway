@@ -374,6 +374,10 @@ class TransactionCategoryTests(Base):
         self.assertEqual(self.parts("t2"), before_t2)
         self.assertEqual(self.row("t3")["category"], "Gifts & Donations")
         self.assertTrue(self.row("t1")["is_split"])
+        # After the undo the other charge is Runway's split again: changing an item re-splits it.
+        item = self.c.execute(select(RetailItem.id).where(RetailItem.order_id == oid).order_by(RetailItem.id)).fetchone()[0]
+        retail.set_item_category(self.c, item, "Pharmacy", remember=False)
+        self.assertIn("Pharmacy", [p[0] for p in self.parts("t2")])
 
 
 class TransactionsListTests(Base):

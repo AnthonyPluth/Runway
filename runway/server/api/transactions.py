@@ -96,9 +96,12 @@ def snapshot(conn, ids: list[str], orders: bool = False) -> list[dict]:
             r["is_split"] = 1 if r["is_split"] else 0
         if orders:
             items = retail.items_of_transactions(conn, [r["id"] for r in rows])
+            charges = retail.charges_of_transactions(conn, [r["id"] for r in rows])
             for r in rows:
                 if r["id"] in items:
                     r["items"] = items[r["id"]]
+                if r["id"] in charges:
+                    r["charges"] = charges[r["id"]]
         out += rows
     return out
 
@@ -123,6 +126,8 @@ def restore(conn, rows: list) -> int:
             continue
         if isinstance(r.get("items"), list):   # the items of its order, which a category change had set too
             retail.restore_items(conn, r["items"])
+        if isinstance(r.get("charges"), list):   # and what Runway had given it from them
+            retail.restore_charges(conn, r["id"], r["charges"])
         if not r.get("is_split"):   # it wasn't split before (a split made since goes away)
             splits.clear(conn, r["id"])
         elif r.get("splits"):   # it was: the parts a category change removed come back

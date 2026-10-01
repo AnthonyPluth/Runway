@@ -976,6 +976,26 @@ def items_of_transactions(conn, tx_ids: list[str]) -> dict[str, list[dict]]:
     return {t: [it for o in os for it in items.get(o, [])] for t, os in by_tx.items()}
 
 
+def charges_of_transactions(conn, tx_ids: list[str]) -> dict[str, list[dict]]:
+    """{tx id: its charges and what Runway last gave it (`applied`)}, so Undo can put that back too: otherwise a
+    transaction re-split by Undo would look like a split you made, and stop following its items."""
+    c = RetailCharge
+    out: dict[str, list[dict]] = {}
+    for n in range(0, len(tx_ids), 500):
+        for r in conn.execute(select(c.id, c.tx_id, c.applied).where(c.tx_id.in_(tx_ids[n:n + 500])).order_by(c.id)):
+            out.setdefault(r["tx_id"], []).append({"id": r["id"], "applied": r["applied"]})
+    return out
+
+
+def restore_charges(conn, tx_id: str, charges: list) -> None:
+    """Put back each of the transaction's charges' `applied` as `charges_of_transactions` saw it."""
+    for ch in charges:
+        if not isinstance(ch, dict) or not isinstance(ch.get("id"), str) or not isinstance(ch.get("applied"), (str, type(None))):
+            continue
+        conn.execute(update(RetailCharge).where(RetailCharge.id == ch["id"], RetailCharge.tx_id == tx_id)
+                     .values(applied=ch["applied"]))
+
+
 def restore_items(conn, items: list) -> None:
     """Put items back as `items_of_transactions` saw them: the category exactly, and who or what chose it."""
     i = RetailItem
