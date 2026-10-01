@@ -50,6 +50,28 @@ class ChurningApiTests(DbCase):
         api.api_churn_card_remove(self.c, {}, {}, str(gold))
         self.assertEqual(len(api.api_churning(self.c, {}, {})["cards"]), 1)
 
+    def test_card_added_with_its_benefits(self):
+        cid = self.add(product="Sapphire Reserve", annual_fee=795, benefits=[
+            {"name": "Travel credit", "kind": "credit", "amount": 300, "period": "annual"}, {"preset": "priority_pass"}])
+        card = next(c for c in api.api_churning(self.c, {}, {})["cards"] if c["id"] == cid)
+        self.assertEqual(len(card["benefits"]), 2)
+        self.assertIn(("Travel credit", 300.0), [(b["name"], b["amount"]) for b in card["benefits"]])
+
+    def test_a_refused_benefit_refuses_the_whole_card(self):
+        # The handler wraps each request in one transaction that rolls back on an error; here a savepoint stands in.
+        before = len(api.api_churning(self.c, {}, {})["cards"])
+        with self.assertRaisesRegex(ApiError, "name"), self.c.sa.begin_nested():
+            self.add(product="Gone", benefits=[{"name": "Fine"}, {"name": " "}])
+        self.assertEqual(len(api.api_churning(self.c, {}, {})["cards"]), before)
+
+    def test_fee_month_follows_the_opening_month(self):
+        opened = date(TODAY.year - 2, 3, 10).isoformat()
+        cid = self.add(product="Old", opened_on=opened, annual_fee=95, fee_month=11)   # a month sent by an older client
+        api.api_churn_card_update(self.c, {}, {"fee_month": 12}, str(cid))
+        fees = [u for u in api.api_churning(self.c, {}, {})["upcoming"] if u["kind"] == "fee"]
+        self.assertTrue(fees)
+        self.assertTrue(all(u["date"][5:] == "03-10" for u in fees))
+
     def test_best_card(self):
         self.add(product="Sapphire Preferred", currency="ur", base_rate=1)
         cid = self.add(owner="Sam", issuer="citi", product="Double Cash", currency="cash", base_rate=2)

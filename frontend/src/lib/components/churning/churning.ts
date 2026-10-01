@@ -269,3 +269,23 @@ export function benefitBoard(cards: ChurnCard[]): BenefitBoard {
   board.perks.sort((x, y) => x.card.product.localeCompare(y.card.product) || benefitOrder(x.b, y.b));   // a card's lounges, then its status
   return board;
 }
+
+// What each collapsed part of the card form says it holds (see Section.svelte).
+const num = (x: unknown) => (x == null || x === "" ? 0 : Number(x));
+
+export function ratesSummary(rows: unknown[], currencyName: string, currencyKey: string, earnNote: string, base: string | number | null): string {
+  const parts = [];
+  if (rows.length) parts.push(`${rows.length} ${rows.length === 1 ? "rate" : "rates"}`);
+  if (currencyKey !== "cash") parts.push(currencyName);
+  if (earnNote.trim()) parts.push(earnNote.trim());
+  return parts.length ? parts.join(" · ") : `${num(base) || 1}x on everything`;
+}
+
+/** "60k Ultimate Rewards after $4,000 in 3 months"; "None" without a bonus. */
+export function bonusSummary(bonus: string | number | null, spend: string | number | null, months: string | number | null, currencyKey: string, currencyName: string): string {
+  if (!num(bonus) && !num(spend)) return "None";
+  const got = num(bonus) ? bonusLabel(num(bonus), currencyKey, currencyName) : "Bonus";
+  return num(spend) ? `${got} after ${fmt0(num(spend))}${num(months) ? ` in ${num(months)} months` : ""}` : got;
+}
+
+export const benefitsSummary = (n: number) => (n ? `${n} ${n === 1 ? "benefit" : "benefits"}` : "None");

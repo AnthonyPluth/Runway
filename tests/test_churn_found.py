@@ -71,14 +71,15 @@ class FoundTests(DbCase):
         self.tx("t4", "a1", "2026-04-01", 795, description="Annual fee refund")   # a refund isn't the fee
         d = self.drafts()["a1"]
         self.assertEqual((d["issuer"], d["product"], d["owner"], d["business"]), ("chase", "Sapphire Reserve", "Alex", 0))
-        self.assertEqual((d["annual_fee"], d["fee_month"]), (795.0, 3))   # the latest charge
+        self.assertEqual(d["annual_fee"], 795.0)   # the latest charge; its month isn't kept (the fee follows the opening month)
+        self.assertNotIn("fee_month", d)
         self.assertEqual((d["opened_on"], d["opened_on_estimate"]), ("2024-03-02", True))
         self.assertNotIn("family", d)
 
     def test_no_transactions_and_no_fee(self):
         self.account("a1", "Venture X (7731)")
         d = self.drafts()["a1"]
-        self.assertEqual((d["opened_on"], d["annual_fee"], d["fee_month"]), (None, None, None))
+        self.assertEqual((d["opened_on"], d["annual_fee"]), (None, None))
 
     def test_joint_owner_is_left_for_you_and_business_is_by_name(self):
         self.c.execute(insert(Account).values(id="j", name="Ink Business Cash (1111)", kind="credit", owner="Joint"))

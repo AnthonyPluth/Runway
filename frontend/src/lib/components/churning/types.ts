@@ -68,7 +68,6 @@ export interface ChurnCard {
   authorized_user: number;
   business: number;
   annual_fee: number;
-  fee_month: number | null;
   currency: string;
   base_rate: number;
   earn_note: string | null;
@@ -312,7 +311,6 @@ export interface FoundDraft {
   product: string;                // "" when the account's name doesn't say
   business: number;
   annual_fee: number | null;      // the latest annual fee charged on it
-  fee_month: number | null;
   opened_on: string | null;
   opened_on_estimate: boolean;
 }
@@ -330,6 +328,8 @@ export interface CardSuggestion {
   benefits: SuggestedBenefit[];
 }
 export interface SuggestedBenefit { name: string; kind: BenefitKind; amount: number | null; period: BenefitPeriod }
+/** A benefit in the card form before the card is saved: from the quick-add list (`preset`), typed in, or suggested by the AI. */
+export interface DraftBenefit extends SuggestedBenefit { preset?: string; ai?: boolean }
 
 // POST /api/churning/cards/{id}/plan/done and /plan/undo
 export interface PlanResult {

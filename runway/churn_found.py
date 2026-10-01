@@ -109,9 +109,9 @@ def clean_product(name: str | None, issuer: str = "other", display_name: str | N
 _FEE = re.compile(r"annual\s+(?:membership\s+)?fee", re.I)
 
 
-def annual_fee_from(conn, account_id: str) -> tuple[float | None, int | None]:
-    """The latest annual fee charged on a card, and the month it posted: from its transactions named like "Annual
-    Fee" or "Annual Membership Fee" (charges, not refunds)."""
+def annual_fee_from(conn, account_id: str) -> float | None:
+    """The latest annual fee charged on a card: from its transactions named like "Annual Fee" or "Annual Membership
+    Fee" (charges, not refunds). The month it posted isn't kept: the fee follows the card's opening month."""
     t = Transaction
     text = func.lower(func.coalesce(t.payee, "") + " " + func.coalesce(t.description, ""))
     rows = conn.execute(select(t.posted, t.amount, t.payee, t.description)
@@ -119,8 +119,8 @@ def annual_fee_from(conn, account_id: str) -> tuple[float | None, int | None]:
                         .order_by(t.posted.desc())).fetchall()
     for r in rows:
         if _FEE.search(f"{r['payee'] or ''} {r['description'] or ''}") and 0 < abs(r["amount"]) <= 10000:
-            return round(abs(r["amount"]), 2), int(r["posted"][5:7])
-    return None, None
+            return round(abs(r["amount"]), 2)
+    return None
 
 
 def earliest_posted(conn, account_id: str) -> str | None:
@@ -152,14 +152,14 @@ def _candidates(conn) -> list[dict]:
 def _draft(conn, a: dict) -> dict:
     issuer = match_issuer(a["org"], a["institution"])
     shown = " ".join(f"{a['name'] or ''} {a['display_name'] or ''}".split())
-    fee, month = annual_fee_from(conn, a["id"])
+    fee = annual_fee_from(conn, a["id"])
     owner = (a["owner"] or "").strip()
     return {
         "account_id": a["id"], "account_name": a["display_name"] or a["name"], "org": a["org"] or a["institution"] or "",
         "owner": "" if owner.lower() == "joint" else owner,
         "issuer": issuer, "product": clean_product(a["name"], issuer, a["display_name"]),
         "business": 1 if re.search(r"\bbusiness\b", shown, re.I) else 0,
-        "annual_fee": fee, "fee_month": month,
+        "annual_fee": fee,
         # The banks don't say when a card was opened: its first transaction here is the best guess, and it can only
         # be later than the truth ("on or before").
         "opened_on": earliest_posted(conn, a["id"]), "opened_on_estimate": True,
