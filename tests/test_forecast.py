@@ -685,6 +685,33 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(b["skipped"], [{"category": "Groceries", "reason": "its card isn't paid from a forecast account"}])
         self.assertEqual(b["monthly"], 0.0)
 
+    def test_a_budget_on_a_card_with_no_statement_yet_still_counts(self):
+        # A new card, paid from checking, with no statement yet and $40 on it: $310 a month of Travel is budgeted on it.
+        self.acct("cc3", "credit", -40.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        b = fc["budget"]
+        self.assertEqual(([u["account_id"] for u in b["used"]], b["skipped"]), (["cc3"], []))
+        self.assertEqual(b["monthly"], 310.0)
+        # Its cycle is taken to close at each month's end, paid in full 25 days later (the next business day). The
+        # September one has the rest of September's $310 and the $40 it owes now; Oct 25 is a Sunday.
+        card = {c["date"]: c for c in b["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-350.0, 40.0))
+        self.assertEqual(card["2026-10-26"]["account_id"], "chk")
+        self.assertEqual(card["2026-11-25"]["amount"], -310.0)                    # October
+        days = fc["dates"]
+        drop = lambda d: b["total"][days.index(d) - 1] - b["total"][days.index(d)]
+        base = lambda d: fc["total"][days.index(d) - 1] - fc["total"][days.index(d)]
+        self.assertAlmostEqual(drop("2026-10-26") - base("2026-10-26"), 350.0, places=2)
+        # The forecast itself has nothing for a card without a statement: it isn't changed
+        self.assertFalse(any(e.get("card_id") == "cc3" for e in fc["events"]))
+
+    def test_a_budget_on_a_card_with_no_statement_and_no_paying_account_is_skipped(self):
+        self.acct("cc3", "credit", 0.0)
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        b = forecast.build(self.conn, TODAY, 60)["budget"]
+        self.assertEqual(b["skipped"], [{"category": "Travel", "reason": "its card isn't paid from a forecast account"}])
+
     def test_a_budget_spends_what_it_carried_over(self):
         # $310 a month from checking, rolling over since August, when $250 was spent: $60 carried into September
         self.tx("chk", "2026-08-12", -250.0, "GROCER", "Groceries")
