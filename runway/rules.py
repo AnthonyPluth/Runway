@@ -25,7 +25,6 @@ from .models import Account, Category, Rule, Transaction
 
 MODES = ("contains", "exact", "starts")
 DIRECTIONS = ("out", "in")
-FIELDS = ("match", "match_mode", "amount_min", "amount_max", "direction", "account_id", "category", "rename", "review", "split")
 CENT = 0.005
 
 

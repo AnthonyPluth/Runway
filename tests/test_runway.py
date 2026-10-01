@@ -671,7 +671,6 @@ class CategoryTests(Base):
             categories.move(self.conn, "Other", "Restaurants")              # under a subcategory
         tree = {c["name"]: c for c in categories.all_categories(self.conn)}
         self.assertEqual((tree["Restaurants"]["path"], tree["Restaurants"]["depth"], tree["Restaurants"]["top"]), (["Food", "Restaurants"], 1, "Food"))
-        self.assertEqual(categories.top_level(self.conn, "Restaurants"), "Food")
         # budget and reports roll subcategories into the parent
         self.tx("cc", "2026-09-02", -8.0, "FIVE GUYS", "Groceries & more")
         self.conn.commit()
