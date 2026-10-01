@@ -2,6 +2,7 @@ import io
 import json
 import os
 import threading
+import time
 import unittest
 import urllib.request
 from unittest import mock
@@ -240,8 +241,15 @@ class MonitoringTests(unittest.TestCase):
             with urllib.request.urlopen(req, timeout=20) as r:
                 self.assertEqual(r.status, 200)
             urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
-        sentry_sdk.flush()
-        txs = transport.of("transaction")
+        # The server finishes a request's transaction just after it has sent the response, so on a busy machine the
+        # transaction can still be on its way: wait for it (briefly) rather than read the transport too soon.
+        deadline = time.monotonic() + 10
+        while True:
+            sentry_sdk.flush()
+            txs = transport.of("transaction")
+            if txs or time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
         self.assertEqual([t["transaction"] for t in txs], ["GET /api/transactions"])   # /healthz isn't traced
         tx = txs[0]
         self.assertEqual(tx["contexts"]["trace"]["trace_id"], trace_id)   # continues the web app's trace
