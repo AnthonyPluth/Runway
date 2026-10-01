@@ -494,6 +494,32 @@ class ForecastAssumptionTests(LedgerCase):
         acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
         self.assertEqual((acct["balance"], acct["pending"]), (5000.0, 0.0))
 
+    def paycheck_pending(self):
+        """A biweekly $1,000 paycheck, today's pending (and linked to it once the forecast matches it)."""
+        self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=1000, frequency="biweekly",
+                                                   anchor_date="2026-09-09", match="acme payroll"))
+        self.tx("chk", "2026-09-23", 1000.0, "ACME PAYROLL", "Income", pending=1)
+
+    def test_a_pending_paycheck_counts_though_the_available_balance_leaves_it_out(self):
+        # Banks don't add pending deposits to the available balance: here it's the same as the balance.
+        self.paycheck_pending()
+        self.conn.execute(update(Account).where(Account.id == "chk").values(available=5000.0))
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual((fc["accounts"][0]["balance"], fc["accounts"][0]["pending"]), (6000.0, 1000.0))
+        self.assertNotIn("2026-09-23", [e["date"] for e in fc["events"] if e["name"] == "Paycheck"])   # in the balance
+
+    def test_pending_debits_and_a_paycheck(self):
+        self.paycheck_pending()
+        self.tx("chk", "2026-09-22", -375.0, "HARDWARE STORE", "Shopping", pending=1)
+        # available has the debits taken out (and not the paycheck): both are added
+        self.conn.execute(update(Account).where(Account.id == "chk").values(available=4625.0))
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (5625.0, 625.0))
+        # the balance already has the debits (available is the same): only the paycheck is added
+        self.conn.execute(update(Account).where(Account.id == "chk").values(available=5000.0))
+        acct = forecast.build(self.conn, TODAY, 30)["accounts"][0]
+        self.assertEqual((acct["balance"], acct["pending"]), (6000.0, 1000.0))
+
     def test_an_overpayment_comes_off_the_next_statement(self):
         # $1,200 paid on the $800 statement (the current balance, say), with $100 of new charges since the close
         self.conn.execute(update(Transaction).where(Transaction.description == "GROCER").values(posted="2026-09-01"))

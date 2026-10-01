@@ -211,15 +211,17 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
 
 def pending_total(conn, account: dict) -> float:
     """What's pending on an account (money out negative) that its balance doesn't have yet. Most banks' balance leaves
-    pending out, but some include it; when the bank also reports an available balance, pending is only added if that
-    brings the balance closer to the available one (otherwise the balance evidently has it already)."""
+    pending out, but some include it. Banks take pending debits out of the available balance but not pending credits,
+    so when the bank reports one, pending debits are only added if that brings the balance closer to it (otherwise the
+    balance evidently has them already); pending credits are always added."""
     T = Transaction
-    pending = conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
-                           .where(T.account_id == account["id"], T.pending == 1)).scalar() or 0.0
+    out, came_in = (conn.execute(select(func.coalesce(func.sum(T.amount), 0.0))
+                                 .where(T.account_id == account["id"], T.pending == 1, cond)).scalar() or 0.0
+                    for cond in (T.amount < 0, T.amount > 0))
     available = account.get("available")
-    if available is not None and abs(account["balance"] + pending - available) >= abs(account["balance"] - available):
-        return 0.0
-    return pending
+    if available is not None and abs(account["balance"] + out - available) >= abs(account["balance"] - available):
+        out = 0.0
+    return out + came_in
 
 
 def card_monthly_spend(conn, card: dict, last_close: date) -> dict:
