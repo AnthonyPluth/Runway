@@ -276,7 +276,7 @@
   {/if}
   {#if c}
     <CardBenefits card={c} {d} {onchanged} />
-  {:else}
+  {:else if !aiBenefits.length}
     <p class="text-sm text-muted-foreground">Add the card first, then its benefits (lounge access, travel and hotel credits) from Edit.</p>
   {/if}
 
