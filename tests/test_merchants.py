@@ -154,7 +154,10 @@ class MerchantTests(DbCase):
         got = merchants.refresh_holding_logos(self.c, opener=self.opener({
             f"https://img.logo.dev/ticker/AAPL?{params}": (PNG, "image/png"), f"https://img.logo.dev/vanguard.com?{params}": (PNG, "image/png")}))
         self.assertEqual(got, 2)
-        self.assertFalse([u for u in self.asked if "target.com" in u or "CUR" in u])
+        # only the held securities' logos were looked up (each ticker, and the fund family for a fund): not the
+        # merchant's, nor one for cash
+        self.assertEqual(sorted(self.asked), sorted(f"https://img.logo.dev/{k}?{params}"
+                                                    for k in ("ticker/AAPL", "ticker/VTSAX", "ticker/XYZ", "vanguard.com")))
         by_ticker = {h["ticker"]: h["logo"] for h in portfolio.holdings(self.c)}
         self.assertEqual(by_ticker, {"AAPL": "/api/merchants/ticker%3AAAPL/logo", "VTSAX": "/api/merchants/site%3Avanguard.com/logo",
                                      "XYZ": None, "CUR:USD": None})
