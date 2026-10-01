@@ -35,10 +35,17 @@ def _bounds(months: list[str]) -> tuple[str, str]:
 
 def _with_data(conn, ms: list[str]) -> list[str]:
     """The months from the first one with a transaction in an account the reports count: before it there's no history,
-    not $0 of spending. The last month always stays, so a new install still shows this month."""
+    not $0 of spending. History that starts after the 1st (a bank's backfill, an import) makes that month a part one,
+    which would pull the averages down, so the months start the month after, unless that would leave only the last
+    month. The last month always stays, so a new install still shows this month."""
     first = conn.execute(select(func.min(Transaction.posted)).select_from(Transaction)
                          .join(Account, Account.id == Transaction.account_id).where(*SCOPE)).scalar()
     start = (first or "")[:7] or ms[-1]
+    if first and first[8:10] != "01":
+        y, m = int(start[:4]), int(start[5:7])
+        after = f"{y + m // 12}-{m % 12 + 1:02d}"
+        if after < ms[-1]:
+            start = after
     return [m for m in ms if m >= start] or ms[-1:]
 
 

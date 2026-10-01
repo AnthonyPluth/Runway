@@ -97,6 +97,15 @@ class ReportTests(DbCase):
         # A gap after the first transaction is a real $0 month, so it stays
         self.assertEqual(len(reports.income_vs_spending(self.c, "2026-11", 12)["months"]), 5)
 
+    def test_history_starting_mid_month_leaves_that_part_month_out(self):
+        # The first transaction on June 17th: June is a part month, so the reports start in July as before
+        self.tx("chk", "2026-06-17", -40, "Corner store", "Groceries")
+        d = reports.income_vs_spending(self.c, "2026-09", 12)
+        self.assertEqual([m["month"] for m in d["months"]], ["2026-07", "2026-08", "2026-09"])
+        self.assertEqual(reports.spending_over_time(self.c, "2026-09", 12)["months"], ["2026-07", "2026-08", "2026-09"])
+        # Unless it's the only month before this one: then it stays, part month and all
+        self.assertEqual([m["month"] for m in reports.income_vs_spending(self.c, "2026-07", 12)["months"]], ["2026-06", "2026-07"])
+
     def test_no_transactions_yet_shows_just_this_month(self):
         self.c.execute(Transaction.__table__.delete())
         d = reports.income_vs_spending(self.c, "2026-09", 12)
