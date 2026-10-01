@@ -24,7 +24,7 @@ if ! command -v poetry >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 poetry env use --quiet "$py" >/dev/null
-# Runway's dependencies and the tools CI runs (ruff, mypy, Bandit, zizmor, ...: pyproject.toml's dev group).
+# Runway's dependencies and the tools CI runs (ruff, mypy, coverage, ...: pyproject.toml's dev group).
 poetry install --no-root --no-interaction
 
 # The web app's packages (npm install, not ci: the container's cache keeps them between sessions).
