@@ -43,6 +43,9 @@ def api_transactions(conn, q, _b):
             # a split transaction counts under every category it's split into, not the one on the row
             where.append(or_(and_(func.coalesce(T.is_split, 0) == 0, T.category.in_(family)),
                              select(TxSplit.id).where(TxSplit.tx_id == T.id, TxSplit.category.in_(family)).exists()))
+    elif q.get("ignored", [""])[0] == "0":   # hide what's marked Ignore (unless that's the category asked for)
+        where.append(or_(T.category.is_(None), func.coalesce(T.is_split, 0) == 1,
+                         T.category.notin_(["Ignore", *categories.descendants(conn, "Ignore")])))
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
         where += [T.posted >= start.isoformat(), T.posted < end.isoformat()]

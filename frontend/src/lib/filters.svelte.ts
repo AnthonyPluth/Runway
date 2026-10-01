@@ -5,6 +5,9 @@ export interface TxFilters { q: string; account: string; category: string; month
 const blank = (): TxFilters => ({ q: "", account: "", category: "", month: "", scope: "" });
 export const txFilters = $state({ transactions: blank(), review: blank() });
 
+// Whether All lists what's categorized Ignore (hidden unless you ask). Not a filter: Clear filters leaves it alone.
+export const txShow = $state({ ignored: false });
+
 /** Open Transactions filtered (e.g. a budget line's spending that month). Unset filters are cleared. */
 export function showTransactions(f: Partial<TxFilters>): void {
   Object.assign(txFilters.transactions, blank(), f);

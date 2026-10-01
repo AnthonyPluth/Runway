@@ -17,7 +17,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { clearAll, isFiltered, txFilters, type TxFilters } from "$lib/filters.svelte";
+  import { clearAll, isFiltered, txFilters, txShow, type TxFilters } from "$lib/filters.svelte";
   import { monthLabel } from "$lib/format";
   import { syncStatus } from "$lib/nav.svelte";
   import { undoable } from "$lib/undo";
@@ -45,20 +45,21 @@
   let count = $state(0);             // the count in the heading (in Review, goes down as you categorize)
   let loads = $state(0);             // a new search starts the table afresh (no leftover ticks); a reload after a change keeps it
   let applied = $state<TxFilters>({ ...f });   // the filters the list (and Upcoming) was last loaded with
+  let appliedIgnored = txShow.ignored;
   let seq = 0;
 
   async function load() {
     const mine = ++seq;
-    const now = { ...f };
+    const now = { ...f }, ignored = txShow.ignored;
     // After a change with the same filters, load as many as were showing, so the list (and where you are in it) stays.
-    const same = !!list && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === applied[k]);
+    const same = !!list && ignored === appliedIgnored && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === applied[k]);
     const qs = query(0, same ? Math.min(1000, Math.max(PAGE, list!.items.length)) : PAGE);
     try {
       const data = await api<TxList>(`/api/transactions?${qs}`);
       if (mine !== seq) return;   // a newer search has been asked for meanwhile
       // The same search again (after a change): the rows are updated where they are, so nothing redraws or jumps. A new
       // search starts the table afresh.
-      applied = now; list = data; count = data.total; listError = "";
+      applied = now; appliedIgnored = ignored; list = data; count = data.total; listError = "";
       if (!same) loads++;
     } catch (err) { if (mine === seq) listError = (err as Error).message; }
   }
@@ -69,6 +70,7 @@
     const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope,
       limit: String(limit), offset: String(offset) });
     if (review) qs.set("review", "1");
+    else if (!txShow.ignored) qs.set("ignored", "0");   // what's marked Ignore stays out of All unless asked for
     return qs;
   }
   // The next page, added to the end (skipping any that shifted in since, e.g. after a sync).
@@ -186,6 +188,12 @@
         <button type="button" class="flex size-5 cursor-pointer items-center justify-center rounded-full hover:bg-primary/20" aria-label="Show all dates"
           onclick={clearMonth}><X class="size-3.5" /></button>
       </span>
+    {/if}
+    {#if !review}
+      <label class="ml-1 flex cursor-pointer items-center gap-2 text-sm max-sm:w-full text-muted-foreground hover:text-foreground">
+        <input type="checkbox" class="size-4 cursor-pointer accent-primary" bind:checked={txShow.ignored} onchange={load} />
+        Show ignored
+      </label>
     {/if}
     {#if isFiltered(f)}
       <Button variant="link" size="sm" class="h-auto px-1 py-0" onclick={clearFilters}>Clear filters</Button>

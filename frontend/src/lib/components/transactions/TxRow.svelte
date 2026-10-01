@@ -24,7 +24,8 @@
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (collapsed
   // until you open it) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
   // merchant; on a wider screen it has a column of its own. From lg up a row is one 40px line (logo, merchant, category,
-  // account, amount in aligned columns) and a chevron opens the details: the account with its institution and the bank's own text.
+  // account, amount in aligned columns), the same height opened or not, and a chevron opens the details: the account with its
+  // institution and the bank's own text.
   let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
     t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
     onselect: (e: MouseEvent, checked: boolean) => void;
@@ -62,7 +63,7 @@
   }
 </script>
 
-<div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(10rem,1.2fr)_minmax(11rem,1fr)_7.5rem] md:gap-y-0 md:px-4 lg:min-h-10 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_1.75rem] lg:py-0",
+<div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(10rem,1.2fr)_minmax(11rem,1fr)_7.5rem] md:gap-y-0 md:px-4 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(2.5rem,auto)] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
     !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
@@ -158,7 +159,7 @@
   <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-2 lg:col-start-6 lg:row-span-1",
     t.amount > 0 ? "font-semibold text-emerald-500" : "font-medium")}>{fmt(t.amount)}</div>
 
-  <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
+  <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer justify-self-end items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
     aria-expanded={open} aria-controls={`detail-${t.id}`} aria-label={`Details for ${name}`} title={open ? "Hide the details" : "Show the details"} onclick={() => (open = !open)}>
     <ChevronDown class={cn("size-4 transition-transform motion-reduce:transition-none", open && "rotate-180")} aria-hidden="true" />
   </button>
