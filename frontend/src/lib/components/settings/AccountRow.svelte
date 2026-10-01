@@ -256,7 +256,7 @@
           <span class="flex h-9 items-center gap-2 text-foreground">{+(loan.rate ?? 0).toFixed(3)}%<span class="text-xs text-muted-foreground">from Plaid</span></span>
         </div>
       {:else}
-        <label class={fieldCls} title="The loan’s annual interest rate. The retirement planner uses it to work out what’s still owed when you sell.">Interest rate
+        <label class={fieldCls} title="The loan’s annual interest rate. With it, Net worth pays the loan down between balances and the retirement planner works out what’s still owed when you sell.">Interest rate
           <span class="relative">
             <input class={`${inputCls} w-full pr-7`} inputmode="decimal" bind:value={rate} placeholder="e.g. 6.25" use:autosave={saveLoan} />
             <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs" aria-hidden="true">%</span>

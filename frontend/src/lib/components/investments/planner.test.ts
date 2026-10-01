@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flows, inDollars, project, projectionIn, RUNS, sale, saleProceeds } from "./planner";
+import { endingPayments, flows, inDollars, paymentEnds, project, projectionIn, RUNS, sale, saleProceeds } from "./planner";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
@@ -28,6 +28,12 @@ const paying: PlanAsset = { ...house, owed_by_year: [50_000, 45_000, 39_000, 0],
 // Equity still vesting: 10k vested today, 20k next year, all 40k in two years.
 const shares: PlanAsset = { key: "equity:acme", name: "Acme", kind: "equity", value: 10_000, yearly_change: 0, owed: 0,
   value_by_year: [10_000, 20_000, 40_000], owed_by_year: [0], loan: null };
+// A loan whose payment is in your spending: $50,000 at 6% and $1,000 a month is 58 payments, the last in August 2031
+// (runway/loans.py works out the year).
+const repaying: PlanAsset = { ...house, owed_by_year: [50_000, 40_748.33, 30_926.03, 20_497.92, 9_426.63, 0],
+  loan: { rate: 6, payment: 1_000, source: "manual", note: null, account_id: "mtg", payoff_year: 2031, payment_counted: true } };
+const repay = (loan: Partial<NonNullable<PlanAsset["loan"]>>, over: Partial<PlanAsset> = {}): PlanAsset =>
+  ({ ...repaying, ...over, loan: { ...repaying.loan!, ...loan } });
 
 describe("project", () => {
   it("gives the same picture for the same plan", () => {
@@ -154,10 +160,64 @@ describe("flows", () => {
     expect(net[5]).toBe(40_000);
   });
 
+  it("takes a payment off Runway's spending figure only, not one you typed (it probably leaves the loan out already)", () => {
+    expect(flows(plan({ spending_own: false }), Y, [repaying]).net.slice(5)).toEqual([-20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
+    expect(flows(plan({ spending_own: true }), Y, [repaying]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    const sold = plan({ spending_own: true, assets: [{ key: "home:1", sell_year: Y + 3 }] });
+    expect(flows(sold, Y, [repaying]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("names each ending payment and why it ends", () => {
+    expect(endingPayments(plan(), [repaying])).toEqual([{ yearly: 12_000, from: 2032, name: "House", sold: false }]);
+    expect(endingPayments(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), [repaying]))
+      .toEqual([{ yearly: 12_000, from: Y + 3, name: "House", sold: true }]);
+  });
+
+  it("takes a loan's payment off spending from the year after it's paid off", () => {
+    // Retires in Y+5 (2031), the year of the last payment: $20,000 then, $8,000 from 2032 on.
+    expect(flows(plan(), Y, [repaying]).net).toEqual([10_000, 10_000, 10_000, 10_000, 10_000, -20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
+    // no payment known, or a payment that never pays it down: spending as entered
+    expect(flows(plan(), Y, [house]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan(), Y, [repay({ payment: null, note: "no_payment", payoff_year: null })]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan(), Y, [repay({ payment: 200, note: "payment_below_interest", payoff_year: null })]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("leaves spending alone when the payment wasn't counted in it (a transfer)", () => {
+    const transfer = repay({ payment_counted: false });
+    expect(flows(plan(), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+  });
+
+  it("or from the year its asset is sold, if that's sooner", () => {
+    const p = plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] });
+    const net = flows(p, Y, [repaying]).net;
+    expect(net.slice(5)).toEqual(Array(6).fill(-8_000));
+    expect(net[3]).toBeCloseTo(10_000 + saleProceeds(repaying, Y + 3, Y, 0.03), 6);
+    // even one whose payment doesn't cover the interest stops when it's sold
+    const short = repay({ payment: 200, note: "payment_below_interest", payoff_year: null });
+    expect(flows(p, Y, [short]).net.slice(5)).toEqual(Array(6).fill(-17_600));
+    // never charges less than nothing, and a loan against two assets comes off once
+    expect(flows(plan(), Y, [repay({ payment: 3_000, payoff_year: 2028 })]).net.slice(5)).toEqual(Array(6).fill(0));
+    expect(flows(plan(), Y, [repaying, { ...repaying, key: "home:2" }]).net.slice(6)).toEqual(Array(5).fill(-8_000));
+  });
+
   it("still has this year when the plan's end age has passed", () => {
     const f = flows(plan({ plan_to_age: 50 }), Y, []);
     expect(f.years).toEqual([Y]);
     expect(f.retireIndex).toBe(0);
+  });
+});
+
+describe("a loan's payment", () => {
+  it("stops being spent the year after the last payment, or when the asset is sold", () => {
+    expect(paymentEnds(repaying, null)).toBe(2032);
+    expect(paymentEnds(repaying, Y + 2)).toBe(Y + 2);
+    expect(paymentEnds(repaying, Y + 9)).toBe(2032);
+    const short = repay({ payment: 250, note: "payment_below_interest", payoff_year: null });
+    expect(paymentEnds(short, null)).toBeNull();
+    expect(paymentEnds(short, Y + 9)).toBe(Y + 9);
+    expect(paymentEnds(house, Y + 2)).toBeNull();   // no loan terms
+    expect(paymentEnds(paying, Y + 2)).toBe(Y + 2);  // terms from an older server, without a payoff year: only a sale ends it
   });
 });
 

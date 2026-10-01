@@ -9,8 +9,8 @@ from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import func, insert, select, update
 
-from runway import db, networth, prices, realie
-from runway.models import Account, Asset, AssetValue, NetworthSnapshot, Transaction
+from runway import db, loans, networth, prices, realie
+from runway.models import Account, Asset, AssetValue, LoanTerms, NetworthSnapshot, Transaction
 from tests.shared import DbCase
 
 TODAY = date(2026, 9, 23)
@@ -85,12 +85,103 @@ class NetWorthTests(Base):
         api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
         self.assertEqual(networth.summary(self.c, TODAY, save=False)["net"], before["net"])
 
+    def test_change_says_which_snapshot_it_is_measured_from(self):
+        # opened 44 days ago and not since: "30 days" is really since then, and the page is told so
+        self.c.execute(insert(NetworthSnapshot).values(date="2026-08-10", assets=0, liabilities=0, net=100000))
+        s = networth.summary(self.c, TODAY, save=False)
+        self.assertEqual(s["change"]["30d"], round(s["net"] - 100000, 2))   # still a number, as before
+        self.assertEqual(s["change_since"], {"30d": "2026-08-10", "90d": None, "1y": None})
+        self.assertEqual(s["change"]["90d"], None)
+
     def test_validation(self):
         for bad in ({"name": "", "kind": "home", "value": 1}, {"name": "X", "kind": "boat", "value": 1},
                     {"name": "X", "kind": "home", "value": "abc"}, {"name": "X", "kind": "home", "value": -5},
                     {"name": "X", "kind": "home", "value": 1, "loan_account_id": "chk"}):
             with self.assertRaises(ValueError):
                 networth.save_asset(self.c, bad, today=TODAY)
+
+
+class LoanTests(Base):
+    """A loan with a rate and payment (Plaid's, yours, or inferred: loans.terms) is paid down month by month from its
+    last balance, synced or not."""
+
+    @staticmethod
+    def by_hand(owed: float, rate: float, payment: float, months: int) -> float:
+        for _ in range(months):
+            owed = max(0.0, owed * (1 + rate / 1200) - payment)
+        return owed
+
+    def loan(self, **kw):
+        return {"kind": "loan", "balance": -200000.0, "owed_positive": 0, "balance_date": "2025-09-23", **kw}
+
+    @staticmethod
+    def terms(rate, payment):
+        return {"rate": rate, "payment": payment}
+
+    def test_amortizes_from_the_balance_date(self):
+        a, t = self.loan(), self.terms(6.0, 1199.10)
+        self.assertAlmostEqual(loans.owed_on(a, t, TODAY), self.by_hand(200000, 6.0, 1199.10, 12), delta=0.01)
+        self.assertEqual(loans.owed_on(a, t, date(2025, 9, 23)), 200000.0)        # nothing paid yet
+        self.assertEqual(loans.owed_on(a, t, date(2025, 10, 22)), 200000.0)       # the first payment is on the 23rd
+        self.assertAlmostEqual(loans.owed_on(a, t, date(2025, 10, 23)), self.by_hand(200000, 6.0, 1199.10, 1), delta=0.01)
+        self.assertEqual(loans.owed_on(a, t, date(2056, 1, 1)), 0.0)              # paid off, never below zero
+        self.assertEqual(loans.owed_on(a, t, date(2025, 1, 1)), 200000.0)         # before the balance: as it is
+        # month by month, as loans.project() has it a year at a time
+        self.assertAlmostEqual(loans.amortize(200000, 6.0, 1199.10, 12), loans.project(200000, 6.0, 1199.10)[0][1], delta=0.01)
+
+    def test_a_payment_on_the_31st_is_made_at_the_end_of_a_shorter_month(self):
+        self.assertEqual(loans.months_between(date(2026, 1, 31), date(2026, 2, 27)), 0)
+        self.assertEqual(loans.months_between(date(2026, 1, 31), date(2026, 2, 28)), 1)
+        self.assertEqual(loans.months_between(date(2026, 1, 31), date(2026, 3, 30)), 1)
+        self.assertEqual(loans.months_between(date(2026, 1, 31), date(2026, 3, 31)), 2)
+        self.assertEqual(loans.months_between(date(2026, 3, 15), date(2026, 1, 15)), 0)
+
+    def test_without_a_rate_or_payment(self):
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(None, 1000), TODAY), 200000.0)   # no rate: nothing guessed
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(0, 1000), TODAY), 188000.0)      # 0%: straight-line
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(6.0, None), TODAY), 200000.0)    # no payment: as it is
+        self.assertEqual(loans.owed_on(self.loan(), None, TODAY), 200000.0)
+        self.assertEqual(loans.owed_on(self.loan(balance_date=None), self.terms(6.0, 1000), TODAY), 200000.0)
+        self.assertEqual(loans.owed_on(self.loan(balance_date="garbled"), self.terms(6.0, 1000), TODAY), 200000.0)
+        # a payment that doesn’t cover the interest ($900 a month; $200,000 at 6% is $1,000 of interest) doesn’t shrink it, or grow it
+        self.assertEqual(loans.owed_on(self.loan(), self.terms(6.0, 900), TODAY), 200000.0)
+        self.assertEqual(loans.owed_on(self.loan(balance=12000.0, owed_positive=1), self.terms(0, 500), TODAY), 6000.0)
+        # a card's balance is never paid down
+        self.assertEqual(loans.owed_on({**self.loan(), "kind": "credit"}, self.terms(0, 500), TODAY), 200000.0)
+
+    def test_net_worth_and_equity_use_the_paid_down_balance(self):
+        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-03-23", interest_rate=6.0,
+                                                                         monthly_payment=1500))
+        networth.save_asset(self.c, {"name": "House", "kind": "home", "value": 425000, "loan_account_id": "mtg"}, today=TODAY)
+        s = networth.summary(self.c, TODAY, save=False)
+        g = {x["key"]: x for x in s["groups"]}
+        owed = round(self.by_hand(250000, 6.0, 1500, 6), 2)
+        mtg = next(i for i in g["loan"]["items"] if i["id"] == "mtg")
+        self.assertEqual((mtg["value"], mtg["synced"]), (owed, 250000.0))
+        self.assertNotIn("synced", next(i for i in g["loan"]["items"] if i["id"] == "auto"))   # no terms: as synced
+        self.assertEqual(g["home"]["items"][0]["equity"], round(425000 - owed, 2))
+        self.assertEqual(g["loan"]["total"], round(owed + 12000, 2))
+        from runway.server.api.accounts import api_account_update
+        api_account_update(self.c, {}, {"networth_hidden": 1}, "mtg")
+        left_out = networth.summary(self.c, TODAY, save=False)["excluded"]
+        self.assertEqual(next(a["balance"] for a in left_out if a["id"] == "mtg"), owed)
+
+    def test_plaids_terms_and_inferred_payments_count_too(self):
+        # Plaid's rate and payment, over a rate and payment you set
+        self.c.execute(update(Account).where(Account.id == "mtg").values(
+            balance_date="2026-06-23", plaid_account_id="p-mtg", interest_rate=3.0, monthly_payment=900))
+        self.c.execute(insert(LoanTerms).values(plaid_account_id="p-mtg", item_id="item", kind="mortgage", interest_rate=6.0,
+                                                monthly_payment=1500))
+        loan = lambda: next(i for i in {x["key"]: x for x in networth.summary(self.c, TODAY, save=False)["groups"]}["loan"]["items"]
+                            if i["id"] == "auto")
+        mtg = next(i for i in networth.summary(self.c, TODAY, save=False)["groups"] if i["key"] == "loan")["items"]
+        self.assertEqual(next(i for i in mtg if i["id"] == "mtg")["value"], round(self.by_hand(250000, 6.0, 1500, 3), 2))
+        # the auto loan: a rate you set and no payment, so the payment is worked out from recent payments into it
+        self.c.execute(update(Account).where(Account.id == "auto").values(balance_date="2026-07-23", interest_rate=0))
+        self.assertNotIn("synced", loan())   # no payment yet: as synced
+        self.c.execute(insert(Transaction), [{"id": f"pay{m}", "account_id": "auto", "posted": f"2026-0{m}-05", "amount": 400}
+                                             for m in (6, 7, 8)])
+        self.assertEqual((loan()["value"], loan()["synced"]), (11200.0, 12000.0))   # two $400 payments since July 23
 
 
 class MockRealie(BaseHTTPRequestHandler):
