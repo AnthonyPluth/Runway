@@ -6,11 +6,11 @@
   import { tick } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
-  import type { RateRow } from "./churning";
+  import { isTravel, type RateRow } from "./churning";
   import type { Churning } from "./types";
 
   // What a card earns: a base rate for everything else, and a row for each category with its multiplier, marked when it
-  // only counts if you book through the issuer's travel portal (then the portal's name). Adding a card keeps these in
+  // only counts if you book through the issuer's travel portal (then the portal's name; travel categories only). Adding a card keeps these in
   // the form and sends them with it; editing one saves the whole list through `save` whenever a row is complete.
   let { d, base = $bindable(""), rows = $bindable([]), portalName = $bindable(""), save }: {
     d: Pick<Churning, "categories">; base: string | number | null; rows: RateRow[]; portalName: string; save?: () => Promise<void>;
@@ -30,6 +30,8 @@
   }
   const anyPortal = $derived(rows.some((r) => r.portal_only));
   const label = (c: { name: string; parent: string | null }) => (c.parent ? `${c.parent} › ${c.name}` : c.name);
+  // A rate already marked portal-only keeps its box (whatever its category), so it can be unticked.
+  const portalable = (r: RateRow) => !!r.portal_only || isTravel(r.category, d.categories.find((c) => c.name === r.category)?.parent);
 </script>
 
 <div class="mt-3" role="group" aria-label="Earning rates">
@@ -49,7 +51,9 @@
         </NativeSelect>
         <Input type="number" min="0" step="0.25" class="w-20" bind:value={r.multiplier} aria-label={`Points per dollar on ${r.category || "the category"}`} placeholder="3" {@attach save ? auto : undefined} />
         <span class="text-muted-foreground">x</span>
-        <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" bind:checked={r.portal_only} {@attach save ? auto : undefined} />Only through the issuer's travel portal</label>
+        {#if portalable(r)}
+          <label class="inline-flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" bind:checked={r.portal_only} {@attach save ? auto : undefined} />Only through the issuer's travel portal</label>
+        {/if}
         <button type="button" class="cursor-pointer px-1 text-muted-foreground hover:text-foreground" aria-label={`Remove the ${r.category || "new"} rate`} onclick={() => drop(i)}>×</button>
       </li>
     {/each}

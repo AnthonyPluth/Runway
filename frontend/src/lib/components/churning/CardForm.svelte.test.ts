@@ -35,6 +35,16 @@ describe("card form", () => {
     expect([...earns.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Bank points", "Airline miles", "Hotel points", "Cash back"]);
   });
 
+  it("offers portal-only just for travel rates", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
+    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();   // no category yet
+    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Restaurants");
+    expect(screen.queryByLabelText("Only through the issuer's travel portal")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Travel");
+    expect(screen.getByLabelText("Only through the issuer's travel portal")).toBeInTheDocument();
+  });
+
   it("sends the earning rates, portal-only ones included, in the request that adds the card", async () => {
     setup();
     await userEvent.type(screen.getByLabelText("Card"), "Venture X");

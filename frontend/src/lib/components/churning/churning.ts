@@ -59,6 +59,12 @@ export function five24Line(f: Five24 | undefined): { count: string; next: string
   return { count, next: "Nothing counts right now" };
 }
 
+// Categories an issuer's travel portal books (travel, or one named for flights, hotels and the like, or under one): only
+// these offer a portal-only rate.
+const TRAVEL = /travel|flight|airfare|airline|hotel|lodging|car rental|rental car|cruise|vacation/i;
+export const isTravel = (name: string | null | undefined, parent?: string | null): boolean =>
+  !!name && (TRAVEL.test(name) || (!!parent && TRAVEL.test(parent)));
+
 export const STATUS_LABEL: Record<string, string> = { open: "Open", closed: "Closed", product_changed: "Product changed" };
 export const BANK_STATUS_LABEL: Record<string, string> = { open: "Open", pending: "Requirements met", received: "Bonus received", closed: "Closed" };
 export const BANK_TYPE_LABEL: Record<string, string> = { checking: "Checking", savings: "Savings", business: "Business" };

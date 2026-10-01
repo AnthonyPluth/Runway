@@ -105,7 +105,7 @@ Credit cards and bank accounts opened for their sign-up bonuses, for you and you
 - **Card benefits and credits**, what's left this period, and the annual fee net of the ones you use.
 - **Bank accounts:** safe-to-close days and fee-waiver reminders, and bank bonus money per year (usually reported as interest).
 - **Your own to-dos** (snoozable), and the cards and bank bonuses you want next, with what's in the way (5/24, bonus rules, a credit score you want first) and the earliest day to apply.
-- **The best card for a purchase** by category, including rates earned only through the issuer's travel portal, and **estimated points** by program (airline and hotel programs each their own) at estimated values you can change.
+- **The best card for a purchase** by category, including, for travel, rates earned only through the issuer's travel portal, and **estimated points** by program (airline and hotel programs each their own) at estimated values you can change.
 
 ## Everyday
 

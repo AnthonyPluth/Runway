@@ -6,21 +6,24 @@
   import { Input } from "$lib/components/ui/input";
   import { fmt, fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
-  import { fullDate } from "./churning";
+  import { catParentOf } from "$lib/categories.svelte";
+  import { fullDate, isTravel } from "./churning";
   import type { BestCard } from "./types";
 
   // Which card to use for a purchase: pick a category (and an amount, if you like) and the open cards are ranked by
   // what they return. A card still short of its sign-up bonus says so: spending there may be worth more.
   let { person, version, showOwner }: { person: string; version: number; showOwner: boolean } = $props();
-  // Some rates only count when you book through the issuer's travel portal: tick the box if you will, and those count.
+  // Some rates only count when you book through the issuer's travel portal: for travel, tick the box if you will, and
+  // those count.
   let category = $state(""), amount = $state(""), portal = $state(false);
+  const travel = $derived(isTravel(category, catParentOf(category)));
   let ranked = $state<BestCard[] | null>(null);
   let error = $state("");
 
   $effect(() => {
     void version;
     const params = new URLSearchParams({ category, owner: person, amount: amount && Number(amount) > 0 ? amount : "" });
-    if (portal) params.set("portal", "1");
+    if (portal && travel) params.set("portal", "1");
     api<{ cards: BestCard[] }>(`/api/churning/best?${params}`)
       .then((r) => { ranked = r.cards; error = ""; })
       .catch((err) => { error = (err as Error).message; });
@@ -41,7 +44,9 @@
           <Input type="number" min="0" step="1" class="w-32 pl-6" bind:value={amount} placeholder="optional" />
         </span>
       </label>
-      <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={portal} />I'll book through the issuer's travel portal</label>
+      {#if travel}
+        <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={portal} />I'll book through the issuer's travel portal</label>
+      {/if}
     </div>
     {#if error}<p class="mt-3 text-sm text-red-500">{error}</p>
     {:else if ranked && !ranked.length}<p class="mt-4 text-sm text-muted-foreground">No open cards{person ? ` for ${person}` : ""} yet.</p>

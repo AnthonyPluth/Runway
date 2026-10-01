@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
-  eligibilityText, feesDue, five24Line, guestsText, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
+  eligibilityText, feesDue, five24Line, guestsText, isTravel, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
   scoreProgress, spendProgress, splitWishes, usesText, valueSource, wishName,
 } from "./churning";
 import { benefit, card } from "./fixtures";
@@ -13,6 +13,13 @@ const sp = (s: string) => s.replace(/\u00a0/g, " ");
 const e = (x: Partial<Eligibility>): Eligibility => ({ status: "now", on: null, why: "", override: false, ...x });
 
 describe("churning helpers", () => {
+  it("knows travel categories by their name or their parent's", () => {
+    for (const [name, parent] of [["Travel", null], ["Flights", null], ["Hotels", null], ["Car Rental", null], ["Parking", "Travel"]] as const)
+      expect(isTravel(name, parent)).toBe(true);
+    for (const [name, parent] of [["Groceries", null], ["Restaurants", null], ["", null], [null, null], ["Rideshare", "Transportation"]] as const)
+      expect(isTravel(name, parent)).toBe(false);
+  });
+
   it("filters by person", () => {
     const items = [{ owner: "Alex" }, { owner: "Sam" }, { owner: null }];
     expect(mine(items, "")).toHaveLength(3);
