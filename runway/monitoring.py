@@ -23,11 +23,15 @@ Once SENTRY_DSN is set, everything below is on; turn any of it off with a rate o
                                       about, which the AI provider sees anyway. Off, only models, timings and tokens.
   SENTRY_CRONS                        a Cron Monitor for the daily bank sync, so a missed or failed one alerts you
   SENTRY_FEEDBACK                     a "Send feedback" link in Settings
+  SENTRY_USER                         who's signed in, as a stable code that doesn't say who (see user_id), so Sentry counts
+                                      the people an error or a slow page affects instead of calling everyone anonymous
 """
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -41,6 +45,7 @@ from typing import Any, overload
 _enabled = False
 _opts: dict[str, Any] = {}   # which of the optional features are on (see init)
 _agent: contextvars.ContextVar[str | None] = contextvars.ContextVar("runway_ai_agent", default=None)
+_in_request: contextvars.ContextVar[bool] = contextvars.ContextVar("runway_sentry_request", default=False)
 
 # Secrets that can appear in an error's text: user:password@ in an address, and Plaid's tokens.
 _USERINFO = re.compile(r"(\b[a-z][a-z0-9+.-]*://)[^/\s@]+@", re.I)
@@ -109,7 +114,9 @@ def _trim_request(event) -> None:
     req = event.get("request")
     if req:
         event["request"] = {"method": req.get("method"), "url": _path_only(req.get("url"))}
-    event.pop("user", None)
+    user = event.pop("user", None)
+    if isinstance(user, dict) and user.get("id"):   # only the code set_user gives: never a name, email or address
+        event["user"] = {"id": str(user["id"])}
     event.pop("extra", None)
 
 
@@ -290,15 +297,41 @@ def request(method: str, name: str, headers) -> Iterator[Any]:
     from sentry_sdk.sessions import track_session
     with sentry_sdk.isolation_scope() as scope, track_session(scope, session_mode="request"):
         scope.clear_breadcrumbs()
-        if not _opts.get("traces"):
-            yield None
-            return
-        incoming = {k: headers.get(k) for k in ("sentry-trace", "baggage") if headers.get(k)}
-        tx = sentry_sdk.continue_trace(incoming, op="http.server", name=f"{method} {name}", source="route",
-                                       origin="manual")
-        tx.set_data("http.request.method", method)
-        with sentry_sdk.start_transaction(tx):
-            yield tx
+        in_request = _in_request.set(True)   # set_user may name who's asking, on this request's scope only
+        try:
+            if not _opts.get("traces"):
+                yield None
+                return
+            incoming = {k: headers.get(k) for k in ("sentry-trace", "baggage") if headers.get(k)}
+            tx = sentry_sdk.continue_trace(incoming, op="http.server", name=f"{method} {name}", source="route",
+                                           origin="manual")
+            tx.set_data("http.request.method", method)
+            with sentry_sdk.start_transaction(tx):
+                yield tx
+        finally:
+            _in_request.reset(in_request)
+
+
+def user_id(user: dict | None) -> str | None:
+    """Who's signed in, as Sentry sees them (with SENTRY_USER): a code made from their sign-in id and Runway's key, the
+    same each time but useless for finding out who it is. Without OIDC (everyone is "local"), "local"."""
+    if not user or not _on("SENTRY_USER"):
+        return None
+    if user.get("local"):
+        return "local"
+    if not user.get("sub"):
+        return None
+    from . import secretbox   # (it imports this module)
+    return hmac.new(secretbox.derived_key("sentry-user"), str(user["sub"]).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def set_user(user: dict | None) -> None:
+    """Put who's asking (user_id) on this request's reports, traces and profiles. Only inside request(): anywhere else
+    the scope is shared, and the next report would carry someone else."""
+    if not (_enabled and _in_request.get()) or not (uid := user_id(user)):
+        return
+    import sentry_sdk
+    sentry_sdk.get_isolation_scope().set_user({"id": uid})
 
 
 @contextlib.contextmanager
@@ -504,8 +537,9 @@ def browser_dsn() -> str | None:
     return (os.environ.get("SENTRY_BROWSER_DSN") or os.environ.get("SENTRY_DSN") or "").strip() or None
 
 
-def browser_config() -> dict | None:
-    """What the web app needs to send its own reports (a DSN is meant to be public), or None when that's off."""
+def browser_config(user: dict | None = None) -> dict | None:
+    """What the web app needs to send its own reports (a DSN is meant to be public), or None when that's off. `user`:
+    who's signed in, sent as user_id's code."""
     dsn = browser_dsn()
     if not dsn or not browser_origin():   # the page may only send to an https address it's been told about
         return None
@@ -514,7 +548,7 @@ def browser_config() -> dict | None:
             "release": os.environ.get("RUNWAY_VERSION") or "dev",
             "traces": traces, "profiles": _profiles(traces),
             "replays": _rate("SENTRY_REPLAY_SAMPLE_RATE"), "replays_on_error": _rate("SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE"),
-            "logs": _on("SENTRY_LOGS"), "feedback": _on("SENTRY_FEEDBACK")}
+            "logs": _on("SENTRY_LOGS"), "feedback": _on("SENTRY_FEEDBACK"), "user_id": user_id(user)}
 
 
 def browser_profiling() -> bool:

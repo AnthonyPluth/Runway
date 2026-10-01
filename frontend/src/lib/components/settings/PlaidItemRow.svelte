@@ -4,6 +4,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
+  import { fmtDateTime } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import BankIcon from "./BankIcon.svelte";
@@ -22,14 +23,13 @@
     const d = it.created_at ? utc(it.created_at) : null;
     if (!d || isNaN(d.getTime())) return "";
     const twin = items.some((o) => o !== it && (o.institution_name || "") === (it.institution_name || ""));
-    const opts: Intl.DateTimeFormatOptions = twin ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" } : { month: "short", day: "numeric", year: "numeric" };
-    return `connected ${d.toLocaleString("en-US", opts)} · `;
+    return `connected ${twin ? fmtDateTime(d) : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })} · `;
   });
   const synced = $derived.by(() => {
     const t = it.last_sync;
     if (!t) return "not synced";
     const d = utc(t);
-    return isNaN(d.getTime()) ? `synced ${t}` : `synced ${d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+    return isNaN(d.getTime()) ? `synced ${t}` : `synced ${fmtDateTime(d)}`;
   });
   const duplicate = $derived.by(() => {
     const d = (it.duplicates || [])[0];

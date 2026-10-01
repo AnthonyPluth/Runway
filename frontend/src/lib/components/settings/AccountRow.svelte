@@ -21,7 +21,7 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, nb } from "$lib/format";
+  import { fmt, fmtDateTime, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -78,7 +78,7 @@
     const t = behind?.it.last_sync;
     if (!t) return "";
     const d = new Date(t.replace(" ", "T") + "Z");
-    return isNaN(d.getTime()) ? t : d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return isNaN(d.getTime()) ? t : fmtDateTime(d);
   });
 
   // The line under the name: "primary · Anthony · paid from Checking · via Plaid", with what needs a look in orange.

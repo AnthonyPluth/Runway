@@ -46,6 +46,11 @@ export function pct(share: number): string {
   if (share >= 0.995 && share < 1) return ">99%";
   return `${Math.round(share * 100)}%`;
 }
+/** A share (0–1) as a progress bar's CSS width, clamped to 0–100% and rounded to a tenth ("33.3%", "100%"). No share is an empty bar. */
+export function barWidth(share: number | null | undefined): string {
+  const p = share == null || Number.isNaN(share) ? 0 : Math.min(100, Math.max(0, share * 100));
+  return `${Math.round(p * 10) / 10}%`;
+}
 
 /** "2026-09" → "September 2026". */
 export function monthLabel(m: string): string {
@@ -62,6 +67,8 @@ export const thisMonth = () => isoDay().slice(0, 7);
 
 /** A server timestamp as a Date: ISO (with its UTC offset, or without one for local time), or "2026-09-28 17:54:18" in UTC. */
 export const serverTime = (s: string) => new Date(s.includes("T") ? s : s.replace(" ", "T") + "Z");
+/** "Sep 28, 5:54 PM": a moment, in this browser's time zone. */
+export const fmtDateTime = (d: Date) => d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** A server timestamp ("2026-09-28 17:54:18" in UTC, or ISO) as "just now", "5 minutes ago", "3 hours ago" or a date. */
 export function relTime(iso: string | null | undefined): string {

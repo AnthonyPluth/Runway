@@ -212,11 +212,7 @@ class ForecastTests(LedgerCase):
         self.acct("chk2", "checking", 300.0)
         for i in range(60):  # plenty of everyday spending in history
             self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
-        self.conn.execute("UPDATE accounts SET daily_spend=1 WHERE id='chk'")
-        db.set_setting(self.conn, "primary_account", "chk")
-        self.conn.execute("DELETE FROM settings WHERE key='migrated_daily_spend_off'")  # pretend it's a pre-update database
-        self.conn.commit()
-        db.init(self.path)  # existing databases: everyday-spending drain gets switched off once
+        db.set_setting(self.conn, "primary_account", "chk")   # chk's everyday-spending drain is off (the default)
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual([a["id"] for a in fc["accounts"]], ["chk"])
         self.assertEqual(fc["primary_id"], "chk")

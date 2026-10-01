@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt0, fmtDate } from "$lib/format";
+  import { barWidth, fmt0, fmtDate } from "$lib/format";
   import { cn } from "$lib/utils";
   import { planDone, planUndo } from "./actions";
   import { STATUS_LABEL, benefitSummary, bonusLabel, daysUntil, eligibilityText, fullDate, planLine, ratesText, spendProgress } from "./churning";
@@ -56,7 +56,7 @@
           </div>
           <div class="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={`Spending toward the ${c.product} bonus`}
             aria-valuemin={0} aria-valuemax={c.bonus_spend ?? 0} aria-valuenow={c.spent ?? 0}>
-            <div class={cn("h-full rounded-full", c.bonus_state === "missed" ? "bg-red-500/70" : p.share >= 1 ? "bg-[var(--good)]" : "bg-[var(--nw-1)]")} style:width={`${(p.share * 100).toFixed(1)}%`}></div>
+            <div class={cn("h-full rounded-full", c.bonus_state === "missed" ? "bg-red-500/70" : p.share >= 1 ? "bg-[var(--good)]" : "bg-[var(--nw-1)]")} style:width={barWidth(p.share)}></div>
           </div>
           {#if c.spend_source === "manual" && c.bonus_state === "active"}<div class="mt-0.5 text-[11px] text-muted-foreground">Spending you entered</div>{/if}
         {/if}

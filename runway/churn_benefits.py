@@ -15,7 +15,7 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, insert, select
 
-from . import churning, db
+from . import churning, db, validate
 from .models import ChurnBenefit, ChurnBenefitUse, ChurnCard
 
 KINDS = {"credit": "Credit", "access": "Access", "status": "Status", "other": "Other"}
@@ -191,10 +191,6 @@ def alerts(cards: list[dict]) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ changes
 
-def _flag(v) -> int:
-    return 1 if v in (True, 1, "1", "true", "on") else 0
-
-
 def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = None) -> int:
     """Add a benefit to a card (a preset's name, kind and period filled in unless given), or change the fields given
     of one."""
@@ -239,7 +235,7 @@ def save(conn, body: dict, card_id: int | None = None, benefit_id: int | None = 
             f[key] = churning._num(body.get(key), label, 0, 100000)
     for key in ("counts", "remind", "active"):
         if new or key in body:
-            f[key] = _flag(body.get(key, 1))
+            f[key] = validate.flag(body.get(key, 1))
     if "remind_days" in body:
         f["remind_days"] = churning._int(body.get("remind_days"), "days ahead to remind you", 0, 365)
     if "expires_on" in body:

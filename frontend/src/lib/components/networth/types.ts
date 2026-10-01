@@ -1,6 +1,6 @@
 // The shapes of the Net worth page's API replies (runway/server.py, runway/networth.py, runway/equity.py).
 
-export interface NwItem {
+interface NwItem {
   type: "account" | "asset" | "equity";
   id: string | number;
   name: string;
@@ -54,7 +54,7 @@ export interface NetWorth {
   realie: { configured: boolean; used: number; limit: number };
 }
 
-export type GrantKind = "iso" | "nso" | "rsu" | "rsa" | "shares";
+type GrantKind = "iso" | "nso" | "rsu" | "rsa" | "shares";
 export interface Grant {
   id: string;
   company_id: string;
@@ -87,7 +87,7 @@ export interface Company {
   vested_value: number;
   unvested_value: number;
 }
-export interface CartaSettings {
+interface CartaSettings {
   env: "production" | "playground" | "mock" | string;
   client_id: string | null;
   has_secret: boolean;

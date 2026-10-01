@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import delete, insert, select, update
 
-from . import db, equity, forecast
+from . import db, equity, forecast, validate
 from .models import Account, Asset, AssetValue, NetworthSnapshot
 
 ASSET_KINDS = {"home": "Real estate", "vehicle": "Vehicles", "other": "Other assets"}
@@ -174,8 +174,8 @@ def remove_asset(conn, asset_id: int) -> None:
     conn.execute(delete(Asset).where(Asset.id == asset_id))
 
 
+_v = validate.Validator(ValueError, drop=",$%", missing="{label} must be a number", not_number="{label} must be a number")
+
+
 def _num(v, label: str) -> float:
-    try:
-        return db.number(str(v).replace(",", "").replace("$", "").replace("%", "").strip())
-    except (TypeError, ValueError):
-        raise ValueError(f"{label} must be a number") from None
+    return _v.number(v, label, required=True)

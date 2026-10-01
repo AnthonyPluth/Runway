@@ -30,9 +30,6 @@ export interface TxList { items: Tx[]; total: number }
 /** POST /api/transactions/{id}/category (and /api/ai/apply) may offer to remember the category for the merchant. */
 export interface RuleOffer { merchant: string; match?: string; replaces?: string | null }
 
-/** An item of GET /api/recurring (only what the ↻ picker needs). */
-export interface RecurringItem { id: number; name: string; frequency: string; account_id: string }
-
 /** A projected event, as Upcoming shows it. */
 export type UpcomingEvent = ForecastEvent & { late_from?: string | null };
 
