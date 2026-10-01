@@ -25,7 +25,7 @@ services:
       OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
       RUNWAY_ALLOWED_HOSTS: ${RUNWAY_ALLOWED_HOSTS:-}
       RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}             # encrypts saved bank access and API keys
-      # Optional: reports to Sentry (see DOCKER.md). Off unless SENTRY_DSN is set; then all of it, each off with 0.
+      # Optional: reports to Sentry (see https://anthonypluth.github.io/Runway/start/docker/#error-reports-optional). Off unless SENTRY_DSN is set; then all of it, each off with 0.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_BROWSER_DSN: ${SENTRY_BROWSER_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
@@ -39,7 +39,7 @@ services:
       SENTRY_FEEDBACK: ${SENTRY_FEEDBACK:-}
       SENTRY_USER: ${SENTRY_USER:-}
       SENTRY_AI_CONTENT: ${SENTRY_AI_CONTENT:-}
-      # Optional: use Postgres instead of the built-in database (see DOCKER.md for moving your data over).
+      # Optional: use Postgres instead of the built-in database (moving your data over: https://anthonypluth.github.io/Runway/start/docker/#using-postgres-optional).
       DATABASE_URL: ${DATABASE_URL:-}
     # depends_on: [db]            # if you use the Postgres service below
 

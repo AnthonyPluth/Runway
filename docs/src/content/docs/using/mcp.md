@@ -1,4 +1,9 @@
-# AI assistants (MCP)
+---
+title: AI assistants (MCP)
+description: Connect Claude or another assistant to Runway.
+sidebar:
+  order: 3
+---
 
 Runway serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so an assistant like Claude can read your accounts, transactions, budget, reports, net worth, orders and credit-card churning (cards, benefits, upcoming fees) and answer questions about them. It never sees your bank connections, settings, API keys or backups.
 
@@ -51,6 +56,6 @@ Access tokens last an hour and refresh tokens 90 days; refresh tokens rotate, an
 
 ## Behind a proxy
 
-Registration (`/oauth/register`) needs no sign-in, so anyone who can reach Runway can register apps (never more than 50 unapproved at once). Runway has no per-address rate limiting; put it at the reverse proxy (see [DOCKER.md](../DOCKER.md#putting-runway-on-the-internet)).
+Registration (`/oauth/register`) needs no sign-in, so anyone who can reach Runway can register apps (never more than 50 unapproved at once). Runway has no per-address rate limiting; put it at the reverse proxy (see [Putting Runway on the internet](/Runway/start/docker/#putting-runway-on-the-internet)).
 
 With `RUNWAY_ALLOW_NO_AUTH=1` and a forward-auth proxy (Authelia, Cloudflare Access, oauth2-proxy), exempt these paths from the proxy's sign-in, since assistants call them without a browser: `/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke` and `/.well-known/oauth-*`. Keep `/oauth/authorize` behind it: that's where you approve.

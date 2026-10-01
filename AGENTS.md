@@ -1,6 +1,6 @@
 # Agent guide
 
-Instructions for AI coding agents working in Runway, a self-hosted personal finance app (Python backend in `runway/`, Svelte web app in `frontend/`, browser extension in `extension/`). Human contributors can use it too; [docs/development.md](docs/development.md) has the long version.
+Instructions for AI coding agents working in Runway, a self-hosted personal finance app (Python backend in `runway/`, Svelte web app in `frontend/`, browser extension in `extension/`). Human contributors can use it too; [Development](docs/src/content/docs/contributing/development.md) has the long version, and the published docs are at https://anthonypluth.github.io/Runway/.
 
 ## Layout
 
@@ -8,23 +8,25 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
-- `docs/`: documentation and screenshots.
+- `docs/`: the documentation site (Starlight), published to GitHub Pages. Pages are Markdown in `docs/src/content/docs/`; screenshots are in `docs/src/assets/screenshots/`.
 
 ## Commands
 
 Python goes through Poetry (Python 3.14).
 
-- `make check`: each tool once: ruff, mypy, the Python tests (SQLite), and the web app's type-check, ESLint, Vitest and build. Run it before pushing. The security scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
+- `make check`: each tool once: ruff, mypy, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
 - `make lint`: ruff, mypy, and ESLint.
 - `make test`: `poetry run python -m unittest discover tests`.
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
+- `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.
 
 ## Conventions
 
 - Match the surrounding code's style, comment density and naming. Ruff and mypy config live in `pyproject.toml`; don't silence a rule to get green.
 - Real typography (’ – −) in user-facing strings and comments is intentional; don't "fix" it to ASCII.
 - Schema changes need an Alembic migration in `runway/migrations/`.
+- A change users or contributors would notice updates its page in `docs/src/content/docs/` in the same PR. Link between pages with absolute paths (`/Runway/start/docker/`); a broken one fails the build.
 - Add or update tests with the change. Don't skip, disable or delete a test to get CI passing.
 - Never commit secrets. `.env.example` lists configuration; real values stay in `.env`.
 - Read `SECURITY.md` before touching auth, encryption or anything that handles bank credentials.
@@ -34,7 +36,7 @@ Python goes through Poetry (Python 3.14).
 Review findings on agents' pull requests here fall into the same few kinds. Check your change for each before you push.
 
 - **Failure paths.** For every new error, rejection or early return, know what the user sees, and test it. Don't leave stale state that says things are fine: a sync that half-fails must not clear the last warning, a failed reload must not leave old numbers on screen looking current, and a job that couldn't start isn't a failed run.
-- **Tests that share the database.** On Postgres every test module shares one schema, and CI runs modules in parallel. A test that writes settings, or runs a sync, the AI categorizer or a request through the server, takes its own database with `tests/shared.py`'s `own_database(self)`. Run the Postgres tests before pushing a change to tests (docs/development.md). In Vitest, use fake timers for anything debounced, so a save doesn't leak into the next test.
+- **Tests that share the database.** On Postgres every test module shares one schema, and CI runs modules in parallel. A test that writes settings, or runs a sync, the AI categorizer or a request through the server, takes its own database with `tests/shared.py`'s `own_database(self)`. Run the Postgres tests before pushing a change to tests (docs/src/content/docs/contributing/development.md). In Vitest, use fake timers for anything debounced, so a save doesn't leak into the next test.
 - **Private data in logs and reports.** Sentry reports, logs and error pages never carry amounts, merchants, account ids, query strings or credentials; that includes exception text (a database error names the row it was writing). Go through `monitoring.scrub`, and test what's sent. The one exception is the AI's prompts and replies on its own spans (`SENTRY_AI_CONTENT`, on by default with a DSN, off with `=0`): nothing else may carry what they do.
 - **Access that outlives the person.** A new kind of session, grant, token or key must end when its owner can no longer sign in (`oidc.access_lapsed`), like browser sessions, assistants' OAuth grants, the browser extension's key and devices' notifications do.
 - **Time zones.** "Today" and the daily sync's hour are the machine's local time (`TZ`). Anything that tells another system about a time (a schedule, a timestamp) carries the same zone, not UTC by default.

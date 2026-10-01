@@ -3,8 +3,8 @@
 SQLAlchemy provides the engine for both, and Alembic keeps the schema (runway/schema.py) up to date: migrations run
 when Runway starts. The rest of Runway queries through the small Connection wrapper here, which works the same on
 either database (rows read by name or position, `lastrowid`, ...): with SQLAlchemy statements built from the ORM
-models in runway/models.py (docs/orm.md), or through its ORM Session (`conn.orm`). SQL text isn't taken: a statement
-is compiled for whichever database the connection is on.
+models in runway/models.py (docs/src/content/docs/contributing/orm.md), or through its ORM Session (`conn.orm`). SQL
+text isn't taken: a statement is compiled for whichever database the connection is on.
 """
 from __future__ import annotations
 
@@ -219,10 +219,11 @@ class Result:
 class Connection:
     """A database connection and its open transaction: one per request or sync, never shared between threads.
 
-    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see docs/orm.md).
-    `orm` is an ORM Session on this same connection and transaction, for loading and changing model objects. Either
-    way, `commit()` commits everything so far (and is what code calls before a slow network request, so the write lock
-    isn't held through it); `rollback()` undoes it. `sa` is the SQLAlchemy connection underneath.
+    `execute()` takes a SQLAlchemy statement (`select(Account.id).where(...)`, `update(Asset)...`; see
+    docs/src/content/docs/contributing/orm.md). `orm` is an ORM Session on this same connection and transaction, for
+    loading and changing model objects. Either way, `commit()` commits everything so far (and is what code calls before
+    a slow network request, so the write lock isn't held through it); `rollback()` undoes it. `sa` is the SQLAlchemy
+    connection underneath.
     """
 
     def __init__(self, sa_conn):
@@ -256,7 +257,7 @@ class Connection:
     def execute(self, stmt, params=None) -> Result:
         """Run a SQLAlchemy statement (params: a dict, or a list of dicts for many rows)."""
         if isinstance(stmt, str):
-            raise TypeError("SQL text isn't supported; build a statement (docs/orm.md)")
+            raise TypeError("SQL text isn't supported; build a statement (docs/src/content/docs/contributing/orm.md)")
         if isinstance(params, list) and not params:   # no rows: nothing to do (not one row of defaults)
             return Result(rows=[])
         self._before()
@@ -308,7 +309,8 @@ def session(path: str | None = None):
 
 
 # ------------------------------------------------------------------------------------------------ SQL helpers
-# Portable pieces for SQLAlchemy statements (docs/orm.md): each works the same on SQLite and Postgres.
+# Portable pieces for SQLAlchemy statements (docs/src/content/docs/contributing/orm.md): each works the same on SQLite
+# and Postgres.
 
 def dialect_insert(conn: Connection, entity):
     """An INSERT for this connection's database that can take .on_conflict_do_update()/.on_conflict_do_nothing()

@@ -1,6 +1,7 @@
-"""Runway queries with SQLAlchemy statements built from runway/models.py (docs/orm.md), and db.Connection.execute()
-doesn't take SQL text. This finds any SQL text passed to `execute()`/`executemany()` in runway/ and tests/ and fails
-if there is some, so a query in text doesn't come back (in a code path the tests don't run, or in a test).
+"""Runway queries with SQLAlchemy statements built from runway/models.py (docs/src/content/docs/contributing/orm.md),
+and db.Connection.execute() doesn't take SQL text. This finds any SQL text passed to `execute()`/`executemany()` in
+runway/ and tests/ and fails if there is some, so a query in text doesn't come back (in a code path the tests don't
+run, or in a test).
 
 What counts as SQL text: a string, f-string, string concatenation or formatting (`"..." + x`, `"..." % x`,
 `"...".format()`, `", ".join()`), or a variable assigned one in the same function, as the first argument. Also any
@@ -120,8 +121,8 @@ def counts() -> dict[str, int]:
 
 class OrmGuardTests(unittest.TestCase):
     def test_no_sql_text(self):
-        self.assertEqual(counts(), {}, "SQL text passed to execute() (module: how many). Write the query with "
-                                       "SQLAlchemy and the models instead: see docs/orm.md.")
+        self.assertEqual(counts(), {}, "SQL text passed to execute() (module: how many). Write the query with SQLAlchemy "
+                                       "and the models instead: see docs/src/content/docs/contributing/orm.md.")
 
     def test_counter(self):
         src = '''

@@ -1,7 +1,7 @@
 # The checks to run before you push: `make check` runs ruff, mypy, the Python tests, the web app's type-check, ESLint,
-# Vitest tests and build, each once. The other targets run one part of it. The security scans (Semgrep, Trivy, zizmor,
-# pip-audit, npm audit, CodeQL) run only in CI, on the pull requests they can affect.
-# Python commands go through Poetry, as in docs/development.md.
+# Vitest tests and build, and the docs site's build, each once. The other targets run one part of it. The security
+# scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI, on the pull requests they can affect.
+# Python commands go through Poetry, as in docs/src/content/docs/contributing/development.md.
 
 PYTHON ?= poetry run python
 NPM ?= npm
@@ -11,10 +11,10 @@ RUFF ?= poetry run ruff
 MYPY ?= poetry run mypy
 
 .PHONY: check lint python-lint frontend-lint test fix \
-	frontend-check frontend-typecheck frontend-test frontend-build
+	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
-check: lint test frontend-check
+check: lint test frontend-check docs-build
 
 # Ruff and mypy for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
 lint: python-lint frontend-lint
@@ -49,3 +49,15 @@ frontend-test: frontend/node_modules
 
 frontend-build: frontend/node_modules
 	cd frontend && $(NPM) run build
+
+docs/node_modules: docs/package-lock.json
+	cd docs && $(NPM) ci --no-audit --no-fund
+	touch docs/node_modules
+
+# The documentation site (Astro Starlight), with live reload at http://localhost:4321/Runway/.
+docs: docs/node_modules
+	cd docs && $(NPM) run dev
+
+# Builds the site into docs/dist and checks every link between its pages, as docs.yml does.
+docs-build: docs/node_modules
+	cd docs && $(NPM) run build

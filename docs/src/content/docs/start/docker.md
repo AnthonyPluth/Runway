@@ -1,4 +1,9 @@
-# Running Runway in Docker
+---
+title: Install with Docker
+description: Register Runway with your sign-in provider, start it, move your data over and put it on the internet.
+sidebar:
+  order: 2
+---
 
 Runway signs you in through your OpenID Connect provider (Authentik, Authelia, Keycloak, Pocket ID, Google,
 Microsoft Entra, ...). The image holds Python, Runway's dependencies (installed with Poetry from `poetry.lock`) and
@@ -86,7 +91,7 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
 2. **Sign-in limited to you.** `OIDC_ALLOWED_EMAILS` and/or `OIDC_ALLOWED_GROUPS`; avoid `OIDC_ALLOW_ANY_USER`.
    Turn on two-factor sign-in at your identity provider: it guards everything behind it. Everyone you let in shares
    one Runway: they see the same accounts and can change the same settings, connect and disconnect banks, download
-   the backup and restore one (see [SECURITY.md](SECURITY.md)). Let in only people you'd hand your finances to.
+   the backup and restore one (see [SECURITY.md](https://github.com/AnthonyPluth/Runway/blob/main/SECURITY.md)). Let in only people you'd hand your finances to.
 3. **A secret key.** Set `RUNWAY_SECRET_KEY` (`openssl rand -base64 32`) and keep a copy in your password manager.
    It encrypts your saved bank access and API keys. (Without it, the key is `./data/secret.key`: back it up with the
    database.) Changing it: put the old one in `RUNWAY_SECRET_KEY_OLD` for one start, and keep it as long as you keep
@@ -97,7 +102,7 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
    `RUNWAY_SECRET_KEY` (restoring elsewhere needs the same key).
 6. **Updates.** Pull new images regularly; each release is tested, and its dependencies are checked for known
    vulnerabilities.
-7. **AI assistants** connect with OAuth at `<RUNWAY_PUBLIC_URL>/mcp` ([docs/mcp.md](docs/mcp.md)). If a forward-auth
+7. **AI assistants** connect with OAuth at `<RUNWAY_PUBLIC_URL>/mcp` ([AI assistants](/Runway/using/mcp/)). If a forward-auth
    proxy signs you in (`RUNWAY_ALLOW_NO_AUTH=1`), exempt `/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`
    and `/.well-known/oauth-*` from it, and keep `/oauth/authorize` behind it.
 
