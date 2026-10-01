@@ -418,6 +418,20 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();   // nothing to sell
     });
 
+    it("lists a loan against nothing for its payment, with what's owed: it isn't sold", () => {
+      const stu = repaying({ account_id: "stu", payoff_year: 2029 });
+      const none = { ...stu, key: "loan:exp", name: "Expedition Loan", kind: "loan", value: 0, owed: 30000,
+        loan: { rate: null, payment: null, source: null, note: "no_rate" as const, account_id: "exp", payoff_year: null, payment_counted: null } };
+      setup(data({ assets: [{ ...stu, key: "loan:stu", name: "Student Loan", kind: "loan", value: 0, owed: 12000 }, none] }));
+      expect(screen.getByRole("heading", { name: "Homes, other assets & loans" })).toBeInTheDocument();
+      expect(screen.getByText("Loan · $12,000 owed")).toBeInTheDocument();
+      expect(screen.getByText("Loan · $30,000 owed")).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
+        .toBeInTheDocument();
+      expect(screen.getAllByText(/loan payment/)).toHaveLength(1);   // no payment known for the new one: nothing to say
+    });
+
     it("won't take a sale year before this one, and says when a kept one has passed", async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       setup(data({ assets: [home] }, { assets: [{ key: "home1", sell_year: 2026, was: 2024 }] }));

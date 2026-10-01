@@ -6,7 +6,7 @@ from datetime import date
 from sqlalchemy import insert, update
 
 from runway import equity, loans, planner
-from runway.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms
+from runway.models import Account, Asset, EquityCompany, EquityGrant, LoanTerms, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -165,6 +165,41 @@ class SellableTests(LedgerCase):
         self.home()
         h = self.sellable("asset:")
         self.assertEqual((h["owed"], h["owed_by_year"], h["loan"]), (5_000, [5_000], None))
+
+    def test_loans_against_nothing_are_in_the_plan_as_debts(self):
+        # A student loan with its terms, paid from checking each month; a personal loan with none yet (as a new one
+        # synced from Fifth Third is); a mortgage against the house; and a hidden loan and a paid-off one, left out
+        self.acct("mtg", "loan", -200_000, interest_rate=6.5, monthly_payment=1264.14)
+        self.home()
+        self.acct("stu", "loan", -12_000, name="Student Loan", org="Nelnet", interest_rate=5, monthly_payment=400)
+        self.acct("exp", "loan", -30_000, name="Expedition Loan", org="Fifth Third")
+        self.acct("old", "loan", -5_000, hidden=1)
+        self.acct("done", "loan", 0, interest_rate=4, monthly_payment=100)
+        self.acct("chk", "checking", 0)
+        for m in (4, 5, 6, 7, 8):
+            self.tx("chk", f"2026-{m:02}-12", -400, "NELNET STUDENT LN PMT", "Education")
+        plan = planner.sellable(self.conn, TODAY)
+        self.assertEqual([a["key"] for a in plan], ["asset:1", "loan:exp", "loan:stu"])   # the mortgage is the home's
+        stu = next(a for a in plan if a["key"] == "loan:stu")
+        self.assertEqual((stu["name"], stu["kind"], stu["value"], stu["owed"]), ("Student Loan", "loan", 0, 12_000))
+        self.assertEqual(stu["owed_by_year"], loans.project(12_000, 5, 400)[0])   # paid down on its terms
+        self.assertEqual(stu["loan"], {"rate": 5, "payment": 400, "source": "manual", "note": None, "account_id": "stu",
+                                       "payment_counted": True, "payoff_year": 2029})
+        exp = next(a for a in plan if a["key"] == "loan:exp")
+        self.assertEqual((exp["owed"], exp["owed_by_year"]), (30_000, [30_000]))
+        self.assertEqual(exp["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "exp",
+                                       "payment_counted": None, "payoff_year": None})
+        # paid as a transfer naming it: not in spending, so the page adds it
+        self.conn.execute(update(Transaction).where(Transaction.account_id == "chk").values(category="Transfer"))
+        stu = next(a for a in planner.sellable(self.conn, TODAY) if a["key"] == "loan:stu")
+        self.assertIs(stu["loan"]["payment_counted"], False)
+        # left out of net worth: left out of the plan too
+        self.conn.execute(update(Account).where(Account.id == "stu").values(networth_hidden=1))
+        self.assertNotIn("loan:stu", [a["key"] for a in planner.sellable(self.conn, TODAY)])
+        # and never sold into it
+        with self.assertRaisesRegex(planner.PlanError, "Unknown asset"):
+            planner.clean({**planner.default({"yearly_savings": 0, "annual_spending": 0, "expected_return": 0.05}, TODAY),
+                           "assets": [{"key": "loan:exp", "sell_year": 2030}]}, TODAY)
 
     def test_equity_counts_what_will_have_vested(self):
         # 4,800 RSUs from 2025-09-15 over 4 years with a 1-year cliff: 1,200 vested on TODAY (2026-09-23), all by 2029.

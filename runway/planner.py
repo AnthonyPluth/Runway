@@ -4,7 +4,8 @@ The plan is kept whole as JSON (setting "retirement_plan") and the projection it
 Carlo simulation, instant as you type: frontend/src/lib/components/investments/planner.ts). Everything is in today's
 dollars, so returns are after inflation. Runway fills in what it knows: the investments you have, what you've been
 saving and spending, and the homes and equity on the Net worth page, shown alongside the investments until you sell
-them into the plan in a year you choose (vehicles lose value, so they aren't counted; their loans' payments are).
+them into the plan in a year you choose (vehicles lose value, so they aren't counted; their loans' payments are, as are
+those of loans against nothing, like a student loan).
 """
 from __future__ import annotations
 
@@ -178,7 +179,9 @@ def default(computed: dict, today: date) -> dict:
 def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page the plan counts: homes and other assets (less the loan against them) and company
     equity (what will have vested by then), held until you sell them into the plan. Vehicles are listed too, but only
-    for their loan's payment: they lose value, so the page neither counts nor sells them. Each says what it's worth and
+    for their loan's payment: they lose value, so the page neither counts nor sells them. So are loans against nothing
+    (a student or personal loan, kind "loan", key "loan:<account id>", worth nothing): debts, there for their payment,
+    paid down on their terms like the rest. Each says what it's worth and
     owes today (`value`, `owed`, a loan paid down since its last balance as on the Net worth page) and how that
     changes: `yearly_change` (a fraction; None when it's not set, and for equity, which the page takes as keeping pace
     with inflation), `owed_by_year` (the loan paid down on its terms, see loans.py) and, for equity, `value_by_year`
@@ -193,32 +196,42 @@ def sellable(conn, today: date) -> list[dict]:
     page leaves spending as it is, since adding a payment that's already in it would count it twice."""
     from . import portfolio   # imported here: portfolio imports this module
     accts = {a["id"]: a for a in db.rows(conn.execute(
-        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.org, Account.name)
+        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.org, Account.name,
+               Account.display_name, Account.hidden, Account.networth_hidden)
         .where(Account.kind.in_(["credit", "loan"]))))}
     items = networth.assets(conn, today)
-    terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
-    spent: list[dict] | None = None
-    moved: list[dict] = []
-    history: list[str] = []
+    linked = {a["loan_account_id"] for a in items if a["loan_account_id"]}
+    # Loans against nothing (a student or personal loan) that net worth counts: debts, for their payment
+    alone = [a for a in accts.values() if a["kind"] == "loan" and a["id"] not in linked and not a["hidden"]
+             and not a["networth_hidden"]]
+    terms = loans.terms(conn, today, sorted(linked) + [a["id"] for a in alone])
+    found: dict[str, list] = {}
+
+    def projected(acct: dict) -> tuple[float, list[float], dict]:
+        """A loan account's balance today, paid down year by year, and its `loan` (see above)."""
+        t = terms.get(acct["id"])
+        owed = loans.owed_on(acct, t, today)
+        by_year, loan = loans.owed_by_year(owed, t)
+        counted: bool | None = None
+        if loan["payment"]:
+            names = [acct["org"] or "", acct["name"] or ""]
+            if not found:
+                found.update(spent=portfolio.spent_outflows(conn, today), moved=portfolio.transfer_outflows(conn, today),
+                             history=portfolio.history_months(conn, today))
+            counted = (True if payment_counted(found["spent"], loan["payment"], names, history=found["history"])
+                       else False if payment_counted(found["moved"], loan["payment"], names, named_only=True,
+                                                     history=found["history"])
+                       else None)
+        loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
+                "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
+        return owed, by_year, loan
+
     out = []
     for a in items:
         acct = accts.get(a["loan_account_id"])
         loan: dict[str, Any] | None = None
         if acct and acct["kind"] == "loan":
-            t = terms.get(acct["id"])
-            owed = loans.owed_on(acct, t, today)
-            by_year, loan = loans.owed_by_year(owed, t)
-            counted: bool | None = None
-            if loan["payment"]:
-                names = [acct["org"] or "", acct["name"] or ""]
-                if spent is None:
-                    spent, moved = portfolio.spent_outflows(conn, today), portfolio.transfer_outflows(conn, today)
-                    history = portfolio.history_months(conn, today)
-                counted = (True if payment_counted(spent, loan["payment"], names, history=history)
-                           else False if payment_counted(moved, loan["payment"], names, named_only=True, history=history)
-                           else None)
-            loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
-                    "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
+            owed, by_year, loan = projected(acct)
         else:   # none, or a card: what's owed today
             owed = round(forecast.owed({**acct, "balance": acct["balance"] or 0.0}), 2) if acct else 0.0
             by_year = [owed]
@@ -226,6 +239,12 @@ def sellable(conn, today: date) -> list[dict]:
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
                     "yearly_change": None if yearly is None else yearly / 100.0, "owed": owed, "owed_by_year": by_year,
                     "loan": loan})
+    for acct in sorted(alone, key=lambda a: (a["display_name"] or a["name"] or "").lower()):
+        owed, by_year, loan = projected(acct)
+        if owed <= 0:   # paid off: nothing to plan for
+            continue
+        out.append({"key": f"loan:{acct['id']}", "name": acct["display_name"] or acct["name"], "kind": "loan", "value": 0.0,
+                    "yearly_change": None, "owed": owed, "owed_by_year": by_year, "loan": loan})
     for c in equity.overview(conn, today)["companies"]:
         if not c["in_networth"]:
             continue

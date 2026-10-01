@@ -123,7 +123,8 @@ export interface PlanLoan {
   account_id?: string; payoff_year?: number | null; payment_counted?: boolean | null;
 }
 /** A home, other asset or company equity from Net worth, which the plan holds until it's sold into it; a vehicle is
- *  listed only for its loan's payment (it loses value, so it isn't counted). `owed` is what's owed on it today (a
+ *  listed only for its loan's payment (it loses value, so it isn't counted), and so is a loan against nothing (kind
+ *  "loan", a student or personal loan: a debt, worth nothing). `owed` is what's owed on it today (a
  *  loan paid down since its last balance, as on Net worth). `yearly_change` is a fraction, or null when none is set
  *  (and for equity): it then keeps pace with inflation. `owed_by_year` and `value_by_year` are indexed by years from
  *  today (0 is today) and stop once they stop changing: the last entry holds from then on. */

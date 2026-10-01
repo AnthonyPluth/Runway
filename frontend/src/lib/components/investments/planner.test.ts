@@ -240,6 +240,16 @@ describe("flows", () => {
     expect(held(p, Y, [car], [Y, Y + 1]).home).toEqual([0, 0]);
     expect(held(p, Y, [car], [Y, Y + 1]).other).toEqual([0, 0]);
   });
+
+  it("treats a loan against nothing (a student loan) like the others: its payment found, added or left, and never held", () => {
+    const student: PlanAsset = { ...repaying, key: "loan:stu", name: "Student Loan", kind: "loan", value: 0 };
+    closeTo(flows(plan(), Y, [student]).net.slice(5), [-(8_000 + 12_000 * d(5)), -8_000, -8_000, -8_000, -8_000, -8_000]);
+    expect(addedPayments(plan(), [{ ...student, loan: { ...student.loan!, payment_counted: false } }], Y))
+      .toEqual([{ yearly: 12_000, from: 2032, name: "Student Loan", sold: false, counted: false }]);
+    expect(flows(plan(), Y, [{ ...student, loan: { ...student.loan!, payment_counted: null } }]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    const h = held(plan(), Y, [student], [Y, Y + 1]);
+    expect([h.home, h.other, h.equity]).toEqual([[0, 0], [0, 0], [0, 0]]);
+  });
 });
 
 describe("held", () => {
