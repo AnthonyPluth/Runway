@@ -29,7 +29,7 @@ On the Overview page.
 Under Settings → Connections, with each account's source chosen under Settings → Accounts.
 
 - **SimpleFIN or Plaid for each account.** Link a bank or card through Plaid, match its accounts to the ones you already have, and pick where each one's balance and transactions come from. Switching keeps your history, categories and recurring matches: transactions both providers have are matched up so nothing is counted twice.
-- Accounts only Plaid can reach can be added on their own, and a card linked through Plaid gets its statements from the issuer whichever provider its transactions come from.
+- Accounts only Plaid can reach can be added on their own, and a card linked through Plaid gets its statements from the issuer whichever provider its transactions come from. A mortgage or student loan linked through Plaid gets its interest rate, monthly payment and payoff date from the lender the same way (Plaid Liabilities), for the retirement planner; other loans take them from you in Settings → Accounts.
 - **Automatic sync** once a day at 7 AM in Runway's time zone (America/New_York unless you set `TZ`), SimpleFIN and Plaid together, late enough for overnight ACH. At 6:30 AM Runway asks Plaid to fetch from the banks (Plaid's Transactions Refresh add-on), so the 7 AM sync is current. Opening Runway only catches up a day's sync that was missed. The **Sync now** button (the circular arrow beside the sync status in the sidebar, or in the More menu on a phone) syncs whenever you press it: SimpleFIN every time, and Plaid, whose quota is small, only if it hasn't been asked that day. A connection's own Sync button in Settings always asks Plaid. The button shows only once a bank is connected.
 
 ## Bills & income
@@ -71,6 +71,7 @@ On Net worth → Investments.
 On Net worth → Retirement.
 
 - A retirement planner that projects your investments year by year to the age you plan for, across 1,000 simulated markets, with the chance your money lasts. Its assumptions (spending, saving, return, Social Security, pensions, one-off events, selling a home) start from your own numbers and keep whatever you change; **Start over** (after a confirmation) goes back to Runway's figures. Until you enter your own dates the results are marked as a sample, and with nothing invested yet the tab points you to Investments instead. It plans from your investments only, in today's dollars and before tax.
+- **Selling a home or equity into the plan:** tick a home, vehicle or company's equity and choose the year to sell it. A home's value grows by its yearly change from the Net worth page, and the loan against it is paid down month by month to what will still be owed that year, using the loan's interest rate and monthly payment: the lender's, through Plaid, for mortgages and student loans, or what you enter on the loan in Settings → Accounts (an auto loan, or a loan from SimpleFIN). Left empty, the payment is the typical month's payments into the loan account lately. Without an interest rate the plan counts today's balance and says so. Equity counts what will have vested by then, at today's share price, including grants that haven't vested at all yet. Hover over the estimate to see what it assumes.
 
 ## Net worth and equity
 

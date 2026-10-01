@@ -238,6 +238,39 @@ describe("RetirementPlanner", () => {
       await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));
       expect(screen.queryByText(/^Sell in/)).not.toBeInTheDocument();
     });
+
+    it("says what the estimate assumes: the home's value then, less the loan paid down on its terms", async () => {
+      const paying = { ...home, yearly_change: 0.025, owed_by_year: Array.from({ length: 26 }, (_, k) => 200000 - k * 8000),
+        loan: { rate: 6.25, payment: 1840, source: "inferred" as const, note: null } };
+      setup(data({ assets: [paying] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+      // 2036: worth 500k (it keeps pace with inflation), 120k still owed in 2036's dollars = 120k / 1.025^10 today
+      expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title",
+        "Home worth $500,000 in 2036, less $93,744 still owed on the loan at 6.25% and $1,840 a month from recent payments. In today’s dollars.");
+      expect(screen.queryByText(/to project it/)).not.toBeInTheDocument();
+    });
+
+    it("says when a loan is paid off by the sale", () => {
+      const paid = { ...home, owed_by_year: [200000, 100000, 0], loan: { rate: 5, payment: 9000, source: "plaid" as const, note: null } };
+      setup(data({ assets: [paid] }, { assets: [{ key: "home1", sell_year: 2030 }] }));
+      expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/; the loan \(5% and \$9,000 a month from Plaid\) is paid off by then\./);
+    });
+
+    it("asks for the loan's interest rate when it can't project it, and counts today's balance", () => {
+      const unknown = { ...home, yearly_change: 0.025, owed_by_year: [200000], loan: { rate: null, payment: null, source: null, note: "no_rate" as const } };
+      setup(data({ assets: [unknown] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");
+      expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less \$200,000 owed on the loan today\./);
+      expect(screen.getByText(/add the loan’s interest rate in/)).toHaveTextContent(/to project it\.$/);
+      expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+    });
+
+    it("shows equity vested by the year it's sold", () => {
+      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: 0, owed: 0,
+        value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
+      setup(data({ assets: [acme] }, { inflation: 0, assets: [{ key: "equity:acme", sell_year: 2030 }] }));
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
+      expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
+    });
   });
 
   it("asks before starting over, and doesn't clear anything on the first click", async () => {

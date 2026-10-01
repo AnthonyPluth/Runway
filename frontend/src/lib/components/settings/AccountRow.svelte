@@ -21,7 +21,7 @@
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDateTime, nb } from "$lib/format";
+  import { fmt, fmtDate, fmtDateTime, nb } from "$lib/format";
   import { accountName } from "$lib/types";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -50,10 +50,21 @@
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
   let spend = $state(!!init.daily_spend);
+  let rate = $state(init.loan?.set_rate != null ? String(init.loan.set_rate) : "");
+  let payment = $state(init.loan?.set_payment != null ? String(init.loan.set_payment) : "");
   let changingType = $state(false);
   let open = $state(openAccounts.has(init.id));
 
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
+  // A loan's terms, for the retirement planner: the lender's through Plaid when it shares them, else yours.
+  const loan = $derived(a.kind === "loan" ? a.loan : undefined);
+  // What an empty payment means: the one that pays the loan off by Plaid's payoff date, else what recent payments suggest.
+  const byPayoff = $derived(!!loan && loan.source === "plaid" && !loan.plaid_payment && loan.payment != null && loan.set_payment == null);
+  const dollars = (n: number) => Math.round(n).toLocaleString("en-US");
+  const hint = $derived(byPayoff ? `${dollars(loan!.payment!)} to pay it off by ${fmtDate(loan!.maturity!, { month: "short", day: "numeric", year: "numeric" })}`
+    : loan?.inferred_payment ? `${dollars(loan.inferred_payment)} from recent payments` : "e.g. 1,850");
+  const hintTitle = $derived(byPayoff ? "Left empty, it’s the payment that pays the loan off by the date the lender gives, through Plaid"
+    : "Left empty, it’s worked out from the payments into this account lately");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
@@ -129,6 +140,15 @@
     } catch (err) { if (rerender) toast.error((err as Error).message); else throw err; }
   }
 
+  // A loan's interest rate and monthly payment, the ones Plaid doesn't supply (an empty payment is worked out from
+  // recent payments).
+  async function saveLoan() {
+    const body: Record<string, unknown> = {};
+    if (!loan?.plaid) body.interest_rate = rate;
+    if (!loan?.plaid_payment) body.monthly_payment = payment;
+    await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
+  }
+
   async function setProvider(e: Event) {
     const v = (e.currentTarget as HTMLSelectElement).value;
     try {
@@ -199,6 +219,33 @@
           {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
         </select>
       </label>
+    {/if}
+    {#if loan}
+      <!-- Each figure Plaid supplies is the lender's and shown as is; what it leaves out (a new loan's payment, say) can be set. -->
+      {#if loan.plaid}
+        <div class={fieldCls}>Interest rate
+          <span class="flex h-9 items-center gap-2 text-foreground">{+(loan.rate ?? 0).toFixed(3)}%<span class="text-xs text-muted-foreground">from Plaid</span></span>
+        </div>
+      {:else}
+        <label class={fieldCls} title="The loan’s annual interest rate. The retirement planner uses it to work out what’s still owed when you sell.">Interest rate
+          <span class="relative">
+            <input class={`${inputCls} w-full pr-7`} inputmode="decimal" bind:value={rate} placeholder="e.g. 6.25" use:autosave={saveLoan} />
+            <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
+          </span>
+        </label>
+      {/if}
+      {#if loan.plaid_payment}
+        <div class={fieldCls}>Monthly payment
+          <span class="flex h-9 items-center gap-2 text-foreground">{fmt(loan.payment)}<span class="text-xs text-muted-foreground">from Plaid</span></span>
+        </div>
+      {:else}
+        <label class={fieldCls} title={hintTitle}>Monthly payment
+          <span class="relative">
+            <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-xs" aria-hidden="true">$</span>
+            <input class={`${inputCls} w-full pl-6`} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />
+          </span>
+        </label>
+      {/if}
     {/if}
     {#if showSource}
       <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source" bind:this={sourceBox}>

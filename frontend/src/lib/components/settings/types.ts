@@ -12,6 +12,16 @@ export interface SettingsAccount extends Account {
   plaid_account_id?: string | null;
   plaid_link?: { transactions?: boolean | number; institution?: string | null; mask?: string | null; closed?: boolean | number;
     statement_note?: string | null } | null;
+  /** Loans: the terms the retirement planner projects what's owed with (runway/loans.py terms()). */
+  loan?: LoanTerms;
+}
+
+/** A loan's terms: `rate` (annual %) and `payment` are what's used; `plaid` when the rate is the lender's, through
+ *  Plaid, and `plaid_payment` when the payment is (each then can't be set here); `set_rate`/`set_payment` are what you
+ *  set; `inferred_payment` comes from the payments into the account lately. */
+export interface LoanTerms {
+  rate: number | null; payment: number | null; maturity?: string | null; source: "plaid" | "manual" | "inferred" | null;
+  plaid: boolean; plaid_payment: boolean; set_rate: number | null; set_payment: number | null; inferred_payment: number | null;
 }
 
 interface SplitPart { category: string; percent: number | string }

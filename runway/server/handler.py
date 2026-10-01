@@ -955,7 +955,7 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
                 data = f.read().replace(b"<script ", f'<script nonce="{nonce}" '.encode())
             if meta := monitoring.trace_meta():   # the page-load trace in the browser continues this one
                 data = data.replace(b"</head>", meta.encode() + b"</head>", 1)
-            # The browser's JS profiler only runs on a page that asks for it (with SENTRY_PROFILE_SESSION_SAMPLE_RATE).
+            # The browser's JS profiler only runs on a page that asks for it.
             extra = {"Document-Policy": "js-profiling"} if monitoring.browser_profiling() else None
             return self._send_file(data, ctype, "no-store", None, gz_ok, nonce, extra=extra)
         entry = _static_entry(full)
