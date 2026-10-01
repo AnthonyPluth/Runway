@@ -10,8 +10,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import func, insert, select
 
 from runway import db, schema
-from runway.models import (Account, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask, ChurnWish,
-                           DeletedAccount, LoanTerms, ManualStatement, Rule, Setting)
+from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
+                           ChurnWish, DeletedAccount, LoanTerms, ManualStatement, Rule, Setting)
 
 
 def drift(path):
@@ -216,11 +216,26 @@ class MigrationTests(unittest.TestCase):
             conn.execute(insert(LoanTerms).values(plaid_account_id="p", item_id="i", interest_rate=6.25))
         self.assertEqual(drift(self.path), [])
 
-    def test_0029_adds_manual_statements_and_deleted_accounts(self):
+    def test_0029_adds_a_cards_purchase_apr(self):
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0028")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("purchase_apr", {col["name"] for col in sa.inspect(c).get_columns("card_statements")})
+            c.exec_driver_sql("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_balance) VALUES ('p', 'i', 640.5)")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            self.assertEqual(tuple(conn.execute(select(CardStatement.last_statement_balance, CardStatement.purchase_apr)).fetchone()),
+                             (640.5, None))
+        self.assertEqual(drift(self.path), [])
+
+    def test_0030_adds_manual_statements_and_deleted_accounts(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0029")
         with db.engine(self.path).begin() as c:
             self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
             c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Visa', 'credit')")
@@ -236,7 +251,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(conn.execute(select(Account.name)).scalar(), "Visa")
         self.assertEqual(drift(self.path), [])
         with db.engine(self.path).begin() as c:   # and back down
-            command.downgrade(db.alembic_config(c), "0028")
+            command.downgrade(db.alembic_config(c), "0029")
             self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")

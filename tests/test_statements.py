@@ -5,7 +5,8 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, insert, update
 
-from runway import forecast, notify, statements
+from runway import db, forecast, notify, statements
+from runway import settings_keys as sk
 from runway.models import Account, CardStatement, ManualStatement, Override
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
@@ -94,6 +95,39 @@ class ManualStatementForecastTests(LedgerCase):
         fc = forecast.build(self.conn, date(2026, 10, 2), 90)                     # past its due date: nothing at all
         self.assertEqual(self.card_events(fc), [])
         self.assertIn("Enter cc’s latest statement so its payment stays in the forecast.", fc["warnings"])
+
+    def pay(self, mode, amount=None, apr=None):
+        db.set_setting(self.conn, sk.card_pay_mode("cc"), mode)
+        db.set_setting(self.conn, sk.card_pay_amount("cc"), amount)
+        db.set_setting(self.conn, sk.card_apr("cc"), apr)
+
+    def test_paid_and_carried_the_way_plaids_would_be(self):
+        # Paying the minimum at a 24% APR, with the Oct 5 payment edited: what carries into the estimated statements
+        # after it is the same whether the statement came from Plaid or was entered.
+        self.pay("minimum", apr="24")
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=-450.0))
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        plaid = forecast.build(self.conn, TODAY, 90)
+        self.unplaid()
+        self.manual("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        mine = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(self.card_events(mine), self.card_events(plaid))
+        m = mine["cards"][0]
+        self.assertEqual((m["pay_mode"], m["remaining"], m["payment"], m["carried"], m["apr_source"]),
+                         ("minimum", 600.0, 450.0, 150.0, "you"))
+        self.assertEqual({k: v for k, v in m.items() if k != "statement_source"},
+                         {k: v for k, v in plaid["cards"][0].items() if k != "statement_source"})
+        self.assertTrue(any(est for *_, est in self.card_events(mine)))
+
+    def test_a_stale_statement_pays_its_plan_and_carries_nothing_forward(self):
+        # A fixed $300 toward the $800 statement, $200 of it paid already: $100 goes out, and with the statement stale
+        # nothing after it is estimated, so the $500 left isn't carried anywhere.
+        self.pay("fixed", amount="300")
+        self.manual("cc", 800.0, "2026-08-10", "2026-09-30")
+        fc = forecast.build(self.conn, date(2026, 9, 16), 90)
+        c = fc["cards"][0]
+        self.assertEqual((c["statement_stale"], c["payment"], c["carried"]), (True, 100.0, 500.0))
+        self.assertEqual(self.card_events(fc), [("cardclose:cc:2026-08-10", "2026-09-30", -100.0, False)])
 
     def test_a_stale_card_is_left_out_of_the_budget_scenario(self):
         from runway.models import Budget

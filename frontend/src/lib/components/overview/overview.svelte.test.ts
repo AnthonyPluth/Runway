@@ -129,6 +129,20 @@ describe("CardsTable", () => {
     expect(screen.getByText(/\$250\.00 left/)).toBeInTheDocument();
   });
 
+  it("says how much of the statement a card that isn't paid in full pays, and what carries over", () => {
+    at("2026-03-10");
+    const { unmount } = render(CardsTable, { cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })] });
+    expect(screen.getByText(/pays \$35\.00 of \$600\.00/)).toHaveAttribute("title", "The rest, $565.00, carries into the next statement");
+    unmount();
+    // more than the statement: the extra comes off the next one
+    const over = render(CardsTable, { cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })] });
+    expect(screen.getByText(/pays \$1,000\.00 of \$600\.00/)).toHaveAttribute("title", "The extra $400.00 comes off the next statement");
+    over.unmount();
+    // paid in full: no "pays", as before
+    render(CardsTable, { cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
+    expect(screen.queryByText(/pays/)).toBeNull();
+  });
+
   it("says when there's no average yet", () => {
     render(CardsTable, { cards: [card({ avg_monthly_spend: null })] });
     expect(screen.getByText("no average yet")).toBeInTheDocument();

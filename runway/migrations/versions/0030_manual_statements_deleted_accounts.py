@@ -1,16 +1,16 @@
 """Card statements you enter by hand (for a card Plaid sends none for), and the accounts you deleted (so a sync doesn't
 bring them back).
 
-Revision ID: 0029
-Revises: 0028
+Revision ID: 0030
+Revises: 0029
 """
 import sqlalchemy as sa
 from alembic import op
 
 from runway.schema import now_text
 
-revision = '0029'
-down_revision = '0028'
+revision = '0030'
+down_revision = '0029'
 branch_labels = None
 depends_on = None
 

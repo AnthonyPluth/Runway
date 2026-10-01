@@ -305,6 +305,7 @@ class CardStatement(Base):
     last_payment_date: Mapped[str | None]
     is_overdue: Mapped[int | None]
     updated: Mapped[str | None]
+    purchase_apr: Mapped[float | None]
 
 
 class ManualStatement(Base):

@@ -48,6 +48,11 @@
   let name = $state(init.display_name || "");
   let owner = $state(init.owner || "");
   let payFrom = $state(init.pay_from || "");
+  // How the card's statements are paid, for the forecast: in full, the minimum, or a fixed amount (and its APR, for the
+  // interest on what that leaves to carry over).
+  let payMode = $state(init.pay_mode || "full");
+  let payAmount = $state<number | null>(init.pay_amount ?? null);
+  let apr = $state<number | null>(init.apr ?? null);
   let kind = $state(init.kind);
   let hidden = $state(!!init.hidden);
   let counted = $state(!init.networth_hidden);
@@ -106,6 +111,9 @@
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
+      if (a.pay_mode === "minimum") bits.push({ text: "pays the minimum" });
+      else if (a.pay_mode === "fixed")
+        bits.push(a.pay_amount != null ? { text: `pays ${fmt(a.pay_amount)} a statement` } : { text: "no fixed amount", warn: true, title: "Paid in full until you enter one" });
       // Its statement: Plaid's says nothing more; one you entered says when it's due; none (or an old one) asks for it.
       const st = a.statement;
       if (!st) bits.push({ text: "no statement", warn: true, title: link ? statementNote(link.statement_note) : undefined }, { text: "Enter…", link: true });
@@ -134,10 +142,10 @@
     if (open) openAccounts.add(a.id); else openAccounts.delete(a.id);
   }
 
-  // Saves the whole row. Fields that change the row's summary (owner, paying account, hidden, net worth, type) redraw the page.
+  // Saves the whole row. Fields that change the row's summary (owner, paying account, how it's paid, hidden, net worth, type) redraw the page.
   async function save(rerender: boolean) {
     const body: Record<string, unknown> = { display_name: name, kind, hidden: hidden ? 1 : 0, networth_hidden: counted ? 0 : 1, owner };
-    if (a.kind === "credit") body.pay_from = payFrom;
+    if (a.kind === "credit") Object.assign(body, { pay_from: payFrom, pay_mode: payMode, pay_amount: payAmount ?? "", apr: apr ?? "" });
     if (owes) body.owed_positive = sign ? 1 : 0;
     if (a.kind === "checking" || a.kind === "savings") body.daily_spend = spend ? 1 : 0;
     try {
@@ -252,6 +260,27 @@
           {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
         </select>
       </label>
+      <label class={fieldCls} title="How much of each statement the forecast pays; what isn't paid carries into the next one">Pay
+        <select class={selectCls} bind:value={payMode} use:autosave={() => save(true)}>
+          <option value="full">full statement</option>
+          <option value="minimum">minimum</option>
+          <option value="fixed">a fixed amount</option>
+        </select>
+      </label>
+      {#if payMode === "fixed"}
+        <label class={fieldCls}>Amount each statement
+          <input type="number" inputmode="decimal" min="0" step="0.01" class={inputCls} bind:value={payAmount} placeholder="$" use:autosave={() => save(true)} />
+        </label>
+      {/if}
+      {#if payMode !== "full"}
+        <!-- Yours wins; without one, the issuer's purchase APR (through Plaid) is used, and shown as the placeholder. -->
+        <div class={fieldCls} title="For the interest on what carries over; without one, the forecast leaves interest out">
+          <label for={`apr-${a.id}`}>APR (%)</label>
+          <input id={`apr-${a.id}`} type="number" inputmode="decimal" min="0" max="100" step="0.01" class={inputCls} bind:value={apr}
+            placeholder={a.issuer_apr != null ? String(a.issuer_apr) : undefined} use:autosave={() => save(false)} />
+          {#if apr == null && a.issuer_apr != null}<span class="text-xs">{a.issuer_apr}% from the issuer</span>{/if}
+        </div>
+      {/if}
     {/if}
     {#if loan}
       <!-- Each figure Plaid supplies is the lender's and shown as is; what it leaves out (a new loan's payment, say) can be set. -->
@@ -260,7 +289,7 @@
           <span class="flex h-9 items-center gap-2 text-foreground">{+(loan.rate ?? 0).toFixed(3)}%<span class="text-xs text-muted-foreground">from Plaid</span></span>
         </div>
       {:else}
-        <label class={fieldCls} title="The loan’s annual interest rate. The retirement planner uses it to work out what’s still owed when you sell.">Interest rate
+        <label class={fieldCls} title="The loan’s annual interest rate. With it, Net worth pays the loan down between balances and the retirement planner works out what’s still owed when you sell.">Interest rate
           <span class="relative">
             <input class={`${inputCls} w-full pr-7`} inputmode="decimal" bind:value={rate} placeholder="e.g. 6.25" use:autosave={saveLoan} />
             <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs" aria-hidden="true">%</span>

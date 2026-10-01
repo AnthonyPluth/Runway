@@ -2,8 +2,10 @@
 
 Account balances come from SimpleFIN. Homes, vehicles and other assets are entered by hand (a home can also be
 valued by Realie, see realie.py). An asset can carry a yearly change (say -15% for a car) so its value drifts
-between your updates, and can be linked to the loan against it to show equity. A snapshot is saved each day the
-numbers are looked at, which builds the history chart going forward.
+between your updates, and can be linked to the loan against it to show equity. A loan with an interest rate and a
+monthly payment (Plaid's, yours from Settings → Accounts, or one worked out from recent payments: see loans.py) is
+paid down month by month from its last balance, synced or not. A snapshot is saved each day the numbers are looked
+at, which builds the history chart going forward.
 """
 from __future__ import annotations
 
@@ -14,7 +16,7 @@ from typing import Any
 
 from sqlalchemy import delete, insert, select, update
 
-from . import db, equity, forecast, validate
+from . import db, equity, forecast, loans, validate
 from .models import Account, Asset, AssetValue, NetworthSnapshot
 
 ASSET_KINDS = {"home": "Real estate", "vehicle": "Vehicles", "other": "Other assets"}
@@ -43,10 +45,11 @@ def assets(conn, today: date | None = None) -> list[dict]:
     return out
 
 
-def _presented(a: dict) -> float:
-    """An account's value the way the groups show it: credit and loan accounts as a positive amount owed."""
+def _presented(a: dict, today: date, terms: dict[str, dict]) -> float:
+    """An account's value the way the groups show it: credit and loan accounts as a positive amount owed, a loan paid
+    down to today on its terms (loans.owed_on)."""
     if a["kind"] in ("credit", "loan"):
-        return round(forecast.owed({**a, "balance": a["balance"] or 0.0}), 2)
+        return loans.owed_on(a, terms.get(a["id"]), today)
     return round(a["balance"] or 0.0, 2)
 
 
@@ -55,6 +58,7 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     accts = db.rows(conn.execute(
         select(Account.id, db.account_label_expr(Account).label("name"), Account.org, Account.kind, Account.balance,
                Account.balance_date, Account.owed_positive, Account.owner, Account.networth_hidden).where(Account.hidden == 0)))
+    terms = loans.terms(conn, today)
     left_out = [a for a in accts if a["networth_hidden"]]   # you left these out of Net worth: listed at the bottom, to bring back
     accts = [a for a in accts if not a["networth_hidden"]]
     groups: dict[str, dict[str, Any]] = {
@@ -70,9 +74,12 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     owed_by_account = {}
     for a in accts:
         item = {"type": "account", "id": a["id"], "name": a["name"], "org": a["org"], "as_of": a["balance_date"], "owner": a["owner"]}
-        value = _presented(a)
+        value = _presented(a, today, terms)
         if a["kind"] in ("credit", "loan"):
             owed_by_account[a["id"]] = value
+            synced = round(forecast.owed({**a, "balance": a["balance"] or 0.0}), 2)
+            if value != synced:   # paid down since the balance's date: what it was then, too
+                item["synced"] = synced
             groups[a["kind"]]["items"].append({**item, "value": value})
         else:
             groups["investments" if a["kind"] == "investment" else "cash"]["items"].append({**item, "value": value})
@@ -100,17 +107,22 @@ def summary(conn, today: date | None = None, save: bool = True) -> dict:
     for h in hist:
         h["detail"] = json.loads(h["detail"] or "{}")
 
-    def change_since(days: int):
+    def change_since(days: int) -> tuple[float | None, str | None]:
+        """The change since the latest snapshot at least `days` old, and that snapshot's date: snapshots are only saved
+        on days the numbers are looked at, so "30 days" can really be longer."""
         cutoff = (today - timedelta(days=days)).isoformat()
         older = [h for h in hist if h["date"] <= cutoff]
-        return round(net - older[-1]["net"], 2) if older else None
+        return (round(net - older[-1]["net"], 2), older[-1]["date"]) if older else (None, None)
+
+    changes = {k: change_since(days) for k, days in (("30d", 30), ("90d", 90), ("1y", 365))}
 
     return {
         "today": today.isoformat(), "net": net, "assets": total_assets, "liabilities": total_liab,
         "groups": [g for g in groups.values() if g["items"]],
-        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a)} for a in left_out],
+        "excluded": [{"id": a["id"], "name": a["name"], "org": a["org"], "kind": a["kind"], "balance": _presented(a, today, terms)} for a in left_out],
         "history": hist, "first_snapshot": hist[0]["date"] if hist else None,
-        "change": {"30d": change_since(30), "90d": change_since(90), "1y": change_since(365)},
+        "change": {k: amount for k, (amount, _) in changes.items()},
+        "change_since": {k: since for k, (_, since) in changes.items()},   # the snapshot each change is measured from
     }
 
 

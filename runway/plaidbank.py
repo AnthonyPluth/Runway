@@ -465,7 +465,10 @@ def store_statements(conn, item, res: dict) -> int:
         stmt = {"last_statement_balance": c.get("last_statement_balance"), "last_statement_date": c.get("last_statement_issue_date"),
                 "next_due_date": c.get("next_payment_due_date"), "minimum_payment": c.get("minimum_payment_amount"),
                 "last_payment_amount": c.get("last_payment_amount"), "last_payment_date": c.get("last_payment_date"),
-                "is_overdue": 1 if c.get("is_overdue") else 0, "updated": _now()}
+                "is_overdue": 1 if c.get("is_overdue") else 0, "updated": _now(),
+                # the APR on purchases (not cash advances, balance transfers or a promotion), for the forecast's interest
+                "purchase_apr": next((_float(a.get("apr_percentage")) for a in c.get("aprs") or []
+                                      if a.get("apr_type") == "purchase_apr"), None)}
         db.upsert(conn, CardStatement, {"plaid_account_id": c["account_id"], "item_id": item["item_id"], **stmt},
                   key=["plaid_account_id"], update=list(stmt))   # a card stays with the connection it was first seen on
         n += 1

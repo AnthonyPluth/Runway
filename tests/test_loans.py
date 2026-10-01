@@ -35,6 +35,17 @@ class AmortizationTests(unittest.TestCase):
         for payment in (1_400, 1_500, 0):
             self.assertEqual(loans.project(300_000, 6, payment), ([300_000], True))
 
+    def test_the_year_of_the_last_payment(self):
+        today, t = date(2026, 10, 1), lambda rate, payment: {"rate": rate, "payment": payment}
+        # a payment a month from November: 2 is December 2026, 14 December 2027, 15 January 2028
+        self.assertEqual(loans.payoff_year(2_000, t(0, 1_000), today), 2026)
+        self.assertEqual(loans.payoff_year(14_000, t(0, 1_000), today), 2027)
+        self.assertEqual(loans.payoff_year(14_001, t(0, 1_000), today), 2028)
+        self.assertEqual(loans.payoff_year(50_000, t(6, 1_000), today), 2031)   # 58 payments: the last in August 2031
+        self.assertEqual(loans.payoff_year(0, t(6, 1_000), today), 2026)        # already paid off
+        for terms in (None, t(None, 1_000), t(6, None), t(6, 250), t(6, 0)):    # not projected, or never paid down
+            self.assertIsNone(loans.payoff_year(50_000, terms, today))
+
     def test_payment_that_pays_it_off_by_a_date(self):
         self.assertAlmostEqual(loans.payment_to_pay_off(12_000, 0, 12), 1_000)
         self.assertAlmostEqual(loans.payment_to_pay_off(100_000, 6, 120), 1110.21, places=2)
@@ -134,7 +145,9 @@ class SellableTests(LedgerCase):
         self.assertEqual(len(h["owed_by_year"]), 31)
         self.assertAlmostEqual(h["owed_by_year"][5], 187_221.68, places=2)
         self.assertEqual(h["owed_by_year"][-1], 0)
-        self.assertEqual(h["loan"], {"rate": 6.5, "payment": 1264.14, "source": "manual", "note": None})
+        # 360 payments from October 2026: the last in September 2056; no money out like it, so it isn't in spending
+        self.assertEqual(h["loan"], {"rate": 6.5, "payment": 1264.14, "source": "manual", "note": None, "account_id": "mtg",
+                                     "payment_counted": False, "payoff_year": 2056})
 
     def test_a_home_whose_loan_has_no_rate_keeps_todays_balance(self):
         self.acct("mtg", "loan", 200_000, owed_positive=1)

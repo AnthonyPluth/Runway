@@ -115,6 +115,17 @@ export interface CardSummary {
   last_close: string;
   remaining: number;
   minimum_payment?: number | null;
+  /** How the forecast pays the statement (Settings → Accounts): what it pays on the due date out of what's left
+   *  (remaining), and what that leaves to carry into the next statement (below zero when a payment you edited is more
+   *  than what's left: the extra comes off the next one). */
+  pay_mode?: "full" | "minimum" | "fixed";
+  payment?: number;
+  carried?: number;
+  /** More refunds (or overpayment) than charges since the close: a credit that comes off the next statement. */
+  credit?: number;
+  /** The APR the forecast charges interest at, and whose it is: the one you entered, or the issuer's (through Plaid). */
+  apr?: number | null;
+  apr_source?: "you" | "issuer" | null;
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;

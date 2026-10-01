@@ -79,7 +79,10 @@ class MockBank(BaseHTTPRequestHandler):
             return self.reply(200, {"liabilities": {"credit": [
                 {"account_id": "p-csp", "last_statement_balance": 640.5, "last_statement_issue_date": "2026-09-05",
                  "next_payment_due_date": "2026-10-02", "minimum_payment_amount": 35, "last_payment_amount": 700,
-                 "last_payment_date": "2026-08-30", "is_overdue": False}], **MockBank.loans}})
+                 "last_payment_date": "2026-08-30", "is_overdue": False,
+                 "aprs": [{"apr_type": "cash_apr", "apr_percentage": 29.99, "balance_subject_to_apr": None},
+                          {"apr_type": "purchase_apr", "apr_percentage": 24.99, "balance_subject_to_apr": 640.5}]}],
+                **MockBank.loans}})
         self.reply(404, {"error_code": "NOT_FOUND"})
 
 
@@ -289,6 +292,23 @@ class PlaidBankTests(DbCase):
         self.assertIn("liabilities", self.c.execute(select(PlaidItem.products)).fetchone()[0])
         self.assertTrue(self.c.execute(select(CardStatement.plaid_account_id)
                                        .where(CardStatement.plaid_account_id == "p-csp")).fetchone())
+        # the purchase APR, not the cash advance one
+        self.assertEqual(self.c.execute(select(CardStatement.purchase_apr)).scalar(), 24.99)
+
+    def test_a_cards_purchase_apr_is_kept_and_other_aprs_are_not(self):
+        item = {"item_id": "it1"}
+        card = {"account_id": "pc", "last_statement_balance": 100, "last_statement_issue_date": "2026-09-05"}
+        apr = lambda: self.c.execute(select(CardStatement.purchase_apr).where(CardStatement.plaid_account_id == "pc")).scalar()
+        plaidbank.store_statements(self.c, item, {"liabilities": {"credit": [{**card, "aprs": [
+            {"apr_type": "balance_transfer_apr", "apr_percentage": 0.0}, {"apr_type": "special", "apr_percentage": 0.0},
+            {"apr_type": "purchase_apr", "apr_percentage": "21.24"}]}]}})
+        self.assertEqual(apr(), 21.24)
+        # only a cash APR, or none at all: no purchase APR (and an old one doesn't linger)
+        plaidbank.store_statements(self.c, item, {"liabilities": {"credit": [{**card, "aprs": [
+            {"apr_type": "cash_apr", "apr_percentage": 29.99}]}]}})
+        self.assertIsNone(apr())
+        plaidbank.store_statements(self.c, item, {"liabilities": {"credit": [card]}})
+        self.assertIsNone(apr())
 
     def test_loan_terms_from_liabilities(self):
         loan = lambda pid, subtype, owed: {"account_id": pid, "name": pid, "type": "loan", "subtype": subtype,

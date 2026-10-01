@@ -300,6 +300,37 @@ export interface BestCard {
   note: string | null;             // "10x if booked through Capital One Travel" / "Only when booked through ..."
 }
 
+// A credit card account that isn't a churning card yet, pre-filled for the add-card form (runway/churn_found.py).
+// Nothing in it is saved until the form is. opened_on is the account's first transaction here (null: it has none):
+// the card was opened on or before it.
+export interface FoundDraft {
+  account_id: string;
+  account_name: string;
+  org: string;
+  owner: string;                  // "" when it's Joint or not set: left for you
+  issuer: string;                 // a key of Churning.issuers
+  product: string;                // "" when the account's name doesn't say
+  business: number;
+  annual_fee: number | null;      // the latest annual fee charged on it
+  fee_month: number | null;
+  opened_on: string | null;
+  opened_on_estimate: boolean;
+}
+export interface Found { drafts: FoundDraft[]; dismissed: { account_id: string; name: string }[] }
+
+// What the AI suggested for a card (POST /api/churning/suggest), already checked against Runway's currencies and
+// categories. Any part can be missing.
+export interface CardSuggestion {
+  family: string | null;
+  currency: string | null;
+  base_rate: number | null;
+  rates: { category: string; multiplier: number; portal_only: number }[];
+  annual_fee: number | null;
+  portal_name: string | null;
+  benefits: SuggestedBenefit[];
+}
+export interface SuggestedBenefit { name: string; kind: BenefitKind; amount: number | null; period: BenefitPeriod }
+
 // POST /api/churning/cards/{id}/plan/done and /plan/undo
 export interface PlanResult {
   id: number; plan: CardPlan; plan_done_on: string | null; status: ChurnCard["status"]; closed_on: string | null;

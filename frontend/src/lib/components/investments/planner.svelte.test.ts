@@ -12,7 +12,7 @@ import PlannerChart from "./PlannerChart.svelte";
 import { fmt0 } from "$lib/format";
 import { project, projectionIn } from "./planner";
 import RetirementPlanner from "./RetirementPlanner.svelte";
-import type { PlanData, RetirementPlan } from "./types";
+import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
 const plan = (extra: Partial<RetirementPlan> = {}): RetirementPlan => ({
   people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 20000 }], plan_to_age: 95, spending: 60000,
@@ -23,6 +23,14 @@ const data = (extra: Partial<PlanData> = {}, p: Partial<RetirementPlan> = {}): P
   computed: { annual_spending: 55000, yearly_savings: 18000, expected_return: 0.05 }, ...extra,
 });
 const setup = (d = data()) => render(RetirementPlanner, { data: d });
+const homeAsset = (over: Partial<PlanAsset> = {}): PlanAsset => ({
+  key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0, ...over,
+});
+// $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045 (runway/loans.py works out the year).
+const repaying = (loan: Partial<NonNullable<PlanAsset["loan"]>> = {}): PlanAsset => homeAsset({
+  owed: 200000, owed_by_year: [200000, 0],
+  loan: { rate: 6, payment: 1500, source: "manual", note: null, account_id: "mtg", payoff_year: 2045, payment_counted: true, ...loan },
+});
 
 // Every edit schedules a save 700ms later. On real timers a test that edits and ends leaves that save pending, and it
 // lands in the next test (a second call where one is expected). Fake timers are dropped after each test, and
@@ -107,7 +115,7 @@ describe("RetirementPlanner", () => {
 
     it("stores percentages as fractions", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      setup(data({ assets: [{ key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0 }] }));
+      setup(data({ assets: [homeAsset()] }));
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       const infl = screen.getByRole("spinbutton", { name: "Inflation" });
       expect(infl).toHaveValue(2.5);
@@ -118,7 +126,7 @@ describe("RetirementPlanner", () => {
     });
 
     it("keeps inflation with the assumptions, with or without homes to sell (it also gives future dollars)", () => {
-      setup(data({ assets: [{ key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0 }] }));
+      setup(data({ assets: [homeAsset()] }));
       expect(screen.getByRole("spinbutton", { name: "Inflation" }).closest("section")).toHaveTextContent("Assumptions");
       expect(screen.getByText(/taking off inflation \(2\.5% a year, under Assumptions\)/)).toBeInTheDocument();
       cleanup();
@@ -226,7 +234,7 @@ describe("RetirementPlanner", () => {
   });
 
   describe("assets", () => {
-    const home = { key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 200000 };
+    const home = homeAsset({ owed: 200000 });
 
     it("explains where assets come from when there are none", () => {
       setup();
@@ -274,6 +282,95 @@ describe("RetirementPlanner", () => {
       setup(data({ assets: [acme] }, { inflation: 0, assets: [{ key: "equity:acme", sell_year: 2030 }] }));
       expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
       expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
+    });
+
+    it("says proceeds are before selling costs and tax, and how a loan is handled", () => {
+      setup(data({ assets: [home] }));
+      expect(screen.getByText(/Proceeds are before selling costs \(often 6–8% of a home’s price\) and tax/)).toBeInTheDocument();
+      expect(screen.getByText(/a loan’s payment comes off your spending once it’s paid off or sold, if it was counted as spending/i)).toBeInTheDocument();
+      expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
+    });
+
+    it("says when a loan's payment ends and comes off spending", async () => {
+      // $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045
+      setup(data({ assets: [repaying()] }));
+      expect(screen.getByText("Its $1,500/month loan payment ends in 2045, and comes off your spending from 2046.")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));   // sold in 2051: paid off before then
+      expect(screen.getByText(/ends in 2045, and comes off your spending from 2046/)).toBeInTheDocument();
+      const year = screen.getByDisplayValue("2051");
+      await userEvent.clear(year);
+      await userEvent.type(year, "2040");
+      expect(screen.getByText("Its $1,500/month loan payment stops when it’s sold, and comes off your spending from 2040.")).toBeInTheDocument();
+    });
+
+    it("under spending, says Runway's figure is less a loan's payment once it's paid off", () => {
+      setup(data({ assets: [repaying()] }));
+      expect(screen.getByText("Runway's figure, from your last six months; less $18,000 a year once the loan on Home is paid off in 2045."))
+        .toBeInTheDocument();
+    });
+
+    it("in future dollars, says what comes off spending in that year's dollars; the projection doesn't change", async () => {
+      setup(data({ assets: [repaying()] }));
+      const odds = screen.getByText(/^\d+%$/).textContent;
+      await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
+      // $18,000 a year in today's dollars is $29,495 in 2046's, at 2.5% a year
+      expect(screen.getByText("Runway's figure, from your last six months; less $29,495 a year (2046 dollars) once the loan on Home is paid off in 2045."))
+        .toBeInTheDocument();
+      expect(screen.getByText("Its $1,500/month loan payment ends in 2045, and comes off your spending from 2046.")).toBeInTheDocument();
+      expect(screen.getByText(/^\d+%$/).textContent).toBe(odds);
+    });
+
+    it("takes nothing off a spending figure you typed, and can go back to Runway's", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      setup(data({ assets: [repaying()] }));
+      const field = screen.getByRole("spinbutton", { name: "Yearly spending in retirement" });
+      await user.clear(field);
+      await user.type(field, "48000");
+      expect(screen.getByText(/^Your own figure, so loan payments aren't taken off it when they end/)).toBeInTheDocument();
+      expect(screen.getByText(/ends in 2045\. Your own spending figure is taken as it is, so nothing comes off\.$/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(800);
+      let body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
+      expect([body.spending, body.spending_own]).toEqual([48000, true]);
+      await user.click(screen.getByRole("button", { name: "Use Runway's figure" }));
+      expect(field).toHaveValue(55000);
+      expect(screen.getByText(/^Runway's figure, from your last six months; less \$18,000 a year/)).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(800);
+      body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
+      expect([body.spending, body.spending_own]).toEqual([55000, false]);
+    });
+
+    it("keeps a saved plan's own spending figure as it is", () => {
+      setup(data({ assets: [repaying()] }, { spending_own: true }));
+      expect(screen.getByRole("button", { name: "Use Runway's figure" })).toBeInTheDocument();
+      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
+    });
+
+    it("says when a loan's payment isn't in spending, so nothing comes off", () => {
+      setup(data({ assets: [repaying({ payment_counted: false })] }));
+      expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
+    });
+
+    it("says when a loan's payment never pays it down, and only that it stays in spending when it was counted", () => {
+      const below = { payment: 900, note: "payment_below_interest" as const, payoff_year: null };
+      const { unmount } = setup(data({ assets: [repaying(below)] }));
+      expect(screen.getByText("Its $900/month loan payment doesn’t cover the interest, so it doesn’t pay the loan down. It stays in your spending.")).toBeInTheDocument();
+      unmount();
+      setup(data({ assets: [repaying({ ...below, payment_counted: false })] }));
+      expect(screen.getByText(/doesn’t pay the loan down\. It was never in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/stays in your spending/)).not.toBeInTheDocument();
+    });
+
+    it("asks for the rate when there's a payment but no rate", () => {
+      setup(data({ assets: [repaying({ rate: null, note: "no_rate", payoff_year: null })] }));
+      expect(screen.getByText("Add the loan’s interest rate in Settings → Accounts to see when its $1,500/month payment ends. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
+    });
+
+    it("says a payment that outlasts the plan goes on past it", () => {
+      setup(data({ assets: [repaying({ payoff_year: null })] }));   // projected, but not paid off within the plan's reach
+      expect(screen.getByText("Its $1,500/month loan payment goes on past the end of the plan. It stays in your spending.")).toBeInTheDocument();
+      expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
     });
 
     describe("in future dollars", () => {
@@ -374,6 +471,28 @@ describe("RetirementPlanner", () => {
       await userEvent.type(infl, "3");
       expect(screen.getByRole("button", { name: "3% a year" })).toBeInTheDocument();
       expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(p.atRetirement * 1.03 ** 25));
+    });
+  });
+
+  describe("what the figures mean", () => {
+    it("says what yearly savings is, and when the history is shorter than a year", () => {
+      const { unmount } = setup();
+      expect(screen.getByText(/\$18,000 a year, is what went into your investments in the last 12 months\. A rollover/)).toBeInTheDocument();
+      unmount();
+      setup(data({ computed: { annual_spending: 55000, yearly_savings: 3000, expected_return: 0.05, savings_measured: true, savings_since: "2026-05-31" } }));
+      expect(screen.getByText(/only goes back to May\s31,\s2026/)).toBeInTheDocument();
+    });
+
+    it("doesn't call a figure typed on the old card a measurement", () => {
+      setup(data({ computed: { annual_spending: 55000, yearly_savings: 20000, expected_return: 0.05, savings_measured: false, savings_since: null } }));
+      expect(screen.queryByText(/what went into your investments/)).not.toBeInTheDocument();
+    });
+
+    it("with two people, says pay covers living costs until both have retired", async () => {
+      setup();
+      expect(screen.queryByText(/still working is assumed to cover/)).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
+      expect(screen.getByText(/the pay of whoever's still working is assumed to cover your living costs/)).toBeInTheDocument();
     });
   });
 

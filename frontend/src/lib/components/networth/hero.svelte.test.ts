@@ -36,6 +36,19 @@ describe("the net worth hero", () => {
     await waitFor(() => expect(chart()).not.toBe(before));
   });
 
+  it("says since when the change really is, when the snapshot it's measured from is older than the range", async () => {
+    // Opened 400, 51 and 31 days ago and today: "30 days" is from 31 days ago (close enough), "90 days" really from a year ago
+    const history = [400, 51, 31, 0].map((n, i) => ({ date: day(n), net: 1000 + i * 500 }));
+    serve({ ...nw(history, { "30d": 300, "90d": 1200, "1y": 2000 }), change_since: { "30d": day(31), "90d": day(400), "1y": day(400) } });
+    render(NetWorth);
+    expect(await screen.findByText("+$300.00 in the last 30 days")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: "90d" }));
+    expect(await screen.findByText(/^\+\$1,200\.00 since Aug\s26,\s2025$/)).toBeInTheDocument();
+    serve({ ...nw(history, { "30d": 300, "90d": 1200, "1y": 2000 }), change_since: { "30d": day(51), "90d": null, "1y": null } });
+    render(NetWorth);
+    expect(await screen.findByText(/^\+\$300\.00 since Aug\s10$/)).toBeInTheDocument();
+  });
+
   it("is a single muted line, with no chart, when there is no history yet", async () => {
     serve(nw([{ date: "2026-09-30", net: 5000 }], { "30d": null, "90d": null, "1y": null }));
     const { container } = render(NetWorth);

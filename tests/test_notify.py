@@ -281,6 +281,12 @@ class NotifyTests(DbCase):
         p = {**notify.DEFAULTS, "card_due": True, "review": False, "low_balance": False, "missed": False}
         got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
         self.assertEqual(got["card:cc:2026-09-25"]["body"], "$400.00 comes out of Checking.")
+        # paying a fixed amount: that's what comes out
+        from runway import settings_keys as sk
+        db.set_setting(self.c, sk.card_pay_mode("cc"), "fixed")
+        db.set_setting(self.c, sk.card_pay_amount("cc"), "150")
+        got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
+        self.assertEqual(got["card:cc:2026-09-25"]["body"], "$150.00 comes out of Checking.")
 
     def test_old_log_entries_are_forgotten(self):
         self.c.execute(insert(NotifyLog), [{"key": "ancient", "sent": 1, "title": "x"},

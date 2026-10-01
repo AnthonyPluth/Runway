@@ -5,6 +5,12 @@ import type { Account } from "$lib/types";
 export interface SettingsAccount extends Account {
   org?: string | null;
   pay_from?: string | null;
+  /** Cards: how the forecast pays each statement (in full by default), the fixed amount, and the APR in percent. */
+  pay_mode?: "full" | "minimum" | "fixed";
+  pay_amount?: number | null;
+  apr?: number | null;
+  /** The card's purchase APR from the issuer, through Plaid: used when you haven't entered one. */
+  issuer_apr?: number | null;
   owed_positive?: number;
   daily_spend?: number;
   networth_hidden?: number;

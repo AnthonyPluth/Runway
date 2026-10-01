@@ -11,6 +11,8 @@ interface NwItem {
   kind?: string;
   loan?: { account_id: string; name: string; owed: number };
   equity?: number;
+  /** A loan paid down since its last balance on its terms (runway/loans.py owed_on): what that balance was. */
+  synced?: number;
 }
 export interface NwGroup { key: string; label: string; side: "asset" | "liability"; items: NwItem[]; total: number }
 
@@ -48,6 +50,8 @@ export interface NetWorth {
   history: { date: string; net: number; assets: number; liabilities: number }[];
   first_snapshot: string | null;
   change: Record<"30d" | "90d" | "1y", number | null>;
+  /** The snapshot each change is measured from: snapshots are only saved on days the page is opened, so it can be older. */
+  change_since?: Record<"30d" | "90d" | "1y", string | null>;
   assets_list: Asset[];
   loan_accounts: { id: string; name: string; kind: string }[];
   /** The home value service: set up or not, and its lookups this month. */
