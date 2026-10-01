@@ -17,6 +17,7 @@
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
   import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
   import { assumptions } from "$lib/components/overview/assumptions";
+  import { comingUp } from "$lib/components/overview/comingUp";
   import { openForecastSettings } from "$lib/components/overview/forecastSheet.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
@@ -203,7 +204,7 @@
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <Group title="Coming up" inset="3.75rem"><EventsList events={fc.events} limit={6} bind:all={comingAll} /></Group>
+        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll} /></Group>
         <Group title="Credit cards"><CardsTable cards={fc.cards} /></Group>
       </div>
       <ThisMonth />

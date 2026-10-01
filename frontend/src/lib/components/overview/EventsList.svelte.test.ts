@@ -105,6 +105,29 @@ describe("EventsList", () => {
     });
   });
 
+  describe("an annual fee", () => {
+    const fee = (extra: Partial<Ev> = {}) => ev({ name: "Sapphire annual fee", amount: -95, kind: "fee", key: undefined, balance_after: undefined,
+      category: "Fees & Interest", account_id: "cc", account: "Sapphire ••1234", paid_on: "2026-11-05", paid_from: "Checking", ...extra });
+
+    it("says which card payment it's in instead of a balance, and can't be edited", () => {
+      show([fee()]);
+      expect(screen.getByText(/on Sapphire ••1234, paid with its Nov 5 payment/)).toBeInTheDocument();
+      expect(screen.queryByText(/balance/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /95/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open in Bills & income" })).not.toBeInTheDocument();
+    });
+
+    it("says when its card's payment isn't in the forecast", () => {
+      show([fee({ paid_on: null, paid_from: null })]);
+      expect(screen.getByText(/on Sapphire ••1234; its payment isn’t in the forecast/)).toBeInTheDocument();
+    });
+
+    it("says when its card isn't linked to an account", () => {
+      show([fee({ account_id: null, account: null, paid_on: null, paid_from: null })]);
+      expect(screen.getByText(/card not linked to an account, so not in the forecast/)).toBeInTheDocument();
+    });
+  });
+
   it("adds the account when several accounts' items are shown together", () => {
     show([ev({ account: "Checking" })], { accounts: true });
     expect(screen.getByText(/· Checking/)).toBeInTheDocument();

@@ -9,6 +9,7 @@
   import TxTable from "$lib/components/transactions/TxTable.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import Upcoming from "$lib/components/transactions/Upcoming.svelte";
+  import { comingUp } from "$lib/components/overview/comingUp";
   import { askRemember } from "$lib/components/transactions/remember.svelte";
   import { restoreTx, type Was } from "$lib/components/transactions/restore";
   import type { RecurringItem } from "$lib/components/recurring/types";
@@ -38,7 +39,7 @@
   const setup = Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
   // Upcoming (projected) items for the forecast account, on All only.
   const upcoming: Promise<UpcomingEvent[]> = review ? Promise.resolve([])
-    : api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => fc.events as UpcomingEvent[]).catch(() => []);
+    : api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => comingUp(fc) as UpcomingEvent[]).catch(() => []);
 
   let list = $state<TxList | null>(null);
   let listError = $state("");

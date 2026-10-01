@@ -87,15 +87,16 @@ export interface ForecastEvent {
   date: string;
   name: string;
   amount: number;
-  kind: "card" | "recurring" | string;
+  kind: "card" | "recurring" | "fee" | string;
   key?: string;
   category?: string | null;
   estimated?: boolean;
   overridden?: boolean;
   original_amount?: number;
-  balance_after: number;
-  account_id?: string;
-  account?: string;
+  /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
+  balance_after?: number;
+  account_id?: string | null;
+  account?: string | null;
   /** Its merchant's logo (a recurring item's: from its last matched transaction). */
   logo?: string | null;
   /** A card statement's card. */
@@ -104,6 +105,10 @@ export interface ForecastEvent {
   recurring_id?: number;
   /** A recurring payment that's partly come (in parts): what has, signed like amount; amount is the rest. */
   paid_so_far?: number;
+  /** An annual fee (kind "fee", Overview.fees): the day the card statement it's on is paid, and the account that pays it
+   *  (null when that payment isn't in the forecast). */
+  paid_on?: string | null;
+  paid_from?: string | null;
 }
 
 export interface CardSummary {
@@ -152,6 +157,9 @@ export interface Overview {
     daily_spend?: number; daily_spend_on?: boolean; daily_spend_estimate?: number;
   }[];
   events: ForecastEvent[];
+  /** Churning cards' annual fees: charges on cards, listed with what's coming up but not in events or the balances
+   *  (each is in its card's statement payment). */
+  fees?: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];
   warnings: string[];
