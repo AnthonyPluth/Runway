@@ -8,7 +8,10 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime
 
+from sqlalchemy import insert
+
 from runway import db
+from runway.models import Account, Transaction
 
 
 class ServerTests(unittest.TestCase):
@@ -104,12 +107,17 @@ class ServerTests(unittest.TestCase):
 
     def test_budget_and_rules_api(self):
         with db.session() as c:
-            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('b1','Card','credit',-10) ON CONFLICT(id) DO NOTHING")
+            db.insert_ignore(c, Account, {"id": "b1", "name": "Card", "kind": "credit", "balance": -10}, key=["id"])
             today = date.today()
-            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
-                      "('b1|1','b1',?, -80,'WHOLE FOODS','Whole Foods','Groceries'), ('b1|2','b1',?, -45,'SHELL','Shell','Auto & Gas'),"
-                      "('b1|3','b1',?, 900,'PAYMENT','Payment','Credit Card Payment')",
-                      (today.isoformat(), today.isoformat(), today.isoformat()))
+            c.execute(insert(Transaction), [{"id": "b1|1", "account_id": "b1", "posted": today.isoformat(),
+                                             "amount": -80, "description": "WHOLE FOODS", "payee": "Whole Foods",
+                                             "category": "Groceries"},
+                                            {"id": "b1|2", "account_id": "b1", "posted": today.isoformat(),
+                                             "amount": -45, "description": "SHELL", "payee": "Shell",
+                                             "category": "Auto & Gas"},
+                                            {"id": "b1|3", "account_id": "b1", "posted": today.isoformat(),
+                                             "amount": 900, "description": "PAYMENT", "payee": "Payment",
+                                             "category": "Credit Card Payment"}])
         self.assertEqual(self.req("POST", "/api/budget", {"category": "Groceries", "amount": 500})[0], 200)
         self.assertEqual(self.req("POST", "/api/budget", {"category": "Income", "amount": 5})[0], 400)
         _, b = self.req("GET", "/api/budget")
@@ -133,13 +141,20 @@ class ServerTests(unittest.TestCase):
         d = today.isoformat()
         self.assertEqual(self.req("POST", "/api/categories", {"name": "Fast food", "parent": "Restaurants"})[0], 200)
         with db.session() as c:
-            c.execute("INSERT INTO accounts(id, name, kind, balance) VALUES ('cf','Checking','checking',100) ON CONFLICT(id) DO NOTHING")
-            c.execute("INSERT INTO transactions(id, account_id, posted, amount, description, payee, category) VALUES "
-                      "('cf|1','cf',?, -20,'SHAKE SHACK','Shake Shack','Fast food'),"
-                      "('cf|2','cf',?, -50,'NICE PLACE','Nice Place','Restaurants'),"
-                      "('cf|3','cf',?, 3000,'PAYROLL','Payroll','Income'),"
-                      "('cf|4','cf',?, -700,'CARD PAYMENT','Card Payment','Credit Card Payment'),"
-                      "('cf|5','cf',?, -30,'MYSTERY','Mystery',NULL)", (d, d, d, d, d))
+            db.insert_ignore(c, Account, {"id": "cf", "name": "Checking", "kind": "checking", "balance": 100}, key=["id"])
+            c.execute(insert(Transaction), [{"id": "cf|1", "account_id": "cf", "posted": d, "amount": -20,
+                                             "description": "SHAKE SHACK", "payee": "Shake Shack",
+                                             "category": "Fast food"},
+                                            {"id": "cf|2", "account_id": "cf", "posted": d, "amount": -50,
+                                             "description": "NICE PLACE", "payee": "Nice Place",
+                                             "category": "Restaurants"},
+                                            {"id": "cf|3", "account_id": "cf", "posted": d, "amount": 3000,
+                                             "description": "PAYROLL", "payee": "Payroll", "category": "Income"},
+                                            {"id": "cf|4", "account_id": "cf", "posted": d, "amount": -700,
+                                             "description": "CARD PAYMENT", "payee": "Card Payment",
+                                             "category": "Credit Card Payment"},
+                                            {"id": "cf|5", "account_id": "cf", "posted": d, "amount": -30,
+                                             "description": "MYSTERY", "payee": "Mystery", "category": None}])
         self.req("POST", "/api/budget", {"category": "Restaurants", "amount": 100})
         _, b = self.req("GET", "/api/budget")
         r = next(c for c in b["categories"] if c["name"] == "Restaurants")

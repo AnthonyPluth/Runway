@@ -18,6 +18,10 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from unittest import mock
 
+from sqlalchemy import delete, func, insert, select, update
+
+from runway.models import Account, CardStatement, OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, Transaction
+
 LOCK = os.path.join(tempfile.gettempdir(), "runway-tests-mcp-switch.lock")
 
 
@@ -47,13 +51,13 @@ def tag() -> str:
 def forget_oauth(conn, client_ids) -> None:
     """Remove these OAuth clients and everything under them (their grants, codes, tokens and consent pages)."""
     for cid in client_ids:
-        grants = [r[0] for r in conn.execute("SELECT id FROM oauth_grants WHERE client_id=?", (cid,)).fetchall()]
+        grants = [r[0] for r in conn.execute(select(OAuthGrant.id).where(OAuthGrant.client_id == cid)).fetchall()]
         for gid in grants:
-            conn.execute("DELETE FROM oauth_tokens WHERE grant_id=?", (gid,))
-            conn.execute("DELETE FROM oauth_codes WHERE grant_id=?", (gid,))
-        conn.execute("DELETE FROM oauth_grants WHERE client_id=?", (cid,))
-        conn.execute("DELETE FROM oauth_consents WHERE params LIKE ?", (f'%"{cid}"%',))
-        conn.execute("DELETE FROM oauth_clients WHERE id=?", (cid,))
+            conn.execute(delete(OAuthToken).where(OAuthToken.grant_id == gid))
+            conn.execute(delete(OAuthCode).where(OAuthCode.grant_id == gid))
+        conn.execute(delete(OAuthGrant).where(OAuthGrant.client_id == cid))
+        conn.execute(delete(OAuthConsent).where(OAuthConsent.params.like(f'%"{cid}"%')))
+        conn.execute(delete(OAuthClient).where(OAuthClient.id == cid))
 
 
 def own_database(case, **env) -> str:
@@ -102,26 +106,26 @@ class LedgerCase(DbCase):
 
     def acct(self, id, kind, balance, **kw):
         cols = {"id": id, "name": id, "kind": kind, "balance": balance, "balance_date": TODAY.isoformat(), **kw}
-        self.conn.execute(
-            f"INSERT INTO accounts({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", list(cols.values())
-        )
+        self.conn.execute(insert(Account).values(**cols))
 
     def stmt(self, card, balance, closed, due, minimum=None):
         """The card issuer's latest statement, as Plaid Liabilities reports it."""
-        self.conn.execute("UPDATE accounts SET plaid_account_id=? WHERE id=?", (f"p-{card}", card))
-        self.conn.execute("DELETE FROM card_statements WHERE plaid_account_id=?", (f"p-{card}",))
-        self.conn.execute("INSERT INTO card_statements(plaid_account_id, item_id, last_statement_balance, last_statement_date, "
-                          "next_due_date, minimum_payment) VALUES (?,?,?,?,?,?)", (f"p-{card}", "item", balance, closed, due, minimum))
+        self.conn.execute(update(Account).where(Account.id == card).values(plaid_account_id=f"p-{card}"))
+        self.conn.execute(delete(CardStatement).where(CardStatement.plaid_account_id == f"p-{card}"))
+        self.conn.execute(insert(CardStatement).values(plaid_account_id=f"p-{card}", item_id="item",
+                                                       last_statement_balance=balance, last_statement_date=closed,
+                                                       next_due_date=due, minimum_payment=minimum))
 
     def cycle(self, card_id, today=None):
         from runway import forecast
-        card = dict(self.conn.execute("SELECT * FROM accounts WHERE id=?", (card_id,)).fetchone())
+        card = dict(self.conn.execute(select(Account).where(Account.id == card_id)).fetchone())
         return forecast.card_cycle(self.conn, card, today or TODAY, forecast.bank_statement(self.conn, card, today or TODAY))
 
     def tx(self, acct, posted, amount, desc="x", category=None, pending=0):
         from runway import categorize
-        n = self.conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        n = self.conn.execute(select(func.count()).select_from(Transaction)).fetchone()[0]
         self.conn.execute(
-            "INSERT INTO transactions(id, account_id, posted, amount, description, payee, category, pending) VALUES (?,?,?,?,?,?,?,?)",
-            (f"{acct}|{n}", acct, posted, amount, desc, categorize.clean_payee(desc), category, pending),
+            insert(Transaction).values(id=f"{acct}|{n}", account_id=acct, posted=posted, amount=amount,
+                                       description=desc, payee=categorize.clean_payee(desc), category=category,
+                                       pending=pending),
         )

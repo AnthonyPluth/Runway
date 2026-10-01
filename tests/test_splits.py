@@ -2,7 +2,10 @@
 import unittest
 from datetime import date
 
+from sqlalchemy import delete, func, insert, select, update
+
 from runway import categories, categorize, forecast, server, simplefin, splits
+from runway.models import Budget, Transaction, TxSplit
 from tests.shared import TODAY, LedgerCase, ts
 
 
@@ -13,7 +16,7 @@ class SplitTests(LedgerCase):
         super().setUp()
         self.acct("cc", "credit", -100.0)
         self.tx("cc", "2026-09-10", -100.0, "TARGET", "Shopping")
-        self.tx_id = self.conn.execute("SELECT id FROM transactions").fetchone()[0]
+        self.tx_id = self.conn.execute(select(Transaction.id)).fetchone()[0]
 
     def split(self, *parts):
         return splits.set_splits(self.conn, self.tx_id, [{"amount": a, "category": c} for a, c in parts])
@@ -25,10 +28,10 @@ class SplitTests(LedgerCase):
             self.split((-100.0, "Groceries"))                       # a split needs two parts
         with self.assertRaises(splits.SplitError):
             self.split((-60.0, "Groceries"), (-40.0, "Nonsense"))
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(select(func.count()).select_from(TxSplit)).fetchone()[0], 0)
 
     def test_budget_and_reports_count_the_parts(self):
-        self.conn.execute("INSERT INTO budgets(category, amount) VALUES ('Groceries', 500)")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
         self.conn.commit()
         spent = {c["name"]: c["spent"] for c in server.api_budget(self.conn, {"month": ["2026-09"]}, None)["categories"]}
@@ -50,16 +53,16 @@ class SplitTests(LedgerCase):
     def test_categorizing_a_split_transaction_puts_it_back_together(self):
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
         categorize.set_category(self.conn, self.tx_id, "Travel")
-        row = self.conn.execute("SELECT category, is_split FROM transactions").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.is_split)).fetchone()
         self.assertEqual((row["category"], row["is_split"]), ("Travel", 0))
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(select(func.count()).select_from(TxSplit)).fetchone()[0], 0)
 
     def test_rules_and_review_leave_a_split_alone(self):
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
-        self.conn.execute("UPDATE transactions SET category=NULL, category_source=NULL")
+        self.conn.execute(update(Transaction).values(category=None, category_source=None))
         server.api_rule_add(self.conn, None, {"match": "target", "category": "Travel", "apply": True})
         categorize.categorize(self.conn, use_ai=False)
-        row = self.conn.execute("SELECT category, is_split, needs_review FROM transactions").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.is_split, Transaction.needs_review)).fetchone()
         self.assertEqual((row["category"], row["is_split"], row["needs_review"]), (None, 1, 0))
 
     def test_renaming_and_removing_a_category_follow_the_parts(self):
@@ -67,17 +70,18 @@ class SplitTests(LedgerCase):
         categories.rename(self.conn, "Groceries", "Food shopping")
         self.assertEqual([s["category"] for s in splits.get(self.conn, self.tx_id)], ["Food shopping", "Shopping"])
         categories.remove(self.conn, "Food shopping")   # no replacement: the whole split goes back to Review
-        row = self.conn.execute("SELECT category, is_split, needs_review FROM transactions").fetchone()
+        row = self.conn.execute(select(Transaction.category, Transaction.is_split, Transaction.needs_review)).fetchone()
         self.assertEqual((row["category"], row["is_split"], row["needs_review"]), (None, 0, 1))
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(select(func.count()).select_from(TxSplit)).fetchone()[0], 0)
 
     def test_a_split_pending_transaction_keeps_its_parts_when_it_posts(self):
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
         self.tx("cc", "2026-09-11", -100.0, "TARGET")
-        posted = self.conn.execute("SELECT id FROM transactions WHERE id<>?", (self.tx_id,)).fetchone()[0]
+        posted = self.conn.execute(select(Transaction.id).where(Transaction.id != self.tx_id)).fetchone()[0]
         splits.carry_over(self.conn, self.tx_id, posted, -100.0)
         self.assertEqual(len(splits.get(self.conn, posted)), 2)
-        self.assertEqual(self.conn.execute("SELECT is_split FROM transactions WHERE id=?", (posted,)).fetchone()[0], 1)
+        self.assertEqual(self.conn.execute(select(Transaction.is_split)
+                                           .where(Transaction.id == posted)).fetchone()[0], 1)
         # a different amount means the parts no longer describe it, so they go
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
         splits.carry_over(self.conn, self.tx_id, posted, -120.0)
@@ -85,9 +89,9 @@ class SplitTests(LedgerCase):
 
     def test_parts_of_a_deleted_transaction_are_pruned(self):
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
-        self.conn.execute("DELETE FROM transactions WHERE id=?", (self.tx_id,))
+        self.conn.execute(delete(Transaction).where(Transaction.id == self.tx_id))
         splits.prune(self.conn)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM tx_splits").fetchone()[0], 0)
+        self.assertEqual(self.conn.execute(select(func.count()).select_from(TxSplit)).fetchone()[0], 0)
 
 
 class SplitAmountChangeTests(LedgerCase):
@@ -95,14 +99,14 @@ class SplitAmountChangeTests(LedgerCase):
         super().setUp()
         self.acct("cc", "credit", -50.0)
         self.tx("cc", "2026-09-10", -50.0, "BISTRO", "Restaurants")
-        self.tx_id = self.conn.execute("SELECT id FROM transactions").fetchone()[0]
+        self.tx_id = self.conn.execute(select(Transaction.id)).fetchone()[0]
 
     def test_parts_follow_a_new_amount(self):
         splits.set_splits(self.conn, self.tx_id, [{"amount": -30, "category": "Restaurants"}, {"amount": -20, "category": "Gifts & Donations"}])
-        self.conn.execute("UPDATE transactions SET amount=-60 WHERE id=?", (self.tx_id,))   # posted with the tip
+        self.conn.execute(update(Transaction).where(Transaction.id == self.tx_id).values(amount=-60))   # posted with the tip
         splits.follow_amount(self.conn, self.tx_id, -60.0)
         self.assertEqual([p["amount"] for p in splits.get(self.conn, self.tx_id)], [-36.0, -24.0])
-        self.assertEqual(self.conn.execute("SELECT needs_review FROM transactions").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute(select(Transaction.needs_review)).fetchone()[0], 1)
 
     def test_odd_cents_still_add_up(self):
         splits.set_splits(self.conn, self.tx_id, [{"amount": -16.67, "category": "Restaurants"},
