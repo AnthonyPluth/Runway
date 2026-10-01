@@ -68,7 +68,9 @@ _MARKS = re.compile(r"[®™℠]")
 _MASK_PAREN = re.compile(r"\s*[(\[]\s*(?:[•*…·.]+\s*|x+(?=\d))?\d{2,}\s*[)\]]\s*$", re.I)
 _MASK_TAIL = re.compile(r"[\s\-–—:]*(?:[•*…·.]+\s*|x+(?=\d))?(?<!\d)\d{3,6}\s*$", re.I)
 # What isn't part of a card's name: its type and network.
-_NOISE = re.compile(r"\b(?:credit\s*card|card\s*member|card|visa|master\s*card|mastercard|world\s+elite|world|signature)\b", re.I)
+# "World" is noise only as the network's tier (World Elite, World Mastercard, or last), not in a name (World of Hyatt).
+_NOISE = re.compile(r"\b(?:credit\s*card|card\s*member|card|visa|master\s*card|mastercard|world\s+elite|world(?=\s+(?:master\s*card|mastercard)\b)"
+                    r"|world\s*$|signature)\b", re.I)
 _GENERIC = {"", "credit", "account", "credit account", "rewards", "cash", "personal", "business"}
 
 

@@ -27,6 +27,10 @@ class CleanProductTests(unittest.TestCase):
             ("Capital One Venture Rewards ••4321", "capital_one", None, "Venture Rewards"),
             ("Freedom Unlimited x9876", "other", None, "Freedom Unlimited"),
             ("Venture X 3030", "capital_one", None, "Venture X"),   # an X that is part of the name stays
+            ("WORLD OF HYATT (1234)", "chase", None, "WORLD OF HYATT"),   # "World" in a name stays...
+            ("Chase World of Hyatt Credit Card", "chase", None, "World of Hyatt"),
+            ("Ink Business Preferred World Mastercard (5555)", "chase", None, "Ink Business Preferred"),   # ...not as a tier
+            ("Southwest Rapid Rewards Plus Visa World", "chase", None, "Southwest Rapid Rewards Plus"),
         ]:
             with self.subTest(name=name):
                 self.assertEqual(churn_found.clean_product(name, issuer, display), want)
