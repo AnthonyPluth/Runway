@@ -10,7 +10,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import func, insert, select
 
 from runway import db, schema
-from runway.models import (Account, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask, ChurnWish,
+from runway.models import (Account, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask, ChurnWish, LoanTerms,
                            Rule, Setting)
 
 
@@ -205,13 +205,15 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0027")
         with db.engine(self.path).begin() as c:
-            self.assertFalse({"loan_rate", "loan_payment"} & {col["name"] for col in sa.inspect(c).get_columns("accounts")})
+            self.assertNotIn("loan_terms", sa.inspect(c).get_table_names())
+            self.assertNotIn("interest_rate", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
             c.exec_driver_sql("INSERT INTO accounts(id, name, kind, balance) VALUES ('mtg', 'Mortgage', 'loan', -250000)")
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
-            self.assertEqual(tuple(conn.execute(select(Account.balance, Account.loan_rate, Account.loan_payment)).fetchone()),
-                             (-250000.0, None, None))
+            self.assertEqual(tuple(conn.execute(select(Account.kind, Account.balance, Account.interest_rate,
+                                                       Account.monthly_payment)).fetchone()), ("loan", -250000, None, None))
+            conn.execute(insert(LoanTerms).values(plaid_account_id="p", item_id="i", interest_rate=6.25))
         self.assertEqual(drift(self.path), [])
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")

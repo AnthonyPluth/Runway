@@ -33,48 +33,38 @@ function rng(seed: number) {
 
 const quantile = (sorted: Float64Array, q: number) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
-/** What's left of a loan after `months` monthly payments, at `rate` a year (0: straight-line), as runway/networth.py
- *  works it out. A payment that doesn't cover the interest leaves it where it is, and it never goes below zero. */
-export function amortize(owed: number, rate: number, payment: number, months: number): number {
-  if (owed <= 0 || !payment || months <= 0) return owed;
-  const r = rate / 12;
-  if (payment <= owed * r) return owed;
-  if (r === 0) return Math.max(0, owed - payment * months);
-  const growth = Math.pow(1 + r, months);
-  return Math.max(0, owed * growth - (payment * (growth - 1)) / r);
+// The entry for `k` years from today in a by-year list that stops once it stops changing.
+const atYear = (list: number[] | undefined, k: number) => (list?.length ? list[Math.min(Math.max(0, k), list.length - 1)] : undefined);
+
+/** Whether a loan's balance is projected (paid down on its terms) rather than held at today's. */
+export const loanProjected = (a: PlanAsset) => !!a.loan && a.loan.note == null && a.loan.payment != null;
+
+/** Selling an asset in `year`, in today's dollars: what it's worth then (its value grown by its own yearly change less
+ *  inflation; for equity, what will have vested by then) and what's still owed on it. A loan with known terms is paid
+ *  down to its balance that year, in today's dollars like the rest; one without stays at today's balance (a
+ *  conservative guess). */
+export function sale(a: PlanAsset, year: number, thisYear: number, inflation: number): { value: number; owed: number } {
+  const k = year - thisYear;
+  const real = (1 + a.yearly_change) / (1 + inflation) - 1;
+  const value = (atYear(a.value_by_year, k) ?? a.value) * Math.pow(1 + real, k);
+  const owed = loanProjected(a) ? (atYear(a.owed_by_year, k) ?? a.owed) / Math.pow(1 + inflation, Math.max(0, k)) : a.owed;
+  return { value, owed };
 }
 
-/** The calendar year of the last payment on the loan against an asset, counting a payment a month from `owed_as_of`;
- *  null when its payment isn't known or doesn't pay it down. */
-export function payoffYear(a: PlanAsset): number | null {
-  if (!a.loan_payment) return null;
-  const [y, m] = a.owed_as_of.split("-").map(Number);
-  if (a.owed <= 0) return y;
-  const r = (a.loan_rate ?? 0) / 12;
-  if (a.loan_payment <= a.owed * r) return null;
-  // Payments until nothing's left; the tiny allowance keeps an exact fit from rounding up a month.
-  const n = r === 0 ? a.owed / a.loan_payment : -Math.log(1 - (a.owed * r) / a.loan_payment) / Math.log(1 + r);
-  return y + Math.floor((m - 1 + Math.ceil(n - 1e-9)) / 12);
+/** What selling an asset in `year` brings in, in today's dollars: what it's worth then less what's still owed. */
+export function saleProceeds(a: PlanAsset, year: number, thisYear: number, inflation: number): number {
+  const { value, owed } = sale(a, year, thisYear, inflation);
+  return Math.max(0, value - owed);
 }
 
-/** The first year the loan's monthly payment is no longer spent: the year after it's paid off, or the year the asset
- *  is sold if that's sooner. null when there's no payment known, or it never ends. */
+/** The first year the monthly payment on the loan against an asset is no longer spent: the year after its last
+ *  payment (runway/loans.py works that out), or the year the asset is sold if that's sooner. null when its payment
+ *  isn't known, or it never ends. */
 export function paymentEnds(a: PlanAsset, sellYear: number | null): number | null {
-  if (!a.loan_payment) return null;
-  const paid = payoffYear(a);
+  if (!a.loan?.payment) return null;
+  const paid = a.loan.payoff_year;
   const ends = [paid == null ? null : paid + 1, sellYear].filter((y): y is number => y != null);
   return ends.length ? Math.min(...ends) : null;
-}
-
-/** What selling an asset in `year` brings in, in today's dollars: its value grown by its own yearly change less
- *  inflation, minus the loan against it. With its monthly payment known the loan is paid down to the sale (a year
- *  of payments for each year from now); without, today's balance is the guess. Either way the balance is in dollars of
- *  that year, so it's taken back to today's by inflation like everything else. */
-export function saleProceeds(a: PlanAsset, year: number, thisYear: number, inflation: number): number {
-  const t = year - thisYear;
-  const real = (1 + a.yearly_change) / (1 + inflation) - 1;
-  const owed = a.loan_payment ? amortize(a.owed, a.loan_rate ?? 0, a.loan_payment, 12 * t) : a.owed;
-  return Math.max(0, a.value * Math.pow(1 + real, t) - owed / Math.pow(1 + inflation, t));
 }
 
 /** Each loan's yearly payment and the first year it's no longer spent (once per loan, however many assets it's
@@ -85,11 +75,13 @@ export function endingPayments(plan: RetirementPlan, assets: PlanAsset[]): { yea
   const byLoan = new Map<string, { yearly: number; from: number }>();
   for (const a of assets) {
     const from = paymentEnds(a, sold.get(a.key) ?? null);
-    if (from == null || !a.loan_id || !a.loan_payment || !a.payment_counted) continue;
-    const had = byLoan.get(a.loan_id);
-    if (!had || from < had.from) byLoan.set(a.loan_id, { yearly: 12 * a.loan_payment, from });
+    const l = a.loan;
+    if (from == null || !l?.account_id || !l.payment || !l.payment_counted) continue;
+    const had = byLoan.get(l.account_id);
+    if (!had || from < had.from) byLoan.set(l.account_id, { yearly: 12 * l.payment, from });
   }
   return [...byLoan.values()];
+}
 }
 
 /** Money in and out in each year other than the market: savings, income, spending, one-time events and sales. */

@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from . import db, equity, networth, validate
+from . import db, equity, forecast, loans, networth, validate
 from . import settings_keys as sk
 from .models import Account
 
@@ -136,34 +136,49 @@ def default(computed: dict, today: date) -> dict:
 
 def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
-    them), and vested company equity. A loan comes with what's owed on it today (paid down since its last balance, as
-    on the Net worth page) and, when you've entered them, its rate and monthly payment, so the page can pay it down to
-    the year of the sale and stop charging the payment once it's gone. `owed` is in dollars of `owed_as_of`.
-    `payment_counted` says whether the payment is in the spending figure the plan starts from: some money out in
-    those months within PAYMENT_MATCH of it. One categorized as a transfer (common when the loan account is synced
-    too) wasn't, so there's nothing to take off when it ends."""
+    them), and company equity (what will have vested by then). Each says what it's worth and owes today (`value`,
+    `owed`, a loan paid down since its last balance as on the Net worth page) and how that changes: `owed_by_year`
+    (the loan paid down on its terms, see loans.py) and, for equity, `value_by_year` (what will have vested), each
+    indexed by years from today and ending once it stops changing.
+    A loan's `loan` also says which account it is (`account_id`), the calendar year of its last payment when it's
+    projected (`payoff_year`), and whether its payment is in the spending figure the plan starts from
+    (`payment_counted`: some money out in those months within PAYMENT_MATCH of it), so the page can take the payment
+    off spending once it's paid off or sold. One categorized as a transfer (common when the loan account is synced
+    too) wasn't in it, so there's nothing to take off when it ends."""
     from . import portfolio   # imported here: portfolio imports this module
-    loans = {a["id"]: a for a in db.rows(conn.execute(
-        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive, Account.loan_rate,
-               Account.loan_payment).where(Account.kind.in_(["credit", "loan"]))))}
+    accts = {a["id"]: a for a in db.rows(conn.execute(
+        select(Account.id, Account.kind, Account.balance, Account.balance_date, Account.owed_positive)
+        .where(Account.kind.in_(["credit", "loan"]))))}
+    items = networth.assets(conn, today)
+    terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
     spent: list[float] | None = None
     out = []
-    for a in networth.assets(conn, today):
-        loan = loans.get(a["loan_account_id"])
-        counted = False
-        if loan and loan["loan_payment"]:
-            spent = portfolio.spent_amounts(conn, today) if spent is None else spent
-            counted = any(abs(s - loan["loan_payment"]) <= PAYMENT_MATCH * loan["loan_payment"] for s in spent)
+    for a in items:
+        acct = accts.get(a["loan_account_id"])
+        loan: dict[str, Any] | None = None
+        if acct and acct["kind"] == "loan":
+            t = terms.get(acct["id"])
+            owed = loans.owed_on(acct, t, today)
+            by_year, loan = loans.owed_by_year(owed, t)
+            counted = False
+            if loan["payment"]:
+                spent = portfolio.spent_amounts(conn, today) if spent is None else spent
+                counted = any(abs(s - loan["payment"]) <= PAYMENT_MATCH * loan["payment"] for s in spent)
+            loan = {**loan, "account_id": acct["id"], "payment_counted": counted,
+                    "payoff_year": loans.payoff_year(owed, t, today) if loan["note"] is None else None}
+        else:   # none, or a card: what's owed today
+            owed = round(forecast.owed({**acct, "balance": acct["balance"] or 0.0}), 2) if acct else 0.0
+            by_year = [owed]
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
-                    "yearly_change": (a["yearly_change"] or 0) / 100.0,
-                    "owed": networth.loan_balance(loan, today) if loan else 0.0, "owed_as_of": today.isoformat(),
-                    "loan_id": loan["id"] if loan else None,
-                    "loan_rate": (loan["loan_rate"] or 0.0) / 100.0 if loan and loan["loan_payment"] else None,
-                    "loan_payment": (loan["loan_payment"] or None) if loan else None, "payment_counted": counted})
-    for c in equity.networth_items(conn, today):
-        out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": c["value"],
-                    "yearly_change": 0.0, "owed": 0.0, "owed_as_of": today.isoformat(), "loan_id": None,
-                    "loan_rate": None, "loan_payment": None, "payment_counted": False})
+                    "yearly_change": (a["yearly_change"] or 0) / 100.0, "owed": owed, "owed_by_year": by_year, "loan": loan})
+    for c in equity.overview(conn, today)["companies"]:
+        if not c["in_networth"]:
+            continue
+        by_year = equity.value_by_year(c, today)
+        if not any(by_year):   # nothing vested now or ever (or no share price)
+            continue
+        out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": by_year[0],
+                    "value_by_year": by_year, "yearly_change": 0.0, "owed": 0.0, "owed_by_year": [0.0], "loan": None})
     return out
 
 

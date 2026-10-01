@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { amortize, flows, paymentEnds, payoffYear, project, RUNS, saleProceeds } from "./planner";
+import { flows, paymentEnds, project, RUNS, sale, saleProceeds } from "./planner";
 import type { PlanAsset, RetirementPlan } from "./types";
 
 const Y = 2026;
@@ -21,14 +21,19 @@ function plan(over: Partial<RetirementPlan> = {}): RetirementPlan {
   };
 }
 
-// A loan whose payment isn't known: today's balance is the guess.
-const house: PlanAsset = {
-  key: "home:1", name: "House", kind: "home", value: 300_000, yearly_change: 0.04, owed: 50_000, owed_as_of: `${Y}-10-01`,
-  loan_id: "mtg", loan_rate: null, loan_payment: null, payment_counted: true,
-};
-// The same with its payment: $50,000 at 6% and $1,000 a month is 58 payments, the last in August 2031.
-const paying: PlanAsset = { ...house, loan_rate: 0.06, loan_payment: 1_000 };
-const byHand = (owed: number, months: number) => { for (let i = 0; i < months; i++) owed = Math.max(0, owed * 1.005 - 1_000); return owed; };
+const house: PlanAsset = { key: "home:1", name: "House", kind: "home", value: 300_000, yearly_change: 0.04, owed: 50_000 };
+// The same house with its loan paid down on known terms: 50k today, 45k, 39k, then paid off in three years.
+const paying: PlanAsset = { ...house, owed_by_year: [50_000, 45_000, 39_000, 0],
+  loan: { rate: 6.25, payment: 700, source: "manual", note: null } };
+// Equity still vesting: 10k vested today, 20k next year, all 40k in two years.
+const shares: PlanAsset = { key: "equity:acme", name: "Acme", kind: "equity", value: 10_000, yearly_change: 0, owed: 0,
+  value_by_year: [10_000, 20_000, 40_000], owed_by_year: [0], loan: null };
+// A loan whose payment is in your spending: $50,000 at 6% and $1,000 a month is 58 payments, the last in August 2031
+// (runway/loans.py works out the year).
+const repaying: PlanAsset = { ...house, owed_by_year: [50_000, 40_748.33, 30_926.03, 20_497.92, 9_426.63, 0],
+  loan: { rate: 6, payment: 1_000, source: "manual", note: null, account_id: "mtg", payoff_year: 2031, payment_counted: true } };
+const repay = (loan: Partial<NonNullable<PlanAsset["loan"]>>, over: Partial<PlanAsset> = {}): PlanAsset =>
+  ({ ...repaying, ...over, loan: { ...repaying.loan!, ...loan } });
 
 describe("project", () => {
   it("gives the same picture for the same plan", () => {
@@ -143,32 +148,44 @@ describe("flows", () => {
     const p = plan({ spending: 0, people: [{ name: "Alex", birth_year: Y - 60, retire_age: 60, savings: 0 }],
       assets: [{ key: "home:1", sell_year: Y + 4 }, { key: "gone", sell_year: Y + 1 }] });
     const net = flows(p, Y, [house]).net;
-    expect(net[4]).toBeCloseTo(267_396.90, 2);
+    expect(net[4]).toBeCloseTo(261_821.25, 2);
     expect(net.filter((_, i) => i !== 4)).toEqual(Array(10).fill(0));   // an asset no longer on Net worth is skipped
+  });
+
+  it("counts a loan paid down and equity vested by the year they're sold", () => {
+    const p = plan({ spending: 0, people: [{ name: "Alex", birth_year: Y - 60, retire_age: 60, savings: 0 }], inflation: 0,
+      assets: [{ key: "home:1", sell_year: Y + 2 }, { key: "equity:acme", sell_year: Y + 5 }] });
+    const net = flows(p, Y, [{ ...paying, yearly_change: 0 }, shares]).net;
+    expect(net[2]).toBe(300_000 - 39_000);
+    expect(net[5]).toBe(40_000);
   });
 
   it("takes a loan's payment off spending from the year after it's paid off", () => {
     // Retires in Y+5 (2031), the year of the last payment: $20,000 then, $8,000 from 2032 on.
-    expect(flows(plan(), Y, [paying]).net).toEqual([10_000, 10_000, 10_000, 10_000, 10_000, -20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
+    expect(flows(plan(), Y, [repaying]).net).toEqual([10_000, 10_000, 10_000, 10_000, 10_000, -20_000, -8_000, -8_000, -8_000, -8_000, -8_000]);
     // no payment known, or a payment that never pays it down: spending as entered
     expect(flows(plan(), Y, [house]).net.slice(5)).toEqual(Array(6).fill(-20_000));
-    expect(flows(plan(), Y, [{ ...paying, loan_payment: 200 }]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan(), Y, [repay({ payment: null, note: "no_payment", payoff_year: null })]).net.slice(5)).toEqual(Array(6).fill(-20_000));
+    expect(flows(plan(), Y, [repay({ payment: 200, note: "payment_below_interest", payoff_year: null })]).net.slice(5)).toEqual(Array(6).fill(-20_000));
   });
 
   it("leaves spending alone when the payment wasn't counted in it (a transfer)", () => {
-    const transfer = { ...paying, payment_counted: false };
+    const transfer = repay({ payment_counted: false });
     expect(flows(plan(), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
     expect(flows(plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] }), Y, [transfer]).net.slice(5)).toEqual(Array(6).fill(-20_000));
   });
 
   it("or from the year its asset is sold, if that's sooner", () => {
     const p = plan({ assets: [{ key: "home:1", sell_year: Y + 3 }] });
-    const net = flows(p, Y, [paying]).net;
+    const net = flows(p, Y, [repaying]).net;
     expect(net.slice(5)).toEqual(Array(6).fill(-8_000));
-    expect(net[3]).toBeCloseTo(10_000 + saleProceeds(paying, Y + 3, Y, 0.03), 6);
+    expect(net[3]).toBeCloseTo(10_000 + saleProceeds(repaying, Y + 3, Y, 0.03), 6);
+    // even one whose payment doesn't cover the interest stops when it's sold
+    const short = repay({ payment: 200, note: "payment_below_interest", payoff_year: null });
+    expect(flows(p, Y, [short]).net.slice(5)).toEqual(Array(6).fill(-17_600));
     // never charges less than nothing, and a loan against two assets comes off once
-    expect(flows(plan(), Y, [{ ...paying, loan_payment: 3_000 }]).net.slice(5)).toEqual(Array(6).fill(0));   // paid off in 2028
-    expect(flows(plan(), Y, [paying, { ...paying, key: "home:2" }]).net.slice(6)).toEqual(Array(5).fill(-8_000));
+    expect(flows(plan(), Y, [repay({ payment: 3_000, payoff_year: 2028 })]).net.slice(5)).toEqual(Array(6).fill(0));
+    expect(flows(plan(), Y, [repaying, { ...repaying, key: "home:2" }]).net.slice(6)).toEqual(Array(5).fill(-8_000));
   });
 
   it("still has this year when the plan's end age has passed", () => {
@@ -178,56 +195,59 @@ describe("flows", () => {
   });
 });
 
-describe("loans", () => {
-  it("amortize month by month, as by hand", () => {
-    expect(amortize(50_000, 0.06, 1_000, 12)).toBeCloseTo(byHand(50_000, 12), 6);
-    expect(amortize(50_000, 0.06, 1_000, 0)).toBe(50_000);
-    expect(amortize(50_000, 0.06, 1_000, 600)).toBe(0);           // never below zero
-    expect(amortize(50_000, 0, 1_000, 12)).toBe(38_000);          // no rate: straight-line
-    expect(amortize(50_000, 0.06, 250, 12)).toBe(50_000);         // only the interest: it doesn't shrink, or grow
-  });
-
-  it("know the year of the last payment", () => {
-    expect(payoffYear(paying)).toBe(2031);
-    // from October 1: the first payment on November 1
-    expect(payoffYear({ ...paying, loan_rate: 0, owed: 2_000 })).toBe(2026);    // 2 payments: the last in December 2026
-    expect(payoffYear({ ...paying, loan_rate: 0, owed: 14_000 })).toBe(2027);   // 14: December 2027
-    expect(payoffYear({ ...paying, loan_rate: 0, owed: 14_001 })).toBe(2028);   // 15: January 2028
-    expect(payoffYear(house)).toBeNull();                                        // no payment known
-    expect(payoffYear({ ...paying, loan_payment: 250 })).toBeNull();             // never paid down
-  });
-
-  it("stop being spent the year after the last payment, or when the asset is sold", () => {
-    expect(paymentEnds(paying, null)).toBe(2032);
-    expect(paymentEnds(paying, Y + 2)).toBe(Y + 2);
-    expect(paymentEnds(paying, Y + 9)).toBe(2032);
-    expect(paymentEnds({ ...paying, loan_payment: 250 }, null)).toBeNull();
-    expect(paymentEnds({ ...paying, loan_payment: 250 }, Y + 9)).toBe(Y + 9);
-    expect(paymentEnds(house, Y + 2)).toBeNull();
+describe("a loan's payment", () => {
+  it("stops being spent the year after the last payment, or when the asset is sold", () => {
+    expect(paymentEnds(repaying, null)).toBe(2032);
+    expect(paymentEnds(repaying, Y + 2)).toBe(Y + 2);
+    expect(paymentEnds(repaying, Y + 9)).toBe(2032);
+    const short = repay({ payment: 250, note: "payment_below_interest", payoff_year: null });
+    expect(paymentEnds(short, null)).toBeNull();
+    expect(paymentEnds(short, Y + 9)).toBe(Y + 9);
+    expect(paymentEnds(house, Y + 2)).toBeNull();   // no loan terms
+    expect(paymentEnds(paying, Y + 2)).toBe(Y + 2);  // terms from an older server, without a payoff year: only a sale ends it
   });
 });
 
 describe("saleProceeds", () => {
-  it("grows the value by its yearly change less inflation, then takes off the loan in today's dollars", () => {
-    // 300k × (1.04 / 1.03)^4 − 50k / 1.03^4: the balance is in dollars of then
-    expect(saleProceeds(house, Y + 4, Y, 0.03)).toBeCloseTo(267_396.90, 2);
-  });
-
-  it("pays the loan down to the sale when its payment is known", () => {
-    expect(saleProceeds(paying, Y + 4, Y, 0.03)).toBeCloseTo(311_821.25 - byHand(50_000, 48) / Math.pow(1.03, 4), 2);
-    expect(saleProceeds(paying, Y + 6, Y, 0.03)).toBeCloseTo(300_000 * Math.pow(1.04 / 1.03, 6), 6);   // paid off by then
+  it("grows the value by its yearly change less inflation, then takes off the loan", () => {
+    // 300k × (1.04 / 1.03)^4 − 50k
+    expect(saleProceeds(house, Y + 4, Y, 0.03)).toBeCloseTo(261_821.25, 2);
   });
 
   it("is today's equity when sold this year", () => {
     expect(saleProceeds(house, Y, Y, 0.03)).toBe(250_000);
-    expect(saleProceeds(paying, Y, Y, 0.03)).toBe(250_000);
   });
 
   it("keeps pace exactly when it rises with inflation", () => {
-    expect(saleProceeds({ ...house, yearly_change: 0.03, owed: 0 }, Y + 10, Y, 0.03)).toBeCloseTo(300_000, 6);
+    expect(saleProceeds({ ...house, yearly_change: 0.03 }, Y + 10, Y, 0.03)).toBeCloseTo(250_000, 6);
   });
 
   it("never brings in less than nothing", () => {
     expect(saleProceeds({ ...house, value: 20_000, yearly_change: -0.1, owed: 25_000 }, Y + 2, Y, 0.03)).toBe(0);
+  });
+
+  it("takes off the loan's projected balance that year, in today's dollars", () => {
+    // 300k × (1.04 / 1.03)^2 − 39k / 1.03^2
+    expect(saleProceeds(paying, Y + 2, Y, 0.03)).toBeCloseTo(300_000 * (1.04 / 1.03) ** 2 - 39_000 / 1.03 ** 2, 6);
+    expect(saleProceeds(paying, Y, Y, 0.03)).toBe(250_000);
+  });
+
+  it("owes nothing once the loan is paid off, however long after", () => {
+    expect(sale(paying, Y + 3, Y, 0).owed).toBe(0);
+    expect(sale(paying, Y + 30, Y, 0)).toEqual({ value: 300_000 * 1.04 ** 30, owed: 0 });
+  });
+
+  it("keeps today's balance when the loan can't be projected", () => {
+    for (const note of ["no_rate", "no_payment", "payment_below_interest"] as const) {
+      const a = { ...house, owed_by_year: [50_000], loan: { rate: null, payment: null, source: null, note } };
+      expect(sale(a, Y + 4, Y, 0.03).owed).toBe(50_000);
+      expect(saleProceeds(a, Y + 4, Y, 0.03)).toBeCloseTo(261_821.25, 2);
+    }
+  });
+
+  it("counts equity vested by the year it's sold, at today's price less inflation", () => {
+    expect(saleProceeds(shares, Y, Y, 0.03)).toBe(10_000);
+    expect(saleProceeds(shares, Y + 1, Y, 0.03)).toBeCloseTo(20_000 / 1.03, 6);
+    expect(saleProceeds(shares, Y + 10, Y, 0)).toBe(40_000);   // fully vested from the third year
   });
 });

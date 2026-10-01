@@ -11,7 +11,7 @@ describe("an account's panel on Net worth", () => {
     render(AccountPanel, { open: true, acct: { ...loan, synced: 250000 }, onchange: () => {} });
     expect(await screen.findByText("$241,234.50")).toBeInTheDocument();
     expect(screen.getByText("Balance then").nextElementSibling).toHaveTextContent("$250,000.00");
-    expect(screen.getByText(/Paid down since by its monthly payment/)).toBeInTheDocument();
+    expect(screen.getByText(/Paid down since on its interest rate and monthly payment/)).toBeInTheDocument();
   });
 
   it("says nothing about paying down when the balance is as synced", async () => {

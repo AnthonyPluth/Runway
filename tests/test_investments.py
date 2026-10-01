@@ -228,24 +228,31 @@ class FireTests(Base):
                                             yearly_change=3, loan_account_id="mtg"))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
-        self.assertEqual((house["loan_id"], house["loan_rate"], house["loan_payment"], house["owed_as_of"]),
-                         ("mtg", None, None, TODAY.isoformat()))   # no payment known: the page keeps it as it is
-        # with its payment entered, what's owed is paid down to today (as on Net worth), and the terms come along
-        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", loan_rate=6, loan_payment=1500))
+        self.assertEqual(house["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "mtg",
+                                         "payment_counted": False, "payoff_year": None})   # no terms: kept as it is
+        # with its terms set, what's owed is paid down to today (as on Net worth), projected on from there
+        self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", interest_rate=6, monthly_payment=1500))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         owed = 200000.0
         for _ in range(2):
             owed = owed * 1.005 - 1500
         self.assertAlmostEqual(house["owed"], owed, delta=0.01)
-        self.assertEqual((house["loan_rate"], house["loan_payment"]), (0.06, 1500.0))
-        self.c.execute(update(Account).where(Account.id == "mtg").values(loan_rate=None))   # a payment and no rate: 0%
-        self.assertEqual(next(a for a in self.plan()["assets"] if a["name"] == "House")["loan_rate"], 0.0)
+        self.assertEqual(house["owed_by_year"][0], house["owed"])
+        self.assertEqual({k: house["loan"][k] for k in ("rate", "payment", "source", "note", "account_id")},
+                         {"rate": 6, "payment": 1500, "source": "manual", "note": None, "account_id": "mtg"})
+        self.assertEqual(house["loan"]["payoff_year"], 2044)   # 219 more payments from October 2026: the last in December 2044
+        # a payment and no rate: nothing is guessed (loans.py), so neither paid down nor projected
+        self.c.execute(update(Account).where(Account.id == "mtg").values(interest_rate=None))
+        house = next(a for a in self.plan()["assets"] if a["name"] == "House")
+        self.assertEqual((house["owed"], house["loan"]["note"], house["loan"]["payoff_year"]), (200000.0, "no_rate", None))
 
     def test_says_whether_a_loans_payment_is_in_spending(self):
-        self.c.execute(insert(Account), [{"id": "mtg", "name": "Mortgage", "kind": "loan", "balance": -200000, "loan_payment": 1850},
-                                         {"id": "chk", "name": "Checking", "kind": "checking", "balance": 0, "loan_payment": None}])
+        self.c.execute(insert(Account), [{"id": "mtg", "name": "Mortgage", "kind": "loan", "balance": -200000, "interest_rate": 6,
+                                          "monthly_payment": 1850},
+                                         {"id": "chk", "name": "Checking", "kind": "checking", "balance": 0, "interest_rate": None,
+                                          "monthly_payment": None}])
         self.c.execute(insert(Asset).values(name="House", kind="home", value=450000, as_of=TODAY.isoformat(), loan_account_id="mtg"))
-        counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["payment_counted"]
+        counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
         pay = lambda id, posted, amount, category: self.c.execute(insert(Transaction).values(
             id=id, account_id="chk", posted=posted, amount=amount, category=category))
         pay("p1", "2026-08-01", -1850, "Transfer")   # paid, but as a transfer: not in spending
@@ -256,7 +263,7 @@ class FireTests(Base):
         self.assertTrue(counted())
         self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category=None))   # uncategorized counts too
         self.assertTrue(counted())
-        self.c.execute(update(Account).where(Account.id == "mtg").values(loan_payment=None))   # no payment: nothing to match
+        self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
         self.assertFalse(counted())
 
     def test_yearly_savings_says_what_it_is(self):

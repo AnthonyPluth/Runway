@@ -11,7 +11,7 @@ interface NwItem {
   kind?: string;
   loan?: { account_id: string; name: string; owed: number };
   equity?: number;
-  /** A loan paid down since its last balance (its monthly payment is set): what that balance was. */
+  /** A loan paid down since its last balance on its terms (runway/loans.py owed_on): what that balance was. */
   synced?: number;
 }
 export interface NwGroup { key: string; label: string; side: "asset" | "liability"; items: NwItem[]; total: number }

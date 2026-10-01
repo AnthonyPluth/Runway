@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  /** `synced`: a loan paid down since its last balance (its monthly payment is set), what that balance was. */
+  /** `synced`: a loan paid down since its last balance (runway/loans.py owed_on), what that balance was. */
   export interface PanelAccount { id: string; name: string; org: string | null; balance: number; as_of?: string | null; synced?: number; counted: boolean }
 </script>
 
@@ -25,7 +25,7 @@
           {#if acct.as_of}<dt class="text-muted-foreground">Last synced</dt><dd class="text-right">{fmtDate(acct.as_of, { month: "short", day: "numeric", year: "numeric" })}</dd>{/if}
           {#if acct.synced != null}<dt class="text-muted-foreground">Balance then</dt><dd class="text-right tabular-nums">{fmt(acct.synced)}</dd>{/if}
         </dl>
-        {#if acct.synced != null}<p class="text-muted-foreground">Paid down since by its monthly payment, set in account settings.</p>{/if}
+        {#if acct.synced != null}<p class="text-muted-foreground">Paid down since on its interest rate and monthly payment (from Plaid, Settings → Accounts, or recent payments).</p>{/if}
         <div class="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
           <span id="count-in-nw" class="font-medium">Count in net worth</span>
           <button type="button" role="switch" aria-checked={acct.counted} aria-labelledby="count-in-nw" onclick={() => onchange(!acct.counted)}

@@ -51,8 +51,8 @@ class Account(Base):
     plaid_account_id: Mapped[str | None]
     provider_since: Mapped[str | None]
     logo: Mapped[str | None]
-    loan_rate: Mapped[float | None]
-    loan_payment: Mapped[float | None]
+    interest_rate: Mapped[float | None]
+    monthly_payment: Mapped[float | None]
 
     transactions: Mapped[list[Transaction]] = _rel("Transaction", "foreign(Transaction.account_id) == Account.id")
 
@@ -304,6 +304,17 @@ class CardStatement(Base):
     last_payment_amount: Mapped[float | None]
     last_payment_date: Mapped[str | None]
     is_overdue: Mapped[int | None]
+    updated: Mapped[str | None]
+
+
+class LoanTerms(Base):
+    __table__ = schema.loan_terms
+    plaid_account_id: Mapped[str]
+    item_id: Mapped[str]
+    kind: Mapped[str | None]
+    interest_rate: Mapped[float | None]
+    monthly_payment: Mapped[float | None]
+    maturity_date: Mapped[str | None]
     updated: Mapped[str | None]
 
 

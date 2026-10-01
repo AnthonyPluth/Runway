@@ -9,8 +9,8 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { paymentEnds, payoffYear, project, saleProceeds } from "./planner";
-  import type { PlanData, RetirementPlan } from "./types";
+  import { loanProjected, paymentEnds, project, sale as saleAt, saleProceeds } from "./planner";
+  import type { PlanAsset, PlanData, RetirementPlan } from "./types";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // Everything is in today's dollars. Changes are kept a moment after you stop typing (or when you leave).
@@ -94,6 +94,26 @@
     plan.assets = on ? [...plan.assets, { key, sell_year: plan.people[0].birth_year + plan.people[0].retire_age }] : plan.assets.filter((a) => a.key !== key);
     keep();
   }
+  // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
+  const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
+  function saleTitle(a: PlanAsset, sellYear: number): string {
+    const { value, owed } = saleAt(a, sellYear, year, plan.inflation);
+    const worth = a.kind === "equity" ? `${a.name}: ${fmt0(value)} vested by ${sellYear}, at today’s share price`
+      : `${a.name} worth ${fmt0(value)} in ${sellYear}`;
+    const l = a.loan;
+    let loan = "";
+    if (l && loanProjected(a)) {
+      const terms = `${+(l.rate ?? 0).toFixed(3)}% and ${fmt0(l.payment ?? 0)} a month ${PAYMENT_FROM[l.source ?? "manual"]}`;
+      loan = owed > 0 ? `, less ${fmt0(owed)} still owed on the loan at ${terms}` : `; the loan (${terms}) is paid off by then`;
+    } else if (a.owed) loan = `, less ${fmt0(owed)} owed on the loan today`;
+    return `${worth}${loan}. In today’s dollars.`;
+  }
+  // Why a loan's balance isn't projected (what's owed today is used instead), and what would fix it.
+  const LOAN_NOTES = {
+    no_rate: "add the loan’s interest rate", no_payment: "add the loan’s monthly payment",
+    payment_below_interest: "its payment doesn’t cover the interest: check the loan’s terms",
+  } as const;
+
   // An event is typed as money in or out plus a positive amount; it's kept signed.
   const setEventSign = (i: number, out: boolean) => { plan.events[i].amount = (out ? -1 : 1) * Math.abs(num(plan.events[i].amount)); keep(); };
   const setEventAmount = (i: number, s: string) => { plan.events[i].amount = (plan.events[i].amount < 0 ? -1 : 1) * Math.abs(Number(s) || 0); keep(); };
@@ -269,20 +289,24 @@
           <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
             <label class="flex min-w-40 flex-1 items-center gap-2">
               <input type="checkbox" class="size-4 cursor-pointer accent-primary" checked={!!s} onchange={(e) => toggleSale(a.key, e.currentTarget.checked)} />
-              <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan" : ""}</span></span>
+              <span>{a.name} <span class="text-sm text-muted-foreground">{fmt0(a.value - a.owed)}{a.owed ? " after the loan today" : ""}</span></span>
             </label>
             {#if s}
               <label class="flex items-center gap-2 text-sm">Sell in
                 <Input type="number" step="1" class="w-24" value={s.sell_year} oninput={(e) => { s.sell_year = Number(e.currentTarget.value); keep(); }} /></label>
               <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
-              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums">≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
+              <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, num(s.sell_year))}>≈ {fmt0(saleProceeds(a, num(s.sell_year), year, plan.inflation))}</span>
+              {#if a.owed > 0 && a.loan?.note}
+                <p class="basis-full pl-6 text-xs text-muted-foreground">Counts what’s owed today: {LOAN_NOTES[a.loan.note]} in
+                  <a class="font-medium whitespace-nowrap text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a> to project it.</p>
+              {/if}
             {/if}
-            {#if a.loan_payment}
-              {@const paid = payoffYear(a)}
+            {#if a.loan?.payment}
+              {@const paid = a.loan.payoff_year ?? null}
               {@const ends = paymentEnds(a, s ? num(s.sell_year) : null)}
               <p class="basis-full pl-6 text-sm text-muted-foreground">
-                {#if ends == null}Its {fmt0(a.loan_payment)}/month loan payment doesn't pay the loan down, so it stays in your spending.
-                {:else}Its {fmt0(a.loan_payment)}/month loan payment {paid == null || ends <= paid ? "stops when it's sold" : `ends in ${paid}`}{#if a.payment_counted},
+                {#if ends == null}Its {fmt0(a.loan.payment)}/month loan payment doesn't pay the loan down, so it stays in your spending.
+                {:else}Its {fmt0(a.loan.payment)}/month loan payment {paid == null || ends <= paid ? "stops when it's sold" : `ends in ${paid}`}{#if a.loan.payment_counted},
                   and comes off your spending from {ends}.{:else}. It isn't in your spending (no payment like it was counted as spending in the last
                   6 months; a transfer isn't), so nothing comes off.{/if}{/if}
               </p>
@@ -291,13 +315,13 @@
         {/each}
       </ul>
       <p class="mt-2 flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">Tick one to sell it into your investments that year, say
-        downsizing. Its value grows by the yearly change set on the Net worth page, and sale proceeds are reduced by
+        downsizing. Its value grows by the yearly change set on the Net worth page, a loan is paid down on its terms and
+        equity keeps vesting until then, and sale proceeds are reduced by
         <span class="relative inline-block w-20">
           <span class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
           <Input type="number" step="0.5" class="h-7 pr-6 text-sm" aria-label="Inflation" value={pctIn(plan.inflation)} oninput={(e) => setPct("inflation", e.currentTarget.value)} />
-        </span> a year of inflation. A loan against it is paid down to the year of the sale when its monthly payment is set in
-        Settings → Accounts (otherwise today's balance is taken off), and its payment comes off your spending once it's paid off or
-        sold, if it was counted as spending rather than as a transfer. Proceeds are before selling costs (often 6–8% of a home's price) and tax.</p>
+        </span> a year of inflation. A loan's payment comes off your spending once it's paid off or sold, if it was counted as
+        spending rather than as a transfer. Proceeds are before selling costs (often 6–8% of a home's price) and tax.</p>
     {:else}
       <p class="text-sm text-muted-foreground">Homes, vehicles and company equity you add on the Net worth page can be sold into the plan here.</p>
     {/if}

@@ -23,8 +23,12 @@ const data = (extra: Partial<PlanData> = {}, p: Partial<RetirementPlan> = {}): P
 });
 const setup = (d = data()) => render(RetirementPlanner, { data: d });
 const homeAsset = (over: Partial<PlanAsset> = {}): PlanAsset => ({
-  key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0, owed_as_of: "2026-10-01",
-  loan_id: null, loan_rate: null, loan_payment: null, payment_counted: true, ...over,
+  key: "home1", name: "Home", kind: "home", value: 500000, yearly_change: 0.03, owed: 0, ...over,
+});
+// $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045 (runway/loans.py works out the year).
+const repaying = (loan: Partial<NonNullable<PlanAsset["loan"]>> = {}): PlanAsset => homeAsset({
+  owed: 200000, owed_by_year: [200000, 0],
+  loan: { rate: 6, payment: 1500, source: "manual", note: null, account_id: "mtg", payoff_year: 2045, payment_counted: true, ...loan },
 });
 
 // Every edit schedules a save 700ms later. On real timers a test that edits and ends leaves that save pending, and it
@@ -226,7 +230,7 @@ describe("RetirementPlanner", () => {
   });
 
   describe("assets", () => {
-    const home = homeAsset({ owed: 200000, loan_id: "mtg" });
+    const home = homeAsset({ owed: 200000 });
 
     it("explains where assets come from when there are none", () => {
       setup();
@@ -243,16 +247,49 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/^Sell in/)).not.toBeInTheDocument();
     });
 
+    it("says what the estimate assumes: the home's value then, less the loan paid down on its terms", async () => {
+      const paying = { ...home, yearly_change: 0.025, owed_by_year: Array.from({ length: 26 }, (_, k) => 200000 - k * 8000),
+        loan: { rate: 6.25, payment: 1840, source: "inferred" as const, note: null } };
+      setup(data({ assets: [paying] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+      // 2036: worth 500k (it keeps pace with inflation), 120k still owed in 2036's dollars = 120k / 1.025^10 today
+      expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title",
+        "Home worth $500,000 in 2036, less $93,744 still owed on the loan at 6.25% and $1,840 a month from recent payments. In today’s dollars.");
+      expect(screen.queryByText(/to project it/)).not.toBeInTheDocument();
+    });
+
+    it("says when a loan is paid off by the sale", () => {
+      const paid = { ...home, owed_by_year: [200000, 100000, 0], loan: { rate: 5, payment: 9000, source: "plaid" as const, note: null } };
+      setup(data({ assets: [paid] }, { assets: [{ key: "home1", sell_year: 2030 }] }));
+      expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/; the loan \(5% and \$9,000 a month from Plaid\) is paid off by then\./);
+    });
+
+    it("asks for the loan's interest rate when it can't project it, and counts today's balance", () => {
+      const unknown = { ...home, yearly_change: 0.025, owed_by_year: [200000], loan: { rate: null, payment: null, source: null, note: "no_rate" as const } };
+      setup(data({ assets: [unknown] }, { assets: [{ key: "home1", sell_year: 2036 }] }));
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $300,000");
+      expect(screen.getByText(/^≈ \$/).getAttribute("title")).toMatch(/less \$200,000 owed on the loan today\./);
+      expect(screen.getByText(/add the loan’s interest rate in/)).toHaveTextContent(/to project it\.$/);
+      expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+    });
+
+    it("shows equity vested by the year it's sold", () => {
+      const acme = { key: "equity:acme", name: "Acme", kind: "equity", value: 10000, yearly_change: 0, owed: 0,
+        value_by_year: [10000, 25000, 40000], owed_by_year: [0], loan: null };
+      setup(data({ assets: [acme] }, { inflation: 0, assets: [{ key: "equity:acme", sell_year: 2030 }] }));
+      expect(screen.getByText(/^≈ \$/)).toHaveTextContent("≈ $40,000");
+      expect(screen.getByText(/^≈ \$/)).toHaveAttribute("title", "Acme: $40,000 vested by 2030, at today’s share price. In today’s dollars.");
+    });
+
     it("says proceeds are before selling costs and tax, and how a loan is handled", () => {
       setup(data({ assets: [home] }));
       expect(screen.getByText(/Proceeds are before selling costs \(often 6–8% of a home's price\) and tax/)).toBeInTheDocument();
-      expect(screen.getByText(/paid down to the year of the sale when its monthly payment is set/)).toBeInTheDocument();
+      expect(screen.getByText(/a loan's payment comes off your spending once it's paid off or sold, if it was counted as spending/i)).toBeInTheDocument();
       expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
     });
 
     it("says when a loan's payment ends and comes off spending", async () => {
       // $200,000 at 6% and $1,500 a month from October 2026: the last payment in 2045
-      setup(data({ assets: [{ ...home, loan_rate: 0.06, loan_payment: 1500 }] }));
+      setup(data({ assets: [repaying()] }));
       expect(screen.getByText("Its $1,500/month loan payment ends in 2045, and comes off your spending from 2046.")).toBeInTheDocument();
       await userEvent.click(screen.getByRole("checkbox", { name: /Home/ }));   // sold in 2051: paid off before then
       expect(screen.getByText(/ends in 2045, and comes off your spending from 2046/)).toBeInTheDocument();
@@ -263,13 +300,13 @@ describe("RetirementPlanner", () => {
     });
 
     it("says when a loan's payment isn't in spending, so nothing comes off", () => {
-      setup(data({ assets: [{ ...home, loan_rate: 0.06, loan_payment: 1500, payment_counted: false }] }));
+      setup(data({ assets: [repaying({ payment_counted: false })] }));
       expect(screen.getByText(/^Its \$1,500\/month loan payment ends in 2045\. It isn't in your spending .* so nothing comes off\.$/)).toBeInTheDocument();
       expect(screen.queryByText(/comes off your spending from/)).not.toBeInTheDocument();
     });
 
     it("says when a loan's payment never pays it down", () => {
-      setup(data({ assets: [{ ...home, loan_rate: 0.06, loan_payment: 900 }] }));
+      setup(data({ assets: [repaying({ payment: 900, note: "payment_below_interest", payoff_year: null })] }));
       expect(screen.getByText(/payment doesn't pay the loan down, so it stays in your spending/)).toBeInTheDocument();
     });
   });

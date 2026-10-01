@@ -23,10 +23,9 @@ type Options = Record<string, unknown> & {
   beforeBreadcrumb: (c: { data?: Record<string, string> }) => { data?: Record<string, string> };
 };
 const cfg = { dsn: "https://k@o.ingest/1", environment: "prod", release: "1.2.3" };
-const all = { ...cfg, traces: 0.5, profiles: 1, replays: 0.1, replays_on_error: 1, logs: true, feedback: true };
 
 /** A fresh copy of the module (it starts only once), started with `config`; returns what Sentry.init was given. */
-async function started(config: typeof cfg | typeof all | Record<string, unknown>) {
+async function started(config: Record<string, unknown>) {
   vi.resetModules();
   init.mockClear();
   addEventProcessor.mockClear();
@@ -44,12 +43,6 @@ describe("startMonitoring", () => {
     expect(setUser).not.toHaveBeenCalled();
   });
 
-  it("records replays of visits with an error only, when that's all that's asked", async () => {
-    const { opts } = await started({ ...cfg, replays: 0, replays_on_error: 1 });
-    expect(opts).toMatchObject({ replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 1 });
-    expect(opts.integrations([]).map((i) => i.name)).toContain("Replay");
-  });
-
   it("does nothing when Runway isn't set up for error reports", async () => {
     const { startMonitoring } = await import("./monitoring");
     await startMonitoring(null);
@@ -64,17 +57,10 @@ describe("startMonitoring", () => {
     expect(init.mock.calls[0][0]).toMatchObject({ dsn: cfg.dsn, environment: "prod", release: "1.2.3" });
   });
 
-  it("turns on only errors unless Runway says otherwise", async () => {
+  it("turns everything on, at full rate", async () => {
     const { m, opts } = await started(cfg);
-    expect(opts).toMatchObject({ tracesSampleRate: 0, profileSessionSampleRate: 0, replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 0 });
-    expect(opts.integrations([{ name: "Dedupe" }]).map((i) => i.name)).toEqual(["Dedupe", "Breadcrumbs"]);
-    expect(m.feedbackAvailable()).toBe(false);
-  });
-
-  it("turns on tracing, profiling, replays, logs and feedback when asked", async () => {
-    const { m, opts } = await started(all);
-    expect(opts).toMatchObject({ tracesSampleRate: 0.5, profileSessionSampleRate: 1, profileLifecycle: "trace",
-                                 replaysSessionSampleRate: 0.1, replaysOnErrorSampleRate: 1 });
+    expect(opts).toMatchObject({ tracesSampleRate: 1, profileSessionSampleRate: 1, profileLifecycle: "trace",
+                                 replaysSessionSampleRate: 1, replaysOnErrorSampleRate: 1 });
     const list = opts.integrations([]);
     expect(list.map((i) => i.name)).toEqual(["Breadcrumbs", "BrowserTracing", "BrowserProfiling", "Replay", "ConsoleLogging", "Feedback"]);
     expect(list.find((i) => i.name === "Replay")?.opts).toMatchObject({
@@ -84,14 +70,8 @@ describe("startMonitoring", () => {
     expect(m.feedbackAvailable()).toBe(true);
   });
 
-  it("never profiles without tracing", async () => {
-    const { opts } = await started({ ...all, traces: 0 });
-    expect(opts.profileSessionSampleRate).toBe(0);
-    expect(opts.integrations([]).map((i) => i.name)).not.toContain("BrowserProfiling");
-  });
-
   it("sends trace headers to Runway only", async () => {
-    const { opts } = await started(all);
+    const { opts } = await started(cfg);
     const targets = opts.tracePropagationTargets as (RegExp | string)[];
     const matches = (url: string) => targets.some((t) => (typeof t === "string" ? url.startsWith(t) : t.test(url)));
     expect(matches("/api/state")).toBe(true);
@@ -103,7 +83,7 @@ describe("startMonitoring", () => {
   });
 
   it("names a page by its hash, not what's searched on it", async () => {
-    const { opts } = await started(all);
+    const { opts } = await started(cfg);
     const tracing = opts.integrations([]).find((i) => i.name === "BrowserTracing")!;
     const rename = tracing.opts!.beforeStartSpan as (o: { name: string; op: string }) => { name: string };
     location.hash = "#budget/recurring?q=rent";
@@ -114,7 +94,7 @@ describe("startMonitoring", () => {
 
   describe("what it sends", () => {
     let opts: Options;
-    beforeEach(async () => { ({ opts } = await started(all)); });
+    beforeEach(async () => { ({ opts } = await started(cfg)); });
 
     it("drops the query string from the page URL (it holds what you searched for) and the user", () => {
       const e = opts.beforeSend({ request: { url: "https://runway.test/#transactions?q=rent", headers: { a: "b" } }, user: { id: 1 }, message: "boom" });
@@ -190,11 +170,13 @@ describe("startMonitoring", () => {
     });
   });
 
-  it("opens the feedback form only when feedback is on", async () => {
-    let { m } = await started(cfg);
-    await m.openFeedback();
+  it("opens the feedback form only once reporting has started", async () => {
+    vi.resetModules();
+    createForm.mockClear();
+    const before = await import("./monitoring");
+    await before.openFeedback();
     expect(createForm).not.toHaveBeenCalled();
-    ({ m } = await started(all));
+    const { m } = await started(cfg);
     await m.openFeedback();
     expect(createForm).toHaveBeenCalledOnce();
     expect(form.appendToDom).toHaveBeenCalled();

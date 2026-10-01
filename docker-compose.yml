@@ -13,34 +13,22 @@ services:
     cap_drop: [ALL]      # Runway needs no special privileges
     volumes:
       - ./data:/data                                   # your database: back this folder up
-    environment:
+    env_file:
+      - path: .env       # every variable in it reaches Runway, so advanced ones (see the Configuration page) need no line here
+        required: false
+    environment:         # what needs a default or a check, and what's costly to lose; .env fills in the rest
       TZ: ${TZ:-America/Chicago}                       # decides "today" for forecasts and budgets
       RUNWAY_PUBLIC_URL: ${RUNWAY_PUBLIC_URL:?Set RUNWAY_PUBLIC_URL in .env}
       OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER in .env}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in .env}
+      # Also passed through by name, so they arrive even when your settings aren't in a .env file here (a stack.env,
+      # --env-file, shell exports): without the key Runway can't read your saved bank access, and without DATABASE_URL
+      # it starts on an empty database.
+      RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}
+      DATABASE_URL: ${DATABASE_URL:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
       OIDC_ALLOWED_EMAILS: ${OIDC_ALLOWED_EMAILS:-}
       OIDC_ALLOWED_GROUPS: ${OIDC_ALLOWED_GROUPS:-}
-      OIDC_TRUST_UNVERIFIED_EMAIL: ${OIDC_TRUST_UNVERIFIED_EMAIL:-}
-      OIDC_SCOPES: ${OIDC_SCOPES:-openid email profile}
-      RUNWAY_ALLOWED_HOSTS: ${RUNWAY_ALLOWED_HOSTS:-}
-      RUNWAY_SECRET_KEY: ${RUNWAY_SECRET_KEY:-}             # encrypts saved bank access and API keys
-      # Optional: reports to Sentry (see https://anthonypluth.github.io/Runway/start/docker/#error-reports-optional). Off unless SENTRY_DSN is set; then all of it, each off with 0.
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      SENTRY_BROWSER_DSN: ${SENTRY_BROWSER_DSN:-}
-      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
-      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-}
-      SENTRY_PROFILE_SESSION_SAMPLE_RATE: ${SENTRY_PROFILE_SESSION_SAMPLE_RATE:-}
-      SENTRY_REPLAY_SAMPLE_RATE: ${SENTRY_REPLAY_SAMPLE_RATE:-}
-      SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE: ${SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE:-}
-      SENTRY_LOGS: ${SENTRY_LOGS:-}
-      SENTRY_METRICS: ${SENTRY_METRICS:-}
-      SENTRY_CRONS: ${SENTRY_CRONS:-}
-      SENTRY_FEEDBACK: ${SENTRY_FEEDBACK:-}
-      SENTRY_USER: ${SENTRY_USER:-}
-      SENTRY_AI_CONTENT: ${SENTRY_AI_CONTENT:-}
-      # Optional: use Postgres instead of the built-in database (moving your data over: https://anthonypluth.github.io/Runway/start/docker/#using-postgres-optional).
-      DATABASE_URL: ${DATABASE_URL:-}
     # depends_on: [db]            # if you use the Postgres service below
 
   # Optional Postgres, if you don't already run one. Then set in .env:
