@@ -939,6 +939,76 @@ def set_item_category(conn, item_id: int, category: str, remember: bool = True) 
     return {"orders": len(orders), "resplit": redone}
 
 
+def _orders_of(conn, tx_ids: list[str]) -> dict[str, list[str]]:
+    """{tx id: the orders its charges pay for}. A charge pairs with one transaction and a transaction with one charge
+    (`match` and `link` see to both), so this is one order each; an order paid in several charges shows up under
+    each of their transactions."""
+    c = RetailCharge
+    out: dict[str, list[str]] = {}
+    for i in range(0, len(tx_ids), 500):
+        for r in conn.execute(select(c.tx_id, c.order_id).where(c.tx_id.in_(tx_ids[i:i + 500])).order_by(c.id)):
+            out.setdefault(r["tx_id"], []).append(r["order_id"])
+    return out
+
+
+def order_mates(conn, tx_ids: list[str]) -> list[str]:
+    """The other transactions that paid for (or were refunded by) the same orders as these ones, for Undo to cover."""
+    orders = {o for v in _orders_of(conn, tx_ids).values() for o in v}
+    if not orders:
+        return []
+    have = set(tx_ids)
+    c = RetailCharge
+    return [r["tx_id"] for r in conn.execute(select(c.tx_id).where(c.order_id.in_(sorted(orders)), c.tx_id.is_not(None))
+                                             .order_by(c.id)) if r["tx_id"] not in have]
+
+
+def items_of_transactions(conn, tx_ids: list[str]) -> dict[str, list[dict]]:
+    """{tx id: the category state of every item of its order(s)}, as Undo needs to put them back (see `restore_items`)."""
+    by_tx = _orders_of(conn, tx_ids)
+    orders = sorted({o for v in by_tx.values() for o in v})
+    i = RetailItem
+    items: dict[str, list[dict]] = {}
+    for n in range(0, len(orders), 500):
+        for r in conn.execute(select(i.id, i.order_id, i.category, i.category_source, i.confidence)
+                              .where(i.order_id.in_(orders[n:n + 500])).order_by(i.id)):
+            items.setdefault(r["order_id"], []).append(
+                {"id": r["id"], "category": r["category"], "category_source": r["category_source"], "confidence": r["confidence"]})
+    return {t: [it for o in os for it in items.get(o, [])] for t, os in by_tx.items()}
+
+
+def restore_items(conn, items: list) -> None:
+    """Put items back as `items_of_transactions` saw them: the category exactly, and who or what chose it."""
+    i = RetailItem
+    for it in items:
+        if not isinstance(it, dict) or not isinstance(it.get("id"), int) or isinstance(it.get("id"), bool):
+            continue
+        cat = it.get("category") or None
+        if cat and not conn.execute(select(Category.name).where(Category.name == cat)).fetchone():
+            cat = None
+        conn.execute(update(i).where(i.id == it["id"]).values(
+            category=cat, category_source=it.get("category_source") or None, confidence=it.get("confidence")))
+
+
+def set_transaction_category(conn, tx_ids: list[str], category: str) -> int:
+    """You gave these transactions one category: every item of their orders gets it too, so the items agree with the
+    transaction instead of re-splitting it the next time something re-applies them. Returns how many items changed.
+
+    The items count as picked by hand, but nothing is remembered for the same item in other orders (that's what
+    picking an item's own category is for). An order paid in several charges has the same category on all its items,
+    so its other transactions follow it unless they're yours (a category or split you made yourself stays); `apply`
+    decides that, and a transaction only ever pairs with one charge, so there's no one-transaction, many-orders case."""
+    orders = sorted({o for v in _orders_of(conn, list(dict.fromkeys(tx_ids))).values() for o in v})
+    if not orders:
+        return 0
+    i, c = RetailItem, RetailCharge
+    n = conn.execute(update(i).where(i.order_id.in_(orders)).values(category=category, category_source="manual", confidence=1)).rowcount
+    have = set(tx_ids)
+    for ch in conn.execute(select(c.id, c.tx_id).where(c.order_id.in_(orders), c.tx_id.is_not(None))).fetchall():
+        if ch["tx_id"] not in have:
+            apply(conn, ch["id"])
+    return n
+
+
 # ------------------------------------------------------------------------------------------------ matching
 
 def match(conn) -> int:

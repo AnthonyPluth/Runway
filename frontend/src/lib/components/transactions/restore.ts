@@ -13,6 +13,8 @@ export interface Was {
   payee: string | null;
   is_split: number;
   splits?: { amount: number; category: string; note?: string | null }[];
+  /** The items of its order, when a category change set theirs too: sent back untouched by Undo. */
+  items?: { id: number; category: string | null; category_source: string | null; confidence: number | null }[];
 }
 
 /** One of `changed` in the reply of POST /api/rules/{id}/apply. */
