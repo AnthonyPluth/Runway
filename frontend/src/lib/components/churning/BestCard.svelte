@@ -16,8 +16,10 @@
   // Some rates only count when you book through the issuer's travel portal: for travel, tick the box if you will, and
   // those count.
   let category = $state(""), amount = $state(""), portal = $state(false);
-  const travel = $derived(isTravel(category, catParentOf(category)));
   let ranked = $state<BestCard[] | null>(null);
+  // Travel by its name, or any category a card has a portal-only rate for (a travel category called something else).
+  const travel = $derived(isTravel(category, catParentOf(category)) ||
+    (!!category && !!ranked?.some((c) => c.needs_portal || c.portal_option)));
   let error = $state("");
 
   $effect(() => {

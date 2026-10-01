@@ -104,7 +104,7 @@
         </button>
       {/if}
       {#if t.retail}
-        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={orderLabel(t.retail)} onclick={toggleOrder}
+        <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={`Receipt: ${orderLabel(t.retail)}`} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
           class={cn("inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition-colors @sm/title:px-2 max-sm:px-2",
             showOrder ? "bg-primary/15 text-primary" : "bg-secondary text-secondary-foreground hover:bg-primary/15 hover:text-primary")}>

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 vi.mock("$lib/categories.svelte", () => {
-  const list = [{ name: "Travel", parent: null }, { name: "Hotels", parent: "Travel" }, { name: "Groceries", parent: null }];
+  const list = [{ name: "Travel", parent: null }, { name: "Hotels", parent: "Travel" }, { name: "Groceries", parent: null }, { name: "Trips", parent: null }];
   return { loadCategories: vi.fn(async () => {}), categories: { list }, catLabel: (c: { name: string }) => c.name,
     categoryGroups: () => [{ label: "Spending", items: list }], catParentOf: (n: string) => list.find((c) => c.name === n)?.parent ?? null };
 });
@@ -48,6 +48,17 @@ describe("best card", () => {
     expect(screen.queryByLabelText("I'll book through the issuer's travel portal")).not.toBeInTheDocument();
     await waitFor(() => expect(calls(/best\?/).at(-1)![0]).toContain("category=Groceries"));
     expect(calls(/best\?/).at(-1)![0]).not.toContain("portal=1");
+  });
+
+  it("offers the portal for a category a card has a portal-only rate on, whatever it's called", async () => {
+    const row = { id: 1, owner: "Alex", product: "Venture X", issuer: "capital_one", multiplier: 2, currency: "miles", cents: 1.4, return_pct: 2.8,
+      value: null, bonus: null, needs_portal: false, portal_name: "Capital One Travel",
+      portal_option: { multiplier: 10, return_pct: 14, portal_name: "Capital One Travel", value: null, note: "" }, note: null };
+    vi.mocked(api).mockImplementation((async (path: string) => ({ cards: [path.includes("category=Trips") ? row : { ...row, portal_option: null }] })) as never);
+    render(BestCard, { person: "", version: 0, showOwner: false });
+    await screen.findByText("Venture X");
+    await userEvent.selectOptions(screen.getByLabelText("Category of the purchase"), "Trips");
+    expect(await screen.findByLabelText("I'll book through the issuer's travel portal")).toBeInTheDocument();
   });
 
   it("offers the better portal rate when portal isn't ticked", async () => {

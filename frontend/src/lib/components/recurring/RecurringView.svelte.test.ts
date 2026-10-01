@@ -123,6 +123,12 @@ describe("Recurring page", () => {
       const { container } = render(Recurring);
       await userEvent.click(await screen.findByRole("button", { name: "Logo for Rent" }));
       expect(container.querySelector("details")).not.toHaveAttribute("open");
+      // The panel isn't inside the item's summary, so clicking its text doesn't open the item (or close the panel).
+      const panel = await screen.findByRole("dialog", { name: "Logo for Rent" });
+      expect(container.querySelector("summary")!.contains(panel)).toBe(false);
+      await userEvent.click(within(panel).getByText("Logo for Rent"));
+      expect(container.querySelector("details")).not.toHaveAttribute("open");
+      expect(screen.getByRole("dialog", { name: "Logo for Rent" })).toBeInTheDocument();
     });
   });
 

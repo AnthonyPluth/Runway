@@ -192,7 +192,7 @@ describe("TxRow", () => {
     it("shows a receipt badge, labelled with the order, and only loads its items when you open it", async () => {
       vi.mocked(api).mockResolvedValue({ id: "o1", retailer: "amazon", order_number: "111", items: [], charges: [], url: "" });
       render(TxRow, props(withOrder));
-      const toggle = screen.getByRole("button", { name: /Amazon · 3 items/ });
+      const toggle = screen.getByRole("button", { name: "Receipt: Amazon · 3 items" });
       expect(within(toggle).getByText("receipt")).toBeInTheDocument();
       expect(toggle).toHaveAttribute("aria-expanded", "false");
       expect(api).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ describe("TxRow", () => {
 
     it("shows the receipt badge as just its icon unless the cell has room for the word", () => {
       render(TxRow, props(tx({ retail: { order_id: "o1", retailer: "target", channel: "store", items: 3 } })));
-      const chip = screen.getByRole("button", { name: "Target in store · 3 items" });
+      const chip = screen.getByRole("button", { name: "Receipt: Target in store · 3 items" });
       expect(chip).toHaveClass("shrink-0");
       expect(within(chip).getByText("receipt")).toHaveClass("hidden", "@sm/title:inline", "max-sm:inline");
       expect(within(row()).getByText("Blue Bottle")).toHaveClass("min-w-[6ch]", "truncate");
