@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select
 
-from . import db
+from . import db, validate
 from .models import EquityCompany, EquityGrant
 
 KINDS = {"iso": "ISO options", "nso": "NSO options", "rsu": "RSUs", "rsa": "Restricted stock", "shares": "Shares"}
@@ -163,18 +163,11 @@ def networth_items(conn, today: date | None = None) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ editing
 
+_v = validate.Validator(EquityError, drop="", out_of_range="The {label} can't be negative")
+
+
 def _num(v, name, allow_none=True):
-    if v in (None, ""):
-        if allow_none:
-            return None
-        raise EquityError(f"Enter the {name}")
-    try:
-        n = db.number(v)
-    except (TypeError, ValueError):
-        raise EquityError(f"The {name} must be a number") from None
-    if n < 0:
-        raise EquityError(f"The {name} can't be negative")
-    return n
+    return _v.number(v, name, low=0, required=not allow_none)
 
 
 def _day(v, name):
