@@ -19,6 +19,7 @@ from unittest import mock
 from cryptography.fernet import Fernet
 
 from runway import backup, carta, db, notify, oidc, secretbox, server, simplefin
+from tests.shared import own_database
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")
 
@@ -128,6 +129,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.open("/healthz")[0], 200)   # everyone else is served as usual
 
     def test_restore_waits_for_a_running_sync(self):
+        # A restore replaces the whole database (and on Postgres restarts its ids), so not the one the other modules
+        # share: that gave test_mcp a grant id that was already taken.
+        own_database(self)
         with db.session() as c:
             raw = backup.dump(c)
         headers = {"X-Runway": "1", "Content-Type": "application/octet-stream"}
