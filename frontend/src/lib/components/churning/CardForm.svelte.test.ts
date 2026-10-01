@@ -173,6 +173,23 @@ describe("card form", () => {
       expect(screen.queryByLabelText("Suggested benefit 1")).toBeNull();
     });
 
+    it("Discard takes back only what the AI filled, not what you changed afterwards", async () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup();
+      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
+      await screen.findByTestId("ai-marked");
+      await userEvent.type(screen.getByLabelText(/^Bonus \(/), "60000");   // typed after the fill
+      await userEvent.clear(screen.getByLabelText(/Family/));
+      await userEvent.type(screen.getByLabelText(/Family/), "Sapphire cards");   // an AI field you corrected
+      await userEvent.click(screen.getByRole("button", { name: "Discard" }));
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(60000);
+      expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire cards");
+      expect(screen.getByLabelText("Earns")).toHaveValue("cash");   // untouched AI fields go back
+      expect(screen.getByLabelText("Annual fee")).toHaveValue(null);
+      expect(screen.queryByLabelText("Category of rate 1")).toBeNull();
+    });
+
     it("on an existing card, saves only when you say so", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup(card({ currency: "cash", annual_fee: 0, rates: [] }));

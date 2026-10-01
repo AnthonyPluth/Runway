@@ -108,7 +108,7 @@
     finally { suggesting = false; }
   }
   function applySuggestion(s: CardSuggestion) {
-    const before = { ...v }, rows = rateRows.map((r) => ({ ...r })), portal = portalName, benefits = aiBenefits;
+    const before: Record<string, unknown> = { ...v }, rows = rateRows.map((r) => ({ ...r })), portal = portalName, benefits = aiBenefits;
     const fields: Record<string, unknown> = {};
     if (s.family && !v.family.trim()) { v.family = s.family; fields.family = s.family; }
     if (s.currency && v.currency === "cash" && s.currency !== "cash") { v.currency = s.currency; fields.currency = s.currency; }
@@ -116,7 +116,7 @@
     if (s.portal_name && !portalName.trim()) { portalName = s.portal_name; fields.portal_name = s.portal_name; }
     let rates = false;
     if (!rateRows.length && (s.rates.length || s.base_rate != null)) {
-      if (s.base_rate != null && ["", "1"].includes(String(v.base_rate))) v.base_rate = String(s.base_rate);
+      if (s.base_rate != null && ["", "1"].includes(String(v.base_rate))) { v.base_rate = String(s.base_rate); fields.base_rate = v.base_rate; }
       rateRows = s.rates.map((r) => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only }));
       rates = true;
     }
@@ -127,7 +127,19 @@
     aiFields = { ...aiFields, ...fields };
     aiRates = aiRates || rates;
     const prev = aiUndo;
-    aiUndo = () => { prev?.(); Object.assign(v, before); rateRows = rows; portalName = portal; aiBenefits = benefits; };
+    // Discard takes back only what the AI filled, and only where it still holds the AI's value: anything you changed
+    // since (the opened date, the bonus) stays as you left it.
+    const filledRows = JSON.stringify(rateRows);
+    aiUndo = () => {
+      const v_ = v as Record<string, unknown>;
+      for (const [k, val] of Object.entries(fields)) {
+        if (k === "portal_name") { if (portalName === val) portalName = portal; }
+        else if (String(v_[k]) === String(val)) v_[k] = before[k];
+      }
+      if (rates && JSON.stringify(rateRows) === filledRows) rateRows = rows;
+      aiBenefits = benefits;
+      prev?.();
+    };
     aiMarked = true;
   }
   function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; }
