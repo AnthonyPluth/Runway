@@ -51,6 +51,8 @@ class Account(Base):
     plaid_account_id: Mapped[str | None]
     provider_since: Mapped[str | None]
     logo: Mapped[str | None]
+    interest_rate: Mapped[float | None]
+    monthly_payment: Mapped[float | None]
 
     transactions: Mapped[list[Transaction]] = _rel("Transaction", "foreign(Transaction.account_id) == Account.id")
 
@@ -324,6 +326,17 @@ class DeletedAccount(Base):
     inv_ids: Mapped[str | None]
     deleted_at: Mapped[str | None]
     restored_at: Mapped[str | None]
+
+
+class LoanTerms(Base):
+    __table__ = schema.loan_terms
+    plaid_account_id: Mapped[str]
+    item_id: Mapped[str]
+    kind: Mapped[str | None]
+    interest_rate: Mapped[float | None]
+    monthly_payment: Mapped[float | None]
+    maturity_date: Mapped[str | None]
+    updated: Mapped[str | None]
 
 
 class InvAccount(Base):

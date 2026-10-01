@@ -8,7 +8,8 @@ accounts (plaid_accounts) are matched to Runway accounts (accounts.plaid_account
     both providers have is matched up (same amount within 3 days) so nothing is counted twice, and your categories
     stay on the transactions you already have.
   - Card statements (balance, closing date, due date, minimum payment) come from Plaid Liabilities for every matched
-    card, whatever its provider; they're how the forecast knows what each card owes and when.
+    card, whatever its provider; they're how the forecast knows what each card owes and when. Mortgages' and student
+    loans' terms (rate, monthly payment, payoff date) come the same way, for the retirement planner.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from sqlalchemy import delete, func, insert, select, update
 from . import brands, db, merchants, splits
 from . import settings_keys as sk
 from .categorize import clean_payee
-from .models import Account, CardStatement, DeletedAccount, PlaidAccount, PlaidItem, Transaction
+from .models import Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Transaction
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
 HISTORY_DAYS = 730     # transaction history to ask for when linking (Plaid's maximum)
@@ -260,6 +261,7 @@ def _set_balance(conn, account_id: str, pa) -> None:
                  .values(balance=balance, available=pa["available"], balance_date=date.today().isoformat()))
 
 
+LIABILITY_LOANS = ("mortgage", "student")   # the loans Plaid Liabilities covers (not auto loans)
 STATEMENT_NOTES = ("PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY", "NO_LIABILITY_ACCOUNTS", "ADDITIONAL_CONSENT_REQUIRED",
                    "INVALID_PRODUCT", "PRODUCTS_NOT_ENABLED", "INSTITUTION_NOT_SUPPORTED")
 
@@ -289,11 +291,13 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
                 _set_error(conn, item_id, e)
                 conn.commit()
                 raise
-    # Card statements: ask whenever the connection has a card, even if Liabilities wasn't listed when it was linked
-    # (optional products don't always show up there). What happened is kept for Settings to explain.
-    has_card = any(a.get("type") == "credit" for a in res.get("accounts", []))
+    # Card statements and loan terms: ask whenever the connection has a card, mortgage or student loan, even if
+    # Liabilities wasn't listed when it was linked (optional products don't always show up there). What happened is
+    # kept for Settings to explain.
+    has_liability = any(a.get("type") == "credit" or (a.get("type") == "loan" and a.get("subtype") in LIABILITY_LOANS)
+                        for a in res.get("accounts", []))
     stmts, stmt_error = None, None
-    if "liabilities" in prods or has_card:
+    if "liabilities" in prods or has_liability:
         try:
             stmts = call(conn, "/liabilities/get", {"access_token": item["access_token"]})
         except PlaidError as e:
@@ -319,6 +323,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     error = None
     if stmts is not None:
         out["statements"] = store_statements(conn, item, stmts)
+        out["loans"] = store_loan_terms(conn, item, stmts)
         db.set_setting(conn, sk.plaid_stmt_note(item_id), None)
         if "liabilities" not in prods:
             conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(products=",".join(sorted(prods | {"liabilities"}))))
@@ -327,7 +332,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
             db.set_setting(conn, sk.plaid_stmt_note(item_id), stmt_error.code)
         else:
             error = stmt_error
-            out["error"] = f"card statements: {stmt_error}"
+            out["error"] = f"card statements and loan terms: {stmt_error}"
     conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id)
                  .values(last_sync=_now(), error=(error.code or str(error)) if error else None))
     return out
@@ -467,6 +472,38 @@ def store_statements(conn, item, res: dict) -> int:
     return n
 
 
+def store_loan_terms(conn, item, res: dict) -> int:
+    """Mortgages' and student loans' interest rate, monthly payment and payoff date, for the retirement planner."""
+    liab = res.get("liabilities") or {}
+    found = []
+    for kind, loans in (("mortgage", liab.get("mortgage")), ("student", liab.get("student"))):
+        for x in loans or []:
+            if not x.get("account_id"):
+                continue
+            if kind == "mortgage":
+                rate = (x.get("interest_rate") or {}).get("percentage")
+                payment = x.get("next_monthly_payment") or x.get("last_payment_amount")
+                maturity = x.get("maturity_date")
+            else:
+                rate = x.get("interest_rate_percentage")
+                payment = x.get("minimum_payment_amount") or x.get("last_payment_amount")
+                maturity = x.get("expected_payoff_date")
+            found.append({"plaid_account_id": x["account_id"], "item_id": item["item_id"], "kind": kind,
+                          "interest_rate": _float(rate), "monthly_payment": _float(payment),
+                          "maturity_date": maturity or None, "updated": _now()})
+    for row in found:   # a loan stays with the connection it was first seen on, as a card's statement does
+        db.upsert(conn, LoanTerms, row, key=["plaid_account_id"],
+                  update=[k for k in row if k not in ("plaid_account_id", "item_id")])
+    return len(found)
+
+
+def _float(v) -> float | None:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def statement(conn, card_id: str, today: date):
     """The issuer's latest statement for a card, through Plaid."""
     r = conn.execute(select(CardStatement).join(Account, Account.plaid_account_id == CardStatement.plaid_account_id)
@@ -514,6 +551,7 @@ def forget_item(conn, item_id: str) -> None:
         _back_to_simplefin(conn, pid)
         conn.execute(update(Account).where(Account.plaid_account_id == pid).values(plaid_account_id=None))
     conn.execute(delete(CardStatement).where(CardStatement.item_id == item_id))
+    conn.execute(delete(LoanTerms).where(LoanTerms.item_id == item_id))
     conn.execute(delete(PlaidAccount).where(PlaidAccount.item_id == item_id))
 
 

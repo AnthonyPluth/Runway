@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from . import db, equity, forecast, networth, validate
+from . import db, equity, forecast, loans, networth, validate
 from . import settings_keys as sk
 from .models import Account
 
@@ -135,16 +135,31 @@ def default(computed: dict, today: date) -> dict:
 
 def sellable(conn, today: date) -> list[dict]:
     """What on the Net worth page can be sold into the plan: homes, vehicles and other assets (less the loan against
-    them), and vested company equity."""
-    owed = {a["id"]: forecast.owed(a) for a in db.rows(conn.execute(
+    them), and company equity (what will have vested by then). Each says what it's worth and owes today (`value`,
+    `owed`) and how that changes: `owed_by_year` (the loan paid down on its terms, see loans.py) and, for equity,
+    `value_by_year` (what will have vested), each indexed by years from today and ending once it stops changing."""
+    accts = {a["id"]: a for a in db.rows(conn.execute(
         select(Account.id, Account.kind, Account.balance, Account.owed_positive).where(Account.kind.in_(["credit", "loan"]))))}
+    items = networth.assets(conn, today)
+    terms = loans.terms(conn, today, [a["loan_account_id"] for a in items if a["loan_account_id"]])
     out = []
-    for a in networth.assets(conn, today):
+    for a in items:
+        acct = accts.get(a["loan_account_id"])
+        owed = round(forecast.owed({**acct, "balance": acct["balance"] or 0.0}), 2) if acct else 0.0
+        if acct and acct["kind"] == "loan":
+            by_year, loan = loans.owed_by_year(owed, terms.get(acct["id"]))
+        else:   # none, or a card: what's owed today
+            by_year, loan = [owed], None
         out.append({"key": f"asset:{a['id']}", "name": a["name"], "kind": a["kind"], "value": a["current_value"],
-                    "yearly_change": (a["yearly_change"] or 0) / 100.0, "owed": round(owed.get(a["loan_account_id"], 0.0), 2)})
-    for c in equity.networth_items(conn, today):
-        out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": c["value"],
-                    "yearly_change": 0.0, "owed": 0.0})
+                    "yearly_change": (a["yearly_change"] or 0) / 100.0, "owed": owed, "owed_by_year": by_year, "loan": loan})
+    for c in equity.overview(conn, today)["companies"]:
+        if not c["in_networth"]:
+            continue
+        by_year = equity.value_by_year(c, today)
+        if not any(by_year):   # nothing vested now or ever (or no share price)
+            continue
+        out.append({"key": f"equity:{c['id']}", "name": c["name"], "kind": "equity", "value": by_year[0],
+                    "value_by_year": by_year, "yearly_change": 0.0, "owed": 0.0, "owed_by_year": [0.0], "loan": None})
     return out
 
 
