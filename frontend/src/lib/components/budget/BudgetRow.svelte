@@ -4,7 +4,6 @@
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
-  import { isPhone } from "$lib/phone.svelte";
   import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
@@ -12,7 +11,6 @@
 
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath.
   // `budgets` is true in the Budgets card, where the budget box is always shown and you can choose the card it's paid with.
-  // On a phone the budget is just a figure: setting budgets, the card and rolling over are for a computer.
   let { c, month, sub = false, budgets = false, counts = false, pace, payAccounts, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; counts?: boolean; pace: number; payAccounts: PayAccount[];
     onsave: (category: string, amount: string) => void; onchanged: () => void;
@@ -64,11 +62,11 @@
     {#if !sub}<CatIcon name={c.name} size={28} solid />{/if}
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
-    {#if budgets && c.budget != null && counts && !isPhone()}
+    {#if budgets && c.budget != null && counts}
       {#if choosing}
         {@const usual = acctName(c.usual_account)}
         <select use:focus data-editor aria-label={`Account ${c.name} is paid with`}
-          class="h-8 max-w-48 min-w-0 cursor-pointer rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&_option]:bg-popover [&>optgroup]:bg-popover"
+          class="h-10 max-w-48 min-w-0 sm:h-8 cursor-pointer rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&_option]:bg-popover [&>optgroup]:bg-popover"
           onchange={(e) => finish(e.currentTarget, true)} onblur={(e) => finish(e.currentTarget, true)}
           onkeydown={(e) => { if (e.key === "Escape") finish(e.currentTarget, false); }}>
           <option value="" selected={!c.pay_with}>{usual ? `Automatic (usually ${usual})` : "Automatic"}</option>
@@ -83,17 +81,17 @@
         {@const chosen = acctName(c.pay_with)}
         <button type="button" title="Which card or account this spending goes on (used by the budget forecast)"
           onclick={() => { done = false; choosing = true; }}
-          class={cn("cursor-pointer rounded-md px-1.5 py-0.5 text-xs whitespace-nowrap text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
+          class={cn("cursor-pointer rounded-md px-1.5 py-2.5 text-xs whitespace-nowrap text-muted-foreground sm:py-0.5 hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
             !chosen && "opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100")}>
           {chosen ?? "Set card"}
         </button>
       {/if}
     {/if}
-    {#if budgets && c.budget != null && !sub && !isPhone()}
+    {#if budgets && c.budget != null && !sub}
       <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
           : "Carry what's left at the end of each month into the next"}
-        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+        class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-2.5 text-xs sm:py-0.5 whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
           c.rollover_from ? "text-primary" : "text-muted-foreground opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 hover:text-foreground [@media(hover:none)]:opacity-100")}>
         <Repeat class="size-3" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
       </button>
@@ -101,18 +99,14 @@
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} title="See the transactions behind this amount"
         class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{money(c.spent)}</a>
-      {#if isPhone()}
-        {#if c.budget != null}<span class="text-muted-foreground">of</span><span>{fmt0(c.budget)}</span>{/if}
-      {:else}
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-2 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
         <input type="number" min="0" step="10" value={c.budget ?? ""} placeholder={c.budget == null ? (sub ? "—" : "Budget") : ""}
           aria-label={`Budget for ${c.name}`} onchange={(e) => onsave(c.name, e.currentTarget.value)}
-          class={cn("h-8 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24",
+          class={cn("h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:w-24",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-5" : "pl-5")} />
       </span>
-      {/if}
     </span>
   </div>
   {#if c.budget != null}

@@ -22,57 +22,49 @@ import OrderDetail from "./orders/OrderDetail.svelte";
 import RecurringFields from "./recurring/RecurringFields.svelte";
 import SplitEditor from "./transactions/SplitEditor.svelte";
 
-const NOTE = (what: string) => `Open Runway on a computer to ${what}.`;
 beforeEach(() => { vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({}); });
 afterEach(() => { cleanup(); viewport.phone = false; });
 
 describe("NotConnected", () => {
-  it("sends a phone to a computer to connect a bank, with no link to the page that isn't there", () => {
+  it("links a phone to Settings → Connections, and keeps the secondary action", () => {
     viewport.phone = true;
-    render(NotConnected, { title: "T", secondary: { label: "Add an asset by hand", onclick: vi.fn() } });
-    expect(screen.getByText(NOTE("connect a bank"))).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Connect a bank" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add an asset by hand" })).not.toBeInTheDocument();
+    const onclick = vi.fn();
+    render(NotConnected, { title: "T", secondary: { label: "Add an asset by hand", onclick } });
+    expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
+    expect(screen.getByRole("button", { name: "Add an asset by hand" })).toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 });
 
 describe("splitting a transaction", () => {
   const t = tx({ amount: -30, category: "Coffee" });
 
-  it("shows the note on a phone, and Close puts it away", async () => {
+  it("is the editor on a phone too, and Cancel closes it", async () => {
     viewport.phone = true;
     const onclose = vi.fn();
     render(SplitEditor, { t, onclose, onsaved: vi.fn() });
-    expect(screen.getByText(NOTE("split transactions"))).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save split" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
+    expect(screen.queryByTestId("desktop-only")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onclose).toHaveBeenCalledOnce();
   });
 
   it("is the editor on a computer", () => {
     render(SplitEditor, { t, onclose: vi.fn(), onsaved: vi.fn() });
     expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
-    expect(screen.queryByTestId("desktop-only")).not.toBeInTheDocument();
   });
 });
 
 describe("an order's items", () => {
-  it("are left to a computer, without even asking for them", () => {
-    viewport.phone = true;
-    render(OrderDetail, { orderId: "x" });
-    expect(screen.getByText(NOTE("see what was in an order"))).toBeInTheDocument();
-    expect(api).not.toHaveBeenCalled();
-  });
-
-  it("load once the screen counts as a computer (widened or turned)", async () => {
+  it("load on a phone", async () => {
     vi.mocked(api).mockResolvedValue({ id: "x", retailer: "target", channel: "store", order_number: "1", placed: "2026-09-26", total: 10,
       items: [], charges: [], url: "https://www.target.com/orders" } as never);
     viewport.phone = true;
     render(OrderDetail, { orderId: "x" });
-    viewport.phone = false;
     expect(await screen.findByRole("link", { name: "Open on target.com" })).toBeInTheDocument();
     expect(api).toHaveBeenCalledTimes(1);
     expect(api).toHaveBeenCalledWith("/api/retail/orders/x", { keep: true });
+    expect(screen.queryByTestId("desktop-only")).not.toBeInTheDocument();
   });
 });
 
@@ -80,17 +72,10 @@ describe("a recurring item's fields", () => {
   const v = () => ({ name: "Rent", account_id: "a1", amount: -1200, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-10-01", match: "", amount_min: "", amount_max: "" });
   const accounts = [{ id: "a1", name: "Checking", kind: "checking" }] as never;
 
-  it("keep the basics on a phone and leave More options to a computer", () => {
+  it("have More options on a phone", () => {
     viewport.phone = true;
     render(RecurringFields, { v: v(), accounts });
     expect(screen.getByRole("textbox", { name: /Name/ })).toHaveValue("Rent");
-    expect(screen.getByText(NOTE("change the account, amount to forecast or merchant text"))).toBeInTheDocument();
-    expect(screen.queryByText(/More options/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Merchant text")).not.toBeInTheDocument();
-  });
-
-  it("have More options on a computer", () => {
-    render(RecurringFields, { v: v(), accounts });
     expect(screen.getByText(/More options/)).toBeInTheDocument();
     expect(screen.getByLabelText("Merchant text")).toBeInTheDocument();
     expect(screen.queryByTestId("desktop-only")).not.toBeInTheDocument();
@@ -102,20 +87,13 @@ describe("a budget's row", () => {
     usual_account: null, spent: 200, own_spent: 200, left: 300, rollover_from: null } as BudgetCategory;
   const show = () => render(BudgetRow, { c, month: "2026-03", pace: 0.5, budgets: true, counts: true, payAccounts: [], onsave: vi.fn(), onchanged: vi.fn() });
 
-  it("is progress only on a phone: the figures and the bar, nothing to edit", () => {
+  it("edits in place on a phone: the amount, the card and rolling over", () => {
     viewport.phone = true;
-    show();
-    expect(screen.getByText("$500")).toBeInTheDocument();
-    expect(screen.getByText("$300 left")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "40% of budget used" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Budget for Groceries")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Roll over|Set card/ })).not.toBeInTheDocument();
-  });
-
-  it("edits in place on a computer", () => {
     show();
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue(500);
     expect(screen.getByRole("button", { name: /Roll over/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Set card/ })).toBeInTheDocument();
+    expect(screen.getByText("$300 left")).toBeInTheDocument();
   });
 });
 

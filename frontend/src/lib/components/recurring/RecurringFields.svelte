@@ -6,8 +6,6 @@
 
 <script lang="ts">
   import { autosave, markSaved } from "$lib/autosave";
-  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
-  import { isPhone } from "$lib/phone.svelte";
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
   import { tick, untrack } from "svelte";
@@ -142,11 +140,8 @@
   </p>
 {/if}
 
-{#if isPhone()}
-  <DesktopOnly what="change the account, amount to forecast or merchant text" class="mt-4" />
-{:else}
 <details class="group mt-4" bind:open={moreOpen}>
-  <summary class="flex w-fit max-w-full cursor-pointer list-none items-center gap-1.5 text-sm text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+  <summary class="flex min-h-10 w-fit max-w-full cursor-pointer sm:min-h-0 list-none items-center gap-1.5 text-sm text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
     <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
     <span class="shrink-0">More options</span>
     {#if !moreOpen}<span class="min-w-0 truncate text-xs">{moreSummary}</span>{/if}
@@ -190,4 +185,3 @@
     </div>
   </div>
 </details>
-{/if}

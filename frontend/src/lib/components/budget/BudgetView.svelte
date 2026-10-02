@@ -14,7 +14,6 @@
   import * as Card from "$lib/components/ui/card";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { fmt0, plural, thisMonth } from "$lib/format";
-  import { isPhone } from "$lib/phone.svelte";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
 
@@ -110,7 +109,7 @@
     <div class="text-[15px] text-muted-foreground">Spent in budgeted categories</div>
     <div class={cn("text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]", over && "text-destructive")}>{fmt0(v.totSpent)}</div>
     <p class={cn("mt-2 text-[15px] tabular-nums", over ? "font-semibold text-destructive" : "text-muted-foreground")}>
-      {v.totBudget <= 0 ? (isPhone() ? "No budgets set" : "Set a budget below") : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
+      {v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
         v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ")}
     </p>
     <StatStrip class="mt-5" items={[
@@ -125,17 +124,16 @@
       {#if v.inBudget.length}
         {#each v.inBudget as f (f.top.name)}{@render family(f, true, b, v.pace, v.countsToward)}{/each}
       {:else}
-        <p class="cell text-sm text-muted-foreground">{isPhone() ? "No budgets yet. Open Runway on a computer to set one." : "No budgets yet. Set one below."}</p>
+        <p class="cell text-sm text-muted-foreground">No budgets yet. Set one below.</p>
       {/if}
   </Group>
 
-  {#if !isPhone() || v.notBudget.length}
   <Group title="Not budgeted" inset="3.4rem" class="mb-4">
       {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace, v.countsToward)}{/each}
-      {#if v.unusedTops.length && !isPhone()}
+      {#if v.unusedTops.length}
         <div class="flex min-h-12 items-center gap-2.5 px-2 py-2">
           <select bind:value={newCat} aria-label="Category to budget"
-            class="h-9 min-w-0 cursor-pointer rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
+            class="h-10 min-w-0 cursor-pointer sm:h-9 rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
             {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}
               <option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
@@ -144,10 +142,9 @@
           <span class="group/money relative ml-auto inline-flex items-center">
             <span aria-hidden="true" class="pointer-events-none absolute left-2 hidden text-sm text-muted-foreground group-focus-within/money:inline">$</span>
             <input type="number" min="0" step="10" placeholder="Budget" aria-label="Budget for the chosen category" onchange={addBudget}
-              class="h-8 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 pl-2 focus:pl-5 text-sm tabular-nums outline-none placeholder:text-primary hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24" />
+              class="h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 pl-2 sm:h-8 focus:pl-5 text-sm tabular-nums outline-none placeholder:text-primary hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24" />
           </span>
         </div>
       {/if}
   </Group>
-  {/if}
 {/if}
