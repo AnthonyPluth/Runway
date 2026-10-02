@@ -36,7 +36,8 @@
           s.total += c.amount; s.parts.push(`${c.name} ${fmt(-c.amount)}`);
         } else {
           add(c.date, { name: c.name + " (budgeted)", amount: c.amount, only: "budget",
-            note: c.charged ? `${fmt(c.charged)} already on the card, the rest budgeted spending` : "budgeted spending" });
+            note: [c.charged ? `${fmt(c.charged)} already on the card, the rest budgeted spending` : "budgeted spending",
+              c.assumed_cycle ? "no statement yet, so taken to close at the month’s end and be paid 25 days later" : ""].filter(Boolean).join(" · ") });
         }
       }
       for (const [d, s] of Object.entries(spend)) add(d, { name: "Budgeted spending", amount: Math.round(s.total * 100) / 100, only: "budget", note: s.parts.join(" · ") });
