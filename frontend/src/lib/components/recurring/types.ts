@@ -76,11 +76,11 @@ export interface MatchedTx {
 
 export const FREQ_OPTIONS: [string, string][] = [["monthly", "Monthly"], ["biweekly", "Every 2 weeks"], ["weekly", "Weekly"],
   ["semimonthly", "Twice a month (set days)"], ["quarterly", "Quarterly"], ["semiannual", "Every 6 months"], ["yearly", "Yearly"],
-  ["dates", "Specific dates each year"]];
+  ["dates", "Specific dates each year"], ["once", "Once (a one-time item)"]];
 export const MODE_OPTIONS: [string, string][] = [["fixed", "Always the amount above"], ["last", "Same as the last payment"], ["avg3", "Average of the last 3 payments"]];
 /** How often, as the list says it: "every 2 weeks". */
 export const FREQ: Record<string, string> = { monthly: "monthly", biweekly: "every 2 weeks", weekly: "weekly", semimonthly: "twice a month",
-  quarterly: "quarterly", semiannual: "every 6 months", yearly: "yearly", dates: "on set dates" };
+  quarterly: "quarterly", semiannual: "every 6 months", yearly: "yearly", dates: "on set dates", once: "one-time" };
 
 /** Schedules that need their dates (or days of the month) listed. */
 export const needsDates = (freq: string) => freq === "dates" || freq === "semimonthly";
