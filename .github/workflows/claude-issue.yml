@@ -3,9 +3,9 @@ name: Claude on issues
 # Label an issue "claude" and Claude takes it on: it reads the issue and the repository's rules (AGENTS.md, CLAUDE.md,
 # SECURITY.md), makes the change on a claude/issue-<n>-... branch, commits it through GitHub's API, and this workflow
 # opens a pull request from that commit that closes the issue. Its progress shows in a comment on the issue. The pull
-# request then gets the usual checks, Claude review and merge gate, and a person merges it.
+# request then gets the usual checks and merge gate, and a person merges it.
 #
-# Needs one of these secrets (as claude-review.yml): ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (a Claude Pro or Max
+# Needs one of these secrets: ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN (a Claude Pro or Max
 # subscription; make one with `claude setup-token`). The branch, the commits and the pull request are made as the
 # Claude GitHub App (https://github.com/apps/claude, installed on this repository), not with this workflow's token:
 # GitHub starts no workflows for a pull request opened with GITHUB_TOKEN, so it would get no checks. The app can't

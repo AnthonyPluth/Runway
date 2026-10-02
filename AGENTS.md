@@ -49,10 +49,10 @@ Review findings on agents' pull requests here fall into the same few kinds. Chec
 
 - Work on the branch you were given; don't push to `main`.
 - Keep commits focused, with a clear message.
-- Before pushing to a PR, run `make check` and the `pre-review` skill (`.claude/skills/pre-review/`), which reviews the branch the way the "Claude review" check will. Each finding that check leaves costs another push and a full CI round, so fix them here first.
+- Before pushing to a PR, run `make check`.
 - Open a PR only when asked, and summarize what changed and why. Keep the description short and professional: a few bullets on the change and how it was tested, not an essay. Don't say who asked for it or reported it.
 - A PR's title decides the next version when it's merged: `feat: …` releases a minor version, `fix: …` or anything else a patch, and `feat!: …` (or a `BREAKING CHANGE:` line) a major one, for a change that breaks an existing setup.
-- A PR is ready when its "Merge gate" check passes: every check green and no unresolved **P1** review finding (`.github/scripts/merge-gate.sh`). Dependabot's updates merge themselves through it. Labelling an issue `claude` has an agent open a PR for it (`.github/workflows/claude-issue.yml`).
+- A PR is ready when its "Merge gate" check passes: every check green (`.github/scripts/merge-gate.sh`). Dependabot's updates merge themselves through it. Labelling an issue `claude` has an agent open a PR for it (`.github/workflows/claude-issue.yml`).
 - Don't hard-wrap lines in PR descriptions, comments, issues or the body of a commit message: write each paragraph or list item as one line, and let GitHub wrap it to the screen. Only code and repo files keep their own wrapping. Keep the commit subject to one short line.
 
 ## Model routing

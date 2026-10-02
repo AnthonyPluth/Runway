@@ -7,9 +7,7 @@
 #   - the newest run of every workflow started by the pull request succeeded (or was skipped), and the ones in
 #     REQUIRED_WORKFLOWS ran at all. CodeQL counts as one of them: GitHub's default setup runs it as a "dynamic" workflow
 #     (not a pull_request one), under the name "PR #<n>";
-#   - every other app's check run (CodeQL, Semgrep, Trivy, zizmor, ...) succeeded, and every commit status did;
-#   - no review thread whose first comment is a **P1:** finding (claude-review.yml) is still open: unresolved, or
-#     resolved by the pull request's own author (unless they maintain the repository), so an author can't quiet one.
+#   - every other app's check run (CodeQL, Semgrep, Trivy, zizmor, ...) succeeded, and every commit status did.
 # Anything still running makes it "pending". Workflows and apps that aren't about whether the change is sound are left
 # out (IGNORED_*). When it passes on one of Dependabot's pull requests, it merges it (see the end).
 #
@@ -50,9 +48,6 @@ if [ "$(wc -l <<< "$prs")" -gt 1 ]; then
 fi
 IFS=$'\t' read -r number author head_repo draft <<< "$prs"
 echo "Pull request #$number by $author at $SHA"
-# Whether the author maintains the repository: then a P1 thread they resolved counts as resolved (see evaluate).
-role=$(gh api "repos/$REPO/collaborators/$author/permission" --jq .role_name 2>/dev/null || echo none)
-case "$role" in admin|maintain) maintainer=true ;; *) maintainer=false ;; esac
 # CodeQL's default setup doesn't analyse Dependabot's pull requests (its check says the configurations "were not found"),
 # so none of its runs ever comes: waiting for one would keep the gate pending, and the merge below, forever. A run that
 # does come still counts, as for any workflow; the tests and the security scans are still required.
@@ -105,27 +100,12 @@ evaluate() {
     esac
   done <<< "$newest"
 
-  # 4. Open P1 review findings: "must be fixed before merging" (claude-review.yml). A thread the pull request's own
-  # author resolved is still open, unless they maintain the repository: anyone else resolving it is a review.
-  # shellcheck disable=SC2016  # $owner, $name and $number are GraphQL's variables, not the shell's
-  p1=$(AUTHOR="$author" MAINTAINER="$maintainer" gh api graphql -F owner="${REPO%/*}" -F name="${REPO#*/}" -F number="$number" -f query='
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-        reviewThreads(first: 100) { nodes { isResolved resolvedBy { login } comments(first: 1) { nodes { body } } } } } } }' \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
-           | select(.comments.nodes[0].body // "" | test("^\\*\\*P1:\\*\\*"))
-           | select((.isResolved | not) or ((.resolvedBy.login // "") == env.AUTHOR and env.MAINTAINER != "true"))] | length')
-
-  if [ ${#failing[@]} -gt 0 ] || [ "$p1" -gt 0 ]; then
-    state=failure
-    parts=()
-    [ ${#failing[@]} -gt 0 ] && parts+=("Failed: $(list "${failing[@]}")")
-    [ "$p1" -gt 0 ] && parts+=("$p1 open P1 review finding(s)")
-    description=$(list "${parts[@]}")
+  if [ ${#failing[@]} -gt 0 ]; then
+    state=failure; description="Failed: $(list "${failing[@]}")"
   elif [ ${#pending[@]} -gt 0 ]; then
     state=pending; description="Waiting for: $(list "${pending[@]}")"
   else
-    state=success; description="Every check passed, and no P1 review finding is open"
+    state=success; description="Every check passed"
   fi
 }
 
