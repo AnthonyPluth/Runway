@@ -11,7 +11,7 @@
   const cols = "md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.8fr)_minmax(0,1.3fr)_auto] md:items-center md:gap-4";
 </script>
 
-<div class={cn("hidden border-b pb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase", cols)} aria-hidden="true">
+<div class={cn("hidden border-b pb-2 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase", cols)} aria-hidden="true">
   <span>Account</span><span>Requirements</span><span>Dates</span><span></span>
 </div>
 <ul class="divide-y">

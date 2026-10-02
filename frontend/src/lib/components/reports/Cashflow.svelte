@@ -41,7 +41,7 @@
   {#if report.error}<Status error={report.error} retry={() => report.load()} />{:else}
   <section class="mb-6">
     <div class={cn("text-[15px]", bad ? "font-semibold text-destructive" : "text-muted-foreground")}>{verdict}</div>
-    <div class={cn("text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]", bad && "text-destructive")}>{fmt0(Math.abs(cf.net))}</div>
+    <div class={cn("text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]", bad && "text-destructive")}>{fmt0(Math.abs(cf.net))}</div>
     {#if cf.total_in > 0}<p class="mt-2 text-[15px] text-muted-foreground">{Math.round((cf.net / cf.total_in) * 100)}% of money in</p>{/if}
     <StatStrip class="mt-5" items={[
       { label: "Money in", value: fmt0(cf.total_in), sub: "income and refunds" },

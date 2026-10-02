@@ -154,7 +154,7 @@
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
   <div class="flex items-center gap-1">
-    <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-tight font-bold tracking-tight outline-none">
+    <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em] outline-none">
       Transactions
       <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
     </h1>

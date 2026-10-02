@@ -15,7 +15,7 @@
 </script>
 
 <div class="mb-4 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
+  <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Budget</h1>
 </div>
 <SubTabs label="Budget" current={tab} tabs={TABS} />
 {#if !app.state?.connected}

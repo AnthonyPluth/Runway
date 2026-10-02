@@ -107,7 +107,7 @@
   <!-- The hero is what's spent in the budgeted categories; the strip has what it's measured against and the rest. -->
   <section class="mb-8">
     <div class="text-[15px] text-muted-foreground">Spent in budgeted categories</div>
-    <div class={cn("text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]", over && "text-destructive")}>{fmt0(v.totSpent)}</div>
+    <div class={cn("text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]", over && "text-destructive")}>{fmt0(v.totSpent)}</div>
     <p class={cn("mt-2 text-[15px] tabular-nums", over ? "font-semibold text-destructive" : "text-muted-foreground")}>
       {v.totBudget <= 0 ? "Set a budget below" : [v.totLeft > 0.005 || !v.totOver ? `${fmt0(v.totLeft)} left` : "",
         v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ")}

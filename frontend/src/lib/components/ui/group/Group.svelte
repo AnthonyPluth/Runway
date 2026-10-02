@@ -12,7 +12,7 @@
 <section class={cn("min-w-0", className)}>
   {#if title || action}
     <div class="mb-1.5 flex items-baseline justify-between px-4">
-      {#if title}<h2 class="text-[13px] font-medium tracking-wide text-muted-foreground uppercase">{title}</h2>{/if}
+      {#if title}<h2 class="eyebrow">{title}</h2>{/if}
       {@render action?.()}
     </div>
   {/if}

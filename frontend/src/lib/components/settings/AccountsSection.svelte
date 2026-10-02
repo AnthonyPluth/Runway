@@ -56,7 +56,7 @@
   <Card.Content>
     {#each groups as g (g.title)}
       <section class="mb-4 last:mb-0" aria-label={g.title}>
-        <h3 class="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{g.title}</h3>
+        <h3 class="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{g.title}</h3>
         {#each g.list as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}
       </section>
     {:else}
