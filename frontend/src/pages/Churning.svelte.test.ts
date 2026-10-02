@@ -29,14 +29,6 @@ beforeEach(() => {
 });
 
 describe("the Churning page", () => {
-  it("links to its assumptions, once, beside the title", async () => {
-    serve({ cards: [card()] });
-    render(Churning, { sub: "" });
-    await screen.findByRole("button", { name: "Add a card" });
-    expect(screen.getAllByRole("link", { name: "Assumptions" })).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Assumptions" })).toHaveAttribute("href", "#setup/assumptions/churning");
-  });
-
   it("shows 5/24 as 0/24 with a helpful note when there are no people yet, not a blank figure", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ people: [], owners: [], cards: [card()] }))) as never);
     render(Churning, { sub: "" });

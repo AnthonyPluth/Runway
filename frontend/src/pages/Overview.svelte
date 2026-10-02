@@ -9,7 +9,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, reload } from "$lib/app.svelte";
-  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import MissedAlert from "$lib/components/MissedAlert.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
@@ -132,7 +131,6 @@
       </div>
       <div class="flex items-center gap-1">
         <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
-        <AssumptionsLink group="forecast" />
       </div>
     </header>
 

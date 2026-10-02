@@ -1,6 +1,5 @@
 <script lang="ts">
   import { app } from "$lib/app.svelte";
-  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -26,7 +25,6 @@
 
 <div class="mb-6 flex items-center gap-1">
   <h1 class="text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
-  <AssumptionsLink group="budget" />
 </div>
 {#if !isPhone()}<SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />{/if}
 {#if app.state?.connected}

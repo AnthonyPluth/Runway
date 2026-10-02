@@ -193,7 +193,7 @@ describe("Settings → Connections, the optional services", () => {
     const ai = within(card("AI categorization"));
     const web = ai.getByLabelText(/Search the web when filling in a card/);
     expect(web).toBeChecked();   // on unless switched off
-    expect(ai.queryByText(/OpenRouter charges for the search/)).toBeNull();   // the cost is under Settings → Assumptions
+    expect(ai.queryByText(/OpenRouter charges for the search/)).toBeNull();   // the docs cover the cost
     await userEvent.click(web);
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { churn_ai_web: false } }));
   });
