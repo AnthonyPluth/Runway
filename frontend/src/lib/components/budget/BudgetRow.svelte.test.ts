@@ -32,7 +32,7 @@ describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
     expect(screen.getByTitle("See the transactions behind this amount")).toHaveTextContent("$200");
-    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue(500);
+    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
   });

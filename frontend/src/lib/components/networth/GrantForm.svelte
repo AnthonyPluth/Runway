@@ -3,6 +3,7 @@
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import * as Sheet from "$lib/components/ui/sheet";
+  import { commas } from "$lib/commas";
   import { onMount } from "svelte";
   import { EQ_KINDS, isOption } from "./equity";
   import type { Grant, GrantBody } from "./types";
@@ -39,7 +40,7 @@
       <label class={lbl}>Strike price
         <span class="relative">
           <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-          <Input class="pl-6" type="number" min="0" step="0.0001" value={f.strike} oninput={num("strike")} />
+          <Input class="pl-6" type="number" min="0" step="0.0001" value={f.strike} {@attach commas} oninput={num("strike")} />
         </span>
       </label>
       <label class={lbl}>Exercised<Input type="number" min="0" step="1" value={f.exercised} oninput={num("exercised")} placeholder="0" /></label>

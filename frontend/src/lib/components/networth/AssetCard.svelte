@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { fmt, fmt0, fmtDate, parseDate } from "$lib/format";
+  import { commas } from "$lib/commas";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { toast } from "svelte-sonner";
   import { HOME_VALUES, valueSource } from "./homeValues";
@@ -53,7 +54,7 @@
         <label class="flex flex-col gap-1 text-sm">Value
           <span class="relative">
             <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-            <input type="number" min="0" step="100" value={Math.round(a.current_value)} use:autosave={saveValue}
+            <input type="number" min="0" step="100" value={Math.round(a.current_value)} {@attach commas} use:autosave={saveValue}
               class="h-9 w-44 rounded-md border border-input bg-transparent pr-2 pl-6 text-sm dark:bg-input/30" />
           </span>
         </label>

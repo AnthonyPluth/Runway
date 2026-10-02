@@ -90,7 +90,7 @@ describe("a budget's row", () => {
   it("edits in place on a phone: the amount, the card and rolling over", () => {
     viewport.phone = true;
     show();
-    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue(500);
+    expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByRole("button", { name: /Roll over/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Set card/ })).toBeInTheDocument();
     expect(screen.getByText("$300 left")).toBeInTheDocument();

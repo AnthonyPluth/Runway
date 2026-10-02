@@ -11,6 +11,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { barWidth, fmt, fmt0, fmtDate, isoDay, shortMoney } from "$lib/format";
+  import { commas } from "$lib/commas";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { toast } from "svelte-sonner";
   import { EQ_KINDS, isOption, shares, todayIndex, vestingSeries } from "./equity";
@@ -102,7 +103,7 @@
       <label class="flex flex-col gap-1 text-sm">Share price
         <span class="relative">
           <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-          <Input class="w-32 pl-6" type="number" min="0" step="0.01" value={coPrice} oninput={(e) => (coPrice = e.currentTarget.value)} placeholder="0.00" />
+          <Input class="w-32 pl-6" type="number" min="0" step="0.01" value={coPrice} {@attach commas} oninput={(e) => (coPrice = e.currentTarget.value)} placeholder="0.00" />
         </span>
       </label>
       <Button size="sm" onclick={async () => { if (await post("/api/equity/companies", { name: coName, share_price: coPrice }, "Company added")) adding = false; }}>Add</Button>
@@ -122,7 +123,7 @@
           <label class="inline-flex items-center gap-2 text-sm">Share price
             <span class="relative">
               <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-              <input type="number" min="0" step="0.01" value={co.share_price ?? ""} placeholder="0.00"
+              <input type="number" min="0" step="0.01" value={co.share_price ?? ""} {@attach commas} placeholder="0.00"
                 class="h-8 w-28 rounded-md border border-input bg-transparent pr-2 pl-6 text-sm dark:bg-input/30"
                 use:autosave={(f) => post(`/api/equity/companies/${cid(co)}`, { share_price: f.value }, "Share price saved")} />
             </span>

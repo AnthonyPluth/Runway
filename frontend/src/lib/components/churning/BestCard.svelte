@@ -7,6 +7,7 @@
   import { fmt, fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
   import { catParentOf } from "$lib/categories.svelte";
+  import { commas } from "$lib/commas";
   import { fullDate, isTravel } from "./churning";
   import type { BestCard } from "./types";
 
@@ -43,7 +44,7 @@
       <label class="flex flex-col gap-1 text-sm">Amount <span class="sr-only">(optional)</span>
         <span class="relative">
           <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-          <Input type="number" min="0" step="1" class="w-32 pl-6" bind:value={amount} placeholder="optional" />
+          <Input type="number" min="0" step="1" class="w-32 pl-6" bind:value={amount} {@attach commas} placeholder="optional" />
         </span>
       </label>
       {#if travel}

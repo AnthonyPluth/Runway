@@ -6,6 +6,7 @@
   import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
   import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
+  import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
 
@@ -102,7 +103,7 @@
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-2 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
-        <input type="number" min="0" step="10" value={c.budget ?? ""} placeholder={c.budget == null ? (sub ? "—" : "Budget") : ""}
+        <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : "Budget") : ""}
           aria-label={`Budget for ${c.name}`} onchange={(e) => onsave(c.name, e.currentTarget.value)}
           class={cn("h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:w-24",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-5" : "pl-5")} />
