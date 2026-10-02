@@ -14,9 +14,8 @@
   import StatStrip, { type Stat, type StatTone } from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { barWidth, fmt, fmt0, fmtDate, fmtDateTime, shortMoney } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDateTime, shortMoney } from "$lib/format";
   import { cn } from "$lib/utils";
   import Check from "@lucide/svelte/icons/check";
   import Info from "@lucide/svelte/icons/info";
@@ -101,7 +100,6 @@
   }
 
   const ALLOC: [AllocKey, string][] = [["asset_class", "Asset class"], ["account", "Account"], ["sector", "Sector"], ["holding", "Top holdings"]];
-  const activity = $derived(d?.activity.filter((t) => !inv.activityType || t.type === inv.activityType) ?? []);
 </script>
 
 {#if error && !status}
@@ -238,48 +236,6 @@
       <Card.Description>{fmt(d.income.income_12m)} in the last 12 months · fees {fmt(d.income.fees_12m)}</Card.Description>
     </Card.Header>
     <Card.Content><BarChart labels={incomeLabels} values={d.income.income} fmtTip={fmt} /></Card.Content>
-  </Card.Root>
-
-  <Card.Root class="mb-6">
-    <Card.Header>
-      <Card.Title>Activity</Card.Title>
-      <Card.Action>
-        <NativeSelect aria-label="Kind of activity" value={inv.activityType} onchange={(e) => { inv.activityType = e.currentTarget.value; inv.activityLimit = 40; }}>
-          <option value="">All activity</option>
-          {#each ["buy", "sell", "cash", "fee", "transfer"] as t (t)}<option value={t}>{t}</option>{/each}
-        </NativeSelect>
-      </Card.Action>
-    </Card.Header>
-    <Card.Content>
-      {#if activity.length}
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead><tr class="text-xs text-muted-foreground [&>th]:pb-1 [&>th]:font-medium [&>th:not(:first-child)]:pl-3">
-              <th class="text-left">Date</th><th class="text-left">Activity</th><th class="text-left max-[700px]:hidden">Account</th>
-              <th class="text-right">Shares</th><th class="text-right">Price</th><th class="text-right">Cash</th>
-            </tr></thead>
-            <tbody>
-              {#each activity.slice(0, inv.activityLimit) as t (t.id)}
-                <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:pl-3">
-                  <td class="whitespace-nowrap text-muted-foreground">{fmtDate(t.date, { month: "short", day: "numeric", year: "numeric" })}</td>
-                  <td>
-                    <div>{t.name ?? ""}</div>
-                    <div class="text-xs text-muted-foreground">{t.type ?? ""}{t.subtype && t.subtype !== t.type ? ` · ${t.subtype}` : ""}{t.ticker && !t.ticker.includes(":") ? ` · ${t.ticker}` : ""}</div>
-                  </td>
-                  <td class="text-muted-foreground max-[700px]:hidden">{t.account_name}</td>
-                  <td class="text-right tabular-nums">{t.quantity ? t.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 }) : ""}</td>
-                  <td class="text-right text-muted-foreground tabular-nums">{t.price ? fmt(t.price) : ""}</td>
-                  <td class={cn("text-right whitespace-nowrap tabular-nums", gainCls(-(t.amount ?? 0)))}>{t.amount ? signed(-t.amount) : ""}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-        {#if activity.length > inv.activityLimit}
-          <Button variant="link" size="sm" class="mt-2 px-0" onclick={() => (inv.activityLimit += 100)}>Show more ({activity.length - inv.activityLimit})</Button>
-        {/if}
-      {/if}
-    </Card.Content>
   </Card.Root>
 
   <HandTracked accounts={d.accounts} seen={status.simplefin_seen} onchanged={load} />

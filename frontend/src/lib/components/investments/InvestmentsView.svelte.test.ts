@@ -28,7 +28,7 @@ describe("InvestmentsView", () => {
       holdings: [holding({ logo: "/api/merchants/ticker%3AVTI/logo" }), holding({ security_id: "s2", ticker: "XYZ", name: "XYZ Corp", logo: null })],
       allocation: { asset_class: [], account: [], sector: [], holding: [] }, income: { months: [], income: [], fees: [], income_12m: 0, fees_12m: 0 },
       history: { dates: ["2026-08-01", "2026-09-30"], value: [2000, 2500], flows: [0, 0], invested: [2000, 2000], twr: [0, 0.1], benchmark: [0, 0.08], missing_prices: [], estimated_before: null },
-      performance: perf, periods: { "1M": perf }, xray: [], plan: {}, activity: [],
+      performance: perf, periods: { "1M": perf }, xray: [], plan: {},
       accounts: [{ id: "a1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: "Fidelity", tracked: 0, drift: null, balance: 2500 }],
     };
     vi.mocked(api).mockImplementation((async (path: string) => path.startsWith("/api/investments?") ? data : { inv_accounts: 1, items: [] }) as never);
@@ -48,7 +48,7 @@ describe("InvestmentsView", () => {
       today: "2026-09-30", total: 2500, unrealized_gain: 500, cost_basis: 2000, day_change: -12, day_change_pct: -0.005, cost_missing: 2, cost_missing_value: 300,
       holdings: [holding()], allocation: { asset_class: [], account: [], sector: [], holding: [] }, income: { months: [], income: [], fees: [], income_12m: 0, fees_12m: 0 },
       history: { dates: ["2026-08-01", "2026-09-30"], value: [2000, 2500], flows: [0, 0], invested: [2000, 2000], twr: [0, 0.1], benchmark: [0, 0.08], missing_prices: [], estimated_before: null },
-      performance: perf, periods: { "1M": perf }, xray: [], plan: {}, activity: [],
+      performance: perf, periods: { "1M": perf }, xray: [], plan: {},
       accounts: [{ id: "a1", item_id: "i", name: "Roth IRA", hidden: 0, hidden_in_accounts: 0, source: "plaid", institution_name: "Fidelity", tracked: 0, drift: null, balance: 2500 }],
     };
     vi.mocked(api).mockImplementation((async (path: string) => path.startsWith("/api/investments?") ? data : { inv_accounts: 1, items: [] }) as never);
@@ -60,7 +60,6 @@ describe("InvestmentsView", () => {
     expect(screen.getByText("Checks", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
     expect(screen.queryByText("X-ray")).toBeNull();
     expect(screen.queryByText("Nothing to show.")).toBeNull();
-    expect(screen.queryByText("No activity.")).toBeNull();
   });
 
   describe("holdings entered by hand", () => {
@@ -71,7 +70,7 @@ describe("InvestmentsView", () => {
         today: "2026-09-30", total: 20000, unrealized_gain: 0, cost_basis: 0, day_change: 0, day_change_pct: 0, cost_missing: 0, cost_missing_value: 0, holdings: [],
         allocation: { asset_class: [], account: [], sector: [], holding: [] }, income: { months: [], income: [], fees: [], income_12m: 0, fees_12m: 0 },
         history: { dates: ["2026-08-01"], value: [1], flows: [0], invested: [1], twr: [0], benchmark: [0], missing_prices: [], estimated_before: null },
-        performance: perf, periods: { "1M": perf }, xray: [], plan: {}, activity: [], accounts,
+        performance: perf, periods: { "1M": perf }, xray: [], plan: {}, accounts,
       };
       vi.mocked(api).mockImplementation((async (path: string) =>
         path.startsWith("/api/investments?") ? data
