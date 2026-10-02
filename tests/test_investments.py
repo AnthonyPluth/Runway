@@ -432,14 +432,14 @@ class MonthlySpendingTests(DbCase):
 
 class ShortHistoryLoanPaymentTests(DbCase):
     """A loan's payment in spending, when Runway has only a few months of transactions: a bank linked in July, today
-    October 1st, a mortgage paid from checking each month since (as Truist's shows on the bank statement)."""
+    October 1st, a mortgage paid from checking each month since (as Northwind's shows on the bank statement)."""
     OCT = date(2026, 10, 1)
 
     def setUp(self):
         super().setUp()
         self.c.execute(insert(Account), [
-            {"id": "mtg", "name": "Mortgage 1588", "org": "Truist", "kind": "loan", "balance": -180000, "interest_rate": 6.5,
-             "monthly_payment": 1262.93},
+            {"id": "mtg", "name": "Mortgage 0042", "org": "Northwind", "kind": "loan", "balance": -180000, "interest_rate": 6.5,
+             "monthly_payment": 1450.00},
             {"id": "chk", "name": "Checking", "org": "Bank", "kind": "checking", "balance": 0, "interest_rate": None,
              "monthly_payment": None}])
         self.c.execute(insert(Asset).values(name="House", kind="home", value=400000, as_of=self.OCT.isoformat(),
@@ -447,7 +447,7 @@ class ShortHistoryLoanPaymentTests(DbCase):
         self.n = 0
         self.spend("2026-07-01", -80, "Groceries", "KROGER")   # history starts July 1st: July is a full month
         for d in ("2026-07-05", "2026-08-04", "2026-09-02"):
-            self.spend(d, -1262.93, "Mortgage", "DIRECT DEBIT TRUIST MORTG OLB MTGPMT (Cash)", "Truist Mortgage")
+            self.spend(d, -1450.00, "Mortgage", "DIRECT DEBIT NORTHWIND MORTG OLB MTGPMT (Cash)", "Northwind Mortgage")
 
     def spend(self, posted, amount, category, desc, payee=None):
         self.n += 1

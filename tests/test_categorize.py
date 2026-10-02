@@ -19,7 +19,7 @@ class PayeeTests(unittest.TestCase):
             "DD *DIMSUMSAM": "Dimsumsam",
             "LYFT   *SCHD AIR 09-20": "Lyft",
             "UBER *EATS PENDING": "Uber Eats",
-            "JIMMY JOHNS - 3956 - ECOM": "Jimmy Johns",
+            "JIMMY JOHNS - 1234 - ECOM": "Jimmy Johns",
             "CVS/PHARMACY ##02671": "Cvs/pharmacy",
             "AMZN Mktp US*2K3AB1": "Amzn Mktp Us",
             "": "",
@@ -33,7 +33,7 @@ class PayeeTests(unittest.TestCase):
             "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)": "Target",
             "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)": "Target",
             "DIRECT DEPOSIT TARGET DEBITACH TRAN (Cash)": "Target",
-            "DIRECT DEBIT FIFTH THIRD BAWEB PAY (Cash)": "Fifth Third",
+            "DIRECT DEBIT LAKESIDE BANK BAWEB PAY (Cash)": "Lakeside Bank",
             "GEICO ACH PMT": "Geico",
             "COMCAST WEB PAY": "Comcast",
             "ACME CORP PAYROLL PPD ID: 1234567": "Acme Corp Payroll",
@@ -43,7 +43,7 @@ class PayeeTests(unittest.TestCase):
         # And payees synced before, as they were stored
         for long in ("Target Cach Tran Cash", "Target C Cash", "Direct Deposit Target Debitach Tran Cash", "Target Debit Cach Tran"):
             self.assertEqual(payees.shorten(long), "Target", long)
-        self.assertEqual(payees.shorten("Fifth Third Baweb Pay Cash"), "Fifth Third")
+        self.assertEqual(payees.shorten("Lakeside Bank Baweb Pay Cash"), "Lakeside Bank")
 
     def test_a_merchants_own_name_stays_as_it_is(self):
         # Transfer words alone aren't enough: a merchant's name can end with them. Only an ACH code (or "web pay", or a
@@ -583,7 +583,7 @@ class CategorizeFixTests(LedgerCase):
     def test_autopay_needs_a_card(self):
         cat = lambda d: categorize.heuristic_category({"description": d, "amount": -100}, "checking")
         for bill in ("COMCAST XFINITY AUTOPAY", "STATE FARM AUTOPAY", "CITY WATER EPAY", "CAPITAL ONE AUTO FINANCE PMT",
-                     "CHASE MORTGAGE AUTOPAY", "CAPITAL ONE AUTO PMT", "TRUIST MORTG OLB MTGPMT"):
+                     "CHASE MORTGAGE AUTOPAY", "CAPITAL ONE AUTO PMT", "NORTHWIND MORTG OLB MTGPMT"):
             self.assertIsNone(cat(bill), bill)
         for card in ("CHASE CREDIT CRD AUTOPAY", "CAPITAL ONE MOBILE PMT", "AMEX EPAYMENT ACH PMT", "DISCOVER E-PAYMENT",
                      "CITI AUTOPAY PAYMENT", "BARCLAYCARD US AUTOPAY", "APPLECARD GSBANK PAYMENT"):
