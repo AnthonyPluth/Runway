@@ -9,7 +9,7 @@
   import { cn } from "$lib/utils";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { toast } from "svelte-sonner";
-  import { currencyGroups, fullDate, points, valueSource } from "./churning";
+  import { balanceText, balanceValue, currencyGroups, fullDate, points, valueSource } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import Section from "./Section.svelte";
   import type { Churning } from "./types";
@@ -28,9 +28,24 @@
   // A balance is as of today when you change it, unless you set its day yourself first.
   const key = (owner: string, currency: string) => `${owner}|${currency}`;
   const day = $state<Record<string, string>>({}), dayEdited = new Set<string>();
+  // A balance reads with its commas ("125,000"), which a number field can't show, and is a number field (arrows that
+  // step it by a point) while you edit it.
+  function commas(el: HTMLInputElement) {
+    const show = () => {
+      const n = balanceValue(el.value);
+      if (n === "" || !Number.isFinite(Number(n))) return;   // left as typed: what's wrong with it shows when it saves
+      el.type = "text";
+      el.value = balanceText(Number(n));
+    };
+    const edit = () => { el.value = balanceValue(el.value); el.type = "number"; };
+    el.addEventListener("focus", edit);
+    el.addEventListener("blur", show);
+    return { destroy() { el.removeEventListener("focus", edit); el.removeEventListener("blur", show); } };
+  }
   const setBalance = (owner: string, currency: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     const k = key(owner, currency);
-    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: f.value, as_of: dayEdited.has(k) && day[k] ? day[k] : d.today } });
+    const typed = balanceValue(f.value);
+    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: typed, as_of: dayEdited.has(k) && day[k] ? day[k] : d.today } });
     dayEdited.delete(k);
     onchanged();
   };
@@ -147,8 +162,8 @@
                       {:else}{row.name}{/if}
                     </td>
                     <td class="text-right">
-                      <input type="number" min="0" step="1" value={row.balance ?? ""} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
-                        use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
+                      <input type="text" inputmode="numeric" min="0" step="1" value={balanceText(row.balance)} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
+                        use:commas use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
                     </td>
                     <td class="text-right tabular-nums">{row.balance_value == null ? "—" : fmt0(row.balance_value)}</td>
                   </tr>
@@ -180,8 +195,8 @@
             <CurrencySelect {d} blank="Add a balance…" bind:value={() => addFor[person] ?? "", (v) => (addFor[person] = v)} aria-label={`Add a balance for ${person}`}
               only={(c) => !r?.currencies.some((x) => x.currency === c)} class="h-8 py-0" />
             {#if addFor[person]}
-              <input type="number" min="0" step="1" placeholder="points" aria-label="Balance"
-                use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm" />
+              <input type="text" inputmode="numeric" min="0" step="1" placeholder="points" aria-label="Balance"
+                use:commas use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm" />
               <label class="flex items-center gap-1 text-xs text-muted-foreground">as of
                 <input type="date" max={d.today} value={d.today} aria-label={`Day of the new ${person} balance`}
                   oninput={(e) => (day[key(person, addFor[person])] = e.currentTarget.value)}

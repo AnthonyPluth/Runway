@@ -65,9 +65,22 @@ describe("Rewards", () => {
     expect(screen.getByTitle(/What this year's points and bonuses are worth/)).toHaveTextContent("$975");
   });
 
-  it("lets a balance change by one point", () => {
+  it("lets a balance change by one point", async () => {
     setup([row({ balance: 100, balance_value: 1.5 })]);
-    expect(screen.getByLabelText("Alex's Chase Ultimate Rewards balance")).toHaveAttribute("step", "1");
+    const box = screen.getByLabelText("Alex's Chase Ultimate Rewards balance");
+    await userEvent.click(box);
+    expect(box).toHaveAttribute("type", "number");
+    expect(box).toHaveAttribute("step", "1");
+  });
+
+  it("shows a balance with its commas, and edits it as a number", async () => {
+    setup([row({ balance: 142000, balance_value: 2130 })]);
+    const box = screen.getByLabelText("Alex's Chase Ultimate Rewards balance");
+    expect(box).toHaveValue("142,000");
+    await userEvent.click(box);
+    expect(box).toHaveValue(142000);
+    await userEvent.tab();
+    expect(box).toHaveValue("142,000");
   });
 
   it("takes a balance off the list, even one that is 0", async () => {
