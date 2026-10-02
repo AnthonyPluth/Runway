@@ -28,7 +28,7 @@
   } = $props();
 
   let all = $state(false);
-  const shown = $derived(all ? items : items.slice(0, 8));
+  const shown = $derived(all ? items : items.slice(0, 4));
   let adding = $state(false);
   let card = $state(""), due = $state(""), action = $state("");
   const SUGGEST = ["Close", "Product change (downgrade)", "Call for a retention offer", "Check the bonus posted", "Move spending elsewhere"];
@@ -116,7 +116,7 @@
           </li>
         {/each}
       </ul>
-      {#if items.length > 8}
+      {#if items.length > 4}
         <Button variant="link" size="sm" class="mt-1 px-0" onclick={() => (all = !all)}>{all ? "Show fewer" : `Show all ${items.length}`}</Button>
       {/if}
     {/if}

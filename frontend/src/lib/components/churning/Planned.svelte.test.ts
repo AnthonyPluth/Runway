@@ -78,6 +78,24 @@ describe("planned", () => {
     expect(screen.getByText("Got it")).toBeInTheDocument();
   });
 
+  it("deletes an applied or dropped item after asking, and offers it only for those", async () => {
+    const { onchanged } = setup([wish(), wish({ id: 2, product: "Old one", status: "dropped" })]);
+    expect(screen.queryByRole("button", { name: /^Delete/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(calls(/remove/)).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Delete Old one?" }));
+    await waitFor(() => expect(calls("/api/churning/wishlist/2/remove")).toHaveLength(1));
+    await waitFor(() => expect(onchanged).toHaveBeenCalled());
+  });
+
+  it("puts one person's plan between another's: one order for everyone", () => {
+    setup([wish({ id: 1, owner: "Alex", product: "First", priority: 1 }), wish({ id: 2, owner: "Sam", product: "Second", priority: 2 }),
+      wish({ id: 3, owner: "Alex", product: "Third", priority: 3 })]);
+    expect([...document.querySelectorAll("[data-wish]")].map((li) => li.getAttribute("data-wish"))).toEqual(["1", "2", "3"]);
+    expect(screen.getAllByTitle("Priority").map((el) => el.textContent)).toEqual(["#1", "#2", "#3"]);
+  });
+
   it("moves an item up by renumbering priorities, and saves a score", async () => {
     const { onchanged } = setup([wish({ id: 1, priority: 1 }), wish({ id: 2, product: "Gold", priority: 2 })]);
     await userEvent.click(screen.getByRole("button", { name: "Move Gold up" }));

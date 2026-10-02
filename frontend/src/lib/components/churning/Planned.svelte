@@ -3,6 +3,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Input } from "$lib/components/ui/input";
   import { fmt0 } from "$lib/format";
@@ -56,6 +57,11 @@
   }
   async function setStatus(w: Wish, status: "wanted" | "dropped") {
     try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status } }); toast(status === "dropped" ? `Dropped ${wishName(w)}` : `${wishName(w)} is wanted again`); onchanged(); }
+    catch (err) { toast.error((err as Error).message); }
+  }
+  // Applied or dropped: gone for good (what applying made, the card or bonus, stays).
+  async function remove(w: Wish) {
+    try { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
   async function applied(w: Wish) {
@@ -112,6 +118,9 @@
         {:else if w.status === "dropped"}
           <Button size="sm" variant="link" class="px-1" onclick={() => setStatus(w, "wanted")}>Want again</Button>
           <Button size="sm" variant="link" class="px-1" onclick={() => (form = w)} aria-label={`Edit ${wishName(w)}`}>Edit</Button>
+        {/if}
+        {#if !open}
+          <ConfirmButton class="px-1" confirm={`Delete ${wishName(w)}?`} title={`Delete ${wishName(w)} from Planned`} onconfirm={() => remove(w)}>Delete</ConfirmButton>
         {/if}
       </div>
     </div>

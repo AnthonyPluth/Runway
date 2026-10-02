@@ -214,7 +214,7 @@ export function benefitOrder(a: Benefit, b: Benefit): number {
 }
 
 export const BLOCKER_LABEL: Record<Blocker["kind"], string> = {
-  five24: "5/24", bonus_rule: "Bonus rule", held: "Still open", wait: "Waiting", score: "Credit score", offer: "Offer",
+  five24: "5/24", bonus_rule: "Bonus rule", held: "Card held", wait: "Waiting", score: "Credit score", offer: "Offer",
 };
 
 /** "705 of 740 wanted": a person's latest score against what a planned item wants; null when it wants none. */

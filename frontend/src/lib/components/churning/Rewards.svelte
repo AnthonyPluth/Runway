@@ -25,9 +25,8 @@
   let newName = $state(""), newCents = $state("");
   const groups = $derived(currencyGroups(d));
 
-  // A balance is as of today when you change it, unless you set its day yourself first.
+  // A balance is as of the day you enter it: the estimate of it now counts what the cards earned from then on.
   const key = (owner: string, currency: string) => `${owner}|${currency}`;
-  const day = $state<Record<string, string>>({}), dayEdited = new Set<string>();
   // A balance reads with its commas ("125,000"), which a number field can't show, and is a number field (arrows that
   // step it by a point) while you edit it.
   function commas(el: HTMLInputElement) {
@@ -43,21 +42,12 @@
     return { destroy() { el.removeEventListener("focus", edit); el.removeEventListener("blur", show); } };
   }
   const setBalance = (owner: string, currency: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
-    const k = key(owner, currency);
-    const typed = balanceValue(f.value);
-    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: typed, as_of: dayEdited.has(k) && day[k] ? day[k] : d.today } });
-    dayEdited.delete(k);
+    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: balanceValue(f.value), as_of: d.today } });
     onchanged();
   };
   // Takes a balance off the list (a program you no longer use); the row stays only while a card still earns in it.
   const remove = (owner: string, currency: string) => async () => {
     await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: null } });
-    onchanged();
-  };
-  // Changing the day keeps the balance and moves the day the estimate counts from.
-  const setDay = (owner: string, currency: string, balance: number | null) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
-    if (balance == null) { dayEdited.add(key(owner, currency)); return; }
-    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: balance, as_of: f.value || d.today } });
     onchanged();
   };
   const setCents = (k: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
@@ -89,27 +79,28 @@
     <Section id="values" title="Point values" summary="What a point is worth to you, in cents" bind:open={values}>
       <div>
         {#each groups as g (g.kind)}
-          <h4 class="mt-3 mb-1 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">{g.label}</h4>
-          <div class="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <!-- Set once and rarely touched: one dense line a currency, where it came from in small print beside the name. -->
+          <h4 class="mt-2 mb-0.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase first:mt-0">{g.label}</h4>
+          <div class="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
             {#each g.currencies as c (c.key)}
-              <div class="flex items-center gap-2 text-sm">
-                <label class="flex flex-1 items-center justify-between gap-2"><span class="min-w-0">{c.name}
-                  <span class="block text-xs text-muted-foreground" title={c.source_note}>{valueSource(c, d.values_as_of)}</span></span>
-                  <span class="flex items-center gap-1"><input type="number" min="0" step="0.05" value={c.cents} use:autosave={setCents(c.key)}
-                    class="h-8 w-20 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />¢</span>
+              <div class="flex min-h-8 items-center gap-1.5 text-sm">
+                <label class="flex min-w-0 flex-1 items-center gap-1.5"><span class="min-w-0 truncate" title={c.name}>{c.name}</span>
+                  <span class="shrink-0 text-[11px] text-muted-foreground" title={c.source_note}>{valueSource(c, d.values_as_of)}</span>
+                  <span class="ml-auto flex shrink-0 items-center gap-0.5"><input type="number" min="0" step="0.05" value={c.cents} use:autosave={setCents(c.key)}
+                    aria-label={`Cents a ${c.name} point`} class="h-7 w-14 rounded-md border border-transparent bg-transparent px-1.5 text-right text-sm tabular-nums hover:border-input focus-visible:border-ring" />¢</span>
                 </label>
                 <!-- Always takes the space, so the inputs line up whether or not a row has Remove or Reset. -->
-                <span class="w-12 shrink-0">
-                  {#if c.custom}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)}>Remove</Button>
-                  {:else if c.default != null && c.cents !== c.default}<Button variant="link" size="sm" class="px-0" onclick={() => reset(c.key)} title={`Back to ${c.default}¢`}>Reset</Button>{/if}
+                <span class="w-11 shrink-0 text-xs">
+                  {#if c.custom}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => reset(c.key)}>Remove</Button>
+                  {:else if c.default != null && c.cents !== c.default}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => reset(c.key)} title={`Back to ${c.default}¢`}>Reset</Button>{/if}
                 </span>
               </div>
             {/each}
           </div>
         {/each}
-        <div class="mt-4 flex flex-wrap items-end gap-2">
-          <label class="flex flex-col gap-1 text-sm">Add a currency<Input class="w-48" bind:value={newName} placeholder="e.g. Bilt Rewards" /></label>
-          <label class="flex flex-col gap-1 text-sm">Cents a point<Input type="number" min="0" step="0.05" class="w-24" bind:value={newCents} /></label>
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <Input class="h-8 w-48" bind:value={newName} placeholder="Add a currency, e.g. Bilt" aria-label="Add a currency" />
+          <span class="flex items-center gap-0.5"><Input type="number" min="0" step="0.05" class="h-8 w-20" bind:value={newCents} placeholder="cents" aria-label="Cents a point" />¢</span>
           <Button size="sm" variant="outline" onclick={addCurrency}>Add</Button>
         </div>
       </div>
@@ -176,11 +167,7 @@
                               Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>{#if row.est_value != null}<span class="tabular-nums" title="Worth of the estimated balance"> · ~{fmt0(row.est_value)}</span>{/if}
                             </span>
                           {/if}
-                          <label class="flex items-center gap-1">as of
-                            <input type="date" max={d.today} value={row.as_of ?? d.today} aria-label={`Day of ${person}'s ${row.name} balance`}
-                              oninput={(e) => (day[k] = e.currentTarget.value)} use:autosave={setDay(person, row.currency, row.balance)}
-                              class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
-                          </label>
+                          {#if row.as_of}<span>Entered {fullDate(row.as_of)}</span>{/if}
                           <button type="button" class="underline hover:text-foreground"
                             aria-label={`Remove ${person}'s ${row.name} balance`} onclick={remove(person, row.currency)}>Remove</button>
                         </div>
@@ -197,12 +184,6 @@
             {#if addFor[person]}
               <input type="text" inputmode="numeric" min="0" step="1" placeholder="points" aria-label="Balance"
                 use:commas use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm" />
-              <label class="flex items-center gap-1 text-xs text-muted-foreground">as of
-                <input type="date" max={d.today} value={d.today} aria-label={`Day of the new ${person} balance`}
-                  oninput={(e) => (day[key(person, addFor[person])] = e.currentTarget.value)}
-                  use:autosave={async () => { dayEdited.add(key(person, addFor[person])); }}
-                  class="h-7 w-32 rounded-md border border-input bg-transparent px-1.5 text-xs" />
-              </label>
             {/if}
           </div>{/if}
         </div>
