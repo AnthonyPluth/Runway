@@ -133,6 +133,11 @@ describe("BudgetRow", () => {
       expect(onchanged).toHaveBeenCalled();
     });
 
+    it("shows Set card on a budget with no card yet, without having to hover", () => {
+      setup(cat(), { budgets: true, counts: true });
+      expect(screen.getByRole("button", { name: "Set card" }).className).not.toMatch(/opacity-0/);
+    });
+
     it("names the chosen card on the button", () => {
       setup(cat({ pay_with: "c1" }), { budgets: true, counts: true });
       expect(screen.getByRole("button", { name: "Visa" })).toBeInTheDocument();

@@ -42,7 +42,8 @@
     onchanged();
   }
 
-  // Which card a budget is paid with: out of the way until you want to change it.
+  // Which card a budget is paid with: a quiet "Set card" until one is chosen (always shown: hidden until hover, it
+  // looked like only budgets that had a card could get one).
   let choosing = $state(false);
   let done = false;
   function focus(el: HTMLSelectElement) { el.focus(); }
@@ -83,7 +84,7 @@
         <button type="button" title="Which card or account this spending goes on (used by the budget forecast)"
           onclick={() => { done = false; choosing = true; }}
           class={cn("cursor-pointer rounded-md px-1.5 py-2.5 text-xs whitespace-nowrap text-muted-foreground sm:py-0.5 hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
-            !chosen && "opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100")}>
+            !chosen && "text-muted-foreground/70")}>
           {chosen ?? "Set card"}
         </button>
       {/if}
