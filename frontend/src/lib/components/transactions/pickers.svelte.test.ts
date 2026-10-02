@@ -229,6 +229,22 @@ describe("LogoPicker", () => {
     expect(api).toHaveBeenLastCalledWith("/api/accounts/a%201/logo", { method: "POST", body: { hidden: true } });
   });
 
+  it("chooses a holding's logo by its group, with Logo.dev's matches for its name", async () => {
+    const fund = options({ candidates: [{ name: "Vanguard", domain: "vanguard.com" }] });
+    vi.mocked(api).mockResolvedValueOnce(fund).mockResolvedValueOnce({}).mockResolvedValueOnce(fund).mockResolvedValue({});
+    const onchanged = vi.fn();
+    render(LogoPicker, { name: "Made-Up Fund", holding: "t:MUF 1", children: logo, onchanged });
+    await userEvent.click(screen.getByRole("button", { name: "Logo for Made-Up Fund" }));
+    expect(api).toHaveBeenCalledWith("/api/investments/logo-options?group=t%3AMUF%201&name=Made-Up%20Fund");
+    await userEvent.click(await screen.findByRole("button", { name: /vanguard\.com/ }));
+    expect(api).toHaveBeenLastCalledWith("/api/investments/logo", { method: "POST", body: { group: "t:MUF 1", website: "vanguard.com" } });
+    expect(toast.success).toHaveBeenCalledWith("Using vanguard.com's logo for Made-Up Fund");
+    expect(onchanged).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Logo for Made-Up Fund" }));
+    await userEvent.click(await screen.findByRole("button", { name: "No logo" }));
+    expect(api).toHaveBeenLastCalledWith("/api/investments/logo", { method: "POST", body: { group: "t:MUF 1", hidden: true } });
+  });
+
   it("says how to pick by website when there's no Logo.dev key", async () => {
     vi.mocked(api).mockResolvedValue(options({ configured: false, candidates: [] }));
     setup();

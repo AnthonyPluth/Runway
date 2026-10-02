@@ -31,6 +31,21 @@ describe("HoldingsTable", () => {
     expect(xyz.querySelector("td span[aria-hidden]")).toHaveTextContent("X");
   });
 
+  it("opens the logo chooser from a holding's logo, and reloads after a choice", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ choice: null, searchable: false, configured: true, candidates: [], error: null }).mockResolvedValue({});
+    const onchanged = setup([holding({ group: "t:VTI" })]);
+    await userEvent.click(screen.getByRole("button", { name: "Logo for Vanguard Total Market" }));
+    expect(api).toHaveBeenCalledWith("/api/investments/logo-options?group=t%3AVTI&name=Vanguard%20Total%20Market");
+    await userEvent.click(await screen.findByRole("button", { name: "No logo" }));
+    expect(api).toHaveBeenLastCalledWith("/api/investments/logo", { method: "POST", body: { group: "t:VTI", hidden: true } });
+    expect(onchanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a holding's logo chooser to the holdings that aren't cash", () => {
+    setup([holding({ group: "t:VTI" }), holding({ security_id: "s9", group: "s9", ticker: "CUR:USD", name: "US Dollar", is_cash: true })]);
+    expect(screen.getAllByRole("button", { name: /^Logo for / })).toHaveLength(1);
+  });
+
   it("shows a holding's ticker, name, accounts, shares, price and value", () => {
     setup();
     const row = screen.getAllByRole("row")[1];
