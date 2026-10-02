@@ -1249,6 +1249,19 @@ class AnnualFeeTests(LedgerCase):
         again = forecast.build(self.conn, TODAY, 90)
         self.assertAlmostEqual(paid(again["budget"], "2026-11-05"), paid(with_fees["budget"], "2026-11-05"), places=2)
 
+    def test_budget_line_keeps_the_fee_of_a_card_with_no_statement(self):
+        # A new card with no statement yet, $310 a month budgeted on it and a $95 fee on Oct 20: the fee is on October's
+        # assumed statement (closing Oct 31, paid Nov 25), with October's charges.
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.churn(account_id="cc3")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-310.0, -405.0))
+        # a budget for fees has it already
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=0.01, pay_with="cc3"))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertAlmostEqual(card["2026-11-25"]["amount"], -310.01, places=2)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

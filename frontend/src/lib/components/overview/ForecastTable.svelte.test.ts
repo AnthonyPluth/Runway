@@ -16,13 +16,12 @@ const fc = (charged: number, assumed: boolean) => ({
 describe("ForecastTable", () => {
   it("says when a card's budgeted statement is on an assumed cycle", () => {
     render(ForecastTable, { fc: fc(40, true) });
-    expect(screen.getByText("New card statement (budgeted)")).toBeInTheDocument();
-    expect(screen.getByText(/\$40\.00 already on the card, the rest budgeted spending · no statement yet, so taken to close at the month’s end and be paid 25 days later/)).toBeInTheDocument();
+    expect(screen.getByText(/New card statement \(budgeted\)/).closest("[title]")).toHaveAttribute("title",
+      "$40.00 already on the card, the rest budgeted spending · no statement yet, so taken to close at the month’s end and be paid 25 days later");
   });
 
   it("says nothing about the cycle for a card with a statement", () => {
     render(ForecastTable, { fc: fc(0, false) });
-    expect(screen.getByText("budgeted spending")).toBeInTheDocument();
-    expect(screen.queryByText(/no statement yet/)).not.toBeInTheDocument();
+    expect(screen.getByText(/New card statement \(budgeted\)/).closest("[title]")).toHaveAttribute("title", "budgeted spending");
   });
 });

@@ -810,7 +810,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i = min(range(len(series)), key=lambda k: series[k])
         return {"date": dates[i], "balance": series[i]}
 
-    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events)
+    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events, fees)
 
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
@@ -884,7 +884,7 @@ def budget_plan(conn, today: date) -> list[dict]:
 
 
 def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash: list[dict], by_id: dict,
-                    card_status: list[dict], events: list[dict]) -> dict | None:
+                    card_status: list[dict], events: list[dict], fees: list[dict] | None = None) -> dict | None:
     """The forecast if you spend exactly your budgets: budgeted spending is charged day by day to each category's
     account; spending on cards is paid on each card's due date, as much of each statement as the card's payment plan
     pays (payment_plan; the rest carries over, as in the forecast). Recurring items and statements that have already closed
@@ -1012,6 +1012,9 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                 break
             owed_now = max(0.0, owing) if first else 0.0
             charges = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
+            # A churning card's annual fee charged this cycle (annual_fees), unless a budget covers its category.
+            charges += -sum(f["amount"] for f in fees or [] if f.get("account_id") == cid
+                            and prev.isoformat() < f["date"] <= close.isoformat() and f["category"] not in budgeted)
             # What it owes today is this cycle's charges, not a balance carried from a statement: no interest on it.
             owed_interest = 0.0 if first else interest(card_plan, owing, charges)
             statement = owing + owed_interest + charges
