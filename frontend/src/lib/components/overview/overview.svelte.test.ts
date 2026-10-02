@@ -93,6 +93,7 @@ describe("SetupChecklist", () => {
 
 describe("ThisMonth", () => {
   it("leaves ignored transactions out of Recent", () => {
+    for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));   // stays loading: only the request matters
     render(ThisMonth);
     expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
   });
@@ -114,11 +115,11 @@ describe("CardsTable", () => {
   it("leaves out cards with a $0 balance and nothing left to pay", () => {
     at("2026-03-10");
     render(CardsTable, { cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
-      card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: -20, remaining: 0 })] });
+      card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: 0, remaining: 0, credit: 20 })] });
     expect(screen.getByText("Sapphire")).toBeInTheDocument();
     expect(screen.queryByText("Freedom")).toBeNull();
     expect(screen.getByText("Venture")).toBeInTheDocument();
-    expect(screen.getByText("Amex")).toBeInTheDocument();
+    expect(screen.queryByText("Amex")).toBeNull();   // a credit comes through as $0 owed
   });
 
   it("says so when every card is at $0", () => {

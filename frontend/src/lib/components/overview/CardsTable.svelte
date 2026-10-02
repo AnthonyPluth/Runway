@@ -13,8 +13,9 @@
   // Each card's latest statement (click it to correct the bank's figure), when it's due and its usual spending, and, for
   // a card that isn't paid in full, how much of it the forecast pays.
   let { cards }: { cards: CardSummary[] } = $props();
-  // A card that owes nothing, with nothing left to pay on its statement, has nothing to say here.
-  const shown = $derived(cards.filter((c) => Math.abs(c.owed_now) >= 0.005 || c.remaining > 0));
+  // A card that owes nothing (owed_now is never below zero: a credit reads as $0), with nothing left to pay on its
+  // statement, has nothing to say here.
+  const shown = $derived(cards.filter((c) => c.owed_now >= 0.005 || c.remaining > 0));
   const today = parseDate(isoDay());
 
   async function setStatement(c: CardSummary, value: number) {
