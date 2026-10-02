@@ -79,7 +79,7 @@
             <thead>
               <tr class="text-left text-xs text-muted-foreground [&>th]:pb-2 [&>th]:font-medium [&>th+th]:pl-4">
                 <th>{GROUPS[st.group]}</th><th class="text-right">{monthTick(d.months[cur])}</th>
-                {#if n > 1}<th class="text-right">vs {monthTick(d.months[cur - 1])}</th>{/if}
+                {#if n > 1}<th class="text-right max-[480px]:hidden">vs {monthTick(d.months[cur - 1])}</th>{/if}
                 {#if lastYear != null}<th class="text-right max-sm:hidden">vs {monthTick(d.months[lastYear], true)}</th>{/if}
                 {#if n > 1}<th class="text-right max-sm:hidden">Monthly average</th>{/if}<th class="text-right">{n} months</th>
               </tr>
@@ -94,7 +94,7 @@
                       title={`Show only ${s.name}`} aria-pressed={on} onclick={() => toggle(s.name)}><Swatch color={s.color} />{s.name}</button>
                   </td>
                   <td class="text-right tabular-nums">{fmt(s.values[cur])}</td>
-                  {#if n > 1}<td class={cn("text-right tabular-nums", c != null && c > 0.1 ? "text-(--low)" : "text-muted-foreground")}>{pctTxt(c)}</td>{/if}
+                  {#if n > 1}<td class={cn("text-right tabular-nums max-[480px]:hidden", c != null && c > 0.1 ? "text-(--low)" : "text-muted-foreground")}>{pctTxt(c)}</td>{/if}
                   {#if lastYear != null}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{pctTxt(change(s.values[cur], s.values[lastYear]))}</td>{/if}
                   {#if n > 1}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{fmt(avg(s.values))}</td>{/if}
                   <td class="text-right tabular-nums">{fmt(s.total)}</td>

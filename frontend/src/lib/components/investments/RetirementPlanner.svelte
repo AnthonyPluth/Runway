@@ -1,13 +1,11 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
-  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0, fmtDate } from "$lib/format";
-  import { isPhone } from "$lib/phone.svelte";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
@@ -223,7 +221,7 @@
   <div class="rounded-lg border border-dashed px-6 py-10 text-center"
     title="Runway plans from your investment accounts. Connect one, or enter holdings by hand, and the planner starts from real numbers.">
     <h3 class="font-medium">Nothing to plan from yet</h3>
-    {#if !isPhone()}<Button class="mt-4" href="#networth/investments">Go to Investments</Button>{/if}
+    <Button class="mt-4" href="#networth/investments">Go to Investments</Button>
   </div>
 {:else}
 {#if shown}
@@ -256,13 +254,10 @@
   </div>
   <div class="mt-4"><PlannerChart p={shown} {names} {dollars} /></div>
 {:else}
-  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age{isPhone() ? " on a computer" : ""} to see the projection.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
 {/if}
 {#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
-{#if isPhone()}
-  <DesktopOnly class="mt-5" what="change the plan" />
-{:else}
 <div class="mt-5 grid gap-6 lg:grid-cols-2">
   <section>
     <h3 class="mb-2 font-medium">Who's retiring</h3>
@@ -429,7 +424,6 @@
     </div>
   </details>
 </div>
-{/if}
 {/if}
 
 {#if saved}

@@ -167,11 +167,11 @@
       <div class="mt-4 overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="text-xs text-muted-foreground"><th class="pb-1 text-left font-medium">Period</th>
-            {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-3 text-right font-medium">{p}</th>{/each}</tr></thead>
-          <tbody class="tabular-nums [&_td]:py-1.5 [&_td:not(:first-child)]:pl-3 [&_td]:whitespace-nowrap">
+            {#each Object.keys(d.periods) as p (p)}<th class="pb-1 pl-2 text-right font-medium sm:pl-3">{p}</th>{/each}</tr></thead>
+          <tbody class="tabular-nums [&_td]:py-1.5 [&_td:not(:first-child)]:pl-2 sm:[&_td:not(:first-child)]:pl-3 [&_td]:whitespace-nowrap">
             <tr class="border-t border-border"><td>Your return</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right", gainCls(p.return))}>{pct(p.return)}</td>{/each}</tr>
             <tr class="border-t border-border"><td>S&amp;P 500</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class="text-right text-muted-foreground">{pct(p.benchmark_return)}</td>{/each}</tr>
-            <tr class="border-t border-border"><td class="whitespace-nowrap">Gain after deposits</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right text-muted-foreground", gainCls(p.gain))}>{signed(p.gain)}</td>{/each}</tr>
+            <tr class="border-t border-border"><td>Gain after deposits</td>{#each Object.entries(d.periods) as [k, p] (k)}<td class={cn("text-right text-muted-foreground", gainCls(p.gain))}>{signed(p.gain)}</td>{/each}</tr>
           </tbody>
         </table>
       </div>

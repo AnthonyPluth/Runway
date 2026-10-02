@@ -54,12 +54,35 @@
     changed = true;
     if (h.lots.length === 1) finish();   // one account: done as soon as it's saved
   };
+  // Under 700px the secondary columns fold into the holding's cell, and the cost basis button goes with them (rendered once).
+  const narrowQuery = typeof matchMedia === "function" ? matchMedia("(max-width: 700px)") : null;
+  const narrow = $state({ on: narrowQuery?.matches ?? false });
+  $effect(() => {
+    if (!narrowQuery) return;
+    const sync = () => { narrow.on = narrowQuery.matches; };
+    narrowQuery.addEventListener("change", sync);
+    sync();
+    return () => narrowQuery.removeEventListener("change", sync);
+  });
   const COLS: [SortKey, string, string][] = [
-    ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right"], ["price", "Price", "text-right"], ["value", "Value", "text-right"],
-    ["day_change", "Today", "text-right"], ["gain", "Total gain", "text-right"], ["allocation", "Weight", "text-right"],
+    ["name", "Holding", "text-left"], ["quantity", "Shares", "text-right max-[700px]:hidden"], ["price", "Price", "text-right max-[700px]:hidden"], ["value", "Value", "text-right"],
+    ["day_change", "Today", "text-right max-[700px]:hidden"], ["gain", "Total gain", "text-right"], ["allocation", "Weight", "text-right max-[700px]:hidden"],
     ["cost_basis", "Cost basis", "text-right max-[700px]:hidden"],
   ];
 </script>
+
+{#snippet costBasis(x: Holding)}
+            {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
+            {:else}
+              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border",
+                x.gain == null ? "text-[var(--nw-1)]" : "text-muted-foreground hover:text-foreground")} title="Edit cost basis"
+                aria-expanded={open === keyOf(x)} onclick={() => (open === keyOf(x) ? finish() : openEditor(x))}>
+                {x.gain == null ? "Add" : fmt(x.cost_basis)}
+                {#if x.cost_manual}<Badge variant="secondary" class="px-1.5 py-0 text-[11px]">edited</Badge>{/if}
+                <Pencil class={cn("size-3", x.gain == null ? "opacity-70" : "opacity-0 group-hover:opacity-70 group-focus-visible:opacity-70")} aria-hidden="true" />
+              </button>
+            {/if}
+{/snippet}
 
 <div class="overflow-x-auto" id="inv-holdings">
   <table class="w-full text-sm">
@@ -77,22 +100,28 @@
     <tbody>
       {#each rows as x (keyOf(x))}
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-3">
-          <td class="min-w-48">
+          <td class="min-w-48 max-[700px]:min-w-0">
             <div class="flex gap-2.5">
               <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
               <div>
                 <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
+                {#if narrow.on}
+                <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
+                  {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{x.day_change != null ? ` · today ${signed(x.day_change)}` : ""} · {(x.allocation * 100).toFixed(1)}%
+                </div>
+                <div>{@render costBasis(x)}</div>
+                {/if}
               </div>
             </div>
           </td>
-          <td class="text-right tabular-nums">{x.is_cash ? "—" : qty(x.quantity)}</td>
-          <td class="text-right tabular-nums">
+          <td class="text-right tabular-nums max-[700px]:hidden">{x.is_cash ? "—" : qty(x.quantity)}</td>
+          <td class="text-right tabular-nums max-[700px]:hidden">
             {x.is_cash ? "—" : fmt(x.price)}
             {#if x.live}<LiveDot class="ml-1.5 size-[7px] align-[2px]" label="Live price" title={`Live price · ${liveAt(x.live_time)}`} />{/if}
           </td>
           <td class="text-right font-semibold tabular-nums">{fmt(x.value)}</td>
-          <td class="text-right tabular-nums">
+          <td class="text-right tabular-nums max-[700px]:hidden">
             {#if x.day_change == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.day_change)}>{signed(x.day_change)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.day_change_pct))}>{pct(x.day_change_pct, 2)}</div>{/if}
           </td>
@@ -100,20 +129,11 @@
             {#if x.gain == null}<span class="text-muted-foreground">—</span>
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
-          <td class="text-right tabular-nums">
+          <td class="text-right tabular-nums max-[700px]:hidden">
             <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{(x.allocation * 100).toFixed(1)}%</span>
           </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
-            {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
-            {:else}
-              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border",
-                x.gain == null ? "text-[var(--nw-1)]" : "text-muted-foreground hover:text-foreground")} title="Edit cost basis"
-                aria-expanded={open === keyOf(x)} onclick={() => (open === keyOf(x) ? finish() : openEditor(x))}>
-                {x.gain == null ? "Add" : fmt(x.cost_basis)}
-                {#if x.cost_manual}<Badge variant="secondary" class="px-1.5 py-0 text-[11px]">edited</Badge>{/if}
-                <Pencil class={cn("size-3", x.gain == null ? "opacity-70" : "opacity-0 group-hover:opacity-70 group-focus-visible:opacity-70")} aria-hidden="true" />
-              </button>
-            {/if}
+            {#if !narrow.on}{@render costBasis(x)}{/if}
           </td>
         </tr>
         {#if open === keyOf(x)}

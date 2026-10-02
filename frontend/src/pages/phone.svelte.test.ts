@@ -47,13 +47,12 @@ describe("Settings", () => {
 describe("Reports", () => {
   beforeEach(() => { vi.mocked(api).mockResolvedValue({ month: "2026-03", income: [], spending: [], total_in: 0, total_out: 0, net: 0 } as never); });
 
-  it("is the cash flow summary on a phone, whichever report the link names", async () => {
+  it("has all five reports on a phone, and the one the link names", async () => {
     viewport.phone = true;
     render(Reports, { sub: "merchants" });
-    expect(await screen.findByText(/No transactions in/)).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Reports" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Open Runway on a computer to see spending over time/)).toBeInTheDocument();
-    expect(vi.mocked(api).mock.calls.every(([p]) => String(p).startsWith("/api/cashflow"))).toBe(true);
+    expect(within(await screen.findByRole("navigation", { name: "Reports" })).getAllByRole("link")).toHaveLength(5);
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([p]) => String(p).startsWith("/api/merchants") || String(p).includes("merchant"))).toBe(true));
   });
 
   it("has all five reports on a computer", async () => {
@@ -102,23 +101,22 @@ describe("Net worth", () => {
   };
   beforeEach(() => { vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/networth" ? summary : {})) as never); });
 
-  it("is the total and what it's made of, read-only, on a phone; Investments and Equity are for a computer", async () => {
+  it("has the assets and liabilities to edit, and all four tabs, on a phone", async () => {
     viewport.phone = true;
     render(NetWorth);
     expect(await screen.findByText("$5,000")).toBeInTheDocument();
-    expect(screen.getByTestId("makes-up")).toBeInTheDocument();   // the bar under the hero, not in a card
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Add to Cash|Checking/ })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Not counted/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Checking, $5,500.00" })).toBeInTheDocument();
+    expect(screen.getByText(/Not counted/)).toBeInTheDocument();
     const tabs = screen.getByRole("navigation", { name: "Net worth" });
-    expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Summary", "Retirement"]);
+    expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Summary", "Investments", "Equity", "Retirement"]);
   });
 
-  it.each([["investments", "see your investments"], ["equity", "see and edit your equity"]])("says %s is for a computer", (sub, what) => {
+  it.each(["investments", "equity"])("shows %s on a phone, with no note about a computer", async (sub) => {
     viewport.phone = true;
     render(NetWorth, { sub });
-    expect(screen.getByText(`Open Runway on a computer to ${what}.`)).toBeInTheDocument();
-    expect(api).not.toHaveBeenCalledWith("/api/investments?period=1Y");
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(vi.mocked(api).mock.calls.some(([p]) => String(p).startsWith(sub === "equity" ? "/api/equity" : "/api/plaid/status"))).toBe(true));
   });
 
   it("lists its accounts and tabs on a computer", async () => {
