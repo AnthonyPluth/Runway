@@ -179,4 +179,6 @@ export interface Overview {
 
 interface BudgetChange {
   date: string; account_id: string; kind: "budget" | "card"; name: string; amount: number; category?: string; account?: string; charged?: number;
+  /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
+  assumed_cycle?: boolean;
 }

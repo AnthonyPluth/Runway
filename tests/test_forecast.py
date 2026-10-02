@@ -679,6 +679,65 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(b["skipped"], [{"category": "Groceries", "reason": "its card isn't paid from a forecast account"}])
         self.assertEqual(b["monthly"], 0.0)
 
+    def test_a_budget_on_a_card_with_no_statement_yet_still_counts(self):
+        # A new card, paid from checking, with no statement yet and $40 on it: $310 a month of Travel is budgeted on it.
+        self.acct("cc3", "credit", -40.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        b = fc["budget"]
+        self.assertEqual(([u["account_id"] for u in b["used"]], b["skipped"]), (["cc3"], []))
+        self.assertEqual(b["monthly"], 310.0)
+        # Its cycle is taken to close at each month's end, paid in full 25 days later (the next business day). The
+        # September one has the rest of September's $310 and the $40 it owes now; Oct 25 is a Sunday.
+        card = {c["date"]: c for c in b["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-350.0, 40.0))
+        self.assertEqual(card["2026-10-26"]["account_id"], "chk")
+        self.assertEqual(card["2026-11-25"]["amount"], -310.0)                    # October
+        days = fc["dates"]
+        drop = lambda d: b["total"][days.index(d) - 1] - b["total"][days.index(d)]
+        base = lambda d: fc["total"][days.index(d) - 1] - fc["total"][days.index(d)]
+        self.assertAlmostEqual(drop("2026-10-26") - base("2026-10-26"), 350.0, places=2)
+        # The forecast itself has nothing for a card without a statement: it isn't changed
+        self.assertFalse(any(e.get("card_id") == "cc3" for e in fc["events"]))
+
+    def test_a_budget_on_a_card_with_no_statement_reads_the_banks_sign(self):
+        # Plaid reports what a card owes as a positive number (owed_positive): $40 owed is in the first statement, and a
+        # $20 credit comes off it, as the bank would bill it.
+        self.acct("cc3", "credit", 40.0, pay_from="chk", owed_positive=1)
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-350.0, 40.0))
+        self.conn.execute(update(Account).where(Account.id == "cc3").values(balance=-20.0))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-10-26"]["charged"]), (-290.0, 0.0))
+        self.assertEqual(card["2026-11-25"]["amount"], -310.0)
+        # A credit bigger than a month's charges carries on into the next statement
+        self.conn.execute(update(Account).where(Account.id == "cc3").values(balance=-400.0))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertNotIn("2026-10-26", card)                                       # $310 - $400: nothing to pay
+        self.assertEqual(card["2026-11-25"]["amount"], -220.0)                     # $310 - the $90 left
+
+    def test_a_budget_on_a_card_with_no_statement_is_paid_the_way_the_card_is_set(self):
+        # A new card set to pay a fixed $100, with $310 a month budgeted on it and nothing owed yet: $100 each time, and
+        # the rest carries over (with a month's interest once it does, at the 24% APR entered for it).
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        db.set_setting(self.conn, sk.card_pay_mode("cc3"), "fixed")
+        db.set_setting(self.conn, sk.card_pay_amount("cc3"), "100")
+        db.set_setting(self.conn, sk.card_apr("cc3"), "24")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-100.0, -100.0))
+        # paid in full when nothing's set
+        db.set_setting(self.conn, sk.card_pay_mode("cc3"), "full")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-310.0, -310.0))
+
+    def test_a_budget_on_a_card_with_no_statement_and_no_paying_account_is_skipped(self):
+        self.acct("cc3", "credit", 0.0)
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        b = forecast.build(self.conn, TODAY, 60)["budget"]
+        self.assertEqual(b["skipped"], [{"category": "Travel", "reason": "its card isn't paid from a forecast account"}])
+
     def test_a_budget_spends_what_it_carried_over(self):
         # $310 a month from checking, rolling over since August, when $250 was spent: $60 carried into September
         self.tx("chk", "2026-08-12", -250.0, "GROCER", "Groceries")
@@ -1183,6 +1242,27 @@ class AnnualFeeTests(LedgerCase):
         self.churn(product="Second", account_id="cc")
         again = forecast.build(self.conn, TODAY, 90)
         self.assertAlmostEqual(paid(again["budget"], "2026-11-05"), paid(with_fees["budget"], "2026-11-05"), places=2)
+
+    def test_budget_line_keeps_the_fee_of_a_card_with_no_statement(self):
+        # A new card with no statement yet, $310 a month budgeted on it and a $95 fee on Oct 20: the fee is on October's
+        # assumed statement (closing Oct 31, paid Nov 25), with October's charges.
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.churn(account_id="cc3")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual((card["2026-10-26"]["amount"], card["2026-11-25"]["amount"]), (-310.0, -405.0))
+        # a budget for fees has it already
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=0.01, pay_with="cc3"))
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertAlmostEqual(card["2026-11-25"]["amount"], -310.01, places=2)
+
+    def test_budget_line_keeps_an_overdue_fee_of_a_card_with_no_statement(self):
+        # Its anniversary was Sep 10 and the fee hasn't posted: it's expected today, on the first assumed statement.
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.churn(opened="2024-09-10", account_id="cc3")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual(card["2026-10-26"]["amount"], -405.0)
 
 
 if __name__ == "__main__":

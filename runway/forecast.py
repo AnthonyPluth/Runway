@@ -50,6 +50,7 @@ EVERY_MONTH = ("weekly", "biweekly", "semimonthly", "monthly")   # recurring fre
 PAY_MODES = ("full", "minimum", "fixed")   # how a card's statements are paid (payment_plan)
 MIN_PAYMENT_FLOOR = 25.0   # without the issuer's minimum: the larger of this and MIN_PAYMENT_RATE of the statement plus
 MIN_PAYMENT_RATE = 0.01    # its interest, as issuers work it out (so paying the minimum never lets the balance grow)
+NO_STATEMENT_DUE_DAYS = 25   # a card with no statement yet: paid this long after its assumed month-end close (budget line)
 FEE_CATEGORY = "Fees & Interest"   # an annual fee's category, when there's one by that name
 FEE_EARLY_DAYS = 45        # a fee charged from this many days before its anniversary on is that anniversary's
 FEE_TEXT = re.compile(r"(?:annual|membership)\s+(?:membership\s+)?fee", re.I)   # "Annual Fee", "Annual Membership Fee"
@@ -805,7 +806,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i = min(range(len(series)), key=lambda k: series[k])
         return {"date": dates[i], "balance": series[i]}
 
-    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events)
+    scenario = budget_scenario(conn, today, horizon_days, dates, cash, by_id, card_status, events, fees)
 
     cash_ids = {a["id"] for a in cash}
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
@@ -878,12 +879,18 @@ def budget_plan(conn, today: date) -> list[dict]:
 
 
 def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash: list[dict], by_id: dict,
-                    card_status: list[dict], events: list[dict]) -> dict | None:
+                    card_status: list[dict], events: list[dict], fees: list[dict] | None = None) -> dict | None:
     """The forecast if you spend exactly your budgets: budgeted spending is charged day by day to each category's
     account; spending on cards is paid on each card's due date, as much of each statement as the card's payment plan
     pays (payment_plan; the rest carries over, as in the forecast). Recurring items and statements that have already closed
     stay as they are; estimated future statements are replaced by the budgeted charges (plus a churning card's annual
     fee charged in them, unless a budget covers its category).
+
+    A card with no statement yet (a new one, or one whose bank hasn't sent one) still has its budgets counted: until a
+    statement says when its cycle closes, it's taken to close on the last day of each month and to be paid
+    NO_STATEMENT_DUE_DAYS later (the next business day), from the account that pays it, the way the card is set to be
+    paid (payment_plan: in full by default; what isn't paid carries over, with interest). What it owes today is in the
+    first of those statements.
 
     A budget includes its category's recurring payments: the ones the forecast already takes out of its accounts are
     subtracted from it each month (this month: from what's left after what's been spent), so they aren't counted twice,
@@ -893,6 +900,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
         return None
     cash_ids = {a["id"] for a in cash}
     cards = {c["id"]: c for c in card_status}
+    # Cards without a statement: their budgets are charged to them and paid on an assumed cycle (see above).
+    new_cards = {a["id"] for a in by_id.values() if a["kind"] == "credit" and a["id"] not in cards}
     budgeted = {n for p in plan for n in p["names"]}
     spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))   # account -> date -> amount
     used, skipped = [], []
@@ -919,10 +928,10 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
 
     for p in plan:
         acct = p["pay_with"] or p["usual"] or cash[0]["id"]
-        if acct not in cash_ids and acct not in cards:
+        if acct not in cash_ids and acct not in cards and acct not in new_cards:
             skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
             continue
-        if acct in cards and by_id[acct]["pay_from"] not in cash_ids:
+        if (acct in cards or acct in new_cards) and by_id[acct]["pay_from"] not in cash_ids:
             skipped.append({"category": p["category"], "reason": "its card isn't paid from a forecast account"})
             continue
         months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
@@ -981,6 +990,40 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                                     # what it's made of: charges already on the card (first statement), plus budgeted ones
                                     "charged": round(info["new_charges"], 2) if first else 0.0})
             prev, close, first = close, next_after(close, card["closing_day"]), False
+
+    # Cards without a statement: their budgeted charges (and what they owe today) on statements that close at each
+    # month's end, each paid NO_STATEMENT_DUE_DAYS later as the card's payment plan pays it. What isn't paid carries into
+    # the next one with interest; a credit comes off the next statement and what's left of it carries on, as the bank does.
+    for cid in sorted(new_cards & spend.keys()):
+        card = by_id[cid]
+        payer, days = card["pay_from"], spend[cid]
+        prev, first = today, True
+        close = clamp_day(today.year, today.month, 31)
+        card_plan = payment_plan(conn, cid)
+        owing = owed(card)   # the bank's sign, as everywhere (owed_positive): below zero is a credit
+        while True:
+            paid = bankdays.next_business_day(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()
+            if paid > dates[-1]:
+                break
+            owed_now = max(0.0, owing) if first else 0.0
+            charges = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
+            # A churning card's annual fee charged this cycle (annual_fees), unless a budget covers its category.
+            # An overdue fee is dated today, so the first statement takes it too.
+            charges += -sum(f["amount"] for f in fees or [] if f.get("account_id") == cid
+                            and (first or prev.isoformat() < f["date"]) and f["date"] <= close.isoformat()
+                            and f["category"] not in budgeted)
+            # What it owes today is this cycle's charges, not a balance carried from a statement: no interest on it.
+            owed_interest = 0.0 if first else interest(card_plan, owing, charges)
+            statement = owing + owed_interest + charges
+            pay = statement_payment(card_plan, statement, charged=owed_interest)
+            owing = statement - pay
+            if pay > 0.005:
+                extra.append((payer, paid, -round(pay, 2)))
+                changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",
+                                "amount": -round(pay, 2), "account": db.account_label(by_id[payer]), "charged": round(owed_now, 2),
+                                "assumed_cycle": True})
+            prev, first = close, False
+            close = clamp_day(close.year + close.month // 12, close.month % 12 + 1, 31)
 
     by_day: dict[tuple, float] = defaultdict(float)
     for e in base:
