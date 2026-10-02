@@ -21,7 +21,7 @@
         {#if it.tone && it.tone !== "good"}<span class={cn("size-1.5 shrink-0 rounded-full bg-current", text[it.tone])} aria-hidden="true"></span>{/if}
         <span class="min-w-0">{it.label}</span>
       </dt>
-      <dd class={cn("order-1 text-[26px] leading-tight font-bold tracking-[-0.03em] tabular-nums", it.tone && text[it.tone])}>{it.value}</dd>
+      <dd class={cn("order-1 text-xl leading-tight break-words md:text-[26px] font-bold tracking-[-0.03em] tabular-nums", it.tone && text[it.tone])}>{it.value}</dd>
       {#if it.sub}<dd class={cn("order-3 mt-0.5 text-[13px] tabular-nums", it.subTone ? text[it.subTone] : "text-muted-foreground")}>{it.sub}</dd>{/if}
     </div>
   {/each}
