@@ -86,11 +86,10 @@ describe("CatIcon", () => {
     expect(container.querySelector("span")).toHaveTextContent("🏷️");
   });
 
-  it("fills the square with the color itself when solid, and tints it otherwise", () => {
-    const solid = render(CatIcon, { name: "Travel", solid: true });
-    expect(solid.container.querySelector("span")!.getAttribute("style")).toContain("rgb(57, 135, 229)");
-    solid.unmount();
-    const tint = render(CatIcon, { name: "Travel" });
-    expect(tint.container.querySelector("span")!.getAttribute("style")).toContain("color-mix");
+  it("shows the emoji with nothing behind it", () => {
+    const { container } = render(CatIcon, { name: "Travel" });
+    const style = container.querySelector("span")!.getAttribute("style")!;
+    expect(style).not.toContain("background");
+    expect(style).toContain("width: 24px");
   });
 });

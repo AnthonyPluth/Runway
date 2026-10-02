@@ -168,7 +168,7 @@
       <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors",
         t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
         "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
-        {#if t.category}<CatIcon name={t.category} size={22} class="rounded-full" />{/if}
+        {#if t.category}<CatIcon name={t.category} size={22} />{/if}
         <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
         <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
