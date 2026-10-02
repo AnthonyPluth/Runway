@@ -2,7 +2,6 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
-  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
@@ -19,14 +18,11 @@
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
-  import { isPhone } from "$lib/phone.svelte";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
 
-  // On a phone: the total, its change, the history and what it's made of (read-only), and the retirement result. Investments,
-  // Equity and changing assets and accounts are for a computer.
   let { sub = "" }: { sub?: string } = $props();
 
   // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come.
@@ -133,10 +129,10 @@
     <div class="border-t border-border first:border-t-0">
       <div class="flex items-center justify-between gap-2 pt-3 pb-1 text-sm font-semibold">
         <span class="flex min-w-0 items-center gap-1">
-          <button type="button" class="inline-flex cursor-pointer items-center gap-1 rounded-sm" aria-expanded={!folded[g.key]} aria-label={`${g.label}, ${folded[g.key] ? "expand" : "collapse"}`}
+          <button type="button" class="inline-flex cursor-pointer items-center gap-1 rounded-sm max-md:min-h-10 max-md:min-w-10" aria-expanded={!folded[g.key]} aria-label={`${g.label}, ${folded[g.key] ? "expand" : "collapse"}`}
             onclick={() => (folded[g.key] = !folded[g.key])}><ChevronDown class={cn("size-4 text-muted-foreground transition-transform", folded[g.key] && "-rotate-90")} /></button>
           {#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}
-          {#if ADDABLE[g.key]}<button type="button" class="ml-1 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground" aria-label={`Add to ${g.label}`}
+          {#if ADDABLE[g.key]}<button type="button" class="ml-1 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground max-md:min-h-10 max-md:px-2" aria-label={`Add to ${g.label}`}
             onclick={() => openAdd(ADDABLE[g.key])}>+ Add</button>{/if}
         </span>
         <span class="tabular-nums">{fmt(g.total)}</span>
@@ -175,13 +171,12 @@
 </div>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
-  ...(isPhone() ? [] : [{ id: "investments", label: "Investments", href: "#networth/investments" }, { id: "equity", label: "Equity", href: "#networth/equity" }]),
+  { id: "investments", label: "Investments", href: "#networth/investments" },
+  { id: "equity", label: "Equity", href: "#networth/equity" },
   { id: "retirement", label: "Retirement", href: "#networth/retirement" },
 ]} />
 
-{#if isPhone() && (sub === "equity" || sub === "investments")}
-  <DesktopOnly what={sub === "equity" ? "see and edit your equity" : "see your investments"} />
-{:else if sub === "equity"}
+{#if sub === "equity"}
   <EquityView />
 {:else if sub === "retirement"}
   <RetirementView />
@@ -229,9 +224,6 @@
     {/if}
   </section>
 
-  {#if isPhone()}
-    <div class="mb-6" data-testid="makes-up">{@render makeup()}</div>
-  {:else}
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
     <Card.Content>
@@ -270,7 +262,6 @@
       {/if}
     </Card.Content>
   </Card.Root>
-  {/if}
 {/if}
 
   <AssetPanel bind:open={assetOpen} a={panelAsset} kind={addKind} {d} onchanged={load} />

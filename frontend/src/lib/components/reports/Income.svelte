@@ -58,16 +58,16 @@
         <table class="w-full text-sm">
           <thead>
             <tr class="text-left text-xs text-muted-foreground [&>th]:pb-2 [&>th]:font-medium [&>th+th]:pl-4">
-              <th>Month</th><th class="text-right">Money in</th><th class="text-right">Spent</th><th class="text-right">Left over</th><th class="text-right">Savings rate</th>
+              <th>Month</th><th class="text-right">Money in</th><th class="text-right">Spent</th><th class="text-right">Left over</th><th class="text-right max-sm:hidden">Savings rate</th>
             </tr>
           </thead>
           <tbody>
             {#each d.months.slice().reverse() as r (r.month)}
               <tr class="border-t [&>td]:py-2.5 [&>td+td]:pl-4">
-                <td class="whitespace-nowrap">{monthLabel(r.month)}</td><td class="text-right tabular-nums">{fmt(r.income)}</td>
+                <td class="sm:whitespace-nowrap">{monthLabel(r.month)}</td><td class="text-right tabular-nums">{fmt(r.income)}</td>
                 <td class="text-right tabular-nums">{fmt(r.spending)}</td>
                 <td class={cn("text-right tabular-nums", r.net < 0 && "text-(--low)")}>{r.net < 0 ? "−" : ""}{fmt(Math.abs(r.net))}</td>
-                <td class="text-right text-muted-foreground tabular-nums">{rate(r.rate)}</td>
+                <td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{rate(r.rate)}</td>
               </tr>
             {/each}
           </tbody>

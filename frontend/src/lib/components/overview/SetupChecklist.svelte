@@ -59,11 +59,11 @@
           </div>
           {#if !step.done && step.hint}
             <span class="flex shrink-0 flex-col items-end gap-1">
-              <Button size="sm" variant="outline" disabled aria-describedby={`step-${i}-hint`}>{step.action}</Button>
+              <Button size="sm" class="h-10 sm:h-8" variant="outline" disabled aria-describedby={`step-${i}-hint`}>{step.action}</Button>
               <span id={`step-${i}-hint`} class="text-[11px] text-muted-foreground">{step.hint}</span>
             </span>
           {:else if !step.done}
-            <Button href={step.href} onclick={step.onclick} size="sm" variant={i === next ? "default" : "outline"}>{step.action}</Button>
+            <Button href={step.href} onclick={step.onclick} size="sm" class="h-10 sm:h-8" variant={i === next ? "default" : "outline"}>{step.action}</Button>
           {/if}
         </li>
       {/each}

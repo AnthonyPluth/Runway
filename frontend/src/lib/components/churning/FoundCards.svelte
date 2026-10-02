@@ -11,7 +11,7 @@
 
   // "Found on your accounts": credit card accounts that aren't churning cards yet, each pre-filled from what Runway
   // knows. Add opens the add-card form with it for review (nothing is saved until you save the form); Dismiss hides
-  // it, and can be undone. Card management is for larger screens (phones don't show it).
+  // it, and can be undone.
   let { found, d, onadd, onchanged }: {
     found: Found; d: Pick<Churning, "issuers">; onadd: (draft: FoundDraft) => void; onchanged: () => void | Promise<void>;
   } = $props();
@@ -36,7 +36,7 @@
 </script>
 
 {#if found.drafts.length || found.dismissed.length}
-  <section class="mb-6 hidden desktop:block" aria-labelledby="found-title" data-testid="found-cards">
+  <section class="mb-6" aria-labelledby="found-title" data-testid="found-cards">
     {#if found.drafts.length}
       <h3 id="found-title" class="text-sm font-medium">Found on your accounts</h3>
       <ul class="divide-y rounded-lg border">

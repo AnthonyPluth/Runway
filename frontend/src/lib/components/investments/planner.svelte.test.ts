@@ -58,11 +58,13 @@ describe("RetirementPlanner", () => {
     expect(screen.queryByText(/financial advice/)).not.toBeInTheDocument();
   });
 
-  it("on a phone, says the plan's fields are on a computer", () => {
+  it("on a phone, still has the plan's fields and the way to Investments", () => {
     viewport.phone = true;
     try {
       setup(data({ is_default: true }));
-      expect(screen.getByText("Open Runway on a computer to change the plan.")).toBeInTheDocument();
+      expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+      expect(screen.getByText("Who's retiring")).toBeInTheDocument();
+      expect(screen.getByText("Spending a year", { exact: false })).toBeInTheDocument();
     } finally { viewport.phone = false; }
   });
 

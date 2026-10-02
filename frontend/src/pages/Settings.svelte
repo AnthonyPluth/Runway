@@ -8,7 +8,6 @@
   import { app, reload } from "$lib/app.svelte";
   import { loadCategories } from "$lib/categories.svelte";
   import { openFeedback } from "$lib/monitoring";
-  import { isPhone } from "$lib/phone.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AccountsSection from "$lib/components/settings/AccountsSection.svelte";
   import AdvancedSection from "$lib/components/settings/AdvancedSection.svelte";
@@ -26,8 +25,8 @@
 
   // svelte-ignore state_referenced_locally
   lastSection = sub || lastSection;
-  // Until you've connected a bank, Settings opens on Connections. A phone has only Notifications: the rest is for a computer.
-  const section = $derived(isPhone() ? "notifications" : resolveSection(lastSection, !!app.state?.connected));
+  // Until you've connected a bank, Settings opens on Connections.
+  const section = $derived(resolveSection(lastSection, !!app.state?.connected));
 
   // Every tab has the accounts, rules and categories to hand, as in the classic page.
   const data = Promise.all([loadCategories(), api<SettingsAccount[]>("/api/accounts"), api<Rule[]>("/api/rules")])
@@ -39,10 +38,8 @@
 </script>
 
 <h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Settings</h1>
-{#if !isPhone()}
 <SubTabs label="Settings" current={section}
   tabs={SECTIONS.map((s) => ({ ...s, href: `#setup/${s.id}`, badge: s.id === "rules" ? ruleCount : undefined }))} />
-{/if}
 
 {#await data}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>

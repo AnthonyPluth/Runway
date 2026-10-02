@@ -60,6 +60,25 @@ describe("TxRow", () => {
     expect(screen.queryByTitle("BLUE  BOTTLE")).not.toBeInTheDocument();
   });
 
+  it("opens the details from the name, with a Split button, where the chevron isn't shown", async () => {
+    render(TxRow, props(tx()));
+    const name = within(row()).getByRole("button", { name: "Blue Bottle" });
+    await userEvent.click(name);
+    expect(name).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Split across categories" }));
+    expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
+  });
+
+  it("keeps the name plain text at desktop width, where the chevron opens the details", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((q) => ({
+      matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false,
+    }) as MediaQueryList);
+    render(TxRow, props(tx()));
+    expect(within(row()).queryByRole("button", { name: "Blue Bottle" })).not.toBeInTheDocument();
+    expect(within(row()).getByText("Blue Bottle").tagName).toBe("SPAN");
+    vi.restoreAllMocks();
+  });
+
   describe("logo", () => {
     it("shows the merchant's logo when it has one", () => {
       const { container } = render(TxRow, props(tx({ logo: "/logos/bb.png" })));

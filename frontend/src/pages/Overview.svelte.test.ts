@@ -152,32 +152,46 @@ describe("Overview", () => {
 describe("Overview on a phone", () => {
   afterEach(() => { cleanup(); viewport.phone = false; });
 
-  it("says there's no account to forecast without a link to the forecast settings a phone doesn't have", async () => {
+  it("links the no-account alert to the forecast settings", async () => {
     viewport.phone = true;
     serve(() => fc({ accounts: [], total: [], events: [] }));
     render(Overview);
-    expect(await screen.findByText(/No account to forecast yet/)).toBeInTheDocument();
-    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /No account to forecast/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /No account to forecast/ })).toHaveAttribute("href", "/#overview?forecast");
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 
-  it("shows alerts that are put right in Settings as text, and keeps the others as links", async () => {
+  it("links alerts to their Settings fix", async () => {
     viewport.phone = true;
     serve(() => fc({ warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" },
       { text: "2 payments over $1,000 aren’t in the forecast.", href: "#budget/recurring" }] }));
     render(Overview);
-    expect(await screen.findByText(/Visa: choose which account pays it/)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Visa: choose which account/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Visa: choose which account/ })).toHaveAttribute("href", "/#setup/accounts");
     expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#budget/recurring");
-    expect(screen.getByText("Open Runway on a computer to put this right.")).toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 
-  it("doesn't send you to a computer for an alert no setting puts right (a payment that's late)", async () => {
+  it("opens the forecast settings sheet from the account name", async () => {
     viewport.phone = true;
-    serve(() => fc({ warning_links: [{ text: "Visa: $40.00 was due Sep 3 and no payment has shown up yet.", href: "#setup/accounts", setting: false }] }));
+    serve(() => fc());
     render(Overview);
-    expect(await screen.findByText(/no payment has shown up yet/)).toBeInTheDocument();
-    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /no payment has shown up/ })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Forecast settings" }));
+    expect(await screen.findByLabelText("Default forecast length (days)")).toBeInTheDocument();
+  });
+
+  it("shows the setup checklist while steps are left", async () => {
+    viewport.phone = true;
+    app.state = { ...app.state!, setup: { bank: true, primary: true, recurring: false, budgets: false, dismissed: false } };
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByText("Finish setting up")).toBeInTheDocument();
+  });
+
+  it("welcomes a phone with the checklist before a bank is connected", async () => {
+    viewport.phone = true;
+    app.state = { ...app.state!, connected: false, setup: { bank: false, primary: false, recurring: false, budgets: false, dismissed: false } };
+    serve(() => fc());
+    render(Overview);
+    expect(screen.getByText("Welcome to Runway")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute("href", "#setup/connections");
   });
 });
