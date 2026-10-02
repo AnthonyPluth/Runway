@@ -193,6 +193,20 @@ describe("Transactions page", () => {
     await waitFor(() => expect(toast).toHaveBeenCalledWith("Coffee → Groceries", expect.objectContaining({ description: "Alpha", action: expect.objectContaining({ label: "Undo" }) })));
   });
 
+  it("under a category filter, changes only a split one's part in it, and loads the list again", async () => {
+    txFilters.transactions.category = "Groceries";
+    const split = tx({ id: "s", payee: "Market", amount: -100, is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Coffee", amount: -40 }],
+      match: { amount: -60, categories: ["Groceries"] } });
+    serve([split], 1, (path, opts) => (opts?.method === "POST" ? { was: [] } : undefined));
+    render(Transactions);
+    await screen.findByText("Market");
+    const loads = vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length;
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the Groceries part of Market" }), "Coffee");
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/s/category", { method: "POST", body: { category: "Coffee", only: "Groceries" } }));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/transactions?")).length).toBeGreaterThan(loads));
+    expect(vi.mocked(toast).mock.calls.at(-1)?.[0]).toBe("Groceries → Coffee");
+  });
+
   it("offers to remember the category for the merchant when the server suggests a rule", async () => {
     serve(rows(), 2, (path, o) => (path.endsWith("/category") && o?.method === "POST" ? { also_updated: 0, offer_rule: { merchant: "Alpha" } } : undefined));
     render(Transactions);

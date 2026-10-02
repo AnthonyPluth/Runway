@@ -11,7 +11,16 @@
   // An Amazon or Target order: its items, each with a category you can change (remembered for the next time you
   // buy it), and the card charges it was paid with. `onchange` runs after anything here changes a transaction.
   // Call loadCategories() before showing it.
-  let { orderId, onchange }: { orderId: string; onchange?: () => void } = $props();
+  // `family`: from a list filtered by a category, that category and its subcategories. Only their items show (all of them
+  // a click away), with an estimate of their share of the tax and shipping, as the transaction's part counts it.
+  let { orderId, family, onchange }: { orderId: string; family?: string[]; onchange?: () => void } = $props();
+  let showAll = $state(false);
+  // Their share of the tax and shipping (less any discount): the order's total over its items, in proportion.
+  function extras(o: RetailOrder, sum: number): string {
+    if (o.total == null || !o.subtotal || o.subtotal <= 0) return "+ tax & shipping";
+    const share = sum * (o.total - o.subtotal) / o.subtotal;
+    return share >= 0.005 ? `+ ~${fmt(share)} tax & shipping` : "";
+  }
 
   // The order stays on screen while it loads again after a change, so its rows update where they are.
   let order = $state<RetailOrder | null>(null);
@@ -86,8 +95,10 @@
             title="For the items with no category; it can propose a new one">{asking ? "Asking the AI…" : "Suggest categories with AI"}</Button>
         </div>
       {/if}
+      {@const mine = family?.length ? o.items.filter((x) => x.category && family.includes(x.category)) : []}
+      {@const items = mine.length && !showAll ? mine : o.items}
       <div class="flex flex-col" title="A category you pick here is used for this item in every order, now and next time">
-        {#each o.items as i (i.id)}
+        {#each items as i (i.id)}
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
@@ -103,6 +114,15 @@
           </div>
         {/each}
       </div>
+      {#if mine.length}
+        <div class="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+          {#if !showAll}<span class="tabular-nums">{extras(o, mine.reduce((n, x) => n + x.amount, 0))}</span>{/if}
+          {#if mine.length < o.items.length}
+            <Button variant="link" size="sm" class="h-auto p-0 text-xs" onclick={() => (showAll = !showAll)}>
+              {showAll ? `Only the ${family![0]} items` : `Show all ${o.items.length} items`}</Button>
+          {/if}
+        </div>
+      {/if}
     {:else}
       <p class="text-muted-foreground">{o.details ? "No items in this order." : "Runway hasn't read this order's items yet; they come with the next import."}</p>
     {/if}

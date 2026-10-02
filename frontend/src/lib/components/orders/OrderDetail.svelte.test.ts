@@ -22,6 +22,27 @@ describe("an order's link to the store", () => {
   });
 });
 
+describe("a receipt opened from a category filter", () => {
+  const order = { id: "x", retailer: "amazon", order_number: "1", placed: "2026-09-26", total: 110, subtotal: 100, details: 1, url: "https://www.amazon.com", charges: [],
+    items: [{ id: 1, title: "Tea", quantity: 1, amount: 30, category: "Groceries" }, { id: 2, title: "Lamp", quantity: 1, amount: 70, category: "Shopping" }] };
+
+  it("shows only that category's items, their share of tax and shipping, and the rest on asking", async () => {
+    vi.mocked(api).mockResolvedValue(order as never);
+    render(OrderDetail, { orderId: "x", family: ["Groceries"] });
+    expect(await screen.findByText("Tea")).toBeInTheDocument();
+    expect(screen.queryByText("Lamp")).not.toBeInTheDocument();
+    expect(screen.getByText("+ ~$3.00 tax & shipping")).toBeInTheDocument();   // 30 × (110 − 100) / 100
+    await userEvent.click(screen.getByRole("button", { name: "Show all 2 items" }));
+    expect(screen.getByText("Lamp")).toBeInTheDocument();
+  });
+
+  it("says tax and shipping without a figure when the order doesn't give its subtotal", async () => {
+    vi.mocked(api).mockResolvedValue({ ...order, subtotal: null } as never);
+    render(OrderDetail, { orderId: "x", family: ["Groceries"] });
+    expect(await screen.findByText("+ tax & shipping")).toBeInTheDocument();
+  });
+});
+
 describe("changing something in an order", () => {
   it("keeps the order on screen while it loads again, instead of falling back to Loading…", async () => {
     const order = { id: "x", retailer: "costco", channel: "store", order_number: "77", placed: "2026-09-26", total: 10, details: 1, url: "https://www.costco.com",

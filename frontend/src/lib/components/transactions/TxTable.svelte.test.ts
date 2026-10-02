@@ -55,6 +55,14 @@ describe("TxTable", () => {
     expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/\$2,940\.00$/);
   });
 
+  it("counts only the matching part of a split one under a category filter", () => {
+    setup({ only: "Groceries", items: [
+      tx({ id: "s", amount: -100, payee: "Split", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Shopping", amount: -40 }],
+        match: { amount: -60, categories: ["Groceries"] } }),
+    ], total: 1 });
+    expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/-\$60\.00$/);
+  });
+
   it("shows no count of its own, which the page heading and Show more already give", () => {
     setup({ total: 40 });
     expect(screen.queryByText("4 of 40")).not.toBeInTheDocument();
@@ -110,6 +118,13 @@ describe("TxTable", () => {
       expect(undoToast()[0]).toBe("Set to Groceries · 2 transactions");
       expect(undoToast()[1].action.label).toBe("Undo");
       expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it("under a category filter, sends it along so a split one changes only that part", async () => {
+      setup({ only: "Coffee" });
+      await userEvent.click(tick("Alpha"));
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], category: "Groceries", only: "Coffee" } });
     });
 
     it("empties the category and name boxes and the selection once it's done", async () => {

@@ -87,6 +87,22 @@ def follow_amount(conn, tx_id: str, amount: float) -> None:
     conn.execute(update(Transaction).where(Transaction.id == tx_id).values(needs_review=1))
 
 
+def recategorize(conn, tx_id: str, family: set[str], category: str) -> bool:
+    """Give the parts in these categories (`family`: a category and its subcategories) `category` instead, leaving the
+    other parts as they are. When every part then has one category the transaction isn't split any more: it takes
+    that category, as if you'd picked it for the whole thing. Returns whether any part was in `family`."""
+    s = TxSplit
+    if not conn.execute(update(s).where(s.tx_id == tx_id, s.category.in_(family)).values(category=category)).rowcount:
+        return False
+    left = {r[0] for r in conn.execute(select(s.category).where(s.tx_id == tx_id))}
+    if left == {category}:
+        clear(conn, tx_id)
+        conn.execute(update(Transaction).where(Transaction.id == tx_id)
+                     .values(category=category, category_source="manual", confidence=1))
+    conn.execute(update(Transaction).where(Transaction.id == tx_id).values(needs_review=0))
+    return True
+
+
 def prune(conn) -> None:
     """Drop parts whose transaction is gone (the bank took it back, say)."""
     conn.execute(delete(TxSplit).where(TxSplit.tx_id.not_in(select(Transaction.id))))

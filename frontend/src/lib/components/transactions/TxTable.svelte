@@ -19,15 +19,17 @@
   // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll. Changing
   // CONFIRM_AT or more asks first, saying how many; every change can be undone from its toast.
   // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
-  let { items, total, review, recurring, selecting = $bindable(false), onsave, onchanged, onmore }: {
-    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; selecting?: boolean;
+  // `only`: the category the list is filtered by. A split transaction then counts (and shows) only its part in it, and a
+  // category set on it changes only that part. `family`: that category and its subcategories, for the receipts.
+  let { items, total, review, recurring, only = "", family, selecting = $bindable(false), onsave, onchanged, onmore }: {
+    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; only?: string; family?: string[]; selecting?: boolean;
     onsave: (t: Tx, category: string) => Promise<void>; onchanged: () => void; onmore?: () => Promise<void>;
   } = $props();
 
   // What a transaction adds to its day's total: its amount, less the parts in a transfer category (card payments,
   // moves between accounts), which show on both sides and aren't money in or out.
   const isTransfer = (name: string | null | undefined) => !!name && !!categories.list.find((c) => c.name === name)?.is_transfer;
-  const counted = (t: Tx) => (t.splits?.length ? t.splits.reduce((n, p) => n + (isTransfer(p.category) ? 0 : p.amount), 0)
+  const counted = (t: Tx) => (t.match ? t.match.amount : t.splits?.length ? t.splits.reduce((n, p) => n + (isTransfer(p.category) ? 0 : p.amount), 0)
     : isTransfer(t.category) ? 0 : t.amount);
 
   // Days, newest first, each with what came in and went out that day.
@@ -63,7 +65,7 @@
   let picked = $state<Record<string, boolean>>({});
   let last: number | null = null;
   const ids = $derived(items.filter((t) => picked[t.id]).map((t) => t.id));
-  const sum = $derived(items.reduce((n, t) => n + (picked[t.id] ? t.amount : 0), 0));
+  const sum = $derived(items.reduce((n, t) => n + (picked[t.id] ? (t.match?.amount ?? t.amount) : 0), 0));
   let bulkCat = $state("");
   let rename = $state("");
 
@@ -96,8 +98,9 @@
     if (all.ids.length < CONFIRM_AT) send(all);
     else { pending = all; asking = true; }
   }
-  const setCategory = (v: string) => change({ body: { category: v }, what: `Set to ${v}`, title: `Set ${v} on ${plural(ids.length, "transaction")}?` },
-    "They leave To review, and any split ones go back to a single category. You can undo it afterwards.", "Set category", "Setting…");
+  const setCategory = (v: string) => change({ body: only ? { category: v, only } : { category: v }, what: `Set to ${v}`, title: `Set ${v} on ${plural(ids.length, "transaction")}?` },
+    only ? `They leave To review. A split one changes only its ${only} part. You can undo it afterwards.`
+      : "They leave To review, and any split ones go back to a single category. You can undo it afterwards.", "Set category", "Setting…");
   function doRename() {
     const v = rename.trim();
     if (v) change({ body: { payee: v }, what: `Renamed to ${v}`, title: `Rename ${plural(ids.length, "transaction")} to ${v}?` },
@@ -145,7 +148,7 @@
         </h3>
         <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:3.75rem]">
           {#each d.rows as { t, i } (t.id)}
-            <TxRow {t} {review} {recurring} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
+            <TxRow {t} {review} {recurring} {family} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
               onsave={(c) => onsave(t, c)} {onchanged} />
           {/each}
         </div>

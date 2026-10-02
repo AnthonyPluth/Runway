@@ -1012,6 +1012,33 @@ def restore_items(conn, items: list) -> None:
             category=cat, category_source=it.get("category_source") or None, confidence=it.get("confidence")))
 
 
+def recategorize_part(conn, tx_id: str, family: set[str], category: str) -> bool:
+    """A transaction split by its order's items (and still as Runway split it): its items in these categories
+    (`family`: a category and its subcategories) get `category`, and the order's charges are split again, so only that
+    part changes. When every item then has one category the transaction takes it and isn't split any more. Returns
+    False when the transaction isn't split by an order's items, for the caller to change its parts itself."""
+    for ch in conn.execute(select(RetailCharge.id, RetailCharge.order_id, RetailCharge.applied)
+                           .where(RetailCharge.tx_id == tx_id)).fetchall():
+        applied = json.loads(ch["applied"]) if ch["applied"] else None
+        if not _is_ours(conn, tx_id, applied):
+            continue
+        tx = conn.execute(select(Transaction.category).where(Transaction.id == tx_id)).fetchone()
+        prev = (applied or {}).get("prev") or {"category": tx["category"] if tx else None}
+        fallback = _fallback_category(conn, {"category": prev["category"]})
+        i = RetailItem
+        ids = [r["id"] for r in conn.execute(select(i.id, i.category).where(i.order_id == ch["order_id"]))
+               if (r["category"] or fallback) in family]
+        if not ids:
+            return False
+        conn.execute(update(i).where(i.id.in_(ids)).values(category=category, category_source="manual", confidence=1))
+        for other in conn.execute(select(RetailCharge.id).where(RetailCharge.order_id == ch["order_id"],
+                                                                RetailCharge.tx_id.is_not(None))).fetchall():
+            apply(conn, other["id"])
+        conn.execute(update(Transaction).where(Transaction.id == tx_id).values(needs_review=0))
+        return True
+    return False
+
+
 def set_transaction_category(conn, tx_ids: list[str], category: str) -> int:
     """You gave these transactions one category: every item of their orders gets it too, so the items agree with the
     transaction instead of re-splitting it the next time something re-applies them. Returns how many items changed.
