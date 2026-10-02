@@ -74,7 +74,7 @@
     <Section id="values" title="Point values" summary="What a point is worth to you, in cents" bind:open={values}>
       <div>
         {#each groups as g (g.kind)}
-          <h4 class="mt-3 mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{g.label}</h4>
+          <h4 class="mt-3 mb-1 text-xs font-semibold tracking-[0.14em] text-muted-foreground uppercase">{g.label}</h4>
           <div class="grid gap-x-6 gap-y-2 sm:grid-cols-2">
             {#each g.currencies as c (c.key)}
               <div class="flex items-center gap-2 text-sm">

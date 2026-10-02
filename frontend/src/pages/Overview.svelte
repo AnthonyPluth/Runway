@@ -110,11 +110,11 @@
     {@const alerts = fc.warning_links.length + (fc.missed?.length ?? 0) + (fc.accounts.length ? 0 : 1)}
 
     <header class="mb-5">
-      <div class="text-[13px] font-semibold tracking-wide text-muted-foreground uppercase">
+      <div class="text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
         {parseDate(fc.today).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
       </div>
       <div class="flex items-center gap-1">
-        <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
+        <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Overview</h1>
       </div>
     </header>
 
@@ -132,7 +132,7 @@
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")}
         onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
-      <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
+      <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
       {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-amber-500" : "text-muted-foreground")}>{note}</p>{/if}
       {#if low && fc.accounts.length}
         <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>

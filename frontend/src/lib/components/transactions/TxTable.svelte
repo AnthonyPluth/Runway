@@ -139,7 +139,7 @@
     {#each days as d (d.day)}
       <section aria-label={dayLabel(d.day)}>
         <!-- lg:pr-14 keeps the total over the amounts, not over the row's chevron column. -->
-        <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-medium tracking-wide text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:pr-14 lg:text-xs lg:backdrop-blur-none">
+        <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:pr-14 lg:text-xs lg:backdrop-blur-none">
           <span>{dayLabel(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case">{fmt(d.net)}</span>{/if}
         </h3>

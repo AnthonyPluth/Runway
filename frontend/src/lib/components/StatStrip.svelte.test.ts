@@ -34,8 +34,8 @@ describe("StatStrip", () => {
     expect(screen.getByText("1 card")).toHaveClass("text-muted-foreground");
   });
 
-  it("lays out as a two-column grid on phones and one row from md up", () => {
+  it("lays out as a two-column grid on phones and compact tiles from md up", () => {
     const { container } = render(StatStrip, { items: [{ label: "A", value: "1" }] });
-    expect(container.firstElementChild).toHaveClass("grid-cols-2", "md:flex");
+    expect(container.firstElementChild).toHaveClass("grid-cols-2", "md:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]");
   });
 });

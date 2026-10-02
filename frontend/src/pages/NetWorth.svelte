@@ -167,7 +167,7 @@
 {/snippet}
 
 <div class="mb-4 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
+  <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Net worth</h1>
 </div>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
@@ -200,7 +200,7 @@
   <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
   <section class="mb-8">
     <div class="sr-only">Net worth</div>
-    <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt0(d.net)}</div>
+    <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]">{fmt0(d.net)}</div>
     {#if d.history.length >= 2}
       <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         {#if ch != null}

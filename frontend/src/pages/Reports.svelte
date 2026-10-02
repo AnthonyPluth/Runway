@@ -21,7 +21,7 @@
 </script>
 
 <div class="mb-6 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
+  <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Reports</h1>
 </div>
 <SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />
 {#if app.state?.connected}

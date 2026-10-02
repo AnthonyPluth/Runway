@@ -12,7 +12,7 @@
   // through SimpleFIN or Plaid (which provider each account uses, and which bank account it is, is decided under
   // Accounts); the browser extension and the services with a key of your own are optional.
   let { accounts = [] }: { accounts?: SettingsAccount[] } = $props();
-  const heading = "text-xs font-medium uppercase tracking-wide text-muted-foreground";
+  const heading = "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground";
 </script>
 
 <section class="flex flex-col gap-3" aria-labelledby="connections-banks">
