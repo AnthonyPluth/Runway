@@ -115,6 +115,6 @@ describe("rewards", () => {
     expect(screen.getByText("Airline miles")).toBeInTheDocument();
     expect(screen.getByText("your value")).toBeInTheDocument();      // AA is overridden
     expect(screen.getAllByText(/estimate \(as of Jun 2026\)/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Estimates, not official values/)).toBeNull();   // that note is under Settings → Assumptions
+    expect(screen.queryByText(/Estimates, not official values/)).toBeNull();   // that note is in the docs
   });
 });

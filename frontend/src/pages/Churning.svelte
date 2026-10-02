@@ -1,7 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
-  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -109,7 +108,6 @@
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center gap-1">
       <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
-      <AssumptionsLink group="churning" />
     </div>
     {#if d.people.length > 1}
       <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}

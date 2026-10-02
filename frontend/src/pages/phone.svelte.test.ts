@@ -39,7 +39,7 @@ describe("Settings", () => {
     render(Settings, { sub: "notifications" });
     const tabs = await screen.findByRole("navigation", { name: "Settings" });
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim().replace(/\d+$/, ""))).toEqual(
-      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Assumptions", "Advanced"]);
+      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Advanced"]);
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 });
