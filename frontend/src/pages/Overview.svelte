@@ -148,7 +148,7 @@
     <!-- The hero: today's balance, whether it holds up, and the forecast under it. The chart is green while the
          balance stays above zero and red when it dips below. -->
     <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
-      <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")} accounts={fc.accounts}
+      <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")}
         onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
       <div class="text-[44px] leading-none font-bold tracking-tight tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
       {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-amber-500" : "text-muted-foreground")}>{note}</p>{/if}

@@ -15,7 +15,7 @@ from ..sync import _inv_lock, _sync_lock
 
 ACCOUNT_FIELDS = {
     "display_name": str, "kind": str, "pay_from": str,
-    "in_forecast": int, "daily_spend": int, "hidden": int, "networth_hidden": int, "owed_positive": int, "owner": str,
+    "in_forecast": int, "hidden": int, "networth_hidden": int, "owed_positive": int, "owner": str,
 }
 KINDS = {"checking", "savings", "credit", "loan", "investment"}
 # A loan's terms, for the retirement planner: (label, lowest, highest). Empty clears one.

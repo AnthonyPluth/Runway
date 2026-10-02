@@ -229,7 +229,9 @@ class ForecastTests(LedgerCase):
         self.acct("chk2", "checking", 300.0)
         for i in range(60):  # plenty of everyday spending in history
             self.tx("chk", (TODAY - timedelta(days=i)).isoformat(), -25.0, "TARGET", "Groceries")
-        db.set_setting(self.conn, "primary_account", "chk")   # chk's everyday-spending drain is off (the default)
+        # an account still marked for everyday spending by an older version: nothing is taken out for it any more
+        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
+        db.set_setting(self.conn, "primary_account", "chk")
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual([a["id"] for a in fc["accounts"]], ["chk"])
         self.assertEqual(fc["primary_id"], "chk")
@@ -238,16 +240,8 @@ class ForecastTests(LedgerCase):
         for i in range(1, len(s)):
             if dates[i] not in event_days:
                 self.assertEqual(s[i], s[i - 1], f"balance moved on {dates[i]} with nothing scheduled")
-        # switched off, the forecast still says what it would take out, for Overview's "about $25 a day"
-        acct = fc["accounts"][0]
-        self.assertEqual((acct["daily_spend"], acct["daily_spend_on"]), (0.0, False))
-        self.assertGreater(acct["daily_spend_estimate"], 0)
-        # opting back in brings the drain back
-        self.conn.execute(update(Account).where(Account.id == "chk").values(daily_spend=1))
-        fc = forecast.build(self.conn, TODAY, 30)
-        self.assertGreater(fc["accounts"][0]["daily_spend"], 0)
-        self.assertTrue(fc["accounts"][0]["daily_spend_on"])
-        self.assertEqual(fc["accounts"][0]["daily_spend"], fc["accounts"][0]["daily_spend_estimate"])
+        self.assertFalse({"daily_spend", "daily_spend_on", "daily_spend_estimate"} & set(fc["accounts"][0]))
+        self.assertFalse(any("everyday_before" in e for e in fc["events"]))
 
     def test_card_without_bank_statements_warns(self):
         self.conn.execute(delete(CardStatement))
@@ -465,7 +459,7 @@ class ForecastEdgeTests(LedgerCase):
 
 
 class ForecastAssumptionTests(LedgerCase):
-    """What the forecast assumes about pending transactions, card cycles, everyday spending and the budget scenario."""
+    """What the forecast assumes about pending transactions, card cycles and the budget scenario."""
     card_setup = ForecastTests.card_setup
 
     def setUp(self):

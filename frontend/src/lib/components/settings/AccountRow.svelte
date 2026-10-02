@@ -57,7 +57,6 @@
   let hidden = $state(!!init.hidden);
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
-  let spend = $state(!!init.daily_spend);
   let rate = $state(init.loan?.set_rate != null ? String(init.loan.set_rate) : "");
   let payment = $state(init.loan?.set_payment != null ? String(init.loan.set_payment) : "");
   let changingType = $state(false);
@@ -149,7 +148,6 @@
     const body: Record<string, unknown> = { display_name: name, kind, hidden: hidden ? 1 : 0, networth_hidden: counted ? 0 : 1, owner };
     if (a.kind === "credit") Object.assign(body, { pay_from: payFrom, pay_mode: payMode, pay_amount: payAmount ?? "", apr: apr ?? "" });
     if (owes) body.owed_positive = sign ? 1 : 0;
-    if (a.kind === "checking" || a.kind === "savings") body.daily_spend = spend ? 1 : 0;
     try {
       await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
       if (rerender) { toast.success("Saved"); reload(); }
@@ -364,10 +362,6 @@
     {/if}
     <section class="flex flex-col gap-2.5 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Options">
       <h4 class="text-sm font-medium">Options</h4>
-      {#if a.kind === "checking" || a.kind === "savings"}
-        <label class={checkCls} title="Spreads this account's recent non-recurring spending evenly over every day of the forecast">
-          <input type="checkbox" bind:checked={spend} use:autosave={() => save(false)} /> Subtract average everyday spending</label>
-      {/if}
       {#if owes}
         <label class={checkCls}><input type="checkbox" bind:checked={sign} use:autosave={() => save(false)} /> Bank reports what's owed as a positive number</label>
       {/if}

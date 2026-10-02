@@ -12,7 +12,6 @@ export interface SettingsAccount extends Account {
   /** The card's purchase APR from the issuer, through Plaid: used when you haven't entered one. */
   issuer_apr?: number | null;
   owed_positive?: number;
-  daily_spend?: number;
   networth_hidden?: number;
   provider?: string | null;
   plaid_account_id?: string | null;
