@@ -39,7 +39,7 @@ describe("SetupChecklist", () => {
     expect(screen.getByText("2 of 4 done")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Done")).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#budget/recurring");
+    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#recurring");
     expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "#budget");
   });
 

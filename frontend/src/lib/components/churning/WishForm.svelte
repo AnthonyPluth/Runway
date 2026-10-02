@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
@@ -92,12 +93,12 @@
   <Section id="expect" title="What you expect" bind:open={open.expect} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
   <div class="flex flex-wrap items-end gap-3">
     {#if v.kind === "card"}
-      <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} placeholder="$" /></label>
+      <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="$" /></label>
       <label class={lbl}>Bonus is paid in<CurrencySelect {d} bind:value={v.currency} {@attach edit("currency")} /></label>
     {/if}
-    <label class={lbl}>Bonus ({v.kind === "card" && v.currency !== "cash" ? "points" : "dollars"})<Input type="number" min="0" step={v.kind === "card" ? 1000 : 25} class="w-32" bind:value={v.bonus} {@attach edit("bonus")} /></label>
+    <label class={lbl}>Bonus ({v.kind === "card" && v.currency !== "cash" ? "points" : "dollars"})<Input type="number" min="0" step={v.kind === "card" ? 1000 : 25} class="w-32" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} /></label>
     {#if v.kind === "card"}
-      <label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} placeholder="$" /></label>
+      <label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" /></label>
       <label class={lbl}>Within (months)<Input type="number" min="1" max="24" class="w-24" bind:value={v.bonus_months} {@attach edit("bonus_months")} /></label>
       <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card (doesn't count toward 5/24)</label>
     {:else}

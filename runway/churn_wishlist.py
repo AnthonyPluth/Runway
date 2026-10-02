@@ -201,7 +201,7 @@ def upcoming(wishlist: list[dict], today: date, end: date) -> list[dict]:
 
 
 def _detail(w: dict) -> str:
-    return "; ".join(w["hints"]) if w["hints"] else ("Priority " + str(w["priority"]) if w.get("priority") else "")
+    return "; ".join(w["hints"])   # (not its priority: that's a place in everyone's plans, not this person's)
 
 
 def alerts(wishlist: list[dict], today: date) -> list[dict]:
@@ -292,8 +292,8 @@ def save(conn, body: dict, wish_id: int | None = None) -> int:
         if st not in STATUSES:
             raise churning.ChurnError("The status is wanted, ready, applied or dropped")
         f["status"] = st
-    if new and f.get("priority") is None:   # after the person's others
-        top = conn.execute(select(func.max(ChurnWish.priority)).where(ChurnWish.owner == f["owner"])).scalar()
+    if new and f.get("priority") is None:   # last: one order for everyone's plans, so people's turns can alternate
+        top = conn.execute(select(func.max(ChurnWish.priority))).scalar()
         f["priority"] = (top or 0) + 1
     if row is None:
         return int(conn.execute(insert(ChurnWish).values(**f)).lastrowid)

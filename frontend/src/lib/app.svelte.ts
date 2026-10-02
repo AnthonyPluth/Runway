@@ -57,13 +57,15 @@ export function keepScroll(y: number): void {
 // Hash routes, as in the classic app: #overview, #setup/connections, ...
 export const route = $state({ page: "overview", sub: "" as string });
 
-// Old routes that are now a tab of another page (#investments is Net worth's Investments tab): they resolve to the new
-// route here, so everything downstream (the page, the tab bar, the nav highlight) sees only the current routes.
-const MOVED: Record<string, [page: string, sub: string]> = { investments: ["networth", "investments"], recurring: ["budget", "recurring"] };
+// Old routes that moved (#investments is Net worth's Investments tab; #budget/recurring was Bills & income, now the
+// Recurring page): they resolve to the new route here, so everything downstream (the page, the nav highlight) sees only
+// the current routes.
+const MOVED: Record<string, [page: string, sub: string]> = { investments: ["networth", "investments"] };
 
 function readHash(): void {
   const [name, rawSub = ""] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
-  const [page, sub] = MOVED[name] ?? [name === "settings" ? "setup" : name, rawSub];
+  const [page, sub] = name === "budget" && rawSub === "recurring" ? ["recurring", ""]
+    : MOVED[name] ?? [name === "settings" ? "setup" : name, rawSub];
   if ((page || "overview") !== route.page) newPage();   // a tab inside the same page keeps its data and place
   route.page = page || "overview";
   route.sub = sub;

@@ -29,7 +29,7 @@ export const pathOnly = (url: string | undefined) => {
   } catch { return scrubText(url.split("?")[0]); }
 };
 
-/** A page's name in traces: "/#budget/recurring", whatever was searched on it. */
+/** A page's name in traces: "/#recurring", whatever was searched on it. */
 export const pageName = () => "/#" + ((location.hash || "#overview").slice(1).split("?")[0] || "overview");
 
 type Data = Record<string, unknown> | undefined;
@@ -89,7 +89,7 @@ export async function startMonitoring(cfg: SentryConfig | null | undefined): Pro
     integrations: (defaults) => [
       ...defaults.filter((i) => !["Console", "Breadcrumbs", "Replay", "ReplayCanvas"].includes(i.name)),
       breadcrumbsIntegration({ dom: false }),
-      // Pages are the hash (#budget/recurring), so name page loads and navigations by it, never by what's searched.
+      // Pages are the hash (#recurring), so name page loads and navigations by it, never by what's searched.
       browserTracingIntegration({ beforeStartSpan: (o) => ({ ...o, name: pageName() }) }),
       browserProfilingIntegration(),
       // Console warnings and errors as Sentry Logs (their text is Runway's own messages, cleaned like the rest).

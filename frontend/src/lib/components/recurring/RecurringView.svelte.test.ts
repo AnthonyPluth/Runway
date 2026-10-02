@@ -32,6 +32,9 @@ const serve = (items: RecurringItem[], suggestions: Suggestion[] = [], more: Rec
 
 beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; });
 
+// The amount field (other labels say "Amount" too); a text box with commas until you're in it, so found by its label.
+const AMOUNT = { selector: 'input[name="amount"]' };
+
 describe("Recurring page", () => {
   it("splits items into money in and money out", async () => {
     serve([item(), item({ id: 2, name: "Paycheck", amount: 3000 })]);
@@ -158,7 +161,7 @@ describe("Recurring page", () => {
     it("adds an item and says how many past transactions it matched; money out is the default, stored negative", async () => {
       await open();
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Gym");
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "120");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "120");
       await userEvent.click(addButton());
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added · matched 3 past transactions"));
       expect(posted()[0][1]).toMatchObject({ method: "POST", body: { name: "Gym", account_id: "a1", amount: -120, frequency: "monthly", anchor_date: isoDay(), active: 1 } });
@@ -168,7 +171,7 @@ describe("Recurring page", () => {
       await open();
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Tax refund");
       await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "1240");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "1240");
       await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "once");
       const day = screen.getByLabelText(/^Date/);
       await userEvent.clear(day);
@@ -182,7 +185,7 @@ describe("Recurring page", () => {
       await open();
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Paycheck");
       await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "3100.50");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "3100.50");
       await userEvent.click(addButton());
       await waitFor(() => expect(posted()).toHaveLength(1));
       expect((posted()[0][1] as { body: { amount: number } }).body.amount).toBe(3100.5);
@@ -191,7 +194,7 @@ describe("Recurring page", () => {
     it("uses the direction you pick even if you pick it after typing the amount", async () => {
       await open();
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Paycheck");
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "-40");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "-40");
       await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
       await userEvent.click(addButton());
       await waitFor(() => expect(posted()).toHaveLength(1));
@@ -202,7 +205,7 @@ describe("Recurring page", () => {
       await open();
       expect(screen.getByRole("radio", { name: "Money out" })).toBeChecked();
       expect(screen.getByLabelText(/Next date/)).toHaveValue(isoDay());
-      expect(screen.getByRole("spinbutton", { name: /Amount/ })).toHaveAttribute("placeholder", "120.00");
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveAttribute("placeholder", "120.00");
       expect(screen.getByRole("textbox", { name: /Name/ })).toHaveAttribute("aria-required", "true");
     });
 
@@ -225,7 +228,7 @@ describe("Recurring page", () => {
       await open();
       await userEvent.click(addButton());
       const name = screen.getByRole("textbox", { name: /Name/ });
-      const amount = screen.getByRole("spinbutton", { name: /Amount/ });
+      const amount = screen.getByLabelText(/Amount/, AMOUNT);
       expect(name).toHaveAttribute("aria-invalid", "true");
       expect(name).toHaveAccessibleDescription("Enter a name, like Paycheck or Rent.");
       expect(amount).toHaveAttribute("aria-invalid", "true");
@@ -240,7 +243,7 @@ describe("Recurring page", () => {
       await open();
       await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "dates");
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Property tax");
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "2000");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "2000");
       await userEvent.click(addButton());
       expect(screen.getByRole("textbox", { name: /Dates each year/ })).toHaveAccessibleDescription("List the dates, like Apr 15, Oct 15.");
       expect(posted()).toHaveLength(0);
@@ -254,7 +257,7 @@ describe("Recurring page", () => {
         return (path === "/api/accounts" ? accounts : []) as never;
       });
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Gym");
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "30");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "30");
       const btn = addButton();
       await userEvent.dblClick(btn);
       expect(posted()).toHaveLength(1);
@@ -272,7 +275,7 @@ describe("Recurring page", () => {
         return [] as never;
       });
       await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Gym");
-      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "30");
+      await userEvent.type(screen.getByLabelText(/Amount/, AMOUNT), "30");
       await userEvent.click(addButton());
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Name, account and frequency are required"));
       expect(addButton()).toBeEnabled();
@@ -292,7 +295,7 @@ describe("Recurring page", () => {
       await userEvent.click(screen.getByRole("button", { name: "Add Netflix" }));
       expect(await screen.findByRole("heading", { name: "Add a recurring item" })).toBeInTheDocument();
       expect(form().getByRole("textbox", { name: /Name/ })).toHaveValue("Netflix");
-      expect(form().getByRole("spinbutton", { name: /Amount/ })).toHaveValue(15.49);
+      expect(form().getByLabelText(/Amount/, AMOUNT)).toHaveValue("15.49");
       expect(form().getByRole("radio", { name: "Money out" })).toBeChecked();
       expect(form().getByLabelText(/Next date/)).toHaveValue("2026-03-05");
       expect(form().getByRole("textbox", { name: /Merchant text/ })).toHaveValue("NETFLIX");
@@ -309,7 +312,7 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByRole("button", { name: "Add Acme Payroll" }));
       expect(await form().findByRole("radio", { name: "Money in" })).toBeChecked();
-      expect(form().getByRole("spinbutton", { name: /Amount/ })).toHaveValue(3100);
+      expect(form().getByLabelText(/Amount/, AMOUNT)).toHaveValue("3100");
     });
 
     it("dismisses a suggestion with Not recurring, and it stays gone", async () => {
@@ -438,9 +441,9 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
       await userEvent.click(screen.getByText("Paycheck"));
-      const [pay, rent] = screen.getAllByRole("spinbutton", { name: /Amount/ });   // money in is listed first
-      expect(rent).toHaveValue(1500);
-      expect(pay).toHaveValue(3000);
+      const [pay, rent] = screen.getAllByLabelText(/Amount/, AMOUNT);   // money in is listed first
+      expect(rent).toHaveValue("1500");
+      expect(pay).toHaveValue("3000");
       const [payOut, rentOut] = screen.getAllByRole("radio", { name: "Money out" });
       expect(rentOut).toBeChecked();
       expect(payOut).not.toBeChecked();
@@ -451,7 +454,7 @@ describe("Recurring page", () => {
       serve([item()], [], { "/api/recurring/1": { linked: 0 } });
       render(Recurring);
       await userEvent.click(await screen.findByText("Rent"));
-      const amount = screen.getAllByRole("spinbutton", { name: /Amount/ })[0];
+      const amount = screen.getByLabelText(/Amount/, AMOUNT);
       await userEvent.clear(amount);
       await userEvent.type(amount, "1600");
       await userEvent.tab();
@@ -488,7 +491,7 @@ describe("Recurring page", () => {
       expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());   // nothing changes until you say so
       await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
       await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ method: "POST", body: expect.objectContaining({ amount: 2100, amount_mode: "fixed" }) })));
-      expect(screen.getAllByRole("spinbutton", { name: /Amount/ })[0]).toHaveValue(2100);
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("2100");
       expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
     });
 
@@ -497,17 +500,17 @@ describe("Recurring page", () => {
         [], { "/api/recurring/1": { linked: 1, amount_min: 1470, amount_max: 2730 } });
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
-      expect(screen.getByLabelText("Smallest amount")).toHaveValue(3500);
+      expect(screen.getByLabelText("Smallest amount")).toHaveValue("3500");
       await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
-      await waitFor(() => expect(screen.getByLabelText("Smallest amount")).toHaveValue(1470));
-      expect(screen.getByLabelText("Largest amount")).toHaveValue(2730);
+      await waitFor(() => expect(screen.getByLabelText("Smallest amount")).toHaveValue("1470"));
+      expect(screen.getByLabelText("Largest amount")).toHaveValue("2730");
     });
 
     it("stops offering the amount once you type your own", async () => {
       serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47 })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
-      const amount = screen.getAllByRole("spinbutton", { name: /Amount/ })[0];
+      const amount = screen.getByLabelText(/Amount/, AMOUNT);
       await userEvent.clear(amount);
       await userEvent.type(amount, "2500");
       expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();   // not "about $2,100, not $2,500"
@@ -523,7 +526,7 @@ describe("Recurring page", () => {
       vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
       await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
-      expect(screen.getAllByRole("spinbutton", { name: /Amount/ })[0]).toHaveValue(5000);
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("5000");
       expect(screen.getByRole("button", { name: "Use $2,100" })).toBeInTheDocument();
     });
 
@@ -531,8 +534,8 @@ describe("Recurring page", () => {
       serve([item({ name: "Paycheck", amount: 5000, amount_min: 3500, amount_max: 6500 })]);
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
-      const lo = screen.getAllByRole("spinbutton", { name: "Smallest amount" })[0], hi = screen.getAllByRole("spinbutton", { name: "Largest amount" })[0];
-      expect(lo).toHaveValue(3500);
+      const lo = screen.getAllByLabelText("Smallest amount")[0], hi = screen.getAllByLabelText("Largest amount")[0];
+      expect(lo).toHaveValue("3500");
       expect(hi).toHaveAccessibleDescription("Leave blank to match any amount with the text.");
       await userEvent.clear(lo);
       await userEvent.type(lo, "1500");

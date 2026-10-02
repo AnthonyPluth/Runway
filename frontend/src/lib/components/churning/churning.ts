@@ -214,7 +214,7 @@ export function benefitOrder(a: Benefit, b: Benefit): number {
 }
 
 export const BLOCKER_LABEL: Record<Blocker["kind"], string> = {
-  five24: "5/24", bonus_rule: "Bonus rule", held: "Still open", wait: "Waiting", score: "Credit score", offer: "Offer",
+  five24: "5/24", bonus_rule: "Bonus rule", held: "Card held", wait: "Waiting", score: "Credit score", offer: "Offer",
 };
 
 /** "705 of 740 wanted": a person's latest score against what a planned item wants; null when it wants none. */
@@ -229,28 +229,24 @@ export const wishName = (w: Pick<Wish, "kind" | "product" | "bank">) =>
   w.kind === "card" ? (w.product ?? "") : [w.bank, w.product].filter(Boolean).join(" ");
 
 /** Planned items still in play (wanted or ready) apart from the ones applied for or dropped. */
-/** Planned items still to do (each person's together, in their order: priorities are per person, so everyone's
- * interleaved by number would put one person's #1 between another's #1 and #2) and the ones applied for or dropped. */
 export function splitWishes(wishes: Wish[]) {
-  const open = wishes.filter((w) => w.status === "wanted" || w.status === "ready");
-  const owners = [...new Set(open.map((w) => w.owner))];
   return {
-    open: owners.flatMap((o) => open.filter((w) => w.owner === o)),
+    // one order for everyone's plans (the server's: by priority), so one person's card can come between another's
+    open: wishes.filter((w) => w.status === "wanted" || w.status === "ready"),
     closed: wishes.filter((w) => w.status === "applied" || w.status === "dropped"),
   };
 }
 
-/** Move a planned item up or down among its person's open items; returns the priorities to save (only the ones that
- * change), numbering them 1, 2, 3… in the new order. */
-export function reorder(open: Wish[], id: number, dir: -1 | 1): { id: number; priority: number }[] {
-  const w = open.find((x) => x.id === id);
-  if (!w) return [];
-  const list = open.filter((x) => x.owner === w.owner);
-  const from = list.findIndex((x) => x.id === id), to = from + dir;
-  if (to < 0 || to >= list.length) return [];
-  const next = [...list];
-  [next[from], next[to]] = [next[to], next[from]];
-  return next.flatMap((x, i) => (x.priority === i + 1 ? [] : [{ id: x.id, priority: i + 1 }]));
+/** Move a planned item up or down past the next one shown (`shown`: the open items on screen, which may be one person's);
+ * returns the priorities to save (only the ones that change), numbering everyone's open items 1, 2, 3… in the new order. */
+export function reorder(open: Wish[], id: number, dir: -1 | 1, shown: Wish[] = open): { id: number; priority: number }[] {
+  const at = shown.findIndex((x) => x.id === id), other = at < 0 ? undefined : shown[at + dir];
+  if (!other) return [];
+  const next = [...open];
+  const i = next.findIndex((x) => x.id === id), j = next.findIndex((x) => x.id === other.id);
+  if (i < 0 || j < 0) return [];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next.flatMap((x, k) => (x.priority === k + 1 ? [] : [{ id: x.id, priority: k + 1 }]));
 }
 
 export interface BenefitRow { card: ChurnCard; b: Benefit }

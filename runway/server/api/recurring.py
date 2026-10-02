@@ -32,7 +32,7 @@ def api_recurring_dismiss(conn, _q, body):
 
 def recurring_logos(conn, items: list[dict]) -> dict[int, str | None]:
     """{recurring id: its logo's URL}. An item wears the logo of the last transaction matched to it, unless you chose one
-    for it: the logo picker on Bills & income picks by the item's name (a bill needn't have a matched transaction, and its
+    for it: the logo picker on Recurring picks by the item's name (a bill needn't have a matched transaction, and its
     name is what you'd call the merchant). That's the same choice Transactions keeps by merchant name, so a name that is
     also a merchant's changes both. A choice of "no logo" leaves the item without one."""
     ids = [i["id"] for i in items]

@@ -99,8 +99,8 @@ describe("startMonitoring", () => {
     const { opts } = await started(cfg);
     const tracing = opts.integrations([]).find((i) => i.name === "BrowserTracing")!;
     const rename = tracing.opts!.beforeStartSpan as (o: { name: string; op: string }) => { name: string };
-    location.hash = "#budget/recurring?q=rent";
-    expect(rename({ name: "/", op: "navigation" }).name).toBe("/#budget/recurring");
+    location.hash = "#recurring?q=rent";
+    expect(rename({ name: "/", op: "navigation" }).name).toBe("/#recurring");
     location.hash = "";
     expect(rename({ name: "/", op: "pageload" }).name).toBe("/#overview");
   });

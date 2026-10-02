@@ -76,12 +76,14 @@
     }
     const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
     return { inBudget, notBudget, unusedTops, countsToward, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
-      pace: b.day / b.days_in_month };   // pace: the share of the month gone
+      // pace: the share of the month gone, counting today as half gone (at the end of today the marker would sit a
+      // day ahead of the date all day long)
+      pace: b.month !== thisMonth() ? (b.day >= b.days_in_month ? 1 : 0) : Math.max(0, b.day - 0.5) / b.days_in_month };
   });
 </script>
 
 {#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number, counts: (c: BudgetCategory) => boolean)}
-  <div class="group/family px-4 py-1.5">
+  <div class="group/family px-4 py-1">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
       <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} counts={counts(c)} {pace} payAccounts={bm.pay_accounts}
         onsave={saveBudget} onchanged={refresh} />

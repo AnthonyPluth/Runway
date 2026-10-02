@@ -9,9 +9,10 @@
   import X from "@lucide/svelte/icons/x";
 
   // On a phone (lib/phone.svelte.ts): a tab bar along the bottom with the four pages you use most, and More for the rest
-  // (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead.
-  const TABS = MAIN_NAV;
-  const MORE: NavItem[] = [...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
+  // (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead. Recurring is in the
+  // sidebar under Budget but goes in More here: five tabs and More wouldn't fit a phone's width.
+  const TABS = MAIN_NAV.filter((x) => x.page !== "recurring");
+  const MORE: NavItem[] = [...MAIN_NAV.filter((x) => x.page === "recurring"), ...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
 
   const current = $derived(currentPage());
   const s = $derived(app.state);

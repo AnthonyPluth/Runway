@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
@@ -71,7 +72,7 @@
             {/if}
             <div class="mt-2 flex flex-wrap items-center gap-2">
               {#if b.kind === "credit" && b.amount && canUse(b)}
-                <Input type="number" min="0" step="1" class="h-8 w-28" bind:value={amounts[b.id]} placeholder={`${fmt0(b.remaining)} left`} aria-label={`Amount of ${b.name} used (blank: the rest)`} />
+                <Input type="number" min="0" step="1" class="h-8 w-28" bind:value={amounts[b.id]} {@attach commas} placeholder={`${fmt0(b.remaining)} left`} aria-label={`Amount of ${b.name} used (blank: the rest)`} />
               {/if}
               <Button size="sm" variant="outline" disabled={!canUse(b)} aria-label={`Mark ${b.name} used`}
                 onclick={async () => { await benefitUse(b.id, b.name, amounts[b.id], onchanged); amounts[b.id] = ""; }}>Mark used</Button>

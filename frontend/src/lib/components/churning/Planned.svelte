@@ -3,6 +3,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Input } from "$lib/components/ui/input";
   import { fmt0 } from "$lib/format";
@@ -17,7 +18,7 @@
   import type { Churning, Wish } from "./types";
   import WishForm from "./WishForm.svelte";
 
-  // Cards and bank bonuses you mean to get, per person in the order you'd go: what each is expected to cost and pay,
+  // Cards and bank bonuses you mean to get, everyone's in one list in the order you'd go: what each is expected to cost and pay,
   // what's in the way of applying now (5/24, the bank's bonus rules, an account still open, a credit score, a day you
   // set) and, when nothing is, "Ready to apply". "I applied" turns it into the real card or bonus.
   let { d, person, showOwner, onchanged, onapplied }: {
@@ -26,6 +27,7 @@
 
   const wishes = $derived(mine(d.wishlist, person));
   const parts = $derived(splitWishes(wishes));
+  const everyone = $derived(splitWishes(d.wishlist).open);   // what the order is saved over, whoever's shown
   let form = $state<Wish | "new" | null>(null);
   let showDone = $state(false);
   const people = $derived(person ? [person] : d.people);
@@ -49,12 +51,17 @@
 
   async function move(w: Wish, dir: -1 | 1) {
     try {
-      await Promise.all(reorder(parts.open, w.id, dir).map((c) => api(`/api/churning/wishlist/${c.id}`, { method: "POST", body: { priority: c.priority } })));
+      await Promise.all(reorder(everyone, w.id, dir, parts.open).map((c) => api(`/api/churning/wishlist/${c.id}`, { method: "POST", body: { priority: c.priority } })));
       onchanged();
     } catch (err) { toast.error((err as Error).message); }
   }
   async function setStatus(w: Wish, status: "wanted" | "dropped") {
     try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status } }); toast(status === "dropped" ? `Dropped ${wishName(w)}` : `${wishName(w)} is wanted again`); onchanged(); }
+    catch (err) { toast.error((err as Error).message); }
+  }
+  // Applied or dropped: gone for good (what applying made, the card or bonus, stays).
+  async function remove(w: Wish) {
+    try { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
   async function applied(w: Wish) {
@@ -112,6 +119,9 @@
           <Button size="sm" variant="link" class="px-1" onclick={() => setStatus(w, "wanted")}>Want again</Button>
           <Button size="sm" variant="link" class="px-1" onclick={() => (form = w)} aria-label={`Edit ${wishName(w)}`}>Edit</Button>
         {/if}
+        {#if !open}
+          <ConfirmButton class="px-1" confirm={`Delete ${wishName(w)}?`} title={`Delete ${wishName(w)} from Planned`} onconfirm={() => remove(w)}>Delete</ConfirmButton>
+        {/if}
       </div>
     </div>
     {#if open}
@@ -163,10 +173,7 @@
     {#if form}{#key form}<WishForm w={form === "new" ? null : form} {d} {person} onclose={closeForm} />{/key}{/if}
     {#if parts.open.length}
       <ul class="divide-y">
-        {#each parts.open as w (w.id)}
-          {@const theirs = parts.open.filter((x) => x.owner === w.owner)}
-          {@render item(w, theirs.indexOf(w), theirs.length)}
-        {/each}
+        {#each parts.open as w, i (w.id)}{@render item(w, i, parts.open.length)}{/each}
       </ul>
     {/if}
     {#if parts.closed.length}

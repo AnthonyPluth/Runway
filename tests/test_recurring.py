@@ -1,4 +1,4 @@
-"""Bills & income: matching recurring payments and their amounts."""
+"""Recurring: matching recurring payments and their amounts."""
 import unittest
 from datetime import date
 from unittest import mock

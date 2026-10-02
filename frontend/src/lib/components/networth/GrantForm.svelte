@@ -35,7 +35,7 @@
       <NativeSelect bind:value={f.kind}>{#each Object.entries(EQ_KINDS) as [k, v] (k)}<option value={k}>{v}</option>{/each}</NativeSelect>
     </label>
     <label class={lbl}>Name<Input bind:value={f.label} placeholder="ES-12 (optional)" /></label>
-    <label class={lbl}>Shares<Input bind:ref={qtyEl} type="number" min="0" step="1" value={f.quantity} oninput={num("quantity")} /></label>
+    <label class={lbl}>Shares<Input bind:ref={qtyEl} type="number" min="0" step="1" value={f.quantity} {@attach commas} oninput={num("quantity")} /></label>
     {#if opt}
       <label class={lbl}>Strike price
         <span class="relative">
@@ -43,7 +43,7 @@
           <Input class="pl-6" type="number" min="0" step="0.0001" value={f.strike} {@attach commas} oninput={num("strike")} />
         </span>
       </label>
-      <label class={lbl}>Exercised<Input type="number" min="0" step="1" value={f.exercised} oninput={num("exercised")} placeholder="0" /></label>
+      <label class={lbl}>Exercised<Input type="number" min="0" step="1" value={f.exercised} {@attach commas} oninput={num("exercised")} placeholder="0" /></label>
     {/if}
     {#if f.kind !== "shares"}
       <label class={lbl}>Granted<Input type="date" bind:value={f.granted_on} /></label>

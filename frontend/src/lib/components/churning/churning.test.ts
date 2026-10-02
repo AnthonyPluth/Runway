@@ -171,22 +171,24 @@ describe("churning 2 helpers", () => {
     expect([b.left, b.usedAmount, b.value]).toEqual([460, 250, 1000]);   // left 10+300+150; used 150+100; worth 300×3+100
   });
 
-  it("shows a score against what a planned item wants, and reorders a person's list", () => {
+  it("shows a score against what a planned item wants, and reorders everyone's plans as one list", () => {
     const w = (id: number, owner: string, priority: number, over: Partial<Wish> = {}) => ({ id, owner, priority, status: "wanted", kind: "card", min_score: null, ...over }) as Wish;
     const scores = { Alex: { owner: "Alex", score: 705, as_of: "2026-09-01", source: null, history: [] } };
     expect(scoreProgress(w(1, "Alex", 1, { min_score: 740 }), scores)).toBe("705 of 740 wanted");
     expect(scoreProgress(w(1, "Sam", 1, { min_score: 740 }), scores)).toBe("740 wanted · no score entered");
     expect(scoreProgress(w(1, "Alex", 1), scores)).toBeNull();
-    const open = [w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2), w(4, "Alex", 3)];
-    expect(reorder(open, 3, -1)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 2 }]);
+    const open = [w(1, "Alex", 1), w(2, "Sam", 2), w(3, "Alex", 3), w(4, "Alex", 4)];
+    expect(reorder(open, 3, -1)).toEqual([{ id: 3, priority: 2 }, { id: 2, priority: 3 }]);   // past Sam's: people alternate
     expect(reorder(open, 1, -1)).toEqual([]);
     expect(reorder(open, 4, 1)).toEqual([]);
     expect(splitWishes([w(1, "A", 1), w(2, "A", 2, { status: "applied" }), w(3, "A", 3, { status: "dropped" }), w(4, "A", 4, { status: "ready" })]).open.map((x) => x.id)).toEqual([1, 4]);
-    // Everyone's together (priorities are per person): each person's items stay together, in their order, so moving one
-    // up or down moves it on screen too.
-    const both = splitWishes([w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2), w(4, "Sam", 2)]).open;
-    expect(both.map((x) => x.id)).toEqual([1, 3, 2, 4]);
-    expect(reorder(both, 3, -1)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 2 }]);
+    // Everyone's in one list, in the server's order, not grouped by person.
+    expect(splitWishes([w(1, "Alex", 1), w(2, "Sam", 2), w(3, "Alex", 3)]).open.map((x) => x.id)).toEqual([1, 2, 3]);
+    // Only Alex's shown: moving one past the other of Alex's keeps Sam's where it is in the shared order.
+    const alex = open.filter((x) => x.owner === "Alex");
+    expect(reorder(open, 3, -1, alex)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 3 }]);
+    // Priorities from before (each person's own 1, 2…) are numbered afresh on the first move.
+    expect(reorder([w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2)], 2, 1)).toEqual([{ id: 2, priority: 3 }]);
     expect(balanceText(1234567)).toBe("1,234,567");
     expect(balanceText(0)).toBe("0");
     expect(balanceText(null)).toBe("");

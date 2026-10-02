@@ -141,7 +141,7 @@ class WishlistTests(DbCase):
         second = self.wish(issuer="amex", product="Gold")
         self.wish(owner="Sam", issuer="amex", product="Green")
         got = churning.overview(self.c, TODAY)
-        self.assertEqual([(w["owner"], w["priority"]) for w in got["wishlist"]], [("Alex", 1), ("Sam", 1), ("Alex", 2)])   # each person's next first
+        self.assertEqual([(w["owner"], w["priority"]) for w in got["wishlist"]], [("Alex", 1), ("Alex", 2), ("Sam", 3)])   # one order for everyone
         now = [u for u in got["upcoming"] if u["kind"] == "apply"]
         self.assertIn("You can apply for Strata Premier now", [u["title"] for u in now])
         keys = [a["key"] for a in notify.alerts(self.c, TODAY, QUIET)]

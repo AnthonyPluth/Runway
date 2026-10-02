@@ -234,7 +234,7 @@ export interface Wish {
   repeat_months: number | null;
   once_per_lifetime: number;
   offer_expires_on: string | null;
-  priority: number | null;         // 1 = next, per person
+  priority: number | null;         // 1 = next; one order for everyone
   status: "wanted" | "ready" | "applied" | "dropped";
   wait_until: string | null;
   min_score: number | null;

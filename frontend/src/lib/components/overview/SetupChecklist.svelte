@@ -21,7 +21,7 @@
     { done: !!s?.primary, title: "Pick your main account", text: "The checking account your paychecks land in and your bills come out of. Runway forecasts its balance.",
       action: "Choose", ...(welcome ? { hint: "after your bank connects" } : { onclick: openForecastSettings }) },
     { done: !!s?.recurring, title: "Add paychecks and bills", text: "Tell Runway what comes in and goes out on a schedule, or accept the ones it spots in your history.",
-      href: "#budget/recurring", action: "Add" },
+      href: "#recurring", action: "Add" },
     { done: !!s?.budgets, title: "Set a few budgets", text: "Start with the categories you'd like to keep an eye on, like groceries and restaurants.",
       href: "#budget", action: "Budget" },
   ]);

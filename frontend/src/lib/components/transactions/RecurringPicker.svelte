@@ -23,7 +23,7 @@
       // None of the item's texts is on this one: offer its text, so the next one links by itself.
       const item = "recurring_id" in body && r?.suggest_text ? items.find((i) => i.id === body.recurring_id) : undefined;
       if (item && r.suggest_text) askAlsoMatch(item.id, item.name, r.suggest_text, onchanged);
-      else toast.success("new" in body ? "Recurring item created; edit it in Bills & income" : body.recurring_id ? "Linked" : "Marked as not recurring");
+      else toast.success("new" in body ? "Recurring item created; edit it in Recurring" : body.recurring_id ? "Linked" : "Marked as not recurring");
     } catch (err) { toast.error((err as Error).message); }
     onclose();
     onchanged();

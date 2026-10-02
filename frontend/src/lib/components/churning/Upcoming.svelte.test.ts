@@ -27,6 +27,14 @@ describe("upcoming", () => {
     return onchanged;
   };
 
+  it("shows the first 4, and the rest on asking", async () => {
+    setup([1, 2, 3, 4, 5, 6].map((n) => item({ title: `Thing ${n}`, card_id: n })));
+    expect(screen.queryByText("Thing 5")).not.toBeInTheDocument();
+    expect(screen.getByText("Thing 4")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show all 6" }));
+    expect(screen.getByText("Thing 6")).toBeInTheDocument();
+  });
+
   it("labels the new kinds", () => {
     setup([item({}), item({ kind: "benefit", benefit_id: 4, title: "Travel credit: $200 left" }), item({ kind: "apply", card_id: null, title: "You can apply for Gold" }),
       item({ kind: "offer_ends", card_id: null, title: "Offer for Gold ends Oct 25" })]);

@@ -1,4 +1,4 @@
-"""The Bills & income form's API contract (amounts stay signed) and dismissing suggestions."""
+"""The Recurring form's API contract (amounts stay signed) and dismissing suggestions."""
 import json
 import unittest
 

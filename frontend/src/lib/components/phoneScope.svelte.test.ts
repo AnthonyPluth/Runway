@@ -115,10 +115,10 @@ describe("churning benefits with none yet", () => {
 describe("the More sheet", () => {
   beforeEach(() => { app.state = { connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString() } as AppState; route.page = "overview"; route.sub = ""; });
 
-  it("only lists pages a phone can use: Net worth, Churning and Settings", async () => {
+  it("only lists pages a phone can use: Recurring, Net worth, Churning and Settings", async () => {
     render(MobileNav);
     await userEvent.click(screen.getByRole("button", { name: "More" }));
     const sheet = screen.getByRole("dialog", { name: "More pages" });
-    expect(Array.from(sheet.querySelectorAll("nav a")).map((a) => a.textContent!.trim())).toEqual(["Net worth", "Churning", "Settings"]);
+    expect(Array.from(sheet.querySelectorAll("nav a")).map((a) => a.textContent!.trim())).toEqual(["Recurring", "Net worth", "Churning", "Settings"]);
   });
 });

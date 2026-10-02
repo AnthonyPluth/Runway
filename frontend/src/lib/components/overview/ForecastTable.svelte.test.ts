@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/svelte";
+import { render, screen, waitFor } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Overview } from "$lib/types";
 import ForecastTable from "./ForecastTable.svelte";
@@ -23,5 +24,18 @@ describe("ForecastTable", () => {
   it("says nothing about the cycle for a card with a statement", () => {
     render(ForecastTable, { fc: fc(0, false) });
     expect(screen.getByText(/New card statement \(budgeted\)/).closest("[title]")).toHaveAttribute("title", "budgeted spending");
+  });
+
+  it("breaks a day's budgeted spending down by budget when you tap it", async () => {
+    const f = fc(0, false);
+    f.budget!.changes = [
+      { date: "2026-10-26", account_id: "chk", kind: "budget", name: "Dining", amount: -10 },
+      { date: "2026-10-26", account_id: "chk", kind: "budget", name: "Groceries", amount: -25.5 },
+    ];
+    render(ForecastTable, { fc: f });
+    await userEvent.click(screen.getByRole("button", { name: "Budgeted spending" }));
+    const pop = (await waitFor(() => screen.getByText(/What’s left of each budget this month, spread evenly over the days left in it\./))).parentElement!;
+    expect([...pop.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["Groceries$25.50", "Dining$10.00"]);
+    expect(pop).toHaveTextContent("That day$35.50");
   });
 });

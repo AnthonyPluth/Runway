@@ -102,18 +102,18 @@ describe("rewards", () => {
     render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });
   };
 
-  it("folds the day, the estimate and Remove behind the row, and shows the balance as of its day and a labeled estimate of the balance now", async () => {
+  it("folds the day, the estimate and Remove behind the row, and shows the balance's day (no date to pick) and a labeled estimate of the balance now", async () => {
     setup();
-    expect(screen.queryByLabelText("Day of Alex's American AAdvantage balance")).not.toBeInTheDocument();
     expect(screen.queryByText(/Estimated now/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "American AAdvantage details" }));
-    expect(screen.getByLabelText("Day of Alex's American AAdvantage balance")).toHaveValue("2026-08-30");
+    expect(screen.getByText("Entered Aug 30")).toBeInTheDocument();
+    expect(document.querySelector('input[type="date"]')).toBeNull();
     expect(screen.getByText(/Estimated now/)).toHaveTextContent("~41,300");
     expect(screen.getByText(/1,300 earned since/)).toBeInTheDocument();
     expect(screen.getByText("$560", { selector: "td" })).toBeInTheDocument();   // Worth stays the balance you entered
   });
 
-  it("saves a new balance as of today unless you set its day", async () => {
+  it("saves a balance as of today", async () => {
     setup();
     const box = screen.getByLabelText("Alex's American AAdvantage balance");
     await userEvent.clear(box);

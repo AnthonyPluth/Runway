@@ -55,6 +55,25 @@ describe("Budget page", () => {
     expect(screen.getByText("March 2026")).toBeInTheDocument();
   });
 
+  it("puts the even-pace marker halfway through today", async () => {
+    serve(month({ day: 2 }));
+    render(Budget);
+    const marks = await screen.findAllByTitle("Where you'd be at an even pace today");
+    expect(marks[0].style.left).toBe(`${((1.5 / 31) * 100).toFixed(1)}%`);
+  });
+
+  it("keeps the marker short of the end on the month's last day, and has none for a finished month", async () => {
+    serve(month({ day: 31 }));
+    const { unmount } = render(Budget);
+    const marks = await screen.findAllByTitle("Where you'd be at an even pace today");
+    expect(marks[0].style.left).toBe(`${((30.5 / 31) * 100).toFixed(1)}%`);
+    unmount();
+    vi.setSystemTime(new Date("2026-04-02T12:00:00"));
+    render(Budget);
+    await screen.findByText("Budgeted");
+    expect(screen.queryByTitle("Where you'd be at an even pace today")).not.toBeInTheDocument();
+  });
+
   it("counts what's spent outside any budget as other spending, and mentions uncategorized", async () => {
     serve(month({ uncategorized: 25 }));
     render(Budget);
@@ -160,35 +179,22 @@ describe("Budget page", () => {
   });
 });
 
-describe("Budget tabs", () => {
-  it("has Budget and Bills & income tabs, with the month picker only on Budget", async () => {
+describe("Budget page", () => {
+  it("has no sub-tab strip now that Recurring is a page of its own, and shows the month picker", async () => {
     serve(month());
-    const { unmount } = render(Budget);
-    const tabs = screen.getByRole("navigation", { name: "Budget" });
-    expect(within(tabs).getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
-    expect(within(tabs).getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    render(Budget);
+    expect(screen.queryByRole("navigation", { name: "Budget" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Recurring|Bills/ })).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Previous month" })).toBeInTheDocument();
-    unmount();
-
-    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/accounts" || path === "/api/recurring" ? [] : {})) as never);
-    render(Budget, { sub: "recurring" });
-    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("aria-current", "page");
-    expect((await screen.findAllByRole("button", { name: "Add" })).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
   });
 
-  it("asks you to connect a bank first on both tabs, keeping the heading and tabs", async () => {
+  it("asks you to connect a bank first, keeping the heading", async () => {
     app.state = { connected: false };
     serve(month());
-    const { unmount } = render(Budget);
+    render(Budget);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Budget");
     expect(screen.getByText("Connect a bank to set a budget")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
-    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
     expect(screen.queryByText("Budgeted")).not.toBeInTheDocument();
-    unmount();
-    render(Budget, { sub: "recurring" });
-    expect(screen.getByText("Connect a bank to track your bills and income")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
   });
 });

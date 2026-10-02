@@ -27,7 +27,7 @@
   // Whole dollars, like the rest of the page; cents only when rounding would make a small amount read as $0.
   const money = (v: number | null) => (v != null && Math.abs(v) >= 0.005 && Math.abs(v) < 0.5 ? fmt(v) : fmt0(v));
 
-  // The category name and the spent amount both open Transactions showing exactly what adds up to that number.
+  // The category name opens Transactions showing exactly what adds up to its spent amount.
   function open(e: MouseEvent) {
     e.preventDefault();
     showTransactions({ category: c.name, month, scope: "budget" });
@@ -42,7 +42,8 @@
     onchanged();
   }
 
-  // Which card a budget is paid with: out of the way until you want to change it.
+  // Which card a budget is paid with: a quiet "Set card" until one is chosen (always shown: hidden until hover, it
+  // looked like only budgets that had a card could get one).
   let choosing = $state(false);
   let done = false;
   function focus(el: HTMLSelectElement) { el.focus(); }
@@ -58,9 +59,9 @@
   }
 </script>
 
-<div class={cn("py-2", sub && "pl-5")}>
-  <div class="flex min-h-9 flex-wrap items-center gap-x-2.5">
-    {#if !sub}<CatIcon name={c.name} size={28} />{/if}
+<div class={cn("py-1", sub && "pl-5")}>
+  <div class="flex min-h-8 flex-wrap items-center gap-x-2.5">
+    <CatIcon name={c.name} size={sub ? 20 : 28} />
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
     {#if budgets && c.budget != null && counts}
@@ -83,7 +84,7 @@
         <button type="button" title="Which card or account this spending goes on (used by the budget forecast)"
           onclick={() => { done = false; choosing = true; }}
           class={cn("cursor-pointer rounded-md px-1.5 py-2.5 text-xs whitespace-nowrap text-muted-foreground sm:py-0.5 hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
-            !chosen && "opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100")}>
+            !chosen && "text-muted-foreground/70")}>
           {chosen ?? "Set card"}
         </button>
       {/if}
@@ -98,20 +99,19 @@
       </button>
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
-      <a href="#transactions" onclick={open} title="See the transactions behind this amount"
-        class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{money(c.spent)}</a>
+      <span>{money(c.spent)}</span>
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <span class="group/money relative inline-flex items-center">
         <span aria-hidden="true" class={cn("pointer-events-none absolute left-2 text-sm text-muted-foreground", c.budget == null && "hidden group-focus-within/money:inline")}>$</span>
         <input type="number" min="0" step="10" value={c.budget ?? ""} {@attach commas} placeholder={c.budget == null ? (sub ? "—" : "Budget") : ""}
           aria-label={`Budget for ${c.name}`} onchange={(e) => onsave(c.name, e.currentTarget.value)}
-          class={cn("h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-8 sm:w-24",
+          class={cn("h-9 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 text-sm tabular-nums outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-24",
             c.budget == null ? "pl-2 placeholder:text-primary focus:pl-5" : "pl-5")} />
       </span>
     </span>
   </div>
   {#if c.budget != null}
-    <div class={cn("mt-0.5 flex items-center gap-3", !sub && "sm:pl-[38px]")}>
+    <div class={cn("flex items-center gap-3", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>
       <div class={cn("relative min-w-28 flex-1 rounded-full bg-muted", sub ? "h-1.5 opacity-85" : "h-2")} role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
         <div class={cn("h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
           style:width={barWidth(pct)}></div>
@@ -128,7 +128,7 @@
       </span>
     </div>
     {#if carried > 0.005}
-      <p class={cn("mt-1 text-xs text-muted-foreground tabular-nums", !sub && "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
+      <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
     {/if}
   {/if}
 </div>

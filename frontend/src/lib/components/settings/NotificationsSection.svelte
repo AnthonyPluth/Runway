@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
@@ -128,7 +129,7 @@
             {@const [k, pre, post, step] = r.num}
             <!-- Fixed-width prefix and suffix so the inputs line up in one column down the list. -->
             <label class="flex w-full items-center gap-1 pl-6 text-sm text-muted-foreground sm:ml-auto sm:w-auto sm:pl-0"><span class="whitespace-nowrap sm:w-14 sm:text-right">{pre}</span><input class={`${inputCls} h-8 w-24`} type="number" min="0" {step}
-              value={d.prefs[k]} use:autosave={savePref(k)} aria-label={`${r.label}: ${pre}…${post}`.replace(": …", ": ")} /><span class="sm:w-20">{post}</span></label>
+              value={d.prefs[k]} {@attach pre.includes("$") ? commas : undefined} use:autosave={savePref(k)} aria-label={`${r.label}: ${pre}…${post}`.replace(": …", ": ")} /><span class="sm:w-20">{post}</span></label>
           {/if}
         </div>
       {/each}

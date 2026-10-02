@@ -34,7 +34,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 
 - **Cash-flow forecast.** Your primary account, day by day for 30 days to 6 months, with the lowest point in plain language. Credit cards come out on their due dates using real statement balances from the issuer (through Plaid), and paydays and payments land on business days.
 - **Bank sync, account by account.** SimpleFIN or Plaid for each account, once a day and on demand. Switching providers keeps your history.
-- **Bills & income.** Paychecks, bills and subscriptions on any schedule, matched to transactions automatically, with a flag for payments that didn't happen.
+- **Recurring.** Paychecks, bills and subscriptions on any schedule, matched to transactions automatically, with a flag for payments that didn't happen.
 - **Transactions and rules.** Categories with subcategories, split transactions, bulk editing, a review queue, and rules that categorize, rename or split by merchant, amount or account.
 - **Optional AI categorization** through OpenRouter, with confidence scores and a log of every call.
 - **Store orders.** A browser extension reads your Amazon, Target and Costco orders and splits each card charge by what you bought.
@@ -45,7 +45,7 @@ It runs on your own computer or home server, keeps its data in one database you 
 - **An assistant-ready API.** An [MCP endpoint](https://anthonypluth.github.io/Runway/using/mcp/) lets Claude or another assistant, once you approve it, answer questions about your money.
 - **Yours to keep.** Autosave everywhere, a dark interface that works on a phone (and installs as an app), and one-file backups that restore into SQLite or Postgres.
 
-The full tour is in the [documentation](https://anthonypluth.github.io/Runway/using/features/). Runway's pages are Overview, Transactions, Budget (with a Bills & income tab), Reports, Net worth (Summary, Investments, Equity and Retirement), Churning and Settings.
+The full tour is in the [documentation](https://anthonypluth.github.io/Runway/using/features/). Runway's pages are Overview, Transactions, Budget, Recurring, Reports, Net worth (Summary, Investments, Equity and Retirement), Churning and Settings.
 
 ## Quick start
 

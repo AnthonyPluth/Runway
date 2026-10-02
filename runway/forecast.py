@@ -765,7 +765,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         named = f" ({', '.join(payees[:3])}{'…' if len(payees) > 3 else ''})" if payees else ""
         warn(f"{len(big)} payment{'' if one else 's'} over ${ONE_OFF_LIMIT:,.0f} in the last {SPEND_WINDOW_DAYS} days "
              f"{'isn’t' if one else 'aren’t'} in the forecast{named}; add {'it as a recurring item' if one else 'them as recurring items'}.",
-             "#budget/recurring")
+             "#recurring")
 
     # A card payment's edit saved while its key was the due date still applies, and moves to its key now (once), so
     # putting it back, which removes the event's key, removes it. Building the forecast otherwise writes nothing: a
