@@ -13,6 +13,8 @@
   // Each card's latest statement (click it to correct the bank's figure), when it's due and its usual spending, and, for
   // a card that isn't paid in full, how much of it the forecast pays.
   let { cards }: { cards: CardSummary[] } = $props();
+  // A card that owes nothing, with nothing left to pay on its statement, has nothing to say here.
+  const shown = $derived(cards.filter((c) => Math.abs(c.owed_now) >= 0.005 || c.remaining > 0));
   const today = parseDate(isoDay());
 
   async function setStatement(c: CardSummary, value: number) {
@@ -28,8 +30,10 @@
 <!-- One row per card, for a grouped list. -->
 {#if !cards.length}
   <p class="cell text-sm text-muted-foreground">Enter each card’s latest statement in {#if isPhone()}Settings → Accounts on a computer{:else}<a class="font-medium text-foreground underline underline-offset-4" href="#setup/accounts">Settings → Accounts</a>{/if} (or link it through Plaid) to see what’s due and when.</p>
+{:else if !shown.length}
+  <p class="cell text-sm text-muted-foreground">None of your cards owe anything right now.</p>
 {:else}
-  {#each cards as c (c.id)}
+  {#each shown as c (c.id)}
     {@const soon = (c.payment ?? c.remaining) > 0 && (parseDate(c.due_date).getTime() - today.getTime()) / 864e5 <= 7}
     <div class="cell items-start">
       <div class="min-w-0 flex-1">

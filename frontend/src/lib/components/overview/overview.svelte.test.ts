@@ -103,6 +103,22 @@ describe("CardsTable", () => {
     expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
   });
 
+  it("leaves out cards with a $0 balance and nothing left to pay", () => {
+    at("2026-03-10");
+    render(CardsTable, { cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
+      card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: -20, remaining: 0 })] });
+    expect(screen.getByText("Sapphire")).toBeInTheDocument();
+    expect(screen.queryByText("Freedom")).toBeNull();
+    expect(screen.getByText("Venture")).toBeInTheDocument();
+    expect(screen.getByText("Amex")).toBeInTheDocument();
+  });
+
+  it("says so when every card is at $0", () => {
+    render(CardsTable, { cards: [card({ owed_now: 0, remaining: 0 })] });
+    expect(screen.queryByText("Sapphire")).toBeNull();
+    expect(screen.getByText("None of your cards owe anything right now.")).toBeInTheDocument();
+  });
+
   it("says quietly when a statement was entered by hand", () => {
     at("2026-03-10");
     const { unmount } = render(CardsTable, { cards: [card()] });
