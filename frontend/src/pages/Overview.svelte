@@ -129,9 +129,7 @@
       <div class="text-[13px] font-semibold tracking-wide text-muted-foreground uppercase">
         {parseDate(fc.today).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
       </div>
-      <div class="flex items-center gap-1">
-        <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
-      </div>
+      <h1 class="text-[34px] leading-tight font-bold tracking-tight">Overview</h1>
     </header>
 
     {#if alerts}

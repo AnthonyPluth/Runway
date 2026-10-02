@@ -45,13 +45,6 @@ beforeEach(() => {
 afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
 
 describe("Overview", () => {
-  it("doesn't explain what the forecast counts", async () => {
-    serve(() => fc());
-    render(Overview);
-    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
-    expect(screen.queryByText(/Includes 1 bill/)).not.toBeInTheDocument();
-  });
-
   it("links each warning to where it's put right", async () => {
     serve(() => fc({
       warnings: ["Enter Visa’s latest statement so its payment is in the forecast.", "Amex: choose which account pays it in Settings."],

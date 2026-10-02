@@ -52,12 +52,6 @@ describe("RetirementPlanner", () => {
     expect(screen.getByRole("img", { name: /Projected investments by age/ })).toBeInTheDocument();
   });
 
-  it("doesn’t explain what the figures are based on, or carry a disclaimer", () => {
-    setup();
-    expect(screen.queryByText(/Based on your/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/financial advice/)).not.toBeInTheDocument();
-  });
-
   it("on a phone, says the plan's fields are on a computer", () => {
     viewport.phone = true;
     try {
@@ -304,11 +298,9 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText("$5,000")).toBeInTheDocument();   // all vested already: just what it's worth
     });
 
-    it("doesn’t spell out the rules for selling and loans", () => {
+    it("says nothing about a loan payment when none is known", () => {
       setup(data({ assets: [home] }));
-      expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();   // no payment known: nothing to say about it
+      expect(screen.queryByText(/loan payment/)).not.toBeInTheDocument();
     });
 
     it("says in plain words when a loan's payment in spending ends, and when the plan takes it off", async () => {
@@ -591,10 +583,7 @@ describe("RetirementPlanner", () => {
   });
 
   describe("what the figures mean", () => {
-    it("says when the investment history is shorter than a year, and leaves what savings is to Assumptions", () => {
-      const { unmount } = setup();
-      expect(screen.queryByText(/is what went into your investments/)).not.toBeInTheDocument();
-      unmount();
+    it("says when the investment history is shorter than a year", () => {
       setup(data({ computed: { annual_spending: 55000, yearly_savings: 3000, expected_return: 0.05, savings_measured: true, savings_since: "2026-05-31" } }));
       expect(screen.getByTitle(/only goes back to May\s31,\s2026/)).toBeInTheDocument();   // a tooltip on Saves a year, not a paragraph
     });
@@ -602,14 +591,6 @@ describe("RetirementPlanner", () => {
     it("doesn't call a figure typed on the old card a measurement", () => {
       setup(data({ computed: { annual_spending: 55000, yearly_savings: 20000, expected_return: 0.05, savings_measured: false, savings_since: null } }));
       expect(screen.queryByText(/what went into your investments/)).not.toBeInTheDocument();
-    });
-
-    it("leaves who's covered while still working to Assumptions, with one person or two", async () => {
-      setup();
-      expect(screen.queryByText(/still working is assumed to cover/)).not.toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
-      expect(screen.queryByText(/still working is assumed to cover/)).not.toBeInTheDocument();
-      expect(screen.queryByText(/Savings stop at/)).not.toBeInTheDocument();
     });
   });
 

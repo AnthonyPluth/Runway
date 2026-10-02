@@ -170,9 +170,7 @@
   {/each}
 {/snippet}
 
-<div class="mb-4 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
-</div>
+<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },
   ...(isPhone() ? [] : [{ id: "investments", label: "Investments", href: "#networth/investments" }, { id: "equity", label: "Equity", href: "#networth/equity" }]),

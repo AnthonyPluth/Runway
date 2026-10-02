@@ -14,9 +14,7 @@
   const tab = $derived(sub === "recurring" ? "recurring" : "budget");
 </script>
 
-<div class="mb-4 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
-</div>
+<h1 class="mb-4 text-[34px] leading-tight font-bold tracking-tight">Budget</h1>
 <SubTabs label="Budget" current={tab} tabs={TABS} />
 {#if !app.state?.connected}
   <NotConnected title={tab === "recurring" ? "Connect a bank to track your bills and income" : "Connect a bank to set a budget"}

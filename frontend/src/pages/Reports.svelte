@@ -23,9 +23,7 @@
   const tab = $derived(isPhone() ? TABS[0] : (TABS.find((t) => t.id === sub) ?? TABS[0]));
 </script>
 
-<div class="mb-6 flex items-center gap-1">
-  <h1 class="text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
-</div>
+<h1 class="mb-6 text-[34px] leading-tight font-bold tracking-tight">Reports</h1>
 {#if !isPhone()}<SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />{/if}
 {#if app.state?.connected}
   <tab.view />

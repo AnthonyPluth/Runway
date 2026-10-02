@@ -106,9 +106,7 @@
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <div class="flex items-center gap-1">
-      <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
-    </div>
+    <h1 class="text-[34px] leading-tight font-bold tracking-tight">Churning</h1>
     {#if d.people.length > 1}
       <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}
         options={[...d.people.map((p) => ({ value: p, label: p })), { value: "all", label: "Both" }]} />
