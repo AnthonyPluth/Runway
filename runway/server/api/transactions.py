@@ -46,6 +46,9 @@ def api_transactions(conn, q, _b):
     elif q.get("ignored", [""])[0] == "0":   # hide what's marked Ignore (unless that's the category asked for)
         where.append(or_(T.category.is_(None), func.coalesce(T.is_split, 0) == 1,
                          T.category.notin_(["Ignore", *categories.descendants(conn, "Ignore")])))
+    elif q.get("ignored", [""])[0] == "only":   # just what ignored=0 hides (a split with an Ignore part isn't hidden)
+        where.append(and_(func.coalesce(T.is_split, 0) == 0,
+                          T.category.in_(["Ignore", *categories.descendants(conn, "Ignore")])))
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
         where += [T.posted >= start.isoformat(), T.posted < end.isoformat()]

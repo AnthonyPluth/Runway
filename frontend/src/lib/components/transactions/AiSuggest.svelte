@@ -87,12 +87,7 @@
 {:else if lines && left.length}
   <Card.Root class="mb-6">
     <Card.Header>
-      <Card.Title>AI suggestions · {plural(lines.length, "merchant")}</Card.Title>
-      <Card.Description>
-        {answered === lines.length ? "The AI suggested a category for every merchant."
-          : answered ? `The AI suggested a category for ${answered} of ${lines.length}; pick the rest yourself.`
-          : "The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5)."}
-      </Card.Description>
+      <Card.Title title={answered ? undefined : "The AI didn't suggest anything this time. Try again, or switch to a stronger model in Settings → Connections (for example anthropic/claude-haiku-4.5)."}>AI suggestions · {answered && answered < lines.length ? `${answered} of ${plural(lines.length, "merchant")}` : plural(lines.length, "merchant")}</Card.Title>
     </Card.Header>
     <Card.Content class="flex flex-col">
       {#each left as l (l.key)}

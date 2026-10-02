@@ -11,6 +11,9 @@
 
   type Item = { name: string; amount: number; note?: string; only?: "forecast" | "budget" };
   const alt = $derived(fc.budget?.total?.length === fc.total.length ? fc.budget.total : null);
+  // The budget line equals the forecast until the first day they differ; it is shown from there on.
+  const firstDiff = $derived(alt ? alt.findIndex((v, i) => Math.abs(v - fc.total[i]) >= 0.005) : -1);
+  const showAlt = $derived(alt != null && firstDiff >= 0);
   const everyday = $derived(fc.accounts.reduce((s, a) => s + (a.daily_spend ?? 0), 0));
 
   const rows = $derived.by(() => {
@@ -43,7 +46,7 @@
   });
 </script>
 
-{#if alt}
+{#if showAlt}
   <p class="mt-2 flex justify-end gap-3 text-xs text-muted-foreground sm:hidden"><span>Forecast</span><span class="text-chart-2">On budget</span></p>
 {/if}
 <div class="mt-2 max-h-[32rem] overflow-auto rounded-md border">
@@ -51,7 +54,7 @@
     <thead class="sticky top-[env(safe-area-inset-top)] z-10 bg-card max-sm:hidden">
       <tr class="text-left text-xs text-muted-foreground [&>th]:px-3 [&>th]:py-2 [&>th]:font-medium">
         <th>Date</th><th>In and out</th><th class="text-right max-sm:hidden">Forecast</th>
-        {#if alt}<th class="whitespace-nowrap text-right max-sm:hidden"><span class="inline-flex items-center gap-1.5"><i class="inline-block h-0 w-3 border-t-2 border-dashed border-chart-2"></i>On budget</span></th>{/if}
+        {#if showAlt}<th class="whitespace-nowrap text-right max-sm:hidden"><span class="inline-flex items-center gap-1.5"><i class="inline-block h-0 w-3 border-t-2 border-dashed border-chart-2"></i>On budget</span></th>{/if}
       </tr>
     </thead>
     <tbody>
@@ -61,16 +64,15 @@
             {r.i === 0 ? "Today" : fmtDow(r.d)}
             <!-- on a phone each day is a block: the date and both balances on one line, what happens under it -->
             <span class={cn("ml-auto font-medium text-foreground tabular-nums sm:hidden", fc.total[r.i] < 0 && "text-destructive")}>{fmt(fc.total[r.i])}</span>
-            {#if alt}<span class={cn("tabular-nums text-chart-2 sm:hidden", alt[r.i] < 0 && "text-destructive")}>{fmt(alt[r.i])}</span>{/if}
+            {#if alt && showAlt && r.i >= firstDiff}<span class={cn("tabular-nums text-chart-2 sm:hidden", alt[r.i] < 0 && "text-destructive")}>{fmt(alt[r.i])}</span>{/if}
           </td>
           <td class="w-full sm:min-w-56">
             {#each r.items as it, j (j)}
               <div class="flex items-baseline justify-between gap-3">
-                <span class="min-w-0">
+                <span class="min-w-0" title={it.note}>
                   {it.name}
                   {#if it.only === "forecast"}<Badge variant="secondary" class="ml-1 px-1.5 py-0 text-[10px]">forecast only</Badge>{/if}
                   {#if it.only === "budget"}<Badge variant="outline" class="ml-1 border-chart-2/50 px-1.5 py-0 text-[10px] text-chart-2">budget only</Badge>{/if}
-                  {#if it.note}<span class="block text-xs text-muted-foreground">{it.note}</span>{/if}
                 </span>
                 <span class={cn("shrink-0 tabular-nums", it.amount > 0 && "text-emerald-500")}>{it.amount > 0 ? "+" : "−"}{fmt(Math.abs(it.amount))}</span>
               </div>
@@ -79,7 +81,7 @@
             {/each}
           </td>
           <td class={cn("whitespace-nowrap text-right font-medium tabular-nums max-sm:hidden", fc.total[r.i] < 0 && "text-destructive")}>{fmt(fc.total[r.i])}</td>
-          {#if alt}<td class={cn("whitespace-nowrap text-right tabular-nums text-chart-2 max-sm:hidden", alt[r.i] < 0 && "text-destructive")}>{fmt(alt[r.i])}</td>{/if}
+          {#if alt && showAlt}<td class={cn("whitespace-nowrap text-right tabular-nums text-chart-2 max-sm:hidden", alt[r.i] < 0 && "text-destructive")}>{r.i >= firstDiff ? fmt(alt[r.i]) : ""}</td>{/if}
         </tr>
       {/each}
     </tbody>

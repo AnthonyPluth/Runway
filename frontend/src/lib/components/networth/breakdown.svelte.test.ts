@@ -54,10 +54,11 @@ describe("the breakdown", () => {
     await user.click(await screen.findByRole("button", { name: /^House, / }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
     expect(within(dialog).getByText(/\$340,000\.00 equity after Mortgage/)).toBeInTheDocument();
-    // The kind and the value show once, in the header.
+    // The kind shows once, in the header; the value is one editable field, not a figure plus an "Update value" button.
     expect(within(dialog).getAllByText(/Home \/ property/)).toHaveLength(1);
-    expect(within(dialog).getAllByText(/\$540,000/)).toHaveLength(1);
-    expect(within(dialog).getByRole("button", { name: "Update value" })).toBeInTheDocument();
+    expect(within(dialog).queryByText(/\$540,000/)).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Value/)).toHaveValue(540000);
+    expect(within(dialog).queryByRole("button", { name: "Update value" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Edit details" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
     const confirm = await screen.findByRole("dialog", { name: "Remove House?" });
@@ -74,8 +75,7 @@ describe("the breakdown", () => {
     await user.click(await screen.findByRole("button", { name: /^Outback, / }));
     const dialog = await screen.findByRole("dialog", { name: "Outback" });
     expect(within(dialog).getByRole("link", { name: /Check on KBB/ })).toHaveAttribute("href", expect.stringContaining("kbb.com"));
-    await user.click(within(dialog).getByRole("button", { name: "Update value" }));
-    const input = within(dialog).getByLabelText(/New value/);
+    const input = within(dialog).getByLabelText(/^Value/);
     await user.clear(input);
     await user.type(input, "21000");
     await user.tab();
@@ -91,9 +91,9 @@ describe("the breakdown", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /^House, / }));
     const dialog = await screen.findByRole("dialog", { name: "House" });
-    expect(within(dialog).queryByRole("button", { name: "Update value" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/^Value/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("$540,000.00")).toBeInTheDocument();   // the figure, not a field
     expect(within(dialog).getByRole("button", { name: "Update from Realie" })).toBeInTheDocument();
-    // (a vehicle keeps its Update value: "shows a vehicle's value link and saves a new value from the panel")
   });
 
   it("edits details in the panel and goes back to the summary", async () => {
@@ -104,7 +104,7 @@ describe("the breakdown", () => {
     await user.click(within(dialog).getByRole("button", { name: "Edit details" }));
     expect(within(dialog).getByLabelText("Name")).toHaveValue("Outback");
     await user.click(within(dialog).getByRole("button", { name: "Done" }));
-    expect(within(dialog).getByRole("button", { name: "Update value" })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Value/)).toBeInTheDocument();
   });
 
   it("adds to a group with its + Add, starting on that kind", async () => {

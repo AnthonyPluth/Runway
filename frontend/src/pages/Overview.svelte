@@ -18,14 +18,12 @@
   import ForecastChart from "$lib/components/overview/ForecastChart.svelte";
   import ForecastSettings from "$lib/components/overview/ForecastSettings.svelte";
   import { comingUp } from "$lib/components/overview/comingUp";
-  import { openForecastSettings } from "$lib/components/overview/forecastSheet.svelte";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
   import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
-  import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt, fmt0, fmt0Down, fmtDate, fmtDow, nb, parseDate, plural, relDay } from "$lib/format";
+  import { fmt, fmt0, fmt0Down, nb, parseDate, relDay } from "$lib/format";
   import { balanceAsOf } from "$lib/nav.svelte";
   import { isPhone } from "$lib/phone.svelte";
   import type { Overview } from "$lib/types";
@@ -103,7 +101,7 @@
 
 {#if !connected}
   {#if isPhone()}
-    <NotConnected title="Welcome to Runway" text="Runway reads your accounts and forecasts where your cash is headed. Setting it up takes a few minutes." />
+    <NotConnected title="Welcome to Runway" />
   {:else}
     <SetupChecklist welcome />
   {/if}
@@ -120,10 +118,6 @@
     {@const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0)}
     {@const low = fc.low}
     {@const lowBad = !!low && low.balance < 0}
-    {@const end = fc.total.length ? fc.total[fc.total.length - 1] : cashNow}
-    {@const allCards = fc.cards.concat(fc.unlinked_cards ?? [])}
-    {@const owed = allCards.reduce((s, c) => s + (c.owed_now || 0), 0)}
-    {@const nextDue = fc.cards.filter((c) => (c.payment ?? c.remaining) > 0 && c.due_date >= fc.today).sort((a, b) => a.due_date.localeCompare(b.due_date))[0]}
     {@const allChecking = fc.accounts.length > 0 && fc.accounts.every((a) => a.kind === "checking")}
     {@const what = fc.accounts.length === 1 ? (allChecking ? "Checking" : fc.accounts[0].name) : "Your cash"}
     {@const lowEvents = fc.events.filter((e) => e.date === low.date && e.amount < 0).sort((a, b) => a.amount - b.amount)}
@@ -164,22 +158,23 @@
           {#if lowBad}Heads up · {what} dips to {fmt0Down(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
           {:else}On track · {what} stays above {fmt0Down(low.balance)} for {nb(span(shown.days))}{/if}
         </p>
+        {#if low.date !== fc.today || nextIn}
         <p class="mt-1 max-w-3xl text-[15px] leading-relaxed text-muted-foreground">
-          {#if low.date === fc.today}Today is the tightest point in the forecast.
-          {:else}The tightest moment is {lowWhen(fc)}{#if lowEvents.length}, when {lowEvents[0].kind === "card" ? `the ${nb(lowEvents[0].name.replace(/ statement$/, ""))} payment` : lowEvents[0].name} goes out{/if}.{/if}
+          {#if low.date !== fc.today}The tightest moment is {lowWhen(fc)}{#if lowEvents.length}, when {lowEvents[0].kind === "card" ? `the ${nb(lowEvents[0].name.replace(/ statement$/, ""))} payment` : lowEvents[0].name} goes out{/if}.{/if}
           {#if nextIn}Next money in: {nb(nextIn.name + ",")} {fmt0(nextIn.amount)} on {nb(relDay(nextIn.date, fc.today))}.{/if}
         </p>
+        {/if}
       {/if}
       {#if fc.accounts.length > 1}
-        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined{#if !isPhone()}{" · "}<button type="button" class="cursor-pointer font-medium text-primary" onclick={openForecastSettings}>choose one account</button>{/if}</p>
+        <p class="mt-1 text-[13px] text-muted-foreground">{fc.accounts.length} accounts combined</p>
       {/if}
 
       <div class="mt-5">
         {#if fc.budget}
           <div class="mb-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
             <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
-            <span class="flex items-center gap-1.5" title={`Spends your budgets (${fmt0(fc.budget.monthly)} a month) on each budget's account or card, in place of estimated card statements. A budget's recurring payments count toward it, so only the rest is spent on top of them, and a budget that rolls over spends what it carried into this month too.${budgetSkipped(fc.budget.skipped)}`}>
-              <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget · low {fmt0Down(fc.budget.low.balance)} on {fmtDate(fc.budget.low.date)}
+            <span class="flex items-center gap-1.5" title={`Your budgets, ${fmt0(fc.budget.monthly)} a month, spent in place of estimated card statements.${budgetSkipped(fc.budget.skipped)}`}>
+              <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget
             </span>
           </div>
         {/if}
@@ -194,13 +189,6 @@
         <div class="mt-2 rounded-2xl bg-card p-4"><ForecastTable {fc} /></div>
       </details>
     </section>
-
-    <StatStrip class="mb-8" items={[
-      { label: `${lowBad ? "Goes negative" : "Lowest"} · ${low ? fmtDow(low.date) : "—"}`, value: low ? fmt(low.balance) : "—", tone: lowBad ? "bad" : undefined },
-      { label: `In ${span(shown.days)}`, value: fmt(end), sub: `${end - cashNow >= 0 ? "+" : "−"}${fmt(Math.abs(end - cashNow))}`,
-        subTone: end - cashNow >= 0 ? "good" : "bad" },
-      { label: "Owed on cards", value: fmt(owed), sub: `${plural(allCards.length, "card")}${nextDue ? ` · next due ${fmtDate(nextDue.due_date)}` : ""}` },
-    ]} />
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">

@@ -13,11 +13,8 @@
   const n = $derived(series.length);
   const alt = $derived(fc.budget?.total?.length === series.length ? fc.budget.total : null);
 
-  // Zoom: the days on show, v0 to v1 (every day unless you've dragged across part of the chart). A new forecast
-  // (another length, a change) shows every day again.
-  let view = $state<[number, number] | null>(null);
-  $effect(() => { void fc; view = null; });
-  const v0 = $derived(view ? view[0] : 0), v1 = $derived(view ? view[1] : Math.max(0, n - 1));
+  // The days on show, v0 to v1: every day of the forecast.
+  const v0 = 0, v1 = $derived(Math.max(0, n - 1));
   const inView = (i: number) => i >= v0 && i <= v1;
   const shown = (vals: number[]) => vals.slice(v0, v1 + 1);
 
@@ -32,7 +29,7 @@
   }
   const ticks = $derived.by(() => {
     const both = alt ? shown(series).concat(shown(alt)) : shown(series);
-    // The axis always starts at $0 (zoomed in too), so the line's height is the balance; it only goes lower to show
+    // The axis always starts at $0, so the line's height is the balance; it only goes lower to show
     // a balance that dips below zero.
     const lo = Math.min(0, ...both), hi = Math.max(0, ...both);
     return niceTicks(lo, hi);
@@ -47,7 +44,7 @@
     for (const e of fc.events) (by[e.date] ||= []).push(e);
     return by;
   });
-  // Labels along the bottom: the first of each month, or (zoomed in to a few weeks) evenly spaced days.
+  // Labels along the bottom: the first of each month, or (a forecast of a few weeks) evenly spaced days.
   const months = $derived.by(() => {
     const span = v1 - v0, out: { i: number; label: string }[] = [];
     const first = { i: v0, label: v0 === 0 ? "Today" : fmtDate(fc.dates[v0]) };
@@ -104,32 +101,18 @@
   const hover = $derived(pointed != null && pointed < n ? pointed : null);
   // Dragging sideways on a phone moves the readout; dragging up or down still scrolls the page. (Svelte's own touch
   // handlers are passive, so they couldn't stop the page scrolling sideways.)
-  // Touching and holding still, then dragging, selects days to zoom into instead.
   function sideways(el: SVGElement, onMove: (clientX: number) => void) {
-    let start: Touch | null = null, hold: ReturnType<typeof setTimeout> | undefined, selecting = false;
-    const down = (e: TouchEvent) => {
-      start = e.touches[0]; selecting = false; clearTimeout(hold);
-      const at = start.clientX;
-      hold = setTimeout(() => { selecting = true; startBrush(at); navigator.vibrate?.(10); }, 350);
-    };
+    let start: Touch | null = null;
+    const down = (e: TouchEvent) => { start = e.touches[0]; };
     const drag = (e: TouchEvent) => {
       const t = e.touches[0];
-      if (!selecting && start && Math.hypot(t.clientX - start.clientX, t.clientY - start.clientY) > 8) clearTimeout(hold);
-      if (selecting) { moveBrush(t.clientX); if (e.cancelable) e.preventDefault(); return; }
       if (start && Math.abs(t.clientY - start.clientY) > Math.abs(t.clientX - start.clientX)) return;
       onMove(t.clientX);
       if (e.cancelable) e.preventDefault();
     };
-    const up = () => { clearTimeout(hold); if (selecting) { selecting = false; endBrush(); } };
     el.addEventListener("touchstart", down, { passive: true });
     el.addEventListener("touchmove", drag, { passive: false });
-    el.addEventListener("touchend", up);
-    el.addEventListener("touchcancel", up);
-    return { destroy() {
-      clearTimeout(hold);
-      el.removeEventListener("touchstart", down); el.removeEventListener("touchmove", drag);
-      el.removeEventListener("touchend", up); el.removeEventListener("touchcancel", up);
-    } };
+    return { destroy() { el.removeEventListener("touchstart", down); el.removeEventListener("touchmove", drag); } };
   }
   /** The day under a point on screen. */
   function dayAt(clientX: number): number {
@@ -139,25 +122,12 @@
   }
   function move(clientX: number) { if (svgEl) pointed = dayAt(clientX); }
 
-  // Dragging across the chart (with the mouse, or after a touch and hold) picks the days to zoom into.
-  let brush = $state<[number, number] | null>(null);
-  function startBrush(clientX: number) { if (svgEl) { const d = dayAt(clientX); brush = [d, d]; pointed = null; } }
-  function moveBrush(clientX: number) { if (brush && svgEl) brush = [brush[0], dayAt(clientX)]; }
-  function endBrush() {
-    if (!brush) return;
-    const [a, b] = [Math.min(...brush), Math.max(...brush)];
-    brush = null;
-    if (b - a >= 2) { view = [a, b]; pointed = null; }   // a few days at least; a click is just a click
-  }
-  const zoomLabel = $derived(view ? `${fmtDate(fc.dates[v0])} – ${fmtDate(fc.dates[v1])}` : "");
   const tipPos = $derived.by(() => {
     if (hover == null || !svgEl) return { left: 0, top: 0 };
     const r = svgEl.getBoundingClientRect(), tw = tipEl?.offsetWidth ?? 180;
     return { left: Math.min(Math.max(0, (x(hover) / W) * r.width + 12), r.width - tw), top: Math.max(0, (y(series[hover]) / H) * r.height - 60) };
   });
 </script>
-
-<svelte:window onmouseup={endBrush} onkeydown={(e) => { if (e.key === "Escape" && view) view = null; }} />
 
 <div class="relative" bind:clientWidth={width}>
   {#if !n}
@@ -207,24 +177,10 @@
         <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
         <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2" />
       {/if}
-      {#if brush}
-        {@const bx = x(Math.min(...brush))}
-        <rect x={bx} y={m.top} width={Math.max(1, x(Math.max(...brush)) - bx)} height={ih} fill="var(--chart-1)" opacity="0.18" />
-      {/if}
-      <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation" class={brush ? "cursor-ew-resize" : "cursor-crosshair"}
-        onmousedown={(e) => { if (e.button === 0) { e.preventDefault(); startBrush(e.clientX); } }}
-        onmousemove={(e) => { if (brush) moveBrush(e.clientX); else move(e.clientX); }} onmouseleave={() => (pointed = null)}
-        ondblclick={() => (view = null)}
+      <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation" class="cursor-crosshair"
+        onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)}
         use:sideways={move} />
     </svg>
-    <div class="mt-1 flex min-h-7 items-center justify-between gap-3 text-xs text-muted-foreground">
-      {#if view}
-        <span class="tabular-nums">Showing {zoomLabel}</span>
-        <button type="button" class="cursor-pointer rounded-full bg-muted px-3 py-1 font-medium text-foreground hover:bg-accent" onclick={() => (view = null)}>Reset zoom</button>
-      {:else}
-        <span><span class="[@media(hover:none)]:hidden">Drag across the chart to zoom in</span><span class="hidden [@media(hover:none)]:inline">Touch and hold, then drag, to zoom in</span></span>
-      {/if}
-    </div>
     {#if hover != null}
       <div bind:this={tipEl} class="pointer-events-none absolute z-10 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
         style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>

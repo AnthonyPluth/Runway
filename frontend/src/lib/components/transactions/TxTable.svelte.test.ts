@@ -44,14 +44,21 @@ describe("TxTable", () => {
     expect(screen.getByRole("heading", { level: 3 })).not.toHaveTextContent("$");
   });
 
-  it("says how many are shown of how many there are", () => {
-    setup({ total: 40 });
-    expect(screen.getByText("4 of 40")).toBeInTheDocument();
+  it("leaves transfers and card payments out of a day's net, and the transfer part of a split", () => {
+    categories.list = [category("Groceries"), { ...category("Transfer"), is_transfer: 1 }];
+    setup({ items: [
+      tx({ id: "p", amount: 3000, payee: "Paycheck", category: "Income" }),
+      tx({ id: "t", amount: -500, payee: "To savings", category: "Transfer" }),
+      tx({ id: "u", amount: 500, payee: "From checking", category: "Transfer" }),
+      tx({ id: "s", amount: -100, payee: "Split", category: "Groceries", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Transfer", amount: -40 }] }),
+    ], total: 4 });
+    expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/\$2,940\.00$/);
   });
 
-  it("says just the count when everything is shown", () => {
-    setup();
-    expect(screen.getByText("4 transactions")).toBeInTheDocument();
+  it("shows no count of its own, which the page heading and Show more already give", () => {
+    setup({ total: 40 });
+    expect(screen.queryByText("4 of 40")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show more (36 left)" })).toBeInTheDocument();
   });
 
   describe("selecting", () => {

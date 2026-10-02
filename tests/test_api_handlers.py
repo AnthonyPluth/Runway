@@ -334,6 +334,13 @@ class HandlerTests(DbCase):
         self.assertEqual({t["id"] for t in hidden["items"]}, everything - {a, b})
         self.assertEqual(hidden["total"], len(everything) - 2)
         self.assertEqual(set(self.ids(ignored="0", category="Ignore")), {a, b})   # asked for by name: shown
+        # ignored=only is exactly what ignored=0 hides: a split with an Ignore part stays in the list, so it isn't counted
+        d = self.one(select(Transaction.id).where(Transaction.id.notin_([a, b, c])).order_by(Transaction.id))[0]
+        amount = self.one(select(Transaction.amount).where(Transaction.id == d))[0]
+        splits.set_splits(self.c, d, [{"amount": amount / 2, "category": "Groceries"},
+                                      {"amount": amount - amount / 2, "category": "Ignore"}])
+        self.assertEqual(set(self.ids(ignored="only", limit=1000)), {a, b})
+        self.assertIn(d, set(self.ids(ignored="0", limit=1000)))
 
     def test_transaction_category_filters(self):
         categories.add(self.c, "Farmers Market", "Groceries")

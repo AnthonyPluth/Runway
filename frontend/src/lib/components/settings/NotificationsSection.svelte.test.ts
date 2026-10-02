@@ -63,3 +63,13 @@ describe("Settings → Notifications on this device", () => {
     expect(sub.unsubscribe).not.toHaveBeenCalled();
   });
 });
+
+describe("Settings → Notifications: what to tell you about", () => {
+  it("labels each choice with a short noun phrase, the full sentence in a tooltip", async () => {
+    setup([]);
+    const box = await screen.findByRole("checkbox", { name: /Large charge/ });
+    expect(box.closest("label")).toHaveAttribute("title", "A large charge posts");
+    expect(screen.queryByText(/No devices yet/)).toBeNull();
+    expect(screen.queryByText("Devices")).toBeNull();
+  });
+});

@@ -94,7 +94,8 @@ describe("#networth/equity", () => {
 
   it("shows vested and still-to-vest figures, the companies and the tab bar as the way back", async () => {
     render(NetWorth, { sub: "equity" });
-    expect(await screen.findByRole("heading", { name: "Equity" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add a company" })).toBeInTheDocument();   // the tab's toolbar; no second "Equity" heading
+    expect(screen.queryByRole("heading", { name: "Equity" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Summary" })).toHaveAttribute("href", "#networth");
     expect(screen.getByText("Vested now")).toBeInTheDocument();
     expect(screen.getAllByText("Still to vest").length).toBeGreaterThan(0);
@@ -146,5 +147,21 @@ describe("#networth/equity", () => {
     await user.click(await screen.findByRole("checkbox", { name: /Count in net worth/ }));
     await waitFor(() => expect(calls("/api/equity/companies/c1")).toHaveLength(1));
     expect((calls("/api/equity/companies/c1")[0][1] as { body: unknown }).body).toEqual({ in_networth: false });
+  });
+});
+
+describe("#networth/equity when it can't load", () => {
+  it("says something went wrong with a way to try again, not bare red text", async () => {
+    let fail = true;
+    vi.mocked(api).mockImplementation((async (path: string) => {
+      if (path === "/api/networth") return nw;
+      if (path === "/api/equity") { if (fail) throw new Error("Server down"); return equity; }
+      return { ok: true };
+    }) as never);
+    render(NetWorth, { sub: "equity" });
+    expect(await screen.findByText("Something went wrong: Server down")).toBeInTheDocument();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Vested now")).toBeInTheDocument();
   });
 });

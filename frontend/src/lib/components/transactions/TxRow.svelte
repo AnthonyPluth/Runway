@@ -24,9 +24,10 @@
   import Receipt from "@lucide/svelte/icons/receipt";
   import Clock from "@lucide/svelte/icons/clock";
   import Flag from "@lucide/svelte/icons/flag";
+  import Repeat from "@lucide/svelte/icons/repeat";
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (from its
-  // receipt badge) the Amazon or Target order it was matched to; ↻ links it to a recurring item. On a phone the category sits under the
+  // receipt badge) the Amazon or Target order it was matched to; the repeat icon links it to a recurring item. On a phone the category sits under the
   // merchant; on a wider screen it has a column of its own. From lg up a row is one 40px line (logo, merchant, category,
   // account, amount in aligned columns), the same height opened or not, and a chevron opens the details: the account with its
   // institution and the bank's own text.
@@ -122,7 +123,7 @@
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           class={cn("inline-flex shrink-0 cursor-pointer items-center rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
             linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!" : onHover)}>
-          ↻{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{t.recurring_name}</span>{/if}
+          <Repeat class="size-3.5" aria-hidden="true" />{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{t.recurring_name}</span>{/if}
         </button>
       {/if}
       {#if t.retail}

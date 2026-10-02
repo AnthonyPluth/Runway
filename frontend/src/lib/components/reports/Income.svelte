@@ -1,18 +1,20 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt, fmt0, monthLabel, thisMonth } from "$lib/format";
+  import { fmt, fmt0, monthLabel, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
   import Bars from "./Bars.svelte";
   import { monthTick, Report } from "./chart.svelte";
   import { monthsOptions, reportState as st } from "./state.svelte";
   import Status from "./Status.svelte";
   import Swatch from "./Swatch.svelte";
-  import Tile from "./Tile.svelte";
   import type { IncomeReport } from "./types";
 
-  // Income vs spending: each month side by side, what was left, and the share of income kept.
+  // Income vs spending: each month side by side, what was left, and the share of income kept. The server leaves out the
+  // months before your first transaction, so the year's count is the months with history. The year isn't over, so a
+  // shortfall is "so far" and not flagged red (like Cash flow's month in progress).
   const IN = "var(--cat-3)", OUT = "var(--cat-1)";
   const report = new Report(() => api<IncomeReport>(`/api/reports/income?end=${thisMonth()}&months=${st.months}`));
   const rate = (r: number | null) => (r == null ? "—" : `${Math.round(r * 100)}%`);
@@ -27,12 +29,12 @@
 {:else}
   {@const d = report.data}
   {@const y = d.year}
-  <div class="mb-6 grid gap-4 md:grid-cols-3">
-    <Tile label={`Money in, ${y.year}`} value={fmt0(y.income)} sub={`${y.months} month${y.months === 1 ? "" : "s"} so far`} />
-    <Tile label={`Spent, ${y.year}`} value={fmt0(y.spending)} sub="not card payments or transfers" />
-    <Tile label={y.net >= 0 ? "Kept" : "▲ Spent more than came in"} value={fmt0(Math.abs(y.net))} alert={y.net < 0}
-      sub={y.rate != null ? `savings rate ${rate(y.rate)}` : ""} />
-  </div>
+  <StatStrip class="mb-6" items={[
+    { label: `Money in, ${y.year}`, value: fmt0(y.income), sub: `${plural(y.months, "month")} so far` },
+    { label: `Spent, ${y.year}`, value: fmt0(y.spending), sub: "not card payments or transfers" },
+    { label: y.net >= 0 ? "Kept so far" : "Spent more than came in so far", value: fmt0(Math.abs(y.net)),
+      sub: y.rate != null ? `savings rate ${rate(y.rate)}` : undefined },
+  ]} />
 
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>Money in and out by month</Card.Title></Card.Header>

@@ -32,8 +32,8 @@ describe("AI assistants (MCP)", () => {
     serve({ allow_writes: false, allow_categorize: false, oauth: true, url: "https://runway.example.com/mcp", reason: null, connections: [] });
     render(McpCard);
     expect(await screen.findByLabelText("MCP address")).toHaveValue("https://runway.example.com/mcp");
-    expect(screen.getByText(/claude mcp add --transport http runway https:\/\/runway.example.com\/mcp/)).toBeInTheDocument();
-    expect(screen.getByText("None yet.")).toBeInTheDocument();
+    expect(screen.getByLabelText("MCP address")).toHaveAttribute("title", expect.stringContaining("claude mcp add --transport http runway https://runway.example.com/mcp"));
+    expect(screen.queryByText("None yet.")).not.toBeInTheDocument();
     expect(screen.queryByText(/Make a key/)).not.toBeInTheDocument();
   });
 

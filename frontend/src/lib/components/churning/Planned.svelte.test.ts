@@ -72,7 +72,8 @@ describe("planned", () => {
   it("collapses applied and dropped items under a toggle", async () => {
     setup([wish(), wish({ id: 2, product: "Old one", status: "dropped" }), wish({ id: 3, product: "Got it", status: "applied", applied_on: "2026-09-01" })]);
     expect(screen.queryByText("Old one")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /Show applied and dropped \(2\)/ }));
+    expect(screen.getByText(/2 applied or dropped ·/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(screen.getByText("Old one")).toBeInTheDocument();
     expect(screen.getByText("Got it")).toBeInTheDocument();
   });
@@ -85,8 +86,13 @@ describe("planned", () => {
     await waitFor(() => expect(onchanged).toHaveBeenCalled());
   });
 
+  it("shows credit scores only while a planned item wants one", () => {
+    setup([wish({ min_score: null })]);
+    expect(screen.queryByLabelText("Credit scores")).not.toBeInTheDocument();
+  });
+
   it("saves a credit score", async () => {
-    setup();
+    setup([wish({ min_score: 740 })]);
     await userEvent.click(screen.getAllByRole("button", { name: /credit score/ })[0]);
     await userEvent.type(screen.getByLabelText("Alex's score"), "720");
     await userEvent.click(screen.getByRole("button", { name: "Save score" }));

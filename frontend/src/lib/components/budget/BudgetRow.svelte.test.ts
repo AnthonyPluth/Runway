@@ -31,15 +31,15 @@ beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).moc
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
-    expect(screen.getByTitle("See the transactions behind this amount")).toHaveTextContent("$200.00");
+    expect(screen.getByTitle("See the transactions behind this amount")).toHaveTextContent("$200");
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue(500);
-    expect(screen.getByText("$300.00 left")).toBeInTheDocument();
+    expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
   });
 
   it("turns red and says how much it's over when spending passes the budget", () => {
     setup(cat({ spent: 620, left: -120 }));
-    expect(screen.getByText("▲ $120.00 over")).toHaveClass("text-destructive");
+    expect(screen.getByText("▲ $120 over")).toHaveClass("text-destructive");
     expect(bar().firstElementChild).toHaveClass("bg-destructive");
     expect(bar()).toHaveAttribute("aria-label", "124% of budget used");   // said as it is; the drawn bar stops at full
     expect(bar().firstElementChild).toHaveStyle({ width: "100%" });
@@ -47,7 +47,7 @@ describe("BudgetRow", () => {
 
   it("warns when you're spending faster than the month is going", () => {
     setup(cat({ spent: 400, left: 100 }), { pace: 0.5 });
-    expect(screen.getByText("$100.00 left · ahead of pace")).toBeInTheDocument();
+    expect(screen.getByText("$100 left · ahead of pace")).toBeInTheDocument();
   });
 
   it("shows where an even pace would be, but not for a finished or future month", () => {
@@ -60,8 +60,16 @@ describe("BudgetRow", () => {
 
   it("includes what rolled over from earlier months", () => {
     setup(cat({ carried: 50, available: 550 }));
-    expect(screen.getByText("$500.00 + $50.00 rolled over from earlier months")).toBeInTheDocument();
+    expect(screen.getByText("$500 + $50 rolled over from earlier months")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "36% of budget used");   // 200 of 550
+  });
+
+  it("says nothing about what's left when nothing is spent yet, and keeps cents a rounding would hide", () => {
+    const { unmount } = render(BudgetRow, { c: cat({ spent: 0, left: 500 }), month: "2026-03", pace: 1, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+    expect(screen.queryByText(/left/)).not.toBeInTheDocument();
+    unmount();
+    setup(cat({ spent: 500.3, left: -0.3 }));
+    expect(screen.getByText("▲ $0.30 over")).toBeInTheDocument();
   });
 
   it("has no bar for a category without a budget, just a box to set one", () => {

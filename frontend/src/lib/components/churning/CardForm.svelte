@@ -4,7 +4,6 @@
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -235,7 +234,6 @@
   {/if}
   {#if aiMarked}
     <div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm" role="status" data-testid="ai-marked">
-      <Badge variant="outline">Suggested by AI</Badge>
       <span class="text-muted-foreground">Suggested by AI, check before saving. The fields it filled are below; change anything that’s wrong.</span>
       {#if c}<Button size="sm" onclick={saveSuggestions}>Save these</Button>{/if}
       <Button size="sm" variant="ghost" onclick={discardSuggestions}>Discard</Button>

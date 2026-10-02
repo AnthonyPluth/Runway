@@ -48,11 +48,11 @@ describe("leaving an account out of net worth", () => {
   });
 });
 
-describe("the Manage list", () => {
+describe("the Not counted list", () => {
   it("brings an account back with Count it again", async () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/networth" ? nw([{ id: "sav", name: "Savings", org: null, kind: "savings", balance: 900 }]) : {})) as never);
     render(NetWorth);
-    await userEvent.click(await screen.findByRole("button", { name: "Manage" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Show" }));
     await userEvent.click(screen.getByRole("button", { name: "Count Savings in net worth again" }));
     await waitFor(() => expect(calls("/api/accounts/sav")).toHaveLength(1));
     expect((calls("/api/accounts/sav")[0][1] as { body: unknown }).body).toEqual({ networth_hidden: 0 });

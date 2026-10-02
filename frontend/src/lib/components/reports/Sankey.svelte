@@ -5,7 +5,8 @@
 
   // The month as a Sankey: money in on the left flows into the month, and out to spending on the right (then to
   // subcategories). Small spending (under 2%) is gathered into "Everything else". Hover a band or a bar for its
-  // amount and share. It never gets narrower than 720px; on a phone it scrolls sideways inside its card.
+  // amount and share. From 560px up it's at least 720px wide and scrolls sideways if it must. Narrower (a phone) it fits
+  // the card instead: no subcategory column, and only the spending names, shortened; the table has the rest.
   let { cf, monthName }: { cf: Cashflow; monthName: string } = $props();
 
   type Role = "in" | "out" | "hub" | "neutral";
@@ -15,11 +16,14 @@
 
   let width = $state(0);
   const nodeW = 12, pad = 8, topPad = 28, bottomPad = 10, minSlot = 16;   // every node gets at least one text line of room
-  const left = 170, right = 190;
+  const NARROW = 560;
+  const narrow = $derived(width > 0 && width < NARROW);
+  const short = (s: string) => (s.length > 16 ? `${s.slice(0, 15).trimEnd()}…` : s);
 
   const chart = $derived.by(() => {
     const total = Math.max(cf.total_in, cf.total_out);
-    const W = Math.max(720, width || 720);
+    const W = narrow ? width : Math.max(720, width || 720);
+    const left = narrow ? 4 : 170, right = narrow ? Math.min(130, W * 0.4) : 190;
     const node = (n: CashflowNode & Partial<Node>, role: Role): Node => ({ ...n, role, x: 0, y: 0, h: 0, out: 0, in: 0 });
     // ---- nodes, by column
     const inNodes = cf.income.map((n) => node(n, "in"));
@@ -32,7 +36,7 @@
       children: [], members: small }, "out"));
     if (cf.total_in > cf.total_out) outNodes.push(node({ name: "Left over", value: +(cf.total_in - cf.total_out).toFixed(2) }, "neutral"));
     const subNodes: Node[] = [];
-    for (const n of outNodes) for (const k of n.children || []) subNodes.push({ ...node(k, "out"), parent: n });
+    if (!narrow) for (const n of outNodes) for (const k of n.children || []) subNodes.push({ ...node(k, "out"), parent: n });
     const cols = subNodes.length ? [inNodes, [hub], outNodes, subNodes] : [inNodes, [hub], outNodes];
 
     // ---- geometry: 300px of band height for the whole month
@@ -74,8 +78,8 @@
   const share = (v: number, base: number) => (base > 0 ? `${Math.round((v / base) * 100)}%` : "");
 </script>
 
-<div class="overflow-x-auto">
-  <div class="relative min-w-[720px]" bind:this={box} bind:clientWidth={width}>
+<div class="overflow-x-auto" bind:clientWidth={width}>
+  <div class={["relative", !narrow && "min-w-[720px]"]} bind:this={box}>
     {#if Math.max(cf.total_in, cf.total_out) > 0}
       {@const c = chart}
       <svg viewBox={`0 0 ${c.W} ${c.H}`} width={c.W} height={c.H} class="block overflow-visible text-xs" role="img"
@@ -95,12 +99,21 @@
           <text {x} y={n.y + n.h / 2 + 4} text-anchor={anchor} class="pointer-events-none fill-foreground [paint-order:stroke] [stroke-linejoin:round]"
             stroke="var(--card)" stroke-width="4">{n.name} <tspan class="fill-muted-foreground">{fmt0(n.value)}</tspan></text>
         {/snippet}
-        {#each c.inNodes as n, i (i)}{@render label(n, n.x - 8, "end")}{/each}
-        <text x={c.hub.x + nodeW / 2} y={c.hub.y - 10} text-anchor="middle" font-weight="600"
-          class="pointer-events-none fill-foreground [paint-order:stroke] [stroke-linejoin:round]" stroke="var(--card)" stroke-width="4">
-          {monthName} <tspan class="fill-muted-foreground">{fmt0(cf.total_in)} in · {fmt0(cf.total_out)} out</tspan></text>
-        {#each c.outNodes as n, i (i)}{@render label(n, n.x + nodeW + 8, "start")}{/each}
-        {#each c.subNodes as n, i (i)}{@render label(n, n.x + nodeW + 8, "start")}{/each}
+        {#if narrow}
+          {#each c.outNodes as n, i (i)}
+            <text x={n.x + nodeW + 6} y={n.y + n.h / 2 + 4} class="pointer-events-none fill-foreground [paint-order:stroke] [stroke-linejoin:round]"
+              stroke="var(--card)" stroke-width="4">{short(n.name)}</text>
+          {/each}
+          <text x={c.hub.x + nodeW / 2} y={c.hub.y - 10} text-anchor="middle" font-weight="600"
+            class="pointer-events-none fill-foreground [paint-order:stroke] [stroke-linejoin:round]" stroke="var(--card)" stroke-width="4">{monthName}</text>
+        {:else}
+          {#each c.inNodes as n, i (i)}{@render label(n, n.x - 8, "end")}{/each}
+          <text x={c.hub.x + nodeW / 2} y={c.hub.y - 10} text-anchor="middle" font-weight="600"
+            class="pointer-events-none fill-foreground [paint-order:stroke] [stroke-linejoin:round]" stroke="var(--card)" stroke-width="4">
+            {monthName} <tspan class="fill-muted-foreground">{fmt0(cf.total_in)} in · {fmt0(cf.total_out)} out</tspan></text>
+          {#each c.outNodes as n, i (i)}{@render label(n, n.x + nodeW + 8, "start")}{/each}
+          {#each c.subNodes as n, i (i)}{@render label(n, n.x + nodeW + 8, "start")}{/each}
+        {/if}
       </svg>
       {#if tip}
         <Tip x={at.x} y={at.y} boxWidth={width} place="above">

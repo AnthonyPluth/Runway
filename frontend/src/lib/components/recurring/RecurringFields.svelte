@@ -12,6 +12,7 @@
   import { toast } from "svelte-sonner";
   import { tick, untrack } from "svelte";
   import { fmt0 } from "$lib/format";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { FREQ_OPTIONS, MODE_OPTIONS, needsDates, signedAmount, type Errors, type RecurringValues } from "./types";
 
   // A recurring item's fields. With `save`, each one saves itself when you change it (the classic onEdit);
@@ -59,22 +60,30 @@
     catch (err) { mag = was; push(); toast.error((err as Error).message); }
   }
 
+  // Help for each field, as its tooltip.
   const hints = {
     anchor_date: "Any date it falls on works.", account_id: "The account the money moves through.",
     amount_mode: "Use the recent payments when the amount changes, like a utility bill.",
     match: "Text on the bank statement, e.g. COMED. One per line to match any of them; blank uses the name.",
     amount_max: "Leave blank to match any amount with the text.",
   };
+  // While More options is closed, one line says what's in it.
+  const moreSummary = $derived.by(() => {
+    const acct = options.find((a) => a.id === v.account_id);
+    const mode = MODE_OPTIONS.find(([val]) => val === v.amount_mode)?.[1] ?? "";
+    const lines = v.match.split("\n").map((x) => x.trim()).filter(Boolean);
+    const match = lines.length ? `matches ${lines[0]}${lines.length > 1 ? ` +${lines.length - 1}` : ""}` : "matches the name";
+    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match].filter(Boolean).join(" · ");
+  });
   let moreOpen = $state(untrack(() => !!save));   // the Add form keeps these tucked away; an existing item shows them all
   $effect(() => { if (errors.account_id || errors.amount_max) moreOpen = true; });
   const err = (name: string) => errors[name as keyof Errors];
-  const ids = (name: string, hint = "") => [err(name) && `${uid}-${name}-err`, hint && `${uid}-${name}-hint`].filter(Boolean).join(" ") || undefined;
+  const ids = (name: string) => (err(name) ? `${uid}-${name}-err` : undefined);
   const bad = (name: string) => (err(name) ? "true" : undefined);
 </script>
 
-{#snippet note(name: string, hint = "")}
+{#snippet note(name: string)}
   {#if err(name)}<p id="{uid}-{name}-err" class="text-xs text-destructive">{err(name)}</p>{/if}
-  {#if hint}<p id="{uid}-{name}-hint" class="text-xs text-muted-foreground">{hint}</p>{/if}
 {/snippet}
 {#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
 
@@ -120,9 +129,9 @@
   {/if}
   <div class="flex min-w-0 flex-col gap-1.5">
     <label class={lbl}><span>{dated ? "Starting" : "Next date"}{@render star()}</span>
-      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date", hints.anchor_date)} use:saveIf={save} />
+      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date")} title={hints.anchor_date} use:saveIf={save} />
     </label>
-    {@render note("anchor_date", hints.anchor_date)}
+    {@render note("anchor_date")}
   </div>
 </div>
 
@@ -136,46 +145,48 @@
 {#if isPhone()}
   <DesktopOnly what="change the account, amount to forecast or merchant text" class="mt-4" />
 {:else}
-<details class="mt-4" bind:open={moreOpen}>
-  <summary class="w-fit cursor-pointer text-sm text-muted-foreground select-none hover:text-foreground">More options <span class="text-xs">(account, amount to forecast, what to match)</span></summary>
+<details class="group mt-4" bind:open={moreOpen}>
+  <summary class="flex w-fit max-w-full cursor-pointer list-none items-center gap-1.5 text-sm text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+    <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />
+    <span class="shrink-0">More options</span>
+    {#if !moreOpen}<span class="min-w-0 truncate text-xs">{moreSummary}</span>{/if}
+  </summary>
   <div class="mt-3 grid gap-x-3 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Account
-        <select class={selectCls} name="account_id" bind:value={v.account_id} aria-invalid={bad("account_id")} aria-describedby={ids("account_id", hints.account_id)} use:saveIf={save}>
+        <select class={selectCls} name="account_id" bind:value={v.account_id} aria-invalid={bad("account_id")} aria-describedby={ids("account_id")} title={hints.account_id} use:saveIf={save}>
           {#each options as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
         </select>
       </label>
-      {@render note("account_id", hints.account_id)}
+      {@render note("account_id")}
     </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Amount to forecast
-        <select class={selectCls} name="amount_mode" bind:value={v.amount_mode} aria-describedby={ids("amount_mode", hints.amount_mode)} use:saveIf={save}>
+        <select class={selectCls} name="amount_mode" bind:value={v.amount_mode} title={hints.amount_mode} use:saveIf={save}>
           {#each MODE_OPTIONS as [val, text] (val)}<option value={val}>{text}</option>{/each}
         </select>
       </label>
-      {@render note("amount_mode", hints.amount_mode)}
     </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Merchant text
         <textarea class={fieldCls + " h-auto min-h-9 resize-y py-1.5"} name="match" rows={Math.max(1, v.match.split("\n").length)} bind:value={v.match}
-          placeholder="e.g. comed" aria-describedby={ids("match", hints.match)} use:saveIf={save}></textarea>
+          placeholder="Blank uses the name" title={hints.match} use:saveIf={save}></textarea>
       </label>
-      {@render note("match", hints.match)}
     </div>
     <div class="flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground">
       <span id="{uid}-range">Only amounts between</span>
       <div class="flex items-center gap-2" role="group" aria-labelledby="{uid}-range">
         <label class="relative min-w-0 flex-1"><span class="sr-only">Smallest amount</span>
           <input class={fieldCls + " tabular-nums"} name="amount_min" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
-            bind:value={v.amount_min} aria-describedby={ids("amount_max", hints.amount_max)} use:saveIf={save} />
+            bind:value={v.amount_min} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
         </label>
         <span>and</span>
         <label class="relative min-w-0 flex-1"><span class="sr-only">Largest amount</span>
           <input class={fieldCls + " tabular-nums"} name="amount_max" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
-            bind:value={v.amount_max} aria-invalid={bad("amount_max")} aria-describedby={ids("amount_max", hints.amount_max)} use:saveIf={save} />
+            bind:value={v.amount_max} aria-invalid={bad("amount_max")} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
         </label>
       </div>
-      {@render note("amount_max", hints.amount_max)}
+      {@render note("amount_max")}
     </div>
   </div>
 </details>

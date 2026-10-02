@@ -4,6 +4,7 @@
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { catColor } from "$lib/categories.svelte";
   import { fmt, fmtDate } from "$lib/format";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { Report } from "./chart.svelte";
   import { rangeDates, rangeOptions, reportState as st, type RangeKey } from "./state.svelte";
   import Status from "./Status.svelte";
@@ -84,7 +85,7 @@
         <p class="py-6 text-center text-sm text-muted-foreground">No spending in this period.</p>
       {:else if leaf}
         {#await txs}
-          <p class="py-4 text-center text-sm text-muted-foreground">Loading…</p>
+          <div class="h-24 animate-pulse rounded-lg bg-muted" role="status"><span class="sr-only">Loading…</span></div>
         {:then list}
           {#if list?.length}
             <div class="overflow-x-auto">
@@ -111,8 +112,10 @@
         {@const kids = node.children ?? []}
         <Treemap items={kids.map((c) => ({ ...c, color: color || colorOf[c.name] }))} total={node.value}
           onpick={(c) => go([...st.path, c.name])} />
-        <details class="mt-2">
-          <summary class="cursor-pointer text-sm text-muted-foreground">Show as table</summary>
+        <details class="group mt-2">
+          <summary class="flex w-fit cursor-pointer list-none items-center gap-1.5 text-sm text-muted-foreground select-none hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />Show as table
+          </summary>
           <table class="mt-2 w-full text-sm">
             <tbody>
               {#each kids as c (c.name)}

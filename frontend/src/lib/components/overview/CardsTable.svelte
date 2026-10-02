@@ -35,9 +35,7 @@
       <div class="min-w-0 flex-1">
         <div class="text-[15px]"><AcctLabel id={c.id} name={c.name} /></div>
         <div class="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
-          owes {fmt(c.owed_now)} now{#if c.statement_source === "manual"}
-            · <span title="You entered this statement in Settings → Accounts">entered by hand</span>{/if}{#if c.avg_monthly_spend != null}
-            · <span title={c.avg_cycles ? `Average per statement over the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : undefined}>about {fmt(c.avg_monthly_spend)} a statement</span>{/if}
+          owes {fmt(c.owed_now)} now{#if c.statement_source === "manual"}{" · "}<span title="You entered this statement in Settings → Accounts">entered by hand</span>{/if}{#if c.avg_monthly_spend != null}{" · "}<span title={c.avg_cycles ? `Average per statement over the last ${c.avg_cycles} statement${c.avg_cycles === 1 ? "" : "s"}` : undefined}>{(c.avg_cycles ?? 0) >= 2 ? "about " : ""}{fmt(c.avg_monthly_spend)} a statement</span>{/if}
         </div>
       </div>
       <div class="flex shrink-0 flex-col items-end text-right tabular-nums">

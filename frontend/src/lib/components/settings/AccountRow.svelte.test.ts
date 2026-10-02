@@ -270,3 +270,30 @@ describe("a loan's terms, for the retirement planner", () => {
     expect(screen.queryByText(/Interest rate/)).toBeNull();
   });
 });
+
+describe("the Owner choice", () => {
+  it("is hidden with one person, and shown with two", () => {
+    app.state = { connected: true, owners: ["Alex"], primary_account: null };
+    const { unmount } = show(acct());
+    expect(screen.queryByLabelText("Owner")).toBeNull();
+    unmount();
+    app.state = { connected: true, owners: ["Alex", "Sam"], primary_account: null };
+    show(acct());
+    expect(screen.getByLabelText("Owner")).toBeInTheDocument();
+  });
+
+  it("stays when the account's owner isn't the one person", () => {
+    app.state = { connected: true, owners: ["Alex"], primary_account: null };
+    show(acct({ owner: "Sam" }));
+    expect(screen.getByLabelText("Owner")).toBeInTheDocument();
+  });
+});
+
+describe("the expanded row", () => {
+  it("groups its switches in an Options box", () => {
+    show(acct());
+    const box = screen.getByRole("region", { name: "Options" });
+    expect(within(box).getByRole("checkbox", { name: "Count in net worth" })).toBeInTheDocument();
+    expect(within(box).getByRole("checkbox", { name: "Hide this account" })).toBeInTheDocument();
+  });
+});

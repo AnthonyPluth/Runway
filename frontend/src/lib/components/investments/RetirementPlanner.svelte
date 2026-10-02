@@ -11,7 +11,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
-  import { onDestroy, tick } from "svelte";
+  import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
   import { addedPayments, counted, type Dollars, endingPayments, inDollars, loanProjected, paymentEnds, project,
     projectionIn, sale as saleAt, saleProceeds, saleYear } from "./planner";
@@ -95,14 +95,10 @@
   // A figure for a year in the dollars chosen, and the projection with each year's figures in them (planner.ts).
   const shownIn = (v: number, y: number) => inDollars(v, y, year, num(plan.inflation), dollars);
   const shown = $derived(proj && projectionIn(proj, year, num(plan.inflation), dollars));
+  // Where the saving figure comes from, when its history is shorter than a year.
+  const savingsNote = $derived(data.computed.savings_measured !== false && data.computed.savings_since
+    ? `Your investment history only goes back to ${fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}.` : undefined);
   const inflationPct = $derived(`${pctIn(num(plan.inflation))}%`);
-  async function toInflation() {
-    assumptionsOpen = true;
-    await tick();
-    const el = document.getElementById(`${uid}-inflation`);
-    el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-    el?.focus({ preventScroll: true });
-  }
   // Nothing invested and no plan of your own yet: nothing to project from. With investments but still Runway's guesses,
   // the results are a sample, so they're shown muted rather than as a verdict.
   const empty = $derived(data.current <= 0 && isDefault);
@@ -224,26 +220,17 @@
 {/snippet}
 
 {#if empty}
-  <div class="rounded-lg border border-dashed px-6 py-10 text-center">
+  <div class="rounded-lg border border-dashed px-6 py-10 text-center"
+    title="Runway plans from your investment accounts. Connect one, or enter holdings by hand, and the planner starts from real numbers.">
     <h3 class="font-medium">Nothing to plan from yet</h3>
-    <p class="mx-auto mt-1 max-w-md text-sm text-muted-foreground">Runway plans from your investment accounts. Connect one, or enter holdings by
-      hand, and the planner starts from real numbers.</p>
     {#if !isPhone()}<Button class="mt-4" href="#networth/investments">Go to Investments</Button>{/if}
   </div>
 {:else}
-{#if sample}
-  <p class="mb-3 text-sm text-muted-foreground">
-    <span class="mr-2 inline-block rounded-full border px-2 py-0.5 text-xs font-medium">Sample · based on default assumptions</span>
-    <strong class="font-medium text-foreground">Enter your birth year and retirement age{isPhone() ? " on a computer" : ""} to make it yours.</strong></p>
-{/if}
-
 {#if shown}
   {@const future = dollars === "future"}
   <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
     <Segmented label="Show amounts in" value={dollars} onchange={setDollars}
       options={[{ value: "today", label: "Today’s dollars" }, { value: "future", label: "Future dollars" }]} />
-    <span class="text-sm text-muted-foreground">at <button type="button" class="font-medium text-foreground underline underline-offset-4"
-      title="Set it under Assumptions" onclick={toInflation}>{inflationPct} a year</button> inflation</span>
   </div>
   <div class="flex flex-wrap gap-x-8 gap-y-3">
     <div>
@@ -285,7 +272,7 @@
           <Input value={person.name} oninput={(e) => { person.name = e.currentTarget.value; keep(); }} /></label>
         <label class="flex flex-col gap-1">{@render field("Retires at", `age`)}
           <Input type="number" step="1" value={person.retire_age} oninput={(e) => { person.retire_age = Number(e.currentTarget.value); keep(); }} /></label>
-        <label class="flex flex-col gap-1">{@render field("Saves a year")}
+        <label class="flex flex-col gap-1" title={savingsNote}>{@render field("Saves a year")}
           {@render money(person.savings, (v) => (person.savings = v), `${names[i]}'s yearly savings`)}</label>
       </div>
     {/each}
@@ -293,10 +280,6 @@
       <Button variant="outline" size="sm" onclick={addPartner}><Plus /> Add a partner</Button>
     {:else}
       <Button variant="ghost" size="sm" onclick={removePartner}><X /> Remove {names[1]}</Button>
-    {/if}
-    {#if data.computed.savings_measured !== false && data.computed.savings_since}
-      <p class="mt-2 text-sm text-muted-foreground">Your investment history only goes back to
-        {fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}.</p>
     {/if}
   </section>
 
