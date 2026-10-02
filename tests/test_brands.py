@@ -102,21 +102,21 @@ class BrandTests(unittest.TestCase):
         path = os.path.join(tempfile.mkdtemp(), "c.db")
         db.init(path)
         with db.session(path) as c:
-            c.execute(insert(Account).values(id="a", name="Card", org="Truist", kind="credit"))
+            c.execute(insert(Account).values(id="a", name="Card", org="Northwind", kind="credit"))
             with self.assertRaises(ApiError):                                           # no key: can't fetch a website's
-                api_account_logo(c, {}, {"website": "truist.com"}, "a")
+                api_account_logo(c, {}, {"website": "northwind-bank.com"}, "a")
             db.set_setting(c, "logodev_token", "pk_test")
             with self.assertRaises(ApiError) as e:
                 api_account_logo(c, {}, {"website": "not a site"}, "a")
             self.assertIn("website", str(e.exception))
             with mock.patch.object(merchants, "_download", return_value=None), self.assertRaises(ApiError):
-                api_account_logo(c, {}, {"website": "truist.com"}, "a")              # Logo.dev has none: nothing changes
+                api_account_logo(c, {}, {"website": "northwind-bank.com"}, "a")              # Logo.dev has none: nothing changes
             self.assertIsNone(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0])
             with mock.patch.object(merchants, "_download", return_value=(b"png", "image/png")):
-                api_account_logo(c, {}, {"website": "https://www.Truist.com/"}, "a")
-            self.assertEqual(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0], "truist.com")
-            self.assertEqual(brands.account_brands(c)["a"]["src"], "/api/merchants/site%3Atruist.com/logo")
-            self.assertEqual(api_account_logo_options(c, {}, {}, "a")["choice"], {"website": "truist.com", "hidden": False})
+                api_account_logo(c, {}, {"website": "https://www.Northwind-Bank.com/"}, "a")
+            self.assertEqual(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0], "northwind-bank.com")
+            self.assertEqual(brands.account_brands(c)["a"]["src"], "/api/merchants/site%3Anorthwind-bank.com/logo")
+            self.assertEqual(api_account_logo_options(c, {}, {}, "a")["choice"], {"website": "northwind-bank.com", "hidden": False})
             api_account_logo(c, {}, {"hidden": True}, "a")
             self.assertEqual(api_account_logo_options(c, {}, {}, "a")["choice"], {"website": None, "hidden": True})
             self.assertIsNone(brands.account_brands(c)["a"]["src"])

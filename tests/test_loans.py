@@ -168,11 +168,11 @@ class SellableTests(LedgerCase):
 
     def test_loans_against_nothing_are_in_the_plan_as_debts(self):
         # A student loan with its terms, paid from checking each month; a personal loan with none yet (as a new one
-        # synced from Fifth Third is); a mortgage against the house; and a hidden loan and a paid-off one, left out
+        # synced from Lakeside Bank is); a mortgage against the house; and a hidden loan and a paid-off one, left out
         self.acct("mtg", "loan", -200_000, interest_rate=6.5, monthly_payment=1264.14)
         self.home()
         self.acct("stu", "loan", -12_000, name="Student Loan", org="Nelnet", interest_rate=5, monthly_payment=400)
-        self.acct("exp", "loan", -30_000, name="Expedition Loan", org="Fifth Third")
+        self.acct("exp", "loan", -30_000, name="Car Loan", org="Lakeside Bank")
         self.acct("old", "loan", -5_000, hidden=1)
         self.acct("done", "loan", 0, interest_rate=4, monthly_payment=100)
         self.acct("chk", "checking", 0)

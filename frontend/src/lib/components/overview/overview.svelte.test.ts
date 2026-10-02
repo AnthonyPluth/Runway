@@ -14,6 +14,7 @@ import CardsTable from "./CardsTable.svelte";
 import { forecastSheet } from "./forecastSheet.svelte";
 import ForecastTable from "./ForecastTable.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
+import ThisMonth from "./ThisMonth.svelte";
 
 beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
 afterEach(() => { app.state = null; forecastSheet.open = false; vi.useRealTimers(); });
@@ -90,6 +91,14 @@ describe("SetupChecklist", () => {
   });
 });
 
+describe("ThisMonth", () => {
+  it("leaves ignored transactions out of Recent", () => {
+    for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));   // stays loading: only the request matters
+    render(ThisMonth);
+    expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
+  });
+});
+
 describe("CardsTable", () => {
   const card = (extra: Partial<CardSummary> = {}): CardSummary => ({
     id: "c1", name: "Sapphire", owed_now: 800, statement_key: "stmt-c1", statement_balance: 600, last_close: "2026-03-01", remaining: 600,
@@ -101,6 +110,22 @@ describe("CardsTable", () => {
     render(CardsTable, { cards: [] });
     expect(screen.getByText(/Enter each card’s latest statement/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+  });
+
+  it("leaves out cards with a $0 balance and nothing left to pay", () => {
+    at("2026-03-10");
+    render(CardsTable, { cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
+      card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: 0, remaining: 0, credit: 20 })] });
+    expect(screen.getByText("Sapphire")).toBeInTheDocument();
+    expect(screen.queryByText("Freedom")).toBeNull();
+    expect(screen.getByText("Venture")).toBeInTheDocument();
+    expect(screen.queryByText("Amex")).toBeNull();   // a credit comes through as $0 owed
+  });
+
+  it("says so when every card is at $0", () => {
+    render(CardsTable, { cards: [card({ owed_now: 0, remaining: 0 })] });
+    expect(screen.queryByText("Sapphire")).toBeNull();
+    expect(screen.getByText("None of your cards owe anything right now.")).toBeInTheDocument();
   });
 
   it("says quietly when a statement was entered by hand", () => {
