@@ -137,9 +137,13 @@
       {#if t.retail}
         <button type="button" aria-expanded={showOrder} aria-controls={`order-${t.id}`} aria-label={`Receipt: ${orderLabel(t.retail)}`} onclick={toggleOrder}
           title={showOrder ? `Hide the ${store} order` : `Show what was in this ${store} order`}
-          class={cn("inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition-colors @sm/title:px-2 max-sm:px-2",
-            showOrder ? "bg-primary/15 text-primary" : "bg-secondary text-secondary-foreground hover:bg-primary/15 hover:text-primary")}>
-          <Receipt class="size-3 shrink-0" aria-hidden="true" /><span class="hidden @sm/title:inline max-sm:inline">receipt</span></button>
+          class={cn(
+            // Big enough to find and hit: a 16px icon in a 28px button (the row is 40px), tinted so it stands out from the
+            // gray badges, and a click area reaching a little past it on every side.
+            "relative inline-flex min-h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors @sm/title:px-2 max-sm:px-2",
+            "after:absolute after:-inset-1.5 after:content-['']",
+            showOrder ? "bg-primary/25 text-primary" : "bg-primary/12 text-primary hover:bg-primary/25")}>
+          <Receipt class="size-4 shrink-0" aria-hidden="true" /><span class="hidden @sm/title:inline max-sm:inline">receipt</span></button>
       {/if}
     </div>
   </div>
