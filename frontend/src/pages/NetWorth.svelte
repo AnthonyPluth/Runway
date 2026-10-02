@@ -2,7 +2,6 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
-  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import { signed } from "$lib/components/investments/numbers";
@@ -169,7 +168,6 @@
 
 <div class="mb-4 flex items-center gap-1">
   <h1 class="text-[34px] leading-tight font-bold tracking-tight">Net worth</h1>
-  <AssumptionsLink group={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "networth"} />
 </div>
 <SubTabs label="Net worth" current={sub === "investments" || sub === "equity" || sub === "retirement" ? sub : "summary"} tabs={[
   { id: "summary", label: "Summary", href: "#networth" },

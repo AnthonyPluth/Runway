@@ -52,7 +52,7 @@ describe("RetirementPlanner", () => {
     expect(screen.getByRole("img", { name: /Projected investments by age/ })).toBeInTheDocument();
   });
 
-  it("leaves what the figures are based on, and the disclaimer, to Settings → Assumptions", () => {
+  it("doesn’t explain what the figures are based on, or carry a disclaimer", () => {
     setup();
     expect(screen.queryByText(/Based on your/)).not.toBeInTheDocument();
     expect(screen.queryByText(/financial advice/)).not.toBeInTheDocument();
@@ -306,7 +306,7 @@ describe("RetirementPlanner", () => {
       expect(screen.getByText("$5,000")).toBeInTheDocument();   // all vested already: just what it's worth
     });
 
-    it("leaves the rules for selling and loans to Settings → Assumptions", () => {
+    it("doesn’t spell out the rules for selling and loans", () => {
       setup(data({ assets: [home] }));
       expect(screen.queryByText(/Proceeds are before selling costs/)).not.toBeInTheDocument();
       expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();

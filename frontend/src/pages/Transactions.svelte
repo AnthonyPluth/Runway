@@ -1,7 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, refreshState } from "$lib/app.svelte";
-  import AssumptionsLink from "$lib/components/AssumptionsLink.svelte";
   import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
@@ -159,7 +158,6 @@
       Transactions
       <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
     </h1>
-    <AssumptionsLink group="transactions" />
   </div>
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}

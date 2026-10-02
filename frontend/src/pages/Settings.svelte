@@ -11,7 +11,6 @@
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AccountsSection from "$lib/components/settings/AccountsSection.svelte";
   import AdvancedSection from "$lib/components/settings/AdvancedSection.svelte";
-  import AssumptionsSection from "$lib/components/settings/AssumptionsSection.svelte";
   import CategoriesSection from "$lib/components/settings/CategoriesSection.svelte";
   import ConnectionsSection from "$lib/components/settings/ConnectionsSection.svelte";
   import NotificationsSection from "$lib/components/settings/NotificationsSection.svelte";
@@ -51,7 +50,6 @@
     {:else if section === "rules"}<RulesSection rules={d.rules} accounts={d.accounts} />
     {:else if section === "connections"}<ConnectionsSection accounts={d.accounts} />
     {:else if section === "notifications"}<NotificationsSection />
-    {:else if section === "assumptions"}<AssumptionsSection />
     {:else}<AdvancedSection />{/if}
   </div>
 {:catch err}

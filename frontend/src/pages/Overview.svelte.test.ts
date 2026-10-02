@@ -45,10 +45,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
 
 describe("Overview", () => {
-  it("links to the forecast's assumptions instead of explaining what it counts", async () => {
+  it("doesn't explain what the forecast counts", async () => {
     serve(() => fc());
     render(Overview);
-    expect(await screen.findByRole("link", { name: "Assumptions" })).toHaveAttribute("href", "#setup/assumptions/forecast");
+    expect(await screen.findByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
     expect(screen.queryByText(/Includes 1 bill/)).not.toBeInTheDocument();
   });
 
