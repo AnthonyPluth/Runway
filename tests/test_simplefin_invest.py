@@ -81,7 +81,7 @@ class CaptureTests(Base):
                {"id": "d2", "posted": 1788100000, "amount": "-1000", "description": "YOU BOUGHT VTI"},
                {"id": "d3", "posted": 1788200000, "amount": "-2.50", "description": "Advisory fee"}]
         simplefin.store_payload(self.c, {"accounts": [account(holdings=[VTI], transactions=txs)]}, date(2026, 8, 1))
-        act = {a["name"]: a for a in portfolio.activity(self.c)}
+        act = {a["name"]: a for a in portfolio._sf_activity(self.c)}
         self.assertEqual((act["DIVIDEND RECEIVED VTI"]["subtype"], act["DIVIDEND RECEIVED VTI"]["amount"]), ("dividend", -12.34))
         self.assertEqual(act["YOU BOUGHT VTI"]["type"], "buy")
         self.assertEqual(act["Advisory fee"]["type"], "fee")

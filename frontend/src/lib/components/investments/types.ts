@@ -62,20 +62,6 @@ export interface InvAccount {
   duplicate_of?: string | null;
 }
 
-export interface Activity {
-  id: string;
-  account_id: string;
-  date: string;
-  name: string | null;
-  type: string | null;
-  subtype: string | null;
-  quantity: number | null;
-  price: number | null;
-  amount: number | null;
-  ticker: string | null;
-  account_name: string;
-}
-
 interface Performance {
   period?: string;
   start?: string;
@@ -177,7 +163,6 @@ export interface Investments {
   xray: XrayRule[];
   plan: PlanData;
   accounts: InvAccount[];
-  activity: Activity[];
 }
 
 export interface Quote { price: number; prev_close: number | null; time: number | null; type: string | null }

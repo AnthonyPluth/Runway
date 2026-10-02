@@ -244,20 +244,6 @@ def _sf_activity(conn, since: str | None = None, limit: int = 500) -> list[dict]
     return out
 
 
-def activity(conn, limit: int = 500) -> list[dict]:
-    ids = _visible_ids(conn)
-    if not ids:
-        return []
-    t = InvTransaction
-    rows = db.rows(conn.execute(
-        select(t, Security.ticker, Security.name.label("sec_name"), InvAccount.name.label("account_name"))
-        .outerjoin(Security, Security.id == t.security_id).join(InvAccount, InvAccount.id == t.account_id)
-        .where(t.account_id.in_(ids)).order_by(t.date.desc(), t.id).limit(limit)))
-    rows += _sf_activity(conn, limit=limit)
-    rows.sort(key=lambda t: (t["date"], t["id"]), reverse=True)
-    return rows[:limit]
-
-
 def _is_income(t: dict) -> bool:
     return (t.get("subtype") or "").lower() in INCOME_SUBTYPES and (t.get("amount") or 0) < 0
 
@@ -792,5 +778,5 @@ def overview(conn, period: str = "1Y", today: date | None = None) -> dict:
         "history": {**hist, "benchmark": bench}, "performance": perf, "periods": periods,
         "xray": xray(conn, hold, alloc, inc, today),
         "plan": planner.overview(conn, hist["value"][-1] if hist.get("value") else 0.0, plan_figures(conn, hist, today), today),
-        "accounts": [a for a in _accounts(conn) if not a["duplicate_of"]], "activity": activity(conn, 300),
+        "accounts": [a for a in _accounts(conn) if not a["duplicate_of"]],
     }
