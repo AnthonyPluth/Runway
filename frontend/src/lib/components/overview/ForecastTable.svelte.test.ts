@@ -9,14 +9,14 @@ const fc = (charged: number, assumed: boolean) => ({
   accounts: [{ id: "chk", name: "Checking", balance: 1000, daily_spend: 0 }], cards: [],
   budget: {
     total: [1000, 650], low: { date: "2026-10-26", balance: 650 }, used: [], skipped: [], monthly: 310,
-    changes: [{ date: "2026-10-26", account_id: "chk", kind: "card", name: "Double Cash statement", amount: -350, charged, assumed_cycle: assumed }],
+    changes: [{ date: "2026-10-26", account_id: "chk", kind: "card", name: "New card statement", amount: -350, charged, assumed_cycle: assumed }],
   },
 }) as unknown as Overview;
 
 describe("ForecastTable", () => {
   it("says when a card's budgeted statement is on an assumed cycle", () => {
     render(ForecastTable, { fc: fc(40, true) });
-    expect(screen.getByText("Double Cash statement (budgeted)")).toBeInTheDocument();
+    expect(screen.getByText("New card statement (budgeted)")).toBeInTheDocument();
     expect(screen.getByText(/\$40\.00 already on the card, the rest budgeted spending · no statement yet, so taken to close at the month’s end and be paid 25 days later/)).toBeInTheDocument();
   });
 
