@@ -1262,6 +1262,14 @@ class AnnualFeeTests(LedgerCase):
         card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
         self.assertAlmostEqual(card["2026-11-25"]["amount"], -310.01, places=2)
 
+    def test_budget_line_keeps_an_overdue_fee_of_a_card_with_no_statement(self):
+        # Its anniversary was Sep 10 and the fee hasn't posted: it's expected today, on the first assumed statement.
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.churn(opened="2024-09-10", account_id="cc3")
+        card = {c["date"]: c for c in forecast.build(self.conn, TODAY, 90)["budget"]["changes"] if c["kind"] == "card"}
+        self.assertEqual(card["2026-10-26"]["amount"], -405.0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

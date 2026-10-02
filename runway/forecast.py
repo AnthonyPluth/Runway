@@ -1013,8 +1013,10 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             owed_now = max(0.0, owing) if first else 0.0
             charges = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
             # A churning card's annual fee charged this cycle (annual_fees), unless a budget covers its category.
+            # An overdue fee is dated today, so the first statement takes it too.
             charges += -sum(f["amount"] for f in fees or [] if f.get("account_id") == cid
-                            and prev.isoformat() < f["date"] <= close.isoformat() and f["category"] not in budgeted)
+                            and (first or prev.isoformat() < f["date"]) and f["date"] <= close.isoformat()
+                            and f["category"] not in budgeted)
             # What it owes today is this cycle's charges, not a balance carried from a statement: no interest on it.
             owed_interest = 0.0 if first else interest(card_plan, owing, charges)
             statement = owing + owed_interest + charges
