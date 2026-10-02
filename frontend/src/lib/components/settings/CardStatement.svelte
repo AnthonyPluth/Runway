@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -69,11 +70,11 @@
       <label class={fieldCls}>Closing date
         <input class={`${inputCls} w-40`} type="date" max={today} required bind:value={close} /></label>
       <label class={fieldCls}>Statement balance
-        <input class={`${inputCls} w-32`} type="number" step="0.01" min="0" inputmode="decimal" required bind:value={balance} /></label>
+        <input class={`${inputCls} w-32`} type="number" step="0.01" min="0" inputmode="decimal" required bind:value={balance} {@attach commas} /></label>
       <label class={fieldCls}>Due date
         <input class={`${inputCls} w-40`} type="date" min={close || undefined} required bind:value={due} /></label>
       <label class={fieldCls}>Minimum (optional)
-        <input class={`${inputCls} w-28`} type="number" step="0.01" min="0" inputmode="decimal" bind:value={minimum} /></label>
+        <input class={`${inputCls} w-28`} type="number" step="0.01" min="0" inputmode="decimal" bind:value={minimum} {@attach commas} /></label>
       <span class="flex gap-2">
         <Button type="submit" size="sm" disabled={saving}>{saving ? "Saving…" : "Save statement"}</Button>
         {#if st}<Button type="button" variant="ghost" size="sm" onclick={() => (adding = false)}>Cancel</Button>{/if}

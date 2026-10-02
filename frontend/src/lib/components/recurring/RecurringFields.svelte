@@ -5,6 +5,7 @@
 </script>
 
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { autosave, markSaved } from "$lib/autosave";
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
@@ -105,7 +106,7 @@
   </div>
   <div class="flex min-w-0 flex-col gap-1.5">
     <label class={lbl}><span>Amount{@render star()}</span>
-      <input class={fieldCls + " tabular-nums"} name="amount" type="number" step="0.01" min="0" inputmode="decimal" bind:this={amountInput} value={mag}
+      <input class={fieldCls + " tabular-nums"} name="amount" type="number" step="0.01" min="0" inputmode="decimal" bind:this={amountInput} value={mag} {@attach commas}
         oninput={(e) => { mag = e.currentTarget.value; push(); }} placeholder="120.00" aria-required="true" aria-invalid={bad("amount")} aria-describedby={ids("amount")} use:saveIf={save} />
     </label>
     {@render note("amount")}
@@ -174,12 +175,12 @@
       <div class="flex items-center gap-2" role="group" aria-labelledby="{uid}-range">
         <label class="relative min-w-0 flex-1"><span class="sr-only">Smallest amount</span>
           <input class={fieldCls + " tabular-nums"} name="amount_min" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
-            bind:value={v.amount_min} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
+            bind:value={v.amount_min} {@attach commas} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
         </label>
         <span>and</span>
         <label class="relative min-w-0 flex-1"><span class="sr-only">Largest amount</span>
           <input class={fieldCls + " tabular-nums"} name="amount_max" type="number" step="0.01" min="0" inputmode="decimal" placeholder="$ any"
-            bind:value={v.amount_max} aria-invalid={bad("amount_max")} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
+            bind:value={v.amount_max} {@attach commas} aria-invalid={bad("amount_max")} aria-describedby={ids("amount_max")} title={hints.amount_max} use:saveIf={save} />
         </label>
       </div>
       {@render note("amount_max")}

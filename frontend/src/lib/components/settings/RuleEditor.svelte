@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { refreshState, reload } from "$lib/app.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
@@ -96,9 +97,9 @@
       </div>
       <div class={rowCls}>
         <label class={`${fieldCls} w-28`}>Amount from<input class={`${inputCls} text-right`} type="number" min="0" step="0.01" inputmode="decimal"
-          value={min} oninput={(e) => (min = e.currentTarget.value)} placeholder="any" /></label>
+          value={min} {@attach commas} oninput={(e) => (min = e.currentTarget.value)} placeholder="any" /></label>
         <label class={`${fieldCls} w-28`}>to<input class={`${inputCls} text-right`} type="number" min="0" step="0.01" inputmode="decimal"
-          value={max} oninput={(e) => (max = e.currentTarget.value)} placeholder="any" /></label>
+          value={max} {@attach commas} oninput={(e) => (max = e.currentTarget.value)} placeholder="any" /></label>
         <label class={`${fieldCls} w-36`}>Direction
           <select class={selectCls} bind:value={direction}>
             <option value="">Either</option><option value="out">Money out</option><option value="in">Money in</option>

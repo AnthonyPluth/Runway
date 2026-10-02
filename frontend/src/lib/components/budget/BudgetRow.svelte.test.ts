@@ -31,10 +31,20 @@ beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).moc
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
-    expect(screen.getByTitle("See the transactions behind this amount")).toHaveTextContent("$200");
+    expect(screen.getByText("$200")).toBeInTheDocument();
+    // only the name opens Transactions; the amount is plain text
+    expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
+  });
+
+  it("shows a subcategory's emoji too, a little smaller", () => {
+    categories.list = [category("Groceries", { icon: "🛒" }), category("Produce", { icon: "🥦", parent: "Groceries" })];
+    const { container } = render(BudgetRow, { c: cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1 }), sub: true,
+      month: "2026-03", pace: 0.5, payAccounts: pay, onsave: vi.fn(), onchanged: vi.fn() });
+    const icon = [...container.querySelectorAll("span[aria-hidden]")].find((el) => el.textContent === "🥦");
+    expect(icon).toHaveStyle({ width: "20px" });
   });
 
   it("turns red and says how much it's over when spending passes the budget", () => {

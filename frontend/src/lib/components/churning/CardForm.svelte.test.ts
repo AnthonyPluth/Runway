@@ -191,7 +191,7 @@ describe("card form", () => {
       expect(screen.getByLabelText("Card")).toHaveValue("Sapphire Reserve");
       expect(screen.getByLabelText("Whose card")).toHaveValue("Alex");
       expect(screen.getByLabelText("Bank")).toHaveValue("chase");
-      expect(screen.getByLabelText("Annual fee")).toHaveValue(795);
+      expect(screen.getByLabelText("Annual fee")).toHaveValue("795");
       expect(screen.queryByLabelText("Fee posts in")).toBeNull();
       expect(screen.queryByTestId("fee-month")).toBeNull();
       expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
@@ -248,7 +248,7 @@ describe("card form", () => {
       expect(await screen.findByTestId("ai-marked")).toHaveTextContent("Suggested by AI, check before saving");
       expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire");
       expect(screen.getByLabelText("Earns")).toHaveValue("ur");
-      expect(screen.getByLabelText("Annual fee")).toHaveValue(550);
+      expect(screen.getByLabelText("Annual fee")).toHaveValue("550");
       expect(screen.getByLabelText("Category of rate 1")).toHaveValue("Travel");
       expect(screen.getByLabelText("The portal's name")).toHaveValue("Chase Travel");
       expect(screen.getByLabelText("Suggested benefit 1")).toHaveValue("Travel credit");
@@ -273,7 +273,7 @@ describe("card form", () => {
       await userEvent.type(screen.getByLabelText("Annual fee"), "95");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
-      expect(screen.getByLabelText("Annual fee")).toHaveValue(95);
+      expect(screen.getByLabelText("Annual fee")).toHaveValue("95");
       await userEvent.click(screen.getByRole("button", { name: "Discard" }));
       expect(screen.queryByTestId("ai-marked")).toBeNull();
       expect(screen.getByLabelText(/Family/)).toHaveValue("");
@@ -302,10 +302,10 @@ describe("card form", () => {
       await userEvent.clear(screen.getByLabelText(/Family/));
       await userEvent.type(screen.getByLabelText(/Family/), "Sapphire cards");   // an AI field you corrected
       await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(60000);
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("60000");
       expect(screen.getByLabelText(/Family/)).toHaveValue("Sapphire cards");
       expect(screen.getByLabelText("Earns")).toHaveValue("cash");   // untouched AI fields go back
-      expect(screen.getByLabelText("Annual fee")).toHaveValue(null);
+      expect(screen.getByLabelText("Annual fee")).toHaveValue("");
       expect(screen.queryByLabelText("Category of rate 1")).toBeNull();
     });
 
@@ -351,10 +351,10 @@ describe("card form", () => {
       expect(links.map((a) => a.getAttribute("href"))).toEqual(["https://www.chase.com/sapphire/reserve", "https://news.example.com/csr"]);
       expect(links[0]).toHaveAttribute("target", "_blank");
       expect(links[0]).toHaveAttribute("rel", "noopener noreferrer");
-      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(100000);
-      expect(screen.getByLabelText("Spend")).toHaveValue(5000);
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("100000");
+      expect(screen.getByLabelText("Spend")).toHaveValue("5000");
       await userEvent.click(screen.getByRole("button", { name: "Discard" }));
-      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("");
     });
 
     it("says when the suggestions didn't come from a web search", async () => {
@@ -372,7 +372,7 @@ describe("card form", () => {
       render(CardForm, { c: card({ currency: "cash", annual_fee: 0, rates: [], bonus: null, bonus_spend: null }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
-      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue(null);
+      expect(screen.getByLabelText(/^Bonus \(/)).toHaveValue("");
     });
 
     it("shows an error as a toast and leaves the form alone", async () => {

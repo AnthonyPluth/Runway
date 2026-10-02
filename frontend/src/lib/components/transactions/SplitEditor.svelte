@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { refreshState } from "$lib/app.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
@@ -51,7 +52,7 @@
     {#each parts as p, i (p.key)}
       <div class="flex flex-wrap items-center gap-2">
         <CategorySelect short bind:value={p.category} label={`Category of part ${i + 1}`} class="w-full sm:w-56" />
-        <Input type="number" step="0.01" min="0" inputmode="decimal" aria-label={`Amount of part ${i + 1}`} bind:value={p.amount}
+        <Input type="number" step="0.01" min="0" inputmode="decimal" aria-label={`Amount of part ${i + 1}`} bind:value={p.amount} {@attach commas}
           class="w-28 text-right tabular-nums" />
         <Input placeholder="Note (optional)" aria-label={`Note for part ${i + 1}`} bind:value={p.note} class="min-w-32 flex-1" />
         <Button variant="ghost" size="icon" class="size-10 sm:size-8" title="Remove this part" aria-label="Remove this part"

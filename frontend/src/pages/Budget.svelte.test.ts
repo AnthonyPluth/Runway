@@ -55,6 +55,13 @@ describe("Budget page", () => {
     expect(screen.getByText("March 2026")).toBeInTheDocument();
   });
 
+  it("puts the even-pace marker halfway through today", async () => {
+    serve(month({ day: 2 }));
+    render(Budget);
+    const marks = await screen.findAllByTitle("Where you'd be at an even pace today");
+    expect(marks[0].style.left).toBe(`${((1.5 / 31) * 100).toFixed(1)}%`);
+  });
+
   it("counts what's spent outside any budget as other spending, and mentions uncategorized", async () => {
     serve(month({ uncategorized: 25 }));
     render(Budget);

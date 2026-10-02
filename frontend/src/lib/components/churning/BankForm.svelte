@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
@@ -68,7 +69,7 @@
       </NativeSelect>
     </label>
     <label class={lbl}>Opened<Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} /></label>
-    <label class={lbl}>Bonus<Input type="number" min="0" step="25" class="w-28" bind:value={v.bonus} {@attach edit("bonus")} placeholder="$" /></label>
+    <label class={lbl}>Bonus<Input type="number" min="0" step="25" class="w-28" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>Status
       <NativeSelect bind:value={v.status} {@attach edit("status")}>
         {#each Object.entries(BANK_STATUS_LABEL) as [k, l] (k)}<option value={k}>{l}</option>{/each}
@@ -78,10 +79,10 @@
 
   <Section id="requirements" title="Requirements" bind:open={open.requirements} summary={bankRequirementsSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
-    <label class={lbl}>Direct deposits total<Input type="number" min="0" step="100" class="w-32" bind:value={v.dd_total} {@attach edit("dd_total")} placeholder="$" /></label>
+    <label class={lbl}>Direct deposits total<Input type="number" min="0" step="100" class="w-32" bind:value={v.dd_total} {@attach edit("dd_total")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>How many deposits<Input type="number" min="0" step="1" class="w-24" bind:value={v.dd_count} {@attach edit("dd_count")} /></label>
     <label class={lbl}>Debit purchases<Input type="number" min="0" step="1" class="w-24" bind:value={v.debit_count} {@attach edit("debit_count")} /></label>
-    <label class={lbl}>Keep a balance of<Input type="number" min="0" step="100" class="w-32" bind:value={v.min_balance} {@attach edit("min_balance")} placeholder="$" /></label>
+    <label class={lbl}>Keep a balance of<Input type="number" min="0" step="100" class="w-32" bind:value={v.min_balance} {@attach edit("min_balance")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>… until<Input type="date" class="w-40" bind:value={v.hold_until} {@attach edit("hold_until")} /></label>
   </div>
   <div class="mt-3 flex flex-wrap items-end gap-3">
@@ -98,7 +99,7 @@
       </NativeSelect>
     </label>
     {#if !v.account_id}
-      <label class={lbl}>Deposited so far<Input type="number" min="0" step="100" class="w-32" bind:value={v.manual_dd} {@attach edit("manual_dd")} placeholder="$" /></label>
+      <label class={lbl}>Deposited so far<Input type="number" min="0" step="100" class="w-32" bind:value={v.manual_dd} {@attach edit("manual_dd")} {@attach commas} placeholder="$" /></label>
       <label class={lbl}>Debit purchases so far<Input type="number" min="0" step="1" class="w-24" bind:value={v.manual_debits} {@attach edit("manual_debits")} /></label>
     {/if}
   </div>
@@ -106,9 +107,9 @@
 
   <Section id="fees" title="Fees & closing" bind:open={open.fees} summary={bankFeesSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
-    <label class={lbl}>Monthly fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.monthly_fee} {@attach edit("monthly_fee")} placeholder="0" /></label>
+    <label class={lbl}>Monthly fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.monthly_fee} {@attach edit("monthly_fee")} {@attach commas} placeholder="0" /></label>
     <label class={`${lbl} min-w-52 flex-1`}>Waived by<Input bind:value={v.fee_waiver} {@attach edit("fee_waiver")} placeholder="e.g. $500 in direct deposits a month" /></label>
-    <label class={lbl}>Early-closing fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.early_close_fee} {@attach edit("early_close_fee")} placeholder="$" /></label>
+    <label class={lbl}>Early-closing fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.early_close_fee} {@attach edit("early_close_fee")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>Keep open (days)<Input type="number" min="0" step="1" class="w-24" bind:value={v.keep_open_days} {@attach edit("keep_open_days")} placeholder="e.g. 180" /></label>
   </div>
   </Section>
@@ -116,7 +117,7 @@
   <Section id="received" title="Bonus received & again" bind:open={open.received} summary={bankReceivedSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Posted on<Input type="date" class="w-40" bind:value={v.received_on} {@attach edit("received_on")} /></label>
-    <label class={lbl}><span>Amount <span class="text-muted-foreground">(if not the bonus)</span></span><Input type="number" min="0" step="1" class="w-28" bind:value={v.received_amount} {@attach edit("received_amount")} placeholder="$" /></label>
+    <label class={lbl}><span>Amount <span class="text-muted-foreground">(if not the bonus)</span></span><Input type="number" min="0" step="1" class="w-28" bind:value={v.received_amount} {@attach edit("received_amount")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>Closed on<Input type="date" class="w-40" bind:value={v.closed_on} {@attach edit("closed_on")} /></label>
     <label class={lbl}>Again after (months)<Input type="number" min="0" step="1" class="w-28" bind:value={v.repeat_months} {@attach edit("repeat_months")} placeholder="from the terms" /></label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.once_per_lifetime} {@attach edit("once_per_lifetime")} />Once per lifetime</label>

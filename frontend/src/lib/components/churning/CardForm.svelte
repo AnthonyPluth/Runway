@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
@@ -224,7 +225,7 @@
     {#if v.status !== "open"}
       <label class={lbl}>{v.status === "closed" ? "Closed on" : "Changed on"}<Input type="date" class="w-40" bind:value={v.closed_on} {@attach edit("closed_on")} /></label>
     {/if}
-    <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} placeholder="0" /></label>
+    <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="0" /></label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.authorized_user} {@attach edit("authorized_user")} />Authorized user</label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card</label>
   </div>
@@ -257,8 +258,8 @@
 
   <Section id="bonus" title="Sign-up bonus" bind:open={open.bonus} flagged={flagged === "bonus"} summary={bonusSummary(v.bonus, v.bonus_spend, v.bonus_months, v.currency, currencyName)}>
     <div class="flex flex-wrap items-end gap-3">
-      <label class={lbl}>Bonus ({v.currency === "cash" ? "dollars" : "points"})<Input type="number" min="0" step="1000" class="w-32" bind:value={v.bonus} {@attach edit("bonus")} /></label>
-      <label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} placeholder="$" /></label>
+      <label class={lbl}>Bonus ({v.currency === "cash" ? "dollars" : "points"})<Input type="number" min="0" step="1000" class="w-32" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} /></label>
+      <label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" /></label>
       <label class={lbl}>Within (months)<Input type="number" min="1" max="24" class="w-24" bind:value={v.bonus_months} {@attach edit("bonus_months")} /></label>
       <label class={lbl}><span>Deadline <span class="text-muted-foreground">(if different)</span></span><Input type="date" class="w-40" bind:value={v.bonus_deadline} {@attach edit("bonus_deadline")} /></label>
       <label class={lbl}>Bonus posted on<Input type="date" class="w-40" bind:value={v.bonus_earned_on} {@attach edit("bonus_earned_on")} /></label>
@@ -271,7 +272,7 @@
         </NativeSelect>
       </label>
       {#if !v.account_id}
-        <label class={lbl}>Spent so far<Input type="number" min="0" step="10" class="w-28" bind:value={v.manual_spend} {@attach edit("manual_spend")} placeholder="$" /></label>
+        <label class={lbl}>Spent so far<Input type="number" min="0" step="10" class="w-28" bind:value={v.manual_spend} {@attach edit("manual_spend")} {@attach commas} placeholder="$" /></label>
       {/if}
     </div>
   </Section>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { Badge } from "$lib/components/ui/badge";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -31,7 +32,7 @@
           <Input class="w-56 max-w-full" bind:value={b.name} aria-label={`${b.ai ? "Suggested benefit" : "Benefit"} ${i + 1}`} placeholder="e.g. Lyft credit" />
           <NativeSelect class="w-28" bind:value={b.kind} aria-label={`Kind of ${b.name || "benefit"}`}>{#each d.benefit_kinds as k (k.key)}<option value={k.key}>{k.name}</option>{/each}</NativeSelect>
           {#if b.kind === "credit"}
-            <Input type="number" min="0" step="1" class="w-24" bind:value={b.amount} placeholder="$" aria-label={`Amount of ${b.name || "benefit"}`} />
+            <Input type="number" min="0" step="1" class="w-24" bind:value={b.amount} {@attach commas} placeholder="$" aria-label={`Amount of ${b.name || "benefit"}`} />
           {/if}
           <NativeSelect class="w-32" bind:value={b.period} aria-label={`How often ${b.name || "benefit"} resets`}>{#each d.benefit_periods as p (p.key)}<option value={p.key}>{p.name}</option>{/each}</NativeSelect>
           {#if b.ai}<Badge variant="outline">Suggested by AI, check before saving</Badge>{/if}

@@ -71,7 +71,7 @@ describe("how a card is paid, from Settings", () => {
   it("pays in full by default, with no amount or APR to fill in", () => {
     show(card());
     expect(screen.getByRole("combobox", { name: "Pay" })).toHaveValue("full");
-    expect(screen.queryByRole("spinbutton", { name: "Amount each statement" })).toBeNull();
+    expect(screen.queryByLabelText("Amount each statement")).toBeNull();
     expect(screen.queryByRole("spinbutton", { name: "APR (%)" })).toBeNull();
     expect(screen.queryByText(/pays/)).toBeNull();
   });
@@ -81,7 +81,7 @@ describe("how a card is paid, from Settings", () => {
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Pay" }), "minimum");
     await waitFor(() => expect(api).toHaveBeenCalled());
     expect(lastBody()).toMatchObject({ pay_mode: "minimum", pay_amount: "", apr: "" });
-    expect(screen.queryByRole("spinbutton", { name: "Amount each statement" })).toBeNull();
+    expect(screen.queryByLabelText("Amount each statement")).toBeNull();
     const apr = screen.getByRole("spinbutton", { name: "APR (%)" });
     await userEvent.type(apr, "24.99");
     await userEvent.tab();
@@ -91,8 +91,8 @@ describe("how a card is paid, from Settings", () => {
   it("asks for the fixed amount and saves it, and shows it on the account's line", async () => {
     show(card({ pay_mode: "fixed", pay_amount: 300, apr: 19.5 }));
     expect(screen.getByText("pays $300.00 a statement")).toBeInTheDocument();
-    const amount = screen.getByRole("spinbutton", { name: "Amount each statement" });
-    expect(amount).toHaveValue(300);
+    const amount = screen.getByLabelText("Amount each statement");
+    expect(amount).toHaveValue("300");
     expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(19.5);
     await userEvent.clear(amount);
     await userEvent.type(amount, "450");

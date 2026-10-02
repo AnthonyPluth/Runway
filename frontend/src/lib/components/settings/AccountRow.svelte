@@ -15,6 +15,7 @@
 </script>
 
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { app, refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
@@ -271,7 +272,7 @@
       </label>
       {#if payMode === "fixed"}
         <label class={fieldCls}>Amount each statement
-          <input type="number" inputmode="decimal" min="0" step="0.01" class={inputCls} bind:value={payAmount} placeholder="$" use:autosave={() => save(true)} />
+          <input type="number" inputmode="decimal" min="0" step="0.01" class={inputCls} bind:value={payAmount} {@attach commas} placeholder="$" use:autosave={() => save(true)} />
         </label>
       {/if}
       {#if payMode !== "full"}

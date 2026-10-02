@@ -292,8 +292,8 @@ def save(conn, body: dict, wish_id: int | None = None) -> int:
         if st not in STATUSES:
             raise churning.ChurnError("The status is wanted, ready, applied or dropped")
         f["status"] = st
-    if new and f.get("priority") is None:   # after the person's others
-        top = conn.execute(select(func.max(ChurnWish.priority)).where(ChurnWish.owner == f["owner"])).scalar()
+    if new and f.get("priority") is None:   # last: one order for everyone's plans, so people's turns can alternate
+        top = conn.execute(select(func.max(ChurnWish.priority))).scalar()
         f["priority"] = (top or 0) + 1
     if row is None:
         return int(conn.execute(insert(ChurnWish).values(**f)).lastrowid)

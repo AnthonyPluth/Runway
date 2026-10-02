@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { Button } from "$lib/components/ui/button";
   import { fmt, fmtDate, nb } from "$lib/format";
@@ -69,7 +70,7 @@
               <td><input class={`tr-ticker w-24 ${input}`} bind:value={r.ticker} onchange={soon} placeholder="FXAIX" aria-label="Ticker" /></td>
               <td><input class={`w-56 ${input}`} bind:value={r.name} onchange={soon} placeholder={r.namePh} aria-label="Fund name" /></td>
               <td><input class={`w-28 ${input}`} type="number" min="0" step="0.0001" value={r.shares} oninput={(e) => (r.shares = e.currentTarget.value)} onchange={soon} placeholder="shares" aria-label="Shares" /></td>
-              <td><input class={`w-28 ${input}`} type="number" min="0" step="1" value={r.value} oninput={(e) => (r.value = e.currentTarget.value)} onchange={soon} placeholder="or value $" aria-label="Value, for a fund without a ticker" /></td>
+              <td><input class={`w-28 ${input}`} type="number" min="0" step="1" value={r.value} {@attach commas} oninput={(e) => (r.value = e.currentTarget.value)} onchange={soon} placeholder="or value $" aria-label="Value, for a fund without a ticker" /></td>
               <td><input class={`w-20 ${input}`} type="number" min="0" max="100" step="0.5" value={r.pct} oninput={(e) => (r.pct = e.currentTarget.value)} onchange={soon} placeholder="%" aria-label="Share of each contribution, %" /></td>
               <td><Button variant="ghost" size="icon" class="size-8" aria-label="Remove fund" onclick={() => { rows.splice(i, 1); save(); }}><X /></Button></td>
             </tr>

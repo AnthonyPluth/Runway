@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
@@ -57,7 +58,7 @@
       </label>
     {/if}
     {#if v.kind === "credit"}
-      <label class={lbl}>Amount<Input type="number" min="0" step="5" class="w-24" bind:value={v.amount} {@attach edit("amount")} placeholder="$" /></label>
+      <label class={lbl}>Amount<Input type="number" min="0" step="5" class="w-24" bind:value={v.amount} {@attach edit("amount")} {@attach commas} placeholder="$" /></label>
     {/if}
     <label class={lbl}>Resets
       <NativeSelect bind:value={v.period} {@attach edit("period")}>{#each d.benefit_periods as p (p.key)}<option value={p.key}>{p.name}</option>{/each}</NativeSelect>
@@ -72,7 +73,7 @@
   </div>
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <label class={lbl}><span>{v.kind === "credit" ? "Worth to me a year" : "Worth a year"} <span class="text-muted-foreground">{v.kind === "credit" ? "(if not the credit's full amount)" : "(your own figure)"}</span></span>
-      <Input type="number" min="0" step="10" class="w-28" bind:value={v.annual_value} {@attach edit("annual_value")} placeholder="$" />
+      <Input type="number" min="0" step="10" class="w-28" bind:value={v.annual_value} {@attach edit("annual_value")} {@attach commas} placeholder="$" />
     </label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.counts} {@attach edit("counts")} />Counts toward its annual fee (I'll use it)</label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.remind} {@attach edit("remind")} />Remind me before it resets</label>
