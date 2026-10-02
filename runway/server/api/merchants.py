@@ -36,6 +36,34 @@ def api_merchant_logo(conn, _q, body):
     return {"ok": True}
 
 
+def api_holding_logo_options(conn, q, _b):
+    """For choosing a holding's logo on Investments: what you chose, and the brands Logo.dev's Brand Search finds for
+    its name. A holding is identified by its `group`, which Investments gives each row."""
+    try:
+        choice = merchants.holding_choice(conn, q.get("group", [""])[0])
+    except ValueError as e:
+        raise ApiError(str(e)) from e
+    name = (q.get("name", [""])[0] or "").strip()
+    out: dict[str, Any] = {"choice": choice, "searchable": merchants.searchable(conn),
+                           "configured": merchants.configured(conn), "candidates": [], "error": None}
+    if name and out["searchable"]:
+        found = merchants.search(conn, name)
+        if found is None:
+            out["error"] = merchants._why
+        else:
+            out["candidates"] = found[:6]
+    return out
+
+
+def api_holding_logo(conn, _q, body):
+    """Choose a holding's logo: a website's, none (its letter), or (neither) Runway's own pick, by ticker or fund family."""
+    try:
+        merchants.choose_holding(conn, body.get("group"), (body.get("website") or "").strip() or None, bool(body.get("hidden")))
+    except ValueError as e:
+        raise ApiError(str(e)) from e
+    return {"ok": True}
+
+
 def api_logodev_status(conn, _q, _b):
     return {**merchants.status(conn), "fetching": _logo_lock.locked()}
 

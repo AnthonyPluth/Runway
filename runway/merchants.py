@@ -42,6 +42,9 @@ REFRESH_DAYS = 30      # a Logo.dev logo is fetched again after this long, in ca
 SITE = "site:"         # merchants.id prefix for logos from Logo.dev, by website
 BRAND = "brand:"       # ... and by the merchant's name, when no website is known
 TICKER = "ticker:"     # ... and by a held stock's or fund's ticker symbol
+# merchant_logos.key prefix for a logo you chose for a holding. A merchant's key is key(name), whose whitespace split
+# drops \x1f, so no merchant key can ever start with this: the two share the table without colliding.
+HOLDING = "holding\x1f"
 LOGO_DEV = "https://img.logo.dev/"
 SEARCH = "https://api.logo.dev/search"
 _TICKER_RX = re.compile(r"^[A-Z0-9](?:[A-Z0-9.-]{0,10})$")
@@ -397,14 +400,23 @@ def note_tickers(conn) -> list[str]:
 
 def holding_logos(conn, holdings: list[dict]) -> dict[str, str]:
     """{holding's group: where Runway serves its logo}, for the holdings Runway has a logo for: by ticker, else by the
-    fund family its name gives. A holding with neither gets no entry (Investments shows a letter)."""
+    fund family its name gives, unless you chose its logo (a website's, or none). A holding with neither gets no entry
+    (Investments shows a letter)."""
+    groups = sorted({h["group"] for h in holdings if h.get("group") and not h.get("is_cash")})
+    chosen = {r["key"]: r for r in conn.execute(select(MerchantLogo.key, MerchantLogo.website, MerchantLogo.hidden).where(
+        MerchantLogo.key.in_([HOLDING + g for g in groups])))} if groups else {}
     want: dict[str, list[str]] = {}
     for h in holdings:
         if h.get("is_cash"):
             continue
+        pick = chosen.get(HOLDING + (h.get("group") or ""))
+        if pick and pick["hidden"]:
+            continue    # you chose a letter
         t = (h.get("ticker") or "").strip().upper()
         fam = brands.fund_family(h.get("name"))
-        ids = ([TICKER + t] if _TICKER_RX.match(t) else []) + ([SITE + fam] if fam else [])
+        # the website you chose first; if its logo is gone, Runway's own pick stands in
+        ids = ([SITE + pick["website"]] if pick and pick["website"] else []) + \
+              ([TICKER + t] if _TICKER_RX.match(t) else []) + ([SITE + fam] if fam else [])
         if ids:
             want[h["group"]] = ids
     if not want:
@@ -526,10 +538,14 @@ def retry_unknown(conn) -> None:
 
 # ---------------------------------------------------------------------------------------------- logos you choose
 
+def _choice(conn, k: str) -> dict | None:
+    r = conn.execute(select(MerchantLogo.website, MerchantLogo.hidden).where(MerchantLogo.key == k)).fetchone()
+    return {"website": r["website"], "hidden": bool(r["hidden"])} if r else None
+
+
 def choice(conn, name: str | None) -> dict | None:
     """The logo you chose for a merchant: {website, hidden}, or None (Runway picks)."""
-    r = conn.execute(select(MerchantLogo.website, MerchantLogo.hidden).where(MerchantLogo.key == key(name))).fetchone()
-    return {"website": r["website"], "hidden": bool(r["hidden"])} if r else None
+    return _choice(conn, key(name))
 
 
 def choose(conn, name: str | None, website: str | None = None, hidden: bool = False, opener=None) -> None:
@@ -538,6 +554,32 @@ def choose(conn, name: str | None, website: str | None = None, hidden: bool = Fa
     k = key(name)
     if not k:
         raise ValueError("Which merchant?")
+    _save_choice(conn, k, website, hidden, opener)
+
+
+def holding_key(group: str | None) -> str:
+    """merchant_logos' key for a holding's logo choice. A holding is keyed by its portfolio group (the ticker, "t:VTI",
+    else the security's id for one without a usable ticker, such as a fund with only a name): the same fund held in
+    several accounts, or sold and bought again, keeps its logo, as its row on Investments does. The group is kept
+    exactly (a security id is case-sensitive)."""
+    g = (group or "").strip()
+    if not g or len(g) > 200:
+        raise ValueError("Which holding?")
+    return HOLDING + g
+
+
+def holding_choice(conn, group: str | None) -> dict | None:
+    """The logo you chose for a holding: {website, hidden}, or None (Runway picks)."""
+    return _choice(conn, holding_key(group))
+
+
+def choose_holding(conn, group: str | None, website: str | None = None, hidden: bool = False, opener=None) -> None:
+    """Choose a holding's logo on Investments: a website's logo (fetched from Logo.dev now), none (its letter), or
+    (neither) Runway's own pick again (by ticker, else fund family)."""
+    _save_choice(conn, holding_key(group), website, hidden, opener)
+
+
+def _save_choice(conn, k: str, website: str | None, hidden: bool, opener=None) -> None:
     if not website and not hidden:
         conn.execute(delete(MerchantLogo).where(MerchantLogo.key == k))
         return

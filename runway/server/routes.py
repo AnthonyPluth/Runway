@@ -37,7 +37,8 @@ from .api.investments import (
 )
 from .api.mcp import api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
-    api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo, api_merchant_logo_options
+    api_holding_logo, api_holding_logo_options, api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo,
+    api_merchant_logo_options
 )
 from .api.networth import (
     api_asset_add, api_asset_refresh, api_asset_remove, api_asset_update, api_networth, api_realie_settings
@@ -149,6 +150,8 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/logodev/status", api_logodev_status),
     ("GET", "/api/merchants/logo-options", api_merchant_logo_options),
     ("POST", "/api/merchants/logo", api_merchant_logo),
+    ("GET", "/api/investments/logo-options", api_holding_logo_options),
+    ("POST", "/api/investments/logo", api_holding_logo),
     ("POST", "/api/logodev/fetch", api_logodev_fetch),
     ("GET", "/api/investments/live", api_live_quotes),
     ("POST", "/api/investments/plan", api_plan_save),

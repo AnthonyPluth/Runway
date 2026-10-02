@@ -8,6 +8,7 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import { tick } from "svelte";
   import LiveDot from "./LiveDot.svelte";
+  import LogoPicker from "$lib/components/transactions/LogoPicker.svelte";
   import TickerIcon from "./TickerIcon.svelte";
   import { gainCls, pct, qty, signed } from "./numbers";
   import { inv, type SortKey } from "./state.svelte";
@@ -102,7 +103,14 @@
         <tr class="border-t border-border align-top [&>td]:py-2 [&>td:not(:first-child)]:whitespace-nowrap [&>td:not(:first-child)]:pl-3">
           <td class="min-w-48 max-[700px]:min-w-0">
             <div class="flex gap-2.5">
-              <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
+              {#if x.is_cash}
+                <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
+              {:else}
+                <!-- Click the logo to choose another (or none) for this holding. -->
+                <LogoPicker name={x.name || x.ticker || "this holding"} holding={x.group || x.security_id} {onchanged}>
+                  <TickerIcon ticker={x.ticker} name={x.name} logo={x.logo} />
+                </LogoPicker>
+              {/if}
               <div>
                 <div><b>{x.ticker && !x.ticker.includes(":") ? x.ticker : ""}</b> {x.name ?? ""}</div>
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>

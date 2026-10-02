@@ -7,10 +7,11 @@
 
   // The merchant's logo, which (tucked away: click it) lets you choose another for every transaction from that
   // merchant: one of Logo.dev's matches for its name, a website's logo, none, or Runway's own pick again. With
-  // `account` it's an account's logo instead (Settings → Accounts), whose matches are for its institution.
-  let { name, children, onchanged, account }: { name: string; children: Snippet; onchanged: () => void; account?: string } = $props();
-  const base = $derived(account ? `/api/accounts/${encodeURIComponent(account)}` : "/api/merchants");
-  const which = $derived(account ? "this account" : "this merchant");
+  // `account` it's an account's logo instead (Settings → Accounts), whose matches are for its institution; with
+  // `holding` (a holding's group on Investments) it's that holding's, whose matches are for its name.
+  let { name, children, onchanged, account, holding }: { name: string; children: Snippet; onchanged: () => void; account?: string; holding?: string } = $props();
+  const base = $derived(account ? `/api/accounts/${encodeURIComponent(account)}` : holding ? "/api/investments" : "/api/merchants");
+  const which = $derived(account ? "this account" : holding ? "this holding" : "this merchant");
 
   interface Options { choice: { website: string | null; hidden: boolean } | null; searchable: boolean; configured: boolean;
     candidates: { name: string; domain: string }[]; error: string | null }
@@ -36,14 +37,15 @@
     open = !open;
     if (!open) return;
     opts = null;
-    try { opts = await api<Options>(account ? `${base}/logo-options` : `${base}/logo-options?name=${encodeURIComponent(name)}`); website = opts.choice?.website ?? ""; }
+    const query = account ? "" : holding ? `?group=${encodeURIComponent(holding)}&name=${encodeURIComponent(name)}` : `?name=${encodeURIComponent(name)}`;
+    try { opts = await api<Options>(`${base}/logo-options${query}`); website = opts.choice?.website ?? ""; }
     catch (err) { toast.error((err as Error).message); open = false; }
   }
   async function choose(body: { website?: string; hidden?: boolean }, what: string) {
     busy = true;
     try {
-      await api(`${base}/logo`, { method: "POST", body: account ? body : { name, ...body } });
-      toast.success(account ? `${what} for ${name}` : `${what} for every ${name} transaction`); open = false; onchanged();
+      await api(`${base}/logo`, { method: "POST", body: account ? body : holding ? { group: holding, ...body } : { name, ...body } });
+      toast.success(account || holding ? `${what} for ${name}` : `${what} for every ${name} transaction`); open = false; onchanged();
     } catch (err) { toast.error((err as Error).message); }
     finally { busy = false; }
   }
@@ -91,8 +93,8 @@
         {#if opts.configured}
           <form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); if (website.trim()) choose({ website }, `Using ${website.trim()}'s logo`); }}>
             <input class="h-9 min-w-0 flex-1 rounded-lg bg-input px-2.5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder={account ? "A website, e.g. chase.com" : "Its website, e.g. target.com"}
-              aria-label={account ? "The website whose logo to use" : "The merchant's website"} bind:value={website} />
+              placeholder={account ? "A website, e.g. chase.com" : holding ? "Its website, e.g. vanguard.com" : "Its website, e.g. target.com"}
+              aria-label={account || holding ? "The website whose logo to use" : "The merchant's website"} bind:value={website} />
             <Button type="submit" size="sm" disabled={busy || !website.trim()}>Use</Button>
           </form>
         {:else}

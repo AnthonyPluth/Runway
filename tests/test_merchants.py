@@ -389,6 +389,89 @@ class MerchantTests(DbCase):
         with self.assertRaises(ValueError):
             merchants.choose(self.c, "  ", "target.com")
 
+    def holdings_for_logos(self):
+        self.c.execute(insert(InvAccount).values(id="ia", item_id="item", name="Brokerage"))
+        self.c.execute(insert(Security), [
+            {"id": "s1", "ticker": "AAPL", "name": "Apple Inc", "is_cash": 0},
+            {"id": "s2", "ticker": None, "name": "Vanguard Made-Up Fund", "is_cash": 0},
+            {"id": "s3", "ticker": "CUR:USD", "name": "Cash", "is_cash": 1}])
+        self.c.execute(insert(Holding), [{"account_id": "ia", "security_id": s, "quantity": 1, "value": 100} for s in ("s1", "s2", "s3")])
+        self.c.execute(insert(Merchant), [{"id": "ticker:AAPL", "logo_url": "u", "logo": "x"}, {"id": "site:vanguard.com", "logo_url": "u", "logo": "x"}])
+
+    def test_you_choose_a_holdings_logo(self):
+        from runway import portfolio
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        self.holdings_for_logos()
+        logos = lambda: {h["name"]: h["logo"] for h in portfolio.holdings(self.c)}
+        auto = {"Apple Inc": "/api/merchants/ticker%3AAAPL/logo", "Vanguard Made-Up Fund": "/api/merchants/site%3Avanguard.com/logo", "Cash": None}
+        self.assertEqual(logos(), auto)
+        self.assertIsNone(merchants.holding_choice(self.c, "t:AAPL"))
+        merchants.choose_holding(self.c, "t:AAPL", "https://www.Apple-Example.com/",
+                                 opener=self.opener({self.logo_dev("apple-example.com"): (PNG, "image/png")}))
+        self.assertEqual(merchants.holding_choice(self.c, "t:AAPL"), {"website": "apple-example.com", "hidden": False})
+        self.assertEqual(logos(), {**auto, "Apple Inc": "/api/merchants/site%3Aapple-example.com/logo"})
+        self.assertEqual(merchants.logo(self.c, "site:apple-example.com"), (PNG, "image/png"))
+        merchants.choose_holding(self.c, "t:AAPL", hidden=True)
+        self.assertEqual(logos(), {**auto, "Apple Inc": None})
+        # a fund without a ticker is chosen by its security id, and leaves the other holdings alone
+        merchants.choose_holding(self.c, "s2", hidden=True)
+        self.assertEqual(logos(), {**auto, "Apple Inc": None, "Vanguard Made-Up Fund": None})
+        merchants.choose_holding(self.c, "t:AAPL")
+        merchants.choose_holding(self.c, "s2")                      # back to Runway's own picks
+        self.assertEqual(logos(), auto)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(MerchantLogo)).fetchone()[0], 0)
+
+    def test_a_holdings_choice_never_meets_a_merchants(self):
+        merchants.choose(self.c, "t:AAPL", hidden=True)               # a merchant that happens to be named like a group
+        self.assertIsNone(merchants.holding_choice(self.c, "t:AAPL"))
+        merchants.choose_holding(self.c, "t:AAPL", hidden=True)
+        merchants.choose_holding(self.c, "t:AAPL")
+        self.assertEqual(merchants.choice(self.c, "t:AAPL"), {"website": None, "hidden": True})   # still there
+        self.assertEqual(merchants.holding_key("t:AAPL")[:7], "holding")
+        self.assertEqual(merchants.key(merchants.holding_key("t:AAPL")), "holding t:aapl")   # a merchant's key can't carry the prefix
+
+    def test_a_missing_website_logo_falls_back_to_runways_pick(self):
+        from runway import portfolio
+        self.holdings_for_logos()
+        self.c.execute(insert(MerchantLogo).values(key=merchants.holding_key("t:AAPL"), website="gone-example.com", hidden=0))
+        self.assertEqual({h["name"]: h["logo"] for h in portfolio.holdings(self.c)}["Apple Inc"], "/api/merchants/ticker%3AAAPL/logo")
+
+    def test_choosing_a_holdings_logo_through_the_api(self):
+        from runway.server.common import ApiError
+        api = server.api.merchants
+        with self.assertRaises(ApiError):
+            api.api_holding_logo(self.c, {}, {"website": "apple-example.com"})                      # which holding?
+        with self.assertRaises(ApiError):
+            api.api_holding_logo_options(self.c, {"group": [""]}, None)
+        with self.assertRaises(ApiError) as e:                                                      # no Logo.dev key
+            api.api_holding_logo(self.c, {}, {"group": "t:AAPL", "website": "apple-example.com"})
+        self.assertIn("Logo.dev", str(e.exception))
+        db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
+        with self.assertRaises(ApiError) as e:
+            api.api_holding_logo(self.c, {}, {"group": "t:AAPL", "website": "not a site"})
+        self.assertIn("website", str(e.exception))
+        self.assertIsNone(merchants.holding_choice(self.c, "t:AAPL"))                               # failures change nothing
+        self.assertEqual(api.api_holding_logo(self.c, {}, {"group": "t:AAPL", "hidden": True}), {"ok": True})
+        options = api.api_holding_logo_options(self.c, {"group": ["t:AAPL"], "name": ["Apple Inc"]}, None)
+        self.assertEqual(options["choice"], {"website": None, "hidden": True})
+        self.assertTrue(options["configured"])
+        self.assertEqual(options["candidates"], [])                                                 # no secret key: no search
+        found = [{"name": "Apple Example", "domain": "apple-example.com"}]
+        db.set_setting(self.c, sk.LOGODEV_SECRET, "sk_test123456")
+        with mock.patch.object(merchants, "search", return_value=found) as search:
+            options = api.api_holding_logo_options(self.c, {"group": ["t:AAPL"], "name": ["Apple Inc"]}, None)
+        search.assert_called_once_with(self.c, "Apple Inc")
+        self.assertEqual(options["candidates"], found)
+        with mock.patch.object(merchants, "search", return_value=None):
+            self.assertEqual(api.api_holding_logo_options(self.c, {"group": ["t:AAPL"], "name": ["Apple Inc"]}, None)["error"], merchants._why)
+        self.assertEqual(api.api_holding_logo(self.c, {}, {"group": "t:AAPL"}), {"ok": True})
+        self.assertIsNone(merchants.holding_choice(self.c, "t:AAPL"))
+
+    def test_the_holding_logo_routes_are_served(self):
+        from runway.server import routes
+        self.assertIn(("POST", "/api/investments/logo"), [(m, p) for m, p, _ in routes.ROUTES])
+        self.assertIn(("GET", "/api/investments/logo-options"), [(m, p) for m, p, _ in routes.ROUTES])
+
     def test_the_secret_key_looks_up_names_again(self):
         started = mock.patch.object(server.api.merchants, "start_logo_backfill").start()
         self.addCleanup(mock.patch.stopall)
