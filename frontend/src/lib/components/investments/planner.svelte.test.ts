@@ -116,7 +116,7 @@ describe("RetirementPlanner", () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       setup();
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      await user.type(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" }), "5");
+      await user.type(screen.getByRole("textbox", { name: "Yearly spending in retirement" }), "5");
       expect(api).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(800);
       expect(api).toHaveBeenCalledOnce();
@@ -149,7 +149,7 @@ describe("RetirementPlanner", () => {
     it("saves a pending change when you leave before the pause is up", async () => {
       const { unmount } = setup();
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      await user.type(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" }), "5");
+      await user.type(screen.getByRole("textbox", { name: "Yearly spending in retirement" }), "5");
       expect(api).not.toHaveBeenCalled();
       unmount();
       expect(api).toHaveBeenCalledOnce();
@@ -231,10 +231,10 @@ describe("RetirementPlanner", () => {
       await userEvent.click(screen.getByRole("button", { name: /Add an event/ }));
       expect(screen.getByLabelText("Year")).toHaveValue(2031);
       expect(screen.getByLabelText("Money")).toHaveValue("out");
-      expect(screen.getByRole("spinbutton", { name: /Amount/ })).toHaveValue(10000);
+      expect(screen.getByRole("textbox", { name: /Amount/ })).toHaveValue("10000");
       await userEvent.selectOptions(screen.getByLabelText("Money"), "in");
       expect(screen.getByLabelText("Money")).toHaveValue("in");
-      expect(screen.getByRole("spinbutton", { name: /Amount/ })).toHaveValue(10000);   // the amount stays positive; only the sign flips
+      expect(screen.getByRole("textbox", { name: /Amount/ })).toHaveValue("10000");   // the amount stays positive; only the sign flips
     });
 
     it("removes an event", async () => {
@@ -344,7 +344,7 @@ describe("RetirementPlanner", () => {
     it("takes nothing off a spending figure you typed, and can go back to Runway's", async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       setup(data({ assets: [repaying()] }));
-      const field = screen.getByRole("spinbutton", { name: "Yearly spending in retirement" });
+      const field = screen.getByRole("textbox", { name: "Yearly spending in retirement" });
       await user.clear(field);
       await user.type(field, "48000");
       expect(screen.queryByText(/taken as it is/)).not.toBeInTheDocument();
@@ -353,7 +353,7 @@ describe("RetirementPlanner", () => {
       let body = (vi.mocked(api).mock.calls.at(-1) as [string, { body: { plan: RetirementPlan } }])[1].body.plan;
       expect([body.spending, body.spending_own]).toEqual([48000, true]);
       await user.click(screen.getByRole("button", { name: "Use Runway's figure" }));
-      expect(field).toHaveValue(55000);
+      expect(field).toHaveValue("55000");
       expect(screen.queryByRole("button", { name: "Use Runway's figure" })).not.toBeInTheDocument();
       expect(screen.getByText(/already in your spending, until it’s paid off in 2045/)).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(800);
@@ -409,14 +409,12 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/pay the loan down/)).not.toBeInTheDocument();
     });
 
-    it("lists a vehicle only for its loan's payment: it isn't counted or sold", () => {
+    it("doesn't list a vehicle: it isn't counted or sold (its loan's payment is still in spending until paid off)", () => {
       const car = repaying({ account_id: "auto", payoff_year: 2029 });
       setup(data({ assets: [{ ...car, key: "asset:car", name: "Car", kind: "vehicle", value: 30000 }] }));
-      expect(screen.getByText("Vehicle")).toBeInTheDocument();
-      expect(screen.queryByRole("checkbox", { name: /Car/ })).not.toBeInTheDocument();
-      expect(screen.getByText("Its $1,500/month loan payment is already in your spending, until it’s paid off in 2029; from 2030 the plan takes it off."))
-        .toBeInTheDocument();
-      expect(screen.queryByText(/Tick one to sell it/)).not.toBeInTheDocument();   // nothing to sell
+      expect(screen.queryByText("Car")).not.toBeInTheDocument();
+      expect(screen.queryByText("Vehicle")).not.toBeInTheDocument();
+      expect(screen.queryByText("Homes & other assets")).not.toBeInTheDocument();   // nothing else to list
     });
 
     it("lists a loan against nothing for its payment, with what's owed: it isn't sold", () => {
@@ -620,7 +618,13 @@ describe("RetirementPlanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
     expect(screen.getByRole("button", { name: "Start over? This clears everything you entered here." })).toBeInTheDocument();
     expect(api).not.toHaveBeenCalled();
-    expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(60000);
+    expect(screen.getByRole("textbox", { name: "Yearly spending in retirement" })).toHaveValue("60000");
+  });
+
+  it("shows dollar amounts with their commas", () => {
+    setup();
+    const field = screen.getByRole("textbox", { name: "Yearly spending in retirement" });
+    expect(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.get!.call(field)).toBe("60,000");
   });
 
   it("starts over from Runway's figures, saving that the plan is the default again", async () => {
@@ -630,7 +634,7 @@ describe("RetirementPlanner", () => {
     expect(api).toHaveBeenCalledWith("/api/investments/plan", { method: "POST", body: { plan: null } });
     await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));   // year - 40
     expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");   // the sample, muted
-    expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(55000);
+    expect(screen.getByRole("textbox", { name: "Yearly spending in retirement" })).toHaveValue("55000");
   });
 
   it("keeps the plan and shows the error when starting over fails", async () => {
@@ -639,7 +643,7 @@ describe("RetirementPlanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
     await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Locked");
-    expect(screen.getByRole("spinbutton", { name: "Yearly spending in retirement" })).toHaveValue(60000);
+    expect(screen.getByRole("textbox", { name: "Yearly spending in retirement" })).toHaveValue("60000");
   });
 });
 
