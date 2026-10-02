@@ -127,7 +127,7 @@ describe("HoldingsTable", () => {
       await userEvent.click(screen.getByRole("button", { name: /\$2,000\.00/ }));
       expect(screen.getByLabelText("Price per share in Brokerage")).toHaveValue(null);
       expect(screen.getByLabelText("Price per share in Brokerage")).toHaveAttribute("placeholder", "reported 200.00");
-      expect(screen.getByLabelText("Price per share in IRA")).toHaveValue(180.5);
+      expect(screen.getByLabelText("Price per share in IRA")).toHaveValue("180.5");
     });
 
     it("saves a price and closes when the security is in one account, then tells the page", async () => {

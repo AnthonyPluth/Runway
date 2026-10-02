@@ -6,6 +6,7 @@
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0, fmtDate } from "$lib/format";
+  import { commas } from "$lib/commas";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
@@ -143,9 +144,10 @@
   const pastYear = (s: RetirementPlan["assets"][number]) => num(s.sell_year) < year;
   // Equity still vesting: what it comes to once it's all vested, at today's share price (value_by_year's last entry).
   const vestsTo = (a: PlanAsset) => (a.kind === "equity" && (a.value_by_year?.length ?? 0) > 1 ? a.value_by_year![a.value_by_year!.length - 1] : null);
-  // What the plan counts, and what it lists only for a loan's payment (vehicles, and loans against nothing).
+  // What the plan counts, and what it lists only for a loan's payment (loans against nothing). Vehicles aren't listed:
+  // the plan neither counts nor sells them, though a loan against one is still paid from spending until it's paid off.
   const plannable = $derived(data.assets.filter(counted));
-  const listed = $derived(data.assets.filter((a) => !counted(a)));
+  const listed = $derived(data.assets.filter((a) => a.kind === "loan"));
   // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
   const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
   // In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then.
@@ -206,7 +208,7 @@
 {#snippet money(value: number, set: (v: number) => void, label: string)}
   <span class="relative">
     <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-    <Input type="number" step="1000" min="0" class="pl-6" aria-label={label} value={value}
+    <Input type="number" step="1000" min="0" class="pl-6" aria-label={label} value={value} {@attach commas}
       oninput={(e) => { set(Number(e.currentTarget.value) || 0); keep(); }} />
   </span>
 {/snippet}
@@ -304,7 +306,7 @@
           <label class="flex flex-col gap-1">{@render field("Amount")}
             <span class="relative">
               <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-              <Input type="number" step="1000" min="0" class="pl-6" value={Math.abs(ev.amount)} oninput={(e) => setEventAmount(i, e.currentTarget.value)} />
+              <Input type="number" step="1000" min="0" class="pl-6" value={Math.abs(ev.amount)} {@attach commas} oninput={(e) => setEventAmount(i, e.currentTarget.value)} />
             </span></label>
         </div>
         <Button variant="ghost" size="icon" aria-label={`Remove ${ev.name || "event"}`} onclick={() => { plan.events.splice(i, 1); keep(); }}><X /></Button>
@@ -313,7 +315,7 @@
     <Button variant="outline" size="sm" onclick={addEvent}><Plus /> Add an event</Button>
   </section>
 
-  {#if data.assets.length}
+  {#if plannable.length || listed.length}
   <section class="lg:col-span-2">
     <h3 class="mb-2 font-medium">{data.assets.some((a) => a.kind === "loan") ? "Homes, other assets & loans" : "Homes & other assets"}</h3>
     <ul class="space-y-2">
@@ -344,8 +346,7 @@
       {/each}
       {#each listed as a (a.key)}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">{a.kind === "loan"
-            ? `Loan · ${fmt0(a.owed)} owed` : "Vehicle"}</span></span>
+          <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">Loan · {fmt0(a.owed)} owed</span></span>
           {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null)}</p>{/if}
         </li>
       {/each}

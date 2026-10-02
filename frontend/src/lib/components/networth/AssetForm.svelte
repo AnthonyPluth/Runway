@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
+  import { commas } from "$lib/commas";
   import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
@@ -50,7 +51,7 @@
       <label class={lbl}>Value today
         <span class="relative">
           <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-          <Input type="number" min="0" step="100" class="w-40 pl-6" value={value} oninput={(e) => (value = e.currentTarget.value)} />
+          <Input type="number" min="0" step="100" class="w-40 pl-6" value={value} {@attach commas} oninput={(e) => (value = e.currentTarget.value)} />
         </span>
       </label>
     {/if}

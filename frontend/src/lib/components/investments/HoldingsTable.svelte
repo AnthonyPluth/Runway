@@ -5,6 +5,7 @@
   import { Button } from "$lib/components/ui/button";
   import { barWidth, fmt } from "$lib/format";
   import { cn } from "$lib/utils";
+  import { commas } from "$lib/commas";
   import Pencil from "@lucide/svelte/icons/pencil";
   import { tick } from "svelte";
   import LiveDot from "./LiveDot.svelte";
@@ -153,7 +154,7 @@
                   <label class="flex flex-col gap-1 text-sm">{l.account_name} · {qty(Number(l.quantity))} shares
                     <span class="relative inline-block">
                       <span class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true">$</span>
-                      <input type="number" min="0" step="0.0001" class="cb-in h-9 w-40 rounded-md border border-input bg-transparent pr-2 pl-6 text-sm dark:bg-input/30"
+                      <input type="number" min="0" step="0.0001" {@attach commas} class="cb-in h-9 w-40 rounded-md border border-input bg-transparent pr-2 pl-6 text-sm dark:bg-input/30"
                         value={typed[i]} oninput={(e) => (typed[i] = e.currentTarget.value)} use:autosave={saveLot(x, i)} aria-label={`Price per share in ${l.account_name}`}
                         placeholder={l.reported_cost_basis && l.quantity ? `reported ${(l.reported_cost_basis / l.quantity).toFixed(2)}` : "not reported"} />
                     </span>

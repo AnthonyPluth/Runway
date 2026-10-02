@@ -15,6 +15,7 @@
   import Group from "$lib/components/ui/group/Group.svelte";
   import { fmt0, plural, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
+  import { commas } from "$lib/commas";
   import { toast } from "svelte-sonner";
 
   let month = $state(budgetMonth ?? thisMonth());
@@ -141,7 +142,7 @@
           </select>
           <span class="group/money relative ml-auto inline-flex items-center">
             <span aria-hidden="true" class="pointer-events-none absolute left-2 hidden text-sm text-muted-foreground group-focus-within/money:inline">$</span>
-            <input type="number" min="0" step="10" placeholder="Budget" aria-label="Budget for the chosen category" onchange={addBudget}
+            <input type="number" min="0" step="10" placeholder="Budget" aria-label="Budget for the chosen category" {@attach commas} onchange={addBudget}
               class="h-10 w-20 rounded-md border border-transparent bg-transparent py-1 pr-1 pl-2 sm:h-8 focus:pl-5 text-sm tabular-nums outline-none placeholder:text-primary hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-24" />
           </span>
         </div>

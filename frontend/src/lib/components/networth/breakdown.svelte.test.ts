@@ -57,7 +57,7 @@ describe("the breakdown", () => {
     // The kind shows once, in the header; the value is one editable field, not a figure plus an "Update value" button.
     expect(within(dialog).getAllByText(/Home \/ property/)).toHaveLength(1);
     expect(within(dialog).queryByText(/\$540,000/)).not.toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/^Value/)).toHaveValue(540000);
+    expect(within(dialog).getByLabelText(/^Value/)).toHaveValue("540000");
     expect(within(dialog).queryByRole("button", { name: "Update value" })).not.toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Edit details" })).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Remove" }));
