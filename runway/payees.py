@@ -1,5 +1,5 @@
 """Shorter merchant names: the ACH and bill-pay words a bank puts after the merchant cut off ("Target Cach Tran Cash"
--> "Target", "Fifth Third Baweb Pay Cash" -> "Fifth Third"), for payees at sync time (categorize.clean_payee); migration
+-> "Target", "Lakeside Bank Baweb Pay Cash" -> "Lakeside Bank"), for payees at sync time (categorize.clean_payee); migration
 0032 gave transactions synced before the shorter names too.
 
 Careful on purpose: a wrong name is worse than a long one. A tail of transfer words is cut only when it has a word in

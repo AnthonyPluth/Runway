@@ -19,8 +19,8 @@ TODAY = date(2026, 9, 23)
 class Base(DbCase):
     def setUp(self):
         super().setUp()
-        rows = [("chk", "Checking", "checking", 4561.10, 0, 0), ("brk", "Brokerage", "investment", 154756.49, 0, 0),
-                ("cc", "Sapphire", "credit", -1510.72, 0, 0), ("mtg", "Mortgage", "loan", -250000.0, 0, 0),
+        rows = [("chk", "Checking", "checking", 4561.10, 0, 0), ("brk", "Brokerage", "investment", 98250.35, 0, 0),
+                ("cc", "Sapphire", "credit", -1275.40, 0, 0), ("mtg", "Mortgage", "loan", -250000.0, 0, 0),
                 ("auto", "Auto loan", "loan", 12000.0, 1, 0), ("old", "Closed card", "credit", -99.0, 0, 1)]
         self.c.execute(insert(Account), [dict(zip(("id", "name", "kind", "balance", "owed_positive", "hidden"), r, strict=True)) for r in rows])
 
@@ -33,11 +33,11 @@ class NetWorthTests(Base):
         s = networth.summary(self.c, TODAY)
         g = {x["key"]: x for x in s["groups"]}
         self.assertEqual(g["cash"]["total"], 4561.10)
-        self.assertEqual(g["investments"]["total"], 154756.49)
-        self.assertEqual(g["credit"]["total"], 1510.72)                  # hidden card left out
+        self.assertEqual(g["investments"]["total"], 98250.35)
+        self.assertEqual(g["credit"]["total"], 1275.40)                  # hidden card left out
         self.assertEqual(g["loan"]["total"], 262000.0)                   # both sign conventions read as amounts owed
         self.assertAlmostEqual(g["vehicle"]["total"], 25500.0, delta=15)  # a year at -15%
-        self.assertAlmostEqual(s["net"], 4561.10 + 154756.49 + 425000 + g["vehicle"]["total"] - 1510.72 - 262000, places=2)
+        self.assertAlmostEqual(s["net"], 4561.10 + 98250.35 + 425000 + g["vehicle"]["total"] - 1275.40 - 262000, places=2)
         house = g["home"]["items"][0]
         self.assertEqual((house["equity"], house["loan"]["name"]), (175000.0, "Mortgage"))
         # a snapshot per day; change since 30 days needs an older snapshot
@@ -59,23 +59,23 @@ class NetWorthTests(Base):
         before = networth.summary(self.c, TODAY, save=False)
         api_account_update(self.c, {}, {"networth_hidden": 1}, "brk")
         after = networth.summary(self.c, TODAY, save=False)
-        self.assertEqual(round(before["net"] - after["net"], 2), 154756.49)
+        self.assertEqual(round(before["net"] - after["net"], 2), 98250.35)
         self.assertNotIn("investments", {g["key"] for g in after["groups"]})
-        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment", "balance": 154756.49}])
+        self.assertEqual(after["excluded"], [{"id": "brk", "name": "Brokerage", "org": None, "kind": "investment", "balance": 98250.35}])
         self.assertEqual(before["excluded"], [])
         # balances read like the groups: a liability is a positive amount owed, whichever sign convention the account uses
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "auto")
         api_account_update(self.c, {}, {"networth_hidden": 1}, "chk")
         bal = {a["id"]: a["balance"] for a in networth.summary(self.c, TODAY, save=False)["excluded"]}
-        self.assertEqual(bal, {"brk": 154756.49, "cc": 1510.72, "auto": 12000.0, "chk": 4561.10})
+        self.assertEqual(bal, {"brk": 98250.35, "cc": 1275.40, "auto": 12000.0, "chk": 4561.10})
         api_account_update(self.c, {}, {"networth_hidden": 0}, "auto")
         api_account_update(self.c, {}, {"networth_hidden": 0}, "chk")
         api_account_update(self.c, {}, {"networth_hidden": 0}, "cc")
         after = networth.summary(self.c, TODAY, save=False)
         # a liability left out makes net worth go up; the account is still there for everything else
         api_account_update(self.c, {}, {"networth_hidden": 1}, "cc")
-        self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1510.72)
+        self.assertEqual(round(networth.summary(self.c, TODAY, save=False)["net"] - after["net"], 2), 1275.40)
         self.assertEqual(self.c.execute(select(Account.hidden).where(Account.id == "cc")).fetchone()[0], 0)
         # a hidden account isn't offered to bring back (Settings hides it everywhere)
         api_account_update(self.c, {}, {"networth_hidden": 1}, "old")

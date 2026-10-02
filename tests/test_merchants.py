@@ -285,8 +285,8 @@ class MerchantTests(DbCase):
     def test_best_match_is_clearly_the_merchant_or_nothing(self):
         m = merchants.best_match
         c = lambda *pairs: [{"name": n, "domain": d} for n, d in pairs]
-        self.assertEqual(m("Mackenthun's Fine Fo", c(("Fine Foods Co", "finefoods.com"), ("Mackenthun's Fine Foods", "mackenthuns.com")))["domain"], "mackenthuns.com")
-        self.assertEqual(m("Kwik Trip 1173", c(("Kwik Trip", "kwiktrip.com")))["domain"], "kwiktrip.com")
+        self.assertEqual(m("Hillside's Fine Fo", c(("Fine Foods Co", "finefoods.com"), ("Hillside's Fine Foods", "hillsidefoods.com")))["domain"], "hillsidefoods.com")
+        self.assertEqual(m("Kwik Trip 2050", c(("Kwik Trip", "kwiktrip.com")))["domain"], "kwiktrip.com")
         self.assertEqual(m("Target", c(("Target Corporation", "target.com")))["domain"], "target.com")
         self.assertIsNone(m("Corner Coffee", c(("Corner Bakery Cafe", "cornerbakerycafe.com"))))
         self.assertIsNone(m("Joe's Diner", c(("Joe & The Juice", "joejuice.com"))))
@@ -295,7 +295,7 @@ class MerchantTests(DbCase):
     def test_brand_search_picks_a_clear_match(self):
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
         db.set_setting(self.c, sk.LOGODEV_SECRET, "sk_test123456")
-        merchants.brand_logos(self.c, [("kwik trip 1173", "Kwik Trip 1173"), ("corner coffee", "Corner Coffee")])
+        merchants.brand_logos(self.c, [("kwik trip 2050", "Kwik Trip 2050"), ("corner coffee", "Corner Coffee")])
         searched = []
         def open_(req):
             url = req.full_url
@@ -312,18 +312,18 @@ class MerchantTests(DbCase):
         self.assertEqual(merchants.fetch_logos(self.c, opener=open_), 1)
         self.assertEqual({a for _, a in searched}, {"Bearer sk_test123456"})
         rows = {r["id"]: r for r in self.c.execute(select(Merchant.id, Merchant.website, Merchant.logo))}
-        self.assertEqual(rows["brand:kwik trip 1173"]["website"], "kwiktrip.com")
+        self.assertEqual(rows["brand:kwik trip 2050"]["website"], "kwiktrip.com")
         self.assertIsNone(rows["brand:corner coffee"]["logo"])   # no clear match: better no logo than someone else's
 
     def test_you_choose_a_merchants_logo(self):
         db.set_setting(self.c, sk.LOGODEV_TOKEN, "pk_test123456")
-        txs = [{"id": "t1", "payee": "Mackenthun's Fine Fo"}, {"id": "t2", "payee": "mackenthun's  fine fo"}, {"id": "t3", "payee": "Other"}]
-        merchants.choose(self.c, "Mackenthun's Fine Fo", "https://www.Mackenthuns.com/", opener=self.opener({self.logo_dev("mackenthuns.com"): (PNG, "image/png")}))
-        self.assertEqual(merchants.chosen_for(self.c, txs), {"t1": "site:mackenthuns.com", "t2": "site:mackenthuns.com"})
-        self.assertIsNotNone(merchants.logo(self.c, "site:mackenthuns.com"))
-        merchants.choose(self.c, "Mackenthun's Fine Fo", hidden=True)
+        txs = [{"id": "t1", "payee": "Hillside's Fine Fo"}, {"id": "t2", "payee": "hillside's  fine fo"}, {"id": "t3", "payee": "Other"}]
+        merchants.choose(self.c, "Hillside's Fine Fo", "https://www.HillsideFoods.com/", opener=self.opener({self.logo_dev("hillsidefoods.com"): (PNG, "image/png")}))
+        self.assertEqual(merchants.chosen_for(self.c, txs), {"t1": "site:hillsidefoods.com", "t2": "site:hillsidefoods.com"})
+        self.assertIsNotNone(merchants.logo(self.c, "site:hillsidefoods.com"))
+        merchants.choose(self.c, "Hillside's Fine Fo", hidden=True)
         self.assertEqual(merchants.chosen_for(self.c, txs), {"t1": None, "t2": None})
-        merchants.choose(self.c, "Mackenthun's Fine Fo")   # back to Runway's pick
+        merchants.choose(self.c, "Hillside's Fine Fo")   # back to Runway's pick
         self.assertEqual(merchants.chosen_for(self.c, txs), {})
         with self.assertRaises(ValueError):
             merchants.choose(self.c, "Other", "nowhere-logo.com", opener=self.opener({}))   # Logo.dev has none

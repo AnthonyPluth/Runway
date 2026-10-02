@@ -347,7 +347,7 @@ class ChangedAmountTests(LedgerCase):
 
 
 class SplitPaymentTests(LedgerCase):
-    """One occurrence paid in parts: the $5,000 paycheck as a $2,150.40 deposit and a $3,495 transfer from another bank."""
+    """One occurrence paid in parts: the $5,000 paycheck as a $2,150.40 deposit and a $2,849 transfer from another bank."""
 
     def setUp(self):
         super().setUp()
