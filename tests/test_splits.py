@@ -5,7 +5,8 @@ from datetime import date
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import categories, categorize, forecast, server, simplefin, splits
-from runway.models import Budget, Transaction, TxSplit
+from runway.models import Budget, Category, Transaction, TxSplit
+from runway.server.api import transactions as api_tx
 from tests.shared import TODAY, LedgerCase, ts
 
 
@@ -49,6 +50,29 @@ class SplitTests(LedgerCase):
         for cat in ("Groceries", "Shopping"):
             self.assertEqual(len(server.api_transactions(self.conn, {"category": [cat]}, None)["items"]), 1)
         self.assertEqual(server.api_transactions(self.conn, {"category": ["Travel"]}, None)["items"], [])
+
+    def test_under_a_category_filter_a_pick_changes_only_that_part(self):
+        self.conn.execute(insert(Category).values(name="Produce", parent="Groceries"))
+        self.split((-50.0, "Groceries"), (-10.0, "Produce"), (-40.0, "Shopping"))
+        got = server.api_transactions(self.conn, {"category": ["Groceries"]}, None)   # a category takes in its subcategories
+        self.assertEqual(got["items"][0]["match"], {"amount": -60.0, "categories": ["Groceries", "Produce"]})
+        r = api_tx.api_tx_category(self.conn, None, {"category": "Travel", "only": "Groceries"}, self.tx_id)
+        self.assertEqual([(p["category"], p["amount"]) for p in splits.get(self.conn, self.tx_id)],
+                         [("Travel", -50.0), ("Travel", -10.0), ("Shopping", -40.0)])
+        self.assertIsNone(r["offer_rule"])
+        # the last other part too: one category for the whole thing, so it isn't split any more
+        api_tx.api_tx_bulk(self.conn, None, {"ids": [self.tx_id], "category": "Travel", "only": "Shopping"})
+        row = self.conn.execute(select(Transaction.category, Transaction.category_source, Transaction.is_split)).fetchone()
+        self.assertEqual(tuple(row), ("Travel", "manual", 0))
+        api_tx.api_tx_bulk(self.conn, None, {"restore": r["was"]})   # Undo: the three parts as they were
+        self.assertEqual([(p["category"], p["amount"]) for p in splits.get(self.conn, self.tx_id)],
+                         [("Groceries", -50.0), ("Produce", -10.0), ("Shopping", -40.0)])
+
+    def test_a_pick_without_a_filter_or_outside_it_changes_the_whole_transaction(self):
+        self.split((-60.0, "Groceries"), (-40.0, "Shopping"))
+        api_tx.api_tx_category(self.conn, None, {"category": "Travel", "only": "Gifts & Donations"}, self.tx_id)   # no part there
+        row = self.conn.execute(select(Transaction.category, Transaction.is_split)).fetchone()
+        self.assertEqual(tuple(row), ("Travel", 0))
 
     def test_categorizing_a_split_transaction_puts_it_back_together(self):
         self.split((-60.0, "Groceries"), (-40.0, "Shopping"))

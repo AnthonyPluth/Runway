@@ -22,6 +22,9 @@ export interface Tx {
   recurring_name?: string | null;
   is_split?: number | boolean;
   splits?: Split[];
+  /** Under a category filter, a split one's parts in that category (or its subcategories): what they add up to, and
+   *  their categories. The list shows that much of it, and a category picked for it changes only those parts. */
+  match?: { amount: number; categories: string[] } | null;
   retail?: (OrderSummary & { order_id: string }) | null;
   logo?: string | null;
   /** A big merchant's: the brand's name a sync gave it ("Amazon") and the one the bank's text gives ("Amzn Mktp Us"),
@@ -29,7 +32,8 @@ export interface Tx {
   brand?: BrandChoice | null;
 }
 export interface BrandChoice { brand: string; bank_name: string; using: "brand" | "bank" }
-export interface TxList { items: Tx[]; total: number }
+/** `family`: under a category filter, the category and its subcategories (a receipt shows just their items). */
+export interface TxList { items: Tx[]; total: number; family?: string[] }
 
 /** POST /api/transactions/{id}/category (and /api/ai/apply) may offer to remember the category for the merchant. */
 export interface RuleOffer { merchant: string; match?: string; replaces?: string | null }

@@ -32,8 +32,10 @@
   // merchant; on a wider screen it has a column of its own. From lg up a row is one 40px line (logo, merchant, category,
   // account, amount in aligned columns), the same height opened or not, and a chevron opens the details: the account with its
   // institution and the bank's own text.
-  let { t, review, selected, selecting, recurring, onselect, onsave, onchanged }: {
-    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[];
+  // `family`: under a category filter, that category and its subcategories. A split transaction then shows only its part
+  // in them (`t.match`): that amount, a picker that changes only that part, and a receipt of just those items.
+  let { t, review, selected, selecting, recurring, family, onselect, onsave, onchanged }: {
+    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[]; family?: string[];
     onselect: (e: MouseEvent, checked: boolean) => void;
     onsave: (category: string) => Promise<void>;
     onchanged: () => void;
@@ -52,6 +54,7 @@
   const suggestion = $derived(!!t.needs_review && !!t.category && t.category_source === "ai");
   const linked = $derived((t.recurring_id ?? 0) > 0);
   const split = $derived(!!t.is_split && !!t.splits?.length);
+  const part = $derived(split && t.match ? t.match : null);
   const name = $derived(t.payee || t.description || "");
   // The bank's own text, only when it says more than the merchant name does.
   const detail = $derived.by(() => {
@@ -159,7 +162,17 @@
   <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
     <!-- On a phone the account is only its bank's logo, ahead of the category. -->
     <span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>
-    {#if split}
+    {#if part}
+      <!-- Only the part in the filter's category: picking another changes just that part. -->
+      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
+        <CatIcon name={part.categories[0]} size={22} />
+        <span class="truncate" title={part.categories.join(", ")}>{part.categories.join(", ")}</span>
+        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
+        <CategorySelect value={part.categories.length === 1 ? part.categories[0] : ""} disabled={saving} label={`Category for the ${part.categories.join(", ")} part of ${name}`}
+          class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />
+      </span>
+      <Button variant="link" size="sm" class="h-auto shrink-0 px-1 text-xs text-muted-foreground" title="Edit the whole split" onclick={() => (splitting = true)}>split</Button>
+    {:else if split}
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
           {#each t.splits ?? [] as s, i (i)}
@@ -191,7 +204,9 @@
   </div>
 
   <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-2 lg:col-start-6 lg:row-span-1",
-    t.amount > 0 ? "font-semibold text-emerald-500" : "font-medium")}>{fmt(t.amount)}</div>
+    (part?.amount ?? t.amount) > 0 ? "font-semibold text-emerald-500" : "font-medium")}>
+    {#if part}{fmt(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
+    {:else}{fmt(t.amount)}{/if}</div>
 
   <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer justify-self-end items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
     aria-expanded={open} aria-controls={`detail-${t.id}`} aria-label={`Details for ${name}`} title={open ? "Hide the details" : "Show the details"} onclick={() => (open = !open)}>
@@ -228,6 +243,6 @@
     <div class="col-span-full pt-2"><SplitEditor {t} onclose={() => (splitting = false)} onsaved={() => { splitting = false; onchanged(); }} /></div>
   {/if}
   {#if showOrder && t.retail}
-    <div id={`order-${t.id}`} class="col-span-full pt-2 md:pl-[5.25rem]"><OrderDetail orderId={t.retail.order_id} onchange={onchanged} /></div>
+    <div id={`order-${t.id}`} class="col-span-full pt-2 md:pl-[5.25rem]"><OrderDetail orderId={t.retail.order_id} family={part ? family : undefined} onchange={onchanged} /></div>
   {/if}
 </div>

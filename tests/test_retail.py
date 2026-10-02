@@ -355,6 +355,29 @@ class TransactionCategoryTests(Base):
         self.assertEqual(self.parts("t1"), before_parts)
         self.assertEqual(tuple(self.row("t1")), before)
 
+    def test_a_category_filter_shows_the_part_and_a_pick_changes_only_its_items(self):
+        got = api_tx.api_transactions(self.c, {"category": ["Groceries"]}, None)
+        self.assertEqual(got["family"], ["Groceries"])
+        self.assertEqual(got["items"][0]["match"], {"amount": -42.44, "categories": ["Groceries"]})
+        self.assertNotIn("match", api_tx.api_transactions(self.c, {}, None)["items"][0])   # no filter: the whole thing
+        before_items, before_parts = self.items(), self.parts("t1")
+        r = api_tx.api_tx_category(self.c, None, {"category": "Gifts & Donations", "only": "Groceries"}, "t1")
+        self.assertTrue(r["part"])
+        # the tea and the bags (the Groceries items) follow; the sash and the crucible keep theirs
+        self.assertEqual(self.parts("t1"), [("Gifts & Donations", -42.44), ("Entertainment", -10.53), ("Shopping", -7.91)])
+        self.assertEqual([c for c, _s, _n in self.items()].count("Gifts & Donations"), 2)
+        self.assertEqual(self.c.execute(select(func.count()).select_from(RetailItemMemory)).scalar(), 0)
+        api_tx.api_tx_bulk(self.c, None, {"restore": r["was"]})   # Undo puts the items and the parts back
+        self.assertEqual((self.items(), self.parts("t1")), (before_items, before_parts))
+
+    def test_when_every_part_ends_up_one_category_the_transaction_takes_it(self):
+        api_tx.api_tx_bulk(self.c, None, {"ids": ["t1"], "category": "Shopping", "only": "Groceries"})
+        self.assertEqual(self.parts("t1"), [("Shopping", -50.35), ("Entertainment", -10.53)])
+        api_tx.api_tx_category(self.c, None, {"category": "Shopping", "only": "Entertainment"}, "t1")
+        t = self.row("t1")
+        self.assertEqual((t["category"], t["is_split"]), ("Shopping", 0))
+        self.assertEqual(self.parts("t1"), [])
+
     def test_bulk_sets_items_of_each_selected_order(self):
         self.tx("t9", "2024-09-10", -5.0, "CORNER STORE", "Shopping", "rule")   # no order
         api_tx.api_tx_bulk(self.c, None, {"ids": ["t1", "t9"], "category": "Groceries"})

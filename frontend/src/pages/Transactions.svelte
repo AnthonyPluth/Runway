@@ -122,7 +122,11 @@
     (row?.querySelector<HTMLElement>("select") ?? caughtUp ?? heading)?.focus();
   }
 
+  // The category filter the list was loaded with, when it's a category: a split transaction's part in it is what shows.
+  const only = $derived(applied.category && applied.category !== "__none__" ? applied.category : "");
+
   async function save(t: Tx, category: string) {
+    if (t.match && only) return savePart(t, category);
     const prev = t.category ?? "";
     const at = list?.items.findIndex((x) => x.id === t.id) ?? -1;
     const next = at < 0 ? undefined : (list!.items[at + 1] ?? list!.items[at - 1])?.id;
@@ -144,6 +148,18 @@
       } else {
         t.category = category; t.needs_review = 0; t.category_source = "manual";
       }
+    } catch (err) { toast.error((err as Error).message); }
+  }
+
+  // Only the part shown changes (its order's items, when an order split it); the whole transaction takes the category
+  // once every part has it. The list loads again: the part may have left the filter.
+  async function savePart(t: Tx, category: string) {
+    try {
+      const r = await api<{ was: Was[] }>(`/api/transactions/${encodeURIComponent(t.id)}/category`, { method: "POST", body: { category, only } });
+      undoable(`${t.match!.categories.join(", ")} → ${category}`, async () => { await restoreTx(r.was); await load(); },
+        { description: t.payee || t.description || undefined });
+      refreshState();
+      await load();
     } catch (err) { toast.error((err as Error).message); }
   }
 
@@ -243,7 +259,7 @@
     </Card.Content></Card.Root>
   {:else}
     {#key loads}
-      <TxTable items={list.items} total={list.total} {review} {recurring} bind:selecting onsave={save} onchanged={load} onmore={more} />
+      <TxTable items={list.items} total={list.total} {review} {recurring} {only} family={list.family} bind:selecting onsave={save} onchanged={load} onmore={more} />
     {/key}
   {/if}
 

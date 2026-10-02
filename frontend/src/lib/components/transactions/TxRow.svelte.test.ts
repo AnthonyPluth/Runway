@@ -33,6 +33,17 @@ describe("TxRow", () => {
     expect(within(row()).getByText("Coffee")).toBeInTheDocument();
   });
 
+  it("under a category filter, shows a split one's part: its amount of the whole, and a picker for just that part", async () => {
+    const p = props(tx({ amount: -100, is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Coffee", amount: -40 }],
+      match: { amount: -60, categories: ["Groceries"] } }), { family: ["Groceries"] });
+    render(TxRow, p);
+    expect(within(row()).getByText("-$60.00")).toBeInTheDocument();
+    expect(within(row()).getByText("of $100.00")).toBeInTheDocument();
+    expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();   // the other part isn't shown
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
+    expect(p.onsave).toHaveBeenCalledWith("Coffee");
+  });
+
   it("gives whatever can truncate a title with its full text", () => {
     render(TxRow, props(tx()));
     expect(within(row()).getByText("Blue Bottle")).toHaveAttribute("title", "Blue Bottle");

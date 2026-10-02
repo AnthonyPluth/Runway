@@ -28,6 +28,7 @@ def tx_logos(conn, items: list[dict]) -> dict[str, str]:
 def api_transactions(conn, q, _b):
     T = Transaction
     where = [db.not_investment()]
+    family: list[str] = []
     if q.get("review", ["0"])[0] == "1":
         where.append(T.needs_review == 1)
     if q.get("recurring", [""])[0]:
@@ -70,11 +71,44 @@ def api_transactions(conn, q, _b):
     logos = tx_logos(conn, items)
     for t in items:
         t["splits"] = parts.get(t["id"], [])
+        if family and t["splits"]:   # filtered by a category: the part of a split one that's in it (see _match)
+            t["match"] = _match(t["splits"], family)
         t["retail"] = orders.get(t["id"])
         t["logo"] = logos.get(t["id"])
         t["brand"] = categorize.brand_choice(t)
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
-    return {"items": items, "total": total}
+    # The category and its subcategories, so a receipt can show just their items.
+    return {"items": items, "total": total, **({"family": family} if family else {})}
+
+
+def _match(parts: list[dict], family: list[str]) -> dict:
+    """The parts of a split transaction in these categories: what they add up to, and their categories. The list shows
+    that much of it under a category filter, the same amount the category's budget counts."""
+    mine = [p for p in parts if p["category"] in family]
+    return {"amount": round(sum(p["amount"] for p in mine), 2), "categories": list(dict.fromkeys(p["category"] for p in mine))}
+
+
+def _family(conn, only) -> set[str]:
+    """`only` (a category filter the change was made under) and its subcategories; empty without one."""
+    if not isinstance(only, str) or not only or only == "__none__":
+        return set()
+    return {only, *categories.descendants(conn, only)}
+
+
+def set_parts(conn, tx_ids: list[str], family: set[str], category: str) -> list[str]:
+    """Under a category filter a split transaction shows only its part in that category, so a category picked for it
+    changes just that part: through its order's items when an order split it, else the part itself. Either way, when
+    every part ends up in one category the transaction takes it. Returns the ids changed this way (the others, not
+    split or with no part in `family`, are for the caller to change as a whole)."""
+    if not family:
+        return []
+    if not conn.execute(select(Category.name).where(Category.name == category)).fetchone():
+        raise ValueError(f"Unknown category: {category}")
+    done = []
+    for tid in [r[0] for r in conn.execute(select(Transaction.id).where(Transaction.id.in_(tx_ids), Transaction.is_split == 1))]:
+        if retail.recategorize_part(conn, tid, family, category) or splits.recategorize(conn, tid, family, category):
+            done.append(tid)
+    return done
 
 
 # What Undo needs to put transactions back as they were: the fields a category, rename, review mark or rule can change.
@@ -146,6 +180,8 @@ def restore(conn, rows: list) -> int:
 def api_tx_category(conn, _q, body, tx_id):
     was = snapshot(conn, [tx_id], orders=True)
     try:
+        if set_parts(conn, [tx_id], _family(conn, body.get("only")), body.get("category", "")):
+            return {"ok": True, "also_updated": 0, "offer_rule": None, "was": was, "part": True}
         remember = bool(body.get("remember"))
         n = categorize.set_category(conn, tx_id, body.get("category", ""), remember)
         retail.set_transaction_category(conn, [tx_id], body.get("category", ""))
@@ -180,10 +216,20 @@ def api_tx_bulk(conn, _q, body, *_):
         raise ApiError("Select some transactions first")
     was = snapshot(conn, ids, orders=bool(body.get("category")))
     try:
-        n = categorize.bulk_update(conn, ids, body.get("category") or None, body.get("payee") or None,
-                                   bool(body.get("reviewed")))
-        if body.get("category"):
-            retail.set_transaction_category(conn, [str(i) for i in ids], body["category"])
+        ids = list(dict.fromkeys(str(i) for i in ids))
+        if not ids or len(ids) > categorize.MAX_BULK:   # (bulk_update says which)
+            categorize.bulk_update(conn, ids, body.get("category") or None, None, False)
+        payee, reviewed = body.get("payee") or None, bool(body.get("reviewed"))
+        # Under a category filter, a split one changes only its part in that category (see set_parts).
+        parts = set(set_parts(conn, ids, _family(conn, body.get("only")), body["category"])) if body.get("category") else set()
+        rest = [i for i in ids if i not in parts]
+        n = len(parts)
+        if parts and (payee or reviewed):
+            categorize.bulk_update(conn, list(parts), None, payee, reviewed)
+        if rest:
+            n += categorize.bulk_update(conn, rest, body.get("category") or None, payee, reviewed)
+        if body.get("category") and rest:
+            retail.set_transaction_category(conn, rest, body["category"])
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True, "updated": n, "was": was}
