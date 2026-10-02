@@ -163,10 +163,10 @@ describe("Overview on a phone", () => {
   it("links alerts to their Settings fix", async () => {
     viewport.phone = true;
     serve(() => fc({ warning_links: [{ text: "Visa: choose which account pays it in Settings.", href: "#setup/accounts" },
-      { text: "2 payments over $1,000 aren’t in the forecast.", href: "#budget/recurring" }] }));
+      { text: "2 payments over $1,000 aren’t in the forecast.", href: "#recurring" }] }));
     render(Overview);
     expect(await screen.findByRole("link", { name: /Visa: choose which account/ })).toHaveAttribute("href", "/#setup/accounts");
-    expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#budget/recurring");
+    expect(screen.getByRole("link", { name: /2 payments over/ })).toHaveAttribute("href", "/#recurring");
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 

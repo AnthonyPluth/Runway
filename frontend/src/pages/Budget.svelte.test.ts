@@ -167,35 +167,22 @@ describe("Budget page", () => {
   });
 });
 
-describe("Budget tabs", () => {
-  it("has Budget and Bills & income tabs, with the month picker only on Budget", async () => {
+describe("Budget page", () => {
+  it("has no sub-tab strip now that Recurring is a page of its own, and shows the month picker", async () => {
     serve(month());
-    const { unmount } = render(Budget);
-    const tabs = screen.getByRole("navigation", { name: "Budget" });
-    expect(within(tabs).getByRole("link", { name: "Budget" })).toHaveAttribute("aria-current", "page");
-    expect(within(tabs).getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    render(Budget);
+    expect(screen.queryByRole("navigation", { name: "Budget" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Recurring|Bills/ })).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Previous month" })).toBeInTheDocument();
-    unmount();
-
-    vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/accounts" || path === "/api/recurring" ? [] : {})) as never);
-    render(Budget, { sub: "recurring" });
-    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("aria-current", "page");
-    expect((await screen.findAllByRole("button", { name: "Add" })).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
   });
 
-  it("asks you to connect a bank first on both tabs, keeping the heading and tabs", async () => {
+  it("asks you to connect a bank first, keeping the heading", async () => {
     app.state = { connected: false };
     serve(month());
-    const { unmount } = render(Budget);
+    render(Budget);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Budget");
     expect(screen.getByText("Connect a bank to set a budget")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
-    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
     expect(screen.queryByText("Budgeted")).not.toBeInTheDocument();
-    unmount();
-    render(Budget, { sub: "recurring" });
-    expect(screen.getByText("Connect a bank to track your bills and income")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
   });
 });

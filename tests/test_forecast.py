@@ -593,7 +593,7 @@ class ForecastAssumptionTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 30)
         text = "3 payments over $1,000 in the last 90 days aren’t in the forecast (State University, Landlord Llc); " \
                "add them as recurring items."
-        self.assertIn({"text": text, "href": "#budget/recurring", "setting": True}, fc["warning_links"])
+        self.assertIn({"text": text, "href": "#recurring", "setting": True}, fc["warning_links"])
         # rent as a recurring item: it links, and only the tuition is left
         self.conn.execute(insert(Recurring).values(name="Rent", account_id="chk", amount=-2000, frequency="monthly",
                                                    anchor_date="2026-08-01", match="landlord"))

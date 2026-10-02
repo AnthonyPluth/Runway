@@ -103,7 +103,7 @@ export interface ForecastEvent {
   logo?: string | null;
   /** A card statement's card. */
   card_id?: string;
-  /** A recurring item's id (in Bills & income). */
+  /** A recurring item's id (in Recurring). */
   recurring_id?: number;
   /** A recurring payment that's partly come (in parts): what has, signed like amount; amount is the rest. */
   paid_so_far?: number;

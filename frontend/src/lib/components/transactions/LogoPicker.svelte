@@ -53,7 +53,7 @@
     const t = e.target as Node;
     if (open && root && !root.contains(t) && !panel?.contains(t)) open = false;
   }
-  // The panel lives at the end of the page, not beside its button: inside a <summary> (Bills & income), a click on the
+  // The panel lives at the end of the page, not beside its button: inside a <summary> (Recurring), a click on the
   // panel's text would open or close the item underneath.
   function toBody(node: HTMLElement) {
     document.body.appendChild(node);

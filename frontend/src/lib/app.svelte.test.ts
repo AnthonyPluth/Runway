@@ -33,15 +33,20 @@ describe("routing", () => {
     expect(route).toMatchObject({ page: "setup", sub: "rules" });
   });
 
-  it("opens the old #investments and #recurring routes as tabs of Net worth and Budget", async () => {
+  it("opens the old #investments route as a tab of Net worth", async () => {
     await go("#investments");
     expect(route).toMatchObject({ page: "networth", sub: "investments" });
-    await go("#recurring");
-    expect(route).toMatchObject({ page: "budget", sub: "recurring" });
     await go("#networth/investments");
     expect(route).toMatchObject({ page: "networth", sub: "investments" });
-    await go("#budget/recurring");
-    expect(route).toMatchObject({ page: "budget", sub: "recurring" });
+  });
+
+  it("opens Recurring at #recurring, and the old #budget/recurring there too", async () => {
+    await go("#recurring");
+    expect(route).toMatchObject({ page: "recurring", sub: "" });
+    await go("#budget");
+    expect(route).toMatchObject({ page: "budget", sub: "" });
+    await go("#budget/recurring?q=rent");
+    expect(route).toMatchObject({ page: "recurring", sub: "" });
   });
 
   it("opens #networth/retirement as the Retirement tab of Net worth", async () => {

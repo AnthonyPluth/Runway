@@ -13,7 +13,7 @@
   import { toast } from "svelte-sonner";
   import Repeat from "@lucide/svelte/icons/repeat";
 
-  // What's coming up. Click an amount to change just that one occurrence; a recurring item's repeat icon opens Bills & income, to
+  // What's coming up. Click an amount to change just that one occurrence; a recurring item's repeat icon opens Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together).
@@ -40,7 +40,7 @@
 
 <!-- Rows of a grouped list (the caller puts them in a Group). -->
 {#if !events.length}
-  <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#budget/recurring">Bills &amp; income</a>.</p>
+  <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
 {:else}
   {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
@@ -57,8 +57,8 @@
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           <span class="truncate">{e.name}</span>
           {#if e.kind === "recurring"}
-            <a class="-my-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href="#budget/recurring"
-              title="Recurring item: change every one in Bills & income" aria-label="Open in Bills & income"><Repeat class="size-3.5" aria-hidden="true" /></a>
+            <a class="-my-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href="#recurring"
+              title="Recurring item: change every one in Recurring" aria-label="Open in Recurring"><Repeat class="size-3.5" aria-hidden="true" /></a>
           {/if}
           {#if e.estimated}
             <Badge variant="secondary" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>

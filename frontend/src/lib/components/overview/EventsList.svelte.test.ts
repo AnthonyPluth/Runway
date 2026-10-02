@@ -28,7 +28,7 @@ beforeEach(() => {
 describe("EventsList", () => {
   it("points to Recurring when nothing is scheduled", () => {
     show([]);
-    expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+    expect(screen.getByRole("link", { name: "Recurring" })).toHaveAttribute("href", "#recurring");
   });
 
   it("shows each item's name, date, amount and the balance after it", () => {
@@ -94,14 +94,14 @@ describe("EventsList", () => {
       expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
     });
 
-    it("marks recurring items with the repeat icon, which opens Bills & income to change every one", () => {
+    it("marks recurring items with the repeat icon, which opens Recurring to change every one", () => {
       show([ev()]);
-      expect(screen.getByRole("link", { name: "Open in Bills & income" })).toHaveAttribute("href", "#budget/recurring");
+      expect(screen.getByRole("link", { name: "Open in Recurring" })).toHaveAttribute("href", "#recurring");
     });
 
-    it("has no Bills & income link on a card payment", () => {
+    it("has no Recurring link on a card payment", () => {
       show([ev({ kind: "card", key: undefined })]);
-      expect(screen.queryByRole("link", { name: "Open in Bills & income" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open in Recurring" })).not.toBeInTheDocument();
     });
   });
 
@@ -114,7 +114,7 @@ describe("EventsList", () => {
       expect(screen.getByText(/on Sapphire ••1234, paid with its Nov 5 payment/)).toBeInTheDocument();
       expect(screen.queryByText(/balance/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /95/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name: "Open in Bills & income" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Open in Recurring" })).not.toBeInTheDocument();
     });
 
     it("says when its card's payment isn't in the forecast", () => {
