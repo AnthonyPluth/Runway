@@ -110,7 +110,9 @@
     <!-- The merchant keeps at least 6 characters. Beside it, the badges (receipt included) and the recurring name are their
          full text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
     <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
-      <span class="min-w-[6ch] truncate font-medium max-sm:max-w-full" title={name}>{name}</span>
+      <!-- Below desktop width, where the details chevron isn't shown, the name opens the details. -->
+      <button type="button" class="min-w-[6ch] cursor-pointer truncate text-left font-medium max-sm:max-w-full lg:cursor-text" title={name}
+        aria-expanded={open} aria-controls={`detail-${t.id}`} onclick={() => (open = !open)}>{name}</button>
       {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
         <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="pending" /><span class="hidden @sm/title:inline max-sm:inline">pending</span></Badge>{/if}
       {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-amber-500/50 px-1.5 text-amber-500 @sm/title:px-2 max-sm:px-2">
@@ -187,7 +189,7 @@
   </button>
 
   {#if open}
-    <dl id={`detail-${t.id}`} class="col-span-full mb-2 hidden grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-2 pl-[3.75rem] text-xs lg:grid">
+    <dl id={`detail-${t.id}`} class="col-span-full mb-2 grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-x-6 gap-y-2 pt-2 pl-12 text-xs lg:pt-0 lg:pl-[3.75rem]">
       <div><dt class="text-muted-foreground">Account</dt><dd><AcctLabel id={t.account_id} name={t.account_name ?? ""} /></dd></div>
       {#if brand?.institution}<div><dt class="text-muted-foreground">Source</dt><dd>{brand.institution}</dd></div>{/if}
       <div><dt class="text-muted-foreground">Posted</dt><dd>{fmtDate(t.posted.slice(0, 10), { month: "short", day: "numeric", year: "numeric" })}</dd></div>
@@ -205,6 +207,10 @@
         </dd></div>
       {/if}
       {#if sourceLabel && t.category}<div><dt class="text-muted-foreground">Category set by</dt><dd>{sourceLabel}</dd></div>{/if}
+      {#if !split}
+        <!-- The row's own Split link is left out on narrow screens. -->
+        <div class="md:hidden"><dd><Button variant="outline" size="sm" class="h-10" onclick={() => (splitting = true)}>Split across categories</Button></dd></div>
+      {/if}
     </dl>
   {/if}
 

@@ -60,6 +60,15 @@ describe("TxRow", () => {
     expect(screen.queryByTitle("BLUE  BOTTLE")).not.toBeInTheDocument();
   });
 
+  it("opens the details from the name, with a Split button, where the chevron isn't shown", async () => {
+    render(TxRow, props(tx()));
+    const name = within(row()).getByRole("button", { name: "Blue Bottle" });
+    await userEvent.click(name);
+    expect(name).toHaveAttribute("aria-expanded", "true");
+    await userEvent.click(screen.getByRole("button", { name: "Split across categories" }));
+    expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
+  });
+
   describe("logo", () => {
     it("shows the merchant's logo when it has one", () => {
       const { container } = render(TxRow, props(tx({ logo: "/logos/bb.png" })));

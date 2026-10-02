@@ -19,7 +19,7 @@
 <nav use:reveal aria-label={label} class={cn("mb-6 flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-[10px] bg-card p-0.5 [scrollbar-width:none]", className)}>
   {#each tabs as t (t.id)}
     <a href={t.href} aria-current={t.id === current ? "page" : undefined}
-      class={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
+      class={cn("flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-1.5 phone:min-h-10 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground",
         t.id === current && "bg-muted text-foreground shadow-sm")}>
       {t.label}
       {#if t.badge}<Badge class="h-4 min-w-4 px-1 text-[10px] tabular-nums">{t.badge}</Badge>{/if}
