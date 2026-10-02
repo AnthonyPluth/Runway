@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, insert, inspect, select
+from sqlalchemy import Integer, MetaData, Table, and_, case, create_engine, event, func, inspect, select
 from sqlalchemy.dialects import postgresql as pg_dialect
 from sqlalchemy.dialects import sqlite as sqlite_dialect
 from sqlalchemy.engine import Engine
@@ -453,7 +453,8 @@ def init(path: str | None = None) -> None:
     with session(path) as conn:
         secretbox.encrypt_stored(conn)   # secrets saved by earlier versions, or under an older key
         if conn.execute(select(func.count()).select_from(Category)).fetchone()[0] == 0:
-            conn.execute(insert(Category), [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])
+            # Ignoring rows already there: two processes starting on one empty Postgres database can both count zero.
+            insert_ignore(conn, Category, [{"name": n, "is_transfer": t, "is_income": i} for n, t, i in DEFAULT_CATEGORIES])
 
 
 def private_files(path: str) -> None:
