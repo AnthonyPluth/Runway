@@ -50,6 +50,7 @@ describe("Reports", () => {
 
   it("has all five reports on a phone, and the one the link names", async () => {
     viewport.phone = true;
+    vi.mocked(api).mockImplementation((async (p: string) => (String(p).includes("merchant") ? { merchants: [] } : {})) as never);
     render(Reports, { sub: "merchants" });
     expect(within(await screen.findByRole("navigation", { name: "Reports" })).getAllByRole("link")).toHaveLength(5);
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();

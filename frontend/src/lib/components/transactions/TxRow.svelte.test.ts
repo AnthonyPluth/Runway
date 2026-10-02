@@ -69,6 +69,16 @@ describe("TxRow", () => {
     expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
   });
 
+  it("keeps the name plain text at desktop width, where the chevron opens the details", () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((q) => ({
+      matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false,
+    }) as MediaQueryList);
+    render(TxRow, props(tx()));
+    expect(within(row()).queryByRole("button", { name: "Blue Bottle" })).not.toBeInTheDocument();
+    expect(within(row()).getByText("Blue Bottle").tagName).toBe("SPAN");
+    vi.restoreAllMocks();
+  });
+
   describe("logo", () => {
     it("shows the merchant's logo when it has one", () => {
       const { container } = render(TxRow, props(tx({ logo: "/logos/bb.png" })));

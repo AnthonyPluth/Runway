@@ -25,6 +25,7 @@
   import Clock from "@lucide/svelte/icons/clock";
   import Flag from "@lucide/svelte/icons/flag";
   import Repeat from "@lucide/svelte/icons/repeat";
+  import { MediaQuery } from "svelte/reactivity";
 
   // One transaction: its category saves as soon as you pick it. Under the row open the split editor, and (from its
   // receipt badge) the Amazon or Target order it was matched to; the repeat icon links it to a recurring item. On a phone the category sits under the
@@ -41,6 +42,8 @@
   let saving = $state(false);
   let picking = $state(false);
   let splitting = $state(false);
+  // At desktop width the details have their own chevron; below it, the merchant name opens them.
+  const desktop = new MediaQuery("min-width: 1024px", false);
   let open = $state(false);
   const showOrder = $derived(openOrders.has(t.id));
   const store = $derived(t.retail?.retailer === "amazon" ? "Amazon" : t.retail?.retailer === "target" ? "Target" : "store");
@@ -110,9 +113,12 @@
     <!-- The merchant keeps at least 6 characters. Beside it, the badges (receipt included) and the recurring name are their
          full text when the cell is 24rem wide (or, on a narrow phone, on a line of their own), and otherwise just an icon. -->
     <div class="flex min-w-0 items-center gap-1.5 max-sm:flex-wrap">
-      <!-- Below desktop width, where the details chevron isn't shown, the name opens the details. -->
-      <button type="button" class="min-w-[6ch] cursor-pointer truncate text-left font-medium max-sm:max-w-full lg:cursor-text" title={name}
-        aria-expanded={open} aria-controls={`detail-${t.id}`} onclick={() => (open = !open)}>{name}</button>
+      {#if desktop.current}
+        <span class="min-w-[6ch] truncate font-medium" title={name}>{name}</span>
+      {:else}
+        <button type="button" class="min-w-[6ch] cursor-pointer truncate text-left font-medium max-sm:max-w-full" title={name}
+          aria-expanded={open} aria-controls={`detail-${t.id}`} onclick={() => (open = !open)}>{name}</button>
+      {/if}
       {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
         <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="pending" /><span class="hidden @sm/title:inline max-sm:inline">pending</span></Badge>{/if}
       {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-amber-500/50 px-1.5 text-amber-500 @sm/title:px-2 max-sm:px-2">
