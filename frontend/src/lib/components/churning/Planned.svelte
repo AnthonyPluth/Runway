@@ -163,7 +163,10 @@
     {#if form}{#key form}<WishForm w={form === "new" ? null : form} {d} {person} onclose={closeForm} />{/key}{/if}
     {#if parts.open.length}
       <ul class="divide-y">
-        {#each parts.open as w, n (w.id)}{@render item(w, n, parts.open.length)}{/each}
+        {#each parts.open as w (w.id)}
+          {@const theirs = parts.open.filter((x) => x.owner === w.owner)}
+          {@render item(w, theirs.indexOf(w), theirs.length)}
+        {/each}
       </ul>
     {/if}
     {#if parts.closed.length}
