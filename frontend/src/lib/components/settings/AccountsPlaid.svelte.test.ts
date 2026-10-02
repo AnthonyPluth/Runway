@@ -45,7 +45,7 @@ describe("Settings → Accounts: hidden accounts", () => {
     await userEvent.click(within(section).getByRole("button", { name: "Show" }));
     expect(within(section).getByText("Old checking")).toBeInTheDocument();
     expect(within(section).getByText("Old savings")).toBeInTheDocument();
-    await userEvent.click(within(section).getByRole("button", { name: "Collapse" }));
+    await userEvent.click(within(section).getByRole("button", { name: "Hide" }));
     expect(screen.queryByText("Old checking")).toBeNull();
   });
 
@@ -67,8 +67,8 @@ describe("Settings → Accounts: deleted accounts", () => {
     render(AccountsSection, { accounts: [acct()] });
     const section = await screen.findByRole("region", { name: "Deleted accounts" });
     expect(section).toHaveTextContent("2 deleted accounts");
-    await userEvent.click(within(section).getByRole("button", { name: "Restore" }));
-    expect(section).toHaveTextContent("lets the next sync bring it back, with whatever history the bank still offers");
+    await userEvent.click(within(section).getByRole("button", { name: "Show" }));
+    expect(within(section).getByRole("list")).toHaveAttribute("title", expect.stringContaining("lets the next sync bring it back, with whatever history the bank still offers"));
     await userEvent.click(within(within(section).getByText("Old Visa").closest("li")!).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/A1/restore", { method: "POST" }));
     expect(toast.success).toHaveBeenCalledWith("Old Visa comes back with the next sync");
@@ -132,7 +132,9 @@ describe("Settings → Accounts: New from Plaid", () => {
   it("keeps the ones you left out reachable, and no longer warns about investments elsewhere", async () => {
     serve(status([item([unmatched, ignored])]));
     render(AccountsSection, { accounts: [acct()] });
-    expect(await screen.findByText("1 Plaid account you're not using")).toBeInTheDocument();
+    expect(await screen.findByText(/1 Plaid account you're not using/)).toBeInTheDocument();
+    expect(screen.queryByText("Old Savings")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(screen.getByText("Old Savings")).toBeInTheDocument();
     expect(screen.queryByText(/investment account/)).toBeNull();
     expect(screen.queryByRole("link", { name: "Connections" })).toBeNull();
@@ -176,9 +178,10 @@ describe("Settings → Accounts: investment accounts from Plaid", () => {
   it("keeps an investment account you left out reachable, and doesn't list a decided one", async () => {
     serve(status([invItem([{ ...roth, account_id: "ignore" }, { ...roth, id: "iv2", name: "Brokerage", account_id: "roth" }])]));
     render(AccountsSection, { accounts: [inv()] });
-    expect(await screen.findByText("1 Plaid account you're not using")).toBeInTheDocument();
+    expect(await screen.findByText(/1 Plaid account you're not using/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "New from Plaid" })).toBeNull();
-    const select = within(document.querySelector("details")!).getByRole("combobox") as HTMLSelectElement;
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    const select = screen.getByRole("combobox") as HTMLSelectElement;
     expect(select.value).toBe("ignore");
   });
 

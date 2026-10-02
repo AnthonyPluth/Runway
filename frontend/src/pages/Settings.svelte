@@ -9,7 +9,6 @@
   import { loadCategories } from "$lib/categories.svelte";
   import { openFeedback } from "$lib/monitoring";
   import { isPhone } from "$lib/phone.svelte";
-  import DesktopOnly from "$lib/components/DesktopOnly.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AccountsSection from "$lib/components/settings/AccountsSection.svelte";
   import AdvancedSection from "$lib/components/settings/AdvancedSection.svelte";
@@ -51,7 +50,6 @@
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:then d}
   <div class="flex flex-col gap-6">
-    {#if isPhone() && section !== "assumptions"}<DesktopOnly what="change connections, accounts, categories, rules and everything else in Settings" />{/if}
     {#if section === "accounts"}<AccountsSection accounts={d.accounts} />
     {:else if section === "categories"}<CategoriesSection />
     {:else if section === "rules"}<RulesSection rules={d.rules} accounts={d.accounts} />
@@ -69,10 +67,11 @@
   </Card.Root>
 {/await}
 
-{#if section === "advanced"}
+{#if section === "advanced" && (version || app.state?.sentry)}
 <p class="mt-8 text-center text-sm text-muted-foreground">
-  Runway {version || "development build"}{#if version}{" · "}<a class={linkCls} target="_blank" rel="noopener"
-    href={`https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(version)}`}>what's new</a>{/if}
-  {#if app.state?.sentry}{" · "}<button type="button" class={linkCls} onclick={() => openFeedback()}>Send feedback</button>{/if}
+  {#if version}<a class={linkCls} target="_blank" rel="noopener"
+    href={`https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(version)}`}>What's new in {version}</a>{/if}
+  {#if version && app.state?.sentry}{" · "}{/if}
+  {#if app.state?.sentry}<button type="button" class={linkCls} onclick={() => openFeedback()}>Send feedback</button>{/if}
 </p>
 {/if}

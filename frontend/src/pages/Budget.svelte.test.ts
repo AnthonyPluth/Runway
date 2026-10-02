@@ -151,10 +151,12 @@ describe("Budget page", () => {
     expect(await screen.findByText("Budgeted")).toBeInTheDocument();
   });
 
-  it("mentions the month's income", async () => {
+  it("puts the month's income in the strip with the totals", async () => {
     serve(month());
     render(Budget);
-    expect(await screen.findByText("Money in this month: $4,000.00")).toBeInTheDocument();
+    const label = await screen.findByText("Money in");
+    expect(label.closest("div")).toHaveTextContent("Money in $4,000");
+    expect(screen.queryByText(/Money in this month/)).not.toBeInTheDocument();
   });
 });
 
@@ -171,7 +173,7 @@ describe("Budget tabs", () => {
     vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/accounts" || path === "/api/recurring" ? [] : {})) as never);
     render(Budget, { sub: "recurring" });
     expect(screen.getByRole("link", { name: "Bills & income" })).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("button", { name: "Add" })).toBeInTheDocument();
+    expect((await screen.findAllByRole("button", { name: "Add" })).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
   });
 

@@ -95,6 +95,32 @@ describe("Overview", () => {
     expect(await screen.findByText("Balance as of today")).toBeInTheDocument();
   });
 
+  it("says each figure once: no strip repeating the low, the end balance and the cards' total", async () => {
+    serve(() => fc());
+    render(Overview);
+    expect(await screen.findByText(/stays above/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Lowest/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Owed on cards")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^In 90\sdays$/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about the tightest moment when it's today, and points no link at one account", async () => {
+    serve(() => fc({ low: { date: TODAY, balance: 1000 }, events: [],
+      accounts: [fc().accounts[0], { ...fc().accounts[0], id: "sav", name: "Savings", kind: "savings" }] }));
+    render(Overview);
+    expect(await screen.findByText(/stays above/)).toBeInTheDocument();
+    expect(screen.queryByText(/tightest/)).not.toBeInTheDocument();
+    expect(screen.getByText("2 accounts combined")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "choose one account" })).not.toBeInTheDocument();
+  });
+
+  it("labels the budget line without a second low figure", async () => {
+    serve(() => fc({ budget: { total: [1000, 800], low: { date: "2026-10-01", balance: 800 }, monthly: 500, changes: [], skipped: [] } }));
+    render(Overview);
+    expect(await screen.findByText("If you stick to your budget")).toBeInTheDocument();
+    expect(screen.queryByText(/low \$800/)).not.toBeInTheDocument();
+  });
+
   it("says why a budget on a card paid from outside the forecast is left out", async () => {
     serve(() => fc({ budget: { total: [1000, 900], low: { date: "2026-10-01", balance: 900 }, monthly: 0, changes: [],
       skipped: [{ category: "Groceries", reason: "its card isn't paid from a forecast account" }] } }));

@@ -119,8 +119,7 @@
         {#if open === keyOf(x)}
           <tr class="bg-muted/40" data-editor>
             <td colspan="8" class="p-3">
-              <p class="text-sm"><b>Price paid per share for {x.ticker || x.name || ""}</b> · your average if you bought at different prices.
-                Runway multiplies it by the shares you hold. Leave a box empty to go back to what the institution reports.</p>
+              <p class="text-sm" title="Your average if you bought at different prices. Runway multiplies it by the shares you hold. Leave a box empty to go back to what the institution reports."><b>Price paid per share for {x.ticker || x.name || ""}</b></p>
               {#each x.lots as l, i (l.account_id)}
                 <div class="mt-3 flex flex-wrap items-end gap-3">
                   <label class="flex flex-col gap-1 text-sm">{l.account_name} · {qty(Number(l.quantity))} shares

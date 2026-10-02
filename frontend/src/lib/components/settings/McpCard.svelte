@@ -6,7 +6,7 @@
   import * as Card from "$lib/components/ui/card";
   import { relTime } from "$lib/format";
   import { toast } from "svelte-sonner";
-  import { checkCls, helpCls, inputCls, titleNote, warnText } from "./ui";
+  import { checkCls, inputCls, titleNote, warnText } from "./ui";
 
   // AI assistants connect to Runway's MCP endpoint (/mcp) by its address and sign in with OAuth: you approve each one
   // on Runway's consent page. This shows the address, lists the assistants connected (and disconnects them), and holds
@@ -48,6 +48,7 @@
     await load();
   }
   const url = $derived(status?.url || `${location.origin}/mcp`);
+  const addHelp = $derived(`Add this address to your assistant and approve it here when it asks. Claude Code: claude mcp add --transport http runway ${url}. Claude on the web or desktop: Settings → Connectors → Add custom connector.`);
   function copy() {
     navigator.clipboard?.writeText(url).then(() => toast.success("Copied"), () => {});
   }
@@ -61,19 +62,16 @@
     {:else if !status}
       <p class="text-sm text-muted-foreground">Loading…</p>
     {:else}
-      <p class={helpCls}>Add this address to your assistant and approve it here when it asks.</p>
       <span class="flex flex-wrap items-center gap-2">
-        <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={url} aria-label="MCP address" />
+        <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={url} aria-label="MCP address" title={addHelp} />
         <Button variant="outline" size="sm" onclick={copy}>Copy</Button>
       </span>
       {#if !status.oauth}
         <p class={`text-sm ${warnText}`}>{status.reason}</p>
       {/if}
-      <p class={helpCls}>Claude Code: <code class="rounded bg-muted px-1 text-foreground">claude mcp add --transport http runway {url}</code>.
-        Claude on the web or desktop: Settings → Connectors → Add custom connector.</p>
 
       <div class="flex flex-col">
-        <span class="text-sm font-medium">Connected assistants</span>
+        {#if status.connections.length}<span class="text-sm font-medium">Connected assistants</span>{/if}
         {#each status.connections as c (c.id)}
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b py-2 last:border-b-0">
             <span class="flex min-w-0 flex-1 flex-col text-sm">
@@ -84,24 +82,16 @@
             </span>
             <ConfirmButton confirm="Disconnect it?" onconfirm={() => revoke(c)}>Revoke</ConfirmButton>
           </div>
-        {:else}
-          <p class={helpCls}>None yet.</p>
         {/each}
       </div>
 
-      <label class={`${checkCls} w-full rounded-lg border p-3`}>
+      <label class={`${checkCls} w-full rounded-lg border p-3`} title="Applies to every connection. An assistant you allowed to change churning when you connected it can then mark a benefit used, add or update cards, benefits, to-dos and planned items, and check off a plan. It can't delete anything or touch accounts, transactions or settings. Turn it off any time and it stops at once.">
         <input type="checkbox" checked={status.allow_writes} onchange={setWrites} aria-label="Let assistants change churning" />
-        <span><b>Let assistants change churning</b> <span class={titleNote}>off unless you turn it on</span>
-          <span class={`${helpCls} block`}>Applies to every connection. An assistant you allowed to change churning when you connected it can
-            then mark a benefit used, add or update cards, benefits, to-dos and planned items, and check off a plan. It can't delete anything or
-            touch accounts, transactions or settings. Turn it off any time and it stops at once.</span></span>
+        <span><b>Let assistants change churning</b> <span class={titleNote}>off unless you turn it on</span></span>
       </label>
-      <label class={`${checkCls} w-full rounded-lg border p-3`}>
+      <label class={`${checkCls} w-full rounded-lg border p-3`} title="Applies to every connection. An assistant you allowed to categorize when you connected it can then set the category of a transaction or an order item, accept the one Runway suggested, and (if you ask it to) remember it for the merchant or item. It can't delete, split or rename anything, or add categories. Turn it off any time and it stops at once.">
         <input type="checkbox" checked={status.allow_categorize} onchange={setCategorize} aria-label="Let assistants categorize" />
-        <span><b>Let assistants categorize</b> <span class={titleNote}>off unless you turn it on</span>
-          <span class={`${helpCls} block`}>Applies to every connection. An assistant you allowed to categorize when you connected it can then
-            set the category of a transaction or an order item, accept the one Runway suggested, and (if you ask it to) remember it for the
-            merchant or item. It can't delete, split or rename anything, or add categories. Turn it off any time and it stops at once.</span></span>
+        <span><b>Let assistants categorize</b> <span class={titleNote}>off unless you turn it on</span></span>
       </label>
     {/if}
   </Card.Content>

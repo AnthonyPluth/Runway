@@ -3,7 +3,7 @@
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { barWidth, fmt, monthShort } from "$lib/format";
+  import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
   import { isPhone } from "$lib/phone.svelte";
   import Repeat from "@lucide/svelte/icons/repeat";
   import { cn } from "$lib/utils";
@@ -25,6 +25,8 @@
   const carried = $derived(c.carried ?? 0);
   const showPace = $derived(pace > 0 && pace < 1);
   const color = $derived(catLook(c.name).color);
+  // Whole dollars, like the rest of the page; cents only when rounding would make a small amount read as $0.
+  const money = (v: number | null) => (v != null && Math.abs(v) >= 0.005 && Math.abs(v) < 0.5 ? fmt(v) : fmt0(v));
 
   // The category name and the spent amount both open Transactions showing exactly what adds up to that number.
   function open(e: MouseEvent) {
@@ -98,9 +100,9 @@
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
       <a href="#transactions" onclick={open} title="See the transactions behind this amount"
-        class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{fmt(c.spent)}</a>
+        class="underline decoration-muted-foreground/50 decoration-dotted underline-offset-4 hover:decoration-foreground">{money(c.spent)}</a>
       {#if isPhone()}
-        {#if c.budget != null}<span class="text-muted-foreground">of</span><span>{fmt(c.budget)}</span>{/if}
+        {#if c.budget != null}<span class="text-muted-foreground">of</span><span>{fmt0(c.budget)}</span>{/if}
       {:else}
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <span class="group/money relative inline-flex items-center">
@@ -125,13 +127,13 @@
       </div>
       <!-- Fixed width so the bars end at the same x whether the text says "left", "over" or "ahead of pace". -->
       <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:w-48">
-        {#if over}<span class="font-semibold text-destructive">▲ {fmt(c.spent - avail!)} over</span>
-        {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{fmt(c.left)} left · ahead of pace</span>
-        {:else}<span class="text-muted-foreground">{fmt(c.left)} left</span>{/if}
+        {#if over}<span class="font-semibold text-destructive">▲ {money(c.spent - avail!)} over</span>
+        {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
+        {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
     </div>
     {#if carried > 0.005}
-      <p class={cn("mt-1 text-xs text-muted-foreground tabular-nums", !sub && "sm:pl-[38px]")}>{fmt(c.budget)} + {fmt(carried)} rolled over from earlier months</p>
+      <p class={cn("mt-1 text-xs text-muted-foreground tabular-nums", !sub && "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
     {/if}
   {/if}
 </div>

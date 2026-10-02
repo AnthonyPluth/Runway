@@ -1,5 +1,5 @@
 // How the Churning page words and filters what the server worked out (runway/churning.py, runway/bank_bonuses.py).
-import { fmt0, fmtDate, parseDate } from "$lib/format";
+import { fmt0, fmtDate, parseDate, plural } from "$lib/format";
 import type {
   BankBonus, Benefit, Blocker, CardPlan, ChurnCard, ChurnRate, Churning, CreditScore, Currency, CurrencyGroup, Eligibility, Five24,
   UpcomingItem, Wish,
@@ -14,7 +14,8 @@ export const mine = <T extends { owner: string | null }>(items: T[], person: str
 export const daysUntil = (day: string, today: string) =>
   Math.round((parseDate(day).getTime() - parseDate(today).getTime()) / 864e5);
 
-const fullDate = (d: string) => fmtDate(d, { month: "short", day: "numeric", year: "numeric" });
+/** "Oct 12" within this year, "Jan 10, 2027" in any other. */
+const fullDate = (d: string) => fmtDate(d, parseDate(d).getFullYear() === new Date().getFullYear() ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 export { fullDate };
 
 /** 60,000 → "60k", 1,250 → "1,250" (points and miles). */
@@ -289,3 +290,37 @@ export function bonusSummary(bonus: string | number | null, spend: string | numb
 }
 
 export const benefitsSummary = (n: number) => (n ? `${n} ${n === 1 ? "benefit" : "benefits"}` : "None");
+
+const join = (parts: unknown[]) => parts.filter(Boolean).join(" · ") || "Nothing added";
+type Fields = Record<string, string | boolean>;
+
+/** The bank bonus form's Requirements: "$500 in direct deposits · 2 debit purchases · 90 days". */
+export const bankRequirementsSummary = (v: Fields) => join([
+  num(v.dd_total) && `${fmt0(num(v.dd_total))} in direct deposits`, num(v.dd_count) && plural(num(v.dd_count), "deposit"),
+  num(v.debit_count) && plural(num(v.debit_count), "debit purchase"), num(v.min_balance) && `${fmt0(num(v.min_balance))} balance`,
+  num(v.deadline_days) && `${num(v.deadline_days)} days`, String(v.other_reqs).trim() && "Other requirement",
+]);
+/** Fees and closing: "$15/month fee · keep open 180 days". */
+export const bankFeesSummary = (v: Fields) => join([
+  num(v.monthly_fee) && `${fmt0(num(v.monthly_fee))}/month fee`, num(v.early_close_fee) && `${fmt0(num(v.early_close_fee))} early-closing fee`,
+  num(v.keep_open_days) && `keep open ${num(v.keep_open_days)} days`,
+]);
+/** Bonus received, and again: "Posted Oct 5 · again after 12 months". */
+export const bankReceivedSummary = (v: Fields) => join([
+  v.received_on && `Posted ${fullDate(String(v.received_on))}`, v.closed_on && `Closed ${fullDate(String(v.closed_on))}`,
+  v.once_per_lifetime ? "once per lifetime" : num(v.repeat_months) && `again after ${plural(num(v.repeat_months), "month")}`,
+  v.eligible_on && `eligible ${fullDate(String(v.eligible_on))}`,
+]);
+/** The planning form's "What you expect": "$95 fee · 60k after $4,000 in 3 months" (a card) or "$300 · Has requirements" (a bank bonus). */
+export function wishExpectSummary(v: Fields, currencyName: string): string {
+  const card = v.kind === "card";
+  const got = num(v.bonus) ? (card ? bonusLabel(num(v.bonus), String(v.currency), currencyName) : fmt0(num(v.bonus))) : "";
+  return join(card
+    ? [v.annual_fee !== "" && v.annual_fee != null && `${fmt0(num(v.annual_fee))} fee`, got && (num(v.bonus_spend) ? `${got} after ${fmt0(num(v.bonus_spend))}${num(v.bonus_months) ? ` in ${num(v.bonus_months)} months` : ""}` : got)]
+    : [got, String(v.requirements).trim() && "Has requirements", v.once_per_lifetime ? "once per lifetime" : num(v.repeat_months) && `again after ${plural(num(v.repeat_months), "month")}`]);
+}
+/** Timing: "Offer ends Dec 1 · wait until Jan 5 · score 740". */
+export const wishTimingSummary = (v: Fields) => join([
+  v.offer_expires_on && `Offer ends ${fullDate(String(v.offer_expires_on))}`, v.wait_until && `wait until ${fullDate(String(v.wait_until))}`,
+  num(v.min_score) && `score ${num(v.min_score)}`, v.status === "dropped" && "dropped",
+]);

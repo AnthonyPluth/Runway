@@ -5,9 +5,10 @@
   import { Button } from "$lib/components/ui/button";
   import { fmtDate } from "$lib/format";
   import { toast } from "svelte-sonner";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import type { CartaStatus } from "./types";
-  import { fieldCls, helpCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
+  import { fieldCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
 
   // Carta (stock options, RSUs and shares) as a row of the browser extension's list: read by the extension, or through
   // Carta's Portfolio API (which needs Carta to approve your app), or Carta's sample data.
@@ -56,12 +57,11 @@
     </span>
   </div>
   {#if c.web_error}<Alert.Root class="my-2"><TriangleAlert /><Alert.Description><p>{c.web_error}</p></Alert.Description></Alert.Root>{/if}
-  <details class="mt-1" open={c.connected || !!c.client_id}>
-    <summary class="cursor-pointer py-1 text-sm text-muted-foreground">Carta's API instead (needs Carta to approve your app)</summary>
+  <details class="group mt-1" open={c.connected || !!c.client_id}>
+    <summary class="flex cursor-pointer list-none items-center gap-1.5 py-1 text-sm text-muted-foreground select-none [&::-webkit-details-marker]:hidden"
+      title="Carta's Portfolio API works only for apps Carta approves. An app made in Carta's developer portal is a Playground app (Carta's test environment, dummy data) until Carta grants it production access. Carta's sample data works without any of that, to see how it looks.">
+      <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />Carta's API instead (needs Carta to approve your app)</summary>
     <div class="mt-2 flex flex-col gap-3">
-      <p class={helpCls}>Carta's Portfolio API works only for apps Carta approves. An app made in Carta's developer portal is a
-        <b class="text-foreground">Playground</b> app (Carta's test environment, dummy data) until Carta grants it production access. Register
-        <code class={code}>{redirect}</code> as its redirect URI. <b class="text-foreground">Carta's sample data</b> works without any of that, to see how it looks.</p>
       <div class={rowCls}>
         <label class={`${fieldCls} w-full sm:w-72`}>Environment
           <select class={selectCls} bind:value={env} onchange={changeEnv}>
@@ -71,6 +71,7 @@
           </select>
         </label>
         {#if env !== "mock"}
+          <span class={`${fieldCls} w-full sm:w-56`}>Redirect URI<code class={`${code} h-9 content-center truncate`} title="Register this as the app's redirect URI in Carta">{redirect}</code></span>
           <label class={`${fieldCls} w-full sm:w-56`}>Client id
             <input class={inputCls} bind:value={clientId} autocomplete="off" spellcheck="false" use:autosave={saveField} /></label>
           <label class={`${fieldCls} w-full sm:w-56`}>Client secret

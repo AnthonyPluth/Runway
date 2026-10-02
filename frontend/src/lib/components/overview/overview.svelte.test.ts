@@ -12,6 +12,7 @@ import type { CardSummary } from "$lib/types";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
 import { forecastSheet } from "./forecastSheet.svelte";
+import ForecastTable from "./ForecastTable.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
 
 beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
@@ -55,6 +56,13 @@ describe("SetupChecklist", () => {
     const choose = screen.getByRole("button", { name: "Choose" });
     expect(choose).toBeDisabled();
     expect(choose).toHaveAccessibleDescription("after your bank connects");
+  });
+
+  it("keeps each step's sentence in a tooltip, not on the page", () => {
+    setup();
+    render(SetupChecklist);
+    expect(screen.queryByText(/The first sync brings in months of history/)).not.toBeInTheDocument();
+    expect(screen.getByText("Connect a bank")).toHaveAttribute("title", expect.stringContaining("The first sync brings in months of history"));
   });
 
   it("welcomes a new user on its own, without a Dismiss button", () => {
@@ -143,6 +151,22 @@ describe("CardsTable", () => {
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
+  it("says \"about\" only for an average over two or more statements", () => {
+    at("2026-03-10");
+    const { unmount } = render(CardsTable, { cards: [card({ avg_cycles: 1 })] });
+    expect(screen.getByText("$700.00 a statement")).toBeInTheDocument();
+    unmount();
+    render(CardsTable, { cards: [card({ avg_cycles: 2 })] });
+    expect(screen.getByText("about $700.00 a statement")).toBeInTheDocument();
+  });
+
+  it("separates the notes with dots and spaces", () => {
+    at("2026-03-10");
+    render(CardsTable, { cards: [card({ statement_source: "manual" })] });
+    const line = screen.getByText(/owes \$800\.00 now/).textContent!.replace(/\s+/g, " ");
+    expect(line).toBe("owes $800.00 now · entered by hand · about $700.00 a statement");
+  });
+
   it("leaves the average out when there isn't one yet", () => {
     render(CardsTable, { cards: [card({ avg_monthly_spend: null })] });
     expect(screen.queryByText(/a statement/)).not.toBeInTheDocument();
@@ -160,5 +184,27 @@ describe("CardsTable", () => {
     expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 610 } });
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
     expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "stmt-c1" } });
+  });
+});
+
+describe("ForecastTable", () => {
+  const base = { today: "2026-03-15", dates: ["2026-03-15", "2026-03-16", "2026-03-17"], accounts: [], cards: [], warnings: [], warning_links: [],
+    low: { date: "2026-03-17", balance: 800 },
+    events: [{ date: "2026-03-16", name: "Rent", amount: -100, kind: "recurring", key: "r", balance_after: 900 }] };
+  const budget = (total: number[]) => ({ total, low: { date: "2026-03-17", balance: 800 }, monthly: 0, changes: [], skipped: [] });
+
+  it("shows the on-budget column only when it ever differs, from the first day it does", () => {
+    const same = render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 900, 900]) } as never });
+    expect(screen.queryByText("On budget")).not.toBeInTheDocument();
+    same.unmount();
+    render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 750, 750]) } as never });
+    expect(screen.getAllByText("On budget").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$750.00").length).toBeGreaterThan(0);
+  });
+
+  it("puts a row's note in a tooltip", () => {
+    render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 850, 800]),
+      events: [{ date: "2026-03-16", name: "Visa statement", amount: -100, kind: "card", estimated: true, key: "c", balance_after: 900 }] } as never });
+    expect(screen.getByText(/Visa statement \(estimate\)/).closest("span[title]")).toHaveAttribute("title", "the budget line pays this card from its budgets instead");
   });
 });

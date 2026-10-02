@@ -6,6 +6,7 @@
   import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import { fullDate } from "./churning";
+  import FoldedLine from "./FoldedLine.svelte";
   import type { Churning, Found, FoundDraft } from "./types";
 
   // "Found on your accounts": credit card accounts that aren't churning cards yet, each pre-filled from what Runway
@@ -17,6 +18,7 @@
 
   const issuer = (key: string) => d.issuers.find((i) => i.key === key)?.name ?? "Other";
   const path = (id: string, what: string) => `/api/churning/found/${encodeURIComponent(id)}/${what}`;
+  let showDismissed = $state(false);
   async function post(url: string) {
     await api(url, { method: "POST" });
     await onchanged();
@@ -53,14 +55,14 @@
       </ul>
     {/if}
     {#if found.dismissed.length}
-      <details class="mt-2 text-xs text-muted-foreground">
-        <summary class="cursor-pointer">{found.dismissed.length} dismissed</summary>
-        <ul class="mt-1 space-y-1">
+      <FoldedLine class="mt-2 text-xs" count={found.dismissed.length} noun="dismissed" bind:open={showDismissed} />
+      {#if showDismissed}
+        <ul class="mt-1 space-y-1 text-xs text-muted-foreground">
           {#each found.dismissed as x (x.account_id)}
             <li class="flex items-center gap-2">{x.name}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => bringBack(x.account_id)} aria-label={`Bring back ${x.name}`}>Bring back</Button></li>
           {/each}
         </ul>
-      </details>
+      {/if}
     {/if}
   </section>
 {/if}

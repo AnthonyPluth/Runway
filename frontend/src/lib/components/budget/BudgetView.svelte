@@ -8,16 +8,15 @@
   import { loadCategories } from "$lib/categories.svelte";
   import BudgetRow from "$lib/components/budget/BudgetRow.svelte";
   import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
+  import MonthPicker from "$lib/components/MonthPicker.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import Group from "$lib/components/ui/group/Group.svelte";
-  import { fmt, fmt0, monthLabel, plural, thisMonth } from "$lib/format";
+  import { fmt0, plural, thisMonth } from "$lib/format";
   import { isPhone } from "$lib/phone.svelte";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
-  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
   let month = $state(budgetMonth ?? thisMonth());
   let b = $state<BudgetMonth | null>(null);
@@ -36,10 +35,8 @@
   }
   refresh();
 
-  function shift(n: number) {
-    const [y, m] = (b?.month ?? month).split("-").map(Number);
-    const d = new Date(y, m - 1 + n, 1);
-    month = budgetMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  function pick(m: string) {
+    month = budgetMonth = m;
     refresh();
   }
 
@@ -93,11 +90,7 @@
 {/snippet}
 
 <div class="mb-6 flex flex-wrap items-center justify-end gap-4">
-  <div class="inline-flex h-9 items-center rounded-lg bg-muted p-[3px]">
-    <Button variant="ghost" size="icon" class="size-8" aria-label="Previous month" onclick={() => shift(-1)}><ChevronLeft /></Button>
-    <span class="min-w-36 rounded-md bg-background px-3 py-1 text-center text-sm font-medium shadow-sm dark:bg-input/30" aria-live="polite">{monthLabel(b?.month ?? month)}</span>
-    <Button variant="ghost" size="icon" class="size-8" aria-label="Next month" onclick={() => shift(1)}><ChevronRight /></Button>
-  </div>
+  <MonthPicker month={b?.month ?? month} onchange={pick} />
 </div>
 
 {#if error && !b}
@@ -121,9 +114,10 @@
         v.totOver > 0.005 ? `▲ ${fmt0(v.totOver)} over in ${plural(v.overCount, "budget")}` : ""].filter(Boolean).join(" · ")}
     </p>
     <StatStrip class="mt-5" items={[
-      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `monthly · plus ${fmt0(v.totCarried)} rolled over` : "monthly · repeats every month" },
+      { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `each month · plus ${fmt0(v.totCarried)} rolled over` : "each month" },
       { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized),
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
+      ...(b.income ? [{ label: "Money in", value: fmt0(b.income) }] : []),
     ]} />
   </section>
 
@@ -156,6 +150,4 @@
       {/if}
   </Group>
   {/if}
-
-  {#if b.income}<p class="text-sm text-muted-foreground">Money in this month: {fmt(b.income)}</p>{/if}
 {/if}

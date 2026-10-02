@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { refreshState } from "$lib/app.svelte";
+  import { categories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
@@ -23,6 +24,12 @@
     onsave: (t: Tx, category: string) => Promise<void>; onchanged: () => void; onmore?: () => Promise<void>;
   } = $props();
 
+  // What a transaction adds to its day's total: its amount, less the parts in a transfer category (card payments,
+  // moves between accounts), which show on both sides and aren't money in or out.
+  const isTransfer = (name: string | null | undefined) => !!name && !!categories.list.find((c) => c.name === name)?.is_transfer;
+  const counted = (t: Tx) => (t.splits?.length ? t.splits.reduce((n, p) => n + (isTransfer(p.category) ? 0 : p.amount), 0)
+    : isTransfer(t.category) ? 0 : t.amount);
+
   // Days, newest first, each with what came in and went out that day.
   const days = $derived.by(() => {
     const out: { day: string; rows: { t: Tx; i: number }[]; net: number }[] = [];
@@ -30,7 +37,7 @@
       const day = t.posted.slice(0, 10);
       if (out.at(-1)?.day !== day) out.push({ day, rows: [], net: 0 });
       const d = out.at(-1)!;
-      d.rows.push({ t, i }); d.net += t.amount;
+      d.rows.push({ t, i }); d.net += counted(t);
     });
     return out;
   });
@@ -123,7 +130,6 @@
         checked={ids.length > 0 && ids.length === items.length} indeterminate={ids.length > 0 && ids.length < items.length}
         onchange={(e) => all(e.currentTarget.checked)} />
     </label>
-    <span class="tabular-nums">{items.length < total ? `${items.length} of ${total}` : plural(total, "transaction")}</span>
     <button type="button" class="ml-auto cursor-pointer text-[15px] text-primary md:hidden"
       onclick={() => { selecting = !selecting; if (!selecting) all(false); }}>{selecting ? "Done" : "Select"}</button>
   </div>

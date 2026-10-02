@@ -5,6 +5,7 @@
   import * as Alert from "$lib/components/ui/alert";
   import { Button } from "$lib/components/ui/button";
   import { toast } from "svelte-sonner";
+  import AiLogTable from "$lib/components/transactions/AiLogTable.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { checkCls, fieldCls, inputCls, rowCls } from "./ui";
@@ -54,4 +55,5 @@
   {#if st.last_llm_error}
     <Alert.Root variant="destructive"><TriangleAlert /><Alert.Description><p>Last AI error: {st.last_llm_error}</p></Alert.Description></Alert.Root>
   {/if}
+  {#if st.has_api_key}<AiLogTable />{/if}
 </ServiceRow>

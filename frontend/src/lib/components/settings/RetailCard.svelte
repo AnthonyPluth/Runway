@@ -79,30 +79,34 @@
     <p class="text-sm text-muted-foreground">Loading…</p>
   {:else}
     {@const r = data}
-    <ol class={`${helpCls} list-decimal space-y-1.5 pl-5`}>
-      <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
-        <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
-      <li>Give it Runway's address ({location.origin}) and a key:
-        {#if r.token}
-          <span>key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
-          {#if r.token_problem}
-            <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
-          {/if}
-          <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
-          <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>
-        {:else}
-          <Button variant="outline" size="sm" class="ml-1" onclick={newKey}>Make a key</Button>
+    {#if r.token}
+      <div class={`${helpCls} flex flex-wrap items-center gap-x-2`}>
+        <span>Key made {relTime(r.token_created)}{r.token_used ? `, last used ${relTime(r.token_used)}` : ", not used yet"}{r.token_expires ? `, works until ${fmtDate(r.token_expires)}` : ""}</span>
+        {#if r.token_problem}
+          <span class={warnText}>{r.token_problem === "expired" ? "This key has expired: make a new one." : "The person who made this key can no longer sign in: make a new one."}</span>
         {/if}
-        {#if shownKey}
-          <span class="mt-2 flex flex-wrap items-center gap-2">
-            <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={shownKey} aria-label="Extension key" bind:this={keyInput} use:selectOnMount />
-            <Button variant="outline" size="sm" onclick={() => copy(keyInput)}>Copy</Button>
-            <span class="text-xs">Shown once: paste it into the extension's options now.</span>
-          </span>
-        {/if}
-      </li>
-      <li>Stay signed in to Amazon, Target, Costco and Carta in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
-    </ol>
+        <ConfirmButton class="h-auto px-1" confirm="Replace the key? The extension will need the new one" onconfirm={newKey}>Make a new key</ConfirmButton>
+        <ConfirmButton class="h-auto px-1" confirm="Remove? The extension stops working" onconfirm={removeKey}>Remove</ConfirmButton>
+      </div>
+      {#if shownKey}
+        <span class={`${helpCls} flex flex-wrap items-center gap-2`}>
+          <input class={`${inputCls} w-full font-mono sm:w-96`} readonly value={shownKey} aria-label="Extension key" bind:this={keyInput} use:selectOnMount />
+          <Button variant="outline" size="sm" onclick={() => copy(keyInput)}>Copy</Button>
+          <span class="text-xs">Shown once: paste it into the extension's options now.</span>
+        </span>
+      {/if}
+    {/if}
+    <!-- Set once: open until there's a key, then folded away. -->
+    <details class="group" open={!r.token}>
+      <summary class="flex cursor-pointer list-none items-center gap-1.5 py-1 text-sm text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />Install steps</summary>
+      <ol class={`${helpCls} mt-1 list-decimal space-y-1.5 pl-5`}>
+        <li><a class={linkCls} href="/api/retail/extension.zip" download>Download the extension</a>, unzip it, and in Chrome (or Edge, Brave, Arc) open
+          <code class="rounded bg-muted px-1 text-foreground">chrome://extensions</code>, turn on Developer mode and choose <b class="text-foreground">Load unpacked</b>.</li>
+        <li>Give it Runway's address ({location.origin}) and a key{#if !r.token}: <Button variant="outline" size="sm" class="ml-1" onclick={newKey}>Make a key</Button>{/if}.</li>
+        <li>Stay signed in to Amazon, Target, Costco and Carta in that browser, and use the extension's <b class="text-foreground">Import</b> button.</li>
+      </ol>
+    </details>
 
     <div class="flex flex-col">
       {#each (["amazon", "target", "costco"] as const) as k (k)}
@@ -127,8 +131,9 @@
     </div>
 
     {#if r.recent.length}
-      <details>
-        <summary class="cursor-pointer py-1 text-sm text-muted-foreground">Recent orders</summary>
+      <details class="group">
+        <summary class="flex cursor-pointer list-none items-center gap-1.5 py-1 text-sm text-muted-foreground select-none [&::-webkit-details-marker]:hidden">
+          <ChevronRight class="size-4 shrink-0 transition-transform group-open:rotate-90" aria-hidden="true" />Recent orders</summary>
         <div class="mt-1 flex flex-col">
           {#each r.recent as o (o.id)}
             {@const st = orderState(o)}

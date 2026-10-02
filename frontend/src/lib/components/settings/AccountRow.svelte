@@ -76,6 +76,8 @@
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
+  // With one person there is nobody to choose between; an owner already set to someone else still shows.
+  const showOwner = $derived(owners.length > 1 || (!!owner && !owners.includes(owner)));
   const link = $derived(a.plaid_link);
   // Where balances and transactions come from: a choice once the account is matched to a Plaid account.
   const canSwitch = $derived(!a.id.startsWith("pl:") && !!link?.transactions);
@@ -250,9 +252,11 @@
       </span>
       {#if a.display_name}<span class="truncate text-xs" title={bank}>From the bank: {bank}</span>{/if}
     </div>
-    <label class={fieldCls}>Owner
-      <OwnerSelect bind:value={owner} {owners} joint blank="—" {@attach fromAction(autosave, () => () => save(true))} />
-    </label>
+    {#if showOwner}
+      <label class={fieldCls}>Owner
+        <OwnerSelect bind:value={owner} {owners} joint blank="—" {@attach fromAction(autosave, () => () => save(true))} />
+      </label>
+    {/if}
     {#if a.kind === "credit"}
       <label class={fieldCls}>Paid from
         <select class={selectCls} bind:value={payFrom} use:autosave={() => save(true)}>
@@ -358,7 +362,8 @@
         </div>
       </section>
     {/if}
-    <div class="flex flex-col gap-2.5 sm:col-span-2 lg:col-span-3">
+    <section class="flex flex-col gap-2.5 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Options">
+      <h4 class="text-sm font-medium">Options</h4>
       {#if a.kind === "checking" || a.kind === "savings"}
         <label class={checkCls} title="Spreads this account's recent non-recurring spending evenly over every day of the forecast">
           <input type="checkbox" bind:checked={spend} use:autosave={() => save(false)} /> Subtract average everyday spending</label>
@@ -369,6 +374,8 @@
       <label class={checkCls} title="Off leaves this account out of the Net worth page; it still shows everywhere else">
         <input type="checkbox" bind:checked={counted} use:autosave={() => save(true)} /> Count in net worth</label>
       <label class={checkCls}><input type="checkbox" bind:checked={hidden} use:autosave={() => save(true)} /> Hide this account</label>
+    </section>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:col-span-2 lg:col-span-3">
       <span class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         {a.kind} account ·
         {#if changingType}

@@ -9,6 +9,7 @@
   import BankList from "$lib/components/churning/BankList.svelte";
   import Benefits from "$lib/components/churning/Benefits.svelte";
   import BestCard from "$lib/components/churning/BestCard.svelte";
+  import FoldedLine from "$lib/components/churning/FoldedLine.svelte";
   import FoundCards from "$lib/components/churning/FoundCards.svelte";
   import CardForm from "$lib/components/churning/CardForm.svelte";
   import CardList from "$lib/components/churning/CardList.svelte";
@@ -54,7 +55,8 @@
   const cards = $derived(d ? [...mine(d.cards, person)].sort(cardOrder) : []);
   const bank = $derived(d ? [...mine(d.bank, person)].sort(bankOrder) : []);
   const upcoming = $derived(d ? mine(d.upcoming, person) : []);
-  let showClosed = $state(false);
+  let showClosed = $state(false), showDoneBank = $state(false);
+  const closedCards = $derived(cards.filter((c) => c.status !== "open"));
   const visibleCards = $derived(showClosed ? cards : cards.filter((c) => c.status === "open"));
   // Bonuses that are paid (or the account closed) are tucked into a collapsed group under the ones still in play.
   const openBank = $derived(bank.filter((b) => b.state !== "received" && b.state !== "closed"));
@@ -67,8 +69,6 @@
   const hasRewards = $derived(people.some((p) => d?.rewards[p]?.currencies.some((r) => r.earned + r.bonuses > 0 || r.balance != null)));
   // With nothing to show, Rewards is one line; "Add a balance" opens the card, which is where balances are entered.
   let addingBalance = $state(false);
-  const startCard = () => { addCard(); location.hash = "#churning"; };
-  const startBank = () => { formId = null; bankFormId = "new"; location.hash = "#churning/bank"; };
 
   // Over 5/24 is a warning; someone with no cards on file isn't.
   const five24Tone = (p: string) => (d?.five24[p] && !d.five24[p].under ? ("warn" as const) : undefined);
@@ -117,6 +117,7 @@
     {/if}
   </div>
 
+  {#if !noData}
   <StatStrip class="mb-6" items={[
     ...(people.length === 1
       ? [{ label: `${people[0]}’s 5/24`, value: five24Line(d.five24[people[0]]).count, sub: five24Line(d.five24[people[0]]).next, tone: five24Tone(people[0]) }]
@@ -128,22 +129,9 @@
       sub: [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
         activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now" },
   ]} />
+  {/if}
 
-  {#if noData}
-    <Card.Root class="mb-6" data-testid="getting-started">
-      <Card.Content class="flex flex-col gap-3">
-        <p class="text-sm text-muted-foreground">Add the cards and bank accounts you open for sign-up bonuses to start tracking them.</p>
-        {#if isPhone()}
-          <DesktopOnly what="add your cards and bank bonuses" />
-        {:else}
-          <div class="flex flex-wrap gap-2">
-            <Button size="sm" onclick={startCard}>Add a card you’ve opened</Button>
-            <Button size="sm" variant="outline" onclick={startBank}>Add a bank bonus</Button>
-          </div>
-        {/if}
-      </Card.Content>
-    </Card.Root>
-  {:else}
+  {#if !noData}
     <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
     {#if !isPhone()}
       <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
@@ -154,13 +142,10 @@
   {/if}
 
   {#if isPhone()}
-    {#if !noData}<DesktopOnly class="mb-4" what="manage cards, bank bonuses, plans and rewards" />{/if}
+    <DesktopOnly class="mb-4" what="manage cards, bank bonuses, plans and rewards" />
   {:else}
-  <div class="flex flex-wrap items-center justify-between gap-3">
     <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
-      tabs={[{ id: "cards", href: "#churning", label: `Cards (${cards.length})` }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: `Bank bonuses (${bank.length})` }]} />
-    {#if tab === "cards"}<label class="mb-4 inline-flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:checked={showClosed} />Show closed</label>{/if}
-  </div>
+      tabs={[{ id: "cards", href: "#churning", label: "Cards" }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: "Bank bonuses" }]} />
   {/if}
 
   {#if tab === "cards"}
@@ -174,15 +159,8 @@
         {#if found && (drafts.length || found.dismissed.length)}<FoundCards found={{ ...found, drafts }} {d} onadd={(x) => addCard(x)} onchanged={loadFound} />{/if}
         {#if visibleCards.length}
           <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => { draft = null; formId = c.id; }} onchanged={load} />
-        {:else}
-          <p class="py-6 text-center text-sm text-muted-foreground">{cards.length ? "No open cards. Tick Show closed to see the rest." : "No cards yet. Add the cards you've opened in the last few years: 5/24 and the bonus rules need them."}</p>
         {/if}
-        <details class="mt-4 text-sm text-muted-foreground">
-          <summary class="cursor-pointer">About "Bonus again" and the banks' rules</summary>
-          <p class="mt-2">These are rules of thumb as the churning community reports them. Banks change them, and each offer has its own terms: confirm with the bank before you apply. Set your own date on a card when you know better.</p>
-          <ul class="mt-2 space-y-1">{#each d.issuers.filter((i) => i.key !== "other") as i (i.key)}<li><b class="font-medium text-foreground">{i.name}:</b> {i.rule}</li>{/each}</ul>
-          <p class="mt-2">5/24 counts personal cards opened in the last 24 months, from any bank, closed or not. Authorized-user cards, business cards and product changes don't count here.</p>
-        </details>
+        {#if closedCards.length}<FoldedLine class={visibleCards.length ? "mt-4" : ""} count={closedCards.length} noun="closed" bind:open={showClosed} />{/if}
       </Card.Content>
     </Card.Root>
   {:else if tab === "benefits"}
@@ -200,14 +178,12 @@
           {#if bankForm}{#key bankFormId}<BankForm b={bankForm === "new" ? null : bankForm} {d} {person} onclose={closeForm} />{/key}{/if}
           {#if openBank.length}
             <BankList bonuses={openBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} />
-          {:else}
-            <p class="py-6 text-center text-sm text-muted-foreground">{bank.length ? "Nothing in progress." : "No bank bonuses yet."}</p>
           {/if}
           {#if doneBank.length}
-            <details class="mt-4 text-sm text-muted-foreground" data-testid="done-bank">
-              <summary class="cursor-pointer">{doneBank.length} paid or closed</summary>
-              <div class="mt-2"><BankList bonuses={doneBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} /></div>
-            </details>
+            <div class="mt-4" data-testid="done-bank">
+              <FoldedLine count={doneBank.length} noun="paid or closed" bind:open={showDoneBank} />
+              {#if showDoneBank}<div class="mt-2"><BankList bonuses={doneBank} {d} showOwner={people.length > 1} onedit={(b) => (bankFormId = b.id)} /></div>{/if}
+            </div>
           {/if}
         </Card.Content>
       </Card.Root>

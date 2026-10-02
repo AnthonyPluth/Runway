@@ -5,10 +5,12 @@
   import PlaidChoice from "./PlaidChoice.svelte";
   import type { PlaidBankAccount } from "./plaidAccounts";
   import type { SettingsAccount } from "./types";
+  import { linkCls } from "./ui";
 
   // Plaid bank, card and investment accounts nobody has decided about yet, at the top of Accounts: each is added as its own account, matched to
   // one you already have, or left out. Once chosen it moves into its type group below. Ones you left out stay reachable.
   let { waiting, left, mine }: { waiting: PlaidBankAccount[]; left: PlaidBankAccount[]; mine: SettingsAccount[] } = $props();
+  let showLeft = $state(false);
 </script>
 
 {#snippet row({ p, it }: PlaidBankAccount)}
@@ -32,8 +34,7 @@
 {/if}
 
 {#if left.length}
-  <details class="rounded-xl border px-3 py-2.5 text-sm">
-    <summary class="cursor-pointer text-muted-foreground">{left.length === 1 ? "1 Plaid account you're not using" : `${left.length} Plaid accounts you're not using`}</summary>
-    <div class="mt-1">{#each left as w (w.p.id)}{@render row(w)}{/each}</div>
-  </details>
+  <p class="text-sm text-muted-foreground">{left.length === 1 ? "1 Plaid account you're not using" : `${left.length} Plaid accounts you're not using`} ·
+    <button type="button" class={linkCls} aria-expanded={showLeft} onclick={() => (showLeft = !showLeft)}>{showLeft ? "Hide" : "Show"}</button></p>
+  {#if showLeft}<div class="rounded-xl border px-3 py-1 text-sm">{#each left as w (w.p.id)}{@render row(w)}{/each}</div>{/if}
 {/if}

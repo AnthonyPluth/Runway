@@ -18,7 +18,6 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import { tick } from "svelte";
-  import Plus from "@lucide/svelte/icons/plus";
 
   type Data = { accounts: Account[] };
   async function load(): Promise<Data> {
@@ -95,10 +94,6 @@
   function toggle(id: number, open: boolean) { if (open) openRecurring.add(String(id)); else openRecurring.delete(String(id)); }
 </script>
 
-<div class="mb-6 flex items-center justify-end gap-4">
-  <Button onclick={openForm}><Plus />Add</Button>
-</div>
-
 {#snippet group(title: string, list: Item[], accounts: Account[])}
   {#if list.length}
     <section aria-label={title}>
@@ -166,41 +161,33 @@
 {#await data}
   <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
 {:then d}
-  {#if adding}
-    <Card.Root class="mb-6" bind:ref={form}>
-      <Card.Header>
-        <Card.Title><h2>Add a recurring item</h2></Card.Title>
-        <Card.Description>Fields marked * are required. Pick money out for a bill, money in for a paycheck.</Card.Description>
-      </Card.Header>
-      <Card.Content>
-        <form novalidate onsubmit={(e) => { e.preventDefault(); add(); }}>
-          {#key formKey}<RecurringFields bind:v={blank} accounts={d.accounts} {errors} />{/key}
-          <div class="mt-4 flex items-center gap-2">
-            <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add"}</Button>
-            {#if items.length}<Button type="button" variant="link" onclick={cancel}>Cancel</Button>{/if}
-          </div>
-        </form>
-      </Card.Content>
-    </Card.Root>
-  {/if}
-
+  <!-- With nothing yet, what's spotted in your history comes first: it's the quickest way to start. -->
   {#if !items.length}{@render suggestionsCard()}{/if}
 
-  {#if items.length}
-    <Card.Root class="mb-6">
-      <Card.Content class="flex flex-col gap-6">
-        {@render group("Money in", moneyIn(items), d.accounts)}
-        {@render group("Money out", moneyOut(items), d.accounts)}
-      </Card.Content>
-    </Card.Root>
-  {:else}
-    <Card.Root class="mb-6">
-      <Card.Content>
-        <p class="py-4 text-center text-sm text-muted-foreground">No recurring items yet. Add one above, pick from what's spotted in your history,
-          or use ↻ on any transaction to start one from it.</p>
-      </Card.Content>
-    </Card.Root>
-  {/if}
+  <Card.Root class="mb-6">
+    <Card.Header>
+      <Card.Title><h2>Paychecks & bills</h2></Card.Title>
+      <Card.Action>
+        <Button variant="outline" size="sm" title="You can also start one from any transaction, with its repeat button" onclick={openForm}>Add</Button>
+      </Card.Action>
+    </Card.Header>
+    <Card.Content class="flex flex-col gap-6">
+      {#if adding}
+        <section bind:this={form} aria-labelledby="add-recurring" class={cn(items.length && "border-b pb-6")}>
+          <h3 id="add-recurring" class="mb-3 text-sm font-medium">Add a recurring item</h3>
+          <form novalidate onsubmit={(e) => { e.preventDefault(); add(); }}>
+            {#key formKey}<RecurringFields bind:v={blank} accounts={d.accounts} {errors} />{/key}
+            <div class="mt-4 flex items-center gap-2">
+              <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add"}</Button>
+              {#if items.length}<Button type="button" variant="link" onclick={cancel}>Cancel</Button>{/if}
+            </div>
+          </form>
+        </section>
+      {/if}
+      {@render group("Money in", moneyIn(items), d.accounts)}
+      {@render group("Money out", moneyOut(items), d.accounts)}
+    </Card.Content>
+  </Card.Root>
 
   {#if items.length}{@render suggestionsCard()}{/if}
 {:catch err}

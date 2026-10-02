@@ -65,7 +65,7 @@
     {#if hiddenList.length}
       <section class="mt-4 border-t pt-3 text-sm text-muted-foreground first:mt-0 first:border-t-0 first:pt-0" aria-label="Hidden accounts">
         <p>{plural(hiddenList.length, "hidden account")} ·
-          <button type="button" class={linkCls} aria-expanded={hiddenOpen} onclick={() => (showHidden = !hiddenOpen)}>{hiddenOpen ? "Collapse" : "Show"}</button></p>
+          <button type="button" class={linkCls} aria-expanded={hiddenOpen} onclick={() => (showHidden = !hiddenOpen)}>{hiddenOpen ? "Hide" : "Show"}</button></p>
         {#if hiddenOpen}
           <div class="mt-2">{#each hiddenList as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}</div>
         {/if}
@@ -74,10 +74,10 @@
     {#if deleted.length}
       <section class="mt-4 border-t pt-3 text-sm text-muted-foreground" aria-label="Deleted accounts">
         <p>{plural(deleted.length, "deleted account")} ·
-          <button type="button" class={linkCls} aria-expanded={showDeleted} onclick={() => (showDeleted = !showDeleted)}>{showDeleted ? "Hide" : "Restore"}</button></p>
+          <button type="button" class={linkCls} aria-expanded={showDeleted} onclick={() => (showDeleted = !showDeleted)}>{showDeleted ? "Hide" : "Show"}</button></p>
         {#if showDeleted}
-          <p class="mt-2">Restoring one lets the next sync bring it back, with whatever history the bank still offers (and a card linked to Plaid linked again); what was deleted with it doesn’t come back.</p>
-          <ul class="mt-2 flex flex-col gap-1.5">
+          <ul class="mt-2 flex flex-col gap-1.5"
+            title="Restoring one lets the next sync bring it back, with whatever history the bank still offers (and a card linked to Plaid linked again); what was deleted with it doesn’t come back.">
             {#each deleted as d (d.id)}
               <li class="flex items-center gap-3"><span class="min-w-0 flex-1 truncate text-foreground">{d.name || d.id}</span>
                 <Button variant="outline" size="sm" disabled={!!restoring} onclick={() => restore(d)}>{restoring === d.id ? "Restoring…" : "Restore"}</Button></li>

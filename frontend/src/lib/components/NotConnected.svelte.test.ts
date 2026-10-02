@@ -9,7 +9,7 @@ describe("NotConnected", () => {
   it("says what the page needs and links to connecting a bank", () => {
     render(NotConnected, { title: "Connect a bank to see your transactions" });
     expect(screen.getByText("Connect a bank to see your transactions")).toBeInTheDocument();
-    expect(screen.getByText(/The first sync brings in months of history/)).toBeInTheDocument();
+    expect(screen.queryByText(/months of history/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
   });
 

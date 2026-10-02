@@ -94,7 +94,7 @@ describe("EventsList", () => {
       expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
     });
 
-    it("marks recurring items with ↻, which opens Bills & income to change every one", () => {
+    it("marks recurring items with the repeat icon, which opens Bills & income to change every one", () => {
       show([ev()]);
       expect(screen.getByRole("link", { name: "Open in Bills & income" })).toHaveAttribute("href", "#budget/recurring");
     });

@@ -13,7 +13,7 @@
   function find(e: Event) {
     e.preventDefault();
     showTransactions({ account: m.account_id ?? "", month: m.date.slice(0, 7) });
-    toast("Use ↻ on the payment to link it to this recurring item");
+    toast("Use the repeat icon on the payment to link it to this recurring item");
   }
   async function dismiss() {
     try { await api("/api/recurring/dismiss", { method: "POST", body: { key: m.key } }); gone = true; ondismiss?.(m.key); toast.success("Dismissed"); }

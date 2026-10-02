@@ -64,8 +64,7 @@
 <Card.Root>
   <Card.Header><Card.Title>Backup &amp; restore</Card.Title></Card.Header>
   <Card.Content class="flex flex-col gap-4">
-    <p class={helpCls}>Everything. Bank access and API keys are in it encrypted with this Runway’s secret key (restoring elsewhere needs the same key): keep it private anyway. Database: {app.state?.database === "postgres" ? "Postgres" : "SQLite"}.</p>
-    <div><Button href="/api/backup" download>Download a backup</Button></div>
+    <div><Button href="/api/backup" download title={`Everything, from the ${app.state?.database === "postgres" ? "Postgres" : "SQLite"} database. Bank access and API keys are in it encrypted with this Runway’s secret key (restoring elsewhere needs the same key): keep it private anyway.`}>Download a backup</Button></div>
     <div class="flex flex-col gap-2">
       <div class="flex flex-wrap items-end gap-3">
         <label class={`${fieldCls} w-full sm:w-80`}>Restore from a backup

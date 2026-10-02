@@ -2,7 +2,7 @@
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
 
-  // What a report shows before its data arrives, or when it couldn't load.
+  // What a report shows before its data arrives (a placeholder block, like Budget's), or when it couldn't load.
   let { error, retry }: { error: Error | null; retry: () => void } = $props();
 </script>
 
@@ -14,5 +14,5 @@
     </Card.Content>
   </Card.Root>
 {:else}
-  <Card.Root><Card.Content><p class="py-6 text-center text-sm text-muted-foreground">Loading…</p></Card.Content></Card.Root>
+  <div class="h-40 animate-pulse rounded-xl bg-muted" role="status"><span class="sr-only">Loading…</span></div>
 {/if}

@@ -114,6 +114,21 @@
   const hasAssetItems = $derived(!!d?.assets_list.length);
 </script>
 
+{#snippet makeup()}
+<div class="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted" role="img"
+        aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${pct(g.total / d!.assets)}`).join(", ")}`}>
+        {#each assetGroups as g, i (g.key)}
+          <span class="block h-full min-w-0.5" style:width={`${((g.total / d!.assets) * 100).toFixed(2)}%`} style:background={`var(--nw-${(i % 6) + 1})`}
+            title={`${g.label} ${fmt0(g.total)}`}></span>
+        {/each}
+      </div>
+      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {#each assetGroups as g, i (g.key)}
+          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {pct(g.total / d!.assets)}</span>
+        {/each}
+      </div>
+{/snippet}
+
 {#snippet side(groups: NwGroup[])}
   {#each groups as g (g.key)}
     <div class="border-t border-border first:border-t-0">
@@ -206,7 +221,7 @@
     {/if}
     <StatStrip class="mt-5" items={[
       { label: "Assets", value: fmt0(d.assets), sub: assetGroups.map((g) => g.label).join(" · ") },
-      { label: "Liabilities", value: fmt0(d.liabilities), sub: liabilities.map((g) => nb(`${g.label} ${fmt0(g.total)}`)).join(" · ") || "nothing owed" },
+      { label: "Liabilities", value: fmt0(d.liabilities), sub: liabilities.map((g) => g.label).join(" · ") || "nothing owed" },
     ]} />
     {#if d.history.length >= 2}
       <div class="mt-5">
@@ -216,24 +231,13 @@
     {/if}
   </section>
 
+  {#if isPhone()}
+    <div class="mb-6" data-testid="makes-up">{@render makeup()}</div>
+  {:else}
   <Card.Root class="mb-6">
     <Card.Header><Card.Title>What makes it up</Card.Title></Card.Header>
     <Card.Content>
-      <div class="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted" role="img"
-        aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${pct(g.total / d!.assets)}`).join(", ")}`}>
-        {#each assetGroups as g, i (g.key)}
-          <span class="block h-full min-w-0.5" style:width={`${((g.total / d.assets) * 100).toFixed(2)}%`} style:background={`var(--nw-${(i % 6) + 1})`}
-            title={`${g.label} ${fmt0(g.total)}`}></span>
-        {/each}
-      </div>
-      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        {#each assetGroups as g, i (g.key)}
-          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {pct(g.total / d.assets)}</span>
-        {/each}
-      </div>
-      {#if isPhone()}
-        <DesktopOnly class="mt-4" what="see and change the accounts and assets behind it" />
-      {:else}
+      {@render makeup()}
       <div class="mt-4 grid gap-6 lg:grid-cols-2">
         <div class="min-w-0"><h3 class="mb-1 font-semibold">Assets</h3>{@render side(d.groups.filter((g) => g.side === "asset"))}
           {#if !hasAssetItems}
@@ -244,13 +248,12 @@
           {#if liabilities.length}{@render side(liabilities)}{:else}<p class="text-sm text-muted-foreground">Nothing owed</p>{/if}
         </div>
       </div>
-      {/if}
-      {#if d.excluded.length && !isPhone()}
+      {#if d.excluded.length}
         <div class="mt-4 border-t border-border pt-3 text-sm text-muted-foreground">
           <p>
             Not counted: {#if d.excluded.length > 3}{d.excluded.length} accounts{excludedTotal != null ? ` (${fmt0(excludedTotal)})` : ""}{:else}{d.excluded.map((a) => nb(`${a.name} ${fmt0(a.balance)}`)).join(" · ")}{/if}
             · <button type="button" class="cursor-pointer font-medium text-foreground underline underline-offset-2" aria-expanded={showExcluded}
-              onclick={() => (showExcluded = !showExcluded)}>Manage</button>
+              onclick={() => (showExcluded = !showExcluded)}>{showExcluded ? "Hide" : "Show"}</button>
           </p>
           {#if showExcluded}
             <ul class="mt-1 divide-y text-sm text-foreground">
@@ -269,6 +272,7 @@
       {/if}
     </Card.Content>
   </Card.Root>
+  {/if}
 {/if}
 
   <AssetPanel bind:open={assetOpen} a={panelAsset} kind={addKind} {d} onchanged={load} />
