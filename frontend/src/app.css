@@ -128,8 +128,8 @@
   --nw-1: #5b9bf0; --nw-2: #f08a4b; --nw-3: #4cc38a; --nw-4: #e3b341; --nw-5: #d488c0; --nw-6: #9085e9;
   --flow-in: #30d158; --flow-out: #0a84ff;
   --good: #30d158; --warning: #f0b84b; --low: #f08a4b;
-  --loss: #e66767;
-  --edge: rgb(255 255 255 / 7%);   /* the hairline around cards and grouped lists */   /* a loss on Investments: the chart palette's coral, softer than a pure red */
+  --loss: #e66767;   /* a loss on Investments: the chart palette's coral, softer than a pure red */
+  --edge: rgb(255 255 255 / 7%);   /* the hairline around cards and grouped lists */
 }
 
 /* Grouped lists, as in iOS Settings: a rounded surface of rows split by inset hairlines. `.cell` is a row;
