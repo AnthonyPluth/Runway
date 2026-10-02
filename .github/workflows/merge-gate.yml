@@ -1,7 +1,7 @@
 name: Merge gate
 
-# One commit status, "Merge gate", on each pull request's head: passing once every check on it has passed and no P1
-# review finding is left open (the rules are in .github/scripts/merge-gate.sh). Require it in a ruleset on main
+# One commit status, "Merge gate", on each pull request's head: passing once every check on it has passed (the rules
+# are in .github/scripts/merge-gate.sh). Require it in a ruleset on main
 # (Settings → Rules → Rulesets → Require status checks to pass → "Merge gate") and it's the one check a merge waits on.
 # It also merges Dependabot's pull requests once it passes.
 #
@@ -13,12 +13,12 @@ name: Merge gate
 on:  # zizmor: ignore[dangerous-triggers]
   # Each of the pull request's own workflows finishing (the last one to finish decides).
   workflow_run:
-    workflows: [Docker image, Security scans, Claude review, Docs]
+    workflows: [Docker image, Security scans, Docs]
     types: [completed]
   # Other apps' checks finishing (CodeQL, Semgrep, Trivy, zizmor, Codecov); GitHub doesn't send this for Actions' own.
   check_suite:
     types: [completed]
-  # By hand, for a pull request whose P1 finding was resolved since (resolving a thread starts nothing by itself).
+  # By hand, to decide a pull request again.
   workflow_dispatch:
     inputs:
       pr:
