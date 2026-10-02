@@ -28,6 +28,7 @@
   const options = $derived(accounts.filter((a) => !a.hidden || a.id === v.account_id));
   const dated = $derived(needsDates(v.frequency));
   const semi = $derived(v.frequency === "semimonthly");
+  const once = $derived(v.frequency === "once");   // a one-time item: just its date
   const lbl = "relative flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground";
 
   // You type the amount as a plain positive number and pick money in or out; the stored amount is signed
@@ -126,8 +127,8 @@
     </div>
   {/if}
   <div class="flex min-w-0 flex-col gap-1.5">
-    <label class={lbl}><span>{dated ? "Starting" : "Next date"}{@render star()}</span>
-      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date")} title={hints.anchor_date} use:saveIf={save} />
+    <label class={lbl}><span>{dated ? "Starting" : once ? "Date" : "Next date"}{@render star()}</span>
+      <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date")} title={once ? undefined : hints.anchor_date} use:saveIf={save} />
     </label>
     {@render note("anchor_date")}
   </div>

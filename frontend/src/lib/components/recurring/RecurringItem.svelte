@@ -40,7 +40,10 @@
   const LINKED_BY: Record<string, string> = { you: "linked by you", auto: "matched automatically" };
 
   const amt = $derived(r.expected_amount ?? r.amount);
-  const sub = $derived([FREQ[v.frequency] || v.frequency, r.next_date ? `next ${fmtDate(r.next_date)}` : "no upcoming date",
+  // A one-time item says its date, whether it's still to come or not.
+  const when = $derived(r.frequency === "once" && r.anchor_date ? fmtDate(r.anchor_date)
+    : r.next_date ? `next ${fmtDate(r.next_date)}` : "no upcoming date");
+  const sub = $derived([FREQ[v.frequency] || v.frequency, when,
     r.matched_count ? `${r.matched_count} matched` : ""].filter(Boolean));
 
   // The logo picker chooses by the item's name (the one the logo comes from, else its last matched transaction's), the

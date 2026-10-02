@@ -226,7 +226,7 @@ recurring = Table(
     Column('name', Text, nullable=False),
     Column('account_id', Text, nullable=False),
     Column('amount', Float, nullable=False, doc='negative = money out'),
-    Column('frequency', Text, nullable=False, doc='weekly | biweekly | semimonthly | monthly | quarterly | semiannual | yearly | dates'),
+    Column('frequency', Text, nullable=False, doc='weekly | biweekly | semimonthly | monthly | quarterly | semiannual | yearly | dates | once'),
     Column('anchor_date', Text, nullable=False, doc='a known occurrence (YYYY-MM-DD)'),
     Column('match', Text, doc='payee texts, one per line: a transaction with any of them matches'),
     Column('end_date', Text),

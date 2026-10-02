@@ -56,6 +56,14 @@ describe("Recurring page", () => {
     expect(await screen.findByText("monthly · next Apr 1 · 4 matched")).toBeInTheDocument();
   });
 
+  it("summarizes a one-time item by its date, before and after it comes", async () => {
+    serve([item({ id: 1, name: "Tax refund", amount: 1240, frequency: "once", anchor_date: "2026-04-20", next_date: "2026-04-20" }),
+      item({ id: 2, name: "Deposit back", amount: 500, frequency: "once", anchor_date: "2026-02-10", next_date: null, matched_count: 1 })]);
+    render(Recurring);
+    expect(await screen.findByText("one-time · Apr 20")).toBeInTheDocument();
+    expect(screen.getByText("one-time · Feb 10 · 1 matched")).toBeInTheDocument();
+  });
+
   it("marks a paused item, and one that missed a payment", async () => {
     serve([item({ active: 0, missed: [{ key: "k", name: "Rent", amount: -1500, date: "2026-03-01", recurring_id: 1 }] })]);
     render(Recurring);
@@ -154,6 +162,20 @@ describe("Recurring page", () => {
       await userEvent.click(addButton());
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added · matched 3 past transactions"));
       expect(posted()[0][1]).toMatchObject({ method: "POST", body: { name: "Gym", account_id: "a1", amount: -120, frequency: "monthly", anchor_date: isoDay(), active: 1 } });
+    });
+
+    it("adds a one-time item on its date", async () => {
+      await open();
+      await userEvent.type(screen.getByRole("textbox", { name: /Name/ }), "Tax refund");
+      await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
+      await userEvent.type(screen.getByRole("spinbutton", { name: /Amount/ }), "1240");
+      await userEvent.selectOptions(screen.getByRole("combobox", { name: /How often/ }), "once");
+      const day = screen.getByLabelText(/^Date/);
+      await userEvent.clear(day);
+      await userEvent.type(day, "2026-04-20");
+      await userEvent.click(addButton());
+      await waitFor(() => expect(posted()).toHaveLength(1));
+      expect(posted()[0][1]).toMatchObject({ body: { name: "Tax refund", amount: 1240, frequency: "once", anchor_date: "2026-04-20" } });
     });
 
     it("stores money in as a positive amount, and ignores a minus you type", async () => {

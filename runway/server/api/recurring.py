@@ -12,7 +12,7 @@ from ..common import ApiError
 from .transactions import tx_logos
 
 
-FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates"}
+FREQS = {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "semiannual", "yearly", "dates", "once"}
 # The columns _recurring_values() gives, in its order.
 COLUMNS = ("name", "account_id", "amount", "frequency", "anchor_date", "match", "end_date", "active", "amount_mode", "dates",
            "amount_min", "amount_max")
@@ -154,6 +154,8 @@ def api_recurring_update(conn, _q, body, rid):
         gone.append(and_(func.coalesce(t.recurring_linked_by, "") != "you", not_(recurring.has_text(recurring.match_texts(new)))))
     if (old["amount_min"], old["amount_max"]) != typed:
         gone.append(and_(t.recurring_linked_by == "auto", not_(recurring.amount_fits(new))))
+    if new["frequency"] == "once" and (old["frequency"], old["anchor_date"]) != (new["frequency"], new["anchor_date"]):
+        gone.append(and_(t.recurring_linked_by == "auto", not_(recurring.posted_near(new))))   # matched far from its date
     if gone:
         conn.execute(update(t).where(t.recurring_id == rid, or_(*gone)).values(recurring_id=None, recurring_linked_by=None))
     linked = recurring.auto_match(conn, [rid])

@@ -123,6 +123,8 @@ def schedule(item: dict) -> rruleset:
     elif freq in ("monthly", "quarterly", "semiannual", "yearly"):
         months = {"monthly": 1, "quarterly": 3, "semiannual": 6, "yearly": 12}[freq]
         rules.rrule(_monthly_rule(MONTHLY, months, anchor, anchor.day))
+    elif freq == "once":
+        rules.rdate(anchor)   # a one-time item: just its date
     elif freq in ("semimonthly", "dates"):
         # A list of days each month ("1,15") or of dates each year ("04-15,10-15").
         for month, day in parse_dates(item.get("dates") or "", freq):
@@ -178,13 +180,14 @@ def owed(account: dict, balance: float | None = None) -> float:
 def paid_by_recurring(items: list[dict]):
     """A test for whether a transaction looks like a payment for one of these recurring items without being linked to
     it: its payee or description has one of the item's texts and its amount is within the item's amount range, if it has
-    one (recurring.fits_amount, as matching does). So a "Prime" item matching "amazon" with a range leaves the rest of the
-    Amazon orders alone."""
+    one (recurring.fits_amount, as matching does), and for a one-time item it's around its date (recurring.near_date). So
+    a "Prime" item matching "amazon" with a range leaves the rest of the Amazon orders alone."""
     rules = [(texts, r) for r in items if (texts := rec.match_texts(r))]
 
     def test(t: dict) -> bool:
         hay = f"{t['payee'] or ''} {t['description'] or ''}".lower()
-        return any(any(m in hay for m in texts) and rec.fits_amount(r, t["amount"]) for texts, r in rules)
+        return any(any(m in hay for m in texts) and rec.fits_amount(r, t["amount"]) and rec.near_date(r, t["posted"])
+                   for texts, r in rules)
     return test
 
 
@@ -221,7 +224,7 @@ def large_one_offs(conn, account_ids: list[str], today: date, recurring: list[di
     transfers = _transfer_categories(conn)
     T = Transaction
     txs = db.rows(conn.execute(
-        select(T.account_id, T.amount, T.payee, T.description, T.category)
+        select(T.account_id, T.posted, T.amount, T.payee, T.description, T.category)
         .where(T.account_id.in_(account_ids), T.posted > (today - timedelta(days=SPEND_WINDOW_DAYS)).isoformat(),
                T.posted <= today.isoformat(), T.pending == 0, T.amount < -ONE_OFF_LIMIT, T.recurring_id.is_(None))
         .order_by(T.amount)))
@@ -1090,7 +1093,9 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
-    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) for m in rec.match_texts(r)]
+    # A one-time item's texts only claim payments around its date, so they don't hide a payee that repeats.
+    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) if r["frequency"] != "once"
+             for m in rec.match_texts(r)]
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)

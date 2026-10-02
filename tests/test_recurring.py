@@ -5,7 +5,7 @@ from unittest import mock
 
 from sqlalchemy import insert, select, update
 
-from runway import forecast, recurring
+from runway import db, forecast, recurring
 from runway.models import Override, Recurring, Transaction
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase
@@ -429,6 +429,82 @@ class SplitPaymentTests(LedgerCase):
         recurring.link(self.conn, "chk|3", prime)
         self.assertEqual(recurring.paid_by_occurrence(dict(self.conn.execute(select(Recurring).where(Recurring.id == prime)).fetchone()),
                                                       recurring.matched(self.conn, prime)), {date(2026, 10, 14): -15.0})
+
+
+class OneTimeTests(LedgerCase):
+    """A one-time expected transaction: a $1,240 tax refund due Oct 20 (a Tuesday), with last spring's refund in history."""
+
+    def setUp(self):
+        super().setUp()
+        from runway.server.api import recurring as api
+        self.api = api
+        self.acct("chk", "checking", 3000.0)
+        self.tx("chk", "2026-05-01", 980.0, "IRS TREAS 310 TAX REF")
+        self.body = {"name": "Tax refund", "account_id": "chk", "amount": 1240, "frequency": "once",
+                     "anchor_date": "2026-10-20", "match": "irs treas"}
+        self.rid = self.api.api_recurring_add(self.conn, None, self.body)["id"]
+
+    def item(self):
+        return dict(self.conn.execute(select(Recurring).where(Recurring.id == self.rid)).fetchone())
+
+    def events(self, today, days=400):
+        return [(e["date"], e["amount"], e.get("late_from")) for e in forecast.build(self.conn, today, days)["events"]
+                if e.get("recurring_id") == self.rid]
+
+    def test_it_is_forecast_once_on_its_date(self):
+        self.assertEqual(self.events(TODAY), [("2026-10-20", 1240, None)])
+        self.assertEqual(forecast.occurrences(self.item(), TODAY, date(2028, 1, 1)), [date(2026, 10, 20)])
+        # On a Saturday, money in comes the business day before.
+        self.assertEqual(forecast.occurrences({**self.item(), "anchor_date": "2026-10-24"}, TODAY, date(2028, 1, 1)),
+                         [date(2026, 10, 23)])
+
+    def test_only_a_payment_near_its_date_matches_it(self):
+        self.assertEqual(recurring.matched(self.conn, self.rid), [])   # not last spring's refund
+        self.tx("chk", "2026-10-16", 1240.0, "IRS TREAS 310 TAX REF")
+        self.tx("chk", "2027-04-20", 300.0, "IRS TREAS 310 TAX REF")
+        recurring.auto_match(self.conn)
+        self.assertEqual([t["posted"] for t in recurring.matched(self.conn, self.rid)], ["2026-10-16"])
+        self.assertEqual(self.events(date(2026, 10, 16)), [])   # it came: nothing more is expected
+        self.assertEqual(recurring.missed(self.conn, date(2026, 11, 10)), [])
+
+    def test_its_window_is_around_the_day_its_money_moves(self):
+        # A $2,500 bill due Saturday Oct 24 is paid Monday Oct 26: a payment five days after that still matches it.
+        bill = self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Tax bill", "amount": -2500,
+                                                            "anchor_date": "2026-10-24", "match": "irs usataxpymt"})["id"]
+        self.tx("chk", "2026-10-31", -2500.0, "IRS USATAXPYMT")
+        recurring.auto_match(self.conn)
+        self.assertEqual([t["posted"] for t in recurring.matched(self.conn, bill)], ["2026-10-31"])
+
+    def test_late_then_missed_if_it_never_comes(self):
+        self.assertEqual(self.events(date(2026, 10, 25)), [("2026-10-25", 1240, "2026-10-20")])
+        self.assertEqual(self.events(date(2026, 11, 2)), [])   # its window has closed
+        self.assertEqual([m["date"] for m in recurring.missed(self.conn, date(2026, 11, 10))], ["2026-10-20"])
+
+    def test_moving_its_date_lets_go_of_what_matched_far_from_the_new_one(self):
+        self.tx("chk", "2026-10-16", 1240.0, "IRS TREAS 310 TAX REF")
+        recurring.auto_match(self.conn)
+        self.api.api_recurring_update(self.conn, None, {**self.body, "anchor_date": "2027-03-01"}, self.rid)
+        self.assertEqual(recurring.matched(self.conn, self.rid), [])
+        # Linked by hand, it stays.
+        recurring.link(self.conn, "chk|1", self.rid)
+        self.api.api_recurring_update(self.conn, None, {**self.body, "anchor_date": "2027-04-01"}, self.rid)
+        self.assertEqual(len(recurring.matched(self.conn, self.rid)), 1)
+
+    def test_a_big_payment_far_from_its_date_is_still_flagged_as_unscheduled(self):
+        self.tx("chk", "2026-08-03", -2500.0, "IRS USATAXPYMT")
+        self.conn.execute(insert(Recurring).values(name="Tax bill", account_id="chk", amount=-2500, frequency="once",
+                                                   anchor_date="2027-04-15", match="irs usataxpymt", amount_mode="fixed"))
+        recurring.auto_match(self.conn)
+        items = db.rows(self.conn.execute(select(Recurring)))
+        self.assertEqual([t["amount"] for t in forecast.large_one_offs(self.conn, ["chk"], TODAY, items)], [-2500.0])
+        self.assertEqual(forecast.large_one_offs(self.conn, ["chk"], TODAY, [{**i, "anchor_date": "2026-08-05"} for i in items]), [])
+
+    def test_it_doesnt_hide_a_suggestion_for_a_payee_that_repeats(self):
+        for d in ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01"]:
+            self.tx("chk", d, -80.0, "CITY WATER")
+        self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Water deposit back", "amount": 150,
+                                                     "anchor_date": "2027-01-15", "match": "city water"})
+        self.assertIn("city water", {s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)})
 
 
 if __name__ == "__main__":
