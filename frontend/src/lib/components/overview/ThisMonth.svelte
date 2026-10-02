@@ -68,7 +68,7 @@
       {#snippet action()}<a href="#budget" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each budgets as b (b.name)}
         <button type="button" class="cell" onclick={() => showTransactions({ category: b.name, month, scope: "budget" })}>
-          <CatIcon name={b.name} size={32} solid />
+          <CatIcon name={b.name} size={32} />
           <span class="min-w-0 flex-1">
             <span class="flex items-baseline justify-between gap-2 text-[15px]">
               <span class="truncate">{b.name}</span>
@@ -93,7 +93,7 @@
         <div class="cell">
           {#if t.logo}
             <Logo src={t.logo} />
-          {:else}<CatIcon name={t.category} size={32} solid />{/if}
+          {:else}<CatIcon name={t.category} size={32} />{/if}
           <span class="min-w-0 flex-1">
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
             <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>

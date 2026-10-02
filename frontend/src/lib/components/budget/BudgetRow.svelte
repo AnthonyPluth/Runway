@@ -60,7 +60,7 @@
 
 <div class={cn("py-2", sub && "pl-5")}>
   <div class="flex min-h-9 flex-wrap items-center gap-x-2.5">
-    {#if !sub}<CatIcon name={c.name} size={28} solid />{/if}
+    {#if !sub}<CatIcon name={c.name} size={28} />{/if}
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
     {#if budgets && c.budget != null && counts}

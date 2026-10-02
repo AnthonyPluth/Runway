@@ -41,7 +41,7 @@
 <span class="relative" bind:this={root}>
   <button type="button" class="cursor-pointer rounded-full ring-offset-2 ring-offset-card hover:ring-2 hover:ring-ring/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     title="Change the emoji" aria-label={`Emoji for ${c.name}`} aria-expanded={open} onclick={() => (open = !open)}>
-    <CatIcon name={c.name} size={28} class="rounded-full" />
+    <CatIcon name={c.name} size={28} />
   </button>
   {#if open}
     <div data-editor role="dialog" aria-label={`Emoji for ${c.name}`}

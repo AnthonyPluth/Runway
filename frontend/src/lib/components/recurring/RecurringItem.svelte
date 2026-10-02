@@ -93,7 +93,7 @@
     <!-- A button inside the summary doesn't toggle it. -->
     <LogoPicker name={r.name} onchanged={logoChanged}>
       {#if r.logo}<Logo src={r.logo} size={28} />
-      {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} class="rounded-full" />
+      {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} />
       {:else}<RecIcon id={r.account_id} />{/if}
     </LogoPicker>
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">

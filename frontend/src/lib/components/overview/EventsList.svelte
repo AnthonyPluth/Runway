@@ -51,7 +51,7 @@
       {:else if bank?.src}
         <img class="size-8 shrink-0 rounded-lg object-contain" src={bank.src} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
       {:else}
-        <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} solid />
+        <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} />
       {/if}
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
