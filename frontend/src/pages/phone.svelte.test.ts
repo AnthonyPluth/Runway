@@ -9,7 +9,7 @@ vi.mock("$lib/categories.svelte", () => ({ loadCategories: vi.fn(async () => {})
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
-import { benefit, calls, card, churning } from "$lib/components/churning/fixtures";
+import { benefit, card, churning } from "$lib/components/churning/fixtures";
 import { viewport } from "$lib/phone.svelte";
 import Churning from "./Churning.svelte";
 import NetWorth from "./NetWorth.svelte";
@@ -24,14 +24,14 @@ afterEach(() => { cleanup(); viewport.phone = false; });
 describe("Settings", () => {
   const data = (async (path: string) => (path === "/api/accounts" || path === "/api/rules" ? [] : path === "/api/push" ? { public_key: "aGVsbG8", prefs: {}, devices: [], recent: [] } : {})) as never;
 
-  it("is Notifications on a phone, with no banner: no tabs, no rules, categories or connections", async () => {
+  it("has every tab on a phone, and opens the one the link names", async () => {
     viewport.phone = true;
     vi.mocked(api).mockImplementation(data);
     render(Settings, { sub: "rules" });
-    expect(await screen.findByText("This device")).toBeInTheDocument();
+    const tabs = await screen.findByRole("navigation", { name: "Settings" });
+    expect(within(tabs).getAllByRole("link").length).toBeGreaterThanOrEqual(7);
+    expect(await screen.findByText("Rules", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Add a rule")).not.toBeInTheDocument();
   });
 
   it("has every tab on a computer", async () => {
@@ -67,16 +67,23 @@ describe("Reports", () => {
 describe("Churning", () => {
   const data = (over = {}) => vi.mocked(api).mockImplementation((async (path: string) => (path.startsWith("/api/churning/best") ? { cards: [] } : churning({ cards: [card({ benefits: [benefit()] })], ...over }))) as never);
 
-  it("is upcoming and the benefits to mark used on a phone, with no cards, bank bonuses or plans to edit", async () => {
+  it("has cards, bank bonuses, plans and to-dos on a phone", async () => {
     viewport.phone = true;
     data();
     render(Churning, { sub: "bank" });
-    expect(await screen.findByText("Worth a year")).toBeInTheDocument();   // the benefits board, whatever tab the link named
-    expect(screen.getAllByText(NOTE)).toHaveLength(1);   // said once, here and not again in the benefits
-    expect(screen.getByText(/manage cards, bank bonuses, plans and rewards/)).toBeInTheDocument();
-    for (const name of ["Add a card", "Add a bank bonus", "Add a to-do"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Cards or bank bonuses" })).not.toBeInTheDocument();
-    expect(calls("/api/churning/best")).toHaveLength(0);
+    expect(await screen.findByRole("button", { name: "Add a bank bonus" })).toBeInTheDocument();
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add a to-do" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Cards or bank bonuses" })).toBeInTheDocument();
+    expect(screen.getByText("Planned")).toBeInTheDocument();
+  });
+
+  it("shows the cards tab on a phone", async () => {
+    viewport.phone = true;
+    data();
+    render(Churning);
+    expect(await screen.findByRole("button", { name: "Add a card" })).toBeInTheDocument();
   });
 
   it("has its cards and tabs on a computer", async () => {

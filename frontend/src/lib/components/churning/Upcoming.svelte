@@ -2,7 +2,6 @@
   import { api } from "$lib/api";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Button } from "$lib/components/ui/button";
-  import { isPhone } from "$lib/phone.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
@@ -61,12 +60,12 @@
 </script>
 
 {#if !items.length && !adding}
-  <EmptyLine label="Upcoming" message="nothing in the next six months" action={cards.length && !isPhone() ? "Add a to-do" : undefined} onaction={() => (adding = true)} />
+  <EmptyLine label="Upcoming" message="nothing in the next six months" action={cards.length ? "Add a to-do" : undefined} onaction={() => (adding = true)} />
 {:else}
 <Card.Root class="mb-6">
   <Card.Header>
     <Card.Title>Upcoming</Card.Title>
-    {#if !isPhone()}<Card.Action><Button size="sm" variant="outline" onclick={() => (adding = !adding)} aria-expanded={adding}>Add a to-do</Button></Card.Action>{/if}
+    <Card.Action><Button size="sm" variant="outline" onclick={() => (adding = !adding)} aria-expanded={adding}>Add a to-do</Button></Card.Action>
   </Card.Header>
   <Card.Content>
     {#if adding}
@@ -110,7 +109,7 @@
                 <Button variant="outline" size="sm" onclick={() => planDone(i.card_id!, onchanged)} aria-label={`Mark "${i.title}" done`}>Done</Button>
               {:else if i.kind === "benefit" && i.benefit_id != null}
                 <Button variant="outline" size="sm" onclick={() => benefitUse(i.benefit_id!, i.title, null, onchanged)} aria-label={`Mark "${i.title}" used`}>Mark used</Button>
-              {:else if (i.kind === "apply" || i.kind === "offer_ends") && !isPhone()}
+              {:else if (i.kind === "apply" || i.kind === "offer_ends")}
                 <Button variant="ghost" size="sm" onclick={seePlanned}>See planned</Button>
               {/if}
             </div>

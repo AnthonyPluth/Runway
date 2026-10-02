@@ -9,8 +9,7 @@
   import X from "@lucide/svelte/icons/x";
 
   // On a phone (lib/phone.svelte.ts): a tab bar along the bottom with the four pages you use most, and More for the rest
-  // (which opens a sheet from the bottom). Every page here is one a phone can use; what's only for a
-  // computer says so where you'd look for it. Hidden on a computer, where the sidebar shows instead.
+  // (which opens a sheet from the bottom). Hidden on a computer, where the sidebar shows instead.
   const TABS = MAIN_NAV;
   const MORE: NavItem[] = [...MONEY_NAV, { page: "setup", label: "Settings", icon: Settings }];
 
