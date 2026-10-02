@@ -467,6 +467,14 @@ class OneTimeTests(LedgerCase):
         self.assertEqual(self.events(date(2026, 10, 16)), [])   # it came: nothing more is expected
         self.assertEqual(recurring.missed(self.conn, date(2026, 11, 10)), [])
 
+    def test_its_window_is_around_the_day_its_money_moves(self):
+        # A $2,500 bill due Saturday Oct 24 is paid Monday Oct 26: a payment five days after that still matches it.
+        bill = self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Tax bill", "amount": -2500,
+                                                            "anchor_date": "2026-10-24", "match": "irs usataxpymt"})["id"]
+        self.tx("chk", "2026-10-31", -2500.0, "IRS USATAXPYMT")
+        recurring.auto_match(self.conn)
+        self.assertEqual([t["posted"] for t in recurring.matched(self.conn, bill)], ["2026-10-31"])
+
     def test_late_then_missed_if_it_never_comes(self):
         self.assertEqual(self.events(date(2026, 10, 25)), [("2026-10-25", 1240, "2026-10-20")])
         self.assertEqual(self.events(date(2026, 11, 2)), [])   # its window has closed
@@ -490,6 +498,13 @@ class OneTimeTests(LedgerCase):
         items = db.rows(self.conn.execute(select(Recurring)))
         self.assertEqual([t["amount"] for t in forecast.large_one_offs(self.conn, ["chk"], TODAY, items)], [-2500.0])
         self.assertEqual(forecast.large_one_offs(self.conn, ["chk"], TODAY, [{**i, "anchor_date": "2026-08-05"} for i in items]), [])
+
+    def test_it_doesnt_hide_a_suggestion_for_a_payee_that_repeats(self):
+        for d in ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01"]:
+            self.tx("chk", d, -80.0, "CITY WATER")
+        self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Water deposit back", "amount": 150,
+                                                     "anchor_date": "2027-01-15", "match": "city water"})
+        self.assertIn("city water", {s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)})
 
 
 if __name__ == "__main__":

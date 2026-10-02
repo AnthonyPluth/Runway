@@ -1093,7 +1093,9 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
-    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) for m in rec.match_texts(r)]
+    # A one-time item's texts only claim payments around its date, so they don't hide a payee that repeats.
+    known = [(r["account_id"], m) for r in db.rows(conn.execute(select(Recurring))) if r["frequency"] != "once"
+             for m in rec.match_texts(r)]
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)

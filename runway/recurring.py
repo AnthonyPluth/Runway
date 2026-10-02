@@ -7,12 +7,12 @@ from datetime import date, timedelta
 
 from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
-from . import brands, db
+from . import bankdays, brands, db
 from .models import Account, Recurring, RecurringDismissed, Transaction
 
 # How far a real payment can land from its expected date and still count as that occurrence.
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
-                     "semiannual": 12, "yearly": 12, "dates": 12, "once": 12}
+                     "semiannual": 12, "yearly": 12, "dates": 12, "once": 5}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
 CENT = 0.005
 # The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than this share away from it
@@ -62,22 +62,29 @@ def amount_fits(item: dict):
                 *([func.abs(t.amount) <= hi + CENT] if hi is not None else []))
 
 
+def _once_window(item: dict) -> tuple[str, str]:
+    """A one-time item's matching window, first and last day: around the day its money moves (its date, moved off a
+    weekend or holiday as the forecast moves it), so a payment the forecast still expects can match it."""
+    window = timedelta(days=MATCH_WINDOW_DAYS["once"])
+    day = bankdays.settles(date.fromisoformat(item["anchor_date"][:10]), (item.get("amount") or 0) > 0)
+    return (day - window).isoformat(), (day + window).isoformat()
+
+
 def near_date(item: dict, posted: str) -> bool:
     """Whether a payment posted on `posted` can be the item's: any day for a repeating item; for a one-time one, only
     within its matching window of its date (so a tax refund's "irs" doesn't claim every later payment to the IRS)."""
     if item.get("frequency") != "once":
         return True
-    window, day = timedelta(days=MATCH_WINDOW_DAYS["once"]), date.fromisoformat(item["anchor_date"][:10])
-    return day - window <= date.fromisoformat(posted[:10]) <= day + window
+    lo, hi = _once_window(item)
+    return lo <= posted[:10] <= hi
 
 
 def posted_near(item: dict):
     """SQL: near_date, for the transaction's posted date."""
     if item.get("frequency") != "once":
         return true()
-    window, day = timedelta(days=MATCH_WINDOW_DAYS["once"]), date.fromisoformat(item["anchor_date"][:10])
-    return and_(func.substr(Transaction.posted, 1, 10) >= (day - window).isoformat(),
-                func.substr(Transaction.posted, 1, 10) <= (day + window).isoformat())
+    lo, hi = _once_window(item)
+    return and_(func.substr(Transaction.posted, 1, 10) >= lo, func.substr(Transaction.posted, 1, 10) <= hi)
 
 
 def auto_match(conn, recurring_ids: list[int] | None = None) -> int:
