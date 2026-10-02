@@ -25,6 +25,11 @@ export function points(n: number | null | undefined): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
+/** A balance to edit, with its commas ("125,000"); "" for none. */
+export const balanceText = (n: number | null | undefined) => (n == null ? "" : n.toLocaleString("en-US", { maximumFractionDigits: 2 }));
+/** What was typed in a balance field, without the commas (or spaces) it may have been written with. */
+export const balanceValue = (text: string) => text.replace(/[,\s]/g, "");
+
 /** A bonus in its own currency: "$200" for cash, "60k Ultimate Rewards" for points. */
 export function bonusLabel(amount: number | null, currencyKey: string, currencyName: string): string {
   if (!amount) return "";
@@ -224,10 +229,16 @@ export const wishName = (w: Pick<Wish, "kind" | "product" | "bank">) =>
   w.kind === "card" ? (w.product ?? "") : [w.bank, w.product].filter(Boolean).join(" ");
 
 /** Planned items still in play (wanted or ready) apart from the ones applied for or dropped. */
-export const splitWishes = (wishes: Wish[]) => ({
-  open: wishes.filter((w) => w.status === "wanted" || w.status === "ready"),
-  closed: wishes.filter((w) => w.status === "applied" || w.status === "dropped"),
-});
+/** Planned items still to do (each person's together, in their order: priorities are per person, so everyone's
+ * interleaved by number would put one person's #1 between another's #1 and #2) and the ones applied for or dropped. */
+export function splitWishes(wishes: Wish[]) {
+  const open = wishes.filter((w) => w.status === "wanted" || w.status === "ready");
+  const owners = [...new Set(open.map((w) => w.owner))];
+  return {
+    open: owners.flatMap((o) => open.filter((w) => w.owner === o)),
+    closed: wishes.filter((w) => w.status === "applied" || w.status === "dropped"),
+  };
+}
 
 /** Move a planned item up or down among its person's open items; returns the priorities to save (only the ones that
  * change), numbering them 1, 2, 3… in the new order. */

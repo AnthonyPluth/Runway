@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
-  eligibilityText, feesDue, five24Line, guestsText, isTravel, mine, ownerChoices, planLine, points, ratesPayload, ratesText, reorder,
+  eligibilityText, feesDue, five24Line, guestsText, isTravel, mine, ownerChoices, planLine, points, balanceText, balanceValue, ratesPayload, ratesText, reorder,
   scoreProgress, spendProgress, splitWishes, usesText, valueSource, wishName,
 } from "./churning";
 import { bankFeesSummary, bankReceivedSummary, bankRequirementsSummary, fullDate, wishExpectSummary, wishTimingSummary } from "./churning";
@@ -182,6 +182,16 @@ describe("churning 2 helpers", () => {
     expect(reorder(open, 1, -1)).toEqual([]);
     expect(reorder(open, 4, 1)).toEqual([]);
     expect(splitWishes([w(1, "A", 1), w(2, "A", 2, { status: "applied" }), w(3, "A", 3, { status: "dropped" }), w(4, "A", 4, { status: "ready" })]).open.map((x) => x.id)).toEqual([1, 4]);
+    // Everyone's together (priorities are per person): each person's items stay together, in their order, so moving one
+    // up or down moves it on screen too.
+    const both = splitWishes([w(1, "Alex", 1), w(2, "Sam", 1), w(3, "Alex", 2), w(4, "Sam", 2)]).open;
+    expect(both.map((x) => x.id)).toEqual([1, 3, 2, 4]);
+    expect(reorder(both, 3, -1)).toEqual([{ id: 3, priority: 1 }, { id: 1, priority: 2 }]);
+    expect(balanceText(1234567)).toBe("1,234,567");
+    expect(balanceText(0)).toBe("0");
+    expect(balanceText(null)).toBe("");
+    expect(balanceValue("1,234,567")).toBe("1234567");
+    expect(balanceValue(" 12 000 ")).toBe("12000");
     expect(wishName({ kind: "bank_bonus", bank: "Chase", product: "Total Checking" })).toBe("Chase Total Checking");
     expect(wishName({ kind: "card", bank: null, product: "Sapphire" })).toBe("Sapphire");
   });
