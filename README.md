@@ -85,5 +85,5 @@ Runway is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ---
 
-<sub>The Geist typeface is © Vercel, used under the <a href="runway/static/fonts/Geist-LICENSE.txt">SIL Open Font License</a>.
+<sub>The Inter typeface is © The Inter Project Authors and the Geist typeface is © Vercel, both used under the SIL Open Font License (<a href="runway/static/fonts/Inter-LICENSE.txt">Inter</a>, <a href="runway/static/fonts/Geist-LICENSE.txt">Geist</a>).
 Merchant, bank and card logos are from Plaid and <a href="https://logo.dev">Logo.dev</a>. They're trademarks of their owners.</sub>

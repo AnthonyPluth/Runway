@@ -1,9 +1,10 @@
 // Runway's service worker: shows push notifications, and keeps the app's shell around so it opens without a
 // connection (with the last-loaded page). Data always comes fresh from the server; nothing from /api is cached.
-const CACHE = "runway-shell-v4";
+const CACHE = "runway-shell-v5";
 // The app's page and Runway's own files. The app's built files (/assets/…) are kept as the page loads them: their
 // names change with every build, so the list can't name them.
-const SHELL = ["/", "/logo.svg", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
+const SHELL = ["/", "/logo.svg", "/fonts/Inter-latin-Variable.woff2", "/fonts/Inter-latin-ext-Variable.woff2",
+  "/fonts/Geist-Variable.woff2", "/manifest.webmanifest"];
 const isShell = (path) => SHELL.includes(path) || path.startsWith("/assets/");
 // The pages that are the app itself (main.ts picks the screen from the hash, and /plaid/oauth resumes a bank link).
 // Any other page (the OAuth consent screen, Carta's callback) is not the shell, so it never replaces the cached one.
