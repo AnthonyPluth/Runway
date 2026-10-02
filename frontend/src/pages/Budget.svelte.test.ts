@@ -62,6 +62,18 @@ describe("Budget page", () => {
     expect(marks[0].style.left).toBe(`${((1.5 / 31) * 100).toFixed(1)}%`);
   });
 
+  it("keeps the marker short of the end on the month's last day, and has none for a finished month", async () => {
+    serve(month({ day: 31 }));
+    const { unmount } = render(Budget);
+    const marks = await screen.findAllByTitle("Where you'd be at an even pace today");
+    expect(marks[0].style.left).toBe(`${((30.5 / 31) * 100).toFixed(1)}%`);
+    unmount();
+    vi.setSystemTime(new Date("2026-04-02T12:00:00"));
+    render(Budget);
+    await screen.findByText("Budgeted");
+    expect(screen.queryByTitle("Where you'd be at an even pace today")).not.toBeInTheDocument();
+  });
+
   it("counts what's spent outside any budget as other spending, and mentions uncategorized", async () => {
     serve(month({ uncategorized: 25 }));
     render(Budget);

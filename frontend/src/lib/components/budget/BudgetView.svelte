@@ -78,7 +78,7 @@
     return { inBudget, notBudget, unusedTops, countsToward, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
       // pace: the share of the month gone, counting today as half gone (at the end of today the marker would sit a
       // day ahead of the date all day long)
-      pace: b.day >= b.days_in_month ? 1 : Math.max(0, b.day - 0.5) / b.days_in_month };
+      pace: b.month !== thisMonth() ? (b.day >= b.days_in_month ? 1 : 0) : Math.max(0, b.day - 0.5) / b.days_in_month };
   });
 </script>
 

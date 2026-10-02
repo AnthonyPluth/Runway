@@ -229,8 +229,6 @@ export const wishName = (w: Pick<Wish, "kind" | "product" | "bank">) =>
   w.kind === "card" ? (w.product ?? "") : [w.bank, w.product].filter(Boolean).join(" ");
 
 /** Planned items still in play (wanted or ready) apart from the ones applied for or dropped. */
-/** Planned items still to do (each person's together, in their order: priorities are per person, so everyone's
- * interleaved by number would put one person's #1 between another's #1 and #2) and the ones applied for or dropped. */
 export function splitWishes(wishes: Wish[]) {
   return {
     // one order for everyone's plans (the server's: by priority), so one person's card can come between another's

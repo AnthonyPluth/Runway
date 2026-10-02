@@ -201,7 +201,7 @@ def upcoming(wishlist: list[dict], today: date, end: date) -> list[dict]:
 
 
 def _detail(w: dict) -> str:
-    return "; ".join(w["hints"]) if w["hints"] else ("Priority " + str(w["priority"]) if w.get("priority") else "")
+    return "; ".join(w["hints"])   # (not its priority: that's a place in everyone's plans, not this person's)
 
 
 def alerts(wishlist: list[dict], today: date) -> list[dict]:
