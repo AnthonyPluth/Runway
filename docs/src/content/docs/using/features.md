@@ -32,7 +32,7 @@ On the Overview page.
 - **One-off edits:** click any upcoming amount (dotted underline) to change it for that date only; a recurring item’s repeat icon opens Bills & income to change every one.
 - **Warnings link to their fix:** a card with no statement (or an out-of-date one you entered) opens that card in Settings → Accounts at its Statement; one with no paying account opens Settings → Accounts, and big payments the forecast leaves out open Bills & income.
 - **Known limitations:** with more than one account in the forecast, a recurring transfer from one to another (to savings, say) only counts as money out unless you add the matching money in on the other account as its own recurring item. Plaid reports the date a statement was issued, which Runway takes as its closing date; for an issuer that posts the statement a day or two after it closes, charges in those days are counted toward the next statement rather than this one.
-- **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions.
+- **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions (leaving out what you marked Ignore).
 
 ## Connections
 

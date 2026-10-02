@@ -14,6 +14,7 @@ import CardsTable from "./CardsTable.svelte";
 import { forecastSheet } from "./forecastSheet.svelte";
 import ForecastTable from "./ForecastTable.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
+import ThisMonth from "./ThisMonth.svelte";
 
 beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
 afterEach(() => { app.state = null; forecastSheet.open = false; vi.useRealTimers(); });
@@ -87,6 +88,13 @@ describe("SetupChecklist", () => {
     render(SetupChecklist);
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast.error).toHaveBeenCalledWith("Nope");
+  });
+});
+
+describe("ThisMonth", () => {
+  it("leaves ignored transactions out of Recent", () => {
+    render(ThisMonth);
+    expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
   });
 });
 
