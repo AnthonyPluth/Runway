@@ -49,6 +49,7 @@
 
 /* Dark: near-black behind, slightly raised surfaces with a hairline edge, blue for actions. */
 .dark {
+  color-scheme: dark;   /* the browser's own controls (number arrows, scrollbars, menus) drawn light on dark, not black */
   --background: #0b0b0c;
   --foreground: #ffffff;
   --card: #18181a;
@@ -118,6 +119,9 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   body { @apply bg-background text-foreground; font-optical-sizing: auto; font-feature-settings: "cv11", "ss03"; -webkit-font-smoothing: antialiased; }
+  /* Dates are typed, not picked: no calendar button on date fields (Chrome, Edge, Safari; Firefox and phones
+     keep their own picker). */
+  input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
 }
 
 /* Runway's chart colors. Categorical series in this order (validated for colorblind
