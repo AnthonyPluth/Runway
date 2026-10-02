@@ -419,7 +419,7 @@ describe("RetirementPlanner", () => {
 
     it("lists a loan against nothing for its payment, with what's owed: it isn't sold", () => {
       const stu = repaying({ account_id: "stu", payoff_year: 2029 });
-      const none = { ...stu, key: "loan:exp", name: "Expedition Loan", kind: "loan", value: 0, owed: 30000,
+      const none = { ...stu, key: "loan:exp", name: "Car Loan", kind: "loan", value: 0, owed: 30000,
         loan: { rate: null, payment: null, source: null, note: "no_rate" as const, account_id: "exp", payoff_year: null, payment_counted: null } };
       setup(data({ assets: [{ ...stu, key: "loan:stu", name: "Student Loan", kind: "loan", value: 0, owed: 12000 }, none] }));
       expect(screen.getByRole("heading", { name: "Homes, other assets & loans" })).toBeInTheDocument();

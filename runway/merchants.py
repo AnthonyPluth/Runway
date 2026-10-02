@@ -202,8 +202,8 @@ def _norm(s: str | None) -> str:
 
 def best_match(name: str, candidates: list[dict]) -> dict | None:
     """The candidate brand that is clearly this merchant, or None: better no logo than someone else's. A match is the
-    same name (or website) give or take spaces, punctuation and "Inc", a name the bank cut short ("Mackenthun's Fine
-    Fo" is "Mackenthun's Fine Foods"), a brand the merchant's name starts with ("Kwik Trip 1173"), or a close spelling."""
+    same name (or website) give or take spaces, punctuation and "Inc", a name the bank cut short ("Hillside's Fine Fo"
+    is "Hillside's Fine Foods"), a brand the merchant's name starts with ("Kwik Trip 2050"), or a close spelling."""
     n = _norm(name)
     squashed = n.replace(" ", "")
     if len(squashed) < 3:

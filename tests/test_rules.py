@@ -60,12 +60,12 @@ class MatchingTests(Base):
         # Made ("remember for this merchant") when the payee was "Target Cach Tran Cash"; payees are shorter now, and
         # the bank's text ("...TARGET DEBIT CACH TRAN (Cash)") doesn't have that long name in it either.
         self.rule(match="target cach tran cash", category="Shopping")
-        self.rule(match="fifth third baweb pay cash", match_mode="exact", category="Loans")
+        self.rule(match="lakeside bank baweb pay cash", match_mode="exact", category="Loans")
         a = self.tx(-35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)")
         b = self.tx(-47.02, "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)")
-        c = self.tx(-698.38, "FIFTH THIRD BAWEB PAY CASH 20251001")
+        c = self.tx(-512.40, "LAKESIDE BANK BAWEB PAY CASH 20251001")
         d = self.tx(-12, "TARGETED ADS LLC")                      # not Target
-        e = self.tx(-20, "FIFTH THIRD MORTGAGE")                  # Fifth Third, but not the merchant the rule was for
+        e = self.tx(-20, "LAKESIDE BANK MORTGAGE")                  # Lakeside Bank, but not the merchant the rule was for
         self.rule(match="paypal ach transfer", category="Transfer")
         f = self.tx(-100, "PAYPAL ACH TRANSFER 20251001")         # a trace number after the bank's words
         g = self.tx(-25, "PAYPAL")                                # a purchase, not the transfers the rule is for
