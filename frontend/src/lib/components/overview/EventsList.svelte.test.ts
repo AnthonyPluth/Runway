@@ -15,9 +15,8 @@ import { category } from "../../../test/fixtures";
 import EventsList from "./EventsList.svelte";
 
 type Ev = ForecastEvent & { late_from?: string | null };
-const estimate = (): StatementEstimate => ({ basis: "average", close: "2026-03-01", due: "2026-03-26", charged_so_far: 300, usual: 766.67,
-  average: 1350, days_left: 17, days_left_share: 0.5667, cycles: [{ close: "2026-01-01", amount: 1200 }, { close: "2026-02-01", amount: 1500 }],
-  statement: 1066.67, total: 1066.67 });
+const estimate = (): StatementEstimate => ({ close: "2026-03-01", due: "2026-03-26", charged_so_far: 300,
+  budgets: [{ category: "Groceries", amount: 500 }, { category: "Dining", amount: 266.67 }], budgets_total: 766.67, statement: 1066.67, total: 1066.67 });
 const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
 // `events` is also a Testing Library mount option, so props go under `props`.
 const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, onchanged: vi.fn(), ...extra } });
@@ -111,19 +110,28 @@ describe("EventsList", () => {
       expect(screen.getByRole("button", { name: "−$140.00" }).parentElement).not.toHaveTextContent("*");
     });
 
+    it("lets a card with no statement yet (no key to edit it by) open its breakdown too", async () => {
+      show([ev({ kind: "card", estimated: true, assumed_cycle: true, key: undefined, name: "New card statement", amount: -350,
+        estimate: { close: "2026-02-28", due: "2026-03-25", assumed_cycle: true, owed_now: 40, budgets: [{ category: "Travel", amount: 310 }],
+          budgets_total: 310, statement: 350, total: 350 } })]);
+      const mark = screen.getByRole("button", { name: "What this estimate is made of" });
+      await userEvent.click(mark);
+      expect(document.getElementById(mark.getAttribute("aria-controls")!)).toHaveTextContent(/Owed on the card now \$40\.00/);
+    });
+
     it("lists what a card statement's estimate is made of: in its tooltip, and under the row on a tap", async () => {
       show([ev({ kind: "card", estimated: true, name: "Visa statement", key: "cardclose:cc:2026-03-01", amount: -1066.67, estimate: estimate() })]);
       const mark = screen.getByRole("button", { name: "What this estimate is made of" });
       expect(mark).toHaveTextContent("*");
       expect(mark).toHaveClass("absolute", "left-full");
       expect(mark.title.split("\n")).toEqual(["Estimate for the Mar 1 statement", "Charged so far · $300.00",
-        "Usual spending, 17 days left · $766.67 (57% of $1,350.00, the average of $1,200.00, $1,500.00)", "= $1,066.67"].map((l) => l.replace("Mar 1", "Mar\u00a01")));
+        "Budgets on this card to Mar 1 · $766.67 (Groceries $500.00, Dining $266.67)", "= $1,066.67"].map((l) => l.replace(/Mar 1/g, "Mar\u00a01")));
       expect(mark).toHaveAttribute("aria-expanded", "false");
       expect(screen.queryByText("Charged so far")).toBeNull();   // collapsed by default
       await userEvent.click(mark);
       expect(mark).toHaveAttribute("aria-expanded", "true");
       const breakdown = document.getElementById(mark.getAttribute("aria-controls")!)!;
-      expect(breakdown).toHaveTextContent(/Charged so far \$300\.00\s*Usual spending, 17 days left/);
+      expect(breakdown).toHaveTextContent(/Charged so far \$300\.00\s*Budgets on this card to/);
       expect(breakdown).toHaveTextContent("= $1,066.67");
       expect(api).not.toHaveBeenCalled();   // a tap on the asterisk doesn't edit the amount
       await userEvent.click(mark);
@@ -135,9 +143,11 @@ describe("EventsList", () => {
       expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/statement hasn't closed yet/);
     });
 
-    it("says when a card estimate comes from the budgets paid with it", () => {
-      show([ev({ kind: "card", estimated: true, from_budgets: true, key: undefined })]);
-      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
+    it("says a card estimate is what's on the card plus its budgets and recurring charges, with no average", () => {
+      show([ev({ kind: "card", estimated: true, key: undefined })]);
+      const title = screen.getByRole("img", { name: "estimate" }).title;
+      expect(title).toMatch(/your budgets paid with it and its recurring charges/);
+      expect(title).not.toMatch(/average/);
     });
 
     it("links a recurring item's name to it in Recurring, with no repeat icon", () => {
@@ -184,21 +194,6 @@ describe("EventsList", () => {
     show([ev({ account: "Checking" })], { accounts: true });
     expect(screen.getByText("Checking", { selector: "div" })).toBeInTheDocument();          // under the item's name
     expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
-  });
-
-  it("shows the budget line's balance beside a day's projected balance, once for several accounts", () => {
-    const { unmount } = show([ev({ account_id: "chk", balance_after: 900 })], { onBudget: { "2026-03-15": 850 } });
-    expect(screen.getByText("· on budget $850.00")).toHaveClass("text-chart-2");
-    unmount();
-    show([ev({ key: "a", account_id: "chk", balance_after: 900 }), ev({ key: "b", account_id: "sav", balance_after: 400 })],
-      { onBudget: { "2026-03-15": 1200 } });
-    expect(screen.queryByText(/· on budget/)).not.toBeInTheDocument();
-    expect(screen.getByText("on budget, all accounts $1,200.00")).toBeInTheDocument();
-  });
-
-  it("shows no budget figure on a day it isn't given", () => {
-    show([ev()], { onBudget: { "2026-03-16": 850 } });
-    expect(screen.queryByText(/on budget/)).not.toBeInTheDocument();
   });
 
   it("groups items by day under the date, with no dividers inside a day, and the projected balance once a day per account", () => {

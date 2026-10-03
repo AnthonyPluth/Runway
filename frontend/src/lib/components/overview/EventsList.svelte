@@ -18,15 +18,13 @@
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
-  // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh). `onBudget`: the budget
-  // line's balance by day (all the forecast's accounts together), from the first day it differs from the forecast's; each
-  // day shows it beside its projected balance.
-  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged, onBudget }: {
+  // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
+  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
-    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void; onBudget?: Record<string, number>;
+    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
-  // Estimated statements whose breakdown is open under the row (by key): its asterisk toggles it.
+  // Estimated statements whose breakdown is open under the row (by the row's id): its asterisk toggles it.
   let explained = $state<Record<string, boolean>>({});
   const uid = $props.id();
   // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
@@ -34,7 +32,7 @@
   // (an annual fee is a card charge: it never moves one).
   const days = $derived.by(() => {
     type Ev = (typeof events)[number];
-    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[]; budgeted?: number }[] = [];
+    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
     shown.forEach((e, i) => {
       if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [] });
       out.at(-1)!.rows.push({ e, i });
@@ -43,7 +41,6 @@
       const last = new Map<string, Ev>();
       for (const { e } of d.rows) if (e.kind !== "fee") last.set(e.account_id ?? "", e);
       d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
-      d.budgeted = d.balances.length ? onBudget?.[d.date] : undefined;   // the budget line's, beside the balance
     }
     return out;
   });
@@ -73,8 +70,10 @@
   <div class="px-4 pt-2.5 pb-1 text-[13px] font-medium text-muted-foreground" role="heading" aria-level="3">{fmtDow(d.date)}</div>
   {#each d.rows as { e, i } (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
+    {@const rid = e.key ?? `${e.date}-${e.name}-${i}`}
+    {@const open = !!(e.estimate && !e.overridden && explained[rid])}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
-    <div class={["cell min-h-12 flex-wrap py-2", e.key && explained[e.key] && "items-start"]}>
+    <div class={["cell min-h-12 flex-wrap py-2", open && "items-start"]}>
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}
         <Logo src={e.logo} />
@@ -107,23 +106,22 @@
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-good"]}>
         <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. A card statement's
-             asterisk is a button: its tooltip lists what the estimate is made of, and a tap shows the same under the row. -->
+             asterisk is a button: its tooltip lists what the estimate is made of, and a tap shows the same under the row.
+             An amount you've changed is yours, not an estimate: no asterisk. -->
         <!-- The asterisk hangs past the amount, so amounts line up on the right with or without one. -->
         <span class="relative flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
-            save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated && !e.overridden}{#if e.estimate && e.key}{@const k = e.key}<button type="button"
+            save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated && !e.overridden}{#if e.estimate}{@const est = e.estimate}<button type="button"
             class="absolute top-0 left-full ml-0.5 cursor-pointer text-muted-foreground after:absolute after:-inset-y-3 after:left-0 after:-right-3 hover:text-foreground"
-            aria-label="What this estimate is made of" aria-expanded={!!explained[k]} aria-controls={`${uid}-${k}`}
-            title={estimateTitle(e.estimate)} onclick={() => (explained[k] = !explained[k])}>*</button>{:else}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
-              ? "the statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
-              : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}{/if}</span>
+            aria-label="What this estimate is made of" aria-expanded={open} aria-controls={`${uid}-${rid}`}
+            title={estimateTitle(est)} onclick={() => (explained[rid] = !explained[rid])}>*</button>{:else}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments"
+              : "the statement hasn't closed yet; what's on the card so far, plus your budgets paid with it and its recurring charges"}`}>*</span>{/if}{/if}</span>
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
       </div>
-
-      {#if e.estimate && !e.overridden && e.key && explained[e.key]}
+      {#if open && e.estimate}
         <!-- under the name (past the icon), its amounts lined up under the row's -->
-        <EstimateBreakdown estimate={e.estimate} id={`${uid}-${e.key}`} class="-mt-2 basis-full pl-11" />
+        <EstimateBreakdown estimate={e.estimate} id={`${uid}-${rid}`} class="-mt-2 basis-full pl-11" />
       {/if}
     </div>
   {/each}
@@ -131,15 +129,8 @@
     <div class="flex flex-wrap justify-end gap-x-1.5 px-4 pt-0.5 pb-3 text-[13px] text-muted-foreground tabular-nums">
       {#if accounts && b.account}<span class="truncate">{b.account} ·</span>{/if}
       <span class={b.amount < 0 ? "font-medium text-destructive" : ""}>projected balance {fmt(b.amount)}</span>
-      <!-- With one account, its balance on budget beside it; with several, once for them all (below). -->
-      {#if d.budgeted !== undefined && d.balances.length === 1}<span class={d.budgeted < 0 ? "font-medium text-destructive" : "text-chart-2"}
-        title="If you stick to your budget">· on budget {fmt(d.budgeted)}</span>{/if}
     </div>
   {/each}
-  {#if d.budgeted !== undefined && d.balances.length > 1}
-    <div class={["-mt-2 px-4 pb-3 text-right text-[13px] tabular-nums", d.budgeted < 0 ? "font-medium text-destructive" : "text-chart-2"]}
-      title="If you stick to your budget">on budget, all accounts {fmt(d.budgeted)}</div>
-  {/if}
   </div>
   {/each}
   {#if events.length > shown.length}

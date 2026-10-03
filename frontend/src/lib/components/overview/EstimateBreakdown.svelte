@@ -3,7 +3,7 @@
   import { estimateHeading, estimateLines } from "./estimate";
 
   // An estimated statement's parts, a line each with its amount on the right and what it's from under it, in a row's
-  // muted second-line style: shown under the row when its asterisk (or "about … a statement") is tapped, for a touch
+  // muted second-line style: shown under the row when its asterisk is tapped, for a touch
   // screen, where a tooltip never shows.
   let { estimate, id, class: className }: { estimate: StatementEstimate; id?: string; class?: string } = $props();
   const lines = $derived(estimateLines(estimate));

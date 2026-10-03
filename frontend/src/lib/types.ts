@@ -34,6 +34,8 @@ export interface AppState {
   /** What banks said on that sync (an expired login, say): it still worked, but they need you. */
   sync_warnings?: string[];
   last_llm_error?: string | null;
+  /** When a backup was last downloaded from Settings → Data, ISO with its UTC offset. */
+  last_backup?: string | null;
   review_count?: number;
   plaid_undecided?: number;
   horizon_days?: number;
@@ -69,6 +71,10 @@ export interface Category {
   custom_icon?: string | null;
   custom_color?: string | null;
   transactions?: number;
+  /** Settings' list only: rules that set it (or split into it), whether it has a budget, and order items in it. */
+  rules?: number;
+  budgeted?: boolean;
+  items?: number;
   [key: string]: unknown;
 }
 
@@ -93,8 +99,8 @@ export interface ForecastEvent {
   key?: string;
   category?: string | null;
   estimated?: boolean;
-  /** A card statement estimated from the budgets paid with the card plus its usual spending outside them. */
-  from_budgets?: boolean;
+  /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
+  assumed_cycle?: boolean;
   /** An estimated card statement: what it's made of. Never on one whose amount you've changed (that's not an estimate). */
   estimate?: StatementEstimate;
   overridden?: boolean;
@@ -118,33 +124,23 @@ export interface ForecastEvent {
 }
 
 /** What an estimated card statement is made of (forecast.estimate_parts). Only what went into it is there; the parts
- *  (charged_so_far, budgets_total, usual, separate_total, fees_total, carried, interest) add up to `statement` to the
- *  cent, and each list adds up to its total. */
+ *  (charged_so_far or owed_now, budgets_total, recurring_total, fees_total, carried, interest) add up to `statement` to
+ *  the cent, and each list adds up to its total. */
 export interface StatementEstimate {
-  /** budgets: the budgets paid with the card plus its usual spending outside them; average: its average spending;
-   *  recent: its recent daily rate (not enough history for an average). */
-  basis: "budgets" | "average" | "recent";
   close: string;
   due: string;
-  /** On the card already this cycle (the one in progress). */
+  /** A card with no statement yet: its cycle is taken to end with the month. */
+  assumed_cycle?: boolean;
+  /** On the card since the last statement closed (the cycle in progress). */
   charged_so_far?: number;
+  /** A card with no statement yet: what it owes today, in its first statement (below zero: a credit). */
+  owed_now?: number;
+  /** The budgets paid with the card, each one's spending to the close. */
   budgets?: { category: string; amount: number }[];
   budgets_total?: number;
-  /** What the average (or the daily rate) adds; on the cycle in progress, its share of the days left. */
-  usual: number;
-  /** The average it's from (budgets: of the spending outside budgets), and the statements averaged, oldest first. */
-  average?: number | null;
-  outside_average?: number | null;
-  cycles?: { close: string; amount: number }[];
-  /** The cycle in progress: the days left to the close, and their share of the cycle. */
-  days_left?: number;
-  days_left_share?: number;
-  /** basis recent: the daily rate, over this many days. */
-  daily_rate?: number;
-  days?: number;
-  /** Recurring charges on the card added on their dates (the average doesn't have them). */
-  separate?: { name: string; amount: number }[];
-  separate_total?: number;
+  /** The card's recurring charges in the cycle that no budget has. */
+  recurring?: { name: string; amount: number }[];
+  recurring_total?: number;
   /** Annual fees charged in the cycle. */
   fees?: { name: string; amount: number }[];
   fees_total?: number;
@@ -181,10 +177,6 @@ export interface CardSummary {
   apr?: number | null;
   apr_source?: "you" | "issuer" | null;
   due_date: string;
-  avg_monthly_spend?: number | null;
-  avg_cycles?: number;
-  /** The card's next estimated statement in the forecast (one whose payment you haven't changed), if any. */
-  next_estimate?: StatementEstimate | null;
   /** Where the statement is from: Plaid, or entered by you. */
   statement_source?: "plaid" | "manual";
   /** One you entered that a newer one should have replaced by now. */
@@ -213,19 +205,10 @@ export interface Overview {
   /** `setting`: changing a setting on that page puts it right (false: an overdue payment, a statement still to come). */
   warning_links: { text: string; href: string; setting?: boolean }[];
   missed?: Missed[];
+  /** The budgets the forecast spends (`monthly` a month in all), and the ones it leaves out, with why. */
   budget?: {
     monthly: number;
-    total: number[];
-    low: { date: string; balance: number };
+    used: { category: string; amount: number; account_id: string; account: string; chosen: boolean }[];
     skipped: { category: string; reason: string }[];
-    /** What sticking to the budget takes out, day by day: each budget paid from a forecast account, and each card's
-     *  statement made of budgeted spending (charged: what's already on the card, in the first one). */
-    changes?: BudgetChange[];
   } | null;
-}
-
-interface BudgetChange {
-  date: string; account_id: string; kind: "budget" | "card"; name: string; amount: number; category?: string; account?: string; charged?: number;
-  /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
-  assumed_cycle?: boolean;
 }

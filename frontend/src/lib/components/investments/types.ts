@@ -179,7 +179,7 @@ export interface Tracked {
 export interface Series {
   name: string;
   values: (number | null)[];
-  cls: "s-main" | "s-alt" | "s-muted";
+  cls: "s-main" | "s-alt" | "s-muted" | "s-4" | "s-5" | "s-6";
   area?: boolean;
   step?: boolean;
 }

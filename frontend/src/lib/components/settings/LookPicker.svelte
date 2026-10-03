@@ -15,6 +15,12 @@
   let { c }: { c: Category } = $props();
   let open = $state(false);
   let root = $state<HTMLElement>();
+  let trigger = $state<HTMLButtonElement>();
+  // Escape and Done put the focus back on the icon; a click elsewhere leaves it where you clicked.
+  function close(refocus = true) {
+    open = false;
+    if (refocus) trigger?.focus();
+  }
 
   async function save(icon: string | null | undefined, color: string | null | undefined) {
     try {
@@ -41,34 +47,34 @@
   // Where a computer keeps its emoji panel (phones have an emoji key on the keyboard instead).
   const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
   const shortcut = /iPhone|iPad|Android/.test(ua) ? "" : /Mac/.test(ua) ? "Ctrl+⌘+Space" : /Windows/.test(ua) ? "Win+." : "";
-  function outside(e: MouseEvent) { if (open && root && !root.contains(e.target as Node)) open = false; }
+  function outside(e: MouseEvent) { if (open && root && !root.contains(e.target as Node)) close(false); }
 </script>
 
-<svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") open = false; }} />
+<svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") { e.preventDefault(); close(); } }} />
 
-<span class="relative" bind:this={root}>
-  <button type="button" class="cursor-pointer rounded-full ring-offset-2 ring-offset-card hover:ring-2 hover:ring-ring/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-    title="Change the emoji" aria-label={`Emoji for ${c.name}`} aria-expanded={open} onclick={() => (open = !open)}>
+<span class="relative inline-flex" bind:this={root}>
+  <button type="button" bind:this={trigger} class="flex cursor-pointer items-center justify-center rounded-full phone:size-10 ring-offset-2 ring-offset-card hover:ring-2 hover:ring-ring/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    title="Change the emoji" aria-label={`Emoji for ${c.name}`} aria-haspopup="dialog" aria-expanded={open} onclick={() => (open ? close() : (open = true))}>
     <CatIcon name={c.name} size={28} />
   </button>
   {#if open}
     <div data-editor role="dialog" aria-label={`Emoji for ${c.name}`}
-      class="absolute top-9 left-0 z-20 w-72 rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg">
+      class="absolute top-9 left-0 z-20 w-[20.5rem] max-w-[calc(100vw-2rem)] rounded-lg phone:top-11 border bg-popover p-3 text-popover-foreground shadow-lg">
       <div class="mb-1.5 text-xs font-medium text-muted-foreground">Emoji</div>
       <input bind:this={box} bind:value={typed} oninput={onType} onkeydown={onKey} type="search" autocomplete="off" spellcheck="false" enterkeyhint="done"
         class="mb-1 h-8 w-full rounded-md border bg-background px-2 text-base" placeholder="Search, or type any emoji"
         aria-label={`Search or type an emoji for ${c.name}`} />
       <p class="mb-2 text-xs text-muted-foreground">{shortcut ? `${shortcut} opens your computer’s emoji panel.` : "Your keyboard’s emoji key has every emoji."}</p>
       <div class="mt-2 mb-1 text-xs text-muted-foreground">{searching ? (found.length ? "Matches" : "No matches; try another word") : "Or pick one"}</div>
-      <div class="grid grid-cols-10 gap-0.5">
+      <div class="grid max-h-72 grid-cols-8 gap-0.5 overflow-y-auto">
         {#each searching ? found : CAT_EMOJI as e (e)}
-          <button type="button" class={cn("flex size-6 cursor-pointer items-center justify-center rounded text-base hover:bg-muted", c.icon === e && "bg-muted ring-1 ring-ring")}
+          <button type="button" class={cn("flex size-9 cursor-pointer items-center justify-center rounded-md text-xl hover:bg-muted", c.icon === e && "bg-muted ring-1 ring-ring")}
             aria-label={`Use ${e}`} onclick={() => pickIcon(e)}>{e}</button>
         {/each}
       </div>
       <div class="mt-3 flex justify-between">
         <Button variant="link" size="sm" class="px-0" disabled={!c.custom_icon && !c.custom_color} onclick={() => save(null, null)}>Reset to default</Button>
-        <Button variant="outline" size="sm" onclick={() => (open = false)}>Done</Button>
+        <Button variant="outline" size="sm" onclick={() => close()}>Done</Button>
       </div>
     </div>
   {/if}

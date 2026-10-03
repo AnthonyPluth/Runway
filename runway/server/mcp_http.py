@@ -17,10 +17,10 @@ from .routes import ROUTES, _match
 # and answers what the caller may do (mcp_access.Access), or None.
 CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.resolve_bearer,)
 
-WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Advanced."
+WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Data."
 READ_ONLY = ("This connection can only read. To let the assistant change churning, reconnect Runway in the assistant and "
              "allow \"Change churning\" when Runway asks.")
-CATEGORIZE_OFF = "Categorizing is switched off. Turn on \"Let assistants categorize\" in Runway under Settings → Advanced."
+CATEGORIZE_OFF = "Categorizing is switched off. Turn on \"Let assistants categorize\" in Runway under Settings → Data."
 CANT_CATEGORIZE = ("This connection can't categorize. To let the assistant pick categories, reconnect Runway in the assistant "
                    "and allow \"Categorize\" when Runway asks.")
 # Why a change of each scope can't be made: (the connection wasn't allowed it, the switch is off).

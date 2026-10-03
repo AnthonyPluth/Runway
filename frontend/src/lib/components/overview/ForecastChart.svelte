@@ -11,7 +11,6 @@
   const iw = $derived(W - m.left - m.right), ih = H - m.top - m.bottom;
   const series = $derived(fc.total);
   const n = $derived(series.length);
-  const alt = $derived(fc.budget?.total?.length === series.length ? fc.budget.total : null);
 
   // The days on show, v0 to v1: every day of the forecast.
   const v0 = 0, v1 = $derived(Math.max(0, n - 1));
@@ -28,10 +27,9 @@
     return out;
   }
   const ticks = $derived.by(() => {
-    const both = alt ? shown(series).concat(shown(alt)) : shown(series);
     // The axis always starts at $0, so the line's height is the balance; it only goes lower to show
     // a balance that dips below zero.
-    const lo = Math.min(0, ...both), hi = Math.max(0, ...both);
+    const lo = Math.min(0, ...shown(series)), hi = Math.max(0, ...shown(series));
     return niceTicks(lo, hi);
   });
   const y0 = $derived(ticks[0]), y1 = $derived(ticks[ticks.length - 1]);
@@ -147,7 +145,6 @@
         {#if eventsByDate[d] && inView(i)}<line x1={x(i)} x2={x(i)} y1={m.top + ih} y2={m.top + ih + 5} stroke="var(--muted-foreground)" />{/if}
       {/each}
       <path d={`M${path(series)} L${x(v1)},${y(y0)} L${x(v0)},${y(y0)} Z`} fill="url(#fc-area)" />
-      {#if alt}<path d={`M${path(alt)}`} fill="none" stroke="var(--chart-2)" stroke-width="1.6" stroke-dasharray="5 4" />{/if}
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
       {#if lowIndex >= 0 && inView(lowIndex)}
         {@const lx = x(lowIndex)}
@@ -177,7 +174,6 @@
         style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>
         <div class="text-muted-foreground">{fmtDow(fc.dates[hover])}</div>
         <div class="text-base font-semibold tabular-nums">{fmt(series[hover])}</div>
-        {#if alt}<div class="flex justify-between gap-4" style:color="var(--chart-2)"><span>If you stick to your budget</span><span class="tabular-nums">{fmt(alt[hover])}</span></div>{/if}
         {#each eventsByDate[fc.dates[hover]] ?? [] as ev, j (j)}
           <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular-nums">{fmtSigned(ev.amount)}</span></div>
         {/each}
