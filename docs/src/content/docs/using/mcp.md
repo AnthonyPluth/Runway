@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-Runway serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so an assistant like Claude can read your accounts, transactions, budget, reports, net worth, orders and credit-card churning (cards, benefits, upcoming fees) and answer questions about them. It never sees your bank connections, settings, API keys or backups.
+Runway serves a [Model Context Protocol](https://modelcontextprotocol.io) endpoint, so an assistant like Claude can read your accounts, transactions, budget, reports, net worth, orders and credit-card churning (cards, benefits, upcoming fees) and answer questions about them, and, if you allow it, make changes. It never sees your bank connections, settings, API keys or backups.
 
 ## Connecting
 
@@ -39,6 +39,17 @@ An assistant can also ask for **categorize:write**: setting a transaction's cate
 - **Let assistants categorize** switched on in the card. It's separate from the churning switch, off until you turn it on, and checked on every change.
 
 A connection approved without it that tries to categorize is told to reconnect. A transaction that's split across categories is refused (one category would remove its parts); change those in Runway. Setting a category marks the transaction reviewed and yours; `set_transaction_category` replies with what it had before (`was`), but there's no undo over MCP: setting the old category again leaves it reviewed, and a remembered rule stays until you change it under Settings → Rules.
+
+## Letting it change anything (optional)
+
+An assistant can also ask for **write**: adding, changing and removing your financial data, as the web app does. That's transactions, budgets, categories, rules, recurring items, forecast amounts, accounts, net worth items, equity, investments, churning and orders, deletes included. It never reaches bank connections (Plaid, SimpleFIN, Carta), API keys and other settings, notifications, logos, backups, or these assistant settings themselves (the blocked list is `BLOCKED` in `runway/mcp_access.py`), and it can't change which bank connection an account comes from. It brings the churning and categorize changes with it. A change needs both:
+
+- **Change anything** ticked on the approval page (offered only when the assistant asks for it, and never ticked for you), and
+- **Let assistants change anything** switched on in the card. It's separate from the other two, off until you turn it on, and checked on every change.
+
+Runway tells the assistant to describe every change and wait for your yes, and for anything destructive (removing or deleting something, or changing many records at once, marked as such) to say what will be lost and ask again, one change at a time. Most areas have their own tools; `list_endpoints` lists everything else it can reach and `call_endpoint` calls it, through the same checks.
+
+The worked example: paste or upload a statement and ask the assistant to enter it. It reads the rows, checks the account with you, shows you the dates, payees and amounts, and on your yes sends them in one call (`add_transactions`, up to 500 rows). A row already in that account (same day, amount and payee) or repeated in the statement is skipped and reported; your rules categorize the rest, and what they don't goes to Review. This is for accounts Runway doesn't sync: a statement for an account a bank sync also feeds would duplicate what the sync brings in later, since only what's already there is caught.
 
 ## Endpoints
 
