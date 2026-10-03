@@ -18,7 +18,7 @@ const width = (wide: boolean) => vi.spyOn(window, "matchMedia").mockImplementati
 describe("Upcoming", () => {
   it("shows 4 items on a narrow screen and offers the rest", () => {
     width(false);
-    render(Upcoming, { props: { events: events(6) } });
+    render(Upcoming, { props: { onchanged: vi.fn(), events: events(6) } });
     expect(screen.getByText("Bill 4")).toBeInTheDocument();
     expect(screen.queryByText("Bill 5")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Show all 6/ })).toBeInTheDocument();
@@ -26,9 +26,19 @@ describe("Upcoming", () => {
 
   it("collapses to the first 3 on desktop", () => {
     width(true);
-    render(Upcoming, { props: { events: events(6) } });
+    render(Upcoming, { props: { onchanged: vi.fn(), events: events(6) } });
     expect(screen.getByText("Bill 3")).toBeInTheDocument();
     expect(screen.queryByText("Bill 4")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Show all 6/ })).toBeInTheDocument();
+  });
+
+  it("names each item's account, unless the list is filtered to one", () => {
+    width(false);
+    const { unmount } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
+    expect(screen.getByText(/^Checking ·/)).toBeInTheDocument();
+    unmount();
+    render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
+    expect(screen.queryByText(/Checking/)).not.toBeInTheDocument();
+    expect(screen.getByText("balance $100.00")).toBeInTheDocument();
   });
 });

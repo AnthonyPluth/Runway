@@ -1,6 +1,5 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { reload } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -11,18 +10,19 @@
 
   // Each card's latest statement (click it to correct the bank's figure), when it's due and its usual spending, and, for
   // a card that isn't paid in full, how much of it the forecast pays.
-  let { cards }: { cards: CardSummary[] } = $props();
+  // `onchanged` loads the forecast again after a statement is corrected, in place.
+  let { cards, onchanged }: { cards: CardSummary[]; onchanged: () => void } = $props();
   // A card that owes nothing (owed_now is never below zero: a credit reads as $0), with nothing left to pay on its
   // statement, has nothing to say here.
   const shown = $derived(cards.filter((c) => c.owed_now >= 0.005 || c.remaining > 0));
   const today = parseDate(isoDay());
 
   async function setStatement(c: CardSummary, value: number) {
-    try { await api("/api/overrides", { method: "POST", body: { key: c.statement_key, amount: value } }); toast.success("Statement balance saved"); reload(); }
+    try { await api("/api/overrides", { method: "POST", body: { key: c.statement_key, amount: value } }); toast.success("Statement balance saved"); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
   async function reset(c: CardSummary) {
-    try { await api("/api/overrides", { method: "DELETE", body: { key: c.statement_key } }); toast.success("Back to the calculated amount"); reload(); }
+    try { await api("/api/overrides", { method: "DELETE", body: { key: c.statement_key } }); toast.success("Back to the calculated amount"); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
 </script>

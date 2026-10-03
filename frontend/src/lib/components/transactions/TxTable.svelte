@@ -21,8 +21,9 @@
   // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
   // `only`: the category the list is filtered by. A split transaction then counts (and shows) only its part in it, and a
   // category set on it changes only that part. `family`: that category and its subcategories, for the receipts.
-  let { items, total, review, recurring, only = "", family, selecting = $bindable(false), onsave, onchanged, onmore }: {
-    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; only?: string; family?: string[]; selecting?: boolean;
+  // `oneAccount`: filtered to one account, so the rows leave it out.
+  let { items, total, review, recurring, only = "", family, oneAccount = false, selecting = $bindable(false), onsave, onchanged, onmore }: {
+    items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; only?: string; family?: string[]; oneAccount?: boolean; selecting?: boolean;
     onsave: (t: Tx, category: string) => Promise<void>; onchanged: () => void; onmore?: () => Promise<void>;
   } = $props();
 
@@ -148,7 +149,7 @@
         </h3>
         <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:3.75rem]">
           {#each d.rows as { t, i } (t.id)}
-            <TxRow {t} {review} {recurring} {family} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
+            <TxRow {t} {review} {recurring} {family} {oneAccount} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
               onsave={(c) => onsave(t, c)} {onchanged} />
           {/each}
         </div>

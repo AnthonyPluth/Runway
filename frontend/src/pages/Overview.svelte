@@ -174,8 +174,8 @@
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll} /></Group>
-        <Group title="Credit cards"><CardsTable cards={fc.cards} /></Group>
+        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll} onchanged={() => load(days)} /></Group>
+        <Group title="Credit cards"><CardsTable cards={fc.cards} onchanged={() => load(days)} /></Group>
       </div>
       <ThisMonth />
     </div>

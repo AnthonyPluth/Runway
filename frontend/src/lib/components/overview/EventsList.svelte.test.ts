@@ -17,7 +17,7 @@ import EventsList from "./EventsList.svelte";
 type Ev = ForecastEvent & { late_from?: string | null };
 const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
 // `events` is also a Testing Library mount option, so props go under `props`.
-const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, ...extra } });
+const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, onchanged: vi.fn(), ...extra } });
 
 beforeEach(() => {
   app.state = null;
@@ -84,7 +84,10 @@ describe("EventsList", () => {
 
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
-      expect(screen.getByText("estimate")).toBeInTheDocument();
+      // an estimate is a word in italics under the amount, not a badge by the name
+      expect(screen.getByText("estimate")).toHaveClass("italic");
+      expect(screen.getByText("estimate").closest("[data-slot=badge]")).toBeNull();
+      expect(screen.getByText("estimate").parentElement).toHaveTextContent(/1,500\.00/);
       expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-03-01 and hasn't shown up yet");
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
     });
@@ -130,7 +133,18 @@ describe("EventsList", () => {
 
   it("adds the account when several accounts' items are shown together", () => {
     show([ev({ account: "Checking" })], { accounts: true });
-    expect(screen.getByText(/· Checking/)).toBeInTheDocument();
+    expect(screen.getByText(/^Checking ·/).textContent).toMatch(/^Checking · balance \$900\.00/);
+  });
+
+  it("groups items by day under the date, with the balance once a day per account, on its last item", () => {
+    show([
+      ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),
+      ev({ key: "b", name: "Card", account_id: "chk", balance_after: 2000 }),
+      ev({ key: "c", name: "Rent", account_id: "sav", account: "Savings", balance_after: 700 }),
+      ev({ key: "d", name: "Paycheck", date: "2026-03-16", amount: 3000, account_id: "chk", balance_after: 5000 }),
+    ]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent!.replace(/\s/g, " "))).toEqual(["Sun, Mar 15", "Mon, Mar 16"]);
+    expect(screen.getAllByText(/^balance /).map((b) => b.textContent)).toEqual(["balance $2,000.00", "balance $700.00", "balance $5,000.00"]);
   });
 
   describe("limit", () => {
@@ -168,6 +182,19 @@ describe("EventsList", () => {
       await userEvent.type(input, "1400{Enter}");
       expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: -1400 } });
       expect(toast.success).toHaveBeenCalledWith("Updated for this date only");
+    });
+
+    it("loads the forecast again in place, without drawing the page afresh", async () => {
+      const onchanged = vi.fn(), version = app.version;
+      show([ev({ overridden: true, original_amount: -1400 })], { onchanged });
+      await userEvent.click(screen.getByRole("button", { name: "−$1,500.00" }));
+      const input = screen.getByRole("spinbutton", { name: "Amount" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "1400{Enter}");
+      await vi.waitFor(() => expect(onchanged).toHaveBeenCalledTimes(1));
+      await userEvent.click(screen.getByRole("button", { name: "reset" }));
+      await vi.waitFor(() => expect(onchanged).toHaveBeenCalledTimes(2));
+      expect(app.version).toBe(version);
     });
 
     it("on the rest of one paid in parts, saves the whole occurrence: what you typed plus what came", async () => {

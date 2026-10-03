@@ -240,6 +240,21 @@ describe("Transactions page", () => {
       expect(screen.getByText("Rent")).toBeInTheDocument();
     });
 
+    it("changes a projected amount and loads the forecast again in place, keeping the list", async () => {
+      let amount = -1500;
+      serve(rows(), 2, (path, o) => (path.startsWith("/api/overview") ? { events: [{ date: "2026-03-20", name: "Rent", amount, kind: "recurring", key: "k", balance_after: 1, account_id: "a1", account: "Checking" }] }
+        : path === "/api/overrides" && o?.method === "POST" ? (amount = -1400, { ok: true }) : undefined));
+      const version = app.version;
+      render(Transactions);
+      await userEvent.click(await screen.findByRole("button", { name: "−$1,500.00" }));
+      const input = screen.getByRole("spinbutton", { name: "Amount" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "1400{Enter}");
+      expect(await screen.findByRole("button", { name: "−$1,400.00" })).toBeInTheDocument();
+      expect(screen.getByText("Alpha")).toBeInTheDocument();
+      expect(app.version).toBe(version);   // the page wasn't drawn afresh
+    });
+
     it("leaves out projected items from other accounts when filtered to one", async () => {
       txFilters.transactions.account = "a1";
       serve(rows(), 2, (path) => (path.startsWith("/api/overview") ? { events: [{ date: "2026-03-20", name: "Other rent", amount: -5, kind: "recurring", key: "k", balance_after: 1, account_id: "zzz" }] } : undefined));

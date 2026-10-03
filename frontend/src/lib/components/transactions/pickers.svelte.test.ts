@@ -278,12 +278,12 @@ describe("Upcoming", () => {
   const ev = { date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "rent-1", balance_after: 900 };
 
   it("shows nothing when nothing is projected", () => {
-    const { container } = render(Upcoming, { props: { events: [] } });
+    const { container } = render(Upcoming, { props: { onchanged: vi.fn(), events: [] } });
     expect(container.textContent?.trim()).toBe("");
   });
 
   it("lists projected items under a heading, with the account since several are shown together", () => {
-    render(Upcoming, { props: { events: [{ ...ev, account: "Checking" }] } });
+    render(Upcoming, { props: { onchanged: vi.fn(), events: [{ ...ev, account: "Checking" }] } });
     expect(screen.getByRole("heading", { name: "Upcoming · projected" })).toBeInTheDocument();
     expect(screen.getByText("Rent")).toBeInTheDocument();
     expect(screen.getByText(/Checking/)).toBeInTheDocument();
