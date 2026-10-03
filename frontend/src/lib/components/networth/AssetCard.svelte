@@ -61,7 +61,7 @@
       {/if}
       <div class="mt-1 text-sm text-muted-foreground">
         {valueSource(a.source)}{a.source !== "manual" && a.low && a.high ? ` (range ${fmt0(a.low)}–${fmt0(a.high)})` : ""}
-        · {a.as_of ? fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" }) : "—"}{a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year since` : ""}
+        · {a.as_of ? fmtDate(a.as_of, { month: "short", day: "numeric", year: "numeric" }) : "—"}{a.yearly_change ? ` · ${a.yearly_change > 0 ? "+" : "−"}${Math.abs(a.yearly_change)}% a year` : ""}
         {#if stale} · <span class="font-semibold text-[var(--warning)]">worth a fresh look</span>{/if}
       </div>
       {#if a.address}<div class="text-sm text-muted-foreground">{a.address}</div>{/if}
