@@ -211,7 +211,7 @@ def _refusal(fetch: Fetch, scope: str = CHURNING) -> str:
         why = fetch("access", {"scope": scope}).get("why")
     except (ToolError, AttributeError):
         why = None
-    return why or f"Changes are switched off. Turn on \"{_SWITCHES[scope]}\" in Runway under Settings → Advanced."
+    return why or f"Changes are switched off. Turn on \"{_SWITCHES[scope]}\" in Runway under Settings → Data."
 
 
 def _change(template: str, id_arg: str | None = None, fields: bool = False, extra: tuple[str, ...] = ()) -> Callable[[Fetch, dict], Any]:

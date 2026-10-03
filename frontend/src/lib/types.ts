@@ -34,6 +34,8 @@ export interface AppState {
   /** What banks said on that sync (an expired login, say): it still worked, but they need you. */
   sync_warnings?: string[];
   last_llm_error?: string | null;
+  /** When a backup was last downloaded from Settings → Data, ISO with its UTC offset. */
+  last_backup?: string | null;
   review_count?: number;
   plaid_undecided?: number;
   horizon_days?: number;
@@ -69,6 +71,10 @@ export interface Category {
   custom_icon?: string | null;
   custom_color?: string | null;
   transactions?: number;
+  /** Settings' list only: rules that set it (or split into it), whether it has a budget, and order items in it. */
+  rules?: number;
+  budgeted?: boolean;
+  items?: number;
   [key: string]: unknown;
 }
 
