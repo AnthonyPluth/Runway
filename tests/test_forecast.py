@@ -1238,8 +1238,10 @@ class EstimatePartsTests(LedgerCase):
 
     def test_whats_charged_and_the_budgets_on_the_card(self):
         # Groceries ($500 a month, $200 spent) and Restaurants ($93, $100 spent: none left this month) on the card
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
-        self.conn.execute(insert(Budget).values(category="Restaurants", amount=93, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Restaurants", amount=93))
+        self.conn.execute(update(Category).where(Category.name == "Restaurants").values(pay_with="cc"))
         est = self.estimates()
         oct10 = est["2026-11-05"]
         self.assertEqual((oct10["close"], oct10["due"], oct10["charged_so_far"]), ("2026-10-10", "2026-11-05", 300.0))
@@ -1281,7 +1283,8 @@ class EstimatePartsTests(LedgerCase):
     def test_a_card_with_no_statement_yet(self):
         # A new card owing $40, with $310 a month of Travel on it: its cycle is taken to end with the month.
         self.acct("cc3", "credit", -40.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         est = self.estimates(card="cc3")
         sep = est["2026-10-26"]
         self.assertEqual((sep["assumed_cycle"], sep["close"], sep["due"], sep["owed_now"]), (True, "2026-09-30", "2026-10-25", 40.0))
@@ -1292,7 +1295,8 @@ class EstimatePartsTests(LedgerCase):
         self.assertNotIn("owed_now", oct_)
 
     def test_an_amount_you_set_is_not_an_estimate(self):
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
         fc = forecast.build(self.conn, TODAY, 90)
         e = next(e for e in fc["events"] if e.get("key") == "cardclose:cc:2026-10-10")
