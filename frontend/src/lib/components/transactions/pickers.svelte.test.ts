@@ -286,6 +286,6 @@ describe("Upcoming", () => {
     render(Upcoming, { props: { onchanged: vi.fn(), events: [{ ...ev, account: "Checking" }] } });
     expect(screen.getByRole("heading", { name: "Upcoming · projected" })).toBeInTheDocument();
     expect(screen.getByText("Rent")).toBeInTheDocument();
-    expect(screen.getByText(/Checking/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Checking/).length).toBeGreaterThan(0);
   });
 });

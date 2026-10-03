@@ -35,13 +35,13 @@ describe("EventsList", () => {
     show([ev()]);
     expect(screen.getByText("Rent")).toBeInTheDocument();
     expect(screen.getByText(/Sun, Mar 15/)).toBeInTheDocument();
-    expect(screen.getByText(/balance \$900\.00/)).toBeInTheDocument();
+    expect(screen.getByText("projected balance $900.00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "−$1,500.00" })).toBeInTheDocument();
   });
 
   it("marks a balance that goes negative", () => {
     show([ev({ balance_after: -20 })]);
-    expect(screen.getByText("balance -$20.00")).toHaveClass("text-destructive");
+    expect(screen.getByText("projected balance -$20.00")).toHaveClass("text-destructive");
   });
 
   it("shows income as a green plus amount", () => {
@@ -84,17 +84,23 @@ describe("EventsList", () => {
 
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
-      // an estimate is a word in italics under the amount, not a badge by the name
-      expect(screen.getByText("estimate")).toHaveClass("italic");
-      expect(screen.getByText("estimate").closest("[data-slot=badge]")).toBeNull();
-      expect(screen.getByText("estimate").parentElement).toHaveTextContent(/1,500\.00/);
+      // an estimate is an asterisk right after the amount, not a word or a badge
+      const mark = screen.getByRole("img", { name: "estimate" });
+      expect(mark).toHaveTextContent("*");
+      expect(mark.parentElement).toHaveTextContent(/1,500\.00\*$/);
+      expect(screen.queryByText("estimate")).not.toBeInTheDocument();
       expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-03-01 and hasn't shown up yet");
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
     });
 
     it("explains a card estimate differently from a recurring one", () => {
       show([ev({ kind: "card", estimated: true, key: undefined })]);
-      expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
+      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/statement hasn't closed yet/);
+    });
+
+    it("says when a card estimate comes from the budgets paid with it", () => {
+      show([ev({ kind: "card", estimated: true, from_budgets: true, key: undefined })]);
+      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
     });
 
     it("marks recurring items with the repeat icon, which opens Recurring to change every one", () => {
@@ -133,10 +139,11 @@ describe("EventsList", () => {
 
   it("adds the account when several accounts' items are shown together", () => {
     show([ev({ account: "Checking" })], { accounts: true });
-    expect(screen.getByText(/^Checking ·/).textContent).toMatch(/^Checking · balance \$900\.00/);
+    expect(screen.getByText("Checking", { selector: "div" })).toBeInTheDocument();          // under the item's name
+    expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
   });
 
-  it("groups items by day under the date, with the balance once a day per account, on its last item", () => {
+  it("groups items by day under the date, with no dividers inside a day, and the projected balance once a day per account", () => {
     show([
       ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),
       ev({ key: "b", name: "Card", account_id: "chk", balance_after: 2000 }),
@@ -144,7 +151,13 @@ describe("EventsList", () => {
       ev({ key: "d", name: "Paycheck", date: "2026-03-16", amount: 3000, account_id: "chk", balance_after: 5000 }),
     ]);
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent!.replace(/\s/g, " "))).toEqual(["Sun, Mar 15", "Mon, Mar 16"]);
-    expect(screen.getAllByText(/^balance /).map((b) => b.textContent)).toEqual(["balance $2,000.00", "balance $700.00", "balance $5,000.00"]);
+    expect(screen.getAllByText(/^projected balance /).map((b) => b.textContent))
+      .toEqual(["projected balance $2,000.00", "projected balance $700.00", "projected balance $5,000.00"]);
+    // a day is one block of the grouped list (its hairlines fall between blocks): the items of Mar 15 share one
+    const day = document.querySelector("[data-day='2026-03-15']")!;
+    expect(day.parentElement!.querySelectorAll(":scope > [data-day]")).toHaveLength(2);
+    expect(day.textContent).toContain("Taxes");
+    expect(day.textContent).toContain("Rent");
   });
 
   describe("limit", () => {

@@ -1001,7 +1001,6 @@ class PaymentModeTests(LedgerCase):
     def test_a_credit_on_the_card_carries_into_the_next_statement(self):
         # A $1,000 refund since the close against $300 of charges: a $700 credit, even paying in full
         self.tx("cc", "2026-09-22", 1000.0, "STORE REFUND", "Refunds")
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         c = self.card(fc)
         self.assertEqual((c["pay_mode"], c["new_charges"], c["credit"], c["payment"], c["carried"]), ("full", 0.0, 700.0, 600.0, 0.0))
@@ -1011,11 +1010,6 @@ class PaymentModeTests(LedgerCase):
         self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-12-07": round(s1 + self.EST2, 2)})
         self.assertTrue(all(e["amount"] < 0 for e in fc["events"] if e["kind"] == "card"))   # never a negative payment
         self.assertFalse(self.interest_warned(fc))   # a credit isn't a balance carried
-        # the budget line too: Oct 10's statement is the credit plus budgeted charges, still below zero
-        card = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "card"}
-        s1 = -700 + 300 + 500 / 31 * 10
-        self.assertNotIn("2026-11-05", card)
-        self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
         # not paying in full, an edit left from before on a statement that now has nothing to pay isn't a payment: no
         # event, and the credit is untouched
         self.pay("fixed", amount="5000")
@@ -1023,6 +1017,67 @@ class PaymentModeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertNotIn("2026-11-05", self.payments(fc))
         self.assertEqual(self.payments(fc)["2026-12-07"], round(-700 + 1066.67 * 17 / 30 + self.EST2, 2))
+
+
+    def test_a_credit_carries_with_budgets_on_both_lines(self):
+        self.tx("cc", "2026-09-22", 1000.0, "STORE REFUND", "Refunds")
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        # the forecast: the credit, then Groceries' $300 left this month over its 7 days and $500 a month after, plus the
+        # average outside Groceries (933.33) as before: Oct 10's comes to $290.18
+        outside = (1200 + 800 + 800) / 3
+        s1 = -700 + outside * 17 / 30 + 300 + 500 / 31 * 10
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": round(s1, 2),
+                                             "2026-12-07": round(outside + 500 / 31 * 21 + 500 / 30 * 10, 2)})
+        # the budget line: Oct 10's statement is the credit plus budgeted charges, still below zero
+        card = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "card"}
+        s1 = -700 + 300 + 500 / 31 * 10
+        self.assertNotIn("2026-11-05", card)
+        self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
+
+    def test_with_budgets_a_cards_statements_are_its_budgets_plus_its_other_spending(self):
+        # Groceries ($500 a month, $200 spent this month) is paid with the card. The card's other spending averaged
+        # 933.33 over its last three statements (1,200, 800 and 1,200 less the $400 of groceries).
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        outside = (1200 + 800 + 800) / 3
+        self.assertEqual(self.card(fc)["avg_outside"], round(outside, 2))
+        oct10 = 300 + outside * 17 / 30 + 300 + 500 / 31 * 10    # on the card already, the rest of its share, Groceries to Oct 10
+        nov10 = outside + 500 / 31 * 21 + 500 / 30 * 10
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": round(oct10, 2), "2026-12-07": round(nov10, 2)})
+        est = [e for e in fc["events"] if e["kind"] == "card" and e["estimated"]]
+        self.assertTrue(est and all(e["from_budgets"] for e in est))
+        # A budget paid from checking isn't on the card: the card's statements are only its spending outside budgets
+        self.conn.execute(update(Budget).where(Budget.category == "Groceries").values(pay_with="chk"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": round(300 + outside * 17 / 30, 2),
+                                             "2026-12-07": round(outside, 2)})
+
+    def test_with_budgets_a_recurring_charge_on_the_card_counts_once(self):
+        # A $600 yearly subscription on the card, due Oct 20 (last year's is older than the averaged statements)
+        self.tx("cc", "2025-10-20", -600.0, "STREAMFLIX YEARLY", "Subscriptions")
+        self.conn.execute(insert(Recurring).values(name="Streamflix", account_id="cc", amount=-600, frequency="yearly",
+                                                   anchor_date="2025-10-20", match="streamflix"))
+        self.assertEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], round(self.EST2 + 600, 2))
+        # A budget for Groceries leaves it on the card, on top of the budgets ...
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        outside = (1200 + 800 + 800) / 3
+        nov10 = outside + 500 / 31 * 21 + 500 / 30 * 10
+        self.assertEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], round(nov10 + 600, 2))
+        # ... and one for Subscriptions (paid from checking) has it already, so it isn't added again
+        self.conn.execute(insert(Budget).values(category="Subscriptions", amount=50, pay_with="chk"))
+        self.assertEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], round(nov10, 2))
+
+    def test_with_budgets_a_carried_balance_is_charged_interest_on_the_budgeted_charges_too(self):
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.pay("minimum", apr="24")
+        fc = forecast.build(self.conn, TODAY, 90)
+        outside = (1200 + 800 + 800) / 3
+        # Sep 10's $800, minimum $40, already met by the $200 paid: $600 carries into Oct 10's statement. Carrying a
+        # balance ends the grace period, so its interest is on the $600 and on half the cycle's charges, budgeted ones too.
+        oct10 = 300 + outside * 17 / 30 + 300 + 500 / 31 * 10
+        interest = (600 + oct10 / 2) * 0.24 / 12
+        self.assertEqual(self.payments(fc)["2026-11-05"], self.minimum(600 + interest + oct10, interest))
 
     def test_paying_the_minimum_writes_nothing(self):
         # the payment plan is read from settings, never written, while the forecast is built
