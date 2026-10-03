@@ -54,23 +54,23 @@
           <table class="w-full text-sm">
             <thead>
               <tr class="text-left text-xs text-muted-foreground [&>th]:pb-2 [&>th]:font-medium [&>th+th]:pl-4 [&>th+th]:whitespace-nowrap">
-                <th>Merchant</th><th class="max-sm:hidden">Usual category</th><th class="text-right">Visits</th>
-                <th class="text-right max-sm:hidden">Average</th><th class="max-sm:hidden">Last</th><th class="text-right">Money out</th>
+                <th>Merchant</th><th class="max-lg:hidden">Usual category</th><th class="text-right">Visits</th>
+                <th class="text-right max-lg:hidden">Average</th><th class="max-lg:hidden">Last</th><th class="text-right">Money out</th>
               </tr>
             </thead>
             <tbody>
               {#each d.merchants as x (x.name)}
                 {@const isOpen = open.has(x.name)}
                 <tr class={cn("relative border-t hover:bg-muted/50 [&>td]:py-2.5 [&>td+td]:pl-4", isOpen && "bg-muted/50")}>
-                  <td class="w-full max-w-0">
+                  <td class="w-full max-w-0 min-w-28">
                     <button class="block max-w-full cursor-pointer truncate text-left outline-none after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring"
                       title={x.name} aria-expanded={isOpen} onclick={() => toggle(x.name)}>{x.name}</button>
                     <span class="mt-1 block h-1 rounded-sm bg-(--flow-out) opacity-55" style:width={`${Math.max(2, (x.total / top) * 100)}%`}></span>
                   </td>
-                  <td class="max-w-44 truncate text-muted-foreground max-sm:hidden" title={x.category}>{catLook(x.category).icon} {x.category}</td>
+                  <td class="max-w-44 truncate text-muted-foreground max-lg:hidden" title={x.category}>{catLook(x.category).icon} {x.category}</td>
                   <td class="text-right tabular-nums">{x.count}</td>
-                  <td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{fmt0(x.average)}</td>
-                  <td class="whitespace-nowrap text-muted-foreground max-sm:hidden">{fmtDate(x.last)}</td>
+                  <td class="text-right text-muted-foreground tabular-nums max-lg:hidden">{fmt0(x.average)}</td>
+                  <td class="whitespace-nowrap text-muted-foreground max-lg:hidden">{fmtDate(x.last)}</td>
                   <td class="text-right whitespace-nowrap tabular-nums">{fmt0(x.total)}</td>
                 </tr>
                 {#if isOpen}

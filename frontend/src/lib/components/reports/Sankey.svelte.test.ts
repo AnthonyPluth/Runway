@@ -74,7 +74,8 @@ describe("Sankey", () => {
 
   it("on a touch screen, the first tap selects (its line stays under the chart) and the second opens", async () => {
     render(Sankey, { cf, monthName: "March" });
-    const tap = async (el: Element) => { await fireEvent.pointerDown(el, { pointerType: "touch" }); await fireEvent.click(el); };
+    // as a browser does it: the tap focuses the mark between its pointerdown and its click
+    const tap = async (el: Element) => { await fireEvent.pointerDown(el, { pointerType: "touch" }); await fireEvent.focus(el); await fireEvent.click(el); };
     await tap(mark(/^Groceries: /));
     expect(showTransactions).not.toHaveBeenCalled();
     expect(detail()).toHaveTextContent("Groceries · $500 · 22% of money out");

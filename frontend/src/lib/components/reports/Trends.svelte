@@ -134,8 +134,8 @@
               <tr class="text-left text-xs text-muted-foreground [&>th]:pb-2 [&>th]:font-medium [&>th+th]:pl-4 [&>th+th]:whitespace-nowrap">
                 <th>{GROUPS[d.group]}</th><th class="text-right whitespace-nowrap">{curLabel}</th>
                 {#if n > 1}<th class="text-right max-[480px]:hidden">{vsLabel(d.months[cur - 1])}</th>{/if}
-                {#if lastYear != null}<th class="text-right max-sm:hidden">{vsLabel(d.months[lastYear])}</th>{/if}
-                {#if n > 1}<th class="text-right max-sm:hidden">Monthly average</th>{/if}<th class="text-right">{n} months</th>
+                {#if lastYear != null}<th class="text-right max-lg:hidden">{vsLabel(d.months[lastYear])}</th>{/if}
+                {#if n > 1}<th class="text-right max-lg:hidden">Monthly average</th>{/if}<th class="text-right">{n} months</th>
               </tr>
             </thead>
             <tbody>
@@ -145,7 +145,7 @@
                 {@const c = change(s.values[cur], prev)}
                 {@const on = s.name === st.focus}
                 <tr class={cn("relative border-t hover:bg-muted/50 [&>td]:py-2.5 [&>td+td]:pl-4 [&>td+td]:whitespace-nowrap", on && "bg-muted/50")}>
-                  <td class="w-full max-w-0">
+                  <td class="w-full max-w-0 min-w-28">
                     {#if s.other}
                       <button class="flex max-w-full cursor-pointer items-center text-left outline-none after:absolute after:inset-0 focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ring"
                         aria-expanded={others} onclick={() => (others = !others)}>
@@ -163,8 +163,8 @@
                   <td class="text-right tabular-nums">{fmt0(s.values[cur])}</td>
                   {#if n > 1}<td class={cn("text-right tabular-nums max-[480px]:hidden", typeof c === "number" && c > 0.1 ? "text-(--low)" : "text-muted-foreground")}
                     title={partial ? `${fmt0(prev)} by the same day` : undefined}>{changeTxt(c)}</td>{/if}
-                  {#if lastYear != null}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{changeTxt(change(s.values[cur], ago))}</td>{/if}
-                  {#if n > 1}<td class="text-right text-muted-foreground tabular-nums max-sm:hidden">{fmt0(avg(s.values))}</td>{/if}
+                  {#if lastYear != null}<td class="text-right text-muted-foreground tabular-nums max-lg:hidden">{changeTxt(change(s.values[cur], ago))}</td>{/if}
+                  {#if n > 1}<td class="text-right text-muted-foreground tabular-nums max-lg:hidden">{fmt0(avg(s.values))}</td>{/if}
                   <td class="text-right tabular-nums">{fmt0(s.total)}</td>
                 </tr>
                 {#if s.other && others && s.members?.length}

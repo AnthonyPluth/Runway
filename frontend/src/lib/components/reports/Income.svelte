@@ -78,7 +78,7 @@
             {#each d.months.slice().reverse() as r (r.month)}
               {@const left = Math.round(r.income) - Math.round(r.spending)}
               <tr class="border-t [&>td]:py-2.5 [&>td+td]:pl-4 [&>td+td]:whitespace-nowrap">
-                <td class="sm:whitespace-nowrap"><span class="max-sm:hidden">{monthLabel(r.month)}</span><span class="sm:hidden">{monthShort(r.month, true)}</span>{#if r.month === now}<span class="text-muted-foreground">{" (so far)"}</span>{/if}</td>
+                <td class="lg:whitespace-nowrap"><span class="max-lg:hidden">{monthLabel(r.month)}</span><span class="lg:hidden">{monthShort(r.month, true)}</span>{#if r.month === now}<span class="text-muted-foreground">{" (so far)"}</span>{/if}</td>
                 <td class="text-right tabular-nums">{fmt0(r.income)}</td>
                 <td class="text-right tabular-nums">{fmt0(r.spending)}</td>
                 <td class={cn("text-right tabular-nums", left < 0 && r.month !== now && "text-(--low)")}>{fmtSigned0(left).replace(/^\+/, "")}</td>

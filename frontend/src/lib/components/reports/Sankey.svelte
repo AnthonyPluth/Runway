@@ -98,13 +98,17 @@
     const r = box!.getBoundingClientRect();
     tip = t; at = { x: e.clientX - r.left, y: e.clientY - r.top };
   }
-  let touch = false;
-  const down = (e: PointerEvent) => { touch = e.pointerType !== "mouse"; };
+  let touch = false, pointing = false;
+  const down = (e: PointerEvent) => { touch = e.pointerType !== "mouse"; pointing = true; };
   function activate(t: Sel) {
+    pointing = false;
     if ((touch && sel?.key !== t.key) || !t.filters) { sel = t; tip = null; return; }
     showTransactions(t.filters);
   }
+  // Focus from the keyboard selects; a tap or a click focuses too, but it's handled as one (activate).
+  function focused(t: Sel) { if (!pointing) sel = t; }
   function key(e: KeyboardEvent, t: Sel) {
+    pointing = false;
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (t.filters) showTransactions(t.filters); }
     if (e.key === "Escape") sel = null;
   }
@@ -130,7 +134,7 @@
             class={["outline-none transition-[fill-opacity] hover:[fill-opacity:0.55] focus-visible:[fill-opacity:0.55]", t.filters && "cursor-pointer",
               sel?.key === l.key ? "[fill-opacity:0.6]" : l.role === "neutral" ? "[fill-opacity:0.2]" : "[fill-opacity:0.3]"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}
-            onfocus={() => (sel = t)} onkeydown={(e) => key(e, t)}>
+            onfocus={() => focused(t)} onkeydown={(e) => key(e, t)}>
             {#if t.filters}<title>See transactions: {t.name}</title>{/if}
           </path>
         {/each}
@@ -141,7 +145,7 @@
             stroke={sel?.key === n.key ? "var(--foreground)" : "var(--card)"} stroke-width={sel?.key === n.key ? 2 : 1}
             class={["outline-none focus-visible:stroke-foreground", t.filters && "cursor-pointer"]}
             onmousemove={(e) => show(e, t)} onmouseleave={() => (tip = null)} onpointerdown={down} onclick={() => activate(t)}
-            onfocus={() => (sel = t)} onkeydown={(e) => key(e, t)}>
+            onfocus={() => focused(t)} onkeydown={(e) => key(e, t)}>
             {#if t.filters}<title>See transactions: {n.name}</title>{/if}
           </rect>
         {/each}
