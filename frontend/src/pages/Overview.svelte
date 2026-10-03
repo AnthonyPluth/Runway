@@ -51,14 +51,6 @@
 
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
-  // The budget line's balance by day, from the first day it differs from the forecast's (Coming up shows it beside each
-  // day's projected balance); none when there are no budgets or it never differs.
-  function onBudget(fc: Overview): Record<string, number> | undefined {
-    const alt = fc.budget?.total;
-    if (!alt || alt.length !== fc.total.length) return undefined;
-    const first = alt.findIndex((v, i) => Math.abs(v - fc.total[i]) >= 0.005);
-    return first < 0 ? undefined : Object.fromEntries(fc.dates.slice(first).map((d, k) => [d, alt[first + k]]));
-  }
   const lowWhen = (fc: Overview) => (fc.low.date === fc.today ? "today" : relDay(fc.low.date, fc.today));
 
   // "Left out: Mortgage and Utilities, which recurring items already cover; Medical, whose account isn't in the forecast."
@@ -70,7 +62,8 @@
     return " Left out: " + Object.entries(by).map(([reason, cats]) => {
       const why = reason.startsWith("a recurring") ? (cats.length > 1 ? "which recurring items already cover" : "which a recurring item already covers")
         : reason.startsWith("its account") ? (cats.length > 1 ? "whose accounts aren't in the forecast" : "whose account isn't in the forecast")
-        : reason.startsWith("its card") ? (cats.length > 1 ? "whose cards aren't paid from a forecast account" : "whose card isn't paid from a forecast account") : reason;
+        : reason.startsWith("its card isn't") ? (cats.length > 1 ? "whose cards aren't paid from a forecast account" : "whose card isn't paid from a forecast account")
+        : reason.startsWith("its card's statement") ? (cats.length > 1 ? "whose cards' statements are out of date" : "whose card's statement is out of date") : reason;
       return `${list(cats)}, ${why}`;
     }).join("; ") + ".";
   }
@@ -136,7 +129,7 @@
 
     <!-- The hero: today's balance, whether it holds up, and the forecast under it. The chart is green while the
          balance stays above zero and red when it dips below. -->
-    <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "var(--good)"} style:--chart-2="#64d2ff">
+    <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "var(--good)"}>
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")}
         onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
       <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
@@ -159,15 +152,12 @@
       {/if}
 
       <div class="mt-5">
-        {#if fc.budget}
-          <div class="mb-1 flex flex-wrap gap-4 text-xs text-muted-foreground">
-            <span class="flex items-center gap-1.5"><i class="inline-block h-0.5 w-4 bg-chart-1"></i>Forecast</span>
-            <span class="flex items-center gap-1.5" title={`Your budgets, ${fmt0(fc.budget.monthly)} a month, spent in place of estimated card statements.${budgetSkipped(fc.budget.skipped)}`}>
-              <i class="inline-block h-0 w-4 border-t-2 border-dashed border-chart-2"></i>If you stick to your budget
-            </span>
-          </div>
-        {/if}
         <ForecastChart {fc} />
+        <!-- What the line spends besides scheduled items: your budgets, and nothing else. -->
+        <p class="mt-1 text-xs text-muted-foreground" title={fc.budget ? budgetSkipped(fc.budget.skipped).trim() || undefined : undefined}>
+          {#if fc.budget?.used.length}Spends your budgets, {fmt0(fc.budget.monthly)} a month, along with your recurring bills and income.
+          {:else}Recurring bills and income only: <a class="font-medium text-foreground underline underline-offset-4" href="#budget">set budgets</a> to include everyday spending.{/if}
+        </p>
       </div>
       <Segmented label="Forecast length" value={String(days)} onchange={setDays} class="mt-3 flex w-full"
         options={[...new Set([30, 60, 90, 180, days])].sort((a, b) => a - b).map((d) => ({ value: String(d), label: short(d) }))} />
@@ -175,9 +165,8 @@
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <!-- On budget figures in the budget line's blue, as on the chart. -->
-        <div style:--chart-2="#64d2ff"><Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll}
-          onchanged={() => load(days)} onBudget={onBudget(fc)} /></Group></div>
+        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll}
+          onchanged={() => load(days)} /></Group>
         <Group title="Credit cards"><CardsTable cards={fc.cards} onchanged={() => load(days)} /></Group>
       </div>
       <ThisMonth />

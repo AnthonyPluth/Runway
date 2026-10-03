@@ -1,5 +1,5 @@
 """Budgets: what each category spent in a month, and what a budget that rolls over carries into the next one. Shared by
-the Budget page and the forecast's "stick to the budget" scenario."""
+the Budget page and the forecast, which spends the budgets."""
 from __future__ import annotations
 
 from datetime import date

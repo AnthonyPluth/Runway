@@ -93,8 +93,8 @@ export interface ForecastEvent {
   key?: string;
   category?: string | null;
   estimated?: boolean;
-  /** A card statement estimated from the budgets paid with the card plus its usual spending outside them. */
-  from_budgets?: boolean;
+  /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
+  assumed_cycle?: boolean;
   overridden?: boolean;
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
@@ -138,8 +138,6 @@ export interface CardSummary {
   apr?: number | null;
   apr_source?: "you" | "issuer" | null;
   due_date: string;
-  avg_monthly_spend?: number | null;
-  avg_cycles?: number;
   /** Where the statement is from: Plaid, or entered by you. */
   statement_source?: "plaid" | "manual";
   /** One you entered that a newer one should have replaced by now. */
@@ -168,19 +166,10 @@ export interface Overview {
   /** `setting`: changing a setting on that page puts it right (false: an overdue payment, a statement still to come). */
   warning_links: { text: string; href: string; setting?: boolean }[];
   missed?: Missed[];
+  /** The budgets the forecast spends (`monthly` a month in all), and the ones it leaves out, with why. */
   budget?: {
     monthly: number;
-    total: number[];
-    low: { date: string; balance: number };
+    used: { category: string; amount: number; account_id: string; account: string; chosen: boolean }[];
     skipped: { category: string; reason: string }[];
-    /** What sticking to the budget takes out, day by day: each budget paid from a forecast account, and each card's
-     *  statement made of budgeted spending (charged: what's already on the card, in the first one). */
-    changes?: BudgetChange[];
   } | null;
-}
-
-interface BudgetChange {
-  date: string; account_id: string; kind: "budget" | "card"; name: string; amount: number; category?: string; account?: string; charged?: number;
-  /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
-  assumed_cycle?: boolean;
 }
