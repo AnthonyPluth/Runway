@@ -22,7 +22,9 @@ const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(Event
 beforeEach(() => {
   app.state = null;
   categories.list = [category("Housing", { icon: "🏠" }), category("Credit Card Payment", { icon: "💳" })];
-  vi.mocked(api).mockClear();
+  vi.mocked(api).mockReset();
+  vi.mocked(api).mockResolvedValue({});
+  vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
 });
 
 describe("EventsList", () => {
@@ -215,7 +217,101 @@ describe("EventsList", () => {
       await userEvent.clear(input);
       await userEvent.type(input, "1400{Enter}");
       expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: -1400 } });
-      expect(toast.success).toHaveBeenCalledWith("Updated for this date only");
+      const [msg, opts] = lastToast();
+      expect(msg).toBe("Changed for Mar\u00a015 only");
+      expect(opts.action.label).toBe("Undo");   // not a recurring item's date: nothing to change from now on
+      expect(opts.cancel).toBeUndefined();
+    });
+
+    type Btn = { label: string; onClick: () => Promise<void> };
+    const lastToast = () => vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { description?: string; action: Btn; cancel?: Btn }];
+    const edit = async (to: string) => {
+      await userEvent.click(screen.getByRole("button", { name: /\$1,500\.00/ }));
+      const input = screen.getByRole("spinbutton", { name: "Amount" });
+      await userEvent.clear(input);
+      await userEvent.type(input, `${to}{Enter}`);
+      await vi.waitFor(() => expect(toast).toHaveBeenCalled());
+    };
+    const prev = { amount: -1500, amount_mode: "avg3", amount_since: "2026-01-01", amount_min: null, amount_max: null };
+    const rent = () => ev({ key: "rec:3:2026-03-15", recurring_id: 3 });
+
+    it("on a repeating item's date, asks whether it's from now on, and Undo takes the date's change back", async () => {
+      const onchanged = vi.fn();
+      show([rent()], { onchanged });
+      await edit("1400");
+      const [msg, opts] = lastToast();
+      expect(msg).toBe("Changed for Mar\u00a015 only");
+      expect(opts.action.label).toBe("From now on");
+      expect(opts.cancel!.label).toBe("Undo");
+      expect(onchanged).toHaveBeenCalledTimes(1);
+      await opts.cancel!.onClick();
+      expect(api).toHaveBeenLastCalledWith("/api/overrides", { method: "DELETE", body: { key: "rec:3:2026-03-15" } });
+      expect(onchanged).toHaveBeenCalledTimes(2);
+    });
+
+    it("Undo puts back the date's earlier change, when it had one", async () => {
+      show([ev({ key: "rec:3:2026-03-15", recurring_id: 3, overridden: true, amount: -1500, paid_so_far: -100 })]);
+      await edit("1400");
+      await lastToast()[1].cancel!.onClick();
+      expect(api).toHaveBeenLastCalledWith("/api/overrides", { method: "POST", body: { key: "rec:3:2026-03-15", amount: -1600 } });
+    });
+
+    it("From now on makes it the item's amount (a fixed one, saying so when it was learned) and drops the date's change; Undo puts both back", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/recurring/3/amount" ? { ok: true, previous: prev } : {})) as never);
+      const onchanged = vi.fn();
+      show([rent()], { onchanged });
+      await edit("1400");
+      await lastToast()[1].action.onClick();
+      expect(api).toHaveBeenCalledWith("/api/recurring/3/amount", { method: "POST", body: { amount: -1400, key: "rec:3:2026-03-15" } });
+      expect(onchanged).toHaveBeenCalledTimes(2);
+      const [msg, opts] = lastToast();
+      expect(msg).toBe("Rent is $1,400.00 from now on");
+      expect(opts.description).toBe("A fixed amount now, not one from recent payments");
+      await opts.action.onClick();   // Undo
+      expect(api).toHaveBeenCalledWith("/api/recurring/3/amount", { method: "POST", body: { restore: prev } });
+      expect(api).toHaveBeenLastCalledWith("/api/overrides", { method: "POST", body: { key: "rec:3:2026-03-15", amount: -1400 } });
+      expect(onchanged).toHaveBeenCalledTimes(3);
+    });
+
+    it("says nothing more about the amount when the item already had a fixed one", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/recurring/3/amount" ? { ok: true, previous: { ...prev, amount_mode: "fixed" } } : {})) as never);
+      show([rent()]);
+      await edit("1400");
+      await lastToast()[1].action.onClick();
+      expect(lastToast()[1].description).toBeUndefined();
+    });
+
+    it("shows the error when From now on fails", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => { if (path.endsWith("/amount")) throw new Error("Offline"); return {}; }) as never);
+      show([rent()]);
+      await edit("1400");
+      await lastToast()[1].action.onClick();
+      expect(toast.error).toHaveBeenCalledWith("Offline");
+    });
+
+    it("on a one-time item, the change is the item's own, with Undo putting its amount back", async () => {
+      vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/overrides" ? { ok: true, item: { id: 5, name: "Tax refund" }, previous: prev } : {})) as never);
+      const onchanged = vi.fn();
+      show([ev({ name: "Tax refund", key: "rec:5:2026-03-15", recurring_id: 5 })], { onchanged });
+      await edit("1400");
+      const [msg, opts] = lastToast();
+      expect(msg).toBe("Tax refund is $1,400.00 now");
+      expect(opts.action.label).toBe("Undo");
+      expect(opts.cancel).toBeUndefined();
+      await opts.action.onClick();
+      expect(api).toHaveBeenLastCalledWith("/api/recurring/5/amount", { method: "POST", body: { restore: prev } });
+      expect(onchanged).toHaveBeenCalledTimes(2);
+    });
+
+    it("keeps everything and shows the error when saving the change fails", async () => {
+      vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
+      const onchanged = vi.fn();
+      show([rent()], { onchanged });
+      await userEvent.click(screen.getByRole("button", { name: "−$1,500.00" }));
+      await userEvent.type(screen.getByRole("spinbutton", { name: "Amount" }), "{Control>}a{/Control}1400{Enter}");
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
+      expect(onchanged).not.toHaveBeenCalled();
+      expect(toast).not.toHaveBeenCalled();
     });
 
     it("loads the forecast again in place, without drawing the page afresh", async () => {

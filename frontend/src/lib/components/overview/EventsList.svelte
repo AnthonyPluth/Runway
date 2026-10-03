@@ -10,6 +10,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
+  import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
 
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's name opens it in Recurring, to
@@ -43,14 +44,44 @@
     return out;
   });
 
+  // What a recurring item had before its own amount changed (POST /api/overrides, /api/recurring/{id}/amount), for Undo.
+  type Previous = { amount: number; amount_mode: string | null; amount_since: string | null; amount_min: number | null; amount_max: number | null };
+  const restoreItem = (id: number, previous: Previous) => api(`/api/recurring/${id}/amount`, { method: "POST", body: { restore: previous } });
+
+  // A changed amount is for that date only, with Undo; for a repeating item, "From now on" makes it the item's amount
+  // instead. A one-time item has only the one date, so the server changes the item itself (Recurring shows it).
   async function change(e: ForecastEvent, value: number) {
-    try {
-      // An edit is what the occurrence comes to in all: on "the rest" of one paid in parts, what's paid so far is added.
-      const total = value + Math.abs(e.paid_so_far ?? 0);
-      await api("/api/overrides", { method: "POST", body: { key: e.key, amount: (e.amount < 0 ? -1 : 1) * total } });
-      toast.success("Updated for this date only");
+    // An edit is what the occurrence comes to in all: on "the rest" of one paid in parts, what's paid so far is added.
+    const sign = e.amount < 0 ? -1 : 1;
+    const total = Math.round(sign * (value + Math.abs(e.paid_so_far ?? 0)) * 100) / 100;
+    const key = e.key!;
+    // This date's own edit as it was (a total, like this one), to put back on Undo; none if it had none.
+    const before = e.overridden ? Math.round((e.amount + (e.paid_so_far ?? 0)) * 100) / 100 : null;
+    let r: { item?: { id: number; name: string }; previous?: Previous };
+    try { r = await api("/api/overrides", { method: "POST", body: { key, amount: total } }); }
+    catch (err) { toast.error((err as Error).message); return; }
+    onchanged();
+    if (r?.item && r.previous) {
+      const { item, previous } = r;
+      undoable(`${item.name} is ${fmt(Math.abs(total))} now`, async () => { await restoreItem(item.id, previous); onchanged(); });
+      return;
+    }
+    const day = key.startsWith("rec:") ? key.split(":")[2] : e.date;
+    const putBack = () => api("/api/overrides", before === null ? { method: "DELETE", body: { key } } : { method: "POST", body: { key, amount: before } });
+    const rid = e.recurring_id;
+    undoable(`Changed for ${fmtDate(day)} only`, async () => { await putBack(); onchanged(); },
+      rid ? { also: { label: "From now on", run: () => fromNowOn(rid, e.name, key, total) } } : {});
+  }
+  // "From now on": the new amount becomes the item's (a fixed amount, if it was learned from the payments), and this
+  // date's edit goes. Undo puts the item back as it was, and the date's edit with it.
+  async function fromNowOn(id: number, name: string, key: string, total: number) {
+    const { previous } = await api<{ previous: Previous }>(`/api/recurring/${id}/amount`, { method: "POST", body: { amount: total, key } });
+    onchanged();
+    undoable(`${name} is ${fmt(Math.abs(total))} from now on`, async () => {
+      await restoreItem(id, previous);
+      await api("/api/overrides", { method: "POST", body: { key, amount: total } });
       onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    }, { description: previous.amount_mode && previous.amount_mode !== "fixed" ? "A fixed amount now, not one from recent payments" : undefined });
   }
   async function reset(e: ForecastEvent) {
     try { await api("/api/overrides", { method: "DELETE", body: { key: e.key } }); toast.success("Back to the usual amount"); onchanged(); }
