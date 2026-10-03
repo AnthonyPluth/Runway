@@ -60,7 +60,7 @@ from .api.retail import (
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
 from .api.transactions import (
     api_ai_apply, api_ai_log, api_ai_suggest, api_recategorize, api_transactions, api_tx_accept, api_tx_bulk,
-    api_tx_brand_name, api_tx_category, api_tx_split
+    api_tx_brand_name, api_tx_category, api_tx_create, api_tx_delete, api_tx_split, api_tx_update
 )
 
 
@@ -79,12 +79,15 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/accounts/deleted", api_accounts_deleted),
     ("POST", "/api/accounts/{id}/restore", api_account_restore),
     ("GET", "/api/transactions", api_transactions),
+    ("POST", "/api/transactions", api_tx_create),
     ("POST", "/api/transactions/bulk", api_tx_bulk),
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
     ("POST", "/api/transactions/{id}/split", api_tx_split),
     ("POST", "/api/transactions/{id}/name", api_tx_brand_name),
     ("POST", "/api/transactions/{id}/recurring", api_tx_recurring),
+    ("POST", "/api/transactions/{id}", api_tx_update),
+    ("DELETE", "/api/transactions/{id}", api_tx_delete),
     ("POST", "/api/overrides", api_override_set),
     ("DELETE", "/api/overrides", api_override_delete),
     ("GET", "/api/push", api_push),

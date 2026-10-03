@@ -367,6 +367,13 @@ def _fetch_changes(conn, item) -> tuple[list, list, list, str]:
 PLAID_IDS = "%|pl:%"   # LIKE pattern for the ids of transactions from Plaid ("<account>|pl:<Plaid's id>")
 
 
+def bank_values(row, posted: str, amount: float) -> dict:
+    """What a sync writes for a transaction it already has: the bank's date and amount, except where you changed one
+    (then the bank's goes beside it, in bank_posted or bank_amount, and yours stays)."""
+    return {"bank_posted" if row["bank_posted"] is not None else "posted": posted,
+            "bank_amount" if row["bank_amount"] is not None else "amount": amount}
+
+
 def duplicate(conn, account_id: str, posted: str, amount: float, from_plaid: bool, claimed: set) -> bool:
     """Whether the other provider already brought this transaction in (same account and amount, within a few
     days). Each earlier transaction stands in for one new one only (claimed)."""
@@ -407,12 +414,13 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         payee = bank_payee(t["merchant_name"]) if t.get("merchant_name") else clean_payee(t.get("name") or desc, keep_bank)
         pending = 1 if t.get("pending") else 0
         merchant = merchants.note(conn, t)
-        known = conn.execute(select(Transaction.is_split).where(Transaction.id == key)).fetchone()
+        known = conn.execute(select(Transaction.is_split, Transaction.bank_posted, Transaction.bank_amount)
+                             .where(Transaction.id == key)).fetchone()
         if known:
             conn.execute(update(Transaction).where(Transaction.id == key).values(
-                posted=posted, amount=amount, description=desc, pending=pending,
-                merchant_id=func.coalesce(merchant, Transaction.merchant_id)))
-            if known["is_split"]:
+                description=desc, pending=pending, merchant_id=func.coalesce(merchant, Transaction.merchant_id),
+                **bank_values(known, posted, amount)))
+            if known["is_split"] and known["bank_amount"] is None:
                 splits.follow_amount(conn, key, amount)
             continue
         since = acct["provider_since"]
@@ -426,14 +434,16 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
             prior = conn.execute(select(Transaction.payee, Transaction.description, Transaction.category, Transaction.category_source, Transaction.confidence,
-                                        Transaction.needs_review, Transaction.recurring_id, Transaction.recurring_linked_by)
+                                        Transaction.needs_review, Transaction.recurring_id, Transaction.recurring_linked_by,
+                                        Transaction.notes)
                                  .where(Transaction.id == old)).fetchone()
             conn.execute(delete(Transaction).where(Transaction.id == old))
         # And the name you gave it: a categorized one's as it was (a rule may have renamed it), an uncategorized one's
         # if it isn't the bank's (Plaid may name the merchant only once it posts).
         if prior and prior["payee"] and (prior["category"] or not payees.from_bank(prior["payee"], prior["description"])):
             payee = prior["payee"]
-        row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee, "pending": pending}
+        row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee, "pending": pending,
+               "notes": prior["notes"] if prior else None}
         if prior and prior["category"]:
             conn.execute(insert(Transaction).values(
                 **row, category=prior["category"], category_source=prior["category_source"],
