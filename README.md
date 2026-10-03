@@ -77,7 +77,7 @@ Your data stays in your own database; outbound calls go only to the services you
 
 ## Releases
 
-Every push to `main` that passes the tests publishes a new image and a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases). You can pin a version (`ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose. The running version is shown under **Settings → Advanced**; how versions are chosen is in [Development](https://anthonypluth.github.io/Runway/contributing/development/#releases).
+Every push to `main` that passes the tests publishes a new image and a [GitHub Release](https://github.com/AnthonyPluth/Runway/releases). You can pin a version (`ghcr.io/anthonypluth/runway:1.2`) and upgrade when you choose. The running version is shown under **Settings → Data**; how versions are chosen is in [Development](https://anthonypluth.github.io/Runway/contributing/development/#releases).
 
 ## License
 

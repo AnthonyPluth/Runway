@@ -53,12 +53,12 @@ describe("Settings → Notifications on this device", () => {
     expect(screen.getByText("from before sign-in")).toBeInTheDocument();
   });
 
-  it("turns another device off from the list, after asking", async () => {
+  it("removes another device from the list, after asking", async () => {
     setup([{ endpoint: "https://push/me", device: "Mac · Chrome" }, { endpoint: "https://push/phone", device: "iPhone · app" }]);
-    const offs = await screen.findAllByRole("button", { name: "Turn off" });
+    const offs = await screen.findAllByRole("button", { name: "Remove" });
     await userEvent.click(offs[1]);
     expect(api).not.toHaveBeenCalledWith("/api/push/unsubscribe", expect.anything());
-    await userEvent.click(screen.getByRole("button", { name: "Turn off?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove?" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/push/unsubscribe", { method: "POST", body: { endpoint: "https://push/phone" } }));
     expect(sub.unsubscribe).not.toHaveBeenCalled();
   });
@@ -71,5 +71,26 @@ describe("Settings → Notifications: what to tell you about", () => {
     expect(box.closest("label")).toHaveAttribute("title", "A large charge posts");
     expect(screen.queryByText(/No devices yet/)).toBeNull();
     expect(screen.queryByText("Devices")).toBeNull();
+  });
+});
+
+describe("Settings → Notifications: devices", () => {
+  it("lists each device with when it was added and last got one, under its own heading", async () => {
+    setup([{ endpoint: "https://push/me", device: "Mac · Chrome", created: 1790000000, last_ok: null }]);
+    expect(await screen.findByRole("heading", { level: 2, name: "Devices" })).toBeInTheDocument();
+    expect(screen.getByText("this one")).toBeInTheDocument();
+    expect(screen.getByText(/^Added .* · nothing delivered yet$/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();                 // rows that stack on a phone, not a table
+  });
+
+  it("says plainly why the last notification failed, with the push service's words behind Details", async () => {
+    setup([{ endpoint: "https://push/phone", device: "iPhone · app", last_error: "push service said 413" },
+      { endpoint: "https://push/old", device: "Old laptop", last_error: "couldn't reach the push service" }]);
+    expect(await screen.findByText("The last notification didn’t get through.")).toBeInTheDocument();
+    expect(screen.getByText("Couldn’t reach its push service last time.")).toBeInTheDocument();
+    const raw = screen.getByText("push service said 413");
+    expect(raw.closest("details")).not.toHaveAttribute("open");     // folded away until you ask
+    await userEvent.click(screen.getAllByText("Details")[0]);
+    expect(raw.closest("details")).toHaveAttribute("open");
   });
 });

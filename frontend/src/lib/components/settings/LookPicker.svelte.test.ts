@@ -70,4 +70,35 @@ describe("a category's emoji picker", () => {
     expect(opts.body).toMatchObject({ name: "Dining", color: "#d95926" });
     expect(opts.body.icon).not.toBe("");
   });
+
+  it("is a dialog that takes the focus, and gives it back to the icon on Escape or Done", async () => {
+    render(LookPicker, { c: cat });
+    const icon = screen.getByRole("button", { name: "Emoji for Dining" });
+    expect(icon).toHaveAttribute("aria-haspopup", "dialog");
+    await userEvent.click(icon);
+    expect(icon).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(screen.getByRole("searchbox")).toHaveFocus());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(icon).toHaveFocus();
+    expect(icon).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(icon);
+    await waitFor(() => expect(screen.getByRole("searchbox")).toHaveFocus());
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(icon).toHaveFocus();
+  });
+
+  it("closes on a click elsewhere, leaving the focus there", async () => {
+    const other = document.createElement("button");
+    document.body.append(other);
+    render(LookPicker, { c: cat });
+    await userEvent.click(screen.getByRole("button", { name: "Emoji for Dining" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await userEvent.click(other);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(other).toHaveFocus();
+    other.remove();
+  });
 });

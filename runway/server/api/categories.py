@@ -1,19 +1,33 @@
 """Categories and the rules that assign them."""
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import delete, func, select
 
 from ... import categories, db, rules, splits
-from ...models import Account, Rule, Transaction
+from ...models import Account, Budget, RetailItem, Rule, Transaction
 from ..common import ApiError
 
 
 def api_categories(conn, _q, _b):
+    """Every category, with how many transactions use it, and what else removing it would change: the rules that set
+    it, whether it has a budget, and the order items in it (Settings asks first when there's any of these)."""
     cats = categories.all_categories(conn)
     p = splits.parts()
     counts = {r["category"]: r["n"] for r in conn.execute(select(p.c.category, func.count().label("n")).group_by(p.c.category))}
+    in_rules: dict[str, int] = {}
+    for cat, split in conn.execute(select(Rule.category, Rule.split)):
+        for name in {cat, *(part["category"] for part in (json.loads(split) if split else []))} - {None}:
+            in_rules[name] = in_rules.get(name, 0) + 1
+    budgeted = set(conn.execute(select(Budget.category)).scalars())
+    items = {r[0]: r[1] for r in conn.execute(select(RetailItem.category, func.count())
+                                              .where(RetailItem.category.is_not(None)).group_by(RetailItem.category))}
     for c in cats:
         c["transactions"] = counts.get(c["name"], 0)
+        c["rules"] = in_rules.get(c["name"], 0)
+        c["budgeted"] = c["name"] in budgeted
+        c["items"] = items.get(c["name"], 0)
     return cats
 
 
