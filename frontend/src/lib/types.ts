@@ -93,6 +93,8 @@ export interface ForecastEvent {
   key?: string;
   category?: string | null;
   estimated?: boolean;
+  /** A card statement estimated from the budgets paid with the card plus its usual spending outside them. */
+  from_budgets?: boolean;
   overridden?: boolean;
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */

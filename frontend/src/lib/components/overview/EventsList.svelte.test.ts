@@ -97,6 +97,11 @@ describe("EventsList", () => {
       expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
     });
 
+    it("says when a card estimate comes from the budgets paid with it", () => {
+      show([ev({ kind: "card", estimated: true, from_budgets: true, key: undefined })]);
+      expect(screen.getByText("estimate").title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
+    });
+
     it("marks recurring items with the repeat icon, which opens Recurring to change every one", () => {
       show([ev()]);
       expect(screen.getByRole("link", { name: "Open in Recurring" })).toHaveAttribute("href", "#recurring");

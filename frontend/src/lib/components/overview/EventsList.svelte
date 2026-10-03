@@ -102,7 +102,9 @@
           <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
         {:else}{fmt(e.amount)}{/if}
         {#if e.estimated}
-          <span class="text-xs text-muted-foreground italic" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</span>
+          <span class="text-xs text-muted-foreground italic" title={e.kind !== "card" ? "Based on recent payments" : e.from_budgets
+            ? "Statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
+            : "Statement hasn't closed yet; based on the card's average over its last 3 statements"}>estimate</span>
         {/if}
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
