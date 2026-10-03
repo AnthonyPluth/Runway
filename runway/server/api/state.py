@@ -26,6 +26,8 @@ def api_state(conn, _q, _b):
         "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
         "llm_model": categorize.llm_model(conn),
         "card_ai_model": categorize.card_ai_model(conn),
+        # what an empty model field means, for Settings to show as its placeholder
+        "llm_model_default": categorize.DEFAULT_MODEL, "card_ai_model_default": categorize.DEFAULT_CARD_MODEL,
         "last_sync_ok": with_offset(db.get_setting(conn, sk.LAST_SYNC_OK)),
         "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
         "sync_warnings": json.loads(db.get_setting(conn, sk.LAST_SYNC_WARNINGS) or "[]"),   # what banks said on that sync

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, refreshState } from "$lib/app.svelte";
-  import { autosave } from "$lib/autosave";
   import { Button } from "$lib/components/ui/button";
   import { toast } from "svelte-sonner";
+  import ProblemNote from "./ProblemNote.svelte";
+  import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
-  import { fieldCls, helpCls, inputCls, linkCls, rowCls } from "./ui";
+  import { helpCls, linkCls, rowCls } from "./ui";
 
   // Real-time stock prices through Finnhub. Runway keeps one connection to it on the server, so the key never reaches
   // your browser. Without a key, live prices come from Yahoo, as before.
@@ -21,7 +22,8 @@
   async function saveKey(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     if (!f.value.trim()) return;
     await api("/api/finnhub/settings", { method: "POST", body: { api_key: f.value } });
-    toast.success("Finnhub key saved. Live prices use it the next time the market is open."); f.value = ""; await refreshState(); loadStatus();
+    f.value = "";
+    toast.success("Key saved. Live prices use it the next time the market is open."); await refreshState(); loadStatus();
   }
   async function clearKey() {
     try { await api("/api/finnhub/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); }
@@ -29,17 +31,16 @@
   }
 </script>
 
-<ServiceRow name="Live stock prices" purpose="Finnhub · real-time trades on Investments" on={configured}>
+<ServiceRow name="Live stock prices" purpose="Finnhub · real-time trades on Investments" on={configured} warn={configured && !!st?.error}>
   <p class={helpCls}>Get a free <a class={linkCls} href="https://finnhub.io/register" target="_blank" rel="noopener">Finnhub key</a>.</p>
   <div class={rowCls}>
-    <label class={`${fieldCls} w-full sm:w-72`}>Finnhub API key
-      <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "paste your key"} use:autosave={saveKey} /></label>
+    <SecretInput label="Finnhub API key" class="w-full sm:w-72" placeholder={configured ? "Key saved" : "paste your key"} save={saveKey} />
     {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
   </div>
   {#if configured && st}
     <div class="rounded-lg bg-muted/50 p-3 text-sm">
       {#if st.error}
-        <p class="text-destructive">{st.error}</p>
+        <ProblemNote text="Finnhub isn’t streaming prices; Yahoo’s are used meanwhile." detail={st.error} />
       {:else if st.connected}
         <p><b class="font-medium">Connected.</b> <span class="tabular-nums">{st.symbols}</span> of {st.limit} tickers streaming.</p>
       {:else}

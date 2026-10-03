@@ -2,11 +2,13 @@
   import { api } from "$lib/api";
   import { refreshState, reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { plural } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { inputCls } from "./ui";
 
-  // The SimpleFIN setup-token flow: paste a token, and Runway claims it and runs the first sync. Used by Connect a bank
-  // and by "Replace the connection" on the SimpleFIN row; `ondone` runs once it's connected.
+  // The SimpleFIN setup-token flow: paste a token, and Runway claims it and runs the first sync. Connecting for the first
+  // time then opens Settings → Accounts, where the new accounts are; "Replace the setup token" passes `ondone` instead,
+  // which runs once it's connected, and stays.
   let { ondone }: { ondone?: () => void } = $props();
   let token = $state("");
   let busy = $state("");
@@ -17,9 +19,10 @@
       await api("/api/connect", { method: "POST", body: { token } });
       busy = "Syncing (first sync pulls ~6 months)…";
       const r = await api<{ new: number }>("/api/sync", { method: "POST" });
-      toast.success(`Connected · ${r.new} transactions imported`);
-      await refreshState(); reload();
-      ondone?.();
+      toast.success(`Connected · ${plural(r.new, "transaction")} imported`);
+      await refreshState();
+      if (ondone) { reload(); ondone(); }
+      else location.hash = "#setup/accounts";
     } catch (err) { toast.error((err as Error).message); busy = ""; }
   }
 </script>
