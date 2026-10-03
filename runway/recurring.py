@@ -294,13 +294,14 @@ def skipped_keys(conn) -> set[str]:
 
 
 CANDIDATES = 6
+CANDIDATE_SHARE = 0.3
 
 
 def candidates(conn, item: dict, day: date, amount: float) -> list[dict]:
     """Transactions that could be the payment the item missed on `day`, to link by hand: not linked to anything (nor
     marked not recurring), on its account, moving money its way, posted within twice its matching window of the day,
-    and within half of `amount` either way (any amount, for an item that learns its amount and has none yet). Closest
-    in amount, then in date, first."""
+    and within CANDIDATE_SHARE of `amount` either way (any amount, for an item that learns its amount and has none yet).
+    Closest in amount, then in date, first."""
     t = Transaction
     window = 2 * MATCH_WINDOW_DAYS.get(item["frequency"], 6)
     want = abs(amount)
@@ -308,7 +309,8 @@ def candidates(conn, item: dict, day: date, amount: float) -> list[dict]:
          .where(t.recurring_id.is_(None), t.account_id == item["account_id"],
                 t.posted >= (day - timedelta(days=window)).isoformat(), t.posted <= (day + timedelta(days=window)).isoformat()))
     if want >= CENT:
-        q = q.where(t.amount > 0 if amount > 0 else t.amount < 0, func.abs(t.amount) >= want / 2, func.abs(t.amount) <= want * 1.5)
+        q = q.where(t.amount > 0 if amount > 0 else t.amount < 0, func.abs(t.amount) >= want * (1 - CANDIDATE_SHARE),
+                    func.abs(t.amount) <= want * (1 + CANDIDATE_SHARE))
     rows = db.rows(conn.execute(q))
     rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((date.fromisoformat(r["posted"][:10]) - day).days), r["id"]))
     return rows[:CANDIDATES]

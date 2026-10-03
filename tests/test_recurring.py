@@ -527,6 +527,7 @@ class ScheduleTests(LedgerCase):
         self.tx("chk", "2026-10-05", -1500.0, "CITY RNT PMT ONLINE")      # the rent, under another text
         self.tx("chk", "2026-10-02", -1480.0, "SOFA STORE")               # about the same amount
         self.tx("chk", "2026-10-01", -3000.0, "BIG TV")                   # twice as much
+        self.tx("chk", "2026-10-01", -1000.0, "SMALLER")                  # a third less
         self.tx("chk", "2026-10-01", 1500.0, "REFUND")                    # money in
         self.tx("chk", "2026-10-20", -1500.0, "CITY RNT PMT ONLINE")      # too long after (12 days for monthly)
         self.tx("sav", "2026-10-01", -1500.0, "CITY RNT PMT ONLINE")      # another account
