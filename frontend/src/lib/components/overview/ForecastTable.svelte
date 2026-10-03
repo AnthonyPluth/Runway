@@ -19,7 +19,8 @@
 
   const rows = $derived.by(() => {
     const byDate: Record<string, Item[]> = {};
-    const add = (d: string, it: Item) => (byDate[d] ||= []).push(it);
+    // Nothing to show for what comes to $0 (a payment edited down to nothing, say): it doesn't move either line.
+    const add = (d: string, it: Item) => { if (Math.abs(it.amount) >= 0.005) (byDate[d] ||= []).push(it); };
     // A card payment both lines make alike (same card, day and amount: its statements are its budgets plus its other
     // spending on both) is one line, not one of each.
     const same = (e: { date: string; name: string; amount: number }) => (c: { kind: string; date: string; name: string; amount: number }) =>

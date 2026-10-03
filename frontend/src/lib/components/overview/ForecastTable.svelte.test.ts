@@ -57,4 +57,12 @@ describe("ForecastTable", () => {
     expect(screen.getByText("forecast only")).toBeInTheDocument();
     expect(screen.getByText("budget only")).toBeInTheDocument();
   });
+
+  it("leaves out what comes to $0, and a day with nothing else", () => {
+    const f = fc(0, false);
+    f.events = [{ date: "2026-10-26", account_id: "chk", kind: "card", name: "Zero card statement", amount: -0.001, estimated: true }] as Overview["events"];
+    render(ForecastTable, { fc: f });
+    expect(screen.queryByText(/Zero card statement/)).not.toBeInTheDocument();
+    expect(screen.queryByText("forecast only")).not.toBeInTheDocument();
+  });
 });
