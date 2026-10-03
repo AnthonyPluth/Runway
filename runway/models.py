@@ -75,6 +75,9 @@ class Transaction(Base):
     is_split: Mapped[int | None]
     merchant_id: Mapped[str | None]
     recurring_linked_by: Mapped[str | None]
+    notes: Mapped[str | None]
+    bank_posted: Mapped[str | None]
+    bank_amount: Mapped[float | None]
 
     account: Mapped[Account] = _rel("Account", "foreign(Transaction.account_id) == Account.id")
     splits: Mapped[list[TxSplit]] = _rel("TxSplit", "foreign(TxSplit.tx_id) == Transaction.id",

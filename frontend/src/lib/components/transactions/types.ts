@@ -27,13 +27,21 @@ export interface Tx {
   match?: { amount: number; categories: string[] } | null;
   retail?: (OrderSummary & { order_id: string }) | null;
   logo?: string | null;
+  /** Your note on it. */
+  notes?: string | null;
+  /** The bank's date and amount when you changed yours (null: not changed). */
+  bank_posted?: string | null;
+  bank_amount?: number | null;
+  /** Where it came from: added by you, or a bank through Plaid or SimpleFIN. */
+  source?: "manual" | "plaid" | "simplefin";
   /** A big merchant's: the brand's name a sync gave it ("Amazon") and the one the bank's text gives ("Amzn Mktp Us"),
    *  and which of them it has. */
   brand?: BrandChoice | null;
 }
 export interface BrandChoice { brand: string; bank_name: string; using: "brand" | "bank" }
 /** `family`: under a category filter, the category and its subcategories (a receipt shows just their items). */
-export interface TxList { items: Tx[]; total: number; family?: string[] }
+/** `sum`: what they all add up to, as the day totals count them (transfers left out, unless they're what's asked for). */
+export interface TxList { items: Tx[]; total: number; sum?: number; family?: string[] }
 
 /** POST /api/transactions/{id}/category (and /api/ai/apply) may offer to remember the category for the merchant. */
 export interface RuleOffer { merchant: string; match?: string; replaces?: string | null }

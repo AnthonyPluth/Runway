@@ -939,6 +939,63 @@ def set_item_category(conn, item_id: int, category: str, remember: bool = True) 
     return {"orders": len(orders), "resplit": redone}
 
 
+def item_undo_state(conn, item_id: int) -> dict:
+    """What picking a category for this item can change, as Undo puts it back (`restore_item_state`): the memory of its
+    title, and every item with that title (the others take it from memory). The transactions those items' orders paid
+    with are the caller's to save (`item_transactions`)."""
+    i = RetailItem
+    it = conn.execute(select(i.title).where(i.id == item_id)).fetchone()
+    key = item_key(it["title"]) if it else ""
+    mem = conn.execute(select(RetailItemMemory.category).where(RetailItemMemory.key == key)).fetchone() if key else None
+    items = [dict(r) for r in conn.execute(select(i.id, i.title, i.category, i.category_source, i.confidence))
+             if r["id"] == item_id or (key and item_key(r["title"]) == key)]
+    return {"key": key, "memory": mem["category"] if mem else None,
+            "items": [{k: r[k] for k in ("id", "category", "category_source", "confidence")} for r in items]}
+
+
+def item_transactions(conn, item_ids: list[int]) -> list[str]:
+    """The transactions that paid for the orders these items are in."""
+    orders = {r["order_id"] for r in conn.execute(select(RetailItem.order_id).where(RetailItem.id.in_(item_ids or [-1])))}
+    return [r["tx_id"] for r in conn.execute(select(RetailCharge.tx_id).where(RetailCharge.order_id.in_(sorted(orders) or [""]),
+                                                                              RetailCharge.tx_id.is_not(None)).order_by(RetailCharge.id))]
+
+
+def restore_item_state(conn, state: dict) -> None:
+    """Put back what `item_undo_state` saw: the title's memory (or none) and the items' categories, exactly."""
+    key = state.get("key")
+    if isinstance(key, str) and key:
+        mem = state.get("memory")
+        if isinstance(mem, str) and mem and conn.execute(select(Category.name).where(Category.name == mem)).fetchone():
+            db.upsert(conn, RetailItemMemory, {"key": key, "category": mem}, key=["key"])
+        else:
+            conn.execute(delete(RetailItemMemory).where(RetailItemMemory.key == key))
+    if isinstance(state.get("items"), list):
+        restore_items(conn, state["items"])
+
+
+_CHARGE_STATE = ("tx_id", "match_source", "not_tx", "applied")
+
+
+def charge_state(conn, charge_id: str) -> dict | None:
+    """A charge's pairing with its transaction, as Undo puts it back (`restore_charge`)."""
+    c = RetailCharge
+    row = conn.execute(select(c.id, *(getattr(c, k) for k in _CHARGE_STATE)).where(c.id == charge_id)).fetchone()
+    return dict(row) if row else None
+
+
+def restore_charge(conn, state: dict) -> bool:
+    """Put a charge's pairing back exactly as `charge_state` saw it (a transaction gone since leaves it unpaired)."""
+    if not isinstance(state, dict) or not isinstance(state.get("id"), str):
+        return False
+    values = {k: state.get(k) if isinstance(state.get(k), str) else None for k in _CHARGE_STATE}
+    if values["tx_id"] and not conn.execute(select(Transaction.id).where(Transaction.id == values["tx_id"])).fetchone():
+        values.update(tx_id=None, applied=None)
+    if values["tx_id"]:   # a transaction pairs with one charge
+        conn.execute(update(RetailCharge).where(RetailCharge.tx_id == values["tx_id"], RetailCharge.id != state["id"])
+                     .values(tx_id=None, applied=None))
+    return conn.execute(update(RetailCharge).where(RetailCharge.id == state["id"]).values(**values)).rowcount > 0
+
+
 def _orders_of(conn, tx_ids: list[str], refunds: bool = True) -> dict[str, list[str]]:
     """{tx id: the orders its charges pay for (or, with `refunds`, its refunds came from)}. A charge pairs with one
     transaction and a transaction with one charge (`match` and `link` see to both), so this is one order each; an

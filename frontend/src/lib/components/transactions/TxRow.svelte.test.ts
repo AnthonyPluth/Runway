@@ -7,7 +7,6 @@ vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn(
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
-import { toast } from "svelte-sonner";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { category, tx } from "../../../test/fixtures";
@@ -44,11 +43,9 @@ describe("TxRow", () => {
     expect(p.onsave).toHaveBeenCalledWith("Coffee");
   });
 
-  it("leaves the account out of the row when the list is filtered to it, but keeps it in the details", async () => {
+  it("leaves the account out of the row when the list is filtered to it", () => {
     render(TxRow, props(tx(), { oneAccount: true }));
     expect(within(row()).queryByTitle("Checking")).not.toBeInTheDocument();
-    await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
-    expect(within(row()).getByText("Account")).toBeInTheDocument();
   });
 
   it("gives whatever can truncate a title with its full text", () => {
@@ -78,23 +75,34 @@ describe("TxRow", () => {
     expect(screen.queryByTitle("BLUE  BOTTLE")).not.toBeInTheDocument();
   });
 
-  it("opens the details from the name, with a Split button, where the chevron isn't shown", async () => {
-    render(TxRow, props(tx()));
-    const name = within(row()).getByRole("button", { name: "Blue Bottle" });
-    await userEvent.click(name);
-    expect(name).toHaveAttribute("aria-expanded", "true");
-    await userEvent.click(screen.getByRole("button", { name: "Split across categories" }));
-    expect(screen.getByRole("button", { name: "Save split" })).toBeInTheDocument();
+  it("opens the details (the sheet) from the name and from the chevron, at every width", async () => {
+    const onopen = vi.fn();
+    render(TxRow, props(tx(), { onopen }));
+    await userEvent.click(within(row()).getByRole("button", { name: "Blue Bottle" }));
+    await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
+    expect(onopen).toHaveBeenCalledTimes(2);
+    expect(within(row()).getByRole("button", { name: "Details for Blue Bottle" })).not.toHaveClass("hidden");
   });
 
-  it("keeps the name plain text at desktop width, where the chevron opens the details", () => {
-    vi.spyOn(window, "matchMedia").mockImplementation((q) => ({
-      matches: true, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, onchange: null, dispatchEvent: () => false,
-    }) as MediaQueryList);
-    render(TxRow, props(tx()));
-    expect(within(row()).queryByRole("button", { name: "Blue Bottle" })).not.toBeInTheDocument();
-    expect(within(row()).getByText("Blue Bottle").tagName).toBe("SPAN");
-    vi.restoreAllMocks();
+  it("dims a pending amount as well as badging it", () => {
+    render(TxRow, props(tx({ pending: 1 })));
+    expect(within(row()).getByText("−$12.50")).toHaveClass("opacity-70");
+  });
+
+  it("marks a transfer with a small ⇄ before its category, but not what's ignored", () => {
+    categories.list.push(category("Transfer", { is_transfer: 1 }), category("Ignore", { is_transfer: 1 }));
+    const { unmount } = render(TxRow, props(tx({ category: "Transfer" })));
+    expect(within(row()).getByLabelText("Transfer")).toBeInTheDocument();
+    unmount();
+    render(TxRow, props(tx({ category: "Ignore" })));
+    expect(within(row()).queryByLabelText("Transfer")).not.toBeInTheDocument();
+  });
+
+  it("shows the saved category again when a pick couldn't be saved", async () => {
+    render(TxRow, props(tx(), { onsave: vi.fn().mockResolvedValue(false) }));
+    const select = screen.getByRole("combobox", { name: "Category for Blue Bottle" });
+    await userEvent.selectOptions(select, "Groceries");
+    await vi.waitFor(() => expect(select).toHaveValue("Coffee"));
   });
 
   describe("logo", () => {
@@ -173,6 +181,8 @@ describe("TxRow", () => {
     it("lists each part's category and amount instead of a single category, without a split badge", () => {
       render(TxRow, props(split));
       expect(screen.queryByText("split")).not.toBeInTheDocument();
+      expect(screen.getByText("2 parts").closest("span")).toHaveClass("lg:hidden");   // below lg just the count
+      expect(screen.getByText("Groceries $20.00").parentElement).toHaveClass("max-lg:hidden");
       expect(screen.getByText("Groceries $20.00")).toBeInTheDocument();
       expect(screen.getByText("Coffee $10.00")).toHaveAttribute("title", "beans");
       expect(screen.queryByRole("combobox", { name: /Category for/ })).not.toBeInTheDocument();
@@ -284,9 +294,10 @@ describe("TxRow", () => {
       const badge = row().querySelector("[data-account-badge]")!;
       expect(badge).toHaveClass("absolute");
       expect(badge).not.toHaveClass("md:hidden");
+      expect(badge.className).not.toMatch(/\bring-/);   // straight over the logo's corner, no outline
       expect(badge).toHaveAttribute("title", "Shared Checking");
-      expect(within(badge as HTMLElement).getByText("Shared Checking")).toHaveClass("hidden");   // its logo only
-      expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4!");
+      expect(badge).not.toHaveTextContent("Shared Checking");   // its logo (here its letter) only
+      expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4", "lg:size-3");
       // the account's column names it without its logo again
       expect(within(row()).getAllByText("S").filter((e) => !badge.contains(e)).every((e) => e.classList.contains("hidden"))).toBe(true);
     });
@@ -302,11 +313,9 @@ describe("TxRow", () => {
       expect(within(row()).getByText("Coffee")).toBeInTheDocument();
     });
 
-    it("on a touch screen, shows the repeat icon only once it's linked, and offers linking in the details", async () => {
+    it("on a touch screen, shows the repeat icon only once it's linked (linking is in the sheet)", () => {
       render(TxRow, props(tx()));
       expect(within(row()).getByRole("button", { name: "Link to a recurring item" })).toHaveClass("[@media(hover:none)]:hidden");
-      await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
-      expect(within(row()).getByText("Link to a recurring item", { selector: "button" }).closest("div")).toHaveClass("[@media(hover:none)]:block");
     });
 
     it("hides row actions until hover only where the device can hover, so a touch screen always shows them", () => {
@@ -315,78 +324,6 @@ describe("TxRow", () => {
       expect(split).toHaveClass("hoverable:opacity-0", "hoverable:group-hover:opacity-100", "hoverable:group-focus-within:opacity-100");
       expect(split).not.toHaveClass("opacity-0");
       expect(screen.getByRole("checkbox", { name: "Select Blue Bottle" }).closest("label")).toHaveClass("hoverable:md:opacity-0");
-    });
-  });
-
-  describe("details (from lg up)", () => {
-    it("opens the details, with the account, its institution and the bank's text, and closes them again", async () => {
-      app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
-      render(TxRow, props(tx()));
-      const toggle = screen.getByRole("button", { name: "Details for Blue Bottle" });
-      expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByText("SimpleFIN Bridge")).not.toBeInTheDocument();
-      await userEvent.click(toggle);
-      expect(toggle).toHaveAttribute("aria-expanded", "true");
-      expect(screen.getByText("SimpleFIN Bridge")).toBeInTheDocument();
-      expect(screen.getByText("BLUE BOTTLE #123", { selector: "dd" })).toBeInTheDocument();
-      await userEvent.click(toggle);
-      expect(screen.queryByText("SimpleFIN Bridge")).not.toBeInTheDocument();
-    });
-
-    const amazon = (using: "brand" | "bank" = "brand") => tx({ payee: using === "brand" ? "Amazon" : "Amzn Mktp Us", description: "AMZN Mktp US*2K3AB1",
-      brand: { brand: "Amazon", bank_name: "Amzn Mktp Us", using } });
-
-    it("offers the bank's name only for a brand's name a sync gave it", async () => {
-      render(TxRow, props(tx()));
-      await userEvent.click(screen.getByRole("button", { name: "Details for Blue Bottle" }));
-      expect(screen.queryByRole("button", { name: "Use the bank’s name" })).not.toBeInTheDocument();
-    });
-
-    it("uses the bank's name for one transaction, and undoes it", async () => {
-      const p = props(amazon());
-      render(TxRow, p);
-      await userEvent.click(screen.getByRole("button", { name: "Details for Amazon" }));
-      expect(screen.getByRole("button", { name: "Use the bank’s name" })).toHaveAttribute("title", "Rename it “Amzn Mktp Us”");
-      const was = [{ id: "t1", payee: "Amazon" }];
-      vi.mocked(api).mockResolvedValueOnce({ updated: 1, payee: "Amzn Mktp Us", was, keep_bank: { brand: "Amazon", keep: false } });
-      await userEvent.click(screen.getByRole("button", { name: "Use the bank’s name" }));
-      await userEvent.click(screen.getByRole("button", { name: "Just this one" }));
-      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "bank", all: false } });
-      expect(p.onchanged).toHaveBeenCalledTimes(1);
-      const [message, opts] = vi.mocked(toast).mock.calls.at(-1)!;
-      expect(message).toBe("Amazon → Amzn Mktp Us");
-      await (opts as unknown as { action: { onClick: () => Promise<void> } }).action.onClick();
-      // Just the names: the brand's setting didn't change
-      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: was } });
-      expect(p.onchanged).toHaveBeenCalledTimes(2);
-    });
-
-    it("keeps the bank's names for all of the brand's from now on, and undo puts the setting back too", async () => {
-      render(TxRow, props(amazon()));
-      await userEvent.click(screen.getByRole("button", { name: "Details for Amazon" }));
-      const was = [{ id: "t1", payee: "Amazon" }, { id: "t2", payee: "Amazon" }];
-      vi.mocked(api).mockResolvedValueOnce({ updated: 2, payee: "Amzn Mktp Us", was, keep_bank: { brand: "Amazon", keep: false } });
-      await userEvent.click(screen.getByRole("button", { name: "Use the bank’s name" }));
-      await userEvent.click(screen.getByRole("button", { name: "All Amazon, from now on" }));
-      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "bank", all: true } });
-      const [message, opts] = vi.mocked(toast).mock.calls.at(-1)!;
-      expect(message).toBe("Amazon: the bank’s names from now on");
-      expect(opts).toMatchObject({ description: "2 renamed" });
-      await (opts as unknown as { action: { onClick: () => Promise<void> } }).action.onClick();
-      expect(api).toHaveBeenCalledWith("/api/transactions/bulk",
-        { method: "POST", body: { restore: was, keep_bank: { brand: "Amazon", keep: false } } });
-    });
-
-    it("goes back to the brand's name, and says so when that fails", async () => {
-      const p = props(amazon("bank"));
-      render(TxRow, p);
-      await userEvent.click(screen.getByRole("button", { name: "Details for Amzn Mktp Us" }));
-      vi.mocked(api).mockRejectedValueOnce(new Error("This transaction’s name isn’t a brand’s"));
-      await userEvent.click(screen.getByRole("button", { name: "Use “Amazon”" }));
-      await userEvent.click(screen.getByRole("button", { name: "Just this one" }));
-      expect(api).toHaveBeenCalledWith("/api/transactions/t1/name", { method: "POST", body: { use: "brand", all: false } });
-      expect(toast.error).toHaveBeenCalledWith("This transaction’s name isn’t a brand’s");
-      expect(p.onchanged).not.toHaveBeenCalled();
     });
   });
 });

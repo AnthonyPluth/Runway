@@ -1,14 +1,22 @@
 """Transactions: the list and its filters, categorizing and splitting them, and the AI model's suggestions."""
 from __future__ import annotations
 
+import math
+import re
 import urllib.parse
+import uuid
+from datetime import date, timedelta
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy.orm import aliased
 
 from ... import categories, categorize, db, merchants, retail, splits
 from ... import settings_keys as sk
-from ...models import Account, AiLog, Category, Recurring, Transaction, TxSplit
+from ...models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
 from ..common import ApiError, _month_range
+
+# A manual transaction's id: its account's, then this and a random part (a bank's are "|<its id>" or "|pl:<its id>").
+MANUAL = "|manual:"
 
 
 def tx_logos(conn, items: list[dict]) -> dict[str, str]:
@@ -25,14 +33,63 @@ def tx_logos(conn, items: list[dict]) -> dict[str, str]:
     return {tid: f"/api/merchants/{urllib.parse.quote(mid, safe='')}/logo" for tid, mid in logos.items()}
 
 
-def api_transactions(conn, q, _b):
+# The kinds of transaction the list can show (`kind`): money in, money out (neither counts transfers) and transfers
+# (between your own accounts; what's marked Ignore has its own switch).
+KINDS = ("in", "out", "transfer")
+
+
+def _transfers(conn) -> tuple[list[str], list[str]]:
+    """The transfer categories that are real transfers (Transfer, Credit Card Payment, ...), and Ignore with its
+    subcategories (a transfer category too, so it isn't counted, but it isn't money moving)."""
+    ignore = ["Ignore", *categories.descendants(conn, "Ignore")]
+    moves = [r[0] for r in conn.execute(select(Category.name).where(Category.is_transfer == 1)) if r[0] not in ignore]
+    return moves, ignore
+
+
+def _date(q, key: str) -> str:
+    v = q.get(key, [""])[0]
+    if not v:
+        return ""
+    try:
+        return date.fromisoformat(v).isoformat()
+    except ValueError:
+        raise ApiError("Dates must look like 2026-09-30") from None
+
+
+def _number(q, key: str) -> float | None:
+    v = q.get(key, [""])[0]
+    if not v:
+        return None
+    try:
+        n = abs(float(v))
+    except ValueError:
+        raise ApiError("Amounts must be numbers") from None
+    if not math.isfinite(n):
+        raise ApiError("Amounts must be numbers")
+    return n
+
+
+def _as_amount(text: str) -> float | None:
+    """A search that's an amount ("59.28", "$1,234.50", "-12"): the amount, unsigned; else None."""
+    s = text.strip().replace("$", "").replace(",", "").replace("\u2212", "-").lstrip("+-").strip()
+    if not re.fullmatch(r"\d+(\.\d{1,2})?|\.\d{1,2}", s):
+        return None
+    return float(s)
+
+
+def tx_where(conn, q) -> tuple[list, list[str]]:
+    """The conditions of a list of transactions (GET /api/transactions's query, also a bulk change's `filter`), and the
+    category the list is filtered by with its subcategories (empty without one)."""
     T = Transaction
     where = [db.not_investment()]
     family: list[str] = []
     if q.get("review", ["0"])[0] == "1":
         where.append(T.needs_review == 1)
     if q.get("recurring", [""])[0]:
-        where.append(T.recurring_id == int(q["recurring"][0]))
+        try:
+            where.append(T.recurring_id == int(q["recurring"][0]))
+        except ValueError:
+            raise ApiError("Unknown recurring item") from None
     if q.get("account", [""])[0]:
         where.append(T.account_id == q["account"][0])
     if q.get("category", [""])[0]:
@@ -53,12 +110,68 @@ def api_transactions(conn, q, _b):
     if q.get("month", [""])[0]:   # YYYY-MM
         start, end = _month_range({"month": q["month"]})
         where += [T.posted >= start.isoformat(), T.posted < end.isoformat()]
+    if since := _date(q, "from"):   # YYYY-MM-DD, both ends included
+        where.append(T.posted >= since)
+    if until := _date(q, "to"):
+        where.append(T.posted < (date.fromisoformat(until) + timedelta(days=1)).isoformat())
+    low, high = _number(q, "min"), _number(q, "max")   # the amount, money in or out
+    if low is not None:
+        where.append(func.abs(T.amount) >= low - 0.005)
+    if high is not None:
+        where.append(func.abs(T.amount) <= high + 0.005)
+    kind = q.get("kind", [""])[0]
+    if kind:
+        if kind not in KINDS:
+            raise ApiError("Unknown kind of transaction")
+        moves, ignore = _transfers(conn)
+        whole = func.coalesce(T.is_split, 0) == 0
+        moving = or_(and_(whole, T.category.in_(moves)),
+                     select(TxSplit.id).where(TxSplit.tx_id == T.id, TxSplit.category.in_(moves)).exists())
+        if kind == "transfer":
+            where.append(moving)
+        else:   # money in or out: not a transfer, nor anything else that isn't counted
+            where += [T.amount > 0 if kind == "in" else T.amount < 0,
+                      or_(T.category.is_(None), func.coalesce(T.is_split, 0) == 1, T.category.notin_(moves + ignore))]
     if q.get("scope", [""])[0] == "budget":   # the same accounts the Budget page counts
         where.append(T.account_id.in_(select(Account.id).where(Account.hidden == 0,
                                                                Account.kind.in_(["checking", "savings", "credit"]))))
-    if q.get("q", [""])[0]:
-        like = f"%{q['q'][0].lower()}%"
-        where.append(or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
+    if text := q.get("q", [""])[0].strip():
+        like = f"%{text.lower()}%"
+        # The merchant, the bank's text, your note, the category (or a split's), or the amount typed as a number.
+        found = [func.lower(T.payee).like(like), func.lower(T.description).like(like), func.lower(T.notes).like(like),
+                 and_(func.coalesce(T.is_split, 0) == 0, func.lower(T.category).like(like)),
+                 select(TxSplit.id).where(TxSplit.tx_id == T.id, func.lower(TxSplit.category).like(like)).exists()]
+        amount = _as_amount(text)
+        if amount is not None:
+            found.append(func.abs(T.amount).between(amount - 0.005, amount + 0.005))
+        where.append(or_(*found))
+    return where, family
+
+
+def _net(conn, where: list, family: list[str], kind: str) -> float:
+    """What the transactions matching `where` add up to, as the day totals count them: transfers (and what's marked
+    Ignore) left out, except when they are what's asked for (kind=transfer); a split one by its parts (only those in
+    `family`, under a category filter)."""
+    T = Transaction
+    moves, ignore = _transfers(conn)
+    left_out = ignore if kind == "transfer" else moves + ignore
+    whole = conn.execute(select(func.coalesce(func.sum(T.amount), 0.0)).where(
+        *where, func.coalesce(T.is_split, 0) == 0, or_(T.category.is_(None), T.category.notin_(left_out)),
+        *([T.category.in_(moves)] if kind == "transfer" else []))).scalar() or 0.0
+    P = aliased(TxSplit)   # not TxSplit itself, which the filters' own subqueries name
+    part = [or_(P.category.is_(None), P.category.notin_(left_out))]
+    if kind == "transfer":
+        part.append(P.category.in_(moves))
+    if family:
+        part.append(P.category.in_(family))
+    parts = conn.execute(select(func.coalesce(func.sum(P.amount), 0.0)).select_from(P).join(T, T.id == P.tx_id)
+                         .where(*where, T.is_split == 1, *part)).scalar() or 0.0
+    return round(whole + parts, 2)
+
+
+def api_transactions(conn, q, _b):
+    T = Transaction
+    where, family = tx_where(conn, q)
     limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
     offset = max(0, int(q.get("offset", ["0"])[0]))
     items = db.rows(conn.execute(
@@ -76,9 +189,17 @@ def api_transactions(conn, q, _b):
         t["retail"] = orders.get(t["id"])
         t["logo"] = logos.get(t["id"])
         t["brand"] = categorize.brand_choice(t)
+        t["source"] = source_of(t["id"])
     total = conn.execute(select(func.count()).select_from(T).where(*where)).fetchone()[0]
-    # The category and its subcategories, so a receipt can show just their items.
-    return {"items": items, "total": total, **({"family": family} if family else {})}
+    # `sum`: what they add up to, as the day totals count them (_net). `family`: the category and its subcategories,
+    # so a receipt can show just their items.
+    return {"items": items, "total": total, "sum": _net(conn, where, family, q.get("kind", [""])[0]),
+            **({"family": family} if family else {})}
+
+
+def source_of(tx_id: str) -> str:
+    """Where a transaction came from: "manual" (added by you), "plaid" or "simplefin" (by its id)."""
+    return "manual" if MANUAL in tx_id else "plaid" if "|pl:" in tx_id else "simplefin"
 
 
 def _match(parts: list[dict], family: list[str]) -> dict:
@@ -212,6 +333,8 @@ def api_tx_bulk(conn, _q, body, *_):
             categorize.keep_bank_name(conn, keep["brand"], bool(keep.get("keep")))
         return {"ok": True, "updated": restore(conn, body["restore"])}
     ids = body.get("ids")
+    if isinstance(body.get("filter"), dict):   # every transaction a list's filters match ("Select all 212")
+        ids = filtered_ids(conn, body["filter"])
     if not isinstance(ids, list):
         raise ApiError("Select some transactions first")
     was = snapshot(conn, ids, orders=bool(body.get("category")))
@@ -233,6 +356,166 @@ def api_tx_bulk(conn, _q, body, *_):
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True, "updated": n, "was": was}
+
+
+def filtered_ids(conn, f: dict) -> list[str]:
+    """The ids of the transactions a list's filters (GET /api/transactions's query, as a dict) match, up to
+    categorize.MAX_BULK; more than that is refused."""
+    q = {k: [str(v)] for k, v in f.items() if isinstance(k, str) and isinstance(v, (str, int, float)) and not isinstance(v, bool)}
+    where, _ = tx_where(conn, q)
+    ids = list(conn.execute(select(Transaction.id).where(*where).order_by(Transaction.posted.desc(), Transaction.id)
+                            .limit(categorize.MAX_BULK + 1)).scalars())
+    if len(ids) > categorize.MAX_BULK:
+        raise ApiError(f"Change at most {categorize.MAX_BULK:,} transactions at once")
+    return ids
+
+
+# ------------------------------------------------------------------------------------------ editing and adding
+
+# What an edit can change, and so what Undo puts back exactly (with the category and splits, from `snapshot`).
+_EDITS = ("payee", "posted", "amount", "notes", "bank_posted", "bank_amount")
+MAX_NOTE = 1000
+MAX_AMOUNT = 1e9
+
+
+def _valid_date(v) -> str:
+    try:
+        return date.fromisoformat(str(v)).isoformat()
+    except ValueError:
+        raise ApiError("Enter a date like 2026-09-30") from None
+
+
+def _valid_amount(v) -> float:
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        raise ApiError("Enter the amount as a number")
+    try:
+        n = float(v)
+    except ValueError:
+        raise ApiError("Enter the amount as a number") from None
+    if not math.isfinite(n) or abs(n) >= MAX_AMOUNT:
+        raise ApiError("Enter the amount as a number")
+    return round(n, 2)
+
+
+def _name(v) -> str | None:
+    return " ".join(str(v or "").split())[:80] or None
+
+
+def _note(v) -> str | None:
+    if v is not None and not isinstance(v, str):
+        raise ApiError("A note is text")
+    return (v or "").strip()[:MAX_NOTE] or None
+
+
+def _tx(conn, tx_id: str) -> dict:
+    row = conn.execute(select(Transaction).where(Transaction.id == tx_id)).fetchone()
+    if not row:
+        raise ApiError("Transaction not found", 404)
+    return dict(row)
+
+
+def edit_was(conn, tx_id: str) -> dict:
+    """A transaction as it is before an edit: its category and splits (`snapshot`) and the fields an edit changes."""
+    was = snapshot(conn, [tx_id])[0]
+    row = conn.execute(select(*(getattr(Transaction, c) for c in _EDITS)).where(Transaction.id == tx_id)).fetchone()
+    return {**was, **dict(row)}
+
+
+def api_tx_update(conn, _q, body, tx_id):
+    """Change a transaction's name, date, amount or note (any of them), or take its category away ({"category": null}).
+    A synced one's date and amount are yours from then on: the bank's are kept beside them (bank_posted, bank_amount)
+    and a sync updates those instead, and changing one back to the bank's makes it the bank's again. A pending one's
+    can't be changed: the bank sets them when it posts. Sends back what Undo needs (`was`), which {"restore": was} puts
+    back exactly, and the transaction as it is now (`tx`)."""
+    tx = _tx(conn, tx_id)
+    t = Transaction
+    if isinstance(body.get("restore"), dict):
+        was = body["restore"]
+        back = {k: was.get(k) for k in _EDITS if k in was}
+        if "posted" in back:
+            back["posted"] = _valid_date(back["posted"])
+        if "amount" in back:
+            back["amount"] = _valid_amount(back["amount"])
+        if back.get("bank_posted") is not None:
+            back["bank_posted"] = _valid_date(back["bank_posted"])
+        if back.get("bank_amount") is not None:
+            back["bank_amount"] = _valid_amount(back["bank_amount"])
+        if "payee" in back:   # as it was, not tidied: rules and recurring items may match on that exact text
+            back["payee"] = back["payee"] if isinstance(back["payee"], str) and back["payee"] else None
+        if "notes" in back:
+            back["notes"] = back["notes"] if isinstance(back["notes"], str) and back["notes"] else None
+        conn.execute(update(t).where(t.id == tx_id).values(**back))
+        restore(conn, [{**was, "id": tx_id}])
+        return {"ok": True}
+    was = edit_was(conn, tx_id)
+    manual = MANUAL in tx_id
+    values: dict = {}
+    if "payee" in body:
+        values["payee"] = _name(body["payee"])
+        if manual and not values["payee"]:
+            raise ApiError("Give it a name")
+    if "notes" in body:
+        values["notes"] = _note(body["notes"])
+    if ("posted" in body or "amount" in body) and tx["pending"] and not manual:
+        raise ApiError("It’s pending: the bank can still change it. Edit it once it posts.")
+    if "posted" in body:
+        values["posted"] = _valid_date(body["posted"])
+        if not manual and values["posted"] != tx["posted"]:
+            bank = tx["bank_posted"] or tx["posted"]
+            values["bank_posted"] = None if values["posted"] == bank else bank
+    if "amount" in body:
+        values["amount"] = _valid_amount(body["amount"])
+        if not manual and abs(values["amount"] - tx["amount"]) >= 0.005:
+            bank = tx["bank_amount"] if tx["bank_amount"] is not None else tx["amount"]
+            values["bank_amount"] = None if abs(values["amount"] - bank) < 0.005 else bank
+    if "category" in body:
+        if body["category"] is not None:
+            raise ApiError("Set a category with /category")
+        values.update(category=None, category_source=None, confidence=None, needs_review=1)
+        splits.clear(conn, tx_id)
+    if not values:
+        raise ApiError("Choose what to change")
+    conn.execute(update(t).where(t.id == tx_id).values(**values))
+    if "amount" in values and tx["is_split"]:   # the parts follow, as when a bank changes it (but it stays reviewed)
+        splits.follow_amount(conn, tx_id, values["amount"])
+        conn.execute(update(t).where(t.id == tx_id).values(needs_review=tx["needs_review"]))
+    # And as it is now, for the app to show while the list loads again (or if it has left the list's filters).
+    return {"ok": True, "was": was, "tx": _tx(conn, tx_id)}
+
+
+def api_tx_create(conn, _q, body):
+    """Add a transaction by hand (cash, a cheque the bank hasn't shown yet): an account, a date, a name and an amount
+    (positive = money in), and optionally a category and a note. It counts like a synced one, in reports and budgets."""
+    acct = conn.execute(select(Account.id, Account.kind).where(Account.id == str(body.get("account") or ""))).fetchone()
+    if not acct or acct["kind"] == "investment":
+        raise ApiError("Choose an account")
+    posted = _valid_date(body.get("posted") or "")
+    if "amount" not in body or body.get("amount") in ("", None):
+        raise ApiError("Enter the amount")
+    amount = _valid_amount(body["amount"])
+    payee = _name(body.get("payee"))
+    if not payee:
+        raise ApiError("Give it a name")
+    category = body.get("category") or None
+    if category is not None and not conn.execute(select(Category.name).where(Category.name == str(category))).fetchone():
+        raise ApiError(f"Unknown category: {category}")
+    tx_id = f"{acct['id']}{MANUAL}{uuid.uuid4().hex[:16]}"
+    conn.execute(insert(Transaction).values(
+        id=tx_id, account_id=acct["id"], posted=posted, amount=amount, payee=payee, notes=_note(body.get("notes")),
+        category=category, category_source="manual" if category else None, confidence=1 if category else None,
+        needs_review=0 if category else 1, pending=0))
+    return {"ok": True, "id": tx_id}
+
+
+def api_tx_delete(conn, _q, _b, tx_id):
+    """Delete a transaction you added (a bank's come and go with the bank)."""
+    _tx(conn, tx_id)
+    if MANUAL not in tx_id:
+        raise ApiError("Only a transaction you added can be deleted")
+    splits.clear(conn, tx_id)
+    conn.execute(update(RetailCharge).where(RetailCharge.tx_id == tx_id).values(tx_id=None, applied=None, match_source=None))
+    conn.execute(delete(Transaction).where(Transaction.id == tx_id))
+    return {"ok": True}
 
 
 def api_tx_brand_name(conn, _q, body, tx_id):

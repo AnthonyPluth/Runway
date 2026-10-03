@@ -19,8 +19,6 @@ export interface OrderSummary { order_id?: string; id?: string; retailer: string
 
 export const STORES: Record<string, string> = { amazon: "Amazon", target: "Target", costco: "Costco" };
 export const STORE_SITES: Record<string, string> = { amazon: "amazon.com", target: "target.com", costco: "costco.com" };
-export const ITEM_SOURCES: Record<string, string> = { manual: "you picked", memory: "as before", ai: "AI", department: "store's department" };
-
 /** "Amazon · 3 items", "Target in store · 1 item" */
 export const orderLabel = (o: OrderSummary) =>
   `${STORES[o.retailer] || o.retailer}${o.channel === "store" ? " in store" : ""}${o.items ? ` · ${o.items} item${o.items === 1 ? "" : "s"}` : ""}`;
