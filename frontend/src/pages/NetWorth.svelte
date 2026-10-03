@@ -4,10 +4,11 @@
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
-  import { signed } from "$lib/components/investments/numbers";
+  import { pct as pctChange } from "$lib/components/investments/numbers";
   import AccountPanel, { type PanelAccount } from "$lib/components/networth/AccountPanel.svelte";
   import AssetPanel from "$lib/components/networth/AssetPanel.svelte";
   import EquityView from "$lib/components/networth/EquityView.svelte";
+  import RefreshFailed from "$lib/components/networth/RefreshFailed.svelte";
   import RetirementView from "$lib/components/networth/RetirementView.svelte";
   import InvestmentsView from "$lib/components/investments/InvestmentsView.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
@@ -17,7 +18,7 @@
   import StatStrip from "$lib/components/StatStrip.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt, fmt0, fmtDate, nb, pct, shortMoney } from "$lib/format";
+  import { fmt, fmt0, fmtDate, fmtSigned0, nb, pct, shortMoney } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -25,7 +26,8 @@
 
   let { sub = "" }: { sub?: string } = $props();
 
-  // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come.
+  // The page's data. Loading again (after an edit) keeps the old numbers on screen until the new ones come; if that
+  // fails, they stay under a "Couldn't refresh" line with Retry.
   let d = $state.raw<NetWorth | null>(null);
   let error = $state<string | null>(null);
   async function load() {
@@ -35,32 +37,50 @@
   load();
 
   // The hero's range: it sets both the change figure and how much of the history the chart shows. A range with no data
-  // (`change` is null) can't be picked; if the chosen one has none, the first that does stands in.
-  const RANGES = [["30d", "30 days", 30], ["90d", "90 days", 90], ["1y", "1 year", 365]] as const;
-  let picked = $state<"30d" | "90d" | "1y">("30d");
+  // (`change` is null) can't be picked; if the chosen one has none, the first that does stands in. Labelled as on
+  // Investments (1M, 3M, 1Y); the API's keys are 30d, 90d and 1y.
+  type RangeKey = "30d" | "90d" | "1y";
+  const RANGES: readonly (readonly [RangeKey, string, string, number])[] = [["30d", "1M", "month", 30], ["90d", "3M", "3 months", 90], ["1y", "1Y", "year", 365]];
+  let picked = $state<RangeKey>("30d");
   const range = $derived(d?.change[picked] != null ? picked : RANGES.find(([k]) => d?.change[k] != null)?.[0] ?? picked);
   const ch = $derived(d?.change[range]);
-  const rangeLabel = $derived(RANGES.find(([k]) => k === range)![1]);
+  const rangeLabel = $derived(RANGES.find(([k]) => k === range)![2]);
+  // The change as a share of where it started ("+2.9%"); none when it started at or below zero, where a share means nothing.
+  const chPct = $derived(d && ch != null && d.net - ch > 0 ? pctChange(ch / (d.net - ch)) : null);
   // The change is measured from the latest snapshot at least that old, and snapshots are only saved on days the page is
   // opened: when that one is more than a few days older than the range, say since when it really is.
   const changeFrom = $derived.by(() => {
     const s = d?.change_since?.[range];
     if (!d || !s) return null;
     const span = Math.round((Date.parse(`${d.today}T00:00:00Z`) - Date.parse(`${s}T00:00:00Z`)) / 864e5);
-    if (span - RANGES.find(([k]) => k === range)![2] <= 3) return null;
+    if (span - RANGES.find(([k]) => k === range)![3] <= 3) return null;
     return fmtDate(s, s.slice(0, 4) === d.today.slice(0, 4) ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
   });
+  // The chart starts where the change is measured from (the snapshot `change_since` names, which can be older than the
+  // range), so the line and the figure above it cover the same days.
   const points = $derived.by(() => {
     if (!d) return [];
-    const days = RANGES.find(([k]) => k === range)![2];
     const from = new Date(`${d.today}T00:00:00Z`);
-    from.setUTCDate(from.getUTCDate() - days);
-    const cutoff = from.toISOString().slice(0, 10);
+    from.setUTCDate(from.getUTCDate() - RANGES.find(([k]) => k === range)![3]);
+    const cutoff = d.change_since?.[range] ?? from.toISOString().slice(0, 10);
     const inRange = d.history.filter((h) => h.date >= cutoff);
     return inRange.length >= 2 ? inRange : d.history;
   });
+  // Pointing at the chart (or stepping along it with the arrow keys) shows that day's figure in the headline.
+  let scrub = $state<number | null>(null);
+  const scrubbed = $derived(scrub != null ? points[scrub] ?? null : null);
+  const fullDate = (s: string) => fmtDate(s, { month: "short", day: "numeric", year: "numeric" });
+
+  // Groups with something in them: an asset group at $0 isn't in the bar, and debts that are all $0 (cards paid
+  // off) leave "Nothing owed" rather than a $0.00 heading.
+  const owesAnything = (g: NwGroup) => g.items.some((i) => Math.abs(i.value) >= 0.005);
   const assetGroups = $derived(d?.groups.filter((g) => g.side === "asset" && g.total > 0) ?? []);
-  const liabilities = $derived(d?.groups.filter((g) => g.side === "liability") ?? []);
+  const liabilities = $derived(d?.groups.filter((g) => g.side === "liability" && owesAnything(g)) ?? []);
+  // Each kind of asset keeps its color (in the bar, its key and before its heading) whatever else there is.
+  const GROUP_COLOR: Record<string, number> = { cash: 1, investments: 2, equity: 3, home: 4, vehicle: 5, other: 6 };
+  const colorOf = (key: string) => `var(--nw-${GROUP_COLOR[key] ?? 6})`;
+  const KIND: Record<string, string> = { checking: "Checking", savings: "Savings", credit: "Credit card", loan: "Loan", investment: "Investment" };
+  const kindLabel = (k: string) => KIND[k] ?? (k ? k[0].toUpperCase() + k.slice(1) : "Account");
 
   async function setLeftOut(id: string, out: boolean) {
     await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
@@ -112,14 +132,14 @@
 {#snippet makeup()}
 <div class="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted" role="img"
         aria-label={`Share of assets by type: ${assetGroups.map((g) => `${g.label} ${pct(g.total / d!.assets)}`).join(", ")}`}>
-        {#each assetGroups as g, i (g.key)}
-          <span class="block h-full min-w-0.5" style:width={`${((g.total / d!.assets) * 100).toFixed(2)}%`} style:background={`var(--nw-${(i % 6) + 1})`}
+        {#each assetGroups as g (g.key)}
+          <span class="block h-full min-w-0.5" style:width={`${((g.total / d!.assets) * 100).toFixed(2)}%`} style:background={colorOf(g.key)}
             title={`${g.label} ${fmt0(g.total)}`}></span>
         {/each}
       </div>
       <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-        {#each assetGroups as g, i (g.key)}
-          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={`var(--nw-${(i % 6) + 1})`}></i>{g.label} {pct(g.total / d!.assets)}</span>
+        {#each assetGroups as g (g.key)}
+          <span class="inline-flex items-center gap-1.5"><i class="inline-block size-2.5 rounded-[3px]" style:background={colorOf(g.key)}></i>{g.label} {pct(g.total / d!.assets)}</span>
         {/each}
       </div>
 {/snippet}
@@ -131,6 +151,7 @@
         <span class="flex min-w-0 items-center gap-1">
           <button type="button" class="inline-flex cursor-pointer items-center gap-1 rounded-sm max-md:min-h-10 max-md:min-w-10" aria-expanded={!folded[g.key]} aria-label={`${g.label}, ${folded[g.key] ? "expand" : "collapse"}`}
             onclick={() => (folded[g.key] = !folded[g.key])}><ChevronDown class={cn("size-4 text-muted-foreground transition-transform", folded[g.key] && "-rotate-90")} /></button>
+          {#if g.side === "asset" && g.total > 0}<i class="mr-0.5 inline-block size-2.5 shrink-0 rounded-[3px]" style:background={colorOf(g.key)} aria-hidden="true" data-color={g.key}></i>{/if}
           {#if g.key === "equity"}<a href="#networth/equity" class="underline-offset-4 hover:underline">{g.label}</a>{:else}{g.label}{/if}
           {#if ADDABLE[g.key]}<button type="button" class="ml-1 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground max-md:min-h-10 max-md:px-2" aria-label={`Add to ${g.label}`}
             onclick={() => openAdd(ADDABLE[g.key])}>+ Add</button>{/if}
@@ -199,17 +220,20 @@
 {:else}
   <!-- One unboxed hero: the number, its change over the chosen range, assets and liabilities, and the history chart. -->
   <section class="mb-8">
+    {#if error}<RefreshFailed {error} onretry={load} />{/if}
     <div class="sr-only">Net worth</div>
-    <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]">{fmt0(d.net)}</div>
+    <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]" data-testid="nw-headline">{fmt0(scrubbed ? scrubbed.net : d.net)}</div>
     {#if d.history.length >= 2}
-      <div class="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        {#if ch != null}
-          <p class={cn("text-[15px] tabular-nums", ch > 0 ? "text-emerald-500" : "text-muted-foreground")}>
-            {signed(ch)} {changeFrom ? `since ${changeFrom}` : `in the last ${rangeLabel}`}
+      <div class="mt-2 flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        {#if scrubbed}
+          <p class="text-[15px] text-muted-foreground" data-testid="nw-change">on {fullDate(scrubbed.date)}</p>
+        {:else if ch != null}
+          <p class={cn("text-[15px] tabular-nums", ch >= 0.5 ? "text-good" : ch <= -0.5 ? "text-loss" : "text-muted-foreground")} data-testid="nw-change">
+            {fmtSigned0(ch)}{chPct ? ` (${chPct})` : ""} <span class="text-muted-foreground">{changeFrom ? `since ${changeFrom}` : `in the last ${rangeLabel}`}</span>
           </p>
-        {/if}
-        <Segmented label="Change over" value={range} onchange={(v) => (picked = v as typeof picked)}
-          options={RANGES.map(([value]) => ({ value, label: value, disabled: d!.change[value] == null }))} />
+        {:else}<span></span>{/if}
+        <Segmented label="Change over" value={range} onchange={(v) => (picked = v as RangeKey)}
+          options={RANGES.map(([value, label]) => ({ value, label, disabled: d!.change[value] == null }))} />
       </div>
     {/if}
     <StatStrip class="mt-5" items={[
@@ -218,9 +242,11 @@
     ]} />
     {#if d.history.length >= 2}
       <div class="mt-5">
-        <LineChart xs={points.map((h) => h.date)} height={220} fmtY={shortMoney} fmtTip={fmt}
+        <LineChart xs={points.map((h) => h.date)} height={220} fmtY={shortMoney} fmtTip={fmt} onpoint={(i) => (scrub = i)}
           series={[{ name: "Net worth", values: points.map((h) => h.net), cls: "s-main", area: true }]} />
       </div>
+    {:else}
+      <p class="mt-5 text-sm text-muted-foreground" data-testid="nw-no-history">History builds up each day you open Runway</p>
     {/if}
   </section>
 
@@ -249,7 +275,7 @@
             <ul class="mt-1 divide-y text-sm text-foreground">
               {#each d.excluded as a (a.id)}
                 <li class="flex items-center justify-between gap-3 py-2">
-                  <span><button type="button" class="cursor-pointer underline-offset-2 hover:underline" onclick={() => openAccount(a.id)}><AcctLabel id={a.id} name={a.name} /></button><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {a.kind}</span></span>
+                  <span><button type="button" class="cursor-pointer underline-offset-2 hover:underline" onclick={() => openAccount(a.id)}><AcctLabel id={a.id} name={a.name} /></button><span class="text-xs text-muted-foreground">{a.org ? ` · ${a.org}` : ""} · {kindLabel(a.kind)}</span></span>
                   <span class="flex items-center gap-3">
                     <span class="tabular-nums">{fmt(a.balance)}</span>
                     <Button size="sm" variant="outline" aria-label={`Count ${a.name} in net worth again`} onclick={() => leaveOut(a.id, a.name, false)}>Count it again</Button>

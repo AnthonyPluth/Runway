@@ -5,8 +5,8 @@
   import type { Grant, GrantBody } from "./types";
 
   // The side panel for adding a grant (`g` null) or editing one. `open` is bound so the page can open it and close it
-  // once the save goes through.
-  let { open = $bindable(false), g = null, company = "", onsave }: { open?: boolean; g?: Grant | null; company?: string; onsave: (body: GrantBody) => void } = $props();
+  // once the save goes through; `onsave` answers with why it didn't, or null.
+  let { open = $bindable(false), g = null, company = "", onsave }: { open?: boolean; g?: Grant | null; company?: string; onsave: (body: GrantBody) => Promise<string | null> } = $props();
 </script>
 
 <Sheet.Root bind:open>

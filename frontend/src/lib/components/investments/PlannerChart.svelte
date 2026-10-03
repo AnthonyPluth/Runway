@@ -3,8 +3,9 @@
   import { niceTicks, sideways } from "./numbers";
   import { HELD_KINDS, type Dollars, type HeldKind, type Projection } from "./planner";
 
-  // The plan by age: the likely range (the middle half of the runs) shaded, the median run as a line, and
-  // a marker at retirement. Ages along the bottom are the first person's; the readout shows everyone's.
+  // The plan by age: the likely range (the middle half of the runs) shaded, the median run as a line, a marker at
+  // today (where it starts) and one at retirement. Along the bottom, the first person's ages with the calendar year
+  // under each; the readout shows everyone's.
   // What's held outside the investments (home equity, other assets, vested equity, until each is sold into the plan)
   // is stacked on top of the typical run, so the top edge is what you'd have in all.
   // The figures come in the dollars chosen (planner.ts projectionIn); `dollars` only says which.
@@ -32,7 +33,7 @@
   const total = $derived(layers.length ? layers[layers.length - 1].hi : p.mid);
 
   let width = $state(0);
-  const m = { top: 22, right: 16, bottom: 30, left: 56 };
+  const m = { top: 22, right: 16, bottom: 42, left: 56 };
   const W = $derived(Math.max(320, width));
   const iw = $derived(W - m.left - m.right), ih = $derived(height - m.top - m.bottom);
   const n = $derived(p.years.length);
@@ -81,7 +82,8 @@
       <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
     {/each}
     {#each xTicks as i (i)}
-      <text x={x(i)} y={height - 10} text-anchor="middle" fill="var(--muted-foreground)">{p.ages[0][i]}</text>
+      <text x={x(i)} y={height - 24} text-anchor="middle" fill="var(--muted-foreground)">{p.ages[0][i]}</text>
+      <text x={x(i)} y={height - 10} text-anchor="middle" fill="var(--muted-foreground)" font-size="10" opacity="0.8" data-year>{p.years[i]}</text>
     {/each}
     {#each layers as l (l.kind)}
       <path d={area(l.hi, l.lo)} fill={HELD[l.kind].color} fill-opacity="0.35" data-layer={l.kind} />
@@ -97,6 +99,10 @@
       <circle cx={rx} cy={m.top} r="4" fill="var(--nw-3)" />
       <text x={rx > W - 110 ? rx - 8 : rx + 8} y={m.top + 4} text-anchor={rx > W - 110 ? "end" : "start"} fill="var(--foreground)" font-weight="500">retirement</text>
     {/if}
+    <g data-testid="today-mark">
+      <circle cx={x(0)} cy={y(p.mid[0])} r="4" fill="var(--foreground)" stroke="var(--card)" stroke-width="2" />
+      <text x={x(0) + 8} y={y(p.mid[0]) - 8} fill="var(--foreground)" font-weight="500">today</text>
+    </g>
     {#if hover != null}
       <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
       <circle cx={x(hover)} cy={y(p.mid[hover])} r="3.5" fill="var(--nw-1)" stroke="var(--card)" stroke-width="1.5" />
@@ -104,7 +110,7 @@
     <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
       onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:sideways={move} />
   </svg>
-  <div class="-mt-1 text-center text-xs text-muted-foreground">{names[0] === "You" ? "Your age" : `${names[0]}'s age`}</div>
+  <div class="-mt-1 text-center text-xs text-muted-foreground">{names[0] === "You" ? "Your age" : `${names[0]}'s age`} · year</div>
   {#if hover != null}
     <div bind:this={tipEl} class="pointer-events-none absolute top-0 z-10 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
       style:left={`${tipLeft}px`}>

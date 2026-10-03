@@ -1,11 +1,12 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { Segmented } from "$lib/components/ui/toggle-group";
-  import { fmt0, fmtDate } from "$lib/format";
+  import { fmt0, fmtDate, plural } from "$lib/format";
   import { commas } from "$lib/commas";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
@@ -18,9 +19,9 @@
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
-  // Changes are kept a moment after you stop typing (or when you leave). On a phone it's the result only; the plan
-  // itself is edited on a computer.
-  let { data }: { data: PlanData } = $props();
+  // Changes are kept a moment after you stop typing (or when you leave). Phones get the same fields, stacked.
+  // `accounts`: how many investment accounts the starting figure adds up, for the line above the results.
+  let { data, accounts = 0 }: { data: PlanData; accounts?: number } = $props();
   const uid = $props.id();
 
   const copy = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
@@ -67,7 +68,16 @@
   const pctIn = (v: number) => String(+(v * 100).toFixed(2));
   const setPct = (k: "return_before" | "return_after" | "volatility" | "inflation", s: string) => { plan[k] = (Number(s) || 0) / 100; keep(); };
 
-  const usable = $derived(plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0);
+  // Ages that can't be: retiring before the age you are now, or planning to an age before retirement. Each says so
+  // under its field, and there's no projection until they're fixed.
+  const ageNow = (p: RetirementPlan["people"][number]) => year - num(p.birth_year);
+  const retireErr = (p: RetirementPlan["people"][number]) =>
+    num(p.birth_year) > 1900 && num(p.retire_age) > 0 && num(p.retire_age) < ageNow(p) ? `At least ${ageNow(p)}, your age now` : null;
+  // How long to plan for is in the first person's age, like the chart's.
+  const retireAt = $derived(num(plan.people[0].retire_age));
+  const planToErr = $derived(num(plan.plan_to_age) > 0 && retireAt > 0 && num(plan.plan_to_age) <= retireAt ? `Past the retirement age (${retireAt})` : null);
+  const agesOk = $derived(plan.people.every((p) => !retireErr(p)) && !planToErr);
+  const usable = $derived(plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0 && agesOk);
   const proj = $derived.by(() => {
     if (!usable) return null;
     const p = $state.snapshot(plan) as RetirementPlan;
@@ -103,6 +113,9 @@
   const empty = $derived(data.current <= 0 && isDefault);
   const sample = $derived(isDefault && data.current > 0);
   const successCls = (s: number) => (sample ? "text-muted-foreground" : s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
+  // The odds in a word, by the same thresholds as their color; the thresholds are in its tooltip.
+  const verdict = (s: number) => (s >= 0.85 ? "Likely" : s >= 0.7 ? "Uncertain" : "Unlikely");
+  const VERDICT_TIP = "Likely at 85% or more, uncertain from 70%, unlikely below 70%";
 
   // Set-once figures (birth years, how long to plan for, income in retirement, returns and inflation) sit under
   // Assumptions: open while something's still missing (Runway's sample plan, or a birth year that isn't one), folded
@@ -110,6 +123,8 @@
   const bornOk = (y: unknown) => num(y) >= year - 100 && num(y) <= year - 14;
   const assumptionsMissing = () => isDefault || !plan.people.every((p) => bornOk(p.birth_year));
   let assumptionsOpen = $state(assumptionsMissing());
+  // An age to fix that's folded away under Assumptions opens them.
+  $effect(() => { if (planToErr) assumptionsOpen = true; });
   const assumptionsSummary = $derived.by(() => {
     const born = plan.people.length > 1 ? plan.people.map((p, i) => `${names[i]} born ${p.birth_year}`).join(", ") : `Born ${plan.people[0].birth_year}`;
     const income = plan.income.map((inc) => `${inc.name || "Income"} ${fmt0(num(inc.amount))} a year at ${inc.start_age}`);
@@ -231,12 +246,19 @@
   <div class="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1.5">
     <Segmented label="Show amounts in" value={dollars} onchange={setDollars}
       options={[{ value: "today", label: "Today’s dollars" }, { value: "future", label: "Future dollars" }]} />
+    {#if sample}<Badge variant="secondary" data-testid="starting-estimate" title="These results start from Runway’s own guesses; change any figure below to make the plan yours">Starting estimate · edit below</Badge>{/if}
   </div>
+  {#if data.current > 0}
+    <p class="mb-3 text-sm text-muted-foreground" data-testid="starting-from">Starting from <span class="font-medium text-foreground tabular-nums">{fmt0(data.current)}</span> invested today{accounts ? ` (${plural(accounts, "account")})` : ""}</p>
+  {/if}
   <div class="flex flex-wrap gap-x-8 gap-y-3">
     <div>
       <div class="text-sm text-muted-foreground">Chance your money lasts</div>
-      <div class={`text-2xl font-semibold tabular-nums ${successCls(shown.success)}`}>{Math.round(shown.success * 100)}%</div>
-      <div class="text-sm text-muted-foreground">to age {plan.plan_to_age}, across 1,000 markets</div>
+      <div class="flex items-baseline gap-2">
+        <span class={`text-2xl font-semibold tabular-nums ${successCls(shown.success)}`}>{Math.round(shown.success * 100)}%</span>
+        <span class={`rounded-full border border-current/30 px-2 py-0.5 text-xs font-medium ${successCls(shown.success)}`} title={VERDICT_TIP} data-testid="verdict">{verdict(shown.success)}</span>
+      </div>
+      <div class="text-sm text-muted-foreground">to age {plan.plan_to_age}, across 1,000 simulated market paths</div>
     </div>
     <div>
       <div class="text-sm text-muted-foreground">Invested at retirement{future ? ` · ${shown.years[shown.retireIndex]}` : ""}</div>
@@ -256,7 +278,7 @@
   </div>
   <div class="mt-4"><PlannerChart p={shown} {names} {dollars} /></div>
 {:else}
-  <p class="py-6 text-center text-sm text-muted-foreground">Enter a birth year and retirement age to see the projection.</p>
+  <p class="py-6 text-center text-sm text-muted-foreground">{agesOk ? "Enter a birth year and retirement age to see the projection." : "Fix the ages below to see the projection."}</p>
 {/if}
 {#if problem}<p class="mt-2 text-sm text-destructive" role="alert">Not saved: {problem}</p>{/if}
 
@@ -267,8 +289,12 @@
       <div class="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
         <label class="col-span-2 flex flex-col gap-1 sm:col-span-1">{@render field("Name")}
           <Input value={person.name} oninput={(e) => { person.name = e.currentTarget.value; keep(); }} /></label>
-        <label class="flex flex-col gap-1">{@render field("Retires at", `age`)}
-          <Input type="number" step="1" value={person.retire_age} oninput={(e) => { person.retire_age = Number(e.currentTarget.value); keep(); }} /></label>
+        <div class="flex flex-col gap-1">
+          <label class="flex flex-col gap-1">{@render field("Retires at", `age`)}
+            <Input type="number" step="1" value={person.retire_age} aria-invalid={!!retireErr(person)} aria-describedby={retireErr(person) ? `${uid}-retire-${i}` : undefined}
+              oninput={(e) => { person.retire_age = Number(e.currentTarget.value); keep(); }} /></label>
+          {#if retireErr(person)}<span id={`${uid}-retire-${i}`} class="text-xs text-destructive">{retireErr(person)}</span>{/if}
+        </div>
         <label class="flex flex-col gap-1" title={savingsNote}>{@render field("Saves a year")}
           {@render money(person.savings, (v) => (person.savings = v), `${names[i]}'s yearly savings`)}</label>
       </div>
@@ -370,8 +396,12 @@
             <label class="flex flex-col gap-1">{@render field(plan.people.length > 1 ? `${names[i]} · born in` : "Born in")}
               <Input type="number" step="1" aria-label="Born in" value={person.birth_year} oninput={(e) => { person.birth_year = Number(e.currentTarget.value); keep(); }} /></label>
           {/each}
-          <label class="flex flex-col gap-1">{@render field("Plan until age")}
-            <Input type="number" step="1" value={plan.plan_to_age} oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
+          <div class="flex flex-col gap-1">
+            <label class="flex flex-col gap-1">{@render field("Plan until age")}
+              <Input type="number" step="1" value={plan.plan_to_age} aria-invalid={!!planToErr} aria-describedby={planToErr ? `${uid}-planto` : undefined}
+                oninput={(e) => { plan.plan_to_age = Number(e.currentTarget.value); keep(); }} /></label>
+            {#if planToErr}<span id={`${uid}-planto`} class="text-xs text-destructive">{planToErr}</span>{/if}
+          </div>
         </div>
       </section>
 
