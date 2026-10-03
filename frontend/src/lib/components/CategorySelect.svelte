@@ -5,7 +5,7 @@
   import type { Category } from "$lib/types";
   import { cn } from "$lib/utils";
   import type { Snippet } from "svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import Check from "@lucide/svelte/icons/check";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Search from "@lucide/svelte/icons/search";
@@ -45,12 +45,18 @@
     const r = trigger.getBoundingClientRect(), h = panel?.offsetHeight ?? 320;
     const width = Math.min(Math.max(256, r.width), window.innerWidth - 16);
     const below = r.bottom + 4, above = r.top - 4 - h;
-    pos = { top: below + h > window.innerHeight - 8 && above > 8 ? above : below, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)), width };
+    const top = below + h > window.innerHeight - 8 && above > 8 ? above : below, left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    // Inside something moved by a transform (a side panel sliding in), "fixed" moves with it: take off how far off the
+    // panel actually is.
+    const was = untrack(() => pos), p = panel?.getBoundingClientRect(), dx = p ? p.left - was.left : 0, dy = p ? p.top - was.top : 0;
+    pos = { top: top - dy, left: left - dx, width };
   }
   $effect(() => {
     if (!open || viewport.phone) return;
     place();
-    requestAnimationFrame(place);
+    // Again each frame for a moment: the panel's own size, and anything around it still sliding into place.
+    const began = performance.now();
+    let frame = requestAnimationFrame(function again() { place(); if (performance.now() - began < 500) frame = requestAnimationFrame(again); });
     const outside = (e: PointerEvent) => {
       const t = e.target as Node;
       if (!panel?.contains(t) && !trigger?.contains(t)) close(false);
@@ -59,6 +65,7 @@
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
     return () => {
+      cancelAnimationFrame(frame);
       document.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("resize", place);
