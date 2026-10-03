@@ -5,6 +5,9 @@
 /* A phone, in either orientation: the same query as PHONE_QUERY in lib/phone.svelte.ts. `desktop:` is everything else. */
 @custom-variant phone (@media (max-width: 767px), (max-height: 500px) and (pointer: coarse));
 @custom-variant desktop (@media not ((max-width: 767px) or ((max-height: 500px) and (pointer: coarse))));
+/* A device that can hover (a mouse or trackpad). Row actions shown only on hover use it (`hoverable:opacity-0
+   hoverable:group-hover:opacity-100`), so on a touch screen, which can't hover, they're simply always there. */
+@custom-variant hoverable (@media (hover: hover));
 
 /* Inter, bundled with Runway (runway/static/fonts, SIL Open Font License): a variable font with an optical-size axis, so
    big headlines get its tighter display cut on their own. Geist stays behind it for the symbols Inter's Latin set lacks. */

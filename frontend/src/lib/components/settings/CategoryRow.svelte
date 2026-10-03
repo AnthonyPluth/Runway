@@ -70,7 +70,7 @@
   </span>
   <span class="w-10 text-right text-sm text-muted-foreground tabular-nums" title="Transactions">{c.transactions || ""}</span>
   <span class={cn("flex flex-wrap items-center justify-end gap-1",
-    !mode && "md:w-52 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100")}>
+    !mode && "md:w-52 hoverable:md:opacity-0 hoverable:md:group-hover:opacity-100 hoverable:md:group-focus-within:opacity-100")}>
     {#if mode === "sub"}
       <input class={cn(inputCls, "h-8 w-56")} placeholder={`New subcategory of ${name}`} aria-label={`New subcategory of ${name}`} bind:value={subName}
         use:focus onkeydown={(e) => { if (e.key === "Enter") addSub(); if (e.key === "Escape") mode = ""; }} />

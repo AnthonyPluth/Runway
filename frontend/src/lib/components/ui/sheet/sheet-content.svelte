@@ -25,8 +25,9 @@
     )}
     {...restProps}>
     {@render children?.()}
+    <!-- The ✕ stays small; its padding makes a 40px target to tap. -->
     <Dialog.Close data-slot="sheet-x"
-      class="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute top-4 right-4 cursor-pointer rounded-sm p-1 focus-visible:ring-2 focus-visible:outline-none">
+      class="text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute top-2 right-2 cursor-pointer rounded-md p-3 focus-visible:ring-2 focus-visible:outline-none">
       <XIcon class="size-4" />
       <span class="sr-only">Close</span>
     </Dialog.Close>

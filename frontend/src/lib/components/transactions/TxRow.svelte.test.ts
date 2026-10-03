@@ -308,6 +308,14 @@ describe("TxRow", () => {
       await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
       expect(within(row()).getByText("Link to a recurring item", { selector: "button" }).closest("div")).toHaveClass("[@media(hover:none)]:block");
     });
+
+    it("hides row actions until hover only where the device can hover, so a touch screen always shows them", () => {
+      render(TxRow, props(tx()));
+      const split = within(row()).getByRole("button", { name: "Split" });
+      expect(split).toHaveClass("hoverable:opacity-0", "hoverable:group-hover:opacity-100", "hoverable:group-focus-within:opacity-100");
+      expect(split).not.toHaveClass("opacity-0");
+      expect(screen.getByRole("checkbox", { name: "Select Blue Bottle" }).closest("label")).toHaveClass("hoverable:md:opacity-0");
+    });
   });
 
   describe("details (from lg up)", () => {

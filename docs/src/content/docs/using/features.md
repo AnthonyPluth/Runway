@@ -9,7 +9,7 @@ The [home page](/Runway/) has the short list. This is what each part does and wh
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
-**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a tab bar at the bottom (Recurring, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, and wide tables that keep their main columns (the rest fold under each row or are left out).
+**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a tab bar at the bottom (Recurring, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, wide tables that keep their main columns (the rest fold under each row or are left out), and buttons big enough to tap. On a touch screen, actions that a mouse shows on hover (Split, a row's checkbox) are always there.
 
 Settings has these tabs: **Accounts**, **Connections** (SimpleFIN, Plaid, the browser extension for Amazon, Target, Costco and Carta, and the optional services: OpenRouter, Realie, Finnhub and Logo.dev), **Categories**, **Rules**, **Notifications** and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Connections.
 

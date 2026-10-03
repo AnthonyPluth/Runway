@@ -21,6 +21,12 @@
         icon: "size-9",
       },
     },
+    // On a phone a button is at least 44px tall (an icon button 44px square), the size a finger can hit. A link-styled
+    // button doesn't grow: it often sits inside a line of text.
+    compoundVariants: [
+      { variant: ["default", "destructive", "outline", "secondary", "ghost"], size: ["default", "sm", "lg"], class: "phone:min-h-11" },
+      { variant: ["default", "destructive", "outline", "secondary", "ghost"], size: "icon", class: "phone:min-h-11 phone:min-w-11" },
+    ],
     defaultVariants: { variant: "default", size: "default" },
   });
 

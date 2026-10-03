@@ -94,7 +94,7 @@
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
           : "Carry what's left at the end of each month into the next"}
         class={cn("inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-2.5 text-xs sm:py-0.5 whitespace-nowrap hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
-          c.rollover_from ? "text-primary" : "text-muted-foreground opacity-0 group-hover/family:opacity-100 focus-visible:opacity-100 hover:text-foreground [@media(hover:none)]:opacity-100")}>
+          c.rollover_from ? "text-primary" : "text-muted-foreground hover:text-foreground hoverable:opacity-0 hoverable:group-hover/family:opacity-100 hoverable:group-focus-within/family:opacity-100")}>
         <Repeat class="size-3" aria-hidden="true" />{c.rollover_from ? "Rolls over" : "Roll over"}
       </button>
     {/if}
