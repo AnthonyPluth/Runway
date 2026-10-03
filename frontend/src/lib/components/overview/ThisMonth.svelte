@@ -17,7 +17,7 @@
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { barWidth, fmt, fmt0, fmtDate, fmtSigned, monthShort, thisMonth } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, fmtSigned, monthShort, pct, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
 
   const month = thisMonth();
@@ -72,7 +72,9 @@
           <span class="min-w-0 flex-1">
             <span class="flex items-baseline justify-between gap-2 text-[15px]">
               <span class="truncate">{b.name}</span>
-              <span class={cn("tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{Math.round(b.pct * 100)}%</span>
+              <!-- Nothing spent yet isn't progress: a muted dash, not "0%". -->
+              {#if b.spent <= 0}<span class="text-muted-foreground/70"><span aria-hidden="true">—</span><span class="sr-only">nothing spent yet</span></span>
+              {:else}<span class={cn("tabular-nums", b.pct > 1 ? "font-medium text-destructive" : "text-muted-foreground")}>{pct(b.pct)}</span>{/if}
             </span>
             <span class="mt-1.5 block h-1 overflow-hidden rounded-full bg-muted">
               <span class={cn("block h-full rounded-full", b.pct > 1 && "bg-destructive")} style:width={barWidth(b.pct)}
