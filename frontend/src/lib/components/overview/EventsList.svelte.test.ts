@@ -17,7 +17,7 @@ import EventsList from "./EventsList.svelte";
 type Ev = ForecastEvent & { late_from?: string | null };
 const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
 // `events` is also a Testing Library mount option, so props go under `props`.
-const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, ...extra } });
+const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, onchanged: vi.fn(), ...extra } });
 
 beforeEach(() => {
   app.state = null;
@@ -182,6 +182,19 @@ describe("EventsList", () => {
       await userEvent.type(input, "1400{Enter}");
       expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "k1", amount: -1400 } });
       expect(toast.success).toHaveBeenCalledWith("Updated for this date only");
+    });
+
+    it("loads the forecast again in place, without drawing the page afresh", async () => {
+      const onchanged = vi.fn(), version = app.version;
+      show([ev({ overridden: true, original_amount: -1400 })], { onchanged });
+      await userEvent.click(screen.getByRole("button", { name: "−$1,500.00" }));
+      const input = screen.getByRole("spinbutton", { name: "Amount" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "1400{Enter}");
+      await vi.waitFor(() => expect(onchanged).toHaveBeenCalledTimes(1));
+      await userEvent.click(screen.getByRole("button", { name: "reset" }));
+      await vi.waitFor(() => expect(onchanged).toHaveBeenCalledTimes(2));
+      expect(app.version).toBe(version);
     });
 
     it("on the rest of one paid in parts, saves the whole occurrence: what you typed plus what came", async () => {

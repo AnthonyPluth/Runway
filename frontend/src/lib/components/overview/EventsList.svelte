@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, reload } from "$lib/app.svelte";
+  import { app } from "$lib/app.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import Logo from "$lib/components/Logo.svelte";
@@ -16,10 +16,11 @@
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's repeat icon opens Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
   // `limit` is how many show before
-  // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together).
-  let { events, limit = 8, accounts = false, all = $bindable(false) }: {
+  // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
+  // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
+  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged }: {
     events: (ForecastEvent & { late_from?: string | null })[];
-    limit?: number; accounts?: boolean; all?: boolean;
+    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
   // A day at a time, under its date. A bank settles a day's payments together, so the balance shows once a day for each
@@ -44,11 +45,11 @@
       const total = value + Math.abs(e.paid_so_far ?? 0);
       await api("/api/overrides", { method: "POST", body: { key: e.key, amount: (e.amount < 0 ? -1 : 1) * total } });
       toast.success("Updated for this date only");
-      reload();
+      onchanged();
     } catch (err) { toast.error((err as Error).message); }
   }
   async function reset(e: ForecastEvent) {
-    try { await api("/api/overrides", { method: "DELETE", body: { key: e.key } }); toast.success("Back to the usual amount"); reload(); }
+    try { await api("/api/overrides", { method: "DELETE", body: { key: e.key } }); toast.success("Back to the usual amount"); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
 </script>

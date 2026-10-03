@@ -107,14 +107,14 @@ describe("CardsTable", () => {
   const at = (iso: string) => vi.useFakeTimers({ toFake: ["Date"], now: new Date(`${iso}T12:00:00`) });
 
   it("explains how to enter cards' statements when there are none", () => {
-    render(CardsTable, { cards: [] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [] });
     expect(screen.getByText(/Enter each card’s latest statement/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
   });
 
   it("leaves out cards with a $0 balance and nothing left to pay", () => {
     at("2026-03-10");
-    render(CardsTable, { cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
+    render(CardsTable, { onchanged: vi.fn(), cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
       card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: 0, remaining: 0, credit: 20 })] });
     expect(screen.getByText("Sapphire")).toBeInTheDocument();
     expect(screen.queryByText("Freedom")).toBeNull();
@@ -123,23 +123,23 @@ describe("CardsTable", () => {
   });
 
   it("says so when every card is at $0", () => {
-    render(CardsTable, { cards: [card({ owed_now: 0, remaining: 0 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ owed_now: 0, remaining: 0 })] });
     expect(screen.queryByText("Sapphire")).toBeNull();
     expect(screen.getByText("None of your cards owe anything right now.")).toBeInTheDocument();
   });
 
   it("says quietly when a statement was entered by hand", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { cards: [card()] });
+    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.queryByText("entered by hand")).toBeNull();
     unmount();
-    render(CardsTable, { cards: [card({ statement_source: "manual" })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
     expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
   it("shows what a card owes, its statement, due date, minimum and usual spending", () => {
     at("2026-03-10");
-    render(CardsTable, { cards: [card()] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.getByText(/owes \$800\.00 now/)).toBeInTheDocument();
     expect(screen.getByText("about $700.00 a statement")).toHaveAttribute("title", expect.stringContaining("last 3 statements"));
     expect(screen.getByRole("button", { name: "$600.00" })).toBeInTheDocument();
@@ -149,58 +149,58 @@ describe("CardsTable", () => {
 
   it("highlights a payment due within a week", () => {
     at("2026-03-22");
-    render(CardsTable, { cards: [card()] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.getByText("due Mar 26")).toHaveClass("text-amber-400");
   });
 
   it("says Paid once nothing remains, and what's left after a part payment", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { cards: [card({ remaining: 0 })] });
+    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 0 })] });
     expect(screen.getByText("Paid ✓")).toBeInTheDocument();
     unmount();
-    render(CardsTable, { cards: [card({ remaining: 250 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 250 })] });
     expect(screen.getByText(/\$250\.00 left/)).toBeInTheDocument();
   });
 
   it("says how much of the statement a card that isn't paid in full pays, and what carries over", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })] });
+    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })] });
     expect(screen.getByText(/pays \$35\.00 of \$600\.00/)).toHaveAttribute("title", "The rest, $565.00, carries into the next statement");
     unmount();
     // more than the statement: the extra comes off the next one
-    const over = render(CardsTable, { cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })] });
+    const over = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })] });
     expect(screen.getByText(/pays \$1,000\.00 of \$600\.00/)).toHaveAttribute("title", "The extra $400.00 comes off the next statement");
     over.unmount();
     // paid in full: no "pays", as before
-    render(CardsTable, { cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
   it("says \"about\" only for an average over two or more statements", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { cards: [card({ avg_cycles: 1 })] });
+    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_cycles: 1 })] });
     expect(screen.getByText("$700.00 a statement")).toBeInTheDocument();
     unmount();
-    render(CardsTable, { cards: [card({ avg_cycles: 2 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_cycles: 2 })] });
     expect(screen.getByText("about $700.00 a statement")).toBeInTheDocument();
   });
 
   it("separates the notes with dots and spaces", () => {
     at("2026-03-10");
-    render(CardsTable, { cards: [card({ statement_source: "manual" })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
     const line = screen.getByText(/owes \$800\.00 now/).textContent!.replace(/\s+/g, " ");
     expect(line).toBe("owes $800.00 now · entered by hand · about $700.00 a statement");
   });
 
   it("leaves the average out when there isn't one yet", () => {
-    render(CardsTable, { cards: [card({ avg_monthly_spend: null })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_monthly_spend: null })] });
     expect(screen.queryByText(/a statement/)).not.toBeInTheDocument();
     expect(screen.getByText(/owes/)).toBeInTheDocument();
   });
 
   it("lets you correct the statement balance, and undo that", async () => {
     at("2026-03-10");
-    render(CardsTable, { cards: [card({ statement_set: true, statement_reported: 590 })] });
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_set: true, statement_reported: 590 })] });
     expect(screen.getByText("set")).toHaveAttribute("title", "Entered by you · the bank reported $590.00");
     await userEvent.click(screen.getByRole("button", { name: "$600.00" }));
     const box = screen.getByRole("spinbutton", { name: "Statement balance" });

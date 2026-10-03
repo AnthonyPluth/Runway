@@ -38,8 +38,13 @@
   // What the page needs before the list: categories, accounts (for the filter) and recurring items (for ↻).
   const setup = Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
   // Upcoming (projected) items for the forecast account, on All only.
-  const upcoming: Promise<UpcomingEvent[]> = review ? Promise.resolve([])
-    : api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => comingUp(fc) as UpcomingEvent[]).catch(() => []);
+  // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
+  let upcoming = $state<UpcomingEvent[]>([]);
+  function loadUpcoming() {
+    if (review) return;
+    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc) as UpcomingEvent[]; }, () => {});
+  }
+  loadUpcoming();
 
   let list = $state<TxList | null>(null);
   let listError = $state("");
@@ -234,7 +239,7 @@
   </div>
 
   {#if !review}
-    {#await upcoming then events}<Upcoming events={shownEvents(events)} oneAccount={!!applied.account} />{/await}
+    <Upcoming events={shownEvents(upcoming)} oneAccount={!!applied.account} onchanged={loadUpcoming} />
   {/if}
 
   {#if listError}
