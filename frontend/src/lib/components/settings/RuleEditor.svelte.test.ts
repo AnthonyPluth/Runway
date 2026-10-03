@@ -12,6 +12,7 @@ import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import RuleEditor from "./RuleEditor.svelte";
 import type { Rule, SettingsAccount } from "./types";
+import { pickCategory } from "../../../test/pick";
 
 const accounts = [{ id: "a1", name: "Checking", kind: "checking" }] as SettingsAccount[];
 type Body = Record<string, unknown>;
@@ -56,7 +57,7 @@ describe("RuleEditor", () => {
   it("adds a rule and applies it to past transactions by default", async () => {
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole foods");
-    await userEvent.selectOptions(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const body = posts("/api/rules").at(-1)!;
     expect(body).toMatchObject({ match: "whole foods", category: "Groceries", apply: true, split: null });
@@ -117,8 +118,8 @@ describe("RuleEditor", () => {
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "costco");
     await userEvent.click(screen.getByRole("button", { name: "Split instead…" }));
     const cats = screen.getAllByRole("combobox", { name: "Category" });
-    await userEvent.selectOptions(cats[1], "Groceries")   // [0] is the (now disabled) single category;
-    await userEvent.selectOptions(cats[2], "Coffee");
+    await pickCategory(cats[1], "Groceries")   // [0] is the (now disabled) single category;
+    await pickCategory(cats[2], "Coffee");
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     expect(posts("/api/rules").at(-1)).toMatchObject({ category: "", split: [{ category: "Groceries", percent: 50 }, { category: "Coffee", percent: 50 }] });
   });

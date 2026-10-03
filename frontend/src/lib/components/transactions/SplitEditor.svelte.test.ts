@@ -12,6 +12,7 @@ import { toast } from "svelte-sonner";
 import { category, tx } from "../../../test/fixtures";
 import SplitEditor from "./SplitEditor.svelte";
 import type { Tx } from "./types";
+import { pickCategory, pickedValue } from "../../../test/pick";
 
 const setup = (t: Tx = tx({ amount: -30, category: "Coffee" }), returnFocus: HTMLElement | null = null) => {
   const cbs = { onclose: vi.fn(), onsaved: vi.fn() };
@@ -19,7 +20,7 @@ const setup = (t: Tx = tx({ amount: -30, category: "Coffee" }), returnFocus: HTM
   return cbs;
 };
 const save = () => screen.getByRole("button", { name: "Save split" });
-const pick = (part: number, name: string) => userEvent.selectOptions(screen.getByRole("combobox", { name: `Category of part ${part}` }), name);
+const pick = (part: number, name: string) => pickCategory(screen.getByRole("combobox", { name: `Category of part ${part}` }), name);
 const amount = (part: number) => screen.getByLabelText(`Amount of part ${part}`);
 
 beforeEach(() => {
@@ -31,7 +32,7 @@ describe("SplitEditor", () => {
   it("starts with the whole amount on the current category and an empty second part", () => {
     setup();
     expect(screen.getByText("Split $30.00")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Category of part 1" })).toHaveValue("Coffee");
+    expect(pickedValue(screen.getByRole("combobox", { name: "Category of part 1" }))).toBe("Coffee");
     expect(amount(1)).toHaveValue("30.00");
     expect(amount(2)).toHaveValue("");
     expect(screen.getByText("adds up")).toBeInTheDocument();
@@ -161,7 +162,7 @@ describe("SplitEditor", () => {
   it("loads an existing split and can remove it", async () => {
     const { onsaved } = setup(tx({ amount: -30, is_split: 1, splits: [{ category: "Coffee", amount: -10, note: "x" }, { category: "Groceries", amount: -20 }] }));
     expect(amount(1)).toHaveValue("10.00");
-    expect(screen.getByRole("combobox", { name: "Category of part 2" })).toHaveValue("Groceries");
+    expect(pickedValue(screen.getByRole("combobox", { name: "Category of part 2" }))).toBe("Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Remove split" }));
     expect(api).toHaveBeenCalledWith("/api/transactions/t1/split", { method: "POST", body: { splits: [] } });
     expect(onsaved).toHaveBeenCalled();
