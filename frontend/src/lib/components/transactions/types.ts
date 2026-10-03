@@ -43,8 +43,10 @@ export interface BrandChoice { brand: string; bank_name: string; using: "brand" 
 /** `sum`: what they all add up to, as the day totals count them (transfers left out, unless they're what's asked for). */
 export interface TxList { items: Tx[]; total: number; sum?: number; family?: string[] }
 
-/** POST /api/transactions/{id}/category (and /api/ai/apply) may offer to remember the category for the merchant. */
-export interface RuleOffer { merchant: string; match?: string; replaces?: string | null }
+/** POST /api/transactions/{id}/category (and /api/ai/apply, and /api/transactions/bulk for one merchant's) may offer to
+ *  remember the category for the merchant: the text a rule would match, the category a rule already gives it, and how
+ *  many more transactions the rule would categorize now. */
+export interface RuleOffer { merchant: string; match?: string; replaces?: string | null; also_updated?: number }
 
 /** A projected event, as Upcoming shows it. */
 export type UpcomingEvent = ForecastEvent & { late_from?: string | null };

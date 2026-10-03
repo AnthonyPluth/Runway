@@ -32,6 +32,31 @@
             left: Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) };
   }
   $effect(() => { if (open) { void opts; requestAnimationFrame(place); } });
+  // While it's open (only then: a page of rows has one of these each), a click elsewhere or Escape closes it, and it
+  // follows its logo as the page scrolls.
+  $effect(() => {
+    if (!open) return;
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+    window.addEventListener("click", outside);
+    window.addEventListener("keydown", key);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("click", outside);
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  });
+  // Focus goes into the panel once it has something to choose, and back to the logo when it closes.
+  let button = $state<HTMLButtonElement>();
+  $effect(() => {
+    if (open && opts && panel) requestAnimationFrame(() => panel?.querySelector<HTMLElement>("button:not(:disabled), input")?.focus());
+  });
+  function close() {
+    open = false;
+    if (panel?.contains(document.activeElement) || document.activeElement === document.body) button?.focus();
+  }
 
   async function show() {
     open = !open;
@@ -45,7 +70,7 @@
     busy = true;
     try {
       await api(`${base}/logo`, { method: "POST", body: account ? body : holding ? { group: holding, ...body } : { name, ...body } });
-      toast.success(account || holding ? `${what} for ${name}` : `${what} for every ${name} transaction`); open = false; onchanged();
+      toast.success(account || holding ? `${what} for ${name}` : `${what} for every ${name} transaction`); close(); onchanged();
     } catch (err) { toast.error((err as Error).message); }
     finally { busy = false; }
   }
@@ -61,11 +86,8 @@
   }
 </script>
 
-<svelte:window onclick={outside} onkeydown={(e) => { if (open && e.key === "Escape") open = false; }}
-  onscroll={() => open && place()} onresize={() => open && place()} />
-
 <span class="relative block" bind:this={root}>
-  <button type="button" class="block cursor-pointer rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+  <button bind:this={button} type="button" class="block cursor-pointer rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     title={`Change ${which}'s logo`} aria-label={`Logo for ${name}`} aria-expanded={open} onclick={show}>
     {@render children()}
   </button>
