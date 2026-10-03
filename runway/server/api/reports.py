@@ -90,7 +90,7 @@ def _span(q) -> tuple[str, str]:
 
 def api_report_spending(conn, q, _b):
     try:
-        return reports.spending_over_time(conn, _ym(q), _months(q), q.get("group", ["category"])[0])
+        return reports.spending_over_time(conn, _ym(q), _months(q), q.get("group", ["category"])[0], date.today())
     except ValueError as e:
         raise ApiError(str(e)) from e
 
@@ -100,7 +100,7 @@ def api_report_income(conn, q, _b):
 
 
 def api_report_merchants(conn, q, _b):
-    return reports.merchants(conn, *_span(q))
+    return reports.merchants(conn, *_span(q), q=q.get("q", [""])[0][:200])
 
 
 def api_report_merchant(conn, q, _b):

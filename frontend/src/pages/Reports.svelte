@@ -14,15 +14,13 @@
     { id: "cashflow", label: "Cash flow", view: Cashflow },
     { id: "trends", label: "Over time", view: Trends },
     { id: "merchants", label: "Merchants", view: Merchants },
-    { id: "income", label: "Income vs spending", view: Income },
+    { id: "income", label: "Income", view: Income },
     { id: "breakdown", label: "Breakdown", view: Breakdown },
   ];
   const tab = $derived(TABS.find((t) => t.id === sub) ?? TABS[0]);
 </script>
 
-<div class="mb-6 flex items-center gap-1">
-  <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Reports</h1>
-</div>
+<h1 class="mb-6 text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Reports</h1>
 <SubTabs label="Reports" current={tab.id} tabs={TABS.map((t) => ({ id: t.id, label: t.label, href: `#reports/${t.id}` }))} />
 {#if app.state?.connected}
   <tab.view />

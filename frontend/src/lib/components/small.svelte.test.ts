@@ -60,6 +60,22 @@ describe("SubTabs", () => {
     render(SubTabs, { tabs, current: "all", label: "x" });
     expect(screen.getByRole("link", { name: "All" })).toHaveAttribute("href", "#transactions");
   });
+
+  it("fades an edge while there are more tabs past it", async () => {
+    render(SubTabs, { tabs, current: "all", label: "x" });
+    const nav = screen.getByRole("navigation", { name: "x" });
+    expect(nav.style.getPropertyValue("--fade-end")).toBe("0px");   // everything fits
+    Object.defineProperty(nav, "scrollWidth", { configurable: true, value: 500 });
+    Object.defineProperty(nav, "clientWidth", { configurable: true, value: 300 });
+    nav.scrollLeft = 0;
+    nav.dispatchEvent(new Event("scroll"));
+    expect(nav.style.getPropertyValue("--fade-start")).toBe("0px");
+    expect(nav.style.getPropertyValue("--fade-end")).toBe("24px");
+    nav.scrollLeft = 200;
+    nav.dispatchEvent(new Event("scroll"));
+    expect(nav.style.getPropertyValue("--fade-start")).toBe("24px");
+    expect(nav.style.getPropertyValue("--fade-end")).toBe("0px");
+  });
 });
 
 describe("MissedAlert", () => {

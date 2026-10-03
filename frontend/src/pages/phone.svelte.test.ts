@@ -59,7 +59,7 @@ describe("Reports", () => {
 
   it("has all five reports on a computer", async () => {
     render(Reports);
-    expect(await screen.findByText(/No transactions in/)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing in/)).toBeInTheDocument();
     expect(within(screen.getByRole("navigation", { name: "Reports" })).getAllByRole("link")).toHaveLength(5);
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });

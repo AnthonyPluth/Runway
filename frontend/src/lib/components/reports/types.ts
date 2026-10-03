@@ -1,11 +1,14 @@
 // What the report endpoints send back (runway/reports.py and api_cashflow in runway/server.py).
 
-/** /api/reports/spending: each month's spending by category, merchant or account. */
+/** /api/reports/spending: each month's spending by category, merchant or account. While the last month is under way,
+ * `through` is today and each series' `same_point` is what it spent last month and a year before up to the same day. */
 export interface SpendingReport {
   months: string[];
   group: "category" | "merchant" | "account";
-  series: { name: string; values: number[]; total: number; other?: boolean; members?: string[] }[];
+  series: { name: string; values: number[]; total: number; other?: boolean; members?: string[]; account?: string;
+    same_point?: { prev: number; year_ago: number | null } }[];
   totals: number[];
+  through?: string | null;
 }
 
 /** /api/reports/income */
