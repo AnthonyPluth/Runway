@@ -49,7 +49,12 @@ describe("benefits", () => {
     await userEvent.click(screen.getByRole("button", { name: "Mark Travel credit used" }));
     await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({ amount: 50 }));
     await userEvent.click(screen.getByRole("button", { name: "Undo the last use of Travel credit" }));
-    await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/unuse")[0])).toEqual({}));
+    await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/unuse")[0])).toEqual({ use_id: 3 }));   // the latest this period
+    // Taking it off says so, and its toast puts the same use back (same amount, same day).
+    const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => void } }];
+    expect(msg).toBe("Took the use off Travel credit");
+    opts.action.onClick();
+    await waitFor(() => expect(bodyOf(calls("/api/churning/benefits/1/use")[1])).toEqual({ used_on: "2026-09-01", amount: 100 }));
     expect(screen.getByText(/1 use ·/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
     expect(screen.getByRole("button", { name: /Undo the Sep.1 use of Travel credit/ })).toBeInTheDocument();

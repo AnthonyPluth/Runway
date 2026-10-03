@@ -3,6 +3,7 @@ import {
   KIND_LABEL, bankLeft, bankOrder, benefitBoard, benefitOrder, benefitState, benefitSummary, bonusLabel, canUse, cardOrder, currencyGroups, daysUntil,
   eligibilityText, feesDue, five24Line, guestsText, isTravel, mine, ownerChoices, planLine, points, balanceText, balanceValue, ratesPayload, ratesText, reorder,
   scoreProgress, spendProgress, splitWishes, usesText, valueSource, wishName,
+  CARD_STATUS_TONE, CHIP_CLASS, DEADLINE_KINDS, URGENCY_CLASS, lastUse, netFeeText, perDayNeeded, rowKey, urgency,
 } from "./churning";
 import { bankFeesSummary, bankReceivedSummary, bankRequirementsSummary, fullDate, wishExpectSummary, wishTimingSummary } from "./churning";
 import { benefit, card } from "./fixtures";
@@ -30,14 +31,15 @@ describe("churning helpers", () => {
     expect(mine(items, "Sam")).toEqual([{ owner: "Sam" }]);
   });
 
-  it("counts days and shortens points", () => {
+  it("counts days and writes points one way", () => {
     expect(daysUntil("2026-10-01", TODAY)).toBe(2);
     expect(daysUntil("2027-03-29", TODAY)).toBe(181);   // across a DST change, still whole days
-    expect(points(60000)).toBe("60k");
+    expect(points(60000)).toBe("60,000");
+    expect(points(75000.4)).toBe("75,000");
     expect(points(1250)).toBe("1,250");
     expect(points(null)).toBe("—");
     expect(bonusLabel(200, "cash", "Cash back")).toBe("$200");
-    expect(bonusLabel(75000, "ur", "Chase Ultimate Rewards")).toBe("75k Ultimate Rewards");
+    expect(bonusLabel(75000, "ur", "Chase Ultimate Rewards")).toBe("75,000 Ultimate Rewards");
     expect(bonusLabel(null, "ur", "x")).toBe("");
   });
 
@@ -221,5 +223,79 @@ describe("dates and form summaries", () => {
     expect(wishExpectSummary({ kind: "bank_bonus", bonus: "300", requirements: "", once_per_lifetime: false, repeat_months: "" }, "")).toBe("$300");
     expect(sp(wishTimingSummary({ offer_expires_on: "2026-12-01", wait_until: "", min_score: "740", status: "wanted" }))).toBe("Offer ends Dec 1 · score 740");
     expect(wishTimingSummary({ offer_expires_on: "", wait_until: "", min_score: "", status: "wanted" })).toBe("Nothing added");
+  });
+});
+
+describe("urgency", () => {
+  it("is red within 7 days or once overdue, amber within 30, muted after, and words how far", () => {
+    const at = (n: number) => urgency(new Date(2026, 8, 29 + n).toISOString().slice(0, 10), TODAY);
+    expect(at(-3)).toMatchObject({ tone: "bad", label: "3 days overdue", days: -3, cls: "text-loss" });
+    expect(at(-1).label).toBe("1 day overdue");
+    expect(at(0)).toMatchObject({ tone: "bad", label: "today" });
+    expect(at(1).label).toBe("tomorrow");
+    expect(at(7)).toMatchObject({ tone: "bad", label: "in 7 days" });
+    expect(at(8)).toMatchObject({ tone: "warn", label: "in 8 days", cls: "text-warning" });
+    expect(at(30)).toMatchObject({ tone: "warn", label: "in 30 days" });
+    expect(at(31)).toMatchObject({ tone: "muted", label: "in 31 days", cls: "text-muted-foreground" });
+    expect(at(120).label).toBe("in 120 days");
+  });
+
+  it("colors with the page's tokens, not a raw color", () => {
+    expect(Object.values(URGENCY_CLASS).join(" ")).not.toMatch(/red-|amber-|emerald-/);
+    expect(Object.values(CHIP_CLASS).join(" ")).not.toMatch(/red-|amber-|emerald-/);
+  });
+
+  it("only colors what has a deadline, not a chance to apply or a day to close", () => {
+    for (const k of ["task", "fee", "plan", "bonus", "benefit", "offer_ends", "bank_due"] as const) expect(DEADLINE_KINDS.has(k)).toBe(true);
+    for (const k of ["apply", "eligible", "five24", "bank_close", "bank_eligible", "bank_post"] as const) expect(DEADLINE_KINDS.has(k)).toBe(false);
+  });
+
+  it("works out the spending a bonus still needs each day, rounded up, and nothing once it is done or late", () => {
+    expect(perDayNeeded(1000, "2026-10-09", TODAY)).toBe("$100/day needed");   // 10 days
+    expect(perDayNeeded(1001, "2026-10-09", TODAY)).toBe("$101/day needed");
+    expect(perDayNeeded(0, "2026-10-09", TODAY)).toBe("");
+    expect(perDayNeeded(500, TODAY, TODAY)).toBe("");
+    expect(perDayNeeded(500, "2026-09-01", TODAY)).toBe("");
+  });
+
+  it("counts annual fees within 30 days, as the rows do", () => {
+    const fee = (id: number, due: string) => card({ id, fee_due: due, annual_fee: 100 });
+    expect(feesDue([fee(1, "2026-10-29"), fee(2, "2026-10-30"), fee(3, "2026-09-01")], TODAY)).toEqual({ total: 200, count: 2 });   // day 30 counts, day 31 doesn't, a late one does
+  });
+});
+
+describe("small helpers", () => {
+  it("says the year against the server's day when it is given, else the browser's", () => {
+    expect(sp(fullDate("2027-02-03", "2027-01-02"))).toBe("Feb 3");           // the server's day is already in 2027
+    expect(sp(fullDate("2027-02-03"))).toBe("Feb 3, 2027");                   // the browser's clock is still in 2026
+    expect(sp(fullDate("2026-12-03", "2027-01-02"))).toBe("Dec 3, 2026");
+    expect(sp(fullDate("2026-12-03", "2026-09-30"))).toBe("Dec 3");
+    expect(sp(five24Line({ count: 3, under: true, under_on: null, next_fall_off: "2027-03-02" } as Five24, "2027-01-02").next)).toBe("2/24 on Mar 2");
+    expect(sp(eligibilityText(e({ status: "later", on: "2027-03-02" }), "2027-01-02"))).toBe("Mar 2");
+  });
+
+  it("words what a card costs once its credits count, in one muted figure", () => {
+    expect(netFeeText(card({ benefits: [], net_fee: 395 }))).toBe("");
+    expect(netFeeText(card({ benefits: [benefit()], net_fee: -55 }))).toBe("net −$55 after credits");
+    expect(netFeeText(card({ benefits: [benefit()], net_fee: 95 }))).toBe("net $95 after credits");
+  });
+
+  it("picks the use Undo takes off: the latest day, then the latest id", () => {
+    const uses = [{ id: 1, amount_used: 10, used_on: "2026-09-01" }, { id: 3, amount_used: 20, used_on: "2026-09-20" }, { id: 2, amount_used: 30, used_on: "2026-09-20" }];
+    expect(lastUse({ uses })).toEqual(uses[1]);
+    expect(lastUse({ uses: [] })).toBeNull();
+  });
+
+  it("keeps a row's key when the others change", () => {
+    const [a, b] = [{ name: "a" }, { name: "b" }];
+    const [ka, kb] = [rowKey(a), rowKey(b)];
+    expect(ka).not.toBe(kb);
+    expect(rowKey(a)).toBe(ka);   // the same row, after the one before it was removed
+  });
+
+  it("gives a status a tone and an attribute none", () => {
+    expect(CARD_STATUS_TONE).toEqual({ open: "good", closed: "neutral", product_changed: "neutral" });
+    expect(CHIP_CLASS.good).toContain("bg-good/15");
+    expect(CHIP_CLASS.bad).toContain("text-loss");
   });
 });

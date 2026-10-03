@@ -79,41 +79,104 @@ describe("SubTabs", () => {
 });
 
 describe("MissedAlert", () => {
-  const m = { key: "rent-2026-03", name: "Rent", amount: -1500, date: "2026-03-01", account_id: "a1", account_name: "Checking" };
+  const m = { key: "rec:7:2026-03-02", name: "Rent", amount: -1500, date: "2026-03-02", account_id: "a1", account_name: "Checking", recurring_id: 7 };
+  const today = "2026-03-11";
   beforeEach(() => { location.hash = ""; });
+  const undo = async () => {
+    const opts = vi.mocked(toast).mock.calls.at(-1)![1] as unknown as { action: { onClick: () => Promise<void> } };
+    await opts.action.onClick();
+  };
 
-  it("says what's missing, how much and where", () => {
-    render(MissedAlert, { m });
-    expect(screen.getByText(/\$1,500\.00 expected/)).toHaveTextContent("Rent: $1,500.00 expected Mar 1 hasn't shown up in Checking.");
+  it("says what's missing, how much, how late and where", () => {
+    render(MissedAlert, { m, today });
+    expect(screen.getByText("Rent")).toBeInTheDocument();
+    expect(screen.getByText("−$1,500.00")).toBeInTheDocument();
+    expect(screen.getByText("9 days late")).toHaveClass("text-warning");
+    expect(screen.getByText(/due Mar 2 · Checking/)).toBeInTheDocument();
+    render(MissedAlert, { m: { ...m, key: "k2", name: "Pay", amount: 2000 }, today: "2026-03-03" });
+    expect(screen.getByText("+$2,000.00")).toBeInTheDocument();
+    expect(screen.getByText("1 day late")).toBeInTheDocument();
   });
 
-  it("says 'expected in' for money that should have come in", () => {
-    render(MissedAlert, { m: { ...m, name: "Pay", amount: 2000 } });
-    expect(screen.getByText(/expected in/)).toBeInTheDocument();
-  });
-
-  it("'Find it' opens Transactions on that account and month", async () => {
-    render(MissedAlert, { m });
-    await userEvent.click(screen.getByRole("link", { name: "Find it" }));
-    expect(txFilters.transactions).toMatchObject({ account: "a1", from: "2026-03-01", to: "2026-03-31" });
-    expect(location.hash).toBe("#transactions?account=a1&from=2026-03-01&to=2026-03-31");
-    expect(toast).toHaveBeenCalled();
-  });
-
-  it("'Dismiss' forgets it, tells the page and removes the row", async () => {
-    vi.mocked(api).mockResolvedValue({});
-    const ondismiss = vi.fn();
-    render(MissedAlert, { m, ondismiss });
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  it("'Link a transaction' lists the payments it could be, right here, and links the one you pick", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => path.includes("/candidates")
+      ? [{ id: "t1", posted: "2026-03-05", amount: -1500, name: "City Rnt Pmt" }, { id: "t2", posted: "2026-03-03", amount: -1480, name: "Sofa Store" }]
+      : { ok: true }) as never);
+    const ondone = vi.fn();
+    render(MissedAlert, { m, today, ondone });
+    await userEvent.click(screen.getByRole("button", { name: "Link a transaction" }));
+    expect(api).toHaveBeenCalledWith("/api/recurring/7/candidates?date=2026-03-02");
+    const list = await screen.findByRole("list", { name: "Payments that could be Rent" });
+    expect(list).toHaveTextContent(/Mar.5\s*City Rnt Pmt\s*−\$1,500\.00/);
+    await userEvent.click(screen.getByRole("button", { name: /^Link City Rnt Pmt on Mar.5$/ }));
+    expect(api).toHaveBeenCalledWith("/api/transactions/t1/recurring", { method: "POST", body: { recurring_id: 7 } });
     expect(api).toHaveBeenCalledWith("/api/recurring/dismiss", { method: "POST", body: { key: m.key } });
-    expect(ondismiss).toHaveBeenCalledWith(m.key);
+    expect(toast.success).toHaveBeenCalledWith("Linked to Rent");
+    expect(ondone).toHaveBeenCalledWith(m.key);
     expect(screen.queryByText("Rent")).not.toBeInTheDocument();
   });
 
-  it("keeps the row and shows the error when dismissing fails", async () => {
+  it("offers to match a linked payment's text from now on", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => path.includes("/candidates") ? [{ id: "t1", posted: "2026-03-05", amount: -1500, name: "City Rnt Pmt" }]
+      : path.endsWith("/recurring") ? { ok: true, suggest_text: "city rnt pmt" } : { ok: true, linked: 0 }) as never);
+    render(MissedAlert, { m, today });
+    await userEvent.click(screen.getByRole("button", { name: "Link a transaction" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Link City/ }));
+    const [msg, opts] = vi.mocked(toast.success).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+    expect(msg).toBe("Linked to Rent");
+    await opts.action.onClick();
+    expect(api).toHaveBeenCalledWith("/api/recurring/7/match", { method: "POST", body: { text: "city rnt pmt" } });
+  });
+
+  it("keeps the row when linking fails", async () => {
+    vi.mocked(api).mockImplementation((async (path: string) => {
+      if (path.includes("/candidates")) return [{ id: "t1", posted: "2026-03-05", amount: -1500, name: "City Rnt Pmt" }];
+      throw new Error("Try later");
+    }) as never);
+    render(MissedAlert, { m, today });
+    await userEvent.click(screen.getByRole("button", { name: "Link a transaction" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Link City/ }));
+    expect(toast.error).toHaveBeenCalledWith("Try later");
+    expect(screen.getByText("Rent")).toBeInTheDocument();
+  });
+
+  it("with nothing close, opens Transactions on that account and month to look further", async () => {
+    vi.mocked(api).mockResolvedValue([] as never);
+    render(MissedAlert, { m, today });
+    await userEvent.click(screen.getByRole("button", { name: "Link a transaction" }));
+    await userEvent.click(await screen.findByRole("link", { name: "Look in Transactions" }));
+    expect(txFilters.transactions).toMatchObject({ account: "a1", from: "2026-03-01", to: "2026-03-31" });
+    expect(location.hash).toBe("#transactions?account=a1&from=2026-03-01&to=2026-03-31");
+  });
+
+  it("says when it couldn't look, with a Retry", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error("offline")).mockResolvedValue([] as never);
+    render(MissedAlert, { m, today });
+    await userEvent.click(screen.getByRole("button", { name: "Link a transaction" }));
+    expect(await screen.findByText(/Couldn’t look for payments/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(/Nothing close to Mar 2/)).toBeInTheDocument();
+  });
+
+  it("'Skip this one' is a $0 for that date, tells the page and removes the row; Undo puts it back", async () => {
+    vi.mocked(api).mockResolvedValue({});
+    const ondone = vi.fn(), onundone = vi.fn();
+    render(MissedAlert, { m, today, ondone, onundone });
+    await userEvent.click(screen.getByRole("button", { name: "Skip this one" }));
+    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: m.key, amount: 0 } });
+    expect(ondone).toHaveBeenCalledWith(m.key);
+    expect(screen.queryByText("Rent")).not.toBeInTheDocument();
+    expect(toast).toHaveBeenLastCalledWith("Skipped Rent on Mar\u00a02", expect.anything());
+    await undo();
+    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: m.key } });
+    expect(onundone).toHaveBeenCalledWith(m.key);
+    expect(await screen.findByText("Rent")).toBeInTheDocument();
+  });
+
+  it("keeps the row and shows the error when skipping fails", async () => {
     vi.mocked(api).mockRejectedValue(new Error("Try later"));
-    render(MissedAlert, { m });
-    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    render(MissedAlert, { m, today });
+    await userEvent.click(screen.getByRole("button", { name: "Skip this one" }));
     expect(toast.error).toHaveBeenCalledWith("Try later");
     expect(screen.getByText("Rent")).toBeInTheDocument();
   });

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -69,5 +69,99 @@ describe("best card", () => {
     vi.mocked(api).mockResolvedValue({ cards: [row] } as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     expect(await screen.findByText("10x if booked through Capital One Travel")).toBeInTheDocument();
+  });
+});
+
+describe("asking for the ranking", () => {
+  const rank = (product: string, over = {}) => ({ id: 1, owner: "Alex", product, issuer: "chase", multiplier: 3, currency: "points", cents: 1.5, return_pct: 4.5, value: null,
+    bonus: null, needs_portal: false, portal_name: null, portal_option: null, note: null, ...over });
+  const deferred = <T,>() => { let resolve!: (v: T) => void, reject!: (e: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("waits for a pause of 300ms in typing before asking again", async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    vi.mocked(api).mockResolvedValue({ cards: [rank("Freedom")] } as never);
+    render(BestCard, { person: "", version: 0, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls(/best\?/)).toHaveLength(1);   // the first ask goes at once
+    await user.type(screen.getByPlaceholderText("optional"), "250");
+    await vi.advanceTimersByTimeAsync(299);
+    expect(calls(/best\?/)).toHaveLength(1);   // still typing, so nothing yet
+    await user.type(screen.getByPlaceholderText("optional"), "0");   // another key restarts the wait
+    await vi.advanceTimersByTimeAsync(299);
+    expect(calls(/best\?/)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls(/best\?/)).toHaveLength(2);
+    expect(calls(/best\?/)[1][0]).toContain("amount=2500");
+  });
+
+  it("asks at once when the page's data was reloaded", async () => {
+    vi.useFakeTimers();
+    vi.mocked(api).mockResolvedValue({ cards: [rank("Freedom")] } as never);
+    const { rerender } = render(BestCard, { person: "", version: 0, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    await rerender({ person: "", version: 1, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls(/best\?/)).toHaveLength(2);
+  });
+
+  it("ignores an old answer that arrives after a newer one", async () => {
+    vi.useFakeTimers();
+    const first = deferred<{ cards: unknown[] }>(), second = deferred<{ cards: unknown[] }>();
+    vi.mocked(api).mockReturnValueOnce(first.promise as never).mockReturnValueOnce(second.promise as never);
+    render(BestCard, { person: "", version: 0, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    screen.getByPlaceholderText("optional").focus();
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).type(screen.getByPlaceholderText("optional"), "9");
+    await vi.advanceTimersByTimeAsync(300);
+    expect(calls(/best\?/)).toHaveLength(2);
+    second.resolve({ cards: [rank("Newer answer")] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByText("Newer answer")).toBeInTheDocument();
+    first.resolve({ cards: [rank("Older answer")] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.queryByText("Older answer")).toBeNull();
+    expect(screen.getByText("Newer answer")).toBeInTheDocument();
+  });
+
+  it("shows a skeleton while the first answer loads, and dims the list while a newer one does", async () => {
+    vi.useFakeTimers();
+    const first = deferred<{ cards: unknown[] }>(), second = deferred<{ cards: unknown[] }>();
+    vi.mocked(api).mockReturnValueOnce(first.promise as never).mockReturnValueOnce(second.promise as never);
+    const { rerender } = render(BestCard, { person: "", version: 0, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByLabelText("Ranking your cards")).toHaveAttribute("aria-busy", "true");
+    first.resolve({ cards: [rank("Freedom")] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.queryByLabelText("Ranking your cards")).toBeNull();
+    const list = screen.getByRole("list");
+    expect(list).toHaveAttribute("aria-busy", "false");
+    await rerender({ person: "", version: 1, showOwner: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(list).toHaveAttribute("aria-busy", "true");
+    expect(list.className).toContain("opacity-60");
+    second.resolve({ cards: [rank("Freedom")] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole("list")).toHaveAttribute("aria-busy", "false");
+  });
+
+  it("says in a friendly line that it couldn't rank, never the raw error, and Try again asks again", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error("HTTP 500: internal error at /api/churning/best"));
+    render(BestCard, { person: "", version: 0, showOwner: false });
+    expect(await screen.findByText(/Couldn’t rank your cards just now/)).toBeInTheDocument();
+    expect(screen.queryByText(/HTTP 500/)).toBeNull();
+    vi.mocked(api).mockResolvedValue({ cards: [rank("Freedom")] } as never);
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Freedom")).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn’t rank/)).toBeNull();
+  });
+
+  it("writes the money in a row one way, to the cent", async () => {
+    vi.mocked(api).mockResolvedValue({ cards: [rank("Freedom", { value: 1.5, bonus: { remaining: 1250.5, deadline: "2026-12-01", amount: 200, currency: "cash" } })] } as never);
+    render(BestCard, { person: "", version: 0, showOwner: false, today: "2026-09-30" });
+    const row = (await screen.findByRole("list")).querySelector("li")!;
+    expect(row).toHaveTextContent("bonus: $1,250.50 to go");
+    expect(row).toHaveTextContent("$1.50");
   });
 });

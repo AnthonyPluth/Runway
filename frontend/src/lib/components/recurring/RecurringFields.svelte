@@ -10,17 +10,20 @@
   import { accountName, type Account } from "$lib/types";
   import { toast } from "svelte-sonner";
   import { tick, untrack } from "svelte";
-  import { fmt0 } from "$lib/format";
+  import { fmt, fmtDate } from "$lib/format";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import X from "@lucide/svelte/icons/x";
   import { FREQ_OPTIONS, MODE_OPTIONS, needsDates, signedAmount, type Errors, type RecurringValues } from "./types";
 
   // A recurring item's fields. With `save`, each one saves itself when you change it (the classic onEdit);
   // without it (the Add form), they just hold what you type. `errors` marks the fields to fix. `suggested` is what the
   // last few payments came to when they all missed a fixed amount (the API's suggested_amount), worked out against the
-  // saved amount `suggestedFor`: offered as the new amount while the field still has that one.
+  // saved amount `suggestedFor`: offered as the new amount while the field still has that one. `next`: when it's next due
+  // (an existing item's, from the API), shown beside the date it repeats from.
   type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-  let { v = $bindable(), accounts, save, errors = {}, suggested = null, suggestedFor = null }: {
+  let { v = $bindable(), accounts, save, errors = {}, suggested = null, suggestedFor = null, next = null }: {
     v: RecurringValues; accounts: Account[]; save?: (f: Field) => Promise<void>; errors?: Errors; suggested?: number | null; suggestedFor?: number | null;
+    next?: string | null;
   } = $props();
 
   const uid = $props.id();
@@ -48,8 +51,8 @@
   // the amount comes from the payments, and comes back if a save of it fails and the old amount returns.
   const suggest = $derived.by(() => {
     if (!suggested || suggestedFor === null || v.amount_mode !== "fixed") return null;
-    const n = Math.round(Math.abs(suggested)), now = Math.abs(Number(v.amount));
-    return Math.abs(now - Math.abs(suggestedFor)) < 0.005 && Math.abs(now - n) > 2 ? n : null;
+    const n = Math.round(Math.abs(suggested) * 100) / 100, now = Math.abs(Number(v.amount));
+    return Math.abs(now - Math.abs(suggestedFor)) < 0.005 && Math.abs(now - n) >= 0.005 ? n : null;
   });
   async function useSuggested(n: number) {
     const was = mag;
@@ -59,13 +62,30 @@
     try { await save(amountInput); markSaved(amountInput); }
     catch (err) { mag = was; push(); toast.error((err as Error).message); }
   }
+  // Or let the amount follow the payments: the average of the last three, as "Amount to forecast" can.
+  let modeSelect = $state<HTMLSelectElement | null>(null);
+  async function useAverage() {
+    const was = v.amount_mode;
+    v.amount_mode = "avg3";
+    if (!save || !modeSelect) return;
+    await tick();
+    try { await save(modeSelect); markSaved(modeSelect); }
+    catch (err) { v.amount_mode = was; toast.error((err as Error).message); }
+  }
+  // Clearing the end date saves like picking one (the field's own change, so autosave knows its new value).
+  let endInput = $state<HTMLInputElement | null>(null);
+  async function clearEnd() {
+    v.end_date = "";
+    await tick();
+    endInput?.dispatchEvent(new Event("change"));
+  }
 
   // Help for each field, as its tooltip.
   const hints = {
     anchor_date: "Any date it falls on works.", account_id: "The account the money moves through.",
     amount_mode: "Use the recent payments when the amount changes, like a utility bill.",
-    match: "Text on the bank statement, e.g. COMED. One per line to match any of them; blank uses the name.",
     amount_max: "Leave blank to match any amount with the text.",
+    end_date: "The last day it can come. Blank: it carries on.",
   };
   // While More options is closed, one line says what's in it.
   const moreSummary = $derived.by(() => {
@@ -73,10 +93,11 @@
     const mode = MODE_OPTIONS.find(([val]) => val === v.amount_mode)?.[1] ?? "";
     const lines = v.match.split("\n").map((x) => x.trim()).filter(Boolean);
     const match = lines.length ? `matches ${lines[0]}${lines.length > 1 ? ` +${lines.length - 1}` : ""}` : "matches the name";
-    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match].filter(Boolean).join(" · ");
+    const ends = v.end_date && !once ? `ends ${fmtDate(v.end_date)}` : "";
+    return [acct ? accountName(acct) : "", mode.charAt(0).toLowerCase() + mode.slice(1), match, ends].filter(Boolean).join(" · ");
   });
   let moreOpen = $state(untrack(() => !!save));   // the Add form keeps these tucked away; an existing item shows them all
-  $effect(() => { if (errors.account_id || errors.amount_max) moreOpen = true; });
+  $effect(() => { if (errors.account_id || errors.amount_max || errors.end_date) moreOpen = true; });
   const err = (name: string) => errors[name as keyof Errors];
   const ids = (name: string) => (err(name) ? `${uid}-${name}-err` : undefined);
   const bad = (name: string) => (err(name) ? "true" : undefined);
@@ -127,18 +148,21 @@
       {@render note("dates")}
     </div>
   {/if}
-  <div class="flex min-w-0 flex-col gap-1.5">
-    <label class={lbl}><span>{dated ? "Starting" : once ? "Date" : "Next date"}{@render star()}</span>
+  <div class="relative flex min-w-0 flex-col gap-1.5">
+    <label class={lbl}><span>{once ? "Date" : "Repeats from"}{@render star()}</span>
       <input class={fieldCls} name="anchor_date" type="date" bind:value={v.anchor_date} aria-required="true" aria-invalid={bad("anchor_date")} aria-describedby={ids("anchor_date")} title={once ? undefined : hints.anchor_date} use:saveIf={save} />
     </label>
+    <!-- When it's next due, worked out from this date (and any skipped or paid), beside the label. -->
+    {#if next && !once}<span class="absolute top-0 right-0 text-xs text-muted-foreground" data-next>Next: {fmtDate(next)}</span>{/if}
     {@render note("anchor_date")}
   </div>
 </div>
 
 {#if suggest}
-  <p class="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
-    <span>The last payments were about {fmt0(suggest)}, not {fmt0(Math.abs(Number(v.amount)))}.</span>
-    <button type="button" class="font-medium text-primary underline-offset-4 hover:underline" onclick={() => useSuggested(suggest)}>Use {fmt0(suggest)}</button>
+  <p class="mt-3 flex flex-wrap items-center gap-x-3 text-sm text-muted-foreground">
+    <span>The last payments were about {fmt(suggest)}, not {fmt(Math.abs(Number(v.amount)))}.</span>
+    <button type="button" class="font-medium text-primary underline-offset-4 hover:underline" onclick={() => useSuggested(suggest)}>Use {fmt(suggest)}</button>
+    <button type="button" class="font-medium text-primary underline-offset-4 hover:underline" title="Forecast the average of the last 3 payments from now on" onclick={useAverage}>Average of last 3</button>
   </p>
 {/if}
 
@@ -159,7 +183,7 @@
     </div>
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Amount to forecast
-        <select class={selectCls} name="amount_mode" bind:value={v.amount_mode} title={hints.amount_mode} use:saveIf={save}>
+        <select class={selectCls} name="amount_mode" bind:value={v.amount_mode} title={hints.amount_mode} bind:this={modeSelect} use:saveIf={save}>
           {#each MODE_OPTIONS as [val, text] (val)}<option value={val}>{text}</option>{/each}
         </select>
       </label>
@@ -167,9 +191,24 @@
     <div class="flex min-w-0 flex-col gap-1.5">
       <label class={lbl}>Merchant text
         <textarea class={fieldCls + " h-auto min-h-9 resize-y py-1.5"} name="match" rows={Math.max(1, v.match.split("\n").length)} bind:value={v.match}
-          placeholder="Blank uses the name" title={hints.match} use:saveIf={save}></textarea>
+          placeholder="Text in the bank’s description" use:saveIf={save}></textarea>
       </label>
     </div>
+    {#if !once}
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <label class={lbl}>Ends on
+          <span class="relative flex items-center">
+            <input class={fieldCls + (v.end_date ? " pr-9" : "")} name="end_date" type="date" bind:value={v.end_date} bind:this={endInput} title={hints.end_date}
+              aria-invalid={bad("end_date")} aria-describedby={ids("end_date")} use:saveIf={save} />
+            {#if v.end_date}
+              <button type="button" class="absolute right-1 flex size-7 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                aria-label="Clear the end date" onclick={clearEnd}><X class="size-4" aria-hidden="true" /></button>
+            {/if}
+          </span>
+        </label>
+        {@render note("end_date")}
+      </div>
+    {/if}
     <div class="flex min-w-0 flex-col gap-1.5 text-sm text-muted-foreground">
       <span id="{uid}-range">Only amounts between</span>
       <div class="flex items-center gap-2" role="group" aria-labelledby="{uid}-range">

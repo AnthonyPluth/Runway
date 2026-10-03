@@ -1,19 +1,20 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
-  import { Badge } from "$lib/components/ui/badge";
+  import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
-  import { fmt, fmt0 } from "$lib/format";
+  import { fmt } from "$lib/format";
   import { cn } from "$lib/utils";
   import { catParentOf } from "$lib/categories.svelte";
   import { commas } from "$lib/commas";
+  import Chip from "./Chip.svelte";
   import { fullDate, isTravel } from "./churning";
   import type { BestCard } from "./types";
 
   // Which card to use for a purchase: pick a category (and an amount, if you like) and the open cards are ranked by
   // what they return. A card still short of its sign-up bonus says so: spending there may be worth more.
-  let { person, version, showOwner }: { person: string; version: number; showOwner: boolean } = $props();
+  let { person, version, showOwner, today }: { person: string; version: number; showOwner: boolean; today?: string } = $props();
   // Some rates only count when you book through the issuer's travel portal: for travel, tick the box if you will, and
   // those count.
   let category = $state(""), amount = $state(""), portal = $state(false);
@@ -21,15 +22,35 @@
   // Travel by its name, or any category a card has a portal-only rate for (a travel category called something else).
   const travel = $derived(isTravel(category, catParentOf(category)) ||
     (!!category && !!ranked?.some((c) => c.needs_portal || c.portal_option)));
-  let error = $state("");
+  let failed = $state(false), loading = $state(true);
+  let tries = $state(0);   // Try again counts up, which asks again at once
 
+  // Typing an amount (or picking another category) asks once you pause for DEBOUNCE_MS, and a slow answer to an old
+  // question never replaces the answer to the newer one. The first ask, a reload of the page's data and Try again go at once.
+  const DEBOUNCE_MS = 300;
+  let seq = 0, started = false, seenVersion = -1, seenTries = 0;
+  async function ask(path: string) {
+    const n = ++seq;
+    try {
+      const r = await api<{ cards: BestCard[] }>(path);
+      if (n !== seq) return;
+      ranked = r.cards; failed = false;
+    } catch {
+      if (n !== seq) return;
+      failed = true;
+    }
+    loading = false;
+  }
   $effect(() => {
-    void version;
     const params = new URLSearchParams({ category, owner: person, amount: amount && Number(amount) > 0 ? amount : "" });
     if (portal && travel) params.set("portal", "1");
-    api<{ cards: BestCard[] }>(`/api/churning/best?${params}`)
-      .then((r) => { ranked = r.cards; error = ""; })
-      .catch((err) => { error = (err as Error).message; });
+    const path = `/api/churning/best?${params}`;
+    const now = !started || version !== seenVersion || tries !== seenTries;
+    started = true; seenVersion = version; seenTries = tries;
+    loading = true;
+    if (now) { ask(path); return; }
+    const timer = setTimeout(() => ask(path), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
   });
   const push = $derived(ranked?.filter((c) => c.bonus) ?? []);
 </script>
@@ -51,23 +72,31 @@
         <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={portal} />I'll book through the issuer's travel portal</label>
       {/if}
     </div>
-    {#if error}<p class="mt-3 text-sm text-red-500">{error}</p>
-    {:else if ranked && !ranked.length}<p class="mt-4 text-sm text-muted-foreground">No open cards{person ? ` for ${person}` : ""} yet.</p>
-    {:else if ranked}
+    {#if failed}
+      <p class="mt-4 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground" role="status">
+        Couldn’t rank your cards just now.
+        <Button variant="link" size="sm" class="h-auto px-0" onclick={() => tries++}>Try again</Button>
+      </p>
+    {:else if !ranked}
+      <div class="mt-4 space-y-2" aria-busy="true" aria-label="Ranking your cards">
+        {#each [0, 1, 2] as i (i)}<div class="h-10 animate-pulse rounded-lg bg-muted motion-reduce:animate-none"></div>{/each}
+      </div>
+    {:else if !ranked.length}<p class="mt-4 text-sm text-muted-foreground">No open cards{person ? ` for ${person}` : ""} yet.</p>
+    {:else}
       {#if push.length}
-        <p class="mt-4 rounded-lg border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-sm">
-          Put spending on <b>{push[0].product}</b>{showOwner ? ` (${push[0].owner})` : ""} to hit its bonus: {fmt0(push[0].bonus!.remaining)} to go by {fullDate(push[0].bonus!.deadline)}.
+        <p class="mt-4 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+          Put spending on <b>{push[0].product}</b>{showOwner ? ` (${push[0].owner})` : ""} to hit its bonus: {fmt(push[0].bonus!.remaining)} to go by {fullDate(push[0].bonus!.deadline, today)}.
         </p>
       {/if}
-      <ol class="mt-3 divide-y">
+      <ol class={cn("mt-3 divide-y transition-opacity", loading && "opacity-60")} aria-busy={loading}>
         {#each ranked as c, i (c.id)}
           <li class="flex items-center gap-3 py-2">
             <span class={cn("w-5 text-right text-sm tabular-nums", i === 0 ? "font-semibold" : "text-muted-foreground")}>{i + 1}</span>
             <div class="min-w-0 flex-1">
               <div class={cn("flex flex-wrap items-center gap-1.5 text-sm", i === 0 && "font-semibold")}>{c.product}{#if showOwner}<span class="font-normal text-muted-foreground"> · {c.owner}</span>{/if}
-                {#if c.needs_portal}<Badge variant="outline">Via {c.portal_name ?? "the issuer's portal"}</Badge>{/if}</div>
-              <div class="text-xs text-muted-foreground">{c.multiplier}x {c.currency} at {c.cents}¢{c.bonus ? ` · bonus: ${fmt0(c.bonus.remaining)} to go` : ""}</div>
-              {#if c.note}<div class={cn("text-xs", c.portal_option ? "text-[var(--good)]" : "text-muted-foreground")}>{c.note}</div>{/if}
+                {#if c.needs_portal}<Chip>Via {c.portal_name ?? "the issuer's portal"}</Chip>{/if}</div>
+              <div class="text-xs text-muted-foreground">{c.multiplier}x {c.currency} at {c.cents}¢{c.bonus ? ` · bonus: ${fmt(c.bonus.remaining)} to go` : ""}</div>
+              {#if c.note}<div class={cn("text-xs", c.portal_option ? "text-good" : "text-muted-foreground")}>{c.note}</div>{/if}
             </div>
             <div class="text-right">
               <div class="text-sm font-medium tabular-nums">{c.return_pct.toFixed(1)}%</div>

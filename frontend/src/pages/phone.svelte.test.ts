@@ -71,27 +71,28 @@ describe("Churning", () => {
   it("has cards, bank bonuses, plans and to-dos on a phone", async () => {
     viewport.phone = true;
     data();
-    render(Churning, { sub: "bank" });
-    expect(await screen.findByRole("button", { name: "Add a bank bonus" })).toBeInTheDocument();
+    const { rerender } = render(Churning, { sub: "" });
+    expect(await screen.findByRole("button", { name: "Add a to-do" })).toBeInTheDocument();   // the Overview: to-dos and plans
+    expect(screen.getByText("Planned")).toBeInTheDocument();
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add a to-do" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Cards or bank bonuses" })).toBeInTheDocument();
-    expect(screen.getByText("Planned")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Churning sections" })).toBeInTheDocument();
+    await rerender({ sub: "bank" });
+    expect(await screen.findByRole("button", { name: "Add a bank bonus" })).toBeInTheDocument();
   });
 
   it("shows the cards tab on a phone", async () => {
     viewport.phone = true;
     data();
-    render(Churning);
+    render(Churning, { sub: "cards" });
     expect(await screen.findByRole("button", { name: "Add a card" })).toBeInTheDocument();
   });
 
   it("has its cards and tabs on a computer", async () => {
     data();
-    render(Churning);
+    render(Churning, { sub: "cards" });
     expect(await screen.findByRole("button", { name: "Add a card" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Cards or bank bonuses" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Churning sections" })).toBeInTheDocument();
   });
 });
 

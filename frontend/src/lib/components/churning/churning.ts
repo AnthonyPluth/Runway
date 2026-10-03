@@ -14,15 +14,53 @@ export const mine = <T extends { owner: string | null }>(items: T[], person: str
 export const daysUntil = (day: string, today: string) =>
   Math.round((parseDate(day).getTime() - parseDate(today).getTime()) / 864e5);
 
-/** "Oct 12" within this year, "Jan 10, 2027" in any other. */
-const fullDate = (d: string) => fmtDate(d, parseDate(d).getFullYear() === new Date().getFullYear() ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
-export { fullDate };
+/** "Oct 12" within this year, "Jan 10, 2027" in any other. `today` is the server's day (Churning's `today`), so the year
+ * turns over when the server's does; without it, the browser's clock. */
+export const fullDate = (d: string, today?: string) => {
+  const year = (today ? parseDate(today) : new Date()).getFullYear();
+  return fmtDate(d, parseDate(d).getFullYear() === year ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
+};
 
-/** 60,000 → "60k", 1,250 → "1,250" (points and miles). */
+export type UrgencyTone = "bad" | "warn" | "muted";
+export interface Urgency { tone: UrgencyTone; label: string; days: number; cls: string }
+/** The text color for each urgency tone (tokens, so a red here is the same red as a loss elsewhere). */
+export const URGENCY_CLASS: Record<UrgencyTone, string> = { bad: "text-loss", warn: "text-warning", muted: "text-muted-foreground" };
+/** How soon a deadline is, said the same way everywhere on the page: red within 7 days or once overdue, amber within 30,
+ * muted otherwise, and "in 12 days" / "3 days overdue" for a label. */
+export function urgency(date: string, today: string): Urgency {
+  const days = daysUntil(date, today);
+  const tone: UrgencyTone = days <= 7 ? "bad" : days <= 30 ? "warn" : "muted";
+  const label = days < 0 ? `${plural(-days, "day")} overdue` : days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+  return { tone, label, days, cls: URGENCY_CLASS[tone] };
+}
+
+/** What a bonus still needs spent each day to be done by its deadline, rounded up ("$45/day needed"); empty once there's
+ * nothing left to spend or no day left. */
+export function perDayNeeded(left: number, deadline: string, today: string): string {
+  const days = daysUntil(deadline, today);
+  return left > 0 && days > 0 ? `${fmt0(Math.ceil(left / days))}/day needed` : "";
+}
+
+/** The kinds of Upcoming item with a deadline to meet: the others (a chance to apply, 5/24 changing, a safe day to
+ * close) are good news or plain dates, so they aren't colored by how close they are. */
+export const DEADLINE_KINDS: ReadonlySet<UpcomingItem["kind"]> = new Set(["task", "fee", "plan", "bonus", "benefit", "offer_ends", "bank_due", "bank_fee"]);
+
+export type ChipTone = "good" | "warn" | "bad" | "neutral";
+/** The colors of a status chip. A status (where something stands: received, missed, plan due) is filled with its tone; an
+ * attribute (Business, AU, Card) is the same neutral outline on every row, so the two never look alike. */
+export const CHIP_CLASS: Record<ChipTone, string> = {
+  good: "border-transparent bg-good/15 text-good",
+  warn: "border-transparent bg-warning/15 text-warning",
+  bad: "border-transparent bg-loss/15 text-loss",
+  neutral: "border-transparent bg-muted text-muted-foreground",
+};
+/** The tone of each card and bank bonus status, by what it means for you. */
+export const CARD_STATUS_TONE: Record<ChurnCard["status"], ChipTone> = { open: "good", closed: "neutral", product_changed: "neutral" };
+export const BANK_STATE_TONE: Record<BankBonus["state"], ChipTone> = { active: "neutral", met: "good", missed: "bad", received: "good", closed: "neutral" };
+
+/** Points and miles, with their commas: 75,000. */
 export function points(n: number | null | undefined): string {
-  if (n == null) return "—";
-  if (Math.abs(n) >= 10000) return `${Math.round(n / 1000).toLocaleString("en-US")}k`;
-  return Math.round(n).toLocaleString("en-US");
+  return n == null ? "—" : Math.round(n).toLocaleString("en-US");
 }
 
 /** A balance to edit, with its commas ("125,000"); "" for none. */
@@ -30,7 +68,7 @@ export const balanceText = (n: number | null | undefined) => (n == null ? "" : n
 /** What was typed in a balance field, without the commas (or spaces) it may have been written with. */
 export const balanceValue = (text: string) => text.replace(/[,\s]/g, "");
 
-/** A bonus in its own currency: "$200" for cash, "60k Ultimate Rewards" for points. */
+/** A bonus in its own currency: "$200" for cash, "60,000 Ultimate Rewards" for points. */
 export function bonusLabel(amount: number | null, currencyKey: string, currencyName: string): string {
   if (!amount) return "";
   return currencyKey === "cash" ? fmt0(amount) : `${points(amount)} ${currencyName.replace(/^(Chase|Amex|Citi|Capital One) /, "")}`;
@@ -47,21 +85,22 @@ export function spendProgress(spent: number | null, need: number | null): { shar
 export function eligibilityText(e: Eligibility, today: string): string {
   switch (e.status) {
     case "now": return e.override ? "Now (your date)" : "Now";
-    case "later": return fullDate(e.on!) + (e.override ? " (your date)" : "");
+    case "later": return fullDate(e.on!, today) + (e.override ? " (your date)" : "");
     case "never": return "Never (once per lifetime)";
     case "in_progress": return "Earning it now";
-    case "held": return e.on && daysUntil(e.on, today) > 0 ? `After you close it, from ${fullDate(e.on)}` : "After you close or downgrade it";
+    case "held": return e.on && daysUntil(e.on, today) > 0 ? `After you close it, from ${fullDate(e.on, today)}` : "After you close or downgrade it";
     case "au": return "—";
     default: return "Rule unknown";
   }
 }
 
-/** "3/24" and what happens next: "4/24 on Jan 10, 2027" (at 5 or more: the day you're under). */
-export function five24Line(f: Five24 | undefined): { count: string; next: string } {
+/** The 5/24 tile: the count ("3/24") and what happens next: "2/24 on Jan 10, 2027" when the next card falls off, "Under
+ * 5/24 on Jan 10, 2027" at 5 or more, and a plain note with no cards or none that count. */
+export function five24Line(f: Five24 | undefined, today?: string): { count: string; next: string } {
   if (!f) return { count: "0/24", next: "No cards yet" };
   const count = `${f.count}/24`;
-  if (f.under_on) return { count, next: `Under 5/24 on ${fullDate(f.under_on)}` };
-  if (f.next_fall_off) return { count, next: `${f.count - 1}/24 on ${fullDate(f.next_fall_off)}` };
+  if (f.under_on) return { count, next: `Under 5/24 on ${fullDate(f.under_on, today)}` };
+  if (f.next_fall_off) return { count, next: `${f.count - 1}/24 on ${fullDate(f.next_fall_off, today)}` };
   return { count, next: "Nothing counts right now" };
 }
 
@@ -86,8 +125,8 @@ export function bankOrder(a: BankBonus, b: BankBonus): number {
   return rank[a.state] - rank[b.state] || b.opened_on.localeCompare(a.opened_on) || a.id - b.id;
 }
 
-/** Annual fees due in the next `days` days: the total and how many. */
-export function feesDue(cards: ChurnCard[], today: string, days = 90): { total: number; count: number } {
+/** Annual fees due within the next `days` days (30, where the rows turn amber): the total and how many. */
+export function feesDue(cards: ChurnCard[], today: string, days = 30): { total: number; count: number } {
   const due = cards.filter((c) => c.fee_due && daysUntil(c.fee_due, today) <= days);
   return { total: due.reduce((s, c) => s + (c.annual_fee || 0), 0), count: due.length };
 }
@@ -116,8 +155,8 @@ export const PLAN_LABEL: Record<CardPlan, string> = {
 export const PLAN_ACTS: CardPlan[] = ["close", "product_change"];
 
 /** A card's plan in a few words for its row: "Keeping it", "Product change to Freedom by Oct 20", "Done Oct 3". */
-export function planLine(c: ChurnCard): string {
-  if (c.plan_done_on) return `Done ${fullDate(c.plan_done_on)}`;
+export function planLine(c: ChurnCard, today?: string): string {
+  if (c.plan_done_on) return `Done ${fullDate(c.plan_done_on, today)}`;
   const by = c.plan_due ? ` by ${fmtDate(c.plan_due)}` : "";
   switch (c.plan) {
     case "keep": return "Keeping it";
@@ -134,6 +173,12 @@ export function benefitSummary(c: Pick<ChurnCard, "benefits" | "benefits_value" 
   return `Benefits ${fmt0(c.benefits_value)}/yr · net fee ${net}`;
 }
 
+/** What a card really costs once its credits are counted, for its row: "net −$55 after credits"; empty without benefits. */
+export function netFeeText(c: Pick<ChurnCard, "benefits" | "net_fee">): string {
+  if (!c.benefits.length) return "";
+  return `net ${c.net_fee < 0 ? `−${fmt0(-c.net_fee)}` : fmt0(c.net_fee)} after credits`;
+}
+
 /** Earning rates as text, with the portal-only ones marked: "5x Travel (via Capital One Travel), 2x Dining". */
 export function ratesText(rates: ChurnRate[], portalName?: string | null): string {
   return rates.map((r) => `${r.multiplier}x ${r.category}${r.portal_only ? ` (${portalName ? `via ${portalName}` : "portal"})` : ""}`).join(", ");
@@ -143,6 +188,16 @@ export function ratesText(rates: ChurnRate[], portalName?: string | null): strin
 export interface RateRow { category: string; multiplier: string | number | null; portal_only: boolean }
 
 const blank = (x: unknown) => x == null || x === "";
+
+const rowKeys = new WeakMap<object, number>();
+let lastRowKey = 0;
+/** A key for a row in a list a form edits (benefits, earning rates) that stays with the row when another is removed, so
+ * the rows left keep their fields and focus instead of taking over their neighbors'. */
+export function rowKey(row: object): number {
+  let k = rowKeys.get(row);
+  if (k == null) rowKeys.set(row, (k = ++lastRowKey));
+  return k;
+}
 
 /** The `rates` a form sends: the base rate first (as the "*" marker), then each row. A row without a category or a
  * multiplier goes as it is, and the server's message names the problem. */
@@ -206,6 +261,10 @@ export const usesText = (b: Pick<Benefit, "uses">) =>
 /** Whether a benefit has something left to mark used this period: a credit with money left, one not used yet, or a
  * perk (a lounge visit can be logged any number of times). */
 export const canUse = (b: Benefit) => (isPerk(b) ? true : b.kind === "credit" && b.amount != null ? (b.remaining ?? 0) > 0.005 : b.used_count === 0);
+
+/** The use "Undo" takes off: this period's latest (the same one the server picks without an id). */
+export const lastUse = (b: Pick<Benefit, "uses">) =>
+  [...b.uses].sort((x, y) => y.used_on.localeCompare(x.used_on) || y.id - x.id)[0] ?? null;
 
 /** A card's benefits in reading order: credits, then other one-offs, then perks (lounges by network), each by name. */
 export function benefitOrder(a: Benefit, b: Benefit): number {
@@ -313,10 +372,10 @@ export const bankFeesSummary = (v: Fields) => join([
   num(v.keep_open_days) && `keep open ${num(v.keep_open_days)} days`,
 ]);
 /** Bonus received, and again: "Posted Oct 5 · again after 12 months". */
-export const bankReceivedSummary = (v: Fields) => join([
-  v.received_on && `Posted ${fullDate(String(v.received_on))}`, v.closed_on && `Closed ${fullDate(String(v.closed_on))}`,
+export const bankReceivedSummary = (v: Fields, today?: string) => join([
+  v.received_on && `Posted ${fullDate(String(v.received_on), today)}`, v.closed_on && `Closed ${fullDate(String(v.closed_on), today)}`,
   v.once_per_lifetime ? "once per lifetime" : num(v.repeat_months) && `again after ${plural(num(v.repeat_months), "month")}`,
-  v.eligible_on && `eligible ${fullDate(String(v.eligible_on))}`,
+  v.eligible_on && `eligible ${fullDate(String(v.eligible_on), today)}`,
 ]);
 /** The planning form's "What you expect": "$95 fee · 60k after $4,000 in 3 months" (a card) or "$300 · Has requirements" (a bank bonus). */
 export function wishExpectSummary(v: Fields, currencyName: string): string {
@@ -327,7 +386,7 @@ export function wishExpectSummary(v: Fields, currencyName: string): string {
     : [got, String(v.requirements).trim() && "Has requirements", v.once_per_lifetime ? "once per lifetime" : num(v.repeat_months) && `again after ${plural(num(v.repeat_months), "month")}`]);
 }
 /** Timing: "Offer ends Dec 1 · wait until Jan 5 · score 740". */
-export const wishTimingSummary = (v: Fields) => join([
-  v.offer_expires_on && `Offer ends ${fullDate(String(v.offer_expires_on))}`, v.wait_until && `wait until ${fullDate(String(v.wait_until))}`,
+export const wishTimingSummary = (v: Fields, today?: string) => join([
+  v.offer_expires_on && `Offer ends ${fullDate(String(v.offer_expires_on), today)}`, v.wait_until && `wait until ${fullDate(String(v.wait_until), today)}`,
   num(v.min_score) && `score ${num(v.min_score)}`, v.status === "dropped" && "dropped",
 ]);

@@ -7,13 +7,19 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { toast } from "svelte-sonner";
 import { bodyOf, calls, churning, wish } from "./fixtures";
 import Planned from "./Planned.svelte";
 
 beforeEach(() => {
   vi.mocked(api).mockReset();
   vi.mocked(api).mockResolvedValue({ ok: true } as never);
+  vi.mocked(toast).mockReset();
+  vi.mocked(toast.error).mockReset();
 });
+
+/** Opens a row's "…" menu. */
+const menu = (name: string) => userEvent.click(screen.getByRole("button", { name: `More actions for ${name}` }));
 
 describe("empty sections", () => {
   it("Planned is one line with an inline action that opens the form", async () => {
@@ -78,15 +84,75 @@ describe("planned", () => {
     expect(screen.getByText("Got it")).toBeInTheDocument();
   });
 
-  it("deletes an applied or dropped item after asking, and offers it only for those", async () => {
+  it("deletes an applied or dropped item only after a dialog asks, and offers it only for those", async () => {
     const { onchanged } = setup([wish(), wish({ id: 2, product: "Old one", status: "dropped" })]);
     expect(screen.queryByRole("button", { name: /^Delete/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show" }));
-    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await menu("Old one");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Old one" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Old one?" });
     expect(calls(/remove/)).toHaveLength(0);
-    await userEvent.click(screen.getByRole("button", { name: "Delete Old one?" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(calls("/api/churning/wishlist/2/remove")).toHaveLength(1));
     await waitFor(() => expect(onchanged).toHaveBeenCalled());
+  });
+
+  it("keeps the dialog's item when Cancel is pressed, and shows a refusal as a toast, leaving the dialog open", async () => {
+    setup([wish({ id: 2, product: "Old one", status: "dropped" }), wish()]);
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    await menu("Old one");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Old one" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Delete Old one?" })).getByRole("button", { name: "Cancel" }));
+    expect(calls(/remove/)).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Delete Old one?" })).toBeNull());
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+    vi.mocked(api).mockRejectedValue(new Error("Planned item not found"));
+    await menu("Old one");
+    await userEvent.click(screen.getByRole("button", { name: "Delete Old one" }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: "Delete Old one?" })).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Planned item not found"));
+    expect(screen.getByRole("dialog", { name: "Delete Old one?" })).toBeInTheDocument();
+  });
+
+  it("drops an item from its menu, says so with an Undo, and the Undo wants it back as it was", async () => {
+    const { onchanged } = setup([wish({ id: 4, status: "ready", ready: true })]);
+    await menu("Sapphire Preferred");
+    await userEvent.click(screen.getByRole("button", { name: "Drop Sapphire Preferred" }));
+    await waitFor(() => expect(bodyOf(calls("/api/churning/wishlist/4")[0])).toEqual({ status: "dropped" }));
+    const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as [string, { action: { label: string; onClick: () => void } }];
+    expect(msg).toBe("Dropped Sapphire Preferred");
+    expect(opts.action.label).toBe("Undo");
+    expect(onchanged).toHaveBeenCalled();
+    opts.action.onClick();
+    await waitFor(() => expect(bodyOf(calls("/api/churning/wishlist/4")[1])).toEqual({ status: "ready" }));
+  });
+
+  it("keeps the main actions on the row and the secondary ones in a menu that closes on Escape", async () => {
+    setup([wish(), wish({ id: 2, product: "Gold", priority: 2 })]);
+    const row = document.querySelector("[data-wish='1']") as HTMLElement;
+    expect(within(row).getByRole("button", { name: "I applied for Sapphire Preferred" })).toBeInTheDocument();
+    for (const n of ["Move Sapphire Preferred down", "Edit Sapphire Preferred", "Drop Sapphire Preferred"]) expect(screen.queryByRole("button", { name: n })).toBeNull();
+    await menu("Sapphire Preferred");
+    expect(screen.getByRole("button", { name: "Edit Sapphire Preferred" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move Sapphire Preferred up" })).toBeDisabled();   // first
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Edit Sapphire Preferred" })).toBeNull();
+    expect(screen.getByRole("button", { name: "More actions for Sapphire Preferred" })).toHaveFocus();
+  });
+
+  it("brings a dropped item back with Want again", async () => {
+    setup([wish({ id: 2, product: "Old one", status: "dropped" }), wish()]);
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    await userEvent.click(screen.getByRole("button", { name: "Want again" }));
+    await waitFor(() => expect(bodyOf(calls("/api/churning/wishlist/2")[0])).toEqual({ status: "wanted" }));
+  });
+
+  it("tells an applied item's Delete apart from the others: a link on the row, no menu", async () => {
+    setup([wish(), wish({ id: 3, product: "Got it", status: "applied", applied_on: "2026-09-01" })]);
+    await userEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.queryByRole("button", { name: "More actions for Got it" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Delete Got it" }));
+    expect(await screen.findByRole("dialog", { name: "Delete Got it?" })).toHaveTextContent("The card or bank bonus it became stays");
   });
 
   it("puts one person's plan between another's: one order for everyone", () => {
@@ -98,6 +164,7 @@ describe("planned", () => {
 
   it("moves an item up by renumbering priorities, and saves a score", async () => {
     const { onchanged } = setup([wish({ id: 1, priority: 1 }), wish({ id: 2, product: "Gold", priority: 2 })]);
+    await menu("Gold");
     await userEvent.click(screen.getByRole("button", { name: "Move Gold up" }));
     await waitFor(() => expect(calls(/wishlist\/\d/)).toHaveLength(2));
     expect(calls(/wishlist\/\d/).map((c) => [c[0], bodyOf(c)])).toEqual([["/api/churning/wishlist/2", { priority: 1 }], ["/api/churning/wishlist/1", { priority: 2 }]]);

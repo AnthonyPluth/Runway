@@ -945,15 +945,21 @@ def restore_suggestion(conn, key: str) -> bool:
 
 
 def list_dismissed_suggestions(conn) -> list[dict]:
-    """The suggestions marked "not recurring", as far as their key tells (the amount isn't kept), for putting one back."""
+    """The suggestions marked "not recurring", as far as their key tells (the amount isn't kept), for putting one back.
+    Each is named as its latest transaction names the payee (the key keeps it lowercased), or by its key's text when
+    none is left."""
     names = dict(conn.execute(select(Account.id, db.account_label_expr())).fetchall())
+    T = Transaction
     out = []
     for key in sorted(dismissed_suggestions(conn)):
         account_id, _, rest = key.partition("|")
         match, _, frequency = rest.rpartition("|")
         if not match:
             continue
-        out.append({"key": key, "account_id": account_id, "account_name": names.get(account_id), "match": match, "frequency": frequency})
+        payee = conn.execute(select(T.payee).where(T.account_id == account_id, func.lower(T.payee) == match)
+                             .order_by(T.posted.desc()).limit(1)).scalar()
+        out.append({"key": key, "account_id": account_id, "account_name": names.get(account_id), "match": match,
+                    "name": payee or match, "frequency": frequency})
     return out
 
 
@@ -1011,7 +1017,9 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
         key = suggestion_key(acct, payee, freq)
         if key in dismissed:
             continue
+        recent = [abs(x) for x in amounts[-6:]]   # what the last few came to, for "$12–$15" when they vary
         out.append({"key": key, "account_id": acct, "name": items[-1]["payee"], "match": payee, "amount": round(med, 2),
+                    "amount_low": round(min(recent), 2), "amount_high": round(max(recent), 2),
                     "frequency": freq, "anchor_date": ds[-1].isoformat(), "count": len(items)})
     out.sort(key=lambda s: -abs(s["amount"]))
     return out
