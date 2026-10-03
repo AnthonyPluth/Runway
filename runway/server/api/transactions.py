@@ -429,7 +429,7 @@ def api_tx_update(conn, _q, body, tx_id):
     A synced one's date and amount are yours from then on: the bank's are kept beside them (bank_posted, bank_amount)
     and a sync updates those instead, and changing one back to the bank's makes it the bank's again. A pending one's
     can't be changed: the bank sets them when it posts. Sends back what Undo needs (`was`), which {"restore": was} puts
-    back exactly."""
+    back exactly, and the transaction as it is now (`tx`)."""
     tx = _tx(conn, tx_id)
     t = Transaction
     if isinstance(body.get("restore"), dict):
@@ -482,7 +482,8 @@ def api_tx_update(conn, _q, body, tx_id):
     if "amount" in values and tx["is_split"]:   # the parts follow, as when a bank changes it (but it stays reviewed)
         splits.follow_amount(conn, tx_id, values["amount"])
         conn.execute(update(t).where(t.id == tx_id).values(needs_review=tx["needs_review"]))
-    return {"ok": True, "was": was}
+    # And as it is now, for the app to show while the list loads again (or if it has left the list's filters).
+    return {"ok": True, "was": was, "tx": _tx(conn, tx_id)}
 
 
 def api_tx_create(conn, _q, body):

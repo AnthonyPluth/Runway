@@ -26,9 +26,11 @@
   // one), with an Undo. A bank's date and amount you changed stay yours (the bank's is a hover away), and a pending one's
   // are the bank's until it posts. Below: whether it counts, where it came from, and its split, recurring item and receipt.
   // `onsave` saves a category as the row does (false when it couldn't be); `onchanged` loads the list again.
-  let { t, recurring, family, onsave, onchanged, onclose }: {
+  // `onpatched`: the transaction as an edit left it, for the sheet to show if the list no longer has it.
+  let { t, recurring, family, onsave, onchanged, onclose, onpatched }: {
     t: Tx; recurring: RecurringItem[]; family?: string[];
     onsave: (t: Tx, category: string) => Promise<boolean | void>; onchanged: () => void; onclose: () => void;
+    onpatched?: (t: Partial<Tx>) => void;
   } = $props();
 
   const manual = $derived(t.source === "manual");
@@ -66,9 +68,11 @@
     errors[field] = "";
     const id = t.id, label = name;
     try {
-      const r = await api<{ was: Record<string, unknown> }>(`/api/transactions/${encodeURIComponent(id)}`, { method: "POST", body });
+      const r = await api<{ was: Record<string, unknown>; tx?: Partial<Tx> }>(`/api/transactions/${encodeURIComponent(id)}`, { method: "POST", body });
+      if (r.tx) onpatched?.(r.tx);
       undoable(message, async () => {
         await api(`/api/transactions/${encodeURIComponent(id)}`, { method: "POST", body: { restore: r.was } });
+        onpatched?.(r.was as Partial<Tx>);
         refreshState(); onchanged();
       }, { description: label || undefined });
       refreshState(); onchanged();

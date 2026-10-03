@@ -344,7 +344,8 @@
     {/key}
   {/if}
 
-  <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={applied.account} {recurring} family={list?.family} onsave={saveFromSheet} onchanged={load} />
+  <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={applied.account} {recurring} family={list?.family} onsave={saveFromSheet} onchanged={load}
+    onpatched={(x) => { if (sheetTx && x.id === sheetTx.id) sheetTx = { ...sheetTx, ...x }; }} />
 
   {#if app.state?.logodev_configured}
     <p class="mt-3 text-xs text-muted-foreground"><a class="underline underline-offset-4 hover:text-foreground" href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></p>

@@ -103,6 +103,7 @@ class EditTests(Ledger):
         r = tx.api_tx_update(self.conn, {}, {"payee": "  Green   Grocer Co ", "notes": " weekly shop "}, "chk|2")
         t = self.row("chk|2")
         self.assertEqual((t["payee"], t["notes"]), ("Green Grocer Co", "weekly shop"))
+        self.assertEqual((r["tx"]["payee"], r["tx"]["notes"]), ("Green Grocer Co", "weekly shop"))
         tx.api_tx_update(self.conn, {}, {"restore": r["was"]}, "chk|2")
         t = self.row("chk|2")
         self.assertEqual((t["payee"], t["notes"], t["category"]), ("Green Grocer", None, "Groceries"))
