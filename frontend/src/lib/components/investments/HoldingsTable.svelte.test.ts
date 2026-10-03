@@ -56,13 +56,13 @@ describe("HoldingsTable", () => {
     expect(row).toHaveTextContent("$2,500.00");
   });
 
-  it("colours gains green and losses red, with losses in parentheses", () => {
+  it("colours gains green and losses red, each signed with a real minus", () => {
     setup([holding({ gain: 500, gain_pct: 0.25, day_change: -30, day_change_pct: -0.012 })]);
     const row = screen.getAllByRole("row")[1];
-    expect(within(row).getByText("+$500.00")).toHaveClass("text-emerald-500");
-    expect(within(row).getByText("+25.0%")).toHaveClass("text-emerald-500");
-    expect(within(row).getByText("($30.00)")).toHaveClass("text-[var(--loss)]");
-    expect(within(row).getByText("(1.20%)")).toHaveClass("text-[var(--loss)]");
+    expect(within(row).getByText("+$500.00")).toHaveClass("text-good");
+    expect(within(row).getByText("+25.0%")).toHaveClass("text-good");
+    expect(within(row).getByText("−$30.00")).toHaveClass("text-loss");
+    expect(within(row).getByText("−1.20%")).toHaveClass("text-loss");
   });
 
   it("shows a dash instead of a gain when the cost basis is unknown, and offers to add it", () => {
