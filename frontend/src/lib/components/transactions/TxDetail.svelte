@@ -21,6 +21,7 @@
   import SplitEditor from "./SplitEditor.svelte";
   import Switch from "./Switch.svelte";
   import type { Tx } from "./types";
+  import { sourceLabel } from "./sources";
 
   // One transaction in the sheet: its name, category, date, amount and note, each saved when you leave it (or pick
   // one), with an Undo. A bank's date and amount you changed stay yours (the bank's is a hover away), and a pending one's
@@ -40,8 +41,7 @@
   const linked = $derived((t.recurring_id ?? 0) > 0);
   const brand = $derived(app.state?.brands?.[t.account_id]);
   // Who chose its category, said as "Set by …".
-  const SOURCES: Record<string, string> = { manual: "you", ai: "the AI", rule: "a rule", retail: "the store order", auto: "Runway" };
-  const sourceLabel = $derived(SOURCES[t.category_source ?? ""] ?? t.category_source ?? "");
+  const setBy = $derived(sourceLabel(t.category_source));
   const from = $derived(manual ? "Added by you" : [brand?.institution, t.source === "plaid" ? "via Plaid" : t.source === "simplefin" ? "via SimpleFIN" : ""].filter(Boolean).join(" "));
   const top = (c: string | null | undefined) => categories.list.find((x) => x.name === c);
   const ignored = $derived(!!t.category && (t.category === "Ignore" || top(t.category)?.top === "Ignore"));
@@ -190,8 +190,8 @@
         <span class="min-w-0 truncate">{(t.splits ?? []).map((s) => `${s.category} ${fmt(Math.abs(s.amount))}`).join(" · ")}</span>
       </span>
     {:else}
-      <CategorySelect bind:value={fCat} label="Category" class="h-10 w-full text-foreground" onchange={setCategory} />
-      {#if t.category && sourceLabel}<span>Set by {sourceLabel}{t.needs_review && t.category_source === "ai" ? " · to review" : ""}</span>{/if}
+      <CategorySelect bind:value={fCat} label="Category" class="h-10 w-full text-foreground" repick={!!t.needs_review} onchange={setCategory} />
+      {#if t.category && setBy}<span>Set by {setBy}{t.needs_review && t.category_source === "ai" ? " · to review" : ""}</span>{/if}
     {/if}
   </div>
 

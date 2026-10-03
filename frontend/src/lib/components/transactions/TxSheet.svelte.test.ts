@@ -13,6 +13,7 @@ import { categories } from "$lib/categories.svelte";
 import { category, tx } from "../../../test/fixtures";
 import TxSheet from "./TxSheet.svelte";
 import type { Tx } from "./types";
+import { pickCategory, pickedValue } from "../../../test/pick";
 
 const accounts = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "c1", name: "Card", kind: "credit" }, { id: "inv", name: "Brokerage", kind: "investment" }];
 const setup = (t: Tx | null, extra: Record<string, unknown> = {}) => {
@@ -111,9 +112,9 @@ describe("transaction sheet", () => {
 
   it("changes the category as the row does, and shows the saved one again when that fails", async () => {
     const p = setup(tx(), { onsave: vi.fn().mockResolvedValue(false) });
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: "Category" }), "Groceries");
     expect(p.onsave).toHaveBeenCalledWith(expect.objectContaining({ id: "t1" }), "Groceries");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Category" })).toHaveValue("Coffee"));
+    await waitFor(() => expect(pickedValue(screen.getByRole("combobox", { name: "Category" }))).toBe("Coffee"));
   });
 
   it("excludes it with a switch (Ignore), and turning it off brings back the category it had", async () => {
@@ -223,7 +224,7 @@ describe("adding a transaction", () => {
     const p = setup(null);
     await userEvent.type(screen.getByRole("textbox", { name: "Name" }), "Farmers market");
     await userEvent.type(screen.getByLabelText("Amount"), "23.40");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: "Category" }), "Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions", { method: "POST", body: expect.objectContaining({
       account: "a1", payee: "Farmers market", amount: -23.4, category: "Groceries", notes: "" }) }));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// The small transaction popups: RecurringPicker, RememberBar, LogoPicker and Upcoming.
-import { render, screen } from "@testing-library/svelte";
+// The small transaction popups: RecurringPicker, LogoPicker and Upcoming.
+import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,8 +12,6 @@ import { toast } from "svelte-sonner";
 import { tx } from "../../../test/fixtures";
 import LogoPicker from "./LogoPicker.svelte";
 import RecurringPicker from "./RecurringPicker.svelte";
-import RememberBar from "./RememberBar.svelte";
-import { askAlsoMatch, askRemember, closeRemember, remember } from "./remember.svelte";
 import Upcoming from "./Upcoming.svelte";
 import { createRawSnippet } from "svelte";
 
@@ -71,9 +69,9 @@ describe("RecurringPicker", () => {
     vi.mocked(api).mockResolvedValue({ ok: true, suggest_text: "online transfer from savings" });
     const { onchanged } = setup();
     await userEvent.selectOptions(select(), "1");
-    expect(remember.match).toEqual({ recurringId: 1, name: "Coffee club", text: "online transfer from savings", reload: onchanged });
+    expect(toast).toHaveBeenCalledWith("Linked to Coffee club", expect.objectContaining({ description: "Also match “online transfer from savings” from now on?" }));
     expect(toast.success).not.toHaveBeenCalled();   // the question says it's linked
-    closeRemember();
+    expect(onchanged).toHaveBeenCalled();
   });
 
   it("marks a transaction as not recurring", async () => {
@@ -101,70 +99,6 @@ describe("RecurringPicker", () => {
   });
 });
 
-describe("RememberBar", () => {
-  afterEach(() => closeRemember());
-
-  it("is hidden until a category was just picked", () => {
-    render(RememberBar);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("asks whether to use the category for the merchant from now on", async () => {
-    render(RememberBar);
-    askRemember("t1", "Coffee", { merchant: "Blue Bottle", replaces: "Dining" }, vi.fn());
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Saved. Always use Coffee for Blue Bottle?(instead of Dining)");
-  });
-
-  it("'Just this once' closes it without a rule", async () => {
-    render(RememberBar);
-    askRemember("t1", "Coffee", { merchant: "Blue Bottle" }, vi.fn());
-    await userEvent.click(await screen.findByRole("button", { name: "Just this once" }));
-    expect(remember.ask).toBeNull();
-    expect(api).not.toHaveBeenCalled();
-  });
-
-  it("'Always' saves it as a rule", async () => {
-    vi.mocked(api).mockResolvedValue({ also_updated: 0 });
-    render(RememberBar);
-    askRemember("t1", "Coffee", { merchant: "Blue Bottle" }, vi.fn());
-    await userEvent.click(await screen.findByRole("button", { name: "Always" }));
-    expect(api).toHaveBeenCalledWith("/api/transactions/t1/category", { method: "POST", body: { category: "Coffee", remember: true } });
-  });
-
-  it("asks whether to match a linked transaction's text from now on, and adds it when you say so", async () => {
-    vi.mocked(api).mockResolvedValue({ ok: true, linked: 2 });
-    const reload = vi.fn();
-    render(RememberBar);
-    askAlsoMatch(1, "Paycheck", "online transfer from savings", reload);
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Linked to Paycheck. Also match “online transfer from savings” from now on?");
-    await userEvent.click(screen.getByRole("button", { name: "Also match" }));
-    expect(api).toHaveBeenCalledWith("/api/recurring/1/match", { method: "POST", body: { text: "online transfer from savings" } });
-    expect(toast.success).toHaveBeenCalledWith("Paycheck also matches “online transfer from savings” now · 2 more linked");
-    expect(reload).toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("'Just this one' leaves the item's texts alone; a failure to add says so", async () => {
-    render(RememberBar);
-    askAlsoMatch(1, "Paycheck", "churn", vi.fn());
-    await userEvent.click(await screen.findByRole("button", { name: "Just this one" }));
-    expect(remember.match).toBeNull();
-    expect(api).not.toHaveBeenCalled();
-    vi.mocked(api).mockRejectedValue(new Error("Use at least three letters of text"));
-    askAlsoMatch(1, "Paycheck", "churn", vi.fn());
-    await userEvent.click(await screen.findByRole("button", { name: "Also match" }));
-    expect(toast.error).toHaveBeenCalledWith("Use at least three letters of text");
-  });
-
-  it("closes on Escape", async () => {
-    render(RememberBar);
-    askRemember("t1", "Coffee", { merchant: "Blue Bottle" }, vi.fn());
-    await screen.findByRole("dialog");
-    await userEvent.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-});
-
 describe("LogoPicker", () => {
   const logo = createRawSnippet(() => ({ render: () => "<span>LOGO</span>" }));
   const options = (extra = {}) => ({ choice: null, searchable: true, configured: true, candidates: [{ name: "Target", domain: "target.com" }], error: null, ...extra });
@@ -174,6 +108,28 @@ describe("LogoPicker", () => {
     setup();
     expect(screen.getByText("LOGO")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("listens to the window only while it's open (a page of rows has one each)", async () => {
+    const add = vi.spyOn(window, "addEventListener");
+    vi.mocked(api).mockResolvedValue(options());
+    setup();
+    expect(add.mock.calls.filter(([type]) => type === "scroll" || type === "keydown")).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Logo for Target" }));
+    expect(add.mock.calls.filter(([type]) => type === "scroll")).toHaveLength(1);
+    add.mockRestore();
+  });
+
+  it("takes the focus in when it opens, and gives it back to the logo on Escape", async () => {
+    vi.mocked(api).mockResolvedValue(options());
+    setup();
+    const logoButton = screen.getByRole("button", { name: "Logo for Target" });
+    await userEvent.click(logoButton);
+    const first = await screen.findByRole("button", { name: /target\.com/ });
+    await waitFor(() => expect(first).toHaveFocus());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(logoButton).toHaveFocus();
   });
 
   it("looks up Logo.dev's matches for the merchant name when opened", async () => {

@@ -200,6 +200,54 @@ class EditingTests(Base):
         self.assertEqual(r["offer_rule"]["match"], "blue bottle")   # it's offered instead
         self.assertEqual(self.row(ids[1])["category"], "Coffee & Snacks")
 
+    def test_the_offer_says_how_many_more_it_would_categorize(self):
+        tid = self.tx(-5, "SQ *BLUE BOTTLE 123")
+        self.tx(-6, "SQ *BLUE BOTTLE 456")                                     # uncategorized: a rule would take it
+        self.tx(-7, "SQ *BLUE BOTTLE 789", category="Restaurants", source="manual")   # yours: left alone
+        reviewed = self.tx(-8, "SQ *BLUE BOTTLE 000", category="Restaurants", source="rule")
+        self.c.execute(update(Transaction).where(Transaction.id == reviewed).values(needs_review=0))
+        self.assertEqual(categorize.rule_offer(self.c, tid, "Coffee & Snacks")["also_updated"], 1)
+
+    def test_setting_one_merchants_transactions_together_offers_a_rule(self):
+        from runway import server
+        ids = [self.tx(-5, "SQ *BLUE BOTTLE 123"), self.tx(-6, "SQ *BLUE BOTTLE 456")]
+        other = self.tx(-7, "SQ *BLUE BOTTLE 789")
+        r = server.api_tx_bulk(self.c, None, {"ids": ids, "category": "Coffee & Snacks"})
+        self.assertEqual((r["offer_rule"]["match"], r["offer_rule"]["also_updated"]), ("blue bottle", 1))   # `other`
+        self.assertEqual(rules.load(self.c), [])                                       # only offered
+        self.assertIsNone(self.row(other)["category"])
+        mixed = server.api_tx_bulk(self.c, None, {"ids": [ids[0], self.tx(-9, "KROGER #12")], "category": "Groceries"})
+        self.assertIsNone(mixed["offer_rule"])                                         # two merchants: no offer
+        renamed = server.api_tx_bulk(self.c, None, {"ids": ids, "payee": "Blue Bottle Coffee"})
+        self.assertIsNone(renamed["offer_rule"])                                       # no category, nothing to offer
+
+    def test_setting_every_match_of_a_filter_offers_a_rule_too(self):
+        from runway import server
+        self.tx(-5, "SQ *BLUE BOTTLE 123"); self.tx(-6, "SQ *BLUE BOTTLE 456")
+        r = server.api_tx_bulk(self.c, None, {"filter": {"q": "blue bottle"}, "category": "Coffee & Snacks"})
+        self.assertEqual((r["updated"], r["offer_rule"]["merchant"]), (2, "Blue Bottle"))
+
+    def test_accepting_keeps_the_category_and_can_be_undone(self):
+        from runway import server
+        tid = self.tx(-5, "SQ *BLUE BOTTLE 123", category="Restaurants", source="history")
+        self.c.execute(update(Transaction).where(Transaction.id == tid).values(needs_review=1, confidence=0.4))
+        r = server.api_tx_accept(self.c, None, None, tid)
+        row = self.row(tid)
+        self.assertEqual((row["category"], row["needs_review"], row["category_source"]), ("Restaurants", 0, "manual"))
+        server.api_tx_bulk(self.c, None, {"restore": r["was"]})
+        row = self.row(tid)
+        self.assertEqual((row["category"], row["needs_review"], row["category_source"], row["confidence"]), ("Restaurants", 1, "history", 0.4))
+
+    def test_nothing_to_accept_without_a_category(self):
+        from runway import server
+        from runway.server.common import ApiError
+        tid = self.tx(-5, "SQ *BLUE BOTTLE 123")
+        with self.assertRaisesRegex(ApiError, "Choose a category"):
+            server.api_tx_accept(self.c, None, None, tid)
+        with self.assertRaises(ApiError) as e:
+            server.api_tx_accept(self.c, None, None, "nope")
+        self.assertEqual(e.exception.status, 404)
+
     def test_describe(self):
         rid = self.rule(match="venmo", match_mode="starts", amount_min=1000, amount_max=2500, direction="out",
                         account_id="chk", category="Mortgage")

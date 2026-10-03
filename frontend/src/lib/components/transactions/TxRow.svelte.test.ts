@@ -11,6 +11,7 @@ import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { category, tx } from "../../../test/fixtures";
 import TxRow from "./TxRow.svelte";
+import { pickCategory, pickedValue } from "../../../test/pick";
 import type { Tx } from "./types";
 
 const props = (t: Tx, extra: Record<string, unknown> = {}) => ({
@@ -39,7 +40,7 @@ describe("TxRow", () => {
     expect(within(row()).getByText("−$60.00")).toBeInTheDocument();
     expect(within(row()).getByText("of $100.00")).toBeInTheDocument();
     expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();   // the other part isn't shown
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
     expect(p.onsave).toHaveBeenCalledWith("Coffee");
   });
 
@@ -101,8 +102,8 @@ describe("TxRow", () => {
   it("shows the saved category again when a pick couldn't be saved", async () => {
     render(TxRow, props(tx(), { onsave: vi.fn().mockResolvedValue(false) }));
     const select = screen.getByRole("combobox", { name: "Category for Blue Bottle" });
-    await userEvent.selectOptions(select, "Groceries");
-    await vi.waitFor(() => expect(select).toHaveValue("Coffee"));
+    await pickCategory(select, "Groceries");
+    await vi.waitFor(() => expect(pickedValue(select)).toBe("Coffee"));
   });
 
   describe("logo", () => {
@@ -129,15 +130,15 @@ describe("TxRow", () => {
   describe("badges", () => {
     it("flags a pending charge", () => {
       render(TxRow, props(tx({ pending: 1 })));
-      expect(screen.getByText("pending")).toBeInTheDocument();
+      expect(screen.getByText("Pending")).toBeInTheDocument();
     });
 
     it("flags what needs review, except on the Review tab where everything does", () => {
       const { unmount } = render(TxRow, props(tx({ needs_review: 1 })));
-      expect(screen.getByText("review")).toBeInTheDocument();
+      expect(screen.getByText("Review")).toBeInTheDocument();
       unmount();
       render(TxRow, props(tx({ needs_review: 1 }), { review: true }));
-      expect(screen.queryByText("review")).not.toBeInTheDocument();
+      expect(screen.queryByText("Review")).not.toBeInTheDocument();
     });
   });
 
@@ -150,28 +151,59 @@ describe("TxRow", () => {
     it("saves as soon as you pick another", async () => {
       const p = props(tx());
       render(TxRow, p);
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "Groceries");
       expect(p.onsave).toHaveBeenCalledWith("Groceries");
     });
 
     it("doesn't save when the blank option is picked", async () => {
       const p = props(tx());
       render(TxRow, p);
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "");
+      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "");
       expect(p.onsave).not.toHaveBeenCalled();
     });
 
-    it("shows the AI's confidence and lets you keep its suggestion", async () => {
-      const p = props(tx({ needs_review: 1, category_source: "ai", confidence: 0.87 }));
+    it("shows the AI's confidence and lets you accept its suggestion, with a ✓ and (phones) the word", async () => {
+      const onaccept = vi.fn();
+      const p = props(tx({ needs_review: 1, category_source: "ai", confidence: 0.87 }), { onaccept });
       render(TxRow, p);
       expect(screen.getByText("87%")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: /Keep/ }));
+      const check = screen.getByRole("button", { name: "Accept Coffee for Blue Bottle" });
+      expect(check).toHaveClass("lg:size-9", "max-md:hidden");   // 36px on a desktop, beside the amount
+      expect(check).toHaveAttribute("title", "Accept Coffee · set by the AI (87%)");
+      await userEvent.click(check);
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+      expect(onaccept).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Accept" })).toHaveClass("md:hidden");
+      expect(p.onsave).not.toHaveBeenCalled();   // accepting doesn't change the category
+    });
+
+    it("offers Accept for whatever set it: a rule or past choices as well as the AI", () => {
+      const { unmount } = render(TxRow, props(tx({ needs_review: 1, category_source: "rule" }), { onaccept: vi.fn() }));
+      expect(screen.getByRole("button", { name: "Accept Coffee for Blue Bottle" })).toHaveAttribute("title", "Accept Coffee · set by a rule");
+      unmount();
+      render(TxRow, props(tx({ needs_review: 1, category_source: "history" }), { onaccept: vi.fn() }));
+      expect(screen.getByRole("button", { name: "Accept Coffee for Blue Bottle" })).toHaveAttribute("title", "Accept Coffee · set by your past choices");
+    });
+
+    it("has nothing to accept without a category, or once reviewed", () => {
+      const { unmount } = render(TxRow, props(tx({ needs_review: 1, category: null }), { onaccept: vi.fn() }));
+      expect(screen.queryByRole("button", { name: /^Accept/ })).not.toBeInTheDocument();
+      unmount();
+      render(TxRow, props(tx({ needs_review: 0 }), { onaccept: vi.fn() }));
+      expect(screen.queryByRole("button", { name: /^Accept/ })).not.toBeInTheDocument();
+    });
+
+    it("keeps a category picked again on a row waiting for review (that accepts it)", async () => {
+      const p = props(tx({ needs_review: 1, category_source: "ai" }));
+      render(TxRow, p);
+      await pickCategory(screen.getByRole("combobox", { name: "Category for Blue Bottle" }), "Coffee");
       expect(p.onsave).toHaveBeenCalledWith("Coffee");
     });
 
-    it("doesn't offer to keep a category you chose yourself", () => {
-      render(TxRow, props(tx({ needs_review: 1, category_source: "manual" })));
-      expect(screen.queryByRole("button", { name: /Keep/ })).not.toBeInTheDocument();
+    it("tells a screen reader which cell is the account and which the amount", () => {
+      render(TxRow, props(tx()));
+      expect(within(row()).getByText("Account:")).toHaveClass("sr-only");
+      expect(within(row()).getByText("Amount:")).toHaveClass("sr-only");
     });
   });
 
@@ -204,6 +236,22 @@ describe("TxRow", () => {
   });
 
   describe("selecting", () => {
+    it("in Select mode, a tap anywhere on the row ticks it instead of opening anything", async () => {
+      const onopen = vi.fn();
+      const p = props(tx(), { selecting: true, onopen });
+      render(TxRow, p);
+      await userEvent.click(within(row()).getByRole("button", { name: "Blue Bottle" }));
+      expect(p.onselect).toHaveBeenCalledWith(expect.any(MouseEvent), true);
+      expect(onopen).not.toHaveBeenCalled();
+      expect(screen.getByRole("checkbox")).toHaveClass("max-md:size-5");
+    });
+
+    it("rings the row the keyboard is on", () => {
+      render(TxRow, props(tx(), { focused: true }));
+      expect(row()).toHaveClass("ring-2");
+      expect(row()).toHaveAttribute("data-focused");
+    });
+
     it("reports a checked box along with the click, so shift-click ranges can work", async () => {
       const p = props(tx());
       render(TxRow, p);
@@ -271,7 +319,7 @@ describe("TxRow", () => {
 
     it("shows the pending and review badges as an icon (labelled) unless the cell has room for the word", () => {
       render(TxRow, props(tx({ pending: 1, needs_review: 1 })));
-      for (const word of ["pending", "review"]) {
+      for (const word of ["Pending", "Review"]) {
         const badge = within(row()).getByTitle(word);
         expect(within(badge).getByLabelText(word)).toHaveClass("@sm/title:hidden");
         expect(within(badge).getByText(word)).toHaveClass("hidden", "@sm/title:inline");
