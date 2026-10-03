@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { fmt, fmt0, fmt0Down, fmtDate, fmtSigned, fmtDow, parseDate, shortMoney } from "$lib/format";
+  import { fmt, fmtDate, fmtSigned, fmtDow, parseDate, shortMoney } from "$lib/format";
   import type { ForecastEvent, Overview } from "$lib/types";
 
-  // The projected balance, day by day: the low point and what each day brings.
+  // The projected balance, day by day: what each day brings (hover or drag for a day's readout).
   let { fc }: { fc: Overview } = $props();
 
   let width = $state(0);
@@ -58,36 +58,6 @@
     }
     return out;
   });
-  const lowIndex = $derived(fc.dates.indexOf(fc.low.date));
-  const lowColor = $derived(lowIndex >= 0 && series[lowIndex] < 0 ? "var(--destructive)" : "var(--foreground)");
-
-  // Labels get a plate behind them so the line doesn't run through; the "ends at" note moves (or goes) when it
-  // would sit on the low-point label.
-  let lowLabel = $state<SVGTextElement | null>(null), endNote = $state<SVGTextElement | null>(null);
-  let lowBox = $state<DOMRect | null>(null), endBox = $state<DOMRect | null>(null), endY = $state(0), showEnd = $state(true);
-  const endYDefault = $derived.by(() => { const ey = y(series[v1]); return ey < m.top + 20 ? ey + 18 : ey - 10; });
-  $effect(() => {
-    void W; void fc;   // re-measure when the chart is redrawn
-    void v0; void v1;
-    endY = endYDefault; showEnd = !inView(lowIndex) || lowIndex < v1 - 4;
-    queueMicrotask(() => {
-      lowBox = lowLabel?.getBBox() ?? null;
-      if (!endNote || !showEnd) { endBox = null; return; }
-      let b = endNote.getBBox();
-      if (lowBox) {
-        const lo = { x: lowBox.x - 7, y: lowBox.y - 4, w: lowBox.width + 14, h: lowBox.height + 8 };
-        const overlaps = (r: DOMRect) => r.x < lo.x + lo.w + 4 && r.x + r.width > lo.x - 4 && r.y < lo.y + lo.h + 4 && r.y + r.height > lo.y - 4;
-        if (overlaps(b)) {
-          const moved = lo.y - 8 > m.top + 10 ? lo.y - 8 : lo.y + lo.h + 16;
-          b = new DOMRect(b.x, b.y + (moved - endY), b.width, b.height);
-          endY = moved;
-          if (overlaps(b)) { showEnd = false; endBox = null; return; }
-        }
-      }
-      endBox = b;
-    });
-  });
-
   // Hovering (or dragging sideways on a phone) shows that day's balance and what happens on it.
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
   // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
@@ -146,21 +116,6 @@
       {/each}
       <path d={`M${path(series)} L${x(v1)},${y(y0)} L${x(v0)},${y(y0)} Z`} fill="url(#fc-area)" />
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
-      {#if lowIndex >= 0 && inView(lowIndex)}
-        {@const lx = x(lowIndex)}
-        {@const ly = y(series[lowIndex])}
-        {@const anchor = lx > W - 140 ? "end" : lx < m.left + 80 ? "start" : "middle"}
-        <circle cx={lx} cy={ly} r="5.5" fill={lowColor} stroke="var(--card)" stroke-width="2" />
-        {#if lowBox}<rect x={lowBox.x - 7} y={lowBox.y - 4} width={lowBox.width + 14} height={lowBox.height + 8} rx="6" fill="var(--popover)" />{/if}
-        <text bind:this={lowLabel} x={lx + (anchor === "start" ? 10 : anchor === "end" ? -10 : 0)} y={ly + (ly > m.top + ih - 30 ? -14 : 24)}
-          text-anchor={anchor} fill={lowColor} font-weight="600">Low {fmt0Down(series[lowIndex])} · {fmtDate(fc.low.date)}</text>
-      {/if}
-      {#if showEnd}
-        {#if endBox}<rect x={endBox.x - 6} y={endBox.y - 3} width={endBox.width + 12} height={endBox.height + 6} rx="5" fill="var(--card)" />{/if}
-        <text bind:this={endNote} x={x(v1)} y={endY} text-anchor="end" fill="var(--muted-foreground)">
-          {fmt0(series[v1])} by {fmtDate(fc.dates[v1])}
-        </text>
-      {/if}
       {#if hover != null}
         <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
         <circle cx={x(hover)} cy={y(series[hover])} r="5" fill="var(--chart-1)" stroke="var(--card)" stroke-width="2" />
