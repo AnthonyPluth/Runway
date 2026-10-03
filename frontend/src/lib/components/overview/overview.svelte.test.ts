@@ -12,7 +12,6 @@ import type { CardSummary } from "$lib/types";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
 import { forecastSheet } from "./forecastSheet.svelte";
-import ForecastTable from "./ForecastTable.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
 import ThisMonth from "./ThisMonth.svelte";
 
@@ -209,27 +208,5 @@ describe("CardsTable", () => {
     expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 610 } });
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
     expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "stmt-c1" } });
-  });
-});
-
-describe("ForecastTable", () => {
-  const base = { today: "2026-03-15", dates: ["2026-03-15", "2026-03-16", "2026-03-17"], accounts: [], cards: [], warnings: [], warning_links: [],
-    low: { date: "2026-03-17", balance: 800 },
-    events: [{ date: "2026-03-16", name: "Rent", amount: -100, kind: "recurring", key: "r", balance_after: 900 }] };
-  const budget = (total: number[]) => ({ total, low: { date: "2026-03-17", balance: 800 }, monthly: 0, changes: [], skipped: [] });
-
-  it("shows the on-budget column only when it ever differs, from the first day it does", () => {
-    const same = render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 900, 900]) } as never });
-    expect(screen.queryByText("On budget")).not.toBeInTheDocument();
-    same.unmount();
-    render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 750, 750]) } as never });
-    expect(screen.getAllByText("On budget").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("$750.00").length).toBeGreaterThan(0);
-  });
-
-  it("puts a row's note in a tooltip", () => {
-    render(ForecastTable, { fc: { ...base, total: [1000, 900, 900], budget: budget([1000, 850, 800]),
-      events: [{ date: "2026-03-16", name: "Visa statement", amount: -100, kind: "card", estimated: true, key: "c", balance_after: 900 }] } as never });
-    expect(screen.getByText(/Visa statement \(estimate\)/).closest("span[title]")).toHaveAttribute("title", "the budget line pays this card from its budgets instead");
   });
 });

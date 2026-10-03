@@ -12,14 +12,16 @@
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
 
-  // What's coming up. Click an amount to change just that one occurrence; a recurring item's repeat icon opens Recurring, to
+  // What's coming up. Click an amount to change just that one occurrence; a recurring item's name opens it in Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
   // `limit` is how many show before
   // "Show all"; `accounts` adds each one's account (Transactions shows several accounts' items together). After an amount
-  // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh).
-  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged }: {
+  // changes, `onchanged` loads the page's forecast again (in place: the page isn't drawn afresh). `onBudget`: the budget
+  // line's balance by day (all the forecast's accounts together), from the first day it differs from the forecast's; each
+  // day shows it beside its projected balance.
+  let { events, limit = 8, accounts = false, all = $bindable(false), onchanged, onBudget }: {
     events: (ForecastEvent & { late_from?: string | null })[];
-    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void;
+    limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void; onBudget?: Record<string, number>;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
   // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
@@ -27,7 +29,7 @@
   // (an annual fee is a card charge: it never moves one).
   const days = $derived.by(() => {
     type Ev = (typeof events)[number];
-    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
+    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[]; budgeted?: number }[] = [];
     shown.forEach((e, i) => {
       if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [] });
       out.at(-1)!.rows.push({ e, i });
@@ -36,6 +38,7 @@
       const last = new Map<string, Ev>();
       for (const { e } of d.rows) if (e.kind !== "fee") last.set(e.account_id ?? "", e);
       d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
+      d.budgeted = d.balances.length ? onBudget?.[d.date] : undefined;   // the budget line's, beside the balance
     }
     return out;
   });
@@ -110,11 +113,18 @@
     </div>
   {/each}
   {#each d.balances as b, k (k)}
-    <div class="flex justify-end gap-1.5 px-4 pt-0.5 pb-3 text-[13px] text-muted-foreground tabular-nums">
+    <div class="flex flex-wrap justify-end gap-x-1.5 px-4 pt-0.5 pb-3 text-[13px] text-muted-foreground tabular-nums">
       {#if accounts && b.account}<span class="truncate">{b.account} ·</span>{/if}
       <span class={b.amount < 0 ? "font-medium text-destructive" : ""}>projected balance {fmt(b.amount)}</span>
+      <!-- With one account, its balance on budget beside it; with several, once for them all (below). -->
+      {#if d.budgeted !== undefined && d.balances.length === 1}<span class={d.budgeted < 0 ? "font-medium text-destructive" : "text-chart-2"}
+        title="If you stick to your budget">· on budget {fmt(d.budgeted)}</span>{/if}
     </div>
   {/each}
+  {#if d.budgeted !== undefined && d.balances.length > 1}
+    <div class={["-mt-2 px-4 pb-3 text-right text-[13px] tabular-nums", d.budgeted < 0 ? "font-medium text-destructive" : "text-chart-2"]}
+      title="If you stick to your budget">on budget, all accounts {fmt(d.budgeted)}</div>
+  {/if}
   </div>
   {/each}
   {#if events.length > shown.length}
