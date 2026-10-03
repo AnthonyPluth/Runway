@@ -271,18 +271,39 @@ describe("TxRow", () => {
 
     it("lets the account and the bank's text share a line, hiding the text until its cell has room", () => {
       render(TxRow, props(tx({ account_name: "Shared Checking" })));
-      const account = within(row()).getAllByText("Shared Checking")[0].parentElement!.parentElement!;
+      const account = within(row()).getAllByText("Shared Checking").map((e) => e.parentElement!.parentElement!).find((e) => e.classList.contains("shrink-[4]"))!;
       expect(account).toHaveClass("min-w-0", "shrink-[4]");
       const bankText = within(row()).getByTitle("BLUE BOTTLE #123");
       expect(bankText).toHaveClass("hidden", "min-w-0", "truncate", "@sm/acct:block");
       expect(bankText.parentElement).toHaveClass("@container/acct", "min-w-0");
     });
 
-    it("shows only the account's logo on a phone", () => {
+    it("shows the account on a phone as a small badge on the merchant's logo", () => {
       app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
       render(TxRow, props(tx({ account_name: "Shared Checking" })));
-      const logo = within(row()).getAllByTitle("Shared Checking").find((e) => e.classList.contains("md:hidden"))!;
-      expect(within(logo).getByText("Shared Checking")).toHaveClass("hidden");
+      const badge = row().querySelector("[data-account-badge]")!;
+      expect(badge).toHaveClass("absolute", "md:hidden");
+      expect(badge).toHaveAttribute("title", "Shared Checking");
+      expect(within(badge as HTMLElement).getByText("Shared Checking")).toHaveClass("hidden");   // its logo only
+      expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4!");
+    });
+
+    it("has no badge when the list is filtered to one account", () => {
+      render(TxRow, props(tx(), { oneAccount: true }));
+      expect(row().querySelector("[data-account-badge]")).toBeNull();
+    });
+
+    it("shows the category as words, without its emoji", () => {
+      render(TxRow, props(tx()));
+      expect(within(row()).queryByText("☕")).not.toBeInTheDocument();
+      expect(within(row()).getByText("Coffee")).toBeInTheDocument();
+    });
+
+    it("on a touch screen, shows the repeat icon only once it's linked, and offers linking in the details", async () => {
+      render(TxRow, props(tx()));
+      expect(within(row()).getByRole("button", { name: "Link to a recurring item" })).toHaveClass("[@media(hover:none)]:hidden");
+      await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
+      expect(within(row()).getByText("Link to a recurring item", { selector: "button" }).closest("div")).toHaveClass("[@media(hover:none)]:block");
     });
   });
 
