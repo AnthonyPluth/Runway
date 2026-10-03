@@ -102,7 +102,7 @@
       <Button class="mt-3" variant="outline" onclick={reload}>Try again</Button>
     </div>
   {:else if !shown}
-    <div class="space-y-4" aria-busy="true"><div class="h-24 w-72 animate-pulse rounded-2xl bg-card"></div><div class="h-64 animate-pulse rounded-2xl bg-card"></div></div>
+    <div class="space-y-4" aria-busy="true"><div class="h-24 w-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div><div class="h-64 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div></div>
   {:else}
     {@const fc = shown.fc}
     {@const cashNow = fc.accounts.reduce((s, a) => s + a.balance, 0)}

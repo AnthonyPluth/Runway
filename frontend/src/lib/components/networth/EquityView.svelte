@@ -77,7 +77,7 @@
       <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
     </Card.Content>
   </Card.Root>
-{:else if !d || !c}<div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+{:else if !d || !c}<div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else}
   {#if lastRead}<p class="mb-6 text-sm text-muted-foreground">From Carta, last read {fmtDate(lastRead)}.</p>{/if}
   {#if c.last_error}

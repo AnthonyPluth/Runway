@@ -74,7 +74,7 @@
   {#if failed && !order}
     <p class="text-muted-foreground">{failed}</p>
   {:else if !order}
-    <div class="h-16 animate-pulse rounded-md bg-muted" aria-busy="true"></div>
+    <div class="h-16 animate-pulse motion-reduce:animate-none rounded-md bg-muted" aria-busy="true"></div>
   {:else}
     {@const o = order}
     {@const totals = [o.subtotal != null ? `items ${fmt(o.subtotal)}` : "", o.shipping ? `shipping ${fmt(o.shipping)}` : "",

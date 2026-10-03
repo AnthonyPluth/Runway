@@ -14,5 +14,5 @@
     </Card.Content>
   </Card.Root>
 {:else}
-  <div class="h-40 animate-pulse rounded-xl bg-muted" role="status"><span class="sr-only">Loading…</span></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted" role="status"><span class="sr-only">Loading…</span></div>
 {/if}

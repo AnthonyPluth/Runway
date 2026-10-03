@@ -24,7 +24,7 @@
     </Card.Content>
   </Card.Root>
 {:else if !plan}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else}
   <Card.Root class="mb-6">
     <Card.Header>

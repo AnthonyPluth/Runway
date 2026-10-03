@@ -42,7 +42,7 @@
   tabs={SECTIONS.map((s) => ({ ...s, href: `#setup/${s.id}`, badge: s.id === "rules" ? ruleCount : undefined }))} />
 
 {#await data}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:then d}
   <div class="flex flex-col gap-6">
     {#if section === "accounts"}<AccountsSection accounts={d.accounts} />

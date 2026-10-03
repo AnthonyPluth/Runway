@@ -114,7 +114,7 @@
 <div>
   {#if ids.length}
     <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
-      <span class="tabular-nums"><b>{ids.length} selected</b> <span class="text-muted-foreground">{fmtSigned(sum)}</span></span>
+      <span class="tabular-nums"><b>{ids.length} selected</b> <span class="text-foreground/70">{fmtSigned(sum)}</span></span>
       <CategorySelect bind:value={bulkCat} blank="Set category…" label="Category for the selected transactions" class="w-48"
         onchange={(v) => v && setCategory(v)} />
       <span class="flex items-center gap-1.5">
@@ -143,7 +143,8 @@
     {#each days as d (d.day)}
       <section aria-label={dayLabel(d.day)}>
         <!-- lg:pr-14 keeps the total over the amounts, not over the row's chevron column. -->
-        <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:py-1 lg:pr-14 lg:text-xs lg:backdrop-blur-none">
+        <!-- On the gray band (lg) the text is lighter than muted-foreground, which is too faint on gray to read. -->
+        <h3 class="sticky top-[env(safe-area-inset-top)] z-[1] flex items-center justify-between bg-background/85 px-4 py-1.5 text-[13px] font-semibold tracking-[0.14em] text-muted-foreground uppercase backdrop-blur lg:bg-muted lg:text-foreground/70 lg:py-1 lg:pr-14 lg:text-xs lg:backdrop-blur-none">
           <span>{dayLabel(d.day)}</span>
           {#if Math.abs(d.net) >= 0.005}<span class="tabular-nums normal-case">{fmtSigned(d.net)}</span>{/if}
         </h3>

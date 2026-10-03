@@ -43,7 +43,7 @@
 </script>
 
 {#await data}
-  <div class="h-72 animate-pulse rounded-2xl bg-card"></div>
+  <div class="h-72 animate-pulse motion-reduce:animate-none rounded-2xl bg-card"></div>
 {:then [pace, budget, latest]}
   {@const diff = pace.spent - pace.last_same_point}
   {@const budgets = budget.categories.filter((c) => c.depth === 0 && c.budget && c.budget > 0)

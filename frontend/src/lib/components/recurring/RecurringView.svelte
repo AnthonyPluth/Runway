@@ -163,7 +163,7 @@
 {/snippet}
 
 {#await data}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:then d}
   <!-- With nothing yet, what's spotted in your history comes first: it's the quickest way to start. -->
   {#if !items.length}{@render suggestionsCard()}{/if}

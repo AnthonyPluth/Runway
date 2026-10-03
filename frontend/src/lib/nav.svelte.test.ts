@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: { error: vi.fn() } }));
 
 import { api } from "./api";
 import { route } from "./app.svelte";
-import { balanceAsOf, currentPage, signOut, signedInUser, syncStatus } from "./nav.svelte";
+import { balanceAsOf, currentPage, signOut, signedInUser, syncDot, syncStatus } from "./nav.svelte";
 
 const s = (x: Partial<AppState> = {}): AppState => ({ connected: true, ...x });
 
@@ -64,6 +64,15 @@ describe("syncStatus", () => {
   it("tells a connected bank that hasn't synced from one that isn't connected", () => {
     expect(syncStatus(s())).toMatchObject({ text: "Not synced yet", tone: "busy", href: "" });
     expect(syncStatus(s({ connected: false }))).toMatchObject({ text: "Bank not connected", tone: "bad", href: "#setup/connections" });
+  });
+});
+
+describe("syncDot", () => {
+  it("uses the app's tones, and keeps a syncing dot still for someone who asked for less motion", () => {
+    expect(syncDot("")).toBe("bg-good");
+    expect(syncDot("warn")).toBe("bg-warning");
+    expect(syncDot("bad")).toBe("bg-destructive");
+    expect(syncDot("busy")).toContain("motion-reduce:animate-none");
   });
 });
 
