@@ -4,7 +4,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
-  import { fmtDateTime } from "$lib/format";
+  import { fmtDateTime, plural } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import BankIcon from "./BankIcon.svelte";
@@ -25,11 +25,13 @@
     const twin = items.some((o) => o !== it && (o.institution_name || "") === (it.institution_name || ""));
     return `connected ${twin ? fmtDateTime(d) : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })} · `;
   });
+  // Beside an error, the time is when it last synced without one.
   const synced = $derived.by(() => {
     const t = it.last_sync;
-    if (!t) return "not synced";
+    if (!t) return it.error ? "" : "not synced";
     const d = utc(t);
-    return isNaN(d.getTime()) ? `synced ${t}` : `synced ${fmtDateTime(d)}`;
+    const when = isNaN(d.getTime()) ? t : fmtDateTime(d);
+    return it.error ? `last successful sync ${when}` : `synced ${when}`;
   });
   const duplicate = $derived.by(() => {
     const d = (it.duplicates || [])[0];
@@ -62,7 +64,8 @@
     try {
       const r = await api<{ bank?: boolean; new_transactions?: number; statements?: number; holdings?: number; transactions?: number }>(
         `/api/plaid/items/${encodeURIComponent(it.item_id)}/sync`, { method: "POST" });
-      toast.success(r.bank ? `Synced · ${r.new_transactions} new transactions · ${r.statements} statements` : `Synced ${r.holdings} holdings, ${r.transactions} activities`);
+      toast.success(r.bank ? `Synced · ${plural(r.new_transactions ?? 0, "new transaction")} · ${plural(r.statements ?? 0, "statement")}`
+        : `Synced ${plural(r.holdings ?? 0, "holding")}, ${r.transactions ?? 0} ${r.transactions === 1 ? "activity" : "activities"}`);
     } catch (err) { toast.error((err as Error).message); }
     reload();
   }
@@ -82,8 +85,14 @@
       <span class="flex flex-wrap items-center gap-1.5 font-medium">{it.institution_name || "Connection"}
         {#if it.env === "sandbox"}<Badge variant="secondary">sandbox</Badge>{/if}
         {#if kind}<Badge variant="secondary">{kind}</Badge>{/if}</span>
-      <span class="text-xs text-muted-foreground">{connectedOn}{#if !problem?.reconnect}{synced}{/if}{#if problem}{problem.reconnect ? "" : " · "}<span
-        class={warnText}>{problem.text}</span>{/if}</span>
+      <span class="text-xs text-muted-foreground">{connectedOn}{synced}{#if problem}{synced ? " · " : ""}<span
+        class="text-warning">{problem.text}</span>{/if}</span>
+      {#if problem?.detail}
+        <details class="text-xs text-muted-foreground">
+          <summary class="w-fit cursor-pointer select-none hoverable:hover:text-foreground">Details</summary>
+          <p class="mt-0.5 font-mono break-words select-all">{problem.detail}</p>
+        </details>
+      {/if}
     </span>
     <span class="flex items-center gap-1 whitespace-nowrap">
       {#if problem?.reconnect}<Button size="sm" onclick={reconnect}>Reconnect</Button>

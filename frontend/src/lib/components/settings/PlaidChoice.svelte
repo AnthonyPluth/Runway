@@ -8,10 +8,14 @@
 
   // What a Plaid account is: added as its own account, the same as one of yours, or not used. An investment connection's
   // accounts (`it` without `bank`) choose among that connection's candidates instead of your bank and card accounts.
-  let { p, mine, it = null, class: cls = "" }: { p: PlaidAccount; mine: SettingsAccount[]; it?: PlaidItem | null; class?: string } = $props();
+  // `preselect` (New from Plaid's undecided ones) shows "Add as its own account" chosen before anything is saved: a
+  // button beside it adds it, and choosing anything else saves that straight away.
+  let { p, mine, it = null, preselect = false, class: cls = "" }: {
+    p: PlaidAccount; mine: SettingsAccount[]; it?: PlaidItem | null; preselect?: boolean; class?: string;
+  } = $props();
 
   const inv = $derived(!!it && !it.bank);
-  const sel = $derived(p.ignored ? "ignore" : p.account_id || "");
+  const sel = $derived(p.ignored ? "ignore" : p.account_id || (preselect ? "new" : ""));
   const own = $derived(!!p.account_id?.startsWith("pl:"));
   // Yours that could be this one: not from Plaid themselves, and not already linked to another Plaid account.
   const options = $derived(mine.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind)
@@ -21,7 +25,7 @@
 
 <select class={cn(selectCls, "w-full sm:w-60", sel && sel !== "ignore" && "border-transparent shadow-none dark:bg-transparent hover:border-input", cls)}
   aria-label="Which of your accounts this is" value={inv && own ? "new" : sel} onchange={(e) => matchPlaidAccount(p.id, e.currentTarget.value, !inv)}>
-  <option value="">Choose…</option>
+  {#if !preselect}<option value="">Choose…</option>{/if}
   {#if inv}
     <option value="new">{own ? "Its own account" : "Add as a new account"}</option>
     {#each candidates as a (a.id)}<option value={a.id}>Same as {a.display_name || a.name} ({fmt(a.balance)})</option>{/each}

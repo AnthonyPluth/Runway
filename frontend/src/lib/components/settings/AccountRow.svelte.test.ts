@@ -9,13 +9,23 @@ vi.mock("$lib/app.svelte", () => ({ app: { state: { owners: [], primary_account:
 
 import { api } from "$lib/api";
 import { app, refreshState, reload } from "$lib/app.svelte";
+import { toast } from "svelte-sonner";
 import AccountRow from "./AccountRow.svelte";
 import type { SettingsAccount } from "./types";
 
 const acct = (over: Partial<SettingsAccount> = {}): SettingsAccount => ({ id: "sav", name: "Savings", kind: "savings", balance: 1000, networth_hidden: 0, ...over });
 const show = (a: SettingsAccount) => render(AccountRow, { a, cash: [a], byName: {} });
 
+// What a field shows (the commas helper's `value` leaves its commas out).
+const shown = (el: HTMLElement) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.get!.call(el);
+// The Undo of the last toast that offered one.
+const undoOf = () => {
+  const call = vi.mocked(toast).mock.calls.findLast(([, o]) => (o as { action?: unknown })?.action);
+  return (call![1] as unknown as { action: { onClick: () => Promise<void> } }).action.onClick;
+};
+
 beforeEach(() => {
+  vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); vi.mocked(reload).mockClear();
   vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({ ok: true } as never);
   app.state = { connected: true, owners: [], primary_account: null };
 });
@@ -43,18 +53,21 @@ describe("leaving an account out of net worth, from Settings", () => {
 describe("choosing the forecast's account, from Settings", () => {
   const chk = acct({ id: "chk", name: "Checking", kind: "checking" });
 
-  it("offers another cash account for the forecast, saving the same setting as Overview's picker", async () => {
+  it("offers another cash account for the forecast among its actions, saving the same setting as Overview's picker", async () => {
     app.state = { connected: true, owners: [], primary_account: "chk" };
     render(AccountRow, { a: acct(), cash: [chk, acct()], byName: {} });
-    expect(screen.queryByText("primary")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Use for the forecast" }));
+    expect(screen.queryByText("Forecast")).toBeNull();
+    const button = within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Use for the forecast" });
+    expect(button.closest("summary")).toBeNull();   // in the opened row, not on its line
+    await userEvent.click(button);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { primary_account: "sav" } }));
     expect(refreshState).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith("Savings is now the forecast account");
   });
 
   it("tags the account in use instead, including a lone checking account nobody chose", () => {
     render(AccountRow, { a: chk, cash: [chk, acct()], byName: {} });
-    expect(screen.getByText("primary")).toBeInTheDocument();
+    expect(within(document.querySelector("summary")!).getByText("Forecast")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use for the forecast" })).toBeNull();
   });
 
@@ -72,7 +85,7 @@ describe("how a card is paid, from Settings", () => {
     show(card());
     expect(screen.getByRole("combobox", { name: "Pay" })).toHaveValue("full");
     expect(screen.queryByLabelText("Amount each statement")).toBeNull();
-    expect(screen.queryByRole("spinbutton", { name: "APR (%)" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "APR" })).toBeNull();
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
@@ -82,7 +95,7 @@ describe("how a card is paid, from Settings", () => {
     await waitFor(() => expect(api).toHaveBeenCalled());
     expect(lastBody()).toMatchObject({ pay_mode: "minimum", pay_amount: "", apr: "" });
     expect(screen.queryByLabelText("Amount each statement")).toBeNull();
-    const apr = screen.getByRole("spinbutton", { name: "APR (%)" });
+    const apr = screen.getByRole("spinbutton", { name: "APR" });
     await userEvent.type(apr, "24.99");
     await userEvent.tab();
     await waitFor(() => expect(lastBody()).toMatchObject({ pay_mode: "minimum", apr: 24.99 }));
@@ -91,23 +104,35 @@ describe("how a card is paid, from Settings", () => {
   it("asks for the fixed amount and saves it, and shows it on the account's line", async () => {
     show(card({ pay_mode: "fixed", pay_amount: 300, apr: 19.5 }));
     expect(screen.getByText("pays $300.00 a statement")).toBeInTheDocument();
-    const amount = screen.getByLabelText("Amount each statement");
+    const amount = screen.getByLabelText(/Amount each statement/);
     expect(amount).toHaveValue("300");
-    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(19.5);
+    expect(amount.parentElement).toHaveTextContent("$");
+    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(19.5);
     await userEvent.clear(amount);
     await userEvent.type(amount, "450");
     await userEvent.tab();
     await waitFor(() => expect(lastBody()).toMatchObject({ pay_mode: "fixed", pay_amount: 450, apr: 19.5 }));
   });
 
+  it("shows a fixed amount with its commas, and saves it without them", async () => {
+    show(card({ pay_mode: "fixed", pay_amount: 1850 }));
+    const amount = screen.getByLabelText(/Amount each statement/);
+    expect(shown(amount)).toBe("1,850");
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "2100");
+    await userEvent.tab();
+    await waitFor(() => expect(lastBody()).toMatchObject({ pay_amount: 2100 }));
+    expect(shown(amount)).toBe("2,100");
+  });
+
   it("shows the issuer's APR when you haven't entered one, and yours when you have", () => {
     const { unmount } = show(card({ pay_mode: "minimum", issuer_apr: 24.99 }));
-    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveAttribute("placeholder", "24.99");
-    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(null);
+    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveAttribute("placeholder", "24.99");
+    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(null);
     expect(screen.getByText("24.99% from the issuer")).toBeInTheDocument();
     unmount();
     show(card({ pay_mode: "minimum", apr: 18, issuer_apr: 24.99 }));
-    expect(screen.getByRole("spinbutton", { name: "APR (%)" })).toHaveValue(18);
+    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(18);
     expect(screen.queryByText(/from the issuer/)).toBeNull();
   });
 
@@ -180,6 +205,23 @@ describe("a card's statement, from Settings", () => {
     expect(earlier).toHaveTextContent("$300.00 · closed Aug 10 · due Sep 21 · min $25.00");
     await userEvent.click(within(earlier).getByRole("button", { name: /^Delete the statement that closed Aug.10$/ }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/cc/statements/2026-08-10/remove", { method: "POST" }));
+    // Undo enters it again as it was
+    expect(toast).toHaveBeenCalledWith("Statement deleted", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
+    await undoOf()();
+    expect(api).toHaveBeenLastCalledWith("/api/accounts/cc/statements", { method: "POST",
+      body: { statement_date: "2026-08-10", balance: 300, due_date: "2026-09-21", minimum_payment: 25 } });
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends no minimum back when undoing the delete of one entered without", async () => {
+    show(cc({ statement: { source: "manual", closed: "2026-09-10", due: "2026-10-21", balance: 500, minimum: null, stale: false },
+      statements: [{ statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21", minimum_payment: null }] }));
+    await open();
+    await userEvent.click(screen.getByRole("button", { name: /^Delete the statement that closed Sep.10$/ }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Statement deleted", expect.anything()));
+    await undoOf()();
+    expect(api).toHaveBeenLastCalledWith("/api/accounts/cc/statements", { method: "POST",
+      body: { statement_date: "2026-09-10", balance: 500, due_date: "2026-10-21", minimum_payment: "" } });
   });
 
   it("flags one that's out of date", () => {
@@ -212,12 +254,85 @@ describe("deleting an account, from Settings", () => {
     await waitFor(() => expect(dialog).toHaveTextContent("120 transactions, with their categories and splits"));
     expect(dialog).toHaveTextContent("2 recurring items on this account");
     expect(dialog).toHaveTextContent("1 rule that only applies to it");
-    expect(dialog).toHaveTextContent("SimpleFIN and Plaid leave it out until you restore it");
+    expect(dialog).toHaveTextContent("SimpleFIN and Plaid leave it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.");
+    expect(dialog).not.toHaveTextContent("can’t be undone");
     expect(within(dialog).getByRole("link", { name: "Download a backup first" })).toHaveAttribute("href", "#setup/advanced");
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    // more than 50 transactions: the name, typed
+    const confirm = within(dialog).getByRole("button", { name: "Delete" });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(within(dialog).getByRole("textbox"), "Savings");
+    await userEvent.click(confirm);
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/sav/remove", { method: "POST" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(reload).toHaveBeenCalled();
+  });
+});
+
+describe("deleting an account: what the dialog waits for", () => {
+  it("holds Delete back until it knows what goes with the account, and needs no typing for a short history", async () => {
+    let answer!: (r: unknown) => void;
+    vi.mocked(api).mockImplementation((path: string) => path.endsWith("/removal")
+      ? new Promise((r) => { answer = r; }) as never : Promise.resolve({ ok: true }) as never);
+    show(acct());
+    await userEvent.click(screen.getByRole("button", { name: "Delete account…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Savings?" });
+    expect(dialog).toHaveTextContent("Counting what goes with it…");
+    expect(within(dialog).getByRole("button", { name: "Delete" })).toBeDisabled();
+    answer({ name: "Savings", transactions: 50, recurring: 0, rules: 0, statements: 0, holdings: 0, plaid: false });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Delete" })).toBeEnabled());
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(dialog).toHaveTextContent("Syncs leave it out until you restore it");
+  });
+});
+
+describe("hiding and renaming an account", () => {
+  it("has Rename and Hide in the opened row, not as a checkbox", async () => {
+    show(acct({ display_name: "Rainy day" }));
+    expect(screen.queryByRole("checkbox", { name: /Hide/ })).toBeNull();
+    const actions = within(screen.getByRole("group", { name: "Account actions" }));
+    await userEvent.click(actions.getByRole("button", { name: "Rename" }));
+    expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+  });
+
+  it("hides it, tells the list so the row moves without a reload, and offers Undo", async () => {
+    const onhidden = vi.fn();
+    render(AccountRow, { a: acct(), cash: [acct()], byName: {}, onhidden });
+    await userEvent.click(within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Hide" }));
+    await waitFor(() => expect(onhidden).toHaveBeenCalledWith("sav", true));
+    expect(api).toHaveBeenCalledWith("/api/accounts/sav", { method: "POST", body: { hidden: 1 } });
+    expect(reload).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith("Savings hidden", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
+    await undoOf()();
+    expect(api).toHaveBeenLastCalledWith("/api/accounts/sav", { method: "POST", body: { hidden: 0 } });
+    expect(onhidden).toHaveBeenLastCalledWith("sav", false);
+  });
+
+  it("keeps it where it is when hiding fails", async () => {
+    const onhidden = vi.fn();
+    vi.mocked(api).mockRejectedValue(new Error("Nope"));
+    render(AccountRow, { a: acct(), cash: [acct()], byName: {}, onhidden });
+    await userEvent.click(within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Hide" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Nope"));
+    expect(onhidden).not.toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("shows a hidden one again", async () => {
+    const onhidden = vi.fn();
+    render(AccountRow, { a: acct({ hidden: 1 }), cash: [acct()], byName: {}, onhidden });
+    await userEvent.click(within(screen.getByRole("group", { name: "Account actions" })).getByRole("button", { name: "Show again" }));
+    await waitFor(() => expect(onhidden).toHaveBeenCalledWith("sav", false));
+    expect(toast.success).toHaveBeenCalledWith("Savings is shown again");
+  });
+});
+
+describe("the account's line on a phone", () => {
+  it("lets the name take two lines and wraps the line under it between words, keeping the balance on one line", () => {
+    show(acct({ id: "cc", name: "Rewards Visa", kind: "credit", pay_from: "chk" }));
+    const summary = document.querySelector("summary")!;
+    expect(within(summary).getByText("Rewards Visa")).toHaveClass("line-clamp-2");
+    expect(summary.innerHTML).not.toContain("overflow-wrap:anywhere");
+    expect(within(summary).getByText("$1,000.00")).toHaveClass("whitespace-nowrap");
   });
 });
 
@@ -228,21 +343,24 @@ describe("a loan's terms, for the retirement planner", () => {
 
   it("lets you set the interest rate and payment, suggesting the payment from recent ones", async () => {
     show(loan({ set_rate: 6.25, inferred_payment: 1840 }));
-    const rate = screen.getByRole("textbox", { name: /Interest rate/ });
-    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
-    expect(rate).toHaveValue("6.25");
+    const rate = screen.getByRole("spinbutton", { name: /Interest rate/ });
+    const payment = screen.getByLabelText(/Monthly payment/);
+    expect(rate).toHaveValue(6.25);
+    expect(rate.parentElement).toHaveTextContent("%");
     expect(payment).toHaveValue("");
+    expect(payment.parentElement).toHaveTextContent("$");
     expect(payment).toHaveAttribute("placeholder", "1,840 from recent payments");
-    await userEvent.type(payment, "1,900{Enter}");
+    await userEvent.type(payment, "1900{Enter}");
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg",
-      { method: "POST", body: { interest_rate: "6.25", monthly_payment: "1,900" } }));
+      { method: "POST", body: { interest_rate: 6.25, monthly_payment: 1900 } }));
+    expect(shown(payment)).toBe("1,900");
     expect(screen.queryByText("from Plaid")).toBeNull();
   });
 
   it("shows the lender's terms from Plaid instead, without fields to change them", () => {
     show(loan({ plaid: true, plaid_payment: true, rate: 6.125, payment: 2140.5, source: "plaid" }));
-    expect(screen.queryByRole("textbox", { name: /Interest rate/ })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: /Monthly payment/ })).toBeNull();
+    expect(screen.queryByLabelText(/Interest rate/)).toBeNull();
+    expect(screen.queryByLabelText(/Monthly payment/)).toBeNull();
     expect(screen.getByText("6.125%")).toBeInTheDocument();
     expect(screen.getByText("$2,140.50")).toBeInTheDocument();
     expect(screen.getAllByText("from Plaid")).toHaveLength(2);
@@ -250,17 +368,17 @@ describe("a loan's terms, for the retirement planner", () => {
 
   it("lets you set the payment when Plaid gives the rate but no payment, and saves only that", async () => {
     show(loan({ plaid: true, rate: 4, payment: 310, source: "inferred", inferred_payment: 310 }));
-    expect(screen.queryByRole("textbox", { name: /Interest rate/ })).toBeNull();
+    expect(screen.queryByLabelText(/Interest rate/)).toBeNull();
     expect(screen.getByText("4%")).toBeInTheDocument();
-    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
+    const payment = screen.getByLabelText(/Monthly payment/);
     expect(payment).toHaveAttribute("placeholder", "310 from recent payments");
     await userEvent.type(payment, "325{Enter}");
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg", { method: "POST", body: { monthly_payment: "325" } }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg", { method: "POST", body: { monthly_payment: 325 } }));
   });
 
   it("says an empty payment pays the loan off by Plaid's payoff date, when that's what's used", () => {
     show(loan({ plaid: true, rate: 6, payment: 2775.5, source: "plaid", maturity: "2036-09-01", inferred_payment: 1850 }));
-    const payment = screen.getByRole("textbox", { name: /Monthly payment/ });
+    const payment = screen.getByLabelText(/Monthly payment/);
     expect(payment.getAttribute("placeholder")).toMatch(/^2,776 to pay it off by Sep\s1,\s2036$/);
     expect(payment.closest("label")).toHaveAttribute("title", expect.stringContaining("pays the loan off by the date the lender gives"));
   });
@@ -294,6 +412,6 @@ describe("the expanded row", () => {
     show(acct());
     const box = screen.getByRole("region", { name: "Options" });
     expect(within(box).getByRole("checkbox", { name: "Count in net worth" })).toBeInTheDocument();
-    expect(within(box).getByRole("checkbox", { name: "Hide this account" })).toBeInTheDocument();
+    expect(within(box).queryByRole("checkbox", { name: /Hide/ })).toBeNull();   // Hide is an action at the top
   });
 });

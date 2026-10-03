@@ -3,34 +3,49 @@
   import { app, refreshState } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { barWidth } from "$lib/format";
+  import { barWidth, plural } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import Check from "@lucide/svelte/icons/check";
   import { openForecastSettings } from "./forecastSheet.svelte";
 
-  // Getting started: four steps that tick themselves off as you do them. On its own (`welcome`) before a bank is
-  // connected; at the top of the Overview after that, until every step is done or you put it away. The main account is
-  // chosen in the forecast settings on the Overview itself, so its step opens them there (and waits for a bank before).
+  // Getting started: four steps that tick themselves off as you do them, each with a short line on what it means. On its
+  // own (`welcome`) before a bank is connected; at the top of the Overview after that, until every step is done or you
+  // put it away (with Undo). Until there's an account the later steps can't be done, so they wait, greyed. The forecast
+  // account is chosen in the forecast settings on the Overview itself, so its step opens them there. Accounts Plaid found
+  // that wait for a decision come first: those steps point at Settings → Accounts, where they're added.
   let { welcome = false }: { welcome?: boolean } = $props();
   const s = $derived(app.state?.setup);
-  type Step = { done: boolean; title: string; text: string; action: string; href?: string; onclick?: () => void; hint?: string };
+  const undecided = $derived(app.state?.plaid_undecided ?? 0);
+  const locked = $derived(!s?.bank);
+  const review = (title: string, text: string) => ({ done: false, title, text, action: "Review", href: "#setup/accounts" });
+  type Step = { done: boolean; title: string; text: string; action: string; href?: string; onclick?: () => void; waits?: boolean };
   const steps: Step[] = $derived([
-    { done: !!s?.bank, title: "Connect a bank", text: "Link your accounts through SimpleFIN or Plaid. The first sync brings in months of history.",
-      href: "#setup/connections", action: "Connect" },
-    { done: !!s?.primary, title: "Pick your main account", text: "The checking account your paychecks land in and your bills come out of. Runway forecasts its balance.",
-      action: "Choose", ...(welcome ? { hint: "after your bank connects" } : { onclick: openForecastSettings }) },
-    { done: !!s?.recurring, title: "Add paychecks and bills", text: "Tell Runway what comes in and goes out on a schedule, or accept the ones it spots in your history.",
-      href: "#recurring", action: "Add" },
-    { done: !!s?.budgets, title: "Set a few budgets", text: "Start with the categories you'd like to keep an eye on, like groceries and restaurants.",
-      href: "#budget", action: "Budget" },
+    !s?.bank && undecided && !welcome
+      ? review("Connect a bank", `Add the ${plural(undecided, "account")} Plaid found in Settings → Accounts`)
+      : { done: !!s?.bank, title: "Connect a bank", text: "SimpleFIN or Plaid, with months of history",
+        href: "#setup/connections", action: "Connect" },
+    s?.bank && undecided && !s?.primary
+      ? review("Choose your forecast account", `First add the ${plural(undecided, "new account")} from Plaid in Settings → Accounts`)
+      : { done: !!s?.primary, title: "Choose your forecast account", text: "Where your pay lands and bills come out",
+        action: "Choose", ...(locked ? { waits: true } : { onclick: openForecastSettings }) },
+    { done: !!s?.recurring, title: "Add paychecks and bills", text: "Or accept the ones Runway spots",
+      href: "#recurring", action: "Add", waits: locked },
+    { done: !!s?.budgets, title: "Set a few budgets", text: "Groceries and dining are a good start",
+      href: "#budget", action: "Budget", waits: locked },
   ]);
   const doneCount = $derived(steps.filter((x) => x.done).length);
   const next = $derived(steps.findIndex((x) => !x.done));
 
+  const setDismissed = async (on: boolean) => {
+    await api("/api/settings", { method: "POST", body: { setup_dismissed: on } });
+    await refreshState();
+  };
   async function dismiss() {
-    try { await api("/api/settings", { method: "POST", body: { setup_dismissed: true } }); await refreshState(); }
-    catch (err) { toast.error((err as Error).message); }
+    try { await setDismissed(true); }
+    catch (err) { toast.error((err as Error).message); return; }
+    undoable("Setup checklist dismissed", () => setDismissed(false));
   }
 </script>
 
@@ -47,23 +62,22 @@
       </div>
       <span class="text-xs text-muted-foreground tabular-nums">{doneCount} of 4 done</span>
     </div>
+    {#if locked}<span id="setup-waits" class="sr-only">{app.state?.connected ? "after you add an account" : "after your bank connects"}</span>{/if}
     <ol class="flex flex-col">
-      {#each steps as step, i (step.title)}
-        <li class="flex items-center gap-3.5 border-t py-3.5 first:border-t-0">
+      {#each steps as step, i (i)}
+        <li class={cn("flex items-center gap-3.5 border-t py-3.5 first:border-t-0", step.waits && !step.done && "opacity-50")}>
           <span class={cn("flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
             step.done ? "bg-good/15 text-good" : i === next ? "bg-primary text-primary-foreground" : "border text-muted-foreground")}>
             {#if step.done}<Check class="size-4" aria-label="Done" />{:else}{i + 1}{/if}
           </span>
           <div class="min-w-0 flex-1">
-            <div class={cn("text-sm font-medium", step.done && "text-muted-foreground line-through decoration-muted-foreground/50")} title={step.done ? undefined : step.text}>{step.title}</div>
+            <div class={cn("text-sm font-medium", step.done && "text-muted-foreground line-through decoration-muted-foreground/50")}>{step.title}</div>
+            {#if !step.done}<div class="text-xs text-muted-foreground">{step.text}</div>{/if}
           </div>
-          {#if !step.done && step.hint}
-            <span class="flex shrink-0 flex-col items-end gap-1">
-              <Button size="sm" class="h-10 sm:h-8" variant="outline" disabled aria-describedby={`step-${i}-hint`}>{step.action}</Button>
-              <span id={`step-${i}-hint`} class="text-[11px] text-muted-foreground">{step.hint}</span>
-            </span>
+          {#if !step.done && step.waits}
+            <Button size="sm" class="h-10 shrink-0 sm:h-8" variant="outline" disabled aria-describedby="setup-waits">{step.action}</Button>
           {:else if !step.done}
-            <Button href={step.href} onclick={step.onclick} size="sm" class="h-10 sm:h-8" variant={i === next ? "default" : "outline"}>{step.action}</Button>
+            <Button href={step.href} onclick={step.onclick} size="sm" class="h-10 shrink-0 sm:h-8" variant={i === next ? "default" : "outline"}>{step.action}</Button>
           {/if}
         </li>
       {/each}

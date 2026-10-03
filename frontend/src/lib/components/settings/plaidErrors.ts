@@ -26,11 +26,12 @@ const OTHER: Record<string, string> = {
   NO_ACCOUNTS: "Plaid found no accounts at this bank that it can read",
 };
 
-interface PlaidProblem { text: string; reconnect: boolean }
+interface PlaidProblem { text: string; reconnect: boolean; detail?: string }
 
-/** A connection's error as a sentence, and whether to offer Reconnect. */
+/** A connection's error as a sentence, and whether to offer Reconnect. One Runway has no words for says it couldn't
+ *  sync, with what Plaid said as `detail` (shown under Details). */
 export function plaidProblem(error: string): PlaidProblem {
   if (Object.hasOwn(RECONNECT, error)) return { text: RECONNECT[error], reconnect: true };
   if (Object.hasOwn(OTHER, error)) return { text: OTHER[error], reconnect: false };
-  return { text: `Couldn’t sync: ${error}`, reconnect: false };
+  return { text: "Couldn’t sync; Runway will try again", reconnect: false, detail: error };
 }

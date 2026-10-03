@@ -14,13 +14,14 @@
   //   confirmLabel  the button that does it ("Remove"); cancelLabel is "Cancel" unless given
   //   busyLabel     the button while onconfirm runs ("Removing…")
   //   destructive   the confirm button in red
-  //   typeToConfirm a word ("RESTORE") the confirm button waits for, typed exactly
+  //   typeToConfirm a word ("RESTORE") or name the confirm button waits for, typed exactly
+  //   disabled      holds the confirm button back (while what it would do is still being worked out)
   //   onconfirm     does it; the dialog stays open and busy until it settles, then closes, unless it returns false (a
   //                 failure it has already shown). Catch errors inside it: a throw leaves the dialog open.
   let { open = $bindable(false), title, description, confirmLabel = "Confirm", cancelLabel = "Cancel", busyLabel, destructive = false,
-    typeToConfirm, onconfirm }: {
+    typeToConfirm, disabled = false, onconfirm }: {
     open?: boolean; title: string; description?: string | Snippet; confirmLabel?: string; cancelLabel?: string; busyLabel?: string;
-    destructive?: boolean; typeToConfirm?: string; onconfirm: () => unknown;
+    destructive?: boolean; typeToConfirm?: string; disabled?: boolean; onconfirm: () => unknown;
   } = $props();
 
   let typed = $state("");
@@ -28,7 +29,7 @@
   let box = $state<HTMLInputElement | null>(null);
   let cancel = $state<HTMLElement | null>(null);
   $effect(() => { if (open) typed = ""; });
-  const ready = $derived(!busy && (!typeToConfirm || typed.trim() === typeToConfirm));
+  const ready = $derived(!busy && !disabled && (!typeToConfirm || typed.trim() === typeToConfirm.trim()));
 
   async function confirm(e: SubmitEvent) {
     e.preventDefault();
@@ -55,7 +56,8 @@
         {#if typeToConfirm}
           <label class="flex flex-col gap-1.5 text-sm text-muted-foreground">
             <span>Type <strong class="text-foreground font-mono">{typeToConfirm}</strong> to confirm</span>
-            <Input bind:ref={box} bind:value={typed} autocomplete="off" autocapitalize="characters" spellcheck={false} disabled={busy} />
+            <Input bind:ref={box} bind:value={typed} autocomplete="off"
+              autocapitalize={typeToConfirm === typeToConfirm.toUpperCase() ? "characters" : "off"} spellcheck={false} disabled={busy} />
           </label>
         {/if}
         <div class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
