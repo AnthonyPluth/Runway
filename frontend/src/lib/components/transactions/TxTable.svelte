@@ -6,6 +6,10 @@
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
+  import * as Popover from "$lib/components/ui/popover";
+  import { viewport } from "$lib/phone.svelte";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import { ruleOffer } from "./remember.svelte";
   import { fmtDate, fmtSigned, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
@@ -13,10 +17,11 @@
   import type { RecurringItem } from "$lib/components/recurring/types";
   import { restoreTx, type Was } from "./restore";
   import TxRow from "./TxRow.svelte";
-  import type { Tx } from "./types";
+  import type { RuleOffer, Tx } from "./types";
 
   // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
-  // category, the merchant's name, or marking them reviewed. The bar for that sticks to the top while you scroll. Changing
+  // category, the merchant's name, or accepting the categories they have. The bar for that sticks to the top while you
+  // scroll; on a phone it's just how many, Categorize and More (the rest, in a small popover). Changing
   // CONFIRM_AT or more asks first, saying how many; every change can be undone from its toast.
   // More load as you reach the bottom (`onmore`). On a phone the checkboxes show once you tap Select.
   // `only`: the category the list is filtered by. A split transaction then counts (and shows) only its part in it, and a
@@ -24,10 +29,11 @@
   // `oneAccount`: filtered to one account, so the rows leave it out.
   // `every`: the list's filters (as GET /api/transactions takes them), so a change can reach every transaction they match,
   // not just the ones loaded ("Select all 212").
-  let { items, total, review, recurring, only = "", family, oneAccount = false, every, selecting = $bindable(false), onsave, onchanged, onmore, onopen }: {
+  // `focused`: the row the keyboard is on (Review). `onaccept`: keep a row's category and take it out of Review.
+  let { items, total, review, recurring, only = "", family, oneAccount = false, every, selecting = $bindable(false), focused = "", onsave, onaccept, onchanged, onmore, onopen }: {
     items: Tx[]; total: number; review: boolean; recurring: RecurringItem[]; only?: string; family?: string[]; oneAccount?: boolean;
-    every?: Record<string, string>; selecting?: boolean;
-    onsave: (t: Tx, category: string) => Promise<boolean | void>; onchanged: () => void; onmore?: () => Promise<void>;
+    every?: Record<string, string>; selecting?: boolean; focused?: string;
+    onsave: (t: Tx, category: string) => Promise<boolean | void>; onaccept?: (t: Tx) => void; onchanged: () => void; onmore?: () => Promise<void>;
     /** Open a transaction's details (the sheet). */
     onopen?: (t: Tx) => void;
   } = $props();
@@ -102,9 +108,14 @@
 
   async function send(c: Pick<Change, "body" | "what" | "ids" | "filter">): Promise<boolean> {
     try {
-      const r = await api<{ updated: number; was: Was[] }>("/api/transactions/bulk", { method: "POST",
+      const r = await api<{ updated: number; was: Was[]; offer_rule?: RuleOffer | null }>("/api/transactions/bulk", { method: "POST",
         body: c.filter ? { filter: c.filter, ...c.body } : { ids: c.ids, ...c.body } });
-      undoable(`${c.what} · ${plural(r.updated, "transaction")}`, async () => { await restoreTx(r.was); onchanged(); });
+      // All one merchant's: "Always for Blue Bottle" too.
+      const cat = typeof c.body.category === "string" ? c.body.category : "";
+      const first = r.was[0]?.id ?? c.ids[0];
+      const offer = cat && r.offer_rule && first ? ruleOffer(first, cat, r.offer_rule, onchanged) : null;
+      undoable(`${c.what} · ${plural(r.updated, "transaction")}`, async () => { await restoreTx(r.was); onchanged(); },
+        offer ? { description: offer.description || undefined, also: offer.also } : {});
       picked = {}; bulkCat = ""; rename = ""; everything = false;   // done with these; the list below updates where it is
       refreshState(); onchanged();
       return true;
@@ -123,12 +134,37 @@
     if (v) change({ body: { payee: v }, what: `Renamed to ${v}`, title: `Rename ${plural(chosen, "transaction")} to ${v}?` },
       "Only the name shown here changes, not the bank’s own text. You can undo it afterwards.", "Rename", "Renaming…");
   }
-  const markReviewed = () => change({ body: { reviewed: true }, what: "Marked reviewed", title: `Mark ${plural(chosen, "transaction")} reviewed?` },
-    "They keep their categories and leave To review. You can undo it afterwards.", "Mark reviewed", "Marking…");
+  const markReviewed = () => change({ body: { reviewed: true }, what: "Accepted", title: `Accept ${plural(chosen, "transaction")}?` },
+    "They keep their categories and leave To review. You can undo it afterwards.", "Accept", "Accepting…");
+  let moreOpen = $state(false);   // the phone bar's More popover
 </script>
 
 <div>
-  {#if ids.length}
+  {#if ids.length && viewport.phone}
+    <!-- A phone: one short line, so the list stays in view. -->
+    <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex items-center gap-2 rounded-lg border bg-popover p-2 pl-3 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
+      <b class="mr-auto tabular-nums">{chosen} selected</b>
+      <CategorySelect bind:value={bulkCat} blank="Categorize" label="Category for the selected transactions" class="h-11 w-auto max-w-40 shrink [&>span]:text-foreground"
+        onchange={(v) => v && setCategory(v)} />
+      <Popover.Root bind:open={moreOpen}>
+        <Popover.Trigger aria-label="More actions" class="inline-flex h-11 cursor-pointer items-center gap-1 rounded-lg px-3 dark:bg-input">More<ChevronDown class="size-4 opacity-60" aria-hidden="true" /></Popover.Trigger>
+        <!-- Not straight into the name box: that would bring up the keyboard over the list. -->
+        <Popover.Content align="end" class="flex w-72 flex-col gap-3" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <span class="text-foreground/70 tabular-nums">{#if everything}All {total.toLocaleString("en-US")} the filters match{:else}{fmtSigned(sum)}{/if}</span>
+          {#if every && !everything && ids.length === items.length && total > items.length}
+            <Button variant="outline" onclick={() => (everything = true)}>Select all {total.toLocaleString("en-US")}</Button>
+          {/if}
+          <span class="flex items-center gap-1.5">
+            <Input bind:value={rename} placeholder="Rename to…" aria-label="New merchant name" class="min-w-0 flex-1"
+              onkeydown={(e) => { if (e.key === "Enter") { moreOpen = false; doRename(); } }} />
+            <Button variant="outline" onclick={() => { moreOpen = false; doRename(); }}>Rename</Button>
+          </span>
+          <Button variant="outline" title="Keep their categories and take them out of Review" onclick={() => { moreOpen = false; markReviewed(); }}>Accept</Button>
+          <Button variant="ghost" onclick={() => { moreOpen = false; all(false); }}>Clear selection</Button>
+        </Popover.Content>
+      </Popover.Root>
+    </div>
+  {:else if ids.length}
     <div data-editor class="sticky top-[env(safe-area-inset-top)] z-10 mb-3 flex flex-wrap items-center gap-2.5 rounded-lg border bg-popover p-2.5 text-sm shadow-md" role="region" aria-label="Change the selected transactions">
       <span class="tabular-nums"><b>{chosen} selected</b>{#if !everything} <span class="text-foreground/70">{fmtSigned(sum)}</span>{/if}</span>
       {#if every && !everything && ids.length === items.length && total > items.length}
@@ -143,7 +179,7 @@
         <Button variant="outline" size="sm" onclick={doRename}>Rename</Button>
       </span>
       <Button variant="outline" size="sm" title="Keep their categories and take them out of Review"
-        onclick={markReviewed}>Mark reviewed</Button>
+        onclick={markReviewed}>Accept</Button>
       <Button variant="link" size="sm" onclick={() => all(false)}>Clear selection</Button>
     </div>
   {/if}
@@ -171,7 +207,7 @@
         <div role="list" class="group-list [--inset:4rem] md:[--inset:5.75rem] lg:rounded-none lg:bg-transparent lg:[--inset:3.75rem]">
           {#each d.rows as { t, i } (t.id)}
             <TxRow {t} {review} {recurring} {family} {oneAccount} {selecting} selected={!!picked[t.id]} onselect={(e, c) => select(e, i, c)}
-              onsave={(c) => onsave(t, c)} {onchanged} onopen={onopen && (() => onopen(t))} />
+              focused={focused === t.id} onsave={(c) => onsave(t, c)} onaccept={onaccept && (() => onaccept(t))} {onchanged} onopen={onopen && (() => onopen(t))} />
           {/each}
         </div>
       </section>

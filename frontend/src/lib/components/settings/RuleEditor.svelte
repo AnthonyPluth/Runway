@@ -174,7 +174,7 @@
       <legend class={legendCls}>Then</legend>
       <div class={rowCls}>
         <label class={`${fieldCls} w-full sm:w-80`}>Category
-          <CategorySelect bind:value={category} blank="Leave it (other rules, history or AI decide)" disabled={parts.length > 0} class="w-full" />
+          <CategorySelect bind:value={category} blank="Leave it (other rules, history or AI decide)" disabled={parts.length > 0} class="w-full" onchange={() => (touched = true)} />
         </label>
         <Button variant="link" size="sm" class="px-0" onclick={toggleSplit}>{parts.length ? "Don't split" : "Split instead…"}</Button>
       </div>
@@ -182,7 +182,7 @@
         <div class="flex flex-col gap-2">
           {#each parts as p, i (i)}
             <div class="flex items-center gap-2">
-              <CategorySelect bind:value={p.category} label={`Part ${i + 1} category`} class="min-w-0 flex-1" />
+              <CategorySelect bind:value={p.category} label={`Part ${i + 1} category`} class="min-w-0 flex-1" onchange={() => (touched = true)} />
               <input class={`${inputCls} w-24 text-right aria-invalid:border-destructive`} type="number" min="0" max="100" step="0.01" aria-label={`Part ${i + 1} percent`}
                 value={p.percent} oninput={(e) => (p.percent = e.currentTarget.value)}
                 aria-invalid={off ? "true" : undefined} aria-describedby={errId("split")} />

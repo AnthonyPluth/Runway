@@ -355,7 +355,9 @@ def api_tx_bulk(conn, _q, body, *_):
             retail.set_transaction_category(conn, rest, body["category"])
     except ValueError as e:
         raise ApiError(str(e)) from e
-    return {"ok": True, "updated": n, "was": was}
+    # All one merchant: the app asks whether to use this category for it from now on, as after a single change.
+    offer = categorize.bulk_rule_offer(conn, rest, body["category"]) if body.get("category") and rest and not parts else None
+    return {"ok": True, "updated": n, "was": was, "offer_rule": offer}
 
 
 def filtered_ids(conn, f: dict) -> list[str]:
@@ -537,15 +539,21 @@ def api_tx_brand_name(conn, _q, body, tx_id):
 
 
 def api_tx_accept(conn, _q, _b, tx_id):
-    categorize.accept_suggestion(conn, tx_id)
-    return {"ok": True}
+    """Keep the category it has (whoever set it) and take it out of Review; `was` puts it back."""
+    was = snapshot(conn, [tx_id])
+    if not was:
+        raise ApiError("Transaction not found", 404)
+    if not categorize.accept_suggestion(conn, tx_id):
+        raise ApiError("Choose a category for it first")
+    return {"ok": True, "was": was}
 
 
-def api_ai_suggest(conn, _q, _b):
+def api_ai_suggest(conn, _q, body):
     if not db.get_setting(conn, sk.OPENROUTER_API_KEY):
         raise ApiError("Add an OpenRouter API key in Settings first.")
+    skip = body.get("skip") if isinstance(body, dict) else None
     try:
-        return categorize.suggest_for_review(conn)
+        return categorize.suggest_for_review(conn, skip=[str(m) for m in skip[:1000]] if isinstance(skip, list) else None)
     except RuntimeError as e:
         raise ApiError(str(e), 502) from e
 
