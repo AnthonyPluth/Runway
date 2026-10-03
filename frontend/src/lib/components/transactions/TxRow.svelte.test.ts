@@ -294,6 +294,7 @@ describe("TxRow", () => {
       const badge = row().querySelector("[data-account-badge]")!;
       expect(badge).toHaveClass("absolute");
       expect(badge).not.toHaveClass("md:hidden");
+      expect(badge.className).not.toMatch(/\bring-/);   // straight over the logo's corner, no outline
       expect(badge).toHaveAttribute("title", "Shared Checking");
       expect(within(badge as HTMLElement).getByText("Shared Checking")).toHaveClass("hidden");   // its logo only
       expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4!");

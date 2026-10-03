@@ -94,7 +94,7 @@
 
   <!-- The account is a small badge on the merchant's logo, at every width (wider screens also name it, in its own column). -->
   <div class="relative col-start-2 row-span-2 mr-3 self-center md:row-span-2 lg:row-span-1 lg:mr-2.5">
-    {#if !oneAccount}<span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md ring-2 ring-card lg:-right-1 lg:-bottom-1 lg:rounded-[3px]" title={t.account_name || undefined}
+    {#if !oneAccount}<span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md lg:-right-1 lg:-bottom-1 lg:rounded-[3px]" title={t.account_name || undefined}
       data-account-badge><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="size-4! lg:size-3! lg:rounded-[3px]! lg:text-[8px]!" labelClass="hidden" /></span>{/if}
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
