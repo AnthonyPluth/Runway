@@ -339,6 +339,21 @@ class CategorizeTests(LedgerCase):
         self.assertEqual(self.conn.execute(select(Rule.category)
                                            .where(Rule.match == "blue bottle")).fetchone()[0], "Coffee & Snacks")
 
+    def test_skipped_merchants_are_left_out_of_the_suggestions(self):
+        self.tx("cc", "2026-09-01", -9.0, "SQ *BLUE BOTTLE")
+        self.tx("cc", "2026-09-05", -30.0, "Z & H GRILL CORP")
+        self.conn.execute(update(Transaction).values(needs_review=1))
+        asked = []
+
+        def fake(key, model, prompt):
+            items = json.loads(prompt.split("Transactions (JSON):\n")[1].split("\n\nReply")[0])
+            asked.extend(it["payee"] for it in items)
+            return json.dumps([{"i": it["i"], "category": "Restaurants", "confidence": 0.9} for it in items])
+
+        sug = categorize.suggest_for_review(self.conn, caller=fake, skip=["blue  bottle"])   # as typed, any case or spacing
+        self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
+        self.assertNotIn("Blue Bottle", asked)                                     # not even asked about
+
     def test_sync_can_skip_ai(self):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY")
         db.set_setting(self.conn, "openrouter_api_key", "k")

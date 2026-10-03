@@ -53,8 +53,10 @@ export function relDay(s: string, today: string): string {
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** A share (0–1) as a whole percentage that never rounds a real amount to "0%" or "100%": 0.003 → "<1%", 0.997 → ">99%". */
+/** A share (0–1) as a whole percentage that never rounds a real amount to "0%" or "100%": 0.003 → "<1%", 0.997 → ">99%".
+ * A negative share (a savings rate when more went out than came in) keeps a real minus: −0.12 → "−12%". */
 export function pct(share: number): string {
+  if (share < 0) return `−${pct(-share)}`;
   if (share === 0) return "0%";
   if (share < 0.005) return "<1%";
   if (share >= 0.995 && share < 1) return ">99%";

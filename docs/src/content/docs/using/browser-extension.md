@@ -8,7 +8,7 @@ sidebar:
 Amazon, Target and Costco don't offer an API for your own order history, so this small extension reads it the way their
 websites do, with the sign-in already in your browser, and sends it to **your** Runway. Runway then matches each card
 charge to its order and splits the transaction by what you bought ($84 at Target: $52 Groceries, $32 Household).
-A matched transaction has a **receipt** badge on Transactions: click it to see what was in the order.
+A matched transaction has a **receipt** badge on Transactions: click it to see what was in the order. A category picked for an item there applies to that item in every order. **Split by items**, **Not this transaction** and an item's category can each be undone from their message.
 
 - **Amazon:** your Payments → Transactions pages (every card charge, with its order number; Amazon charges each
   shipment separately) and each order's details page.

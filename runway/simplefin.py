@@ -296,7 +296,8 @@ def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
     in_window = (Transaction.account_id == acct_id, Transaction.pending == 1, Transaction.posted >= window_start.isoformat())
     for old in conn.execute(
         select(Transaction.id, Transaction.description, Transaction.payee, Transaction.amount, Transaction.category,
-               Transaction.category_source, Transaction.confidence, Transaction.needs_review, Transaction.is_split)
+               Transaction.category_source, Transaction.confidence, Transaction.needs_review, Transaction.is_split,
+               Transaction.notes)
         .where(*in_window)
     ).fetchall():
         carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
@@ -323,11 +324,12 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
     same = " ".join(bank_payee(raw).lower().split()) == " ".join(bank_payee(desc).lower().split())
     payee = clean_payee(raw, keep_bank) if same else bank_payee(raw)
     key = f"{acct_id}|{tx['id']}"
-    row = conn.execute(select(Transaction.id, Transaction.pending, Transaction.is_split).where(Transaction.id == key)).fetchone()
+    row = conn.execute(select(Transaction.id, Transaction.pending, Transaction.is_split, Transaction.bank_posted,
+                              Transaction.bank_amount).where(Transaction.id == key)).fetchone()
     if row:
         conn.execute(update(Transaction).where(Transaction.id == key).values(
-            posted=posted, amount=amount, description=desc, pending=pending))
-        if row["is_split"]:
+            description=desc, pending=pending, **plaidbank.bank_values(row, posted, amount)))
+        if row["is_split"] and row["bank_amount"] is None:
             splits.follow_amount(conn, key, amount)
         return None
     if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
@@ -339,13 +341,13 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
             mine = p["payee"] and not payees.from_bank(p["payee"], p["description"])
             conn.execute(insert(Transaction).values(
                 id=key, account_id=acct_id, posted=posted, amount=amount, description=desc, payee=p["payee"] if mine else payee,
-                pending=pending))
+                pending=pending, notes=p["notes"]))
             return key
         conn.execute(insert(Transaction).values(
             id=key, account_id=acct_id, posted=posted, amount=amount, description=desc,
             payee=p["payee"] or payee, pending=pending,   # a rule may have renamed it
             category=p["category"], category_source=p["category_source"], confidence=p["confidence"],
-            needs_review=p["needs_review"]))
+            needs_review=p["needs_review"], notes=p["notes"]))
         if p["is_split"]:
             splits.carry_over(conn, p["id"], key, amount)
         return None

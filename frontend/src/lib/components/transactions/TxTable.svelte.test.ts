@@ -11,6 +11,8 @@ import { categories } from "$lib/categories.svelte";
 import { toast } from "svelte-sonner";
 import { category, tx } from "../../../test/fixtures";
 import TxTable from "./TxTable.svelte";
+import { viewport } from "$lib/phone.svelte";
+import { pickCategory, pickedValue } from "../../../test/pick";
 
 const items = [
   tx({ id: "a", posted: "2026-03-10", amount: -10, payee: "Alpha" }),
@@ -30,7 +32,7 @@ beforeEach(() => {
   vi.mocked(api).mockReset();
   categories.list = [category("Coffee"), category("Groceries")];
 });
-afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); viewport.phone = false; });
 
 describe("TxTable", () => {
   it("groups by day, newest first, with each day's net", () => {
@@ -53,6 +55,12 @@ describe("TxTable", () => {
       tx({ id: "s", amount: -100, payee: "Split", category: "Groceries", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Transfer", amount: -40 }] }),
     ], total: 4 });
     expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/\$2,940\.00$/);
+    expect(screen.getByText("+$2,940.00")).toHaveAttribute("title", "Transfers not counted");
+  });
+
+  it("says nothing about transfers on a day without one", () => {
+    setup();
+    expect(screen.getByText("−$15.00")).not.toHaveAttribute("title");
   });
 
   it("counts only the matching part of a split one under a category filter", () => {
@@ -113,17 +121,29 @@ describe("TxTable", () => {
       const p = setup();
       await userEvent.click(tick("Alpha"));
       await userEvent.click(tick("Bravo"));
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a", "b"], category: "Groceries" } });
       expect(undoToast()[0]).toBe("Set to Groceries · 2 transactions");
       expect(undoToast()[1].action.label).toBe("Undo");
       expect(p.onchanged).toHaveBeenCalled();
     });
 
+    it("offers to use the category for the merchant from now on when they're all one merchant's", async () => {
+      vi.mocked(api).mockResolvedValue({ updated: 2, was, offer_rule: { merchant: "Alpha", match: "alpha", also_updated: 3 } });
+      setup();
+      await userEvent.click(tick("Alpha"));
+      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      const [msg, opts] = vi.mocked(toast).mock.calls.at(-1) as unknown as [string, { description: string; action: { label: string }; cancel: { label: string } }];
+      expect(msg).toBe("Set to Groceries · 2 transactions");
+      expect(opts.action.label).toBe("Always for Alpha");
+      expect(opts.cancel.label).toBe("Undo");
+      expect(opts.description).toBe("matches “alpha” · +3 more");
+    });
+
     it("under a category filter, sends it along so a split one changes only that part", async () => {
       setup({ only: "Coffee" });
       await userEvent.click(tick("Alpha"));
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], category: "Groceries", only: "Coffee" } });
     });
 
@@ -131,17 +151,17 @@ describe("TxTable", () => {
       setup();
       await userEvent.click(tick("Alpha"));
       await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "Acme");
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+      await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
       expect(screen.queryByRole("region", { name: "Change the selected transactions" })).not.toBeInTheDocument();
       await userEvent.click(tick("Bravo"));
       expect(screen.getByRole("textbox", { name: "New merchant name" })).toHaveValue("");
-      expect(screen.getByRole("combobox", { name: "Category for the selected transactions" })).toHaveValue("");
+      expect(pickedValue(screen.getByRole("combobox", { name: "Category for the selected transactions" }))).toBe("");
     });
 
     it("undoes with what each transaction was, which the server sent back", async () => {
       const p = setup();
       await userEvent.click(tick("Alpha"));
-      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
       vi.mocked(api).mockClear();
       await undoToast()[1].action.onClick();
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { restore: was } });
@@ -152,7 +172,7 @@ describe("TxTable", () => {
     it("says so when the undo fails", async () => {
       setup();
       await userEvent.click(tick("Alpha"));
-      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
       vi.mocked(api).mockRejectedValue(new Error("Gone"));
       await undoToast()[1].action.onClick();
       expect(toast.error).toHaveBeenCalledWith("Gone");
@@ -173,7 +193,7 @@ describe("TxTable", () => {
 
       it("asks with the count at ten or more, and only then changes them", async () => {
         await pickAll(10);
-        await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
         const dialog = await screen.findByRole("dialog", { name: "Set Groceries on 10 transactions?" });
         expect(api).not.toHaveBeenCalled();
         await userEvent.click(within(dialog).getByRole("button", { name: "Set category" }));
@@ -184,26 +204,26 @@ describe("TxTable", () => {
 
       it("leaves everything as it was when you cancel", async () => {
         await pickAll(11);
-        await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
+        await pickCategory(screen.getByRole("combobox", { name: "Category for the selected transactions" }), "Groceries");
         await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
         expect(api).not.toHaveBeenCalled();
         expect(screen.getByText("11 selected")).toBeInTheDocument();
-        expect(screen.getByRole("combobox", { name: "Category for the selected transactions" })).toHaveValue("");
+        expect(pickedValue(screen.getByRole("combobox", { name: "Category for the selected transactions" }))).toBe("");
       });
 
-      it("asks before a rename and before marking reviewed", async () => {
+      it("asks before a rename and before accepting", async () => {
         await pickAll(12);
         await userEvent.type(screen.getByRole("textbox", { name: "New merchant name" }), "Acme");
         await userEvent.click(screen.getByRole("button", { name: "Rename" }));
         await userEvent.click(within(await screen.findByRole("dialog", { name: "Rename 12 transactions to Acme?" })).getByRole("button", { name: "Cancel" }));
-        await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
-        expect(await screen.findByRole("dialog", { name: "Mark 12 transactions reviewed?" })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+        expect(await screen.findByRole("dialog", { name: "Accept 12 transactions?" })).toBeInTheDocument();
         expect(api).not.toHaveBeenCalled();
       });
 
       it("doesn't ask for fewer than ten", async () => {
         await pickAll(9);
-        await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+        await userEvent.click(screen.getByRole("button", { name: "Accept" }));
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
         await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", expect.objectContaining({ method: "POST" })));
       });
@@ -219,10 +239,10 @@ describe("TxTable", () => {
       expect(undoToast()[0]).toBe("Renamed to Acme · 2 transactions");
     });
 
-    it("marks them reviewed", async () => {
+    it("accepts their categories", async () => {
       setup();
       await userEvent.click(tick("Alpha"));
-      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], reviewed: true } });
     });
 
@@ -230,7 +250,7 @@ describe("TxTable", () => {
       vi.mocked(api).mockRejectedValue(new Error("Locked"));
       const p = setup();
       await userEvent.click(tick("Alpha"));
-      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
       expect(toast.error).toHaveBeenCalledWith("Locked");
       expect(p.onchanged).not.toHaveBeenCalled();
     });
@@ -248,16 +268,83 @@ describe("TxTable", () => {
       expect(await screen.findByRole("button", { name: /Show more/ })).toBeEnabled();
     });
 
+    it("says when more couldn't be loaded, and tries again only when asked", async () => {
+      const onmore = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+      setup({ total: 10, onmore });
+      await userEvent.click(screen.getByRole("button", { name: "Show more (6 left)" }));
+      expect(await screen.findByText(/Couldn’t load more/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(onmore).toHaveBeenCalledTimes(2);
+      expect(await screen.findByRole("button", { name: /Show more/ })).toBeEnabled();
+    });
+
     it("has no Show more once everything is loaded", () => {
       setup();
       expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
     });
   });
 
+  describe("select all", () => {
+    const every = { q: "coffee", ignored: "0" };
+    it("offers every one the filters match once all the loaded ones are ticked, and changes them by the filters", async () => {
+      vi.mocked(api).mockResolvedValue({ updated: 212, was: [] });
+      const p = setup({ total: 212, every, onmore: vi.fn() });
+      expect(screen.queryByRole("button", { name: /Select all 212/ })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+      expect(screen.getByText("212 selected")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Accept" }));
+      expect(screen.getByRole("dialog")).toHaveTextContent("Accept 212 transactions?");   // that many: it asks first
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Accept" }));
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { filter: every, reviewed: true } }));
+      expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it("goes back to the ticked ones when one is unticked", async () => {
+      setup({ total: 212, every });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+      await userEvent.click(tick("Alpha"));
+      expect(screen.getByText("3 selected")).toBeInTheDocument();
+    });
+
+    it("isn't offered when everything is loaded", async () => {
+      setup({ every });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      expect(screen.queryByRole("button", { name: /Select all/ })).not.toBeInTheDocument();
+    });
+  });
+
   it("hands a picked category to onsave along with the transaction", async () => {
     const p = setup();
     const row = screen.getAllByRole("listitem")[0];
-    await userEvent.selectOptions(within(row).getByRole("combobox"), "Groceries");
+    await pickCategory(within(row).getByRole("combobox"), "Groceries");
     expect(p.onsave).toHaveBeenCalledWith(items[0], "Groceries");
+  });
+
+  describe("on a phone", () => {
+    it("keeps the bar to one line: how many, Categorize and More for the rest", async () => {
+      vi.mocked(api).mockResolvedValue({ updated: 1, was: [] });
+      viewport.phone = true;
+      const p = setup({ selecting: true });
+      await userEvent.click(tick("Alpha"));
+      const bar = screen.getByRole("region", { name: "Change the selected transactions" });
+      expect(bar).toHaveTextContent("1 selected");
+      expect(within(bar).getByRole("combobox", { name: "Category for the selected transactions" })).toHaveTextContent("Categorize");
+      expect(within(bar).queryByRole("textbox")).not.toBeInTheDocument();   // the rest is under More
+      await userEvent.click(within(bar).getByRole("button", { name: "More actions" }));
+      // (jsdom can't place a popover, so it counts as hidden, names and all)
+      await fireEvent.click(screen.getByText("Accept", { selector: "[data-popover-content] button" }));
+      expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], reviewed: true } });
+      expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it("in Select mode, ticks a row from a tap anywhere on it", async () => {
+      viewport.phone = true;
+      setup({ selecting: true });
+      await userEvent.click(screen.getByText("Bravo"));
+      expect(tick("Bravo")).toBeChecked();
+    });
   });
 });

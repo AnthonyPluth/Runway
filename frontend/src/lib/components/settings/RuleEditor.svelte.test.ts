@@ -12,6 +12,7 @@ import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import RuleEditor from "./RuleEditor.svelte";
 import type { Rule, SettingsAccount } from "./types";
+import { pickCategory } from "../../../test/pick";
 
 const accounts = [{ id: "a1", name: "Checking", kind: "checking" }] as SettingsAccount[];
 type Body = Record<string, unknown>;
@@ -59,7 +60,7 @@ describe("RuleEditor", () => {
     setup();
     expect(screen.getByRole("checkbox", { name: /Apply to past/ })).not.toBeChecked();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole foods");
-    await userEvent.selectOptions(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const body = posts("/api/rules").at(-1)!;
     expect(body).toMatchObject({ match: "whole foods", category: "Groceries", apply: false, split: null });
@@ -73,7 +74,7 @@ describe("RuleEditor", () => {
       : path === "/api/rules/12/apply" ? { updated: 2, changed: [{ id: "t1" }, { id: "t2" }], undoable: true } : {}) as never);
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole foods");
-    await userEvent.selectOptions(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     await userEvent.click(screen.getByRole("checkbox", { name: /Apply to past/ }));
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const dialog = await screen.findByRole("dialog", { name: "Apply this rule to past transactions?" });
@@ -123,7 +124,7 @@ describe("RuleEditor", () => {
     const add = screen.getByRole("button", { name: "Add rule" });
     expect(add).toBeDisabled();
     expect(screen.queryByText(/Add a condition/)).not.toBeInTheDocument();   // not before you've done anything
-    await userEvent.selectOptions(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     const box = screen.getByPlaceholderText("whole foods");
     expect(screen.getByText(/Add a condition/)).toBeInTheDocument();
     expect(box).toHaveAttribute("aria-invalid", "true");
@@ -138,7 +139,7 @@ describe("RuleEditor", () => {
 
   it("takes an amount, a direction or an account as the condition too, and checks the amounts' order", async () => {
     setup();
-    await userEvent.selectOptions(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
+    await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     const add = screen.getByRole("button", { name: "Add rule" });
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Account" }), "a1");
     expect(add).toBeEnabled();
@@ -162,8 +163,8 @@ describe("RuleEditor", () => {
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "costco");
     await userEvent.click(screen.getByRole("button", { name: "Split instead…" }));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Part 1 category" }), "Groceries");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Part 2 category" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: "Part 1 category" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: "Part 2 category" }), "Coffee");
     expect(screen.getByText("adds up")).toBeInTheDocument();
     const first = screen.getByRole("spinbutton", { name: "Part 1 percent" });
     await userEvent.clear(first);
@@ -177,7 +178,7 @@ describe("RuleEditor", () => {
     expect(screen.getByText("adds up")).toBeInTheDocument();
     expect(screen.getByText("Give every part a category.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add rule" })).toBeDisabled();
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Part 3 category" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: "Part 3 category" }), "Coffee");
     expect(screen.getByRole("button", { name: "Add rule" })).toBeEnabled();
   });
 
@@ -195,8 +196,8 @@ describe("RuleEditor", () => {
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "costco");
     await userEvent.click(screen.getByRole("button", { name: "Split instead…" }));
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Part 1 category" }), "Groceries");
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Part 2 category" }), "Coffee");
+    await pickCategory(screen.getByRole("combobox", { name: "Part 1 category" }), "Groceries");
+    await pickCategory(screen.getByRole("combobox", { name: "Part 2 category" }), "Coffee");
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     expect(posts("/api/rules").at(-1)).toMatchObject({ category: "", split: [{ category: "Groceries", percent: 50 }, { category: "Coffee", percent: 50 }] });
   });

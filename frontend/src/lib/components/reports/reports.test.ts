@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Report, monthTick, niceTicks, scrub } from "./chart.svelte";
+import { catFilter, channels, contrast, dayBefore, drill, INK_DARK, INK_LIGHT, textOn } from "./look";
 import { monthsOptions, rangeDates, rangeOptions } from "./state.svelte";
 
 describe("niceTicks", () => {
@@ -68,6 +69,34 @@ describe("Report", () => {
     expect(r.data).toBe("second");
   });
 
+  it("is loading while an answer is out, and not once the latest one is in or has failed", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const calls = [deferred<string>(), deferred<string>(), deferred<string>()];
+    let n = 0;
+    const r = new Report(() => calls[n++].p);
+    expect(r.loading).toBe(true);
+    r.load();
+    calls[0].resolve("old");
+    await calls[0].p;
+    expect(r.loading).toBe(true);   // the newer one is still out
+    calls[1].resolve("new");
+    await calls[1].p;
+    expect(r.loading).toBe(false);
+    r.load();
+    calls[2].reject(new Error("nope"));
+    await calls[2].p.catch(() => {});
+    expect(r.loading).toBe(false);
+    expect(r.data).toBe("new");
+  });
+
+  it("records a fetcher that throws before it answers as a failure", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = new Report<string>(() => { throw new Error("bad url"); });
+    await Promise.resolve(); await Promise.resolve();
+    expect(r.error?.message).toBe("bad url");
+    expect(r.loading).toBe(false);
+  });
+
   it("ignores a slow old answer that arrives after a newer one", async () => {
     const calls = [deferred<string>(), deferred<string>()];
     let n = 0;
@@ -130,5 +159,39 @@ describe("scrub", () => {
     a.destroy();
     fire(el, "touchstart", touch(1, 1));
     expect(moves).toEqual([]);
+  });
+});
+
+describe("report colors and links", () => {
+  it("reads a color's channels", () => {
+    expect(channels("#3987e5")).toEqual([57, 135, 229]);
+    expect(channels("#fff")).toEqual([255, 255, 255]);
+    expect(channels("rgb(0 131 0)")).toEqual([0, 131, 0]);
+    expect(channels("rgba(1, 2, 3, 0.5)")).toEqual([1, 2, 3]);
+    expect(channels("nonsense")).toBeNull();
+  });
+
+  it("picks white on dark fills and dark ink on light ones, always at 4.5:1 or better", () => {
+    expect(textOn("#008300")).toBe(INK_LIGHT);
+    expect(textOn("#6b6a66")).toBe(INK_LIGHT);
+    expect(textOn("#c98500")).toBe(INK_DARK);
+    expect(textOn("#3987e5")).toBe(INK_DARK);
+    for (const c of ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86", "#6b6a66"]) {
+      const ink = channels(textOn(c))!;
+      expect(contrast(channels(c)!, ink)).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(textOn("var(--nowhere)")).toBe(INK_DARK);   // can't be read: dark ink
+  });
+
+  it("turns a report's exclusive end into Transactions' last day, across months and years", () => {
+    expect(dayBefore("2026-10-01")).toBe("2026-09-30");
+    expect(dayBefore("2027-01-01")).toBe("2026-12-31");
+    expect(dayBefore("2026-03-09")).toBe("2026-03-08");   // the day the clocks change
+  });
+
+  it("asks Transactions for the accounts the reports count, and for no category as Uncategorized", () => {
+    expect(drill({ month: "2026-09", kind: "out" })).toEqual({ scope: "budget", month: "2026-09", kind: "out" });
+    expect(catFilter("Uncategorized")).toBe("__none__");
+    expect(catFilter("Groceries")).toBe("Groceries");
   });
 });
