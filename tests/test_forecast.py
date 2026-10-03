@@ -132,8 +132,11 @@ class ForecastTests(LedgerCase):
         self.assertEqual(fc["total"][0], 5000.0)                                    # from tomorrow
         self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 110 / 7, delta=0.01)
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 10.0, delta=0.01)        # October: 310 / 31
-        # every day after today, in the account's series too
-        self.assertTrue(all(self.drop(fc, d) > 0 for d in fc["dates"][1:]))
+        # every banking day after today, in the account's series too; a weekend's or a holiday's goes out on the next one
+        from runway import bankdays
+        business = [d for d in fc["dates"][1:] if bankdays.is_business_day(date.fromisoformat(d))]
+        self.assertTrue(all(self.drop(fc, d) > 0 for d in business))
+        self.assertTrue(all(self.drop(fc, d) == 0 for d in fc["dates"][1:] if d not in business))
         self.assertEqual(fc["accounts"][0]["series"], fc["total"])
         # not listed as events: the only one is the card's payment, its balance after it taking in the days before
         self.assertEqual([(e["date"], e["kind"]) for e in fc["events"]], [("2026-10-05", "card")])
@@ -142,6 +145,59 @@ class ForecastTests(LedgerCase):
         self.assertEqual(oct5["balance_after"], fc["total"][fc["dates"].index("2026-10-05")])
         # the last day: what's been spent, and the card's payment
         self.assertAlmostEqual(fc["total"][-1], 5000 - 600 - 110 - 310 - 310 / 30 * 2, delta=0.02)
+
+    def test_budgeted_spending_from_checking_goes_out_on_banking_days(self):
+        # $310/month on Groceries from checking: $10 a day in October. A weekend's or a bank holiday's goes out on the
+        # next business day, and the chart's readout gets each day's amount.
+        from runway import bankdays
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
+        fc = forecast.build(self.conn, TODAY, 60)   # through Sunday Nov 22
+        spend = fc["spend"]
+        # Sat Oct 17 and Sun Oct 18 come out on Monday the 19th
+        self.assertNotIn("2026-10-17", spend)
+        self.assertNotIn("2026-10-18", spend)
+        self.assertEqual((spend["2026-10-16"], spend["2026-10-19"]), (10.0, 30.0))
+        self.assertEqual(self.drop(fc, "2026-10-17"), 0)
+        self.assertAlmostEqual(self.drop(fc, "2026-10-19"), 30.0, places=2)
+        # Columbus Day (Monday Oct 12) is a bank holiday: Saturday through Monday go out on Tuesday the 13th
+        self.assertFalse(bankdays.is_business_day(date(2026, 10, 12)))
+        self.assertFalse({"2026-10-10", "2026-10-11", "2026-10-12"} & spend.keys())
+        self.assertEqual(spend["2026-10-13"], 40.0)
+        # October's month is the same, less Saturday Oct 31's, which goes out on Monday Nov 2 with Nov 1's
+        self.assertAlmostEqual(sum(v for d, v in spend.items() if d.startswith("2026-10")), 300.0, places=2)
+        self.assertEqual(spend["2026-11-02"], round(10 + 2 * 310 / 30, 2))
+        # a weekend at the end of the chart would go out past it, so it isn't on it
+        self.assertEqual(max(spend), "2026-11-20")
+        self.assertAlmostEqual(sum(spend.values()), 110 + 310 + 310 / 30 * 20, places=1)
+        self.assertEqual(fc["total"][-1], fc["total"][fc["dates"].index("2026-11-20")])
+        # one forecast account: its own spending is the whole of it
+        self.assertEqual(fc["accounts"][0]["spend"], spend)
+
+    def test_the_readout_has_each_accounts_budgeted_spending(self):
+        self.conn.execute(update(Account).where(Account.id == "chk").values(in_forecast=1))
+        self.acct("chk2", "checking", 1000.0, in_forecast=1)
+        for name, amount, acct in (("Groceries", 310, "chk"), ("Travel", 62, "chk2")):
+            self.conn.execute(insert(Budget).values(category=name, amount=amount))
+            self.conn.execute(update(Category).where(Category.name == name).values(pay_with=acct))
+        fc = forecast.build(self.conn, TODAY, 40)
+        each = {a["id"]: a["spend"] for a in fc["accounts"]}
+        self.assertEqual((each["chk"]["2026-10-19"], each["chk2"]["2026-10-19"], fc["spend"]["2026-10-19"]), (30.0, 6.0, 36.0))
+        self.assertEqual(set(fc["spend"]), set(each["chk"]) | set(each["chk2"]))
+        self.assertTrue(set(fc["spend"]) <= set(fc["dates"]))
+        self.assertTrue(all(v > 0 for v in fc["spend"].values()))
+        self.assertNotIn(fc["today"], fc["spend"])   # budgets are spent from tomorrow
+
+    def test_a_budget_paid_with_a_card_is_charged_any_day(self):
+        # $310/month on Groceries with the card: nothing comes out of checking day by day, and the card's charges stay
+        # on the days they're made, weekends and holidays too (Sat Oct 10 is on the statement that closes that day).
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual((fc["spend"], fc["accounts"][0]["spend"]), ({}, {}))
+        card = {e["date"]: -e["amount"] for e in fc["events"] if e["kind"] == "card"}
+        self.assertAlmostEqual(card["2026-11-05"], 300 + 110 + 10 * 10, places=2)          # Sep 24-30 and Oct 1-10
+        self.assertAlmostEqual(card["2026-12-07"], 21 * 10 + 10 * 310 / 30, places=2)      # Oct 11-31 and Nov 1-10
 
     def test_balance_after_takes_in_the_days_budgeted_spending(self):
         # $310/month on Groceries from checking ($10 a day in October) and a $50 gym on Oct 15, the day's only event:
@@ -176,11 +232,11 @@ class ForecastTests(LedgerCase):
         box = [e for e in fc["events"] if e.get("recurring_id") == 7]
         self.assertEqual([(e["date"], e["category"]) for e in box], [("2026-10-01", "Groceries"), ("2026-11-02", "Groceries")])
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)   # October: 500 - 100
-        self.assertAlmostEqual(self.drop(fc, "2026-11-15"), 400 / 30, delta=0.01)   # November: its box is Nov 2 (the 1st is a Sunday)
+        self.assertAlmostEqual(self.drop(fc, "2026-11-17"), 400 / 30, delta=0.01)   # November: its box is Nov 2 (the 1st is a Sunday)
         # September: $300 spent (the $100 box and $200 at the grocer), $200 left over Sep 24-30
         self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 200 / 7, delta=0.01)
-        # the box's own day: the box, and the day's share of the rest
-        self.assertAlmostEqual(self.drop(fc, "2026-11-02"), 100 + 400 / 30, delta=0.01)
+        # the box's own day (a Monday): the box, and the share of the rest of it and the weekend before it
+        self.assertAlmostEqual(self.drop(fc, "2026-11-02"), 100 + 400 / 31 + 2 * 400 / 30, delta=0.01)
 
     def test_a_budget_its_recurring_payments_cover_adds_nothing(self):
         self.grocery_box()

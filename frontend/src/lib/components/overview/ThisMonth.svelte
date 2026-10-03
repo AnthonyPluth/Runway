@@ -100,7 +100,7 @@
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
             <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>
           </span>
-          <span class={cn("text-[15px] tabular-nums", t.amount > 0 && "text-good")}>{fmtSigned(t.amount)}</span>
+          <span class={cn("shrink-0 text-[15px] whitespace-nowrap tabular-nums", t.amount > 0 && "text-good")}>{fmtSigned(t.amount)}</span>
         </div>
       {/each}
     </Group>

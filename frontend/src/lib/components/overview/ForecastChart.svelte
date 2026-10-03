@@ -122,6 +122,10 @@
   });
 </script>
 
+{#snippet row(label: string, amount: number)}
+  <div class="flex items-baseline justify-between gap-4"><span class="min-w-0">{label}</span><span class="shrink-0 whitespace-nowrap tabular-nums">{fmtSigned(amount)}</span></div>
+{/snippet}
+
 <div class="relative" bind:clientWidth={width}>
   {#if !n}
     <p class="py-6 text-center text-sm text-muted-foreground">No cash accounts in the forecast yet.</p>
@@ -170,13 +174,17 @@
         use:sideways={move} />
     </svg>
     {#if hover != null}
-      <div bind:this={tipEl} class="pointer-events-none absolute z-10 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
+      {@const spent = fc.spend?.[fc.dates[hover]] ?? 0}
+      <!-- A row's name wraps when it's long; its amount always stays whole on one line. -->
+      <div bind:this={tipEl} class="pointer-events-none absolute z-10 max-w-80 min-w-44 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
         style:left={`${tipPos.left}px`} style:top={`${tipPos.top}px`}>
         <div class="text-muted-foreground">{fmtDow(fc.dates[hover])}</div>
         <div class="text-base font-semibold tabular-nums">{fmt(series[hover])}</div>
         {#each eventsByDate[fc.dates[hover]] ?? [] as ev, j (j)}
-          <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular-nums">{fmtSigned(ev.amount)}</span></div>
+          {@render row(`${ev.name}${ev.estimated ? " (est.)" : ""}`, ev.amount)}
         {/each}
+        <!-- What the budgets take out that day: in the balance, but not an event of its own. -->
+        {#if spent > 0}{@render row("Budgeted spending (est.)", -spent)}{/if}
       </div>
     {/if}
   {/if}
