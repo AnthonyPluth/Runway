@@ -169,6 +169,18 @@ class RecurringAmountTests(LedgerCase):
         history[1]["amount"] = 30.0   # both under it, but too far apart to say what it is now
         self.assertIsNone(recurring.stale_amount(item, history, date(2026, 10, 1)))
 
+    def test_a_drift_counts_past_5_percent_or_2_dollars_whichever_is_more(self):
+        def stale(amount, paid):
+            item = {"amount": -amount, "amount_mode": "fixed", "frequency": "monthly", "anchor_date": "2026-07-01"}
+            history = [{"posted": d, "amount": -p, "pending": 0} for d, p in zip(("2026-09-01", "2026-08-01"), paid, strict=True)]
+            return recurring.stale_amount(item, history, date(2026, 10, 1))
+        self.assertEqual(stale(80, (87.40, 87.40)), -87.4)       # $7.40 off an $80 bill, to the cent
+        self.assertIsNone(stale(80, (81.90, 81.90)))              # under $2 off: the same bill
+        self.assertEqual(stale(30, (32.10, 32.10)), -32.1)        # $2.10 off: more than $2 (5% would be $1.50)
+        self.assertIsNone(stale(1000, (1040, 1045)))              # $45 off $1,000 is under 5%
+        self.assertEqual(stale(1000, (1060, 1055)), -1057.5)      # over 5%, both the same way
+        self.assertIsNone(stale(1000, (1060, 940)))               # one each way
+
 
 class RecurringEditTests(LedgerCase):
     """The merchant texts and amount range, as the editor sends them."""
@@ -429,6 +441,105 @@ class SplitPaymentTests(LedgerCase):
         recurring.link(self.conn, "chk|3", prime)
         self.assertEqual(recurring.paid_by_occurrence(dict(self.conn.execute(select(Recurring).where(Recurring.id == prime)).fetchone()),
                                                       recurring.matched(self.conn, prime)), {date(2026, 10, 14): -15.0})
+
+
+class ScheduleTests(LedgerCase):
+    """Rent of $1,500 on the 1st, paid Jul 1, Aug 3 (Aug 1 was a Saturday) and Sep 1; today is Wednesday Sep 23."""
+
+    def setUp(self):
+        super().setUp()
+        from runway.server.api import recurring as api
+        self.api = api
+        self.acct("chk", "checking", 5000.0)
+        self.acct("sav", "savings", 500.0)
+        for d in ("2026-07-01", "2026-08-03", "2026-09-01"):
+            self.tx("chk", d, -1500.0, "CITY RENT")
+        self.body = {"name": "Rent", "account_id": "chk", "amount": -1500, "frequency": "monthly",
+                     "anchor_date": "2026-07-01", "match": "city rent"}
+        self.rid = self.api.api_recurring_add(self.conn, None, self.body)["id"]
+
+    def events(self, today=TODAY, days=120):
+        return [(e["date"], e["amount"]) for e in forecast.build(self.conn, today, days)["events"] if e.get("recurring_id") == self.rid]
+
+    def listed(self, today=TODAY):
+        with mock.patch.object(self.api, "date", wraps=date) as d:
+            d.today.return_value = today
+            return next(i for i in self.api.api_recurring(self.conn, None, None) if i["id"] == self.rid)
+
+    def skip(self, day):
+        from runway.server.api.state import api_override_set
+        api_override_set(self.conn, None, {"key": f"rec:{self.rid}:{day}", "amount": 0})
+
+    def test_the_forecast_stops_at_its_end_date(self):
+        self.assertEqual(self.events(), [("2026-10-01", -1500), ("2026-11-02", -1500), ("2026-12-01", -1500), ("2027-01-04", -1500)])   # New Year’s Day, then a weekend
+        # Ending on Nov 1 keeps Nov 1's (paid the Monday after, Nov 2), and nothing after it.
+        self.api.api_recurring_update(self.conn, None, {**self.body, "end_date": "2026-11-01"}, str(self.rid))
+        self.assertEqual(self.events(), [("2026-10-01", -1500), ("2026-11-02", -1500)])
+        self.assertEqual(self.listed(date(2026, 11, 3))["next_date"], None)
+        # A day earlier, Oct 1's is the last one.
+        self.api.api_recurring_update(self.conn, None, {**self.body, "end_date": "2026-10-31"}, str(self.rid))
+        self.assertEqual(self.events(), [("2026-10-01", -1500)])
+        # Clearing it carries on as before.
+        self.api.api_recurring_update(self.conn, None, {**self.body, "end_date": ""}, str(self.rid))
+        self.assertEqual(len(self.events()), 4)
+
+    def test_an_end_date_is_checked(self):
+        for end, msg in (("2026-06-30", "It ends before it starts"), ("next week", "Pick an end date (YYYY-MM-DD)")):
+            with self.subTest(end=end), self.assertRaises(ApiError) as e:
+                self.api.api_recurring_update(self.conn, None, {**self.body, "end_date": end}, str(self.rid))
+            self.assertEqual(str(e.exception), msg)
+        self.assertIsNone(self.conn.execute(select(Recurring.end_date)).scalar())
+
+    def test_a_paused_item_is_out_of_the_forecast_and_never_missed(self):
+        self.api.api_recurring_update(self.conn, None, {**self.body, "active": 0}, str(self.rid))
+        self.assertEqual(self.events(), [])
+        self.assertEqual(recurring.missed(self.conn, date(2026, 10, 20)), [])
+        self.api.api_recurring_update(self.conn, None, {**self.body, "active": 1}, str(self.rid))
+        self.assertEqual(len(self.events()), 4)
+
+    def test_skipping_the_next_one_is_a_zero_edit_the_forecast_and_the_list_follow(self):
+        self.assertEqual((self.listed()["next_date"], self.listed()["skipped"]), ("2026-10-01", []))
+        self.skip("2026-10-01")
+        fc = forecast.build(self.conn, TODAY, 120)
+        oct1 = next(e for e in fc["events"] if e.get("recurring_id") == self.rid)
+        self.assertEqual((oct1["date"], oct1["amount"], oct1["overridden"], oct1["original_amount"]), ("2026-10-01", 0, True, -1500))
+        self.assertAlmostEqual(fc["total"][-1], 5000 - 1500 * 3, places=2)   # three payments, not four
+        item = self.listed()
+        self.assertEqual((item["next_date"], item["skipped"]), ("2026-11-02", ["2026-10-01"]))
+        # It never shows up as missed once its window has passed...
+        self.assertEqual(recurring.missed(self.conn, date(2026, 10, 20)), [])
+        # ...and taking the skip back (the edit's reset) expects it again.
+        from runway.server.api.state import api_override_delete
+        api_override_delete(self.conn, None, {"key": f"rec:{self.rid}:2026-10-01"})
+        self.assertEqual(self.listed()["next_date"], "2026-10-01")
+        self.assertEqual([m["date"] for m in recurring.missed(self.conn, date(2026, 10, 20))], ["2026-10-01"])
+
+    def test_one_thats_late_says_since_when_and_skipping_it_clears_that(self):
+        item = self.listed(date(2026, 10, 3))   # Oct 1's hasn't come; its window is open until Oct 7
+        self.assertEqual((item["late_date"], item["next_date"]), ("2026-10-01", "2026-11-02"))
+        self.assertEqual(self.listed()["late_date"], None)
+        self.skip("2026-10-01")
+        self.assertEqual(self.listed(date(2026, 10, 3))["late_date"], None)
+        # One due today is next, not late.
+        self.assertEqual(self.listed(date(2026, 11, 2))["next_date"], "2026-11-02")
+
+    def test_payments_to_link_to_a_missed_one(self):
+        self.tx("chk", "2026-10-05", -1500.0, "CITY RNT PMT ONLINE")      # the rent, under another text
+        self.tx("chk", "2026-10-02", -1480.0, "SOFA STORE")               # about the same amount
+        self.tx("chk", "2026-10-01", -3000.0, "BIG TV")                   # twice as much
+        self.tx("chk", "2026-10-01", 1500.0, "REFUND")                    # money in
+        self.tx("chk", "2026-10-20", -1500.0, "CITY RNT PMT ONLINE")      # too long after (12 days for monthly)
+        self.tx("sav", "2026-10-01", -1500.0, "CITY RNT PMT ONLINE")      # another account
+        self.tx("chk", "2026-09-28", -1500.0, "NOT RENT")
+        recurring.link(self.conn, self.conn.execute(select(Transaction.id).where(Transaction.description == "NOT RENT")).scalar(), None)
+        found = self.api.api_recurring_candidates(self.conn, {"date": ["2026-10-01"]}, None, str(self.rid))
+        self.assertEqual([(t["posted"], t["amount"]) for t in found], [("2026-10-05", -1500.0), ("2026-10-02", -1480.0)])
+        self.assertTrue(found[0]["name"])
+        for q in ({}, {"date": ["soon"]}):
+            with self.subTest(q=q), self.assertRaises(ApiError):
+                self.api.api_recurring_candidates(self.conn, q, None, str(self.rid))
+        with self.assertRaises(ApiError):
+            self.api.api_recurring_candidates(self.conn, {"date": ["2026-10-01"]}, None, "999")
 
 
 class OneTimeTests(LedgerCase):

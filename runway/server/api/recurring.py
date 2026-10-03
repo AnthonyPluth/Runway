@@ -52,9 +52,31 @@ def recurring_logos(conn, items: list[dict]) -> dict[int, str | None]:
     return out
 
 
+def _due(conn, it: dict, hist: list[dict], today: date, skipped: set[str]) -> dict:
+    """When the item is next due, as the forecast has it: next_date, the first date from today on that's still expected;
+    late_date, an earlier one still expected while its matching window is open (it's late; the forecast has it today);
+    skipped, the dates from today on you've skipped. Late ones count from when the account's history allows, as in the
+    forecast (forecast.build)."""
+    window = recurring.MATCH_WINDOW_DAYS.get(it["frequency"], 6)
+    first_tx = conn.execute(select(func.min(Transaction.posted)).where(Transaction.account_id == it["account_id"])).scalar()
+    since = max(today - timedelta(days=window + 1), date.fromisoformat(first_tx[:10]) + timedelta(days=window) if first_tx else today)
+    paid = recurring.paid_by_occurrence(it, hist)
+    due, skips = [], []
+    for d in forecast.occurrences(it, min(since, today - timedelta(days=1)), today + timedelta(days=400)):
+        if f"rec:{it['id']}:{d.isoformat()}" in skipped:
+            skips.append(d)
+        elif recurring.still_due(it, d, paid, today, it["expected_amount"]) is not None:
+            due.append(d)
+    late = [d for d in due if d < today]
+    nxt = [d for d in due if d >= today]
+    return {"next_date": nxt[0].isoformat() if nxt else None, "late_date": late[0].isoformat() if late else None,
+            "skipped": [d.isoformat() for d in skips if d >= today]}
+
+
 def api_recurring(conn, _q, _b):
     items = db.rows(conn.execute(recurring.with_account_name().order_by(Recurring.active.desc(), Recurring.name)))
     today = date.today()
+    skipped = recurring.skipped_keys(conn)
     for it in items:
         hist = recurring.matched(conn, it["id"], 12)
         it["matched_count"] = conn.execute(
@@ -62,10 +84,7 @@ def api_recurring(conn, _q, _b):
         it["last_matched"] = hist[0] if hist else None
         it["expected_amount"] = recurring.expected_amount(it, hist)
         it["suggested_amount"] = recurring.stale_amount(it, hist, today)   # its last payments all came to something else
-        paid = recurring.paid_by_occurrence(it, hist)
-        nxt = [d for d in forecast.occurrences(it, today, today + timedelta(days=400))
-               if recurring.still_due(it, d, paid, today, it["expected_amount"]) is not None]
-        it["next_date"] = nxt[0].isoformat() if nxt else None
+        it.update(_due(conn, it, hist, today, skipped))
     logos = recurring_logos(conn, items)
     missed = recurring.missed(conn, today)
     for it in items:
@@ -85,9 +104,12 @@ def _recurring_values(conn, body):
         raise ApiError("Amount and a date (YYYY-MM-DD) are required") from None
     if not name or freq not in FREQS or not conn.execute(select(Account.id).where(Account.id == acct)).fetchone():
         raise ApiError("Name, account and frequency are required")
-    end = body.get("end_date") or None
-    if end:
-        end = date.fromisoformat(end).isoformat()
+    try:
+        end = date.fromisoformat(body["end_date"]).isoformat() if body.get("end_date") else None
+    except (TypeError, ValueError):
+        raise ApiError("Pick an end date (YYYY-MM-DD)") from None
+    if end and end < anchor:
+        raise ApiError("It ends before it starts")
     match = recurring.clean_texts(body.get("match"))
     try:
         lo, hi = (None if body.get(k) in (None, "") else round(abs(db.number(body[k])), 2) for k in ("amount_min", "amount_max"))
@@ -160,6 +182,20 @@ def api_recurring_update(conn, _q, body, rid):
         conn.execute(update(t).where(t.recurring_id == rid, or_(*gone)).values(recurring_id=None, recurring_linked_by=None))
     linked = recurring.auto_match(conn, [rid])
     return {"ok": True, "linked": linked, "amount_min": new["amount_min"], "amount_max": new["amount_max"]}   # it may have moved
+
+
+def api_recurring_candidates(conn, q, _b, rid):
+    """Transactions that could be the payment an item missed on ?date=, to link by hand (recurring.candidates)."""
+    item = conn.execute(select(Recurring).where(Recurring.id == int(rid))).fetchone()
+    if not item:
+        raise ApiError("Recurring item not found", 404)
+    try:
+        day = date.fromisoformat((q.get("date") or [""])[0])
+    except ValueError:
+        raise ApiError("Which date?") from None
+    item = dict(item)
+    amount = recurring.expected_amount(item, recurring.matched(conn, item["id"], 12))
+    return [{**t, "name": t["payee"] or t["description"]} for t in recurring.candidates(conn, item, day, amount)]
 
 
 def api_recurring_add_text(conn, _q, body, rid):

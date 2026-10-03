@@ -8,15 +8,17 @@ from datetime import date, timedelta
 from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
 from . import bankdays, brands, db
-from .models import Account, Recurring, RecurringDismissed, Transaction
+from .models import Account, Override, Recurring, RecurringDismissed, Transaction
 
 # How far a real payment can land from its expected date and still count as that occurrence.
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
                      "semiannual": 12, "yearly": 12, "dates": 12, "once": 5}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
 CENT = 0.005
-# The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than this share away from it
-# (the same way, and within this share of each other).
+# The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than DRIFT_SHARE of it, or
+# DRIFT_DOLLARS, whichever is more, away from it (the same way), and within STALE_TOLERANCE of each other.
+DRIFT_SHARE = 0.05
+DRIFT_DOLLARS = 2.0
 STALE_TOLERANCE = 0.3
 RECENT_PAYMENTS = 3
 # Paid within this share of an occurrence's amount, it's done (a paycheck a few dollars off); further short, the rest is
@@ -263,7 +265,8 @@ def stale_amount(item: dict, history: list[dict], today: date | None = None) -> 
     """For a fixed-amount item whose latest payments all came to something else (a raise, a new rate), what they came to
     on average: the amount to suggest instead. It looks at the last RECENT_PAYMENTS occurrences paid since the amount was
     last set (each one's total, when it came in parts; not one whose window is still open, which may have more to come):
-    at least two, all more than STALE_TOLERANCE off the amount the same way, and close to each other. None otherwise."""
+    at least two, all off the amount the same way by more than DRIFT_SHARE of it or DRIFT_DOLLARS (whichever is more), and
+    close to each other. None otherwise."""
     amount = abs(item["amount"] or 0)
     if (item.get("amount_mode") or "fixed") != "fixed" or amount < CENT:
         return None
@@ -273,13 +276,42 @@ def stale_amount(item: dict, history: list[dict], today: date | None = None) -> 
     payments = _same_way(item, [t for t in history if not t["pending"] and t["posted"] >= since])
     totals = [abs(sum(p["amount"] for p in ps)) for occ, ps in by_occurrence(item, payments)
               if occ is None or occ + window < today][:RECENT_PAYMENTS]
-    lo, hi = amount * (1 - STALE_TOLERANCE), amount * (1 + STALE_TOLERANCE)
+    off = max(amount * DRIFT_SHARE, DRIFT_DOLLARS)
+    lo, hi = amount - off, amount + off
     if len(totals) < 2 or not (all(t < lo for t in totals) or all(t > hi for t in totals)):
         return None
     level = statistics.mean(totals)
     if any(abs(t - level) > STALE_TOLERANCE * level for t in totals):
         return None   # all over the place: no one amount to offer
     return math.copysign(round(level, 2), item["amount"])
+
+
+def skipped_keys(conn) -> set[str]:
+    """The occurrences you've skipped ("Skip the next one", "Skip this one"): a one-off edit to $0 of a recurring
+    item's date (rec:<id>:<date>), which the forecast already reads as nothing coming that day."""
+    return {k for k, a in conn.execute(select(Override.key, Override.amount).where(Override.key.like("rec:%")))
+            if abs(a or 0) < CENT}
+
+
+CANDIDATES = 6
+
+
+def candidates(conn, item: dict, day: date, amount: float) -> list[dict]:
+    """Transactions that could be the payment the item missed on `day`, to link by hand: not linked to anything (nor
+    marked not recurring), on its account, moving money its way, posted within twice its matching window of the day,
+    and within half of `amount` either way (any amount, for an item that learns its amount and has none yet). Closest
+    in amount, then in date, first."""
+    t = Transaction
+    window = 2 * MATCH_WINDOW_DAYS.get(item["frequency"], 6)
+    want = abs(amount)
+    q = (select(t.id, t.posted, t.amount, t.payee, t.description, t.pending)
+         .where(t.recurring_id.is_(None), t.account_id == item["account_id"],
+                t.posted >= (day - timedelta(days=window)).isoformat(), t.posted <= (day + timedelta(days=window)).isoformat()))
+    if want >= CENT:
+        q = q.where(t.amount > 0 if amount > 0 else t.amount < 0, func.abs(t.amount) >= want / 2, func.abs(t.amount) <= want * 1.5)
+    rows = db.rows(conn.execute(q))
+    rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((date.fromisoformat(r["posted"][:10]) - day).days), r["id"]))
+    return rows[:CANDIDATES]
 
 
 LOOKBACK_DAYS = 60
@@ -291,11 +323,11 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     An occurrence counts as missed once its matching window has passed (e.g. 6 days for a monthly bill) without a
     linked transaction within that window either side of the date (one that came in short, or in parts, isn't missed:
     something arrived). Occurrences before the item's start date, before
-    the account's synced history begins, or that you've dismissed are skipped."""
+    the account's synced history begins, or that you've dismissed or skipped are left out."""
     from . import forecast   # forecast imports this module
 
     today = today or date.today()
-    dismissed = set(conn.execute(select(RecurringDismissed.key)).scalars())
+    dismissed = set(conn.execute(select(RecurringDismissed.key)).scalars()) | skipped_keys(conn)
     out = []
     t = Transaction
     for item in db.rows(conn.execute(with_account_name().where(Recurring.active == 1))):
