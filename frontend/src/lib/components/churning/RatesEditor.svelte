@@ -6,7 +6,7 @@
   import { tick } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
-  import { isTravel, type RateRow } from "./churning";
+  import { isTravel, rowKey, type RateRow } from "./churning";
   import type { Churning } from "./types";
 
   // What a card earns: a base rate for everything else, and a row for each category with its multiplier, marked when it
@@ -43,7 +43,7 @@
         <span class="text-muted-foreground">x</span>
       </label>
     </li>
-    {#each rows as r, i (i)}
+    {#each rows as r, i (rowKey(r))}
       <li class="flex flex-wrap items-center gap-2">
         <NativeSelect class="w-40" bind:value={r.category} aria-label={`Category of rate ${i + 1}`} {@attach save ? auto : undefined}>
           <option value="">Category…</option>

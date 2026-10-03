@@ -3,12 +3,12 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { planDone, planUndo } from "./actions";
@@ -16,11 +16,15 @@
   import CardBenefits from "./CardBenefits.svelte";
   import { PLAN_ACTS, PLAN_LABEL, benefitsSummary, bonusSummary, fullDate, ratesPayload, ratesSummary, type RateRow } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
+  import FieldNote from "./FieldNote.svelte";
+  import { fieldProps, focusFirstInvalid } from "./form";
+  import FormFooter from "./FormFooter.svelte";
   import RatesEditor from "./RatesEditor.svelte";
   import Section from "./Section.svelte";
   import type { CardSuggestion, ChurnCard, Churning, DraftBenefit, FoundDraft } from "./types";
+  import { validateCard } from "./validate";
 
-  // Adding a card, or editing one (each field saves as you change it, as elsewhere in Runway; Done redraws the page).
+  // Adding a card, or editing one (each field saves as you change it, as elsewhere in Runway; Close redraws the page).
   // The essentials (whose card, bank, name, opened, annual fee) are always showing; the rest sits in sections that start
   // closed, each saying what's in it, and open for the AI's suggestions or a refused save. The annual fee posts in the
   // month the card was opened, so there's no month to pick.
@@ -53,28 +57,40 @@
   // svelte-ignore state_referenced_locally
   let openedGuess = $state(!c && !!draft);
   let changed = false;
+  const uid = $props.id();
+  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
+  let attempted = $state(false);
+  const errors = $derived(attempted ? validateCard(v) : {});
+  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
   // Editing: each field saves on its own. Adding: everything at once, with the Add button.
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!c) return;
-    await api(`/api/churning/cards/${c.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } });
+    try { await api(`/api/churning/cards/${c.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
+    catch (err) { attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (c ? fromAction(autosave, () => save(key)) : null);
   // The base rate travels inside `rates` (as the "*" category), so it isn't sent twice.
   const ratesBody = () => ({ rates: ratesPayload(v.base_rate, rateRows), portal_name: portalName });
-  let addError = $state("");
+  let addError = $state(""), busy = $state(false);
   async function add() {
+    if (busy) return;
+    attempted = true; addError = ""; flagged = null;
+    await tick();
+    if (Object.keys(validateCard(v)).length) { focusFirstInvalid(box); return; }
     const { base_rate: _base, ...rest } = v;
+    busy = true;
     try {
       // The benefits go with the card, in one request: if one is refused, no card is added.
       await api("/api/churning/cards", { method: "POST", body: { ...rest, ...ratesBody(), benefits: benefitsBody() } });
       toast(`Added ${v.product}`);
       onclose(true);
     }
-    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; toast.error(addError); }
+    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
+    finally { busy = false; }
   }
   const benefitBody = ({ ai: _ai, ...b }: DraftBenefit) => ({ ...b, amount: b.amount === null || String(b.amount) === "" ? null : b.amount });
   const benefitsBody = () => aiBenefits.filter((b) => b.name.trim()).map(benefitBody);
@@ -92,9 +108,11 @@
     ["more", /family|notes|eligible|changed from/i],
   ];
   const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
-  async function remove() {
-    try { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Removed ${c!.product}`); onclose(true); }
-    catch (err) { toast.error((err as Error).message); }
+  // Deleting a card takes its to-dos, earning rates and benefits with it, and none of that comes back, so it asks first.
+  let asking = $state(false);
+  async function remove(): Promise<boolean> {
+    try { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Deleted ${c!.product}`); onclose(true); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
 
   // Earning rates: kept in the form and sent with the card when adding; when editing, each change saves the whole list.
@@ -190,11 +208,13 @@
   }
 
   const currencyName = $derived(d.currencies.find((x) => x.key === v.currency)?.name ?? "");
-  const planSummary = $derived(PLAN_LABEL[v.plan as keyof typeof PLAN_LABEL] + (PLAN_ACTS.includes(v.plan) && v.plan_date ? ` by ${fullDate(v.plan_date)}` : ""));
-  const moreSummary = $derived([v.family.trim() && `Family: ${v.family.trim()}`, v.changed_from && "Product change", v.eligible_on && `Bonus again from ${fullDate(v.eligible_on)}`, v.notes.trim() && "Notes"].filter(Boolean).join(" · ") || "Nothing added");
+  const planSummary = $derived(PLAN_LABEL[v.plan as keyof typeof PLAN_LABEL] + (PLAN_ACTS.includes(v.plan) && v.plan_date ? ` by ${fullDate(v.plan_date, d.today)}` : ""));
+  const moreSummary = $derived([v.family.trim() && `Family: ${v.family.trim()}`, v.changed_from && "Product change", v.eligible_on && `Bonus again from ${fullDate(v.eligible_on, d.today)}`, v.notes.trim() && "Notes"].filter(Boolean).join(" · ") || "Nothing added");
   const sameOwner = $derived(d.cards.filter((x) => x.owner === v.owner && x.id !== c?.id));
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
 </script>
+
+{#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{c ? `Edit ${c.product}` : draft ? `Add ${draft.account_name}` : "Add a card"}</h3>
@@ -202,21 +222,28 @@
 
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <label class={lbl}>Whose card
-      <OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} />
+      <OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} {...fp("owner", true)} />
     </label>
     <label class={lbl}>Bank
-      <NativeSelect bind:value={v.issuer} {@attach edit("issuer")}>
+      <NativeSelect bind:value={v.issuer} {@attach edit("issuer")} {...fp("issuer", true)}>
         {#each d.issuers as i (i.key)}<option value={i.key}>{i.name}</option>{/each}
       </NativeSelect>
     </label>
-    <label class={`${lbl} min-w-48 flex-1`}>Card<Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" /></label>
+    <div class="flex min-w-48 flex-1 flex-col gap-1">
+      <label class={lbl}><span>Card{@render star()}</span><Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" {...fp("product", true)} /></label>
+      <FieldNote {uid} name="product" {errors} />
+    </div>
     {#if canSuggest}
       <Button variant="outline" size="sm" disabled={!v.product.trim() || suggesting} onclick={suggest}
         title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent.">{suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
+      <span class="self-center text-xs text-muted-foreground" data-testid="ai-consent">Sends only the bank and card name.</span>
     {/if}
   </div>
   <div class="mt-3 flex flex-wrap items-end gap-3">
-    <label class={lbl}>{openedGuess ? "Opened (on or before)" : "Opened"}<Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} oninput={() => (openedGuess = false)} /></label>
+    <div class="flex flex-col gap-1">
+      <label class={lbl}><span>{openedGuess ? "Opened (on or before)" : "Opened"}{@render star()}</span><Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} oninput={() => (openedGuess = false)} {...fp("opened_on", true)} /></label>
+      <FieldNote {uid} name="opened_on" {errors} />
+    </div>
     <label class={lbl}>Status
       <NativeSelect bind:value={v.status} {@attach edit("status")}>
         <option value="open">Open</option><option value="closed">Closed</option><option value="product_changed">Product changed</option>
@@ -225,13 +252,16 @@
     {#if v.status !== "open"}
       <label class={lbl}>{v.status === "closed" ? "Closed on" : "Changed on"}<Input type="date" class="w-40" bind:value={v.closed_on} {@attach edit("closed_on")} /></label>
     {/if}
-    <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="0" /></label>
+    <div class="flex flex-col gap-1">
+      <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="0" {...fp("annual_fee")} /></label>
+      <FieldNote {uid} name="annual_fee" {errors} />
+    </div>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.authorized_user} {@attach edit("authorized_user")} />Authorized user</label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card</label>
   </div>
 
   {#if openedGuess}
-    <p class="mt-1 text-xs text-[var(--warning)]" data-testid="opened-guess">{draft?.opened_on ? "This is a guess: the card’s first transaction in Runway, so it was opened on or before this day. Change it to the day you opened it; 5/24 and the bonus rules depend on it." : "Runway can’t tell when this card was opened: enter the day. 5/24 and the bonus rules depend on it."}</p>
+    <p class="mt-1 text-xs text-warning" data-testid="opened-guess">{draft?.opened_on ? "This is a guess: the card’s first transaction in Runway, so it was opened on or before this day. Change it to the day you opened it; 5/24 and the bonus rules depend on it." : "Runway can’t tell when this card was opened: enter the day. 5/24 and the bonus rules depend on it."}</p>
   {/if}
   {#if aiMarked}
     <div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm" role="status" data-testid="ai-marked">
@@ -246,7 +276,7 @@
     </div>
   {/if}
 
-  <Section id="rates" title="Earning rates" bind:open={open.rates} flagged={flagged === "rates"} summary={ratesSummary(rateRows, currencyName, v.currency, v.earn_note, v.base_rate)}>
+  <Section id="rates" title="Earning rates" bind:open={open.rates} flagged={flagged === "rates"} error={addError} summary={ratesSummary(rateRows, currencyName, v.currency, v.earn_note, v.base_rate)}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>Earns
         <CurrencySelect {d} bind:value={v.currency} {@attach edit("currency")} />
@@ -256,10 +286,10 @@
     <RatesEditor {d} bind:base={v.base_rate} bind:rows={rateRows} bind:portalName save={c ? saveRates : undefined} />
   </Section>
 
-  <Section id="bonus" title="Sign-up bonus" bind:open={open.bonus} flagged={flagged === "bonus"} summary={bonusSummary(v.bonus, v.bonus_spend, v.bonus_months, v.currency, currencyName)}>
+  <Section id="bonus" title="Sign-up bonus" bind:open={open.bonus} flagged={flagged === "bonus"} error={addError} summary={bonusSummary(v.bonus, v.bonus_spend, v.bonus_months, v.currency, currencyName)}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>Bonus ({v.currency === "cash" ? "dollars" : "points"})<Input type="number" min="0" step="1000" class="w-32" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} /></label>
-      <label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" /></label>
+      <div class="flex flex-col gap-1"><label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" {...fp("bonus_spend")} /></label><FieldNote {uid} name="bonus_spend" {errors} /></div>
       <label class={lbl}>Within (months)<Input type="number" min="1" max="24" class="w-24" bind:value={v.bonus_months} {@attach edit("bonus_months")} /></label>
       <label class={lbl}><span>Deadline <span class="text-muted-foreground">(if different)</span></span><Input type="date" class="w-40" bind:value={v.bonus_deadline} {@attach edit("bonus_deadline")} /></label>
       <label class={lbl}>Bonus posted on<Input type="date" class="w-40" bind:value={v.bonus_earned_on} {@attach edit("bonus_earned_on")} /></label>
@@ -277,7 +307,7 @@
     </div>
   </Section>
 
-  <Section id="benefits" title="Benefits" bind:open={open.benefits} flagged={flagged === "benefits"} summary={benefitsSummary((c?.benefits.length ?? 0) + aiBenefits.length)}>
+  <Section id="benefits" title="Benefits" bind:open={open.benefits} flagged={flagged === "benefits"} error={addError} summary={benefitsSummary((c?.benefits.length ?? 0) + aiBenefits.length)}>
     {#if c}
       {#if aiBenefits.length}<BenefitDrafts {d} bind:rows={aiBenefits} picker={false} />{/if}
       <CardBenefits card={c} {d} {onchanged} />
@@ -286,7 +316,7 @@
     {/if}
   </Section>
 
-  <Section id="plan" title="Plan" bind:open={open.plan} flagged={flagged === "plan"} summary={planSummary}>
+  <Section id="plan" title="Plan" bind:open={open.plan} flagged={flagged === "plan"} error={addError} summary={planSummary}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>What I'll do with it
         <NativeSelect bind:value={v.plan} {@attach edit("plan")}>
@@ -303,16 +333,16 @@
       <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.hide_upcoming} {@attach edit("hide_upcoming")} />Don't show this card in Upcoming</label>
     </div>
     {#if PLAN_ACTS.includes(v.plan)}
-      <p class="mt-1 text-xs text-muted-foreground">Left blank: the day before the next annual fee{c?.plan_due && !v.plan_date ? ` (${fullDate(c.plan_due)})` : ""}.</p>
+      <p class="mt-1 text-xs text-muted-foreground">Left blank: the day before the next annual fee{c?.plan_due && !v.plan_date ? ` (${fullDate(c.plan_due, d.today)})` : ""}.</p>
     {/if}
     {#if c && c.plan_done_on}
-      <p class="mt-2 flex items-center gap-2 text-sm">Done {fullDate(c.plan_done_on)}<Button variant="link" size="sm" class="h-auto px-0" onclick={async () => { await planUndo(c.id, onchanged); changed = true; }}>Undo</Button></p>
+      <p class="mt-2 flex items-center gap-2 text-sm">Done {fullDate(c.plan_done_on, d.today)}<Button variant="link" size="sm" class="h-auto px-0" onclick={async () => { await planUndo(c.id, onchanged); changed = true; }}>Undo</Button></p>
     {:else if c?.plan_active}
       <Button variant="outline" size="sm" class="mt-2" onclick={async () => { await planDone(c.id, onchanged); changed = true; }}>Mark the plan done</Button>
     {/if}
   </Section>
 
-  <Section id="more" title="More details" bind:open={open.more} flagged={flagged === "more"} summary={moreSummary}>
+  <Section id="more" title="More details" bind:open={open.more} flagged={flagged === "more"} error={addError} summary={moreSummary}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}><span>Family <span class="text-muted-foreground">(optional)</span></span>
         <Input class="w-40" bind:value={v.family} {@attach edit("family")} placeholder="e.g. Sapphire" title="Cards whose bonuses the bank counts as one" />
@@ -330,13 +360,17 @@
     </div>
   </Section>
 
-  <div class="mt-4 flex flex-wrap items-center gap-2">
+  <FormFooter error={addError} sticky={!c}>
     {#if c}
-      <Button size="sm" onclick={() => onclose(changed)}>Done</Button>
-      <ConfirmButton confirm={`Remove ${c.product} and its to-dos?`} onconfirm={remove}>Remove card</ConfirmButton>
+      <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
+      <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete card</Button>
     {:else}
-      <Button size="sm" onclick={add}>Add</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
-  </div>
-  {#if addError}<p class="mt-2 text-sm text-red-500" role="alert">{addError}</p>{/if}
+  </FormFooter>
 </div>
+
+{#if c}
+  <ConfirmDialog bind:open={asking} title={`Delete ${c.product}?`} confirmLabel="Delete card" busyLabel="Deleting…" destructive
+    description="This also deletes its to-dos, benefits and earning rates, for good." onconfirm={remove} />
+{/if}

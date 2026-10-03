@@ -2,19 +2,23 @@
   import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { BANK_STATUS_LABEL, BANK_TYPE_LABEL, bankFeesSummary, bankReceivedSummary, bankRequirementsSummary } from "./churning";
+  import FieldNote from "./FieldNote.svelte";
+  import { fieldProps, focusFirstInvalid } from "./form";
+  import FormFooter from "./FormFooter.svelte";
   import Section from "./Section.svelte";
   import type { BankBonus, Churning } from "./types";
+  import { validateBank } from "./validate";
 
-  // Adding a bank account bonus, or editing one (each field saves as you change it; Done redraws the page).
+  // Adding a bank account bonus, or editing one (each field saves as you change it; Close redraws the page).
   let { b, d, person, onclose }: { b: BankBonus | null; d: Churning; person: string; onclose: (changed: boolean) => void } = $props();
 
   const str = (x: unknown) => (x == null ? "" : String(x));
@@ -35,41 +39,76 @@
   };
   const v = $state(initial());
   let changed = false;
+  const uid = $props.id();
+  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
+  let attempted = $state(false);
+  const errors = $derived(attempted ? validateBank(v) : {});
+  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!b) return;
-    await api(`/api/churning/bank/${b.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } });
+    try { await api(`/api/churning/bank/${b.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
+    catch (err) { attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (b ? fromAction(autosave, () => save(key)) : null);
+
+  // Which section a refusal is about (the server's messages name the field), so that section opens.
+  type Key = "requirements" | "fees" | "received";
+  let flagged = $state<Key | null>(null);
+  let addError = $state(""), busy = $state(false);
+  const SECTION_OF: [Key, RegExp][] = [
+    ["fees", /fee|keep it open/i],
+    ["requirements", /direct deposit|debit|balance|requirements|days to meet|deadline|days for the bonus to post|checking or savings/i],
+    ["received", /post|closed|eligible|months between|received|lifetime/i],
+  ];
+  const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
   async function add() {
+    if (busy) return;
+    attempted = true; addError = ""; flagged = null;
+    await tick();
+    if (Object.keys(validateBank(v)).length) { focusFirstInvalid(box); return; }
+    busy = true;
     try { await api("/api/churning/bank", { method: "POST", body: v }); toast(`Added ${v.bank}`); onclose(true); }
-    catch (err) { toast.error((err as Error).message); }
+    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
+    finally { busy = false; }
   }
-  async function remove() {
-    try { await api(`/api/churning/bank/${b!.id}/remove`, { method: "POST" }); toast(`Removed ${b!.bank}`); onclose(true); }
-    catch (err) { toast.error((err as Error).message); }
+  // Deleting a bonus takes its record for good (nothing here can bring it back), so it asks first.
+  let asking = $state(false);
+  async function remove(): Promise<boolean> {
+    try { await api(`/api/churning/bank/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.bank}`); onclose(true); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
   const lbl = "flex flex-col gap-1 text-sm";
-  const open = $state({ requirements: false, fees: false, received: false });
+  const open = $state<Record<Key, boolean>>({ requirements: false, fees: false, received: false });
 </script>
+
+{#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{b ? `Edit ${b.bank}` : "Add a bank bonus"}</h3>
-  
 
   <div class="mt-3 flex flex-wrap items-end gap-3">
-    <label class={lbl}>Whose account<OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} /></label>
-    <label class={`${lbl} min-w-40 flex-1`}>Bank<Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" /></label>
+    <label class={lbl}>Whose account<OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} {...fp("owner", true)} /></label>
+    <div class="flex min-w-40 flex-1 flex-col gap-1">
+      <label class={lbl}><span>Bank{@render star()}</span><Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" {...fp("bank", true)} /></label>
+      <FieldNote {uid} name="bank" {errors} />
+    </div>
     <label class={lbl}>Account
       <NativeSelect bind:value={v.account_type} {@attach edit("account_type")}>
         {#each Object.entries(BANK_TYPE_LABEL) as [k, l] (k)}<option value={k}>{l}</option>{/each}
       </NativeSelect>
     </label>
-    <label class={lbl}>Opened<Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} /></label>
-    <label class={lbl}>Bonus<Input type="number" min="0" step="25" class="w-28" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} placeholder="$" /></label>
+    <div class="flex flex-col gap-1">
+      <label class={lbl}><span>Opened{@render star()}</span><Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} {...fp("opened_on", true)} /></label>
+      <FieldNote {uid} name="opened_on" {errors} />
+    </div>
+    <div class="flex flex-col gap-1">
+      <label class={lbl}><span>Bonus{@render star()}</span><Input type="number" min="0" step="25" class="w-28" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} placeholder="$" {...fp("bonus", true)} /></label>
+      <FieldNote {uid} name="bonus" {errors} />
+    </div>
     <label class={lbl}>Status
       <NativeSelect bind:value={v.status} {@attach edit("status")}>
         {#each Object.entries(BANK_STATUS_LABEL) as [k, l] (k)}<option value={k}>{l}</option>{/each}
@@ -77,7 +116,7 @@
     </label>
   </div>
 
-  <Section id="requirements" title="Requirements" bind:open={open.requirements} summary={bankRequirementsSummary(v)}>
+  <Section id="requirements" title="Requirements" bind:open={open.requirements} flagged={flagged === "requirements"} error={addError} summary={bankRequirementsSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Direct deposits total<Input type="number" min="0" step="100" class="w-32" bind:value={v.dd_total} {@attach edit("dd_total")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>How many deposits<Input type="number" min="0" step="1" class="w-24" bind:value={v.dd_count} {@attach edit("dd_count")} /></label>
@@ -105,7 +144,7 @@
   </div>
   </Section>
 
-  <Section id="fees" title="Fees & closing" bind:open={open.fees} summary={bankFeesSummary(v)}>
+  <Section id="fees" title="Fees & closing" bind:open={open.fees} flagged={flagged === "fees"} error={addError} summary={bankFeesSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Monthly fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.monthly_fee} {@attach edit("monthly_fee")} {@attach commas} placeholder="0" /></label>
     <label class={`${lbl} min-w-52 flex-1`}>Waived by<Input bind:value={v.fee_waiver} {@attach edit("fee_waiver")} placeholder="e.g. $500 in direct deposits a month" /></label>
@@ -114,7 +153,7 @@
   </div>
   </Section>
 
-  <Section id="received" title="Bonus received & again" bind:open={open.received} summary={bankReceivedSummary(v)}>
+  <Section id="received" title="Bonus received & again" bind:open={open.received} flagged={flagged === "received"} error={addError} summary={bankReceivedSummary(v, d.today)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Posted on<Input type="date" class="w-40" bind:value={v.received_on} {@attach edit("received_on")} /></label>
     <label class={lbl}><span>Amount <span class="text-muted-foreground">(if not the bonus)</span></span><Input type="number" min="0" step="1" class="w-28" bind:value={v.received_amount} {@attach edit("received_amount")} {@attach commas} placeholder="$" /></label>
@@ -126,12 +165,17 @@
   </Section>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
-  <div class="mt-4 flex flex-wrap items-center gap-2">
+  <FormFooter error={addError} sticky={!b}>
     {#if b}
-      <Button size="sm" onclick={() => onclose(changed)}>Done</Button>
-      <ConfirmButton confirm={`Remove ${b.bank}?`} onconfirm={remove}>Remove</ConfirmButton>
+      <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
+      <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete</Button>
     {:else}
-      <Button size="sm" onclick={add}>Add</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
-  </div>
+  </FormFooter>
 </div>
+
+{#if b}
+  <ConfirmDialog bind:open={asking} title={`Delete ${b.bank}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive
+    description="It’s deleted for good, with its dates and progress." onconfirm={remove} />
+{/if}
