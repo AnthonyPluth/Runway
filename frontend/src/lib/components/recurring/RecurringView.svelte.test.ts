@@ -210,6 +210,19 @@ describe("Recurring page", () => {
       await waitFor(() => expect(container.querySelector("img[src='/api/merchants/site%3Alandlord.com/logo']")).toBeInTheDocument());
     });
 
+    it("wears its account's bank as a small badge on the logo, and none without one or when the bank's mark is the icon", async () => {
+      app.state = { connected: true, brands: { a1: { institution: "Chase", src: "/api/merchants/brand%3Achase/logo" } } };
+      serve([item({ logo: "/api/merchants/m-rent/logo", account_name: "Checking" }), item({ id: 2, name: "Water", account_id: "gone", logo: "/api/merchants/m-w/logo" }),
+        item({ id: 3, name: "Gym", logo: null })]);
+      render(Recurring);
+      await screen.findByText("Rent");
+      const badges = document.querySelectorAll("[data-account-badge]");
+      expect(badges).toHaveLength(1);
+      expect(badges[0].closest("[data-recurring]")).toHaveAttribute("data-recurring", "1");
+      expect(badges[0]).toHaveAttribute("title", "Checking");
+      expect(badges[0].querySelector("img")).toHaveAttribute("src", "/api/merchants/brand%3Achase/logo");
+    });
+
     it("doesn't open the item when you click its logo", async () => {
       serve([item()], [], { "/api/merchants/logo-options?name=Rent": { choice: null, searchable: false, configured: false, candidates: [], error: null } });
       const { container } = render(Recurring);

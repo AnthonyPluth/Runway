@@ -44,7 +44,7 @@ Under Settings → Connections, with each account's source chosen under Settings
 
 ## Recurring
 
-On the Recurring page, right under Budget (the old Budget → Bills & income link still opens it). Items are grouped into Money in and Money out, late ones first and then by when each is next due (“in 9 days”, “tomorrow”, “3 days late”), with what each group comes to a month under it (“≈ $2,400 a month out”: weekly is 52 a year, every two weeks 26, and so on; paused and one-time items aren’t counted). It works without a bank too, for items you add by hand.
+On the Recurring page, right under Budget (the old Budget → Bills & income link still opens it). Items are grouped into Money in and Money out, late ones first and then by when each is next due (“in 9 days”, “tomorrow”, “3 days late”), with what each group comes to a month under it (“≈ $2,400 a month out”: weekly is 52 a year, every two weeks 26, and so on; paused and one-time items aren’t counted). Each row wears its account's bank as a small badge on its logo, as on Transactions. It works without a bank too, for items you add by hand.
 
 - Paychecks, mortgage, bills and subscriptions: weekly, every two weeks, twice a month, monthly, quarterly, twice a year, yearly, or on specific dates (property tax on April 15 and October 15, say).
 - **One-time items:** choose **Once** under How often for money you expect on one date only (a tax refund, a deposit coming back, a big bill you know about). The forecast has it on that date, late if it hasn't come yet, and it shows as missed if it never does. It only matches a transaction within 5 days of its date, so its merchant text doesn't claim later payments to the same place.

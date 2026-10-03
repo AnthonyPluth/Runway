@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { reload } from "$lib/app.svelte";
+  import { app, reload } from "$lib/app.svelte";
+  import AcctLabel from "$lib/components/AcctLabel.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
@@ -130,12 +131,19 @@
 <div>
 <details class="group/item" data-recurring={r.id} use:intoView bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
   <summary class="cell cursor-pointer list-none transition-colors hover:bg-white/4 group-open/item:bg-white/3 [&::-webkit-details-marker]:hidden">
-    <!-- A button inside the summary doesn't toggle it. -->
-    <LogoPicker name={r.name} onchanged={logoChanged}>
-      {#if r.logo}<Logo src={r.logo} size={28} />
-      {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} />
-      {:else}<RecIcon id={r.account_id} />{/if}
-    </LogoPicker>
+    <!-- A button inside the summary doesn't toggle it. Its account's bank is a small badge on the logo, as on
+         Transactions; an item shown by its bank's own mark (no logo or category yet), or without an account, has none. -->
+    <span class="relative shrink-0">
+      {#if (r.logo || r.last_matched?.category) && r.account_id && app.state?.brands?.[r.account_id]}
+        <span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md" title={r.account_name || undefined}
+          data-account-badge><AcctLabel id={r.account_id} name={r.account_name ?? ""} iconClass="size-4!" labelClass="hidden" /></span>
+      {/if}
+      <LogoPicker name={r.name} onchanged={logoChanged}>
+        {#if r.logo}<Logo src={r.logo} size={28} />
+        {:else if r.last_matched?.category}<CatIcon name={r.last_matched.category} size={28} />
+        {:else}<RecIcon id={r.account_id} />{/if}
+      </LogoPicker>
+    </span>
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[15px] font-medium">
         <span class="min-w-0 truncate">{v.name || r.name}</span>
