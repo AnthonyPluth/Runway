@@ -10,7 +10,7 @@ export interface BudgetCategory {
   has_children: boolean;
   icon?: string;
   budget: number | null;
-  /** The account this budget's spending goes on (for the budget forecast); null means automatic. */
+  /** The account the category's spending goes on (for the budget forecast; set in Settings → Categories); null means automatic. */
   pay_with: string | null;
   /** The account it usually goes on, which "Automatic" uses. */
   usual_account: string | null;

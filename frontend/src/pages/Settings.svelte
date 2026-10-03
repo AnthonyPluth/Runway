@@ -44,11 +44,12 @@
   };
   const data = $derived(LOADS[section]?.() ?? null);
 
-  // The Rules tab's count, and Connections' accounts, without holding anything up.
+  // The Rules tab's count, and the accounts Connections and Categories (its paid-with picker) show, without holding
+  // anything up.
   let ruleCount = $state(0);
   rulesReq().then((r) => (ruleCount = r.length), () => {});
-  let connectionAccounts = $state<SettingsAccount[]>([]);
-  $effect(() => { if (section === "connections") accountsReq().then((r) => (connectionAccounts = r), () => {}); });
+  let sideAccounts = $state<SettingsAccount[]>([]);
+  $effect(() => { if (section === "connections" || section === "categories") accountsReq().then((r) => (sideAccounts = r), () => {}); });
 
   const version = $derived(app.state?.version && app.state.version !== "dev" ? app.state.version : "");
 </script>
@@ -59,7 +60,7 @@
 
 {#if !data}
   <div class="flex flex-col gap-6">
-    {#if section === "connections"}<ConnectionsSection accounts={connectionAccounts} />
+    {#if section === "connections"}<ConnectionsSection accounts={sideAccounts} />
     {:else if section === "notifications"}<NotificationsSection />
     {:else}<AdvancedSection />{/if}
   </div>
@@ -84,7 +85,7 @@
   {:then d}
     <div class="flex flex-col gap-6">
       {#if section === "accounts"}<AccountsSection accounts={d.accounts ?? []} />
-      {:else if section === "categories"}<CategoriesSection />
+      {:else if section === "categories"}<CategoriesSection accounts={sideAccounts} />
       {:else if section === "rules"}<RulesSection rules={d.rules ?? []} accounts={d.accounts ?? []} />{/if}
     </div>
   {:catch err}

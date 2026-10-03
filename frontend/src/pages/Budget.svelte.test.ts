@@ -55,6 +55,28 @@ describe("Budget page", () => {
     expect(screen.getByText("March 2026")).toBeInTheDocument();
   });
 
+  it("puts each row's account on its emoji: its own, else its parent's, else the one used most", async () => {
+    app.state = { connected: true, brands: { c1: { initial: "V" }, c2: { initial: "A" }, b1: { initial: "C" } } };
+    serve(month({
+      pay_accounts: [{ id: "c1", name: "Visa", kind: "credit" }, { id: "c2", name: "Amex", kind: "credit" }, { id: "b1", name: "Checking", kind: "checking" }],
+      categories: [
+        cat("Groceries", { budget: 500, spent: 200, left: 300, has_children: true, pay_with: "c1" }),
+        cat("Produce", { parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 50, spent: 50, left: 0, usual_account: "b1" }),
+        cat("Bakery", { parent: "Groceries", path: ["Groceries", "Bakery"], depth: 1, top: "Groceries", budget: 30, spent: 10, left: 20, pay_with: "c2" }),
+        cat("Gas", { spent: 80, usual_account: "b1" }),
+        cat("Pets", { spent: 20 }),
+      ],
+    }));
+    const { container } = render(Budget);
+    await screen.findByText("Budgeted");
+    const badge = (name: string) => {
+      const link = screen.getByRole("link", { name });
+      return link.parentElement!.querySelector("[data-account-badge]")?.getAttribute("title") ?? null;
+    };
+    expect([badge("Groceries"), badge("Produce"), badge("Bakery"), badge("Gas"), badge("Pets")]).toEqual(["Visa", "Visa", "Amex", "Checking", null]);
+    expect(container.querySelectorAll("[data-account-badge]")).toHaveLength(4);
+  });
+
   it("puts the even-pace marker halfway through today", async () => {
     serve(month({ day: 2 }));
     render(Budget);

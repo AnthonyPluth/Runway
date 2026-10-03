@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { app } from "$lib/app.svelte";
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
@@ -10,14 +11,17 @@
   import { toast } from "svelte-sonner";
   import type { BudgetCategory, PayAccount } from "./types";
 
-  // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath.
-  // `budgets` is true in the Budgets card, where the budget box is always shown and you can choose the card it's paid with.
-  let { c, month, sub = false, budgets = false, counts = false, pace, payAccounts, onsave, onchanged }: {
-    c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; counts?: boolean; pace: number; payAccounts: PayAccount[];
-    onsave: (category: string, amount: string) => void; onchanged: () => void;
+  // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
+  // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
+  // budget box is always shown. `account` is the card or account its spending goes on (its own, else its parent's,
+  // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji.
+  let { c, month, sub = false, budgets = false, pace, payAccounts, account = null, onsave, onchanged }: {
+    c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; pace: number; payAccounts: PayAccount[];
+    account?: string | null; onsave: (category: string, amount: string) => void; onchanged: () => void;
   } = $props();
 
-  const acctName = (id: string | null) => (id ? payAccounts.find((x) => x.id === id)?.name : undefined);
+  const brand = $derived(account ? app.state?.brands?.[account] : undefined);
+  const accountName = $derived(account ? payAccounts.find((x) => x.id === account)?.name ?? brand?.institution ?? undefined : undefined);
   const avail = $derived(c.available ?? c.budget);
   const pct = $derived(avail != null && avail > 0 ? Math.max(0, c.spent / avail) : c.spent > 0 ? 1 : 0);
   const over = $derived(avail != null && c.spent > avail);
@@ -41,54 +45,21 @@
     } catch (err) { toast.error((err as Error).message); }
     onchanged();
   }
-
-  // Which card a budget is paid with: a quiet "Set card" until one is chosen (always shown: hidden until hover, it
-  // looked like only budgets that had a card could get one).
-  let choosing = $state(false);
-  let done = false;
-  function focus(el: HTMLSelectElement) { el.focus(); }
-  async function finish(sel: HTMLSelectElement, save: boolean) {
-    if (done) return;
-    done = true;
-    if (save && sel.value !== (c.pay_with || "")) {
-      try { await api("/api/budget", { method: "POST", body: { category: c.name, pay_with: sel.value } }); toast.success("Saved"); }
-      catch (err) { toast.error((err as Error).message); }
-    }
-    choosing = false;
-    onchanged();
-  }
 </script>
 
 <div class={cn("py-1", sub && "pl-5")}>
   <div class="flex min-h-8 flex-wrap items-center gap-x-2.5">
-    <CatIcon name={c.name} size={sub ? 20 : 28} />
+    <span class="relative shrink-0">
+      <CatIcon name={c.name} size={sub ? 20 : 28} />
+      <!-- The account as a small badge on the emoji, as Transactions puts it on a merchant's logo. -->
+      {#if brand}<span class={cn("absolute z-[1] rounded-md", sub ? "-right-1 -bottom-1" : "-right-1.5 -bottom-1.5")} title={accountName} data-account-badge>
+        {#if brand.src}<img class={cn("shrink-0 rounded object-contain", sub ? "size-3" : "size-4")} src={brand.src} alt={accountName ?? ""} width="16" height="16" loading="lazy" />
+        {:else}<span class={cn("flex shrink-0 items-center justify-center rounded bg-muted font-semibold text-muted-foreground", sub ? "size-3 text-[7px]" : "size-4 text-[9px]")}
+          role="img" aria-label={accountName}>{brand.initial}</span>{/if}
+      </span>{/if}
+    </span>
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
-    {#if budgets && c.budget != null && counts}
-      {#if choosing}
-        {@const usual = acctName(c.usual_account)}
-        <select use:focus data-editor aria-label={`Account ${c.name} is paid with`}
-          class="h-10 max-w-48 min-w-0 sm:h-8 cursor-pointer rounded-md border border-input bg-transparent px-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&_option]:bg-popover [&>optgroup]:bg-popover"
-          onchange={(e) => finish(e.currentTarget, true)} onblur={(e) => finish(e.currentTarget, true)}
-          onkeydown={(e) => { if (e.key === "Escape") finish(e.currentTarget, false); }}>
-          <option value="" selected={!c.pay_with}>{usual ? `Automatic (usually ${usual})` : "Automatic"}</option>
-          <optgroup label="Cards">
-            {#each payAccounts.filter((x) => x.kind === "credit") as x (x.id)}<option value={x.id} selected={x.id === c.pay_with}>{x.name}</option>{/each}
-          </optgroup>
-          <optgroup label="Bank accounts">
-            {#each payAccounts.filter((x) => x.kind !== "credit") as x (x.id)}<option value={x.id} selected={x.id === c.pay_with}>{x.name}</option>{/each}
-          </optgroup>
-        </select>
-      {:else}
-        {@const chosen = acctName(c.pay_with)}
-        <button type="button" title="Which card or account this spending goes on (used by the budget forecast)"
-          onclick={() => { done = false; choosing = true; }}
-          class={cn("cursor-pointer rounded-md px-1.5 py-2.5 text-xs whitespace-nowrap text-muted-foreground sm:py-0.5 hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none",
-            !chosen && "text-muted-foreground/70")}>
-          {chosen ?? "Set card"}
-        </button>
-      {/if}
-    {/if}
     {#if budgets && c.budget != null && !sub}
       <button type="button" aria-pressed={!!c.rollover_from} onclick={() => setRollover(!c.rollover_from)}
         title={c.rollover_from ? `What's left each month carries into the next (since ${monthShort(c.rollover_from, true)}). Click to stop.`
@@ -99,7 +70,8 @@
       </button>
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
-      <span>{money(c.spent)}</span>
+      <span class={cn(sub && over && "font-semibold text-destructive")} title={sub && over ? `${money(c.spent - avail!)} over` : undefined}
+        >{money(c.spent)}{#if sub && over}<span class="sr-only">{` (${money(c.spent - avail!)} over)`}</span>{/if}</span>
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <!-- The "$" sits just before the number, so it reads "$60" like the spent figure beside it. -->
       <span class="group/money relative inline-flex items-center">
@@ -111,9 +83,9 @@
       </span>
     </span>
   </div>
-  {#if c.budget != null}
-    <div class={cn("flex items-center gap-3", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>
-      <div class={cn("relative min-w-28 flex-1 rounded-full bg-muted", sub ? "h-1.5 opacity-85" : "h-2")} role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
+  {#if c.budget != null && !sub}
+    <div class="flex items-center gap-3 sm:pl-[38px]">
+      <div class="relative h-2 min-w-28 flex-1 rounded-full bg-muted" role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
         <div class={cn("h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
           style:width={barWidth(pct)}></div>
         {#if showPace}
@@ -128,8 +100,8 @@
         {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>
     </div>
-    {#if carried > 0.005}
-      <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
-    {/if}
+  {/if}
+  {#if c.budget != null && carried > 0.005}
+    <p class={cn("mt-0.5 text-xs text-muted-foreground tabular-nums", sub ? "sm:pl-[30px]" : "sm:pl-[38px]")}>{fmt0(c.budget)} + {money(carried)} rolled over from earlier months</p>
   {/if}
 </div>
