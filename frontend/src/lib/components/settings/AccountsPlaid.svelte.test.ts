@@ -47,6 +47,23 @@ describe("Settings → Accounts: hidden accounts", () => {
     expect(within(section).getByText("Old savings")).toBeInTheDocument();
     await userEvent.click(within(section).getByRole("button", { name: "Hide" }));
     expect(screen.queryByText("Old checking")).toBeNull();
+    expect(section).toHaveTextContent("Left out of lists, totals and the forecast; their transactions are kept.");
+  });
+
+  it("moves an account you hide into them without reloading, and back with Undo", async () => {
+    serve(status([]));
+    render(AccountsSection, { accounts: [acct(), acct({ id: "sav", name: "Savings", kind: "savings" }), acct({ id: "old1", name: "Old checking", hidden: 1 })] });
+    expect(await screen.findByRole("region", { name: "Hidden accounts" })).toHaveTextContent("1 hidden account");
+    const row = screen.getByText("Savings").closest("details")!;
+    await userEvent.click(within(row).getByRole("button", { name: "Hide" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "Hidden accounts" })).toHaveTextContent("2 hidden accounts"));
+    expect(screen.queryByText("Savings")).toBeNull();   // left the list (the hidden ones stay collapsed)
+    expect(screen.getByText("Checking")).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    const undo = vi.mocked(toast).mock.calls.findLast(([m]) => m === "Savings hidden")![1] as unknown as { action: { onClick: () => Promise<void> } };
+    await undo.action.onClick();
+    await waitFor(() => expect(screen.getByText("Savings")).toBeInTheDocument());
+    expect(screen.getByRole("region", { name: "Hidden accounts" })).toHaveTextContent("1 hidden account");
   });
 
   it("shows no hidden line when none are hidden", async () => {
@@ -90,8 +107,22 @@ describe("Settings → Accounts: New from Plaid", () => {
     const group = await screen.findByRole("region", { name: "New from Plaid" });
     expect(within(group).getByText("Freedom")).toBeInTheDocument();
     expect(within(group).queryByText("Total Checking")).toBeNull();   // already matched: it's in its type group instead
-    const options = within(within(group).getByRole("combobox")).getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(["Choose…", "Add as its own account", "Same as Amex Gold", "Don't use"]);
+    const select = within(group).getByRole("combobox");
+    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Add as its own account", "Same as Amex Gold", "Don't use"]);
+    expect(select).toHaveValue("new");   // chosen to start with, saved with Add
+    expect(api).not.toHaveBeenCalledWith("/api/plaid/match", expect.anything());
+    expect(within(group).getByRole("button", { name: "Add Freedom" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Add all/ })).toBeNull();   // just the one
+  });
+
+  it("adds them all at once", async () => {
+    serve(status([item([unmatched, { ...unmatched, id: "pa9", name: "Sapphire", mask: "0009" }])]));
+    render(AccountsSection, { accounts: [acct()] });
+    await userEvent.click(await screen.findByRole("button", { name: "Add all 2" }));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.filter(([p]) => p === "/api/plaid/match").map(([, o]) => (o as { body: unknown }).body))
+      .toEqual([{ plaid_account_id: "pa1", target: "new" }, { plaid_account_id: "pa9", target: "new" }]));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added 2 accounts"));
+    expect(reload).toHaveBeenCalledOnce();
   });
 
   it("has no group when there's nothing to decide, or no Plaid", async () => {
@@ -109,7 +140,7 @@ describe("Settings → Accounts: New from Plaid", () => {
     serve(status([item([unmatched])]));
     render(AccountsSection, { accounts: [acct()] });
     const group = await screen.findByRole("region", { name: "New from Plaid" });
-    await userEvent.selectOptions(within(group).getByRole("combobox"), "new");
+    await userEvent.click(within(group).getByRole("button", { name: "Add Freedom" }));
     await waitFor(() => expect(matchCall()).toBeTruthy());
     expect(matchCall()![1]).toEqual({ method: "POST", body: { plaid_account_id: "pa1", target: "new" } });
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Added to your accounts"));
@@ -155,7 +186,7 @@ describe("Settings → Accounts: investment accounts from Plaid", () => {
     const selects = within(group).getAllByRole("combobox");
     expect(selects).toHaveLength(2);
     expect(within(selects[1]).getAllByRole("option").map((o) => o.textContent))
-      .toEqual(["Choose…", "Add as a new account", "Same as My Roth ($5,000.00)", "Don't count it"]);   // "Taken" is linked to another
+      .toEqual(["Add as a new account", "Same as My Roth ($5,000.00)", "Don't count it"]);   // "Taken" is linked to another
   });
 
   it("matches it through POST /api/plaid/match with the investment toast", async () => {

@@ -13,17 +13,21 @@
   import type { DeletedAccount, PlaidStatus, SettingsAccount } from "./types";
   import { linkCls } from "./ui";
 
-  // Settings → Accounts: every account grouped by type. The forecast's account can be chosen here or on Overview (its
-  // forecast settings, which also hold its length).
+  // Settings → Accounts: every account grouped by type. The forecast account can be chosen here or on Overview (its
+  // forecast settings, which also hold its length). Hiding or showing an account moves its row here, without loading
+  // the page again: the list stays where it is, and the hidden accounts' count changes.
   let { accounts }: { accounts: SettingsAccount[] } = $props();
+  let hiddenNow = $state<Record<string, boolean>>({});
+  const moved = (id: string, on: boolean) => { hiddenNow = { ...hiddenNow, [id]: on }; };
+  const list = $derived(accounts.map((a) => (a.id in hiddenNow ? { ...a, hidden: hiddenNow[a.id] ? 1 : 0 } : a)));
 
-  const cash = $derived(accounts.filter((a) => a.kind === "checking" || a.kind === "savings"));
+  const cash = $derived(list.filter((a) => a.kind === "checking" || a.kind === "savings"));
   const byName = $derived(Object.fromEntries(accounts.map((a) => [a.id, accountName(a)])));
 
   const KIND_GROUPS: [string, string[]][] = [["Cash", ["checking", "savings"]], ["Credit cards", ["credit"]], ["Loans", ["loan"]], ["Investments", ["investment"]]];
-  const groups = $derived(KIND_GROUPS.map(([title, kinds]) => ({ title, list: accounts.filter((a) => !a.hidden && kinds.includes(a.kind)) })).filter((g) => g.list.length));
+  const groups = $derived(KIND_GROUPS.map(([title, kinds]) => ({ title, list: list.filter((a) => !a.hidden && kinds.includes(a.kind)) })).filter((g) => g.list.length));
   // Hidden accounts are tucked into a collapsed line, like the deleted ones below; a link to one of them opens it.
-  const hiddenList = $derived(accounts.filter((a) => a.hidden));
+  const hiddenList = $derived(list.filter((a) => a.hidden));
   let showHidden = $state(false);
   const hiddenOpen = $derived(showHidden || hiddenList.some((a) => a.id === accountFocus.id));
 
@@ -52,12 +56,12 @@
 <NewFromPlaid {waiting} left={ignoredAccounts(plaid)} {mine} />
 
 <Card.Root>
-  <Card.Header><Card.Title>Accounts</Card.Title></Card.Header>
-  <Card.Content>
+  <Card.Header class="px-4 sm:px-6"><Card.Title>Accounts</Card.Title></Card.Header>
+  <Card.Content class="px-4 sm:px-6">
     {#each groups as g (g.title)}
       <section class="mb-4 last:mb-0" aria-label={g.title}>
         <h3 class="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{g.title}</h3>
-        {#each g.list as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}
+        {#each g.list as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} onhidden={moved} />{/each}
       </section>
     {:else}
       {#if !hiddenList.length}<p class="py-6 text-center text-sm text-muted-foreground">Accounts appear here after the first sync.</p>{/if}
@@ -66,8 +70,9 @@
       <section class="mt-4 border-t pt-3 text-sm text-muted-foreground first:mt-0 first:border-t-0 first:pt-0" aria-label="Hidden accounts">
         <p>{plural(hiddenList.length, "hidden account")} ·
           <button type="button" class={linkCls} aria-expanded={hiddenOpen} onclick={() => (showHidden = !hiddenOpen)}>{hiddenOpen ? "Hide" : "Show"}</button></p>
+        <p class="text-xs">Left out of lists, totals and the forecast; their transactions are kept.</p>
         {#if hiddenOpen}
-          <div class="mt-2">{#each hiddenList as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} />{/each}</div>
+          <div class="mt-2">{#each hiddenList as a (a.id)}<AccountRow {a} {cash} {byName} {plaid} {mine} onhidden={moved} />{/each}</div>
         {/if}
       </section>
     {/if}
