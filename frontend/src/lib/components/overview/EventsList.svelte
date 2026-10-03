@@ -23,18 +23,20 @@
     limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
-  // A day at a time, under its date. A bank settles a day's payments together, so the balance shows once a day for each
-  // account, on its last item that day (an annual fee is a card charge: it never carries one).
+  // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
+  // projected balance shows once a day for each account, under the day's items: the balance after its last item that day
+  // (an annual fee is a card charge: it never moves one).
   const days = $derived.by(() => {
-    const out: { date: string; rows: { e: (typeof events)[number]; i: number; balance: boolean }[] }[] = [];
+    type Ev = (typeof events)[number];
+    const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
     shown.forEach((e, i) => {
-      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [] });
-      out.at(-1)!.rows.push({ e, i, balance: false });
+      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [], balances: [] });
+      out.at(-1)!.rows.push({ e, i });
     });
     for (const d of out) {
-      const last = new Map<string, number>();
-      d.rows.forEach((r, k) => { if (r.e.kind !== "fee") last.set(r.e.account_id ?? "", k); });
-      for (const k of last.values()) d.rows[k].balance = true;
+      const last = new Map<string, Ev>();
+      for (const { e } of d.rows) if (e.kind !== "fee") last.set(e.account_id ?? "", e);
+      d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
     }
     return out;
   });
@@ -59,8 +61,10 @@
   <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
 {:else}
   {#each days as d (d.date)}
+  <!-- One block a day: the group's hairlines fall between days, not between a day's items. -->
+  <div data-day={d.date}>
   <div class="px-4 pt-2.5 pb-1 text-[13px] font-medium text-muted-foreground" role="heading" aria-level="3">{fmtDow(d.date)}</div>
-  {#each d.rows as { e, i, balance } (e.key ?? `${e.date}-${e.name}-${i}`)}
+  {#each d.rows as { e, i } (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
     <div class="cell">
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
@@ -90,11 +94,8 @@
             {:else if e.paid_on}on {e.account}, paid with its {fmtDate(e.paid_on)} payment
             {:else}on {e.account}; its payment isn’t in the forecast{/if}
           </div>
-        {:else if (accounts && e.account) || balance}
-          <div class="truncate text-[13px] text-muted-foreground tabular-nums">
-            {#if accounts && e.account}{e.account}{/if}{#if accounts && e.account && balance}{" · "}{/if}{#if balance}<span
-              class={(e.balance_after ?? 0) < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after ?? 0)}</span>{/if}
-          </div>
+        {:else if accounts && e.account}
+          <div class="truncate text-[13px] text-muted-foreground">{e.account}</div>
         {/if}
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
@@ -112,6 +113,13 @@
       </div>
     </div>
   {/each}
+  {#each d.balances as b, k (k)}
+    <div class="flex justify-end gap-1.5 px-4 pt-0.5 pb-3 text-[13px] text-muted-foreground tabular-nums">
+      {#if accounts && b.account}<span class="truncate">{b.account} ·</span>{/if}
+      <span class={b.amount < 0 ? "font-medium text-destructive" : ""}>projected balance {fmt(b.amount)}</span>
+    </div>
+  {/each}
+  </div>
   {/each}
   {#if events.length > shown.length}
     <button type="button" class="cell justify-between text-[15px] text-primary" onclick={() => (all = true)}>

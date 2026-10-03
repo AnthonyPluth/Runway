@@ -35,10 +35,10 @@ describe("Upcoming", () => {
   it("names each item's account, unless the list is filtered to one", () => {
     width(false);
     const { unmount } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
-    expect(screen.getByText(/^Checking ·/)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Checking/).length).toBe(2);   // on the item, and on its projected balance
     unmount();
     render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
     expect(screen.queryByText(/Checking/)).not.toBeInTheDocument();
-    expect(screen.getByText("balance $100.00")).toBeInTheDocument();
+    expect(screen.getByText("projected balance $100.00")).toBeInTheDocument();
   });
 });
