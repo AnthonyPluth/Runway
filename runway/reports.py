@@ -89,39 +89,71 @@ def _group_key(row, group: str, kinds: _Kinds) -> str:
     if group == "merchant":
         return merchant_name(row)
     if group == "account":
-        return row["account_name"]
+        return row["account_id"]
     return kinds.top(row["category"])
 
 
-def spending_over_time(conn, end: str, months: int = 12, group: str = "category") -> dict:
+def _month_back(month: str, n: int) -> str:
+    y, m = (int(x) for x in month.split("-"))
+    return f"{date(y, m, 1) - relativedelta(months=n):%Y-%m}"
+
+
+def spending_over_time(conn, end: str, months: int = 12, group: str = "category", today: date | None = None) -> dict:
     """Spending per month, by top-level category, merchant or account: the biggest few by name, the rest together.
-    Months before the first transaction are left out."""
+    Months before the first transaction are left out.
+
+    When the last month is the one `today` is in, it's only part of a month, so each series also gets `same_point`:
+    what it spent last month (`prev`) and the same month a year before (`year_ago`, None when that's outside the
+    months shown) up to the same day of the month (`through`), to compare like with like."""
     if group not in GROUPS:
         raise ValueError("Group by category, merchant or account")
     ms = _with_data(conn, month_list(end, max(2, min(months, 36))))
     kinds = _Kinds(conn)
+    partial = today is not None and f"{today:%Y-%m}" == ms[-1]
+    day = today.day if today is not None and partial else 0
+    back = {_month_back(ms[-1], 1): "prev", _month_back(ms[-1], 12): "year_ago"}
     per: dict[str, dict[str, float]] = {}
+    early: dict[str, dict[str, float]] = {}      # the months to compare with, up to the same day
+    label: dict[str, str] = {}
     for r in _rows(conn, *_bounds(ms)):
         if kinds.kind(r) != "spend":
             continue
-        g = per.setdefault(_group_key(r, group, kinds), {})
+        key = _group_key(r, group, kinds)
+        label.setdefault(key, r["account_name"] if group == "account" else key)
+        g = per.setdefault(key, {})
         g[r["month"]] = g.get(r["month"], 0.0) - r["amount"]
+        if partial and r["month"] in back and int(r["posted"][8:10]) <= day:
+            e = early.setdefault(key, {})
+            e[back[r["month"]]] = e.get(back[r["month"]], 0.0) - r["amount"]
+    year_ago_shown = _month_back(ms[-1], 12) in ms
     series: list[dict[str, Any]] = []
-    for name, by_month in per.items():
+    for key, by_month in per.items():
         values = [round(max(0.0, by_month.get(m, 0.0)), 2) for m in ms]
         total = round(sum(values), 2)
         if total > 0.005:
-            series.append({"name": name, "values": values, "total": total})
+            s: dict[str, Any] = {"name": label[key], "values": values, "total": total}
+            if group == "account":
+                s["account"] = key
+            if partial:
+                e = early.get(key, {})
+                s["same_point"] = {"prev": round(max(0.0, e.get("prev", 0.0)), 2),
+                                   "year_ago": round(max(0.0, e.get("year_ago", 0.0)), 2) if year_ago_shown else None}
+            series.append(s)
     series.sort(key=lambda s: -s["total"])
     shown, rest = series[:TOP], series[TOP:]
     if len(rest) == 1:
         shown.append(rest[0])
     elif rest:
         values = [round(sum(s["values"][i] for s in rest), 2) for i in range(len(ms))]
-        shown.append({"name": f"Everything else ({len(rest)})", "values": values, "total": round(sum(values), 2), "other": True,
-                      "members": [s["name"] for s in rest]})
+        other: dict[str, Any] = {"name": f"Everything else ({len(rest)})", "values": values, "total": round(sum(values), 2),
+                                 "other": True, "members": [s["name"] for s in rest]}
+        if partial:
+            other["same_point"] = {"prev": round(sum(s["same_point"]["prev"] for s in rest), 2),
+                                   "year_ago": round(sum(s["same_point"]["year_ago"] for s in rest), 2) if year_ago_shown else None}
+        shown.append(other)
     totals = [round(sum(s["values"][i] for s in series), 2) for i in range(len(ms))]
-    return {"months": ms, "group": group, "series": shown, "totals": totals, "all": series}
+    return {"months": ms, "group": group, "series": shown, "totals": totals, "all": series,
+            "through": f"{today:%Y-%m-%d}" if today is not None and partial else None}
 
 
 def income_vs_spending(conn, end: str, months: int = 12) -> dict:
@@ -149,14 +181,18 @@ def income_vs_spending(conn, end: str, months: int = 12) -> dict:
                                      "rate": round((ti - to) / ti, 4) if ti > 0 else None}}
 
 
-def merchants(conn, start: str, end: str, limit: int = 100) -> dict:
-    """Where you spent the most: each merchant's total, visits, average, last visit and usual category."""
+def merchants(conn, start: str, end: str, limit: int = 100, q: str = "") -> dict:
+    """Where you spent the most: each merchant's total, visits, average, last visit and usual category. `q` keeps the
+    merchants whose name has it in (any case); `count` and `total` are then of those."""
+    needle = q.strip().lower()
     kinds = _Kinds(conn)
     agg: dict[str, dict] = {}
     for r in _rows(conn, start, end):
         if kinds.kind(r) != "spend":
             continue
         name = merchant_name(r)
+        if needle and needle not in name.lower():
+            continue
         a = agg.setdefault(name.lower(), {"name": name, "total": 0.0, "count": 0, "last": "", "cats": {}, "ids": set()})
         a["total"] -= r["amount"]
         if r["id"] not in a["ids"]:   # a split transaction's parts are one visit

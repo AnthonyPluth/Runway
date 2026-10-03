@@ -76,6 +76,49 @@ class ReportTests(DbCase):
         self.assertTrue(d["series"][-1]["other"])
         self.assertAlmostEqual(sum(s["values"][1] for s in d["series"]), d["totals"][1])
 
+    def test_a_month_under_way_compares_with_the_same_point_of_last_month(self):
+        from datetime import date
+        # On September 6th: August up to the 6th had Whole Foods' 150 less the 20 refund, not all of August
+        d = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 9, 6))
+        self.assertEqual(d["through"], "2026-09-06")
+        g = next(s for s in d["series"] if s["name"] == "Groceries")
+        self.assertEqual(g["same_point"], {"prev": 130.0, "year_ago": None})   # a year ago isn't among the months
+        self.tx("cc", "2026-08-20", -70, "Whole Foods", "Groceries")           # after the 6th: not counted
+        d = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 9, 6))
+        self.assertEqual(next(s for s in d["series"] if s["name"] == "Groceries")["same_point"]["prev"], 130.0)
+        self.assertEqual(next(s for s in d["series"] if s["name"] == "Shopping")["same_point"]["prev"], 0.0)
+        # A month that's over has nothing to compare by day
+        done = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 10, 2))
+        self.assertIsNone(done["through"])
+        self.assertNotIn("same_point", done["series"][0])
+        self.assertNotIn("same_point", reports.spending_over_time(self.c, "2026-09", 3)["series"][0])
+
+    def test_same_point_on_the_31st_counts_all_of_a_shorter_month(self):
+        from datetime import date
+        self.tx("cc", "2026-09-30", -10, "Whole Foods", "Groceries")
+        self.tx("cc", "2026-10-31", -5, "Whole Foods", "Groceries")
+        d = reports.spending_over_time(self.c, "2026-10", 4, today=date(2026, 10, 31))
+        g = next(s for s in d["series"] if s["name"] == "Groceries")
+        self.assertEqual(g["same_point"]["prev"], g["values"][-2])
+
+    def test_a_year_ago_and_everything_else_get_the_same_point_too(self):
+        from datetime import date
+        self.tx("cc", "2025-09-01", -25, "Whole Foods", "Groceries")
+        self.tx("cc", "2025-09-20", -99, "Whole Foods", "Groceries")
+        for i in range(10):
+            self.tx("cc", "2026-08-03", -(i + 1), f"Shop {i}", "Shopping")
+        d = reports.spending_over_time(self.c, "2026-09", 13, "merchant", today=date(2026, 9, 6))
+        wf = next(s for s in d["series"] if s["name"] == "Whole Foods")
+        self.assertEqual(wf["same_point"], {"prev": 130.0, "year_ago": 25.0})
+        rest = d["series"][-1]
+        self.assertTrue(rest["other"])
+        members = [s for s in d["all"] if s["name"] in rest["members"]]
+        self.assertAlmostEqual(rest["same_point"]["prev"], sum(s["same_point"]["prev"] for s in members))
+
+    def test_by_account_names_each_series_and_keeps_its_id(self):
+        d = reports.spending_over_time(self.c, "2026-09", 3, "account")
+        self.assertEqual({(s["name"], s["account"]) for s in d["series"]}, {("Card", "cc")})
+
     def test_income_vs_spending(self):
         d = reports.income_vs_spending(self.c, "2026-09", 3)
         sept = d["months"][-1]
@@ -122,6 +165,15 @@ class ReportTests(DbCase):
         one = reports.merchant(self.c, "whole foods", "2026-09", 3)
         self.assertEqual(one["values"], [100.0, 130.0, 120.0])
         self.assertEqual(len(one["transactions"]), 4)
+
+    def test_merchants_search_covers_every_merchant(self):
+        d = reports.merchants(self.c, "2026-07-01", "2026-10-01", limit=1, q="  SHACK ")
+        self.assertEqual([m["name"] for m in d["merchants"]], ["Shake Shack"])
+        self.assertEqual((d["count"], d["total"]), (1, 12.0))
+        self.assertEqual(reports.merchants(self.c, "2026-07-01", "2026-10-01", q="nothing like it")["merchants"], [])
+        from runway.server.api.reports import api_report_merchants
+        d = api_report_merchants(self.c, {"start": ["2026-07-01"], "end": ["2026-10-01"], "q": ["whole"]}, None)
+        self.assertEqual([m["name"] for m in d["merchants"]], ["Whole Foods"])
 
     def test_breakdown_and_its_transactions(self):
         tree = reports.breakdown(self.c, "2026-09-01", "2026-10-01")["tree"]
