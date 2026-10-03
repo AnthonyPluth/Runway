@@ -4,6 +4,7 @@
   import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import { fmt, fmtDate, isoDay, nb } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import type { SettingsAccount } from "./types";
   import { fieldCls, inputCls, rowCls, warnText } from "./ui";
@@ -39,12 +40,20 @@
     } catch (err) { toast.error((err as Error).message); }
     finally { saving = false; }
   }
+  // Deleting one offers Undo, which enters it again just as it was.
   async function remove(date: string) {
+    const was = entered.find((s) => s.statement_date === date);
+    const id = a.id;
     try {
-      await api(`/api/accounts/${encodeURIComponent(a.id)}/statements/${encodeURIComponent(date)}/remove`, { method: "POST" });
-      toast.success("Statement deleted");
+      await api(`/api/accounts/${encodeURIComponent(id)}/statements/${encodeURIComponent(date)}/remove`, { method: "POST" });
       reload();
-    } catch (err) { toast.error((err as Error).message); }
+    } catch (err) { toast.error((err as Error).message); return; }
+    if (!was) { toast.success("Statement deleted"); return; }
+    undoable("Statement deleted", async () => {
+      await api(`/api/accounts/${encodeURIComponent(id)}/statements`, { method: "POST", body: { statement_date: was.statement_date,
+        balance: was.balance, due_date: was.due_date, minimum_payment: was.minimum_payment ?? "" } });
+      reload();
+    });
   }
 </script>
 

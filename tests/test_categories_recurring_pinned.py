@@ -352,7 +352,7 @@ class RulesPinnedTests(Base):
     def test_remember_and_offer(self):
         t = self.tx(-5, "BLUE BOTTLE")
         self.assertEqual(categorize.rule_offer(self.c, t, "Coffee & Snacks"),
-                         {"merchant": "Blue Bottle", "match": "blue bottle", "replaces": None})
+                         {"merchant": "Blue Bottle", "match": "blue bottle", "replaces": None, "also_updated": 0})
         self.c.execute(insert(Rule).values(match="blue bottle", match_mode="exact", category="Shopping"))
         rules.remember(self.c, "blue bottle", "Coffee & Snacks")   # not the exact-text rule: a new one
         self.assertEqual([tuple(r) for r in self.c.execute(select(Rule.match, Rule.match_mode, Rule.category)

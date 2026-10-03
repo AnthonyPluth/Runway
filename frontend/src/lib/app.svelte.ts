@@ -55,7 +55,8 @@ export function keepScroll(y: number): void {
 
 // ------------------------------------------------------------------------------------------ routing
 // Hash routes, as in the classic app: #overview, #setup/connections, ...
-export const route = $state({ page: "overview", sub: "" as string });
+// `query`: what follows "?" (Transactions keeps its filters there).
+export const route = $state({ page: "overview", sub: "" as string, query: "" as string });
 
 // Old routes that moved (#investments is Net worth's Investments tab; #budget/recurring was Bills & income, now the
 // Recurring page): they resolve to the new route here, so everything downstream (the page, the nav highlight) sees only
@@ -63,12 +64,23 @@ export const route = $state({ page: "overview", sub: "" as string });
 const MOVED: Record<string, [page: string, sub: string]> = { investments: ["networth", "investments"] };
 
 function readHash(): void {
-  const [name, rawSub = ""] = (location.hash || "#overview").slice(1).split("?")[0].split("/");
+  const [path, query = ""] = (location.hash || "#overview").slice(1).split(/\?(.*)/s);
+  const [name, rawSub = ""] = path.split("/");
   const [page, sub] = name === "budget" && rawSub === "recurring" ? ["recurring", ""]
     : MOVED[name] ?? [name === "settings" ? "setup" : name, rawSub];
   if ((page || "overview") !== route.page) newPage();   // a tab inside the same page keeps its data and place
   route.page = page || "overview";
   route.sub = sub;
+  route.query = query;
+}
+
+/** Put this query in the address (`#page/sub?query`) without a new history entry or a hashchange: a page's own
+ *  filters, as they change. */
+export function setQuery(query: string): void {
+  if (query === route.query) return;
+  const path = (location.hash || "#overview").split("?")[0];
+  history.replaceState(history.state, "", `${location.pathname}${location.search}${path}${query ? `?${query}` : ""}`);
+  route.query = query;
 }
 readHash();
 window.addEventListener("hashchange", readHash);

@@ -13,6 +13,7 @@ from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, oidc, retail, splits
 from runway.models import Account, AiLog, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
+from runway.server.api import retail as api_retail
 from runway.server.api import transactions as api_tx
 from tests.shared import DbCase
 
@@ -264,6 +265,62 @@ class SplitTests(Base):
         retail.match_and_apply(self.c)
         self.assertIsNone(self.c.execute(select(RetailCharge.tx_id)).fetchone()["tx_id"])
         self.assertEqual(retail.link(self.c, charge, "t1"), "split")   # you can still pick it yourself
+
+    def _split_order(self):
+        self.amazon_order_with_charge()
+        self.tx("t1", "2024-09-10", -60.88, "AMZN Mktp US", "Shopping", "rule")
+        db.set_setting(self.c, "openrouter_api_key", "k")
+        retail.finish(self.c, "amazon", caller=AI)
+        return self.c.execute(select(RetailCharge.id)).fetchone()["id"]
+
+    def charge(self):
+        return dict(self.c.execute(select(RetailCharge.tx_id, RetailCharge.match_source, RetailCharge.not_tx, RetailCharge.applied)).fetchone())
+
+    def test_undo_not_this_transaction(self):
+        charge = self._split_order()
+        before, parts = self.charge(), self.parts("t1")
+        r = api_retail.api_retail_unlink(self.c, {}, {}, charge)
+        self.assertEqual(self.row("t1")["is_split"], 0)
+        api_retail.api_retail_charge_restore(self.c, {}, {"was": r["was"]}, charge)
+        self.assertEqual(self.charge(), before)
+        self.assertEqual(self.parts("t1"), parts)
+
+    def test_undo_split_by_items(self):
+        charge = self._split_order()
+        api_retail.api_retail_unlink(self.c, {}, {}, charge)
+        retail.link(self.c, charge, "t1")
+        splits.clear(self.c, "t1")   # you categorized it yourself, as one thing
+        self.c.execute(update(Transaction).where(Transaction.id == "t1").values(category="Groceries", category_source="manual"))
+        before = self.charge()
+        r = api_retail.api_retail_apply(self.c, {}, {}, charge)
+        self.assertEqual(self.row("t1")["is_split"], 1)
+        api_retail.api_retail_charge_restore(self.c, {}, {"was": r["was"]}, charge)
+        t = self.row("t1")
+        self.assertEqual((t["is_split"], t["category"]), (0, "Groceries"))
+        self.assertEqual(self.charge(), before)
+
+    def test_undo_an_items_category_puts_back_the_memory_items_and_split(self):
+        self._split_order()
+        item = self.c.execute(select(RetailItem.id).where(RetailItem.title.like("The Crucible%"))).fetchone()["id"]
+        parts = self.parts("t1")
+        items = [tuple(r) for r in self.c.execute(select(RetailItem.id, RetailItem.category, RetailItem.category_source).order_by(RetailItem.id))]
+        r = api_retail.api_retail_item(self.c, {}, {"category": "Shopping"}, str(item))
+        self.assertNotEqual(self.parts("t1"), parts)
+        api_retail.api_retail_item_restore(self.c, {}, {"was": r["was"]}, str(item))
+        self.assertEqual(self.parts("t1"), parts)
+        self.assertEqual([tuple(r) for r in self.c.execute(select(RetailItem.id, RetailItem.category, RetailItem.category_source).order_by(RetailItem.id))], items)
+        self.assertIsNone(self.c.execute(select(RetailItemMemory.category)).fetchone())   # nothing was remembered before
+
+    def test_undo_checks_what_it_is_sent(self):
+        charge = self._split_order()
+        from runway.server.common import ApiError
+        for body in ({}, {"was": "x"}, {"was": {"charge": {"id": "other"}}}):
+            with self.subTest(body=body), self.assertRaises(ApiError):
+                api_retail.api_retail_charge_restore(self.c, {}, body, charge)
+        with self.assertRaises(ApiError):
+            api_retail.api_retail_item_restore(self.c, {}, {}, "1")
+        with self.assertRaises(ApiError):
+            api_retail.api_retail_item(self.c, {}, {"category": "Shopping"}, "abc")
 
     def test_pending_transaction_that_posts_is_matched_again(self):
         self.amazon_order_with_charge()

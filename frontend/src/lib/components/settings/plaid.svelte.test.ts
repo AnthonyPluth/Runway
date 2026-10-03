@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
-import { connectPlaid, openPlaidLink, plaidSession, resumePlaidOAuth, runPlaidLink } from "./plaid.svelte";
+import { addPlaidAccounts, connectPlaid, openPlaidLink, plaidSession, resumePlaidOAuth, runPlaidLink } from "./plaid.svelte";
 
 type Opts = Parameters<NonNullable<Window["Plaid"]>["create"]>[0];
 let opts: Opts;
@@ -116,7 +116,7 @@ describe("openPlaidLink", () => {
 });
 
 describe("resumePlaidOAuth", () => {
-  it("finishes linking after a bank's sign-in page and reloads the page", async () => {
+  it("finishes linking after a bank's sign-in page and shows the new accounts", async () => {
     history.replaceState(null, "", "/plaid/oauth?oauth_state_id=abc");
     vi.mocked(api).mockResolvedValue({ link_token: "resume", item_id: null, kind: "bank" });
     const p = resumePlaidOAuth();
@@ -124,8 +124,19 @@ describe("resumePlaidOAuth", () => {
     expect(opts).toMatchObject({ token: "resume", receivedRedirectUri: expect.stringContaining("oauth_state_id=abc") });
     expect(location.hash).toBe("#setup/connections");
     opts.onSuccess("public", {});
-    await vi.waitFor(() => expect(reload).toHaveBeenCalled());
     expect(await p).toBe(true);
+    expect(location.hash).toBe("#setup/accounts");
+  });
+
+  it("stays and reloads after reconnecting through a bank's sign-in page", async () => {
+    history.replaceState(null, "", "/plaid/oauth?oauth_state_id=abc");
+    vi.mocked(api).mockResolvedValue({ link_token: "resume", item_id: "it1", kind: "bank" });
+    const p = resumePlaidOAuth();
+    await vi.waitFor(() => expect(open).toHaveBeenCalled());
+    opts.onSuccess("public", {});
+    expect(await p).toBe(true);
+    expect(reload).toHaveBeenCalled();
+    expect(location.hash).toBe("#setup/connections");
   });
 
   it("shows the error when it can't resume", async () => {
@@ -136,31 +147,57 @@ describe("resumePlaidOAuth", () => {
 });
 
 describe("connectPlaid", () => {
-  it("stays on Connections after connecting a bank", async () => {
+  it("opens Settings → Accounts after connecting a bank, where its accounts wait", async () => {
     location.hash = "#setup/connections";
     vi.mocked(api).mockResolvedValue({ link_token: "tok-1" });
     const p = connectPlaid("bank");
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     opts.onSuccess("public", {});
     await p;
-    expect(location.hash).toBe("#setup/connections");
-    expect(reload).toHaveBeenCalled();
+    expect(location.hash).toBe("#setup/accounts");
   });
 
-  it("stays put after connecting an investment account, and when Link is closed", async () => {
-    location.hash = "#setup/connections";
+  it("reloads Accounts when connecting from there, and stays put when Link is closed", async () => {
+    location.hash = "#setup/accounts";
     vi.mocked(api).mockResolvedValue({ link_token: "tok-1" });
     const inv = connectPlaid("investments");
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     opts.onSuccess("public", {});
     await inv;
-    expect(location.hash).toBe("#setup/connections");
+    expect(location.hash).toBe("#setup/accounts");
+    expect(reload).toHaveBeenCalled();
+    location.hash = "#setup/connections";
     open.mockClear(); vi.mocked(reload).mockClear();
     const closed = connectPlaid("bank");
     await vi.waitFor(() => expect(open).toHaveBeenCalled());
     opts.onExit(null, {});
     await closed;
     expect(location.hash).toBe("#setup/connections");
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("addPlaidAccounts", () => {
+  it("adds each as its own account, then says how many and reloads once", async () => {
+    vi.mocked(api).mockResolvedValue({ ok: true });
+    expect(await addPlaidAccounts(["a", "b", "c"])).toBe(3);
+    expect(vi.mocked(api).mock.calls.filter(([p]) => p === "/api/plaid/match").map(([, o]) => (o as { body: unknown }).body))
+      .toEqual(["a", "b", "c"].map((id) => ({ plaid_account_id: id, target: "new" })));
+    expect(toast.success).toHaveBeenCalledWith("Added 3 accounts");
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("stops at one that fails and says how far it got", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ ok: true }).mockRejectedValueOnce(new Error("Plaid didn’t answer"));
+    expect(await addPlaidAccounts(["a", "b", "c"])).toBe(1);
+    expect(toast.error).toHaveBeenCalledWith("Added 1 of 3: Plaid didn’t answer");
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the page as it was when none could be added", async () => {
+    vi.mocked(api).mockRejectedValueOnce(new Error("Nope"));
+    expect(await addPlaidAccounts(["a"])).toBe(0);
+    expect(toast.error).toHaveBeenCalledWith("Nope");
     expect(reload).not.toHaveBeenCalled();
   });
 });

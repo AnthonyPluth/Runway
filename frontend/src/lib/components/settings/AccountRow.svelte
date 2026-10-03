@@ -25,6 +25,7 @@
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { fmt, fmtDate, fmtDateTime, nb, plural } from "$lib/format";
   import { accountName } from "$lib/types";
+  import { undoable } from "$lib/undo";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
   import { toast } from "svelte-sonner";
@@ -39,9 +40,12 @@
   import type { AccountRemoval, PlaidStatus, SettingsAccount } from "./types";
   import { checkCls, fieldCls, inputCls, linkCls, rowCls, selectCls, warnText } from "./ui";
 
-  // One account: a compact line (name, where it syncs from, what's notable, balance) that opens into its settings, each saved as you go.
-  let { a, cash, byName, plaid = null, mine = [] }: {
+  // One account: a compact line (name, where it syncs from, what's notable, balance) that opens into its settings, each
+  // saved as you go, under a row of actions (use it for the forecast, rename, hide). Hiding one tells the list
+  // (`onhidden`), which moves it to the hidden ones without loading the page again.
+  let { a, cash, byName, plaid = null, mine = [], onhidden }: {
     a: SettingsAccount; cash: SettingsAccount[]; byName: Record<string, string>; plaid?: PlaidStatus | null; mine?: SettingsAccount[];
+    onhidden?: (id: string, hidden: boolean) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -58,8 +62,8 @@
   let hidden = $state(!!init.hidden);
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
-  let rate = $state(init.loan?.set_rate != null ? String(init.loan.set_rate) : "");
-  let payment = $state(init.loan?.set_payment != null ? String(init.loan.set_payment) : "");
+  let rate = $state<number | null>(init.loan?.set_rate ?? null);
+  let payment = $state<number | null>(init.loan?.set_payment ?? null);
   let changingType = $state(false);
   let open = $state(openAccounts.has(init.id));
 
@@ -70,7 +74,7 @@
   const byPayoff = $derived(!!loan && loan.source === "plaid" && !loan.plaid_payment && loan.payment != null && loan.set_payment == null);
   const dollars = (n: number) => Math.round(n).toLocaleString("en-US");
   const hint = $derived(byPayoff ? `${dollars(loan!.payment!)} to pay it off by ${fmtDate(loan!.maturity!, { month: "short", day: "numeric", year: "numeric" })}`
-    : loan?.inferred_payment ? `${dollars(loan.inferred_payment)} from recent payments` : "e.g. 1,850");
+    : loan?.inferred_payment ? `${dollars(loan.inferred_payment)} from recent payments` : "");
   const hintTitle = $derived(byPayoff ? "Left empty, it’s the payment that pays the loan off by the date the lender gives, through Plaid"
     : "Left empty, it’s worked out from the payments into this account lately");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
@@ -102,14 +106,16 @@
     return isNaN(d.getTime()) ? t : fmtDateTime(d);
   });
 
-  // The line under the name: "primary · Alex · paid from Checking · via Plaid", with what needs a look in orange.
-  // Another checking or savings account offers "Use for the forecast" there instead of "primary". With no choice made,
-  // a lone checking account is the one the forecast uses.
-  const primary = $derived(a.id === app.state?.primary_account
+  // The line under the name: "Forecast · Alex · paid from Checking · via Plaid", with what needs a look in orange.
+  // "Forecast" marks the forecast account; another checking or savings account offers "Use for the forecast" among its
+  // actions. With no choice made, a lone checking account is the one the forecast uses.
+  const forecast = $derived(a.id === app.state?.primary_account
     || (!app.state?.primary_account && a.kind === "checking" && cash.filter((c) => c.kind === "checking" && !c.hidden).length === 1));
+  const canForecast = $derived((a.kind === "checking" || a.kind === "savings") && !hidden && !forecast);
+  const label = $derived(name.trim() || a.name);
   const summary = $derived.by(() => {
-    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean; primary?: boolean }[] = [];
-    if (primary) bits.push({ text: "primary", tag: true });
+    const bits: { text: string; warn?: boolean; tag?: boolean; title?: string; link?: boolean }[] = [];
+    if (forecast) bits.push({ text: "Forecast", tag: true, title: "The forecast account: Overview forecasts its balance" });
     if (a.owner) bits.push({ text: a.owner });
     if (a.kind === "credit") {
       bits.push(a.pay_from ? { text: `paid from ${byName[a.pay_from] || "?"}` } : { text: "no paying account", warn: true });
@@ -124,19 +130,35 @@
     }
     if (a.networth_hidden) bits.push({ text: "not in net worth", title: "Left out of the Net worth page; still counted everywhere else" });
     bits.push({ text: source, title: a.provider === "plaid" || own ? "Balances and transactions come from Plaid" : "Balances and transactions come from SimpleFIN" });
-    if ((a.kind === "checking" || a.kind === "savings") && !a.hidden && !primary)
-      bits.push({ text: "Use for the forecast", primary: true });
     return bits;
   });
 
   // The same setting as the account picker in Overview's forecast settings.
-  async function makePrimary(e: Event) {
-    e.preventDefault(); e.stopPropagation();
+  async function useForForecast() {
     try {
       await api("/api/settings", { method: "POST", body: { primary_account: a.id } });
-      toast.success(`Overview now forecasts ${name.trim() || a.name}`);
+      toast.success(`${label} is now the forecast account`);
       await refreshState();
     } catch (err) { toast.error((err as Error).message); }
+  }
+
+  function rename() {
+    const box = document.getElementById(`name-${a.id}`) as HTMLInputElement | null;
+    box?.focus(); box?.select();
+  }
+
+  // Hiding (or showing again) saves just that, then the list moves the row without redrawing the page; hiding offers Undo.
+  const setHiddenOnServer = (on: boolean) => api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body: { hidden: on ? 1 : 0 } });
+  async function setHidden(on: boolean) {
+    try { await setHiddenOnServer(on); }
+    catch (err) { toast.error((err as Error).message); return; }
+    hidden = on;
+    openAccounts.delete(a.id);
+    const id = a.id, what = label, moved = onhidden;
+    const done = (v: boolean) => { if (moved) { moved(id, v); Promise.resolve().then(() => refreshState()).catch(() => {}); } else reload(); };
+    done(on);
+    if (on) undoable(`${what} hidden`, async () => { await setHiddenOnServer(false); done(false); });
+    else toast.success(`${what} is shown again`);
   }
 
   function toggled(e: Event) {
@@ -159,8 +181,8 @@
   // recent payments).
   async function saveLoan() {
     const body: Record<string, unknown> = {};
-    if (!loan?.plaid) body.interest_rate = rate;
-    if (!loan?.plaid_payment) body.monthly_payment = payment;
+    if (!loan?.plaid) body.interest_rate = rate ?? "";
+    if (!loan?.plaid_payment) body.monthly_payment = payment ?? "";
     await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
   }
 
@@ -193,7 +215,9 @@
     else { open = true; openAccounts.add(a.id); }
   });
 
-  // Deleting the account: the dialog says what goes with it (asked when it opens).
+  // Deleting the account: the dialog says what goes with it (asked when it opens). One with more transactions than this
+  // asks for its name to be typed.
+  const TYPE_ABOVE = 50;
   let removing = $state(false);
   let removal = $state<AccountRemoval | null>(null);
   async function askRemove() {
@@ -205,11 +229,14 @@
   async function remove() {
     try {
       await api(`/api/accounts/${encodeURIComponent(a.id)}/remove`, { method: "POST" });
-      toast.success(`${name.trim() || a.name} deleted`);
+      toast.success(`${label} deleted`);
       openAccounts.delete(a.id);
       reload();
     } catch (err) { toast.error((err as Error).message); return false; }
   }
+  // Money and rates look alike everywhere here: "$" before the figure, "%" after, commas while you're elsewhere.
+  const prefix = "pointer-events-none absolute top-[1.125rem] left-3 -translate-y-1/2 text-sm text-muted-foreground";
+  const suffix = "pointer-events-none absolute top-[1.125rem] right-3 -translate-y-1/2 text-sm text-muted-foreground";
   let linking = $state("");
   async function linkTo(e: Event) {
     const el = e.currentTarget as HTMLSelectElement;
@@ -225,20 +252,25 @@
 <details class="group border-b last:border-b-0" {open} ontoggle={toggled}>
   <summary class="flex cursor-pointer list-none items-center gap-3 rounded-lg px-1 py-3 hover:bg-muted/50 [&::-webkit-details-marker]:hidden">
     <BankIcon id={a.id} />
+    <!-- On a phone the name may take two lines and the line under it wraps between words; the balance stays on one. -->
     <span class="flex min-w-0 flex-1 flex-col">
-      <span class="truncate font-medium">{name.trim() || a.name}</span>
-      <span class="text-xs text-muted-foreground [overflow-wrap:anywhere]">
-        {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary">{bit.text}</Badge>{:else if bit.link}<button
-          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openStatement}>{bit.text}</button>{:else if bit.primary}<button
-          type="button" class="font-medium text-primary" onclick={makePrimary}>{bit.text}</button>{:else}<span
-          class={bit.warn ? warnText : ""} title={bit.title}>{nb(bit.text)}</span>{/if}{/each}
+      <span class="line-clamp-2 font-medium break-words">{label}</span>
+      <span class="text-xs text-muted-foreground [overflow-wrap:break-word]">
+        {#each summary as bit, i (i)}{#if i}{" · "}{/if}{#if bit.tag}<Badge variant="secondary" title={bit.title}>{bit.text}</Badge>{:else if bit.link}<button
+          type="button" class="font-medium text-foreground underline underline-offset-4" onclick={openStatement}>{bit.text}</button>{:else}<span
+          class={bit.warn ? warnText : ""} title={bit.title}>{bit.text}</span>{/if}{/each}
       </span>
     </span>
-    <span class="shrink-0 tabular-nums">{fmt(a.balance)}</span>
+    <span class="shrink-0 whitespace-nowrap tabular-nums">{fmt(a.balance)}</span>
     <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
   </summary>
 
   <div class="grid gap-4 pb-4 pl-1 pt-1 sm:grid-cols-2 sm:pl-10 lg:grid-cols-3">
+    <div class="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-3" role="group" aria-label="Account actions">
+      {#if canForecast}<Button size="sm" onclick={useForForecast}>Use for the forecast</Button>{/if}
+      <Button variant="outline" size="sm" onclick={rename}>Rename</Button>
+      <Button variant="outline" size="sm" onclick={() => setHidden(!hidden)}>{hidden ? "Show again" : "Hide"}</Button>
+    </div>
     <div class={`${fieldCls} sm:col-span-2 lg:col-span-3`}>
       <label for={`name-${a.id}`}>Name</label>
       <span class="flex items-center gap-2 sm:max-w-md">
@@ -272,15 +304,22 @@
       </label>
       {#if payMode === "fixed"}
         <label class={fieldCls}>Amount each statement
-          <input type="number" inputmode="decimal" min="0" step="0.01" class={inputCls} bind:value={payAmount} {@attach commas} placeholder="$" use:autosave={() => save(true)} />
+          <span class="relative">
+            <span class={prefix} aria-hidden="true">$</span>
+            <input type="number" inputmode="decimal" min="0" step="0.01" class={`${inputCls} w-full pl-6`} bind:value={payAmount} {@attach commas}
+              use:autosave={() => save(true)} />
+          </span>
         </label>
       {/if}
       {#if payMode !== "full"}
         <!-- Yours wins; without one, the issuer's purchase APR (through Plaid) is used, and shown as the placeholder. -->
         <div class={fieldCls} title="For the interest on what carries over; without one, the forecast leaves interest out">
-          <label for={`apr-${a.id}`}>APR (%)</label>
-          <input id={`apr-${a.id}`} type="number" inputmode="decimal" min="0" max="100" step="0.01" class={inputCls} bind:value={apr}
-            placeholder={a.issuer_apr != null ? String(a.issuer_apr) : undefined} use:autosave={() => save(false)} />
+          <label for={`apr-${a.id}`}>APR</label>
+          <span class="relative">
+            <input id={`apr-${a.id}`} type="number" inputmode="decimal" min="0" max="100" step="0.01" class={`${inputCls} w-full pr-7`} bind:value={apr}
+              placeholder={a.issuer_apr != null ? String(a.issuer_apr) : undefined} use:autosave={() => save(false)} />
+            <span class={suffix} aria-hidden="true">%</span>
+          </span>
           {#if apr == null && a.issuer_apr != null}<span class="text-xs">{a.issuer_apr}% from the issuer</span>{/if}
         </div>
       {/if}
@@ -294,8 +333,9 @@
       {:else}
         <label class={fieldCls} title="The loan’s annual interest rate. With it, Net worth pays the loan down between balances and the retirement planner works out what’s still owed when you sell.">Interest rate
           <span class="relative">
-            <input class={`${inputCls} w-full pr-7`} inputmode="decimal" bind:value={rate} placeholder="e.g. 6.25" use:autosave={saveLoan} />
-            <span class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs" aria-hidden="true">%</span>
+            <input type="number" inputmode="decimal" min="0" max="30" step="0.001" class={`${inputCls} w-full pr-7`} bind:value={rate}
+              placeholder="6.25" use:autosave={saveLoan} />
+            <span class={suffix} aria-hidden="true">%</span>
           </span>
         </label>
       {/if}
@@ -306,8 +346,9 @@
       {:else}
         <label class={fieldCls} title={hintTitle}>Monthly payment
           <span class="relative">
-            <span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-xs" aria-hidden="true">$</span>
-            <input class={`${inputCls} w-full pl-6`} inputmode="decimal" bind:value={payment} placeholder={hint} use:autosave={saveLoan} />
+            <span class={prefix} aria-hidden="true">$</span>
+            <input type="number" inputmode="decimal" min="0" step="0.01" class={`${inputCls} w-full pl-6`} bind:value={payment} {@attach commas}
+              placeholder={hint} use:autosave={saveLoan} />
           </span>
         </label>
       {/if}
@@ -368,7 +409,6 @@
       {/if}
       <label class={checkCls} title="Off leaves this account out of the Net worth page; it still shows everywhere else">
         <input type="checkbox" bind:checked={counted} use:autosave={() => save(true)} /> Count in net worth</label>
-      <label class={checkCls}><input type="checkbox" bind:checked={hidden} use:autosave={() => save(true)} /> Hide this account</label>
     </section>
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:col-span-2 lg:col-span-3">
       <span class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
@@ -389,9 +429,11 @@
   </div>
 </details>
 
-<ConfirmDialog bind:open={removing} title={`Delete ${name.trim() || a.name}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive onconfirm={remove}>
+<!-- Waits for the count of what goes with it; with a long history, for the account's name typed too. -->
+<ConfirmDialog bind:open={removing} title={`Delete ${label}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive onconfirm={remove}
+  disabled={!removal} typeToConfirm={removal && removal.transactions > TYPE_ABOVE ? label : undefined}>
   {#snippet description()}
-    <p>Deletes the account and everything Runway keeps for it. This can’t be undone; only a backup has it.</p>
+    <p>Deletes the account and everything Runway keeps for it:</p>
     {#if removal}
       <ul class="list-disc space-y-1 pl-5">
         <li>{removal.transactions ? `${plural(removal.transactions, "transaction")}, with their categories and splits` : "No transactions"}</li>
@@ -402,7 +444,7 @@
         <li>Budgets, cards and loans that point at it let go of it.</li>
       </ul>
     {:else}<p>Counting what goes with it…</p>{/if}
-    <p>It stays deleted: {removal?.plaid ? "SimpleFIN and Plaid leave" : "syncs leave"} it out until you restore it, at the bottom of Settings → Accounts.</p>
+    <p>{removal?.plaid ? "SimpleFIN and Plaid leave" : "Syncs leave"} it out until you restore it from the bottom of this list, which brings back the account but not what was deleted with it.</p>
     <p><a class={linkCls} href="#setup/advanced" onclick={() => (removing = false)}>Download a backup first</a></p>
   {/snippet}
 </ConfirmDialog>

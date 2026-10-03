@@ -69,6 +69,9 @@ transactions = Table(
     Column('is_split', Integer, server_default=text('0'), doc='split across categories: the parts are in tx_splits, and they, not this row, count'),
     Column('merchant_id', Text, doc='the merchant as Plaid named it (merchants.id)'),
     Column('recurring_linked_by', Text, doc="how it got its recurring_id: 'you' | 'auto' (NULL = not known, from before this was kept)"),
+    Column('notes', Text, doc='your note on it'),
+    Column('bank_posted', Text, doc="the bank's date when you changed posted (NULL = not changed); a sync updates this, not posted"),
+    Column('bank_amount', Float, doc="the bank's amount when you changed amount (NULL = not changed); a sync updates this, not amount"),
 )
 
 merchants = Table(

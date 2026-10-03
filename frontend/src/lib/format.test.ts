@@ -136,6 +136,8 @@ describe("pct", () => {
   it("formats a share as a percentage", () => {
     expect(pct(0)).toBe("0%");
     expect(pct(0.001)).toBe("<1%");
+    expect(pct(-0.1234)).toBe("−12%");
+    expect(pct(-0.001)).toBe("−<1%");
     expect(pct(0.004)).toBe("<1%");
     expect(pct(0.005)).toBe("1%");
     expect(pct(0.1)).toBe("10%");

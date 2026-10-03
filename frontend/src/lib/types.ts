@@ -28,6 +28,9 @@ export interface AppState {
   has_api_key?: boolean;
   llm_model?: string;
   card_ai_model?: string;
+  /** The models an empty model field stands for. */
+  llm_model_default?: string;
+  card_ai_model_default?: string;
   /** When the banks last synced without an error, ISO with its UTC offset. */
   last_sync_ok?: string | null;
   last_log?: SyncLog | null;

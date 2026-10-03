@@ -30,7 +30,13 @@ describe("Reports page", () => {
   it("shows the report once a bank is connected", async () => {
     app.state = { connected: true };
     render(Reports);
-    expect(await screen.findByText(/No transactions in/)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing in/)).toBeInTheDocument();
     expect(screen.queryByText("Connect a bank to see where your money goes")).not.toBeInTheDocument();
+  });
+
+  it("names the five reports short enough for a phone's tab track", () => {
+    app.state = { connected: false };
+    render(Reports);
+    expect(screen.getAllByRole("link").map((a) => a.textContent!.trim()).slice(0, 5)).toEqual(["Cash flow", "Over time", "Merchants", "Income", "Breakdown"]);
   });
 });

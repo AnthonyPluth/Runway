@@ -13,6 +13,7 @@ from ... import carta_web, categorize, db, monitoring, retail
 from ... import settings_keys as sk
 from ...models import RetailCharge
 from ..common import ApiError, _current
+from . import transactions
 
 
 def api_retail(conn, _q, _b):
@@ -55,16 +56,38 @@ def api_retail_order(conn, _q, _b, oid):
         raise ApiError(str(e), 404) from e
 
 
+def _item_id(item_id) -> int:
+    try:
+        return int(item_id)
+    except ValueError:
+        raise ApiError("Item not found", 404) from None
+
+
 def api_retail_item(conn, _q, body, item_id):
-    """Pick an item's category, or accept the AI's proposed new one (`new_category`: {name, parent}): it's created, then used."""
+    """Pick an item's category, or accept the AI's proposed new one (`new_category`: {name, parent}): it's created, then used.
+    Sends back what Undo needs (`was`: the items and memory it changes, and the transactions it re-splits), which
+    POST /api/retail/items/{id}/restore puts back."""
     category, created = body.get("category") or "", False
+    iid = _item_id(item_id)
+    state = retail.item_undo_state(conn, iid)
+    was = {**state, "tx": transactions.snapshot(conn, retail.item_transactions(conn, [i["id"] for i in state["items"]]), orders=True)}
     try:
         if body.get("new_category"):
             category, created = categorize.create_proposed(conn, body["new_category"])
-        return {**retail.set_item_category(conn, int(item_id), category, body.get("remember", True) is not False),
-                "category": category, "created": created}
+        return {**retail.set_item_category(conn, iid, category, body.get("remember", True) is not False),
+                "category": category, "created": created, "was": was}
     except (retail.RetailError, ValueError) as e:
         raise ApiError(str(e)) from e
+
+
+def api_retail_item_restore(conn, _q, body, _item_id):
+    """Undo a category picked for an item: the `was` its reply sent."""
+    if not isinstance(body.get("was"), dict):
+        raise ApiError("Nothing to put back")
+    retail.restore_item_state(conn, body["was"])
+    if isinstance(body["was"].get("tx"), list):
+        transactions.restore(conn, body["was"]["tx"])
+    return {"ok": True}
 
 
 def api_retail_suggest(conn, _q, _b, order_id):
@@ -75,8 +98,28 @@ def api_retail_suggest(conn, _q, _b, order_id):
         raise ApiError(str(e), 502) from e
 
 
+def _charge_was(conn, charge_id: str) -> dict:
+    """A charge's pairing and its transaction (with its order's items), as Undo puts them back (api_retail_charge_restore)."""
+    state = retail.charge_state(conn, charge_id)
+    if not state:
+        raise ApiError("Charge not found", 404)
+    return {"charge": state, "tx": transactions.snapshot(conn, [state["tx_id"]], orders=True) if state["tx_id"] else []}
+
+
 def api_retail_unlink(conn, _q, _b, charge_id):
+    was = _charge_was(conn, charge_id)
     retail.unlink(conn, charge_id)
+    return {"ok": True, "was": was}
+
+
+def api_retail_charge_restore(conn, _q, body, charge_id):
+    """Undo "Not this transaction" or "Split by items": the charge paired as it was, and its transaction as it was."""
+    was = body.get("was")
+    if not isinstance(was, dict) or not isinstance(was.get("charge"), dict) or was["charge"].get("id") != charge_id:
+        raise ApiError("Nothing to put back")
+    retail.restore_charge(conn, was["charge"])
+    if isinstance(was.get("tx"), list):
+        transactions.restore(conn, was["tx"])
     return {"ok": True}
 
 
@@ -88,8 +131,9 @@ def api_retail_link(conn, _q, body, charge_id):
 
 
 def api_retail_apply(conn, _q, _b, charge_id):
-    """Split this charge's transaction by its items even if you had categorized it yourself."""
-    return {"result": retail.apply(conn, charge_id, force=True)}
+    """Split this charge's transaction by its items even if you had categorized it yourself (with what Undo needs)."""
+    was = _charge_was(conn, charge_id)
+    return {"result": retail.apply(conn, charge_id, force=True), "was": was}
 
 
 def api_retail_candidates(conn, _q, _b, charge_id):
