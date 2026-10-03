@@ -3,7 +3,7 @@
   import { autosave } from "$lib/autosave";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { barWidth, fmt } from "$lib/format";
+  import { barWidth, fmt, pct as share } from "$lib/format";
   import { cn } from "$lib/utils";
   import { commas } from "$lib/commas";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -76,10 +76,11 @@
 {#snippet costBasis(x: Holding)}
             {#if x.is_cash || x.asset_class === "Not reported"}<span class="text-muted-foreground">—</span>
             {:else}
-              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border",
+              <!-- Looks editable without hovering (a dotted underline, and the pencil always there on a touch screen) -->
+              <button class={cn("group inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-transparent px-1.5 py-0.5 hover:border-border focus-visible:border-border max-md:min-h-10",
                 x.gain == null ? "text-[var(--nw-1)]" : "text-muted-foreground hover:text-foreground")} title="Edit cost basis"
                 aria-expanded={open === keyOf(x)} onclick={() => (open === keyOf(x) ? finish() : openEditor(x))}>
-                {x.gain == null ? "Add" : fmt(x.cost_basis)}
+                <span class="underline decoration-dotted decoration-from-font underline-offset-4">{x.gain == null ? "Add" : fmt(x.cost_basis)}</span>
                 {#if x.cost_manual}<Badge variant="secondary" class="px-1.5 py-0 text-[11px]">edited</Badge>{/if}
                 <Pencil class={cn("size-3", x.gain == null ? "opacity-70" : "opacity-70 hoverable:opacity-0 hoverable:group-hover:opacity-70 hoverable:group-focus-visible:opacity-70")} aria-hidden="true" />
               </button>
@@ -117,7 +118,7 @@
                 <div class="text-xs text-muted-foreground">{x.accounts.join(", ")}</div>
                 {#if narrow.on}
                 <div class="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                  {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{x.day_change != null ? ` · today ${signed(x.day_change)}` : ""} · {(x.allocation * 100).toFixed(1)}%
+                  {x.is_cash ? "Cash" : `${qty(x.quantity)} × ${fmt(x.price)}`}{x.day_change != null ? ` · today ${signed(x.day_change)}` : ""} · {share(x.allocation)}
                 </div>
                 <div>{@render costBasis(x)}</div>
                 {/if}
@@ -139,7 +140,7 @@
             {:else}<span class={gainCls(x.gain)}>{signed(x.gain)}</span><div class={cn("text-xs text-muted-foreground", gainCls(x.gain_pct))}>{pct(x.gain_pct)}</div>{/if}
           </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
-            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{(x.allocation * 100).toFixed(1)}%</span>
+            <span class="mr-2 inline-block h-1.5 w-14 overflow-hidden rounded-full bg-muted align-middle"><span class="block h-full rounded-full bg-[var(--nw-1)]" style:width={barWidth(x.allocation)}></span></span><span class="inline-block w-12">{share(x.allocation)}</span>
           </td>
           <td class="text-right tabular-nums max-[700px]:hidden">
             {#if !narrow.on}{@render costBasis(x)}{/if}
@@ -148,7 +149,8 @@
         {#if open === keyOf(x)}
           <tr class="bg-muted/40" data-editor>
             <td colspan="8" class="p-3">
-              <p class="text-sm" title="Your average if you bought at different prices. Runway multiplies it by the shares you hold. Leave a box empty to go back to what the institution reports."><b>Price paid per share for {x.ticker || x.name || ""}</b></p>
+              <p class="text-sm" title="Your average if you bought at different prices. Runway multiplies it by the shares you hold."><b>Price paid per share for {x.ticker || x.name || ""}</b></p>
+              <p class="text-xs text-muted-foreground">Leave it empty to go back to the institution’s figure</p>
               {#each x.lots as l, i (l.account_id)}
                 <div class="mt-3 flex flex-wrap items-end gap-3">
                   <label class="flex flex-col gap-1 text-sm">{l.account_name} · {qty(Number(l.quantity))} shares

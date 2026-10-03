@@ -7,16 +7,23 @@
   // crosshair readout of every line on the day you point at. `xs` are dates (YYYY-MM-DD), or ready-made labels
   // with `labels`. Days before `estimateUntil` are shaded: they're rebuilt from activity, not recorded. `mark` draws a
   // dashed vertical line at a (fractional) index into `xs`, with what comes after it shaded. `table`: the numbers as a
-  // table behind "Show as table" (true), only for screen readers ("sr"), or not at all (false).
-  let { xs, series, fmtY = String, fmtTip, height = 240, zero = false, labels = false, estimateUntil = null, table = true, mark = null }: {
+  // table behind "Show as table" (true), only for screen readers ("sr"), or not at all (false). `onpoint` hears which
+  // day the readout is on (null when it's off), so a headline can follow it.
+  // Narrower than 480px (a phone), the names leave the line ends for a key under the chart, giving the lines the room.
+  // With the keyboard, the arrow keys (and Home and End) step the readout along the days once the chart has focus.
+  let { xs, series, fmtY = String, fmtTip, height = 240, zero = false, labels = false, estimateUntil = null, table = true, mark = null, onpoint }: {
     xs: string[]; series: Series[]; fmtY?: (v: number) => string; fmtTip?: (v: number) => string; height?: number;
     zero?: boolean; labels?: boolean; estimateUntil?: string | null; table?: boolean | "sr"; mark?: { at: number; label: string } | null;
+    onpoint?: (i: number | null) => void;
   } = $props();
 
-  const COLOR = { "s-main": "var(--nw-1)", "s-alt": "var(--nw-2)", "s-muted": "var(--muted-foreground)" };
+  const COLOR: Record<string, string> = { "s-main": "var(--nw-1)", "s-alt": "var(--nw-2)", "s-muted": "var(--muted-foreground)", "s-4": "var(--nw-4)", "s-5": "var(--nw-5)", "s-6": "var(--nw-6)" };
   const ft = $derived(fmtTip ?? fmtY);
-  let width = $state(0);
-  const H = $derived(height), m = { top: 14, right: 110, bottom: 26, left: 56 };
+  let width = $state(0), wrapEl = $state<HTMLDivElement | null>(null);
+  const narrow = $derived(width > 0 && width < 480);
+  const H = $derived(height), m = $derived({ top: 14, right: narrow ? 16 : 110, bottom: 26, left: 56 });
+  /** A long name cut to fit beside the line's end ("Acme Robotics International" → "Acme Robotics…"). */
+  const short = (s: string, max = 15) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
   const W = $derived(Math.max(320, width));
   const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const n = $derived(xs.length);
@@ -37,7 +44,7 @@
 
   // About six evenly spaced labels along the bottom.
   const xTicks = $derived.by(() => {
-    const step = Math.max(1, Math.round((n - 1) / Math.max(1, Math.min(5, Math.floor(iw / 80)))));
+    const step = Math.max(1, Math.round((n - 1) / Math.max(1, Math.min(5, Math.floor(iw / (labels ? 100 : 80))))));
     const out: number[] = [];
     for (let i = 0; i < n; i += step) out.push(i);
     return out;
@@ -60,6 +67,7 @@
   const ends = $derived.by(() => {
     const out: { s: Series; xi: number; yv: number; dot: number }[] = [];
     for (const s of series) {
+      if (narrow) break;   // the key under the chart names them instead
       let li = -1;
       s.values.forEach((v, i) => { if (v != null) li = i; });
       if (li >= 0 && ok(s.values[li])) out.push({ s, xi: x(li), yv: y(s.values[li]!), dot: y(s.values[li]!) });
@@ -85,12 +93,42 @@
   let pointed = $state<number | null>(null), svgEl = $state<SVGSVGElement | null>(null), tipEl = $state<HTMLDivElement | null>(null);
   // The day the readout is on, while the chart still has it (a shorter one would leave it past the end).
   const hover = $derived(pointed != null && pointed < n ? pointed : null);
+  $effect(() => { onpoint?.(hover); });
   function move(clientX: number) {
     if (!svgEl) return;
     const r = svgEl.getBoundingClientRect();
     const px = ((clientX - r.left) / r.width) * W;
     pointed = Math.max(0, Math.min(n - 1, Math.round(((px - m.left) / iw) * (n - 1))));
   }
+  // The arrow keys step a day (a tenth of the chart with Shift), Home and End go to the ends, Escape puts it away.
+  function key(e: KeyboardEvent) {
+    const at = hover ?? n - 1, big = Math.max(1, Math.round(n / 10));
+    const to = e.key === "ArrowLeft" || e.key === "ArrowDown" ? at - (e.shiftKey ? big : 1)
+      : e.key === "ArrowRight" || e.key === "ArrowUp" ? at + (e.shiftKey ? big : 1)
+      : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (e.key === "Escape") { pointed = null; return; }
+    if (to == null) return;
+    e.preventDefault();
+    pointed = Math.max(0, Math.min(n - 1, to));
+  }
+  // A tap shows the readout and it stays when the finger lifts; a tap anywhere else puts it away.
+  $effect(() => {
+    if (hover == null) return;
+    const away = (e: PointerEvent) => { if (wrapEl && !wrapEl.contains(e.target as Node)) pointed = null; };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  });
+  const dayLabel = (i: number) => (labels ? xs[i] : fmtDate(xs[i], { month: "short", day: "numeric", year: "numeric" }));
+  // What screen readers hear: each line from its first day to its last, and the change ("Net worth: $5,000 on
+  // Sep 1, 2026 to $5,400 on Sep 30, 2026, up $400"). While stepping through, the day's figures.
+  const unsigned = (v: number) => ft(Math.abs(v)).replace(/^[+−-]/, "");
+  const summary = $derived(series.map((s) => {
+    const i0 = s.values.findIndex(ok), i1 = s.values.findLastIndex(ok);
+    if (i0 < 0) return `${s.name}: no data`;
+    const a = s.values[i0]!, b = s.values[i1]!, d = b - a;
+    return `${s.name}: ${ft(a)} on ${dayLabel(i0)} to ${ft(b)} on ${dayLabel(i1)}, ${d > 0 ? "up" : d < 0 ? "down" : "no change"}${d ? ` ${unsigned(d)}` : ""}`;
+  }).join("; "));
+  const readout = (i: number) => `${dayLabel(i)}: ${series.map((s) => `${s.name} ${s.values[i] == null ? "none" : ft(s.values[i]!)}`).join(", ")}`;
   const tipLeft = $derived.by(() => {
     if (hover == null || !svgEl) return 0;
     const r = svgEl.getBoundingClientRect(), tw = tipEl?.offsetWidth ?? 160;
@@ -103,23 +141,24 @@
     for (let i = n - 1; i >= 0; i -= step) out.push(i);
     return out.reverse();
   });
-  const name = $derived(series.map((s) => s.name).join(" and "));
 </script>
 
-<div class="relative" bind:clientWidth={width}>
+<div class="relative" bind:clientWidth={width} bind:this={wrapEl}>
   {#if n < 2}
     <p class="py-6 text-center text-sm text-muted-foreground">Nothing to chart yet.</p>
   {:else if !vals.length}
     <p class="py-6 text-center text-sm text-muted-foreground">No data for this period yet.</p>
   {:else}
-    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full select-none text-xs" role="img" aria-label={name}>
+    <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full rounded-md text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-ring"
+      role="slider" tabindex="0" aria-label={summary} aria-valuemin={0} aria-valuemax={n - 1} aria-valuenow={hover ?? n - 1}
+      aria-valuetext={readout(hover ?? n - 1)} onkeydown={key} onblur={() => (pointed = null)}>
       {#each ticks as t (t)}
         <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
         <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{fmtY(t)}</text>
       {/each}
       {#if zero && y0 < 0 && y1 > 0}<line x1={m.left} x2={W - m.right} y1={y(0)} y2={y(0)} stroke="var(--muted-foreground)" />{/if}
       {#each xTicks as i (i)}
-        <text x={x(i)} y={H - 6} text-anchor={i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{xLabel(i)}</text>
+        <text x={x(i)} y={H - 6} text-anchor={i === 0 ? "start" : x(i) > W - m.right - 30 ? "end" : "middle"} fill="var(--muted-foreground)">{xLabel(i)}</text>
       {/each}
       {#if estX != null}
         <rect x={m.left} y={m.top} width={Math.max(0, estX - m.left)} height={ih} fill="var(--muted-foreground)" opacity="0.08" />
@@ -137,7 +176,7 @@
       {/each}
       {#each ends as e, k (k)}
         <circle cx={e.xi} cy={e.dot} r="4" fill={COLOR[e.s.cls]} stroke="var(--card)" stroke-width="2" />
-        <text x={e.xi + 8} y={e.yv + 4} fill="var(--muted-foreground)">{e.s.name}</text>
+        <text x={e.xi + 8} y={e.yv + 4} fill="var(--muted-foreground)">{#if e.s.name.length > 15}<title>{e.s.name}</title>{/if}{short(e.s.name)}</text>
       {/each}
       {#if hover != null}
         <line x1={x(hover)} x2={x(hover)} y1={m.top} y2={m.top + ih} stroke="var(--muted-foreground)" />
@@ -149,6 +188,13 @@
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation"
         onmousemove={(e) => move(e.clientX)} onmouseleave={() => (pointed = null)} use:sideways={move} />
     </svg>
+    {#if narrow && series.length > 1}
+      <ul class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-hidden="true" data-testid="chart-legend">
+        {#each series as s, k (k)}
+          <li class="flex min-w-0 items-center gap-1.5"><i class="inline-block h-[3px] w-2.5 shrink-0 rounded-sm" style:background={COLOR[s.cls]}></i><span class="max-w-36 truncate" title={s.name}>{s.name}</span></li>
+        {/each}
+      </ul>
+    {/if}
     {#if hover != null}
       <div bind:this={tipEl} class="pointer-events-none absolute top-0 z-10 min-w-40 rounded-lg bg-popover px-3 py-2 text-xs shadow-lg ring-1 ring-border"
         style:left={`${tipLeft}px`}>
@@ -156,7 +202,7 @@
         {#each series as s, k (k)}
           {@const v = s.values[hover]}
           <div class="flex justify-between gap-4">
-            <span class="flex items-center gap-1.5"><i class="inline-block h-[3px] w-2.5 rounded-sm" style:background={COLOR[s.cls]}></i>{s.name}</span>
+            <span class="flex min-w-0 items-center gap-1.5"><i class="inline-block h-[3px] w-2.5 shrink-0 rounded-sm" style:background={COLOR[s.cls]}></i><span class="max-w-40 truncate">{s.name}</span></span>
             <span class="tabular-nums">{v == null ? "—" : ft(v)}</span>
           </div>
         {/each}
