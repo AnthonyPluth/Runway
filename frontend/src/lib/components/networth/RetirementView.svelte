@@ -1,17 +1,20 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import RetirementPlanner from "$lib/components/investments/RetirementPlanner.svelte";
-  import type { PlanData } from "$lib/components/investments/types";
+  import type { InvAccount, PlanData } from "$lib/components/investments/types";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
 
   // The Retirement tab of Net worth. The plan comes with the investments data (it starts from the portfolio's value and
   // history), which works without any investment accounts: the planner then starts from Runway's own figures.
-  let plan = $state.raw<PlanData | null>(null);
+  // `accounts`: how many investment accounts that starting value adds up (the ones Investments counts).
+  let plan = $state.raw<PlanData | null>(null), accounts = $state(0);
   let error = $state<string | null>(null);
   async function load() {
-    try { plan = (await api<{ plan: PlanData }>("/api/investments?period=1Y")).plan; error = null; }
-    catch (err) { error = (err as Error).message; }
+    try {
+      const r = await api<{ plan: PlanData; accounts?: InvAccount[] }>("/api/investments?period=1Y");
+      plan = r.plan; accounts = (r.accounts ?? []).filter((a) => !a.hidden && !a.duplicate_of).length; error = null;
+    } catch (err) { error = (err as Error).message; }
   }
   load();
 </script>
@@ -30,6 +33,6 @@
     <Card.Header>
       <Card.Title>Retirement planner</Card.Title>
     </Card.Header>
-    <Card.Content><RetirementPlanner data={plan} /></Card.Content>
+    <Card.Content><RetirementPlanner data={plan} {accounts} /></Card.Content>
   </Card.Root>
 {/if}
