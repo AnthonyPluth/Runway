@@ -8,6 +8,17 @@ export const fmt0 = (n: number | null | undefined) => money0.format(n ?? 0);
  * low (never "$4,821"); a negative low to the cent, as rounding it either way would misstate how far it dips. */
 export const fmt0Down = (n: number | null | undefined) => (n ?? 0) < 0 ? fmt(n) : money0.format(Math.floor(n ?? 0));
 
+/** A signed amount: "+$1,234.56" for money in, "−$1,234.56" (a real minus) for money out, "$0.00" for what rounds to nothing. */
+export function fmtSigned(n: number | null | undefined): string {
+  const c = Math.round((n ?? 0) * 100) / 100;
+  return c === 0 ? fmt(0) : (c > 0 ? "+" : "−") + fmt(Math.abs(c));
+}
+/** {@link fmtSigned} in whole dollars: "+$1,235", "−$40", "$0". */
+export function fmtSigned0(n: number | null | undefined): string {
+  const c = Math.round(n ?? 0);
+  return c === 0 ? fmt0(0) : (c > 0 ? "+" : "−") + fmt0(Math.abs(c));
+}
+
 /** "$1.2k", "−$350" for chart axes. */
 export function shortMoney(v: number): string {
   const a = Math.abs(v);
@@ -48,6 +59,11 @@ export function pct(share: number): string {
   if (share < 0.005) return "<1%";
   if (share >= 0.995 && share < 1) return ">99%";
   return `${Math.round(share * 100)}%`;
+}
+/** A change as a fraction (0.12 = up 12%) as a signed whole percentage: "+12%", "−87%", "0%" for what rounds to nothing. */
+export function pctSigned(delta: number): string {
+  const p = Math.round(Math.abs(delta) * 100);
+  return p === 0 ? "0%" : `${delta > 0 ? "+" : "−"}${p}%`;
 }
 /** A share (0–1) as a progress bar's CSS width, clamped to 0–100% and rounded to a tenth ("33.3%", "100%"). No share is an empty bar. */
 export function barWidth(share: number | null | undefined): string {

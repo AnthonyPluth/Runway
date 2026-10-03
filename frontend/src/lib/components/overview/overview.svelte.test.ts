@@ -142,14 +142,14 @@ describe("CardsTable", () => {
     expect(screen.getByText(/owes \$800\.00 now/)).toBeInTheDocument();
     expect(screen.getByText("about $700.00 a statement")).toHaveAttribute("title", expect.stringContaining("last 3 statements"));
     expect(screen.getByRole("button", { name: "$600.00" })).toBeInTheDocument();
-    expect(screen.getByText("due Mar 26")).not.toHaveClass("text-amber-400");
+    expect(screen.getByText("due Mar 26")).not.toHaveClass("text-warning");
     expect(screen.getByText(/min \$35\.00/)).toBeInTheDocument();
   });
 
   it("highlights a payment due within a week", () => {
     at("2026-03-22");
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
-    expect(screen.getByText("due Mar 26")).toHaveClass("text-amber-400");
+    expect(screen.getByText("due Mar 26")).toHaveClass("text-warning");
   });
 
   it("says Paid once nothing remains, and what's left after a part payment", () => {

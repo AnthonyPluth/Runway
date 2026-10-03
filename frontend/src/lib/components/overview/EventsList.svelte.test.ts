@@ -46,7 +46,7 @@ describe("EventsList", () => {
 
   it("shows income as a green plus amount", () => {
     show([ev({ name: "Pay", amount: 3000, kind: "recurring" })]);
-    expect(screen.getByRole("button", { name: "+$3,000.00" })).toHaveClass("text-emerald-500");
+    expect(screen.getByRole("button", { name: "+$3,000.00" })).toHaveClass("text-good");
   });
 
   describe("icon", () => {
@@ -262,7 +262,7 @@ describe("EventsList", () => {
     it("can't be edited when the item has no key (a card statement)", () => {
       show([ev({ key: undefined })]);
       expect(screen.queryByRole("button", { name: /1,500/ })).not.toBeInTheDocument();
-      expect(screen.getByText("-$1,500.00")).toBeInTheDocument();
+      expect(screen.getByText("−$1,500.00")).toBeInTheDocument();
     });
 
     it("resets an edited amount to the usual one", async () => {

@@ -101,7 +101,7 @@ describe("Sidebar", () => {
     render(Sidebar);
     const link = within(screen.getByRole("status")).getByRole("link", { name: "Synced · 1 bank needs attention" });
     expect(link).toHaveAttribute("href", "#setup/connections");
-    expect(link).toHaveClass("text-amber-500");
+    expect(link).toHaveClass("text-warning");
     expect(screen.getByText("Chase: log in again")).toHaveClass("truncate");
   });
 
@@ -128,7 +128,7 @@ describe("MobileNav", () => {
     unmount();
     app.state = state({ sync_warnings: ["Chase: log in again"] });
     render(MobileNav);
-    expect(screen.getByTestId("sync-dot")).toHaveClass("bg-amber-500");
+    expect(screen.getByTestId("sync-dot")).toHaveClass("bg-warning");
     const more = screen.getByRole("button", { name: "More, Synced · 1 bank needs attention" });
     await userEvent.click(more);
     const sheet = screen.getByRole("dialog", { name: "More pages" });

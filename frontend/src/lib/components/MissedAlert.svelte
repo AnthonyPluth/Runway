@@ -24,7 +24,7 @@
 <!-- A row of the Overview's Needs attention list. -->
 {#if !gone}
   <div class="cell">
-    <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+    <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
     <p class="min-w-0 flex-1 text-sm">
       <b class="font-medium">{m.name}</b>: {fmt(Math.abs(m.amount))} {m.amount > 0 ? "expected in" : "expected"} {fmtDate(m.date)} hasn't shown up in {m.account_name || "the account"}.
     </p>

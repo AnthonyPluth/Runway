@@ -6,7 +6,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { app } from "$lib/app.svelte";
-  import { fmt, fmtDate } from "$lib/format";
+  import { fmt, fmtDate, fmtSigned } from "$lib/format";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { RecurringItem } from "$lib/components/recurring/types";
@@ -129,7 +129,7 @@
       {/if}
       {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
         <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="pending" /><span class="hidden @sm/title:inline max-sm:inline">pending</span></Badge>{/if}
-      {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-amber-500/50 px-1.5 text-amber-500 @sm/title:px-2 max-sm:px-2">
+      {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-warning/50 px-1.5 text-warning @sm/title:px-2 max-sm:px-2">
         <Flag class="size-3 @sm/title:hidden max-sm:hidden" aria-label="review" /><span class="hidden @sm/title:inline max-sm:inline">review</span></Badge>{/if}
       {#if picking}
         <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
@@ -185,7 +185,7 @@
     {:else}
       <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
       <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-2 text-sm transition-colors",
-        t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
+        t.category ? "hover:bg-muted" : "border border-dashed border-warning/60 pl-2 text-warning hover:bg-warning/10",
         "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
         <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
@@ -205,9 +205,9 @@
   </div>
 
   <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-2 lg:col-start-6 lg:row-span-1",
-    (part?.amount ?? t.amount) > 0 ? "font-semibold text-emerald-500" : "font-medium")}>
-    {#if part}{fmt(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
-    {:else}{fmt(t.amount)}{/if}</div>
+    (part?.amount ?? t.amount) > 0 ? "font-semibold text-good" : "font-medium")}>
+    {#if part}{fmtSigned(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
+    {:else}{fmtSigned(t.amount)}{/if}</div>
 
   <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer justify-self-end items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
     aria-expanded={open} aria-controls={`detail-${t.id}`} aria-label={`Details for ${name}`} title={open ? "Hide the details" : "Show the details"} onclick={() => (open = !open)}>

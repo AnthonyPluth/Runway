@@ -49,7 +49,7 @@ const daysBetween = (t: Date, now: Date) =>
 
 /** The dot beside the sync line, by tone. */
 export const syncDot = (tone: SyncTone) =>
-  ({ "": "bg-emerald-500", busy: "animate-pulse bg-muted-foreground", warn: "bg-amber-500", bad: "bg-destructive" })[tone];
+  ({ "": "bg-good", busy: "animate-pulse bg-muted-foreground", warn: "bg-warning", bad: "bg-destructive" })[tone];
 
 /** How fresh the data is; sync runs on its own (daily, and when you open Runway). A sync that worked can still leave a
  * bank needing you (an expired login), and a good sync days ago isn't "up to date": both show amber. */

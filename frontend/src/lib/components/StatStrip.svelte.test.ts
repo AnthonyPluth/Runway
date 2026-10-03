@@ -23,14 +23,24 @@ describe("StatStrip", () => {
 
   it("colors a good value without a dot", () => {
     const { container } = render(StatStrip, { items: [{ label: "Left", value: "$9", tone: "good" }] });
-    expect(screen.getByText("$9")).toHaveClass("text-emerald-400");
+    expect(screen.getByText("$9")).toHaveClass("text-good");
     expect(container.querySelector("dt > span[aria-hidden]")).toBeNull();
+  });
+
+  it("colors a gain or a loss with up and down, with no dot and no tinted edge", () => {
+    const { container } = render(StatStrip, { items: [{ label: "Gain", value: "+$12", tone: "up", sub: "+4%", subTone: "up" }, { label: "Loss", value: "−$7", tone: "down", sub: "−2%", subTone: "down" }] });
+    expect(screen.getByText("+$12")).toHaveClass("text-good");
+    expect(screen.getByText("+4%")).toHaveClass("text-good");
+    expect(screen.getByText("−$7")).toHaveClass("text-loss");
+    expect(screen.getByText("−2%")).toHaveClass("text-loss");
+    expect(container.querySelector("dt > span[aria-hidden]")).toBeNull();
+    for (const tile of container.querySelectorAll("dl > div")) expect(tile).toHaveClass("border-[var(--edge)]");
   });
 
   it("colors just the note with subTone, leaving the value plain", () => {
     render(StatStrip, { items: [{ label: "In 90 days", value: "$20,000", sub: "+$1,500", subTone: "good" }, { label: "Owed", value: "$10", sub: "1 card" }] });
-    expect(screen.getByText("+$1,500")).toHaveClass("text-emerald-400");
-    expect(screen.getByText("$20,000")).not.toHaveClass("text-emerald-400");
+    expect(screen.getByText("+$1,500")).toHaveClass("text-good");
+    expect(screen.getByText("$20,000")).not.toHaveClass("text-good");
     expect(screen.getByText("1 card")).toHaveClass("text-muted-foreground");
   });
 

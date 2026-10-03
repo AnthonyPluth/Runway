@@ -36,7 +36,7 @@ describe("TxTable", () => {
   it("groups by day, newest first, with each day's net", () => {
     setup();
     const days = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent!.replace(/\u00a0/g, " "));
-    expect(days).toEqual(["Tuesday, Mar 10 -$15.00", "Monday, Mar 9 $100.00", "Wed, Dec 31, 2025 -$1.00"]);
+    expect(days).toEqual(["Tuesday, Mar 10 −$15.00", "Monday, Mar 9 +$100.00", "Wed, Dec 31, 2025 −$1.00"]);
   });
 
   it("leaves out a day's net when it comes to nothing", () => {
@@ -60,7 +60,7 @@ describe("TxTable", () => {
       tx({ id: "s", amount: -100, payee: "Split", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Shopping", amount: -40 }],
         match: { amount: -60, categories: ["Groceries"] } }),
     ], total: 1 });
-    expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/-\$60\.00$/);
+    expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/−\$60\.00$/);
   });
 
   it("shows no count of its own, which the page heading and Show more already give", () => {
@@ -77,7 +77,7 @@ describe("TxTable", () => {
       await userEvent.click(tick("Charlie"));
       const bar = screen.getByRole("region", { name: "Change the selected transactions" });
       expect(bar).toHaveTextContent("2 selected");
-      expect(bar).toHaveTextContent("$90.00");
+      expect(bar).toHaveTextContent("+$90.00");
     });
 
     it("selects the whole range on shift-click", async () => {

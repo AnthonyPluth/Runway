@@ -17,7 +17,7 @@
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import Group from "$lib/components/ui/group/Group.svelte";
   import { showTransactions } from "$lib/filters.svelte";
-  import { barWidth, fmt, fmt0, fmtDate, monthShort, thisMonth } from "$lib/format";
+  import { barWidth, fmt, fmt0, fmtDate, fmtSigned, monthShort, thisMonth } from "$lib/format";
   import { cn } from "$lib/utils";
 
   const month = thisMonth();
@@ -54,7 +54,7 @@
       <div class="px-4 pt-3 pb-2">
         <div class="text-[13px] text-muted-foreground">Spent so far in {monthShort(pace.month)}</div>
         <div class="text-[28px] font-semibold tracking-tight tabular-nums">{fmt(pace.spent)}</div>
-        <p class={cn("text-[13px] font-medium tabular-nums", Math.abs(diff) < 1 ? "text-muted-foreground" : diff > 0 ? "text-amber-400" : "text-emerald-400")}>
+        <p class={cn("text-[13px] font-medium tabular-nums", Math.abs(diff) < 1 ? "text-muted-foreground" : diff > 0 ? "text-warning" : "text-good")}>
           {#if Math.abs(diff) < 1}About the same as this point in {monthShort(pace.prev_month)}
           {:else}{diff > 0 ? "▲" : "▼"} {fmt0(Math.abs(diff))} {diff > 0 ? "more" : "less"} than this point in {monthShort(pace.prev_month)}{/if}
           <span class="font-normal text-muted-foreground"> · {monthShort(pace.prev_month)} total {fmt0(pace.last_total)}</span>
@@ -98,7 +98,7 @@
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
             <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>
           </span>
-          <span class={cn("text-[15px] tabular-nums", t.amount > 0 && "text-emerald-400")}>{fmt(t.amount)}</span>
+          <span class={cn("text-[15px] tabular-nums", t.amount > 0 && "text-good")}>{fmtSigned(t.amount)}</span>
         </div>
       {/each}
     </Group>

@@ -29,7 +29,7 @@ describe("TxRow", () => {
   it("shows the merchant, the formatted amount and the category", () => {
     render(TxRow, props(tx()));
     expect(within(row()).getByText("Blue Bottle")).toBeInTheDocument();
-    expect(within(row()).getByText("-$12.50")).toBeInTheDocument();
+    expect(within(row()).getByText("−$12.50")).toBeInTheDocument();
     expect(within(row()).getByText("Coffee")).toBeInTheDocument();
   });
 
@@ -37,7 +37,7 @@ describe("TxRow", () => {
     const p = props(tx({ amount: -100, is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Coffee", amount: -40 }],
       match: { amount: -60, categories: ["Groceries"] } }), { family: ["Groceries"] });
     render(TxRow, p);
-    expect(within(row()).getByText("-$60.00")).toBeInTheDocument();
+    expect(within(row()).getByText("−$60.00")).toBeInTheDocument();
     expect(within(row()).getByText("of $100.00")).toBeInTheDocument();
     expect(within(row()).queryByText(/\$40\.00/)).not.toBeInTheDocument();   // the other part isn't shown
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for the Groceries part of Blue Bottle" }), "Coffee");
@@ -59,10 +59,10 @@ describe("TxRow", () => {
 
   it("makes money coming in green and bold, and leaves spending plain", () => {
     const { unmount } = render(TxRow, props(tx({ amount: 2500 })));
-    expect(screen.getByText("$2,500.00")).toHaveClass("text-emerald-500", "font-semibold");
+    expect(screen.getByText("+$2,500.00")).toHaveClass("text-good", "font-semibold");
     unmount();
     render(TxRow, props(tx()));
-    expect(screen.getByText("-$12.50")).not.toHaveClass("text-emerald-500");
+    expect(screen.getByText("−$12.50")).not.toHaveClass("text-good");
   });
 
   it("falls back to the description when there's no merchant name", () => {

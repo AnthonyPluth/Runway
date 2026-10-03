@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { barWidth, fmt, fmt0, fmt0Down, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
+import { barWidth, fmt, fmt0, fmt0Down, fmtSigned, fmtSigned0, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, pctSigned, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
@@ -21,6 +21,18 @@ describe("money", () => {
     expect(fmt0Down(-12.2)).toBe("-$12.20");
     expect(fmt0Down(1000)).toBe("$1,000");
     expect(fmt0Down(null)).toBe("$0");
+  });
+  it("signs an amount with a plus for money in and a real minus for money out", () => {
+    expect(fmtSigned(1234.56)).toBe("+$1,234.56");
+    expect(fmtSigned(-1234.56)).toBe("−$1,234.56");
+    expect(fmtSigned(0)).toBe("$0.00");
+    expect(fmtSigned(-0.004)).toBe("$0.00");
+    expect(fmtSigned(0.005)).toBe("+$0.01");
+    expect(fmtSigned(null)).toBe("$0.00");
+    expect(fmtSigned0(1234.5)).toBe("+$1,235");
+    expect(fmtSigned0(-40.2)).toBe("−$40");
+    expect(fmtSigned0(-0.4)).toBe("$0");
+    expect(fmtSigned0(undefined)).toBe("$0");
   });
   it("shortens amounts for chart axes", () => {
     expect(shortMoney(0)).toBe("$0");
@@ -107,6 +119,16 @@ describe("plural", () => {
     expect(plural(1, "item")).toBe("1 item");
     expect(plural(0, "item")).toBe("0 items");
     expect(plural(3, "item")).toBe("3 items");
+  });
+});
+
+describe("pctSigned", () => {
+  it("signs a change with a plus or a real minus, and none when it rounds to nothing", () => {
+    expect(pctSigned(0.12)).toBe("+12%");
+    expect(pctSigned(-0.871)).toBe("−87%");
+    expect(pctSigned(0)).toBe("0%");
+    expect(pctSigned(-0.004)).toBe("0%");
+    expect(pctSigned(1.5)).toBe("+150%");
   });
 });
 

@@ -43,7 +43,7 @@
   <Card.Content>
     <div class="mb-4 flex items-center gap-3">
       <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={4} aria-valuenow={doneCount} aria-label="Setup progress">
-        <div class="h-full rounded-full bg-emerald-500 transition-[width] duration-500" style:width={barWidth(doneCount / 4)}></div>
+        <div class="h-full rounded-full bg-good transition-[width] duration-500" style:width={barWidth(doneCount / 4)}></div>
       </div>
       <span class="text-xs text-muted-foreground tabular-nums">{doneCount} of 4 done</span>
     </div>
@@ -51,7 +51,7 @@
       {#each steps as step, i (step.title)}
         <li class="flex items-center gap-3.5 border-t py-3.5 first:border-t-0">
           <span class={cn("flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-            step.done ? "bg-emerald-500/15 text-emerald-500" : i === next ? "bg-primary text-primary-foreground" : "border text-muted-foreground")}>
+            step.done ? "bg-good/15 text-good" : i === next ? "bg-primary text-primary-foreground" : "border text-muted-foreground")}>
             {#if step.done}<Check class="size-4" aria-label="Done" />{:else}{i + 1}{/if}
           </span>
           <div class="min-w-0 flex-1">

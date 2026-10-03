@@ -87,7 +87,7 @@
 <!-- An alert links to where it's put right. -->
 {#snippet attention(text: string, href: string)}
     <a class="cell" {href}>
-      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
+      <span class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-warning text-black" aria-hidden="true"><TriangleAlert class="size-4" /></span>
       <span class="min-w-0 flex-1 text-sm">{text}</span>
       <ChevronRight class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
     </a>
@@ -136,13 +136,13 @@
 
     <!-- The hero: today's balance, whether it holds up, and the forecast under it. The chart is green while the
          balance stays above zero and red when it dips below. -->
-    <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "#30d158"} style:--chart-2="#64d2ff">
+    <section class="mb-6" style:--chart-1={lowBad ? "var(--destructive)" : "var(--good)"} style:--chart-2="#64d2ff">
       <ForecastSettings label={fc.accounts.map((a) => a.name).join(" + ") || (allChecking ? "Checking" : "Cash")}
         onhorizon={(d) => setDays(String(d))} onchange={() => load(days)} />
       <div class="text-[44px] leading-none font-extrabold tracking-[-0.04em] tabular-nums md:text-[56px]">{fmt(cashNow)}</div>
-      {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-amber-500" : "text-muted-foreground")}>{note}</p>{/if}
+      {#if note}<p class={cn("mt-1.5 text-[13px]", asOf?.stale ? "text-warning" : "text-muted-foreground")}>{note}</p>{/if}
       {#if low && fc.accounts.length}
-        <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-emerald-400")}>
+        <p class={cn("mt-2 flex items-baseline gap-1.5 text-[15px] font-semibold", lowBad ? "text-destructive" : "text-good")}>
           <span class="size-2 shrink-0 translate-y-[-1px] rounded-full bg-current" aria-hidden="true"></span>
           {#if lowBad}Heads up · {what} dips to {fmt0Down(low.balance)} {nb(lowWhen(fc) === "today" ? "today" : "on " + lowWhen(fc))}
           {:else}On track · {what} stays above {fmt0Down(low.balance)} for {nb(span(shown.days))}{/if}

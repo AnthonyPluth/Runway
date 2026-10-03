@@ -45,7 +45,7 @@
     <div class="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
       <div class="flex min-w-0 flex-1 flex-col" role="status" title={sync.title}>
         {#if sync.href}
-          <a href={sync.href} class={cn("flex items-center gap-2 underline underline-offset-4", sync.tone === "warn" ? "text-amber-500" : "text-destructive")}>
+          <a href={sync.href} class={cn("flex items-center gap-2 underline underline-offset-4", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
             <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
           </a>
         {:else}
