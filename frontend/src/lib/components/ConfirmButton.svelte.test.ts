@@ -33,4 +33,25 @@ describe("ConfirmButton", () => {
     await user.click(screen.getByRole("button"));   // a click after it lapsed asks again rather than acting
     expect(onconfirm).not.toHaveBeenCalled();
   });
+
+  it("announces the question, and keeps both labels laid out so the button doesn't change size", async () => {
+    render(ConfirmButton, { confirm: "Remove it for good?", onconfirm: vi.fn(), children: label });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const live = document.querySelector("[aria-live=polite]")!;
+    expect(live).toHaveTextContent("");
+    expect(screen.getByText("Remove it for good?")).toHaveClass("invisible");
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    expect(live).toHaveTextContent("Remove it for good?");
+    expect(screen.getByText("Remove it for good?", { selector: "button span" })).not.toHaveClass("invisible");
+    expect(screen.getByText("Remove").parentElement).toHaveClass("invisible");
+  });
+
+  it("drops its timer when it goes away mid-question", async () => {
+    const { unmount } = render(ConfirmButton, { confirm: "Really?", onconfirm: vi.fn(), children: label });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(screen.getByRole("button"));
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
