@@ -7,7 +7,7 @@ from sqlalchemy import delete, insert, update
 
 from runway import db, forecast, notify, statements
 from runway import settings_keys as sk
-from runway.models import Account, CardStatement, ManualStatement, Override
+from runway.models import Account, Budget, CardStatement, ManualStatement, Override, Recurring
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase
@@ -40,11 +40,17 @@ class ManualStatementForecastTests(LedgerCase):
         self.conn.execute(delete(CardStatement))
         self.conn.execute(update(Account).where(Account.id == "cc").values(plaid_account_id=None))
 
+    def subscription(self):
+        """A $15 monthly charge on the card from Sep 30, so each estimated statement has something on it."""
+        self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30"))
+
     @staticmethod
     def card_events(fc):
         return [(e["key"], e["date"], e["amount"], e["estimated"]) for e in fc["events"] if e["kind"] == "card"]
 
     def test_the_same_events_as_the_same_statement_from_plaid(self):
+        self.subscription()
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=40.0)
         plaid = forecast.build(self.conn, TODAY, 90)
         self.unplaid()
@@ -72,6 +78,7 @@ class ManualStatementForecastTests(LedgerCase):
         self.manual("cc", 500.0, "2026-08-12", "2026-09-07")
         self.manual("cc", 800.0, "2026-09-12", "2026-10-07")
         self.manual("cc", 50.0, "2026-10-12", "2026-11-07")    # can't have closed yet: not used
+        self.subscription()
         fc = forecast.build(self.conn, TODAY, 90)
         c = fc["cards"][0]
         self.assertEqual((c["last_close"], c["statement_balance"]), ("2026-09-12", 800.0))
@@ -129,12 +136,17 @@ class ManualStatementForecastTests(LedgerCase):
         self.assertEqual((c["statement_stale"], c["payment"], c["carried"]), (True, 100.0, 500.0))
         self.assertEqual(self.card_events(fc), [("cardclose:cc:2026-08-10", "2026-09-30", -100.0, False)])
 
-    def test_a_stale_card_is_left_out_of_the_budget_scenario(self):
-        from runway.models import Budget
+    def test_a_stale_card_has_no_estimated_statements_with_budgets_either(self):
+        # Groceries is paid with the card, but its statement is stale: nothing is estimated from it, budgets or not.
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
         self.manual("cc", 800.0, "2026-07-10", "2026-08-05")
-        b = forecast.build(self.conn, TODAY, 90)["budget"]
-        self.assertEqual([c for c in b["changes"] if c["kind"] == "card"], [])
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(self.card_events(fc), [])
+        self.assertIn("Enter cc’s latest statement so its payment stays in the forecast.", fc["warnings"])
+        self.assertEqual(len(set(fc["total"])), 1)   # nothing comes out of checking for it
+        # so its budget isn't counted as spent, and says why
+        self.assertEqual((fc["budget"]["used"], fc["budget"]["skipped"], fc["budget"]["monthly"]),
+                         ([], [{"category": "Groceries", "reason": "its card's statement is out of date"}], 0.0))
 
     def test_the_statement_balance_can_be_corrected(self):
         self.manual("cc", 800.0, "2026-09-10", "2026-10-05")
