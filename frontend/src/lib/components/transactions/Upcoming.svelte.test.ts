@@ -31,4 +31,14 @@ describe("Upcoming", () => {
     expect(screen.queryByText("Bill 4")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Show all 6/ })).toBeInTheDocument();
   });
+
+  it("names each item's account, unless the list is filtered to one", () => {
+    width(false);
+    const { unmount } = render(Upcoming, { props: { events: events(1) } });
+    expect(screen.getByText(/^Checking ·/)).toBeInTheDocument();
+    unmount();
+    render(Upcoming, { props: { events: events(1), oneAccount: true } });
+    expect(screen.queryByText(/Checking/)).not.toBeInTheDocument();
+    expect(screen.getByText("balance $100.00")).toBeInTheDocument();
+  });
 });

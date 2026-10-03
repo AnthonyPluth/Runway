@@ -44,6 +44,13 @@ describe("TxRow", () => {
     expect(p.onsave).toHaveBeenCalledWith("Coffee");
   });
 
+  it("leaves the account out of the row when the list is filtered to it, but keeps it in the details", async () => {
+    render(TxRow, props(tx(), { oneAccount: true }));
+    expect(within(row()).queryByTitle("Checking")).not.toBeInTheDocument();
+    await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
+    expect(within(row()).getByText("Account")).toBeInTheDocument();
+  });
+
   it("gives whatever can truncate a title with its full text", () => {
     render(TxRow, props(tx()));
     expect(within(row()).getByText("Blue Bottle")).toHaveAttribute("title", "Blue Bottle");

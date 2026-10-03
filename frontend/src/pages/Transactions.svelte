@@ -234,7 +234,7 @@
   </div>
 
   {#if !review}
-    {#await upcoming then events}<Upcoming events={shownEvents(events)} />{/await}
+    {#await upcoming then events}<Upcoming events={shownEvents(events)} oneAccount={!!applied.account} />{/await}
   {/if}
 
   {#if listError}
@@ -259,7 +259,7 @@
     </Card.Content></Card.Root>
   {:else}
     {#key loads}
-      <TxTable items={list.items} total={list.total} {review} {recurring} {only} family={list.family} bind:selecting onsave={save} onchanged={load} onmore={more} />
+      <TxTable items={list.items} total={list.total} {review} {recurring} {only} family={list.family} oneAccount={!!applied.account} bind:selecting onsave={save} onchanged={load} onmore={more} />
     {/key}
   {/if}
 

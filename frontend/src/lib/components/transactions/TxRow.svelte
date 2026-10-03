@@ -34,8 +34,9 @@
   // institution and the bank's own text.
   // `family`: under a category filter, that category and its subcategories. A split transaction then shows only its part
   // in them (`t.match`): that amount, a picker that changes only that part, and a receipt of just those items.
-  let { t, review, selected, selecting, recurring, family, onselect, onsave, onchanged }: {
-    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[]; family?: string[];
+  // `oneAccount`: the list is filtered to one account, so the row leaves it out (the details still name it).
+  let { t, review, selected, selecting, recurring, family, oneAccount = false, onselect, onsave, onchanged }: {
+    t: Tx; review: boolean; selected: boolean; selecting: boolean; recurring: RecurringItem[]; family?: string[]; oneAccount?: boolean;
     onselect: (e: MouseEvent, checked: boolean) => void;
     onsave: (category: string) => Promise<void>;
     onchanged: () => void;
@@ -154,14 +155,14 @@
        is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
        text only shows once the cell is 24rem wide, so it never lands on the account. -->
   <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    <span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>
-    {#if detail}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span><span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
+    {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
+    {#if detail}{#if !oneAccount}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span>{/if}<span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
   <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
     <!-- On a phone the account is only its bank's logo, ahead of the category. -->
-    <span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>
+    {#if !oneAccount}<span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>{/if}
     {#if part}
       <!-- Only the part in the filter's category: picking another changes just that part. -->
       <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>

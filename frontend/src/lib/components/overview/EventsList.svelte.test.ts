@@ -130,7 +130,18 @@ describe("EventsList", () => {
 
   it("adds the account when several accounts' items are shown together", () => {
     show([ev({ account: "Checking" })], { accounts: true });
-    expect(screen.getByText(/· Checking/)).toBeInTheDocument();
+    expect(screen.getByText(/^Checking ·/).textContent).toMatch(/^Checking · balance \$900\.00/);
+  });
+
+  it("groups items by day under the date, with the balance once a day per account, on its last item", () => {
+    show([
+      ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),
+      ev({ key: "b", name: "Card", account_id: "chk", balance_after: 2000 }),
+      ev({ key: "c", name: "Rent", account_id: "sav", account: "Savings", balance_after: 700 }),
+      ev({ key: "d", name: "Paycheck", date: "2026-03-16", amount: 3000, account_id: "chk", balance_after: 5000 }),
+    ]);
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent!.replace(/\s/g, " "))).toEqual(["Sun, Mar 15", "Mon, Mar 16"]);
+    expect(screen.getAllByText(/^balance /).map((b) => b.textContent)).toEqual(["balance $2,000.00", "balance $700.00", "balance $5,000.00"]);
   });
 
   describe("limit", () => {

@@ -22,6 +22,21 @@
     limit?: number; accounts?: boolean; all?: boolean;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
+  // A day at a time, under its date. A bank settles a day's payments together, so the balance shows once a day for each
+  // account, on its last item that day (an annual fee is a card charge: it never carries one).
+  const days = $derived.by(() => {
+    const out: { date: string; rows: { e: (typeof events)[number]; i: number; balance: boolean }[] }[] = [];
+    shown.forEach((e, i) => {
+      if (out.at(-1)?.date !== e.date) out.push({ date: e.date, rows: [] });
+      out.at(-1)!.rows.push({ e, i, balance: false });
+    });
+    for (const d of out) {
+      const last = new Map<string, number>();
+      d.rows.forEach((r, k) => { if (r.e.kind !== "fee") last.set(r.e.account_id ?? "", k); });
+      for (const k of last.values()) d.rows[k].balance = true;
+    }
+    return out;
+  });
 
   async function change(e: ForecastEvent, value: number) {
     try {
@@ -42,7 +57,9 @@
 {#if !events.length}
   <p class="cell text-sm text-muted-foreground">Nothing scheduled. Add paychecks and bills on&nbsp;<a class="font-medium text-primary" href="#recurring">Recurring</a>.</p>
 {:else}
-  {#each shown as e, i (e.key ?? `${e.date}-${e.name}-${i}`)}
+  {#each days as d (d.date)}
+  <div class="px-4 pt-2.5 pb-1 text-[13px] font-medium text-muted-foreground" role="heading" aria-level="3">{fmtDow(d.date)}</div>
+  {#each d.rows as { e, i, balance } (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
     <div class="cell">
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
@@ -71,14 +88,14 @@
           <!-- An annual fee is a charge on its card: it reaches cash in the card's statement payment, not on its own. -->
           <div class="truncate text-[13px] text-muted-foreground tabular-nums"
             title="Charged to the card: it's paid with the card's statement, so it's in that payment rather than taken out of your balance on its own">
-            {fmtDow(e.date)} · {#if !e.account}card not linked to an account, so not in the forecast
+            {#if !e.account}card not linked to an account, so not in the forecast
             {:else if e.paid_on}on {e.account}, paid with its {fmtDate(e.paid_on)} payment
             {:else}on {e.account}; its payment isn’t in the forecast{/if}
           </div>
-        {:else}
+        {:else if (accounts && e.account) || balance}
           <div class="truncate text-[13px] text-muted-foreground tabular-nums">
-            {fmtDow(e.date)}{#if accounts && e.account}{" · "}{e.account}{/if} ·
-            <span class={(e.balance_after ?? 0) < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after ?? 0)}</span>
+            {#if accounts && e.account}{e.account}{/if}{#if accounts && e.account && balance}{" · "}{/if}{#if balance}<span
+              class={(e.balance_after ?? 0) < 0 ? "font-medium text-destructive" : ""}>balance {fmt(e.balance_after ?? 0)}</span>{/if}
           </div>
         {/if}
       </div>
@@ -91,6 +108,7 @@
         {/if}
       </div>
     </div>
+  {/each}
   {/each}
   {#if events.length > shown.length}
     <button type="button" class="cell justify-between text-[15px] text-primary" onclick={() => (all = true)}>
