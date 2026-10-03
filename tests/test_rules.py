@@ -204,9 +204,11 @@ class EditingTests(Base):
         tid = self.tx(-5, "SQ *BLUE BOTTLE 123")
         self.tx(-6, "SQ *BLUE BOTTLE 456")                                     # uncategorized: a rule would take it
         self.tx(-7, "SQ *BLUE BOTTLE 789", category="Restaurants", source="manual")   # yours: left alone
-        reviewed = self.tx(-8, "SQ *BLUE BOTTLE 000", category="Restaurants", source="rule")
+        reviewed = self.tx(-8, "SQ *BLUE BOTTLE 000", category="Restaurants", source="rule")   # Runway's guess: a rule corrects it
         self.c.execute(update(Transaction).where(Transaction.id == reviewed).values(needs_review=0))
-        self.assertEqual(categorize.rule_offer(self.c, tid, "Coffee & Snacks")["also_updated"], 1)
+        same = self.tx(-9, "SQ *BLUE BOTTLE 111", category="Coffee & Snacks", source="ai")   # already right: nothing to change
+        self.c.execute(update(Transaction).where(Transaction.id == same).values(needs_review=0))
+        self.assertEqual(categorize.rule_offer(self.c, tid, "Coffee & Snacks")["also_updated"], 2)
 
     def test_setting_one_merchants_transactions_together_offers_a_rule(self):
         from runway import server
