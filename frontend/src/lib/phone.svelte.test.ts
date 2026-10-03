@@ -56,3 +56,12 @@ describe("isPhone", () => {
     expect(css).toContain(`@custom-variant desktop (@media not ((max-width: 767px) or ((max-height: 500px) and (pointer: coarse))));`);
   });
 });
+
+describe("zoom", () => {
+  it("is off for the page: the viewport meta for the installed app and Android, touch-action for Safari in a tab", () => {
+    const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
+    expect(html).toMatch(/<meta name="viewport" content="[^"]*\bmaximum-scale=1\b[^"]*\buser-scalable=no\b[^"]*">/);
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    expect(css).toMatch(/^\s*html \{ touch-action: pan-x pan-y; \}/m);
+  });
+});

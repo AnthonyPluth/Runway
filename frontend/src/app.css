@@ -128,6 +128,10 @@
 @layer base {
   * { @apply border-border outline-ring/50; }
   body { @apply bg-background text-foreground; font-optical-sizing: auto; font-feature-settings: "cv11", "ss03"; -webkit-font-smoothing: antialiased; }
+  /* No pinch or double-tap zoom: the page is laid out for the phone already, and a zoomed-in dashboard is a mistake to
+     back out of, not a feature. The viewport meta in index.html says the same; Safari in a tab ignores that and honours
+     this. Scrolling is untouched. Text still follows the phone's text size. */
+  html { touch-action: pan-x pan-y; }
   /* Dates are typed, not picked: no calendar button on date fields (Chrome, Edge, Safari; Firefox and phones
      keep their own picker). */
   input[type="date"]::-webkit-calendar-picker-indicator { display: none; }

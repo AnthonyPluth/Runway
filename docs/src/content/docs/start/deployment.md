@@ -18,7 +18,7 @@ docker compose up -d
 
 ## On your phone
 
-Open Runway in Safari on your iPhone, tap **Share → Add to Home Screen**, and open it from the new icon: it runs full screen like an app. To get notifications (iOS 16.4 or later), go to **Settings → Notifications** inside the installed app and tap **Turn on notifications**. On a computer, the same button works in Chrome, Edge, Firefox or Safari. Installing and notifications need Runway to be served over `https://`.
+Open Runway in Safari on your iPhone, tap **Share → Add to Home Screen**, and open it from the new icon: it runs full screen like an app, and the page doesn't pinch-zoom (text follows your phone's text size). To get notifications (iOS 16.4 or later), go to **Settings → Notifications** inside the installed app and tap **Turn on notifications**. On a computer, the same button works in Chrome, Edge, Firefox or Safari. Installing and notifications need Runway to be served over `https://`.
 
 Notifications are sent with Web Push, signed (VAPID) and end-to-end encrypted (RFC 8291) by [pywebpush](https://github.com/web-push-libs/pywebpush). They go straight to your browser's push service (Apple's, Google's or Mozilla's), so no third-party notification service or account is involved, and the server needs outbound HTTPS to those services.
 
