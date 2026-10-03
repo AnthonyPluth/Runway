@@ -4,7 +4,7 @@ import { estimateLines, estimateText, estimateTitle } from "./estimate";
 
 const base = { close: "2026-11-01", due: "2026-11-26" } as const;
 // (dates keep their no-break space)
-const text = (est: StatementEstimate) => estimateLines(est).map((l) => estimateText(l).replace(/ /g, " "));
+const text = (est: StatementEstimate) => estimateLines(est).map((l) => estimateText(l).replace(/\u00a0/g, " "));
 
 describe("estimate breakdown", () => {
   it("lists what's charged and the budgets on the card, the sum last", () => {
@@ -15,7 +15,7 @@ describe("estimate breakdown", () => {
       recurring: [{ name: "Insurance", amount: 600 }, { name: "Streaming", amount: 4.45 }], recurring_total: 604.45,
       statement: 2788.55, total: 2788.55,
     };
-    expect(estimateTitle(est).replace(/ /g, " ").split("\n")).toEqual([
+    expect(estimateTitle(est).replace(/\u00a0/g, " ").split("\n")).toEqual([
       "Estimate for the Nov 1 statement",
       "Charged so far · $1,204.10",
       "Budgets on this card to Nov 1 · $980.00 (Groceries $600.00, Restaurants $250.00, Gas $100.00, …)",
@@ -52,7 +52,7 @@ describe("estimate breakdown", () => {
   it("a card with no statement yet: what it owes now, on a cycle taken to end with the month", () => {
     const est: StatementEstimate = { close: "2026-10-31", due: "2026-11-25", assumed_cycle: true, owed_now: 40,
       budgets: [{ category: "Travel", amount: 310 }], budgets_total: 310, statement: 350, total: 350 };
-    expect(estimateTitle(est).replace(/ /g, " ").split("\n")).toEqual(["Estimate for a statement closing Oct 31 (none from the bank yet)",
+    expect(estimateTitle(est).replace(/\u00a0/g, " ").split("\n")).toEqual(["Estimate for a statement closing Oct 31 (none from the bank yet)",
       "Owed on the card now · $40.00", "Budgets on this card to Oct 31 · $310.00 (Travel)", "= $350.00"]);
     expect(text({ ...est, owed_now: -20, statement: 290, total: 290 })[0]).toBe("Credit on the card now · −$20.00");
   });
