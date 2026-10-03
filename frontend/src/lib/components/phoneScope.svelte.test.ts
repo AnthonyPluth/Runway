@@ -101,13 +101,13 @@ describe("churning benefits with none yet", () => {
   it("are one muted line, with no computer note (the Churning page says that once)", () => {
     viewport.phone = true;
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.getByText(/^none yet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 
-  it("are one muted line on a computer screen too, without telling you to edit a card", () => {
+  it("are one muted line on a computer screen too, saying only where benefits come from", () => {
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.getByText(/^none yet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Edit a card and add its lounge access/)).not.toBeInTheDocument();
   });
 });

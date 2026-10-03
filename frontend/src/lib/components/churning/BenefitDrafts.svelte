@@ -1,8 +1,9 @@
 <script lang="ts">
   import { commas } from "$lib/commas";
-  import { Badge } from "$lib/components/ui/badge";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
+  import Chip from "./Chip.svelte";
+  import { rowKey } from "./churning";
   import type { Churning, DraftBenefit } from "./types";
 
   // The benefits of a card that isn't saved yet: a row each (name, kind, amount, how often it resets), from the quick-add
@@ -27,7 +28,7 @@
 <div data-testid="ai-benefits">
   {#if rows.length}
     <ul class="mb-3 space-y-2">
-      {#each rows as b, i (i)}
+      {#each rows as b, i (rowKey(b))}
         <li class="flex flex-wrap items-center gap-2">
           <Input class="w-56 max-w-full" bind:value={b.name} aria-label={`${b.ai ? "Suggested benefit" : "Benefit"} ${i + 1}`} placeholder="e.g. Lyft credit" />
           <NativeSelect class="w-28" bind:value={b.kind} aria-label={`Kind of ${b.name || "benefit"}`}>{#each d.benefit_kinds as k (k.key)}<option value={k.key}>{k.name}</option>{/each}</NativeSelect>
@@ -35,7 +36,7 @@
             <Input type="number" min="0" step="1" class="w-24" bind:value={b.amount} {@attach commas} placeholder="$" aria-label={`Amount of ${b.name || "benefit"}`} />
           {/if}
           <NativeSelect class="w-32" bind:value={b.period} aria-label={`How often ${b.name || "benefit"} resets`}>{#each d.benefit_periods as p (p.key)}<option value={p.key}>{p.name}</option>{/each}</NativeSelect>
-          {#if b.ai}<Badge variant="outline">Suggested by AI, check before saving</Badge>{/if}
+          {#if b.ai}<Chip tone="warn">Suggested by AI, check before saving</Chip>{/if}
           <button type="button" class="cursor-pointer px-1 text-muted-foreground hover:text-foreground" aria-label={`Remove ${b.name || "the benefit"}`} onclick={() => (rows = rows.filter((_, n) => n !== i))}>×</button>
         </li>
       {/each}

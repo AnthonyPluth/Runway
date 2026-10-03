@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { toast } from "svelte-sonner";
 import { bodyOf, calls, churning } from "./fixtures";
 import Rewards from "./Rewards.svelte";
 import type { Churning, RewardRow } from "./types";
@@ -22,7 +23,11 @@ const setup = (rows: RewardRow[]) => {
   render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });
 };
 
-beforeEach(() => { vi.mocked(api).mockReset(); });
+beforeEach(() => {
+  vi.mocked(api).mockReset();
+  vi.mocked(toast).mockReset();
+  vi.mocked(toast.error).mockReset();
+});
 
 describe("Rewards", () => {
   it("keeps this year's earnings out of the balances view", () => {
@@ -40,7 +45,7 @@ describe("Rewards", () => {
     await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
     const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
     expect(within(r).getByText("~4,183")).toBeInTheDocument();         // spending
-    expect(within(r).getByText("60k")).toBeInTheDocument();            // bonuses
+    expect(within(r).getByText("60,000")).toBeInTheDocument();            // bonuses
     expect(within(r).getByText("~$963")).toBeInTheDocument();          // what that's worth
     expect(screen.queryByText("Other airline miles")).not.toBeInTheDocument();   // earned nothing this year
     expect(screen.queryByLabelText("Alex's Amex Membership Rewards balance")).not.toBeInTheDocument();   // no balances here
@@ -91,6 +96,37 @@ describe("Rewards", () => {
     await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/churning/balances",
       { method: "POST", body: { owner: "Alex", currency: "airline", points: null } }));
   });
+
+  it("says a balance was removed with an Undo that puts back the same points and day", async () => {
+    vi.mocked(api).mockResolvedValue({});
+    setup([row({ currency: "airline", name: "Other airline miles", balance: 41250.5, balance_value: 12, as_of: "2026-08-30" })]);
+    await userEvent.click(screen.getByRole("button", { name: "Other airline miles details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }));
+    await waitFor(() => expect(calls("/api/churning/balances")).toHaveLength(1));
+    const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as [string, { action: { label: string; onClick: () => void } }];
+    expect(msg).toBe("Removed Alex’s Other airline miles balance");
+    expect(opts.action.label).toBe("Undo");
+    opts.action.onClick();
+    await waitFor(() => expect(bodyOf(calls("/api/churning/balances")[1])).toEqual({ owner: "Alex", currency: "airline", points: 41250.5, as_of: "2026-08-30" }));
+  });
+
+  it("shows a toast instead of an unhandled rejection when removing a balance fails, and offers no undo", async () => {
+    vi.mocked(api).mockRejectedValue(new Error("Unknown currency"));
+    setup([row({ currency: "airline", name: "Other airline miles", balance: 100, balance_value: 1, as_of: "2026-09-01" })]);
+    await userEvent.click(screen.getByRole("button", { name: "Other airline miles details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove Alex's Other airline miles balance" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Unknown currency"));
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("lays the earned table out as stacked cells below xl, with each figure labeled", async () => {
+    setup([row({ currency: "amex_mr", name: "Amex Membership Rewards", earned: 4183, bonuses: 60000, value: 962.75 })]);
+    await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
+    const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
+    expect(r.className).toContain("max-xl:grid");
+    expect([...r.querySelectorAll("td[data-label]")].map((td) => td.getAttribute("data-label"))).toEqual(["Spending", "Bonuses", "Total"]);
+    expect(screen.getByRole("table").querySelector("thead")!.className).toContain("max-xl:hidden");
+  });
 });
 
 describe("rewards", () => {
@@ -120,6 +156,28 @@ describe("rewards", () => {
     await userEvent.type(box, "42000");
     await userEvent.tab();
     await waitFor(() => expect(bodyOf(calls("/api/churning/balances")[0])).toEqual({ owner: "Alex", currency: "aa", points: "42000", as_of: "2026-09-30" }));
+  });
+
+  it("asks before deleting a currency of your own, which takes its balances with it", async () => {
+    const d = churning({ currencies: [{ key: "x-bilt", name: "Bilt", kind: "other", cents: 2, default: null, custom: true, overridden: false, estimate: false, as_of: null, source_note: "" }],
+      currency_groups: [], rewards: { Alex: { currencies: [], value: 0, balance_value: 0 } } } as never);
+    render(Rewards, { d, people: ["Alex"], onchanged: vi.fn() });
+    await userEvent.click(screen.getByText("Point values"));
+    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete Bilt?" });
+    expect(dialog).toHaveTextContent("balances");
+    expect(calls(/currencies\/.*remove/)).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(calls("/api/churning/currencies/x-bilt/remove")).toHaveLength(1));
+  });
+
+  it("has point-value inputs at least 13px, and 36px tall on a phone", async () => {
+    setup();
+    await userEvent.click(screen.getByText("Point values"));
+    const input = screen.getByLabelText("Cents a American AAdvantage point");
+    expect(input.className).toContain("text-[13px]");
+    expect(input.className).toContain("phone:h-9");
   });
 
   it("groups the point values and marks which are estimates and which are yours", async () => {

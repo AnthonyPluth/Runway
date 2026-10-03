@@ -1,10 +1,10 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { fmt0 } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
+  import Chip from "./Chip.svelte";
   import { fullDate } from "./churning";
   import FoldedLine from "./FoldedLine.svelte";
   import type { Churning, Found, FoundDraft } from "./types";
@@ -43,7 +43,7 @@
         {#each found.drafts as x (x.account_id)}
           <li class="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
             <div class="min-w-0 flex-1">
-              <div class="font-medium">{x.product || x.account_name}{#if x.business}<Badge variant="outline" class="ml-2">Business</Badge>{/if}</div>
+              <div class="font-medium">{x.product || x.account_name}{#if x.business}<Chip class="ml-2">Business</Chip>{/if}</div>
               <div class="text-xs text-muted-foreground">
                 {issuer(x.issuer)}{x.owner ? ` · ${x.owner}` : ""}{x.annual_fee ? ` · ${fmt0(x.annual_fee)} annual fee` : ""}{x.opened_on ? ` · opened on or before ${fullDate(x.opened_on)}` : ""}
               </div>

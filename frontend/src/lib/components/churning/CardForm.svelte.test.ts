@@ -42,7 +42,7 @@ describe("card form", () => {
     it("keeps the essentials up front and every other part closed, each saying what's in it", () => {
       setup();
       for (const id of ["rates", "bonus", "benefits", "plan", "more"]) expect(section(id).open).toBe(false);
-      for (const label of ["Whose card", "Bank", "Card", "Opened", "Annual fee"]) expect(screen.getByLabelText(label).closest("details")).toBeNull();
+      for (const label of ["Whose card", "Bank", "Card", "Opened", "Annual fee"]) expect(screen.getByLabelText(new RegExp(`^${label}`)).closest("details")).toBeNull();
       expect(summary("rates")).toHaveTextContent("1x on everything");
       expect(summary("bonus")).toHaveTextContent("None");
       expect(summary("benefits")).toHaveTextContent("None");
@@ -64,7 +64,7 @@ describe("card form", () => {
       await userEvent.type(screen.getByLabelText(/^Bonus \(/), "75000");
       await userEvent.type(screen.getByLabelText("Spend"), "4000");
       expect(summary("rates")).toHaveTextContent("2 rates · Chase Ultimate Rewards");
-      expect(summary("bonus")).toHaveTextContent("75k Ultimate Rewards after $4,000 in 3 months");
+      expect(summary("bonus")).toHaveTextContent("75,000 Ultimate Rewards after $4,000 in 3 months");
       await userEvent.type(screen.getByLabelText(/Family/), "Sapphire");
       expect(summary("more")).toHaveTextContent("Family: Sapphire");
     });
@@ -72,7 +72,7 @@ describe("card form", () => {
     it("starts closed with summaries when editing a card too", () => {
       setup(card({ bonus: 60000, bonus_spend: 4000, currency: "ur", rates: [{ category: "Travel", multiplier: 5, portal_only: false }], benefits: [benefit()] }));
       expect(section("bonus").open).toBe(false);
-      expect(summary("bonus")).toHaveTextContent("60k Ultimate Rewards after $4,000 in 3 months");
+      expect(summary("bonus")).toHaveTextContent("60,000 Ultimate Rewards after $4,000 in 3 months");
       expect(summary("rates")).toHaveTextContent("1 rate");
       expect(summary("benefits")).toHaveTextContent("1 benefit");
     });
@@ -80,7 +80,7 @@ describe("card form", () => {
     it("opens the section a refused save is about, and marks it", async () => {
       vi.mocked(api).mockRejectedValue(new Error("Pick a category for each earning rate"));
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
       await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
       expect(section("rates").open).toBe(false);
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -92,7 +92,7 @@ describe("card form", () => {
     it("opens the benefits section when a benefit is refused", async () => {
       vi.mocked(api).mockRejectedValue(new Error("Enter the benefit's name"));
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
       await waitFor(() => expect(section("benefits").open).toBe(true));
     });
@@ -100,7 +100,7 @@ describe("card form", () => {
     it("adds the benefits you enter in the request that adds the card", async () => {
       vi.mocked(api).mockResolvedValue({ id: 5 } as never);
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "lounge");
       await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "custom");
       await userEvent.type(screen.getByLabelText("Benefit 2"), "Travel credit");
@@ -116,7 +116,7 @@ describe("card form", () => {
 
     it("leaves out a benefit row with no name, and a removed one", async () => {
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
       await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "custom");
       await userEvent.selectOptions(screen.getByLabelText("Add a benefit to this card"), "lounge");
       await userEvent.click(screen.getByRole("button", { name: "Remove Lounge access" }));
@@ -138,7 +138,7 @@ describe("card form", () => {
 
   it("sends the earning rates, portal-only ones included, in the request that adds the card", async () => {
     setup();
-    await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+    await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
     await userEvent.selectOptions(screen.getByLabelText("Category of rate 1"), "Hotels");
     await userEvent.type(screen.getByLabelText("Points per dollar on Hotels"), "10");
@@ -155,11 +155,11 @@ describe("card form", () => {
   it("shows the server's message when the rates are refused", async () => {
     vi.mocked(api).mockRejectedValue(new Error("Pick a category for each earning rate"));
     setup();
-    await userEvent.type(screen.getByLabelText("Card"), "Venture X");
+    await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
     await userEvent.click(screen.getByRole("button", { name: "Add a rate" }));
     await userEvent.click(screen.getByRole("button", { name: "Add" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a category for each earning rate");
-    expect(toast.error).toHaveBeenCalledWith("Pick a category for each earning rate");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pick a category for each earning rate");   // by the Add button
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("saves the whole list of rates when a row of an existing card changes", async () => {
@@ -188,13 +188,13 @@ describe("card form", () => {
 
     it("starts pre-filled, says the opening day is a guess, and saves nothing until Add", async () => {
       open();
-      expect(screen.getByLabelText("Card")).toHaveValue("Sapphire Reserve");
+      expect(screen.getByLabelText(/^Card/)).toHaveValue("Sapphire Reserve");
       expect(screen.getByLabelText("Whose card")).toHaveValue("Alex");
       expect(screen.getByLabelText("Bank")).toHaveValue("chase");
       expect(screen.getByLabelText("Annual fee")).toHaveValue("795");
       expect(screen.queryByLabelText("Fee posts in")).toBeNull();
       expect(screen.queryByTestId("fee-month")).toBeNull();
-      expect(screen.getByLabelText("Opened (on or before)")).toHaveValue("2024-03-02");
+      expect(screen.getByLabelText(/^Opened \(on or before\)/)).toHaveValue("2024-03-02");
       expect(screen.getByTestId("opened-guess")).toHaveTextContent("opened on or before this day");
       expect(calls(/./)).toHaveLength(0);
       await userEvent.click(screen.getByRole("button", { name: "Add" }));
@@ -206,10 +206,10 @@ describe("card form", () => {
 
     it("stops calling the date a guess once you change it", async () => {
       open();
-      const opened = screen.getByLabelText("Opened (on or before)");
+      const opened = screen.getByLabelText(/^Opened \(on or before\)/);
       await userEvent.clear(opened);
       await userEvent.type(opened, "2023-11-20");
-      expect(screen.getByLabelText("Opened")).toHaveValue("2023-11-20");
+      expect(screen.getByLabelText(/^Opened/)).toHaveValue("2023-11-20");
       expect(screen.queryByTestId("opened-guess")).toBeNull();
     });
 
@@ -242,7 +242,7 @@ describe("card form", () => {
       setup();
       const button = screen.getByRole("button", { name: "Fill in the rest with AI" });
       expect(button).toBeDisabled();   // it needs a name to ask about
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(button);
       expect(bodyOf(calls("/api/churning/suggest")[0])).toEqual({ issuer: "chase", product: "Sapphire Reserve" });   // the bank and the name only
       expect(await screen.findByTestId("ai-marked")).toHaveTextContent("Suggested by AI, check before saving");
@@ -269,7 +269,7 @@ describe("card form", () => {
     it("keeps what you already entered, and Discard puts the form back", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.type(screen.getByLabelText("Annual fee"), "95");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
@@ -284,7 +284,7 @@ describe("card form", () => {
     it("asking again doesn't suggest the same benefits twice", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
@@ -295,7 +295,7 @@ describe("card form", () => {
     it("Discard takes back only what the AI filled, not what you changed afterwards", async () => {
       app.state = { connected: true, has_api_key: true } as never;
       setup();
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await screen.findByTestId("ai-marked");
       await userEvent.type(screen.getByLabelText(/^Bonus \(/), "60000");   // typed after the fill
@@ -343,7 +343,7 @@ describe("card form", () => {
       };
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? withSources : { ok: true })) as never);
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       const sources = await screen.findByTestId("ai-sources");
       expect(sources).toHaveTextContent("From: chase.com, news.example.com");
@@ -361,7 +361,7 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/churning/suggest" ? { ...suggestion, web: false, sources: [] } : { ok: true })) as never);
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       expect(await screen.findByTestId("ai-sources")).toHaveTextContent("without a web search");
     });
@@ -379,11 +379,101 @@ describe("card form", () => {
       app.state = { connected: true, has_api_key: true } as never;
       vi.mocked(api).mockRejectedValue(new Error("The AI request failed after 45s: timed out"));
       render(CardForm, { c: null, d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
-      await userEvent.type(screen.getByLabelText("Card"), "Sapphire Reserve");
+      await userEvent.type(screen.getByLabelText(/^Card/), "Sapphire Reserve");
       await userEvent.click(screen.getByRole("button", { name: "Fill in the rest with AI" }));
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("The AI request failed after 45s: timed out"));
       expect(screen.queryByTestId("ai-marked")).toBeNull();
       expect(screen.getByRole("button", { name: "Fill in the rest with AI" })).toBeEnabled();
+    });
+  });
+
+  describe("validation and the footer", () => {
+    const section = (id: string) => screen.getByTestId(`section-${id}`) as HTMLDetailsElement;
+
+    it("says which fields are missing, marks them, focuses the first and sends nothing", async () => {
+      setup();
+      await userEvent.clear(screen.getByLabelText(/^Opened/));
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      const product = screen.getByLabelText(/^Card/);
+      expect(product).toHaveAttribute("aria-invalid", "true");
+      expect(product).toHaveAttribute("aria-required", "true");
+      expect(product).toHaveAccessibleDescription("Enter the card’s name, like Sapphire Preferred.");
+      expect(screen.getByLabelText(/^Opened/)).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByText("Enter the day it was opened.")).toBeInTheDocument();
+      expect(product).toHaveFocus();
+      expect(calls("/api/churning/cards")).toHaveLength(0);
+      await userEvent.type(product, "Venture X");   // fixing a field clears its note
+      expect(product).not.toHaveAttribute("aria-invalid");
+      expect(screen.queryByText(/Enter the card’s name/)).toBeNull();
+    });
+
+    it("shows the required star for people who can see it, not as part of the accessible name", () => {
+      setup();
+      const label = screen.getByLabelText(/^Card/).closest("label")!;
+      expect(label.querySelector("[aria-hidden=true]")).toHaveTextContent("*");
+    });
+
+    it("says the server's refusal by the Add button and in the section it is about, which opens", async () => {
+      vi.mocked(api).mockRejectedValue(new Error("Enter the points per dollar on Travel"));
+      setup();
+      await userEvent.type(screen.getByLabelText(/^Card/), "Venture X");
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Enter the points per dollar on Travel");
+      await waitFor(() => expect(section("rates").open).toBe(true));
+      expect(screen.getByTestId("error-rates")).toHaveTextContent("Enter the points per dollar on Travel");
+      expect(screen.getByTestId("flagged-rates")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Add" })).toBeEnabled();   // try again
+      vi.mocked(api).mockResolvedValue({ id: 3 } as never);
+      await userEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    });
+
+    it("keeps the Add button in a footer that is sticky on phones", () => {
+      setup();
+      expect(screen.getByTestId("form-footer").className).toContain("phone:sticky");
+    });
+
+    it("says in one visible line, next to the AI button, that only the bank and name are sent", () => {
+      app.state = { connected: true, has_api_key: true } as never;
+      setup();
+      expect(screen.getByTestId("ai-consent")).toHaveTextContent("Sends only the bank and card name.");
+      app.state = null;
+    });
+
+    it("calls Done Close when editing, and Delete card asks first, naming what goes with it", async () => {
+      const onclose = vi.fn();
+      render(CardForm, { c: card({ product: "Venture X" }), d: churning(), person: "", onclose, onchanged: vi.fn() });
+      expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Delete card" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete Venture X?" });
+      expect(dialog).toHaveTextContent("to-dos");
+      expect(calls(/remove/)).toHaveLength(0);
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      expect(calls(/remove/)).toHaveLength(0);
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());   // closed, and the page clickable again
+      await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
+      await userEvent.click(screen.getByRole("button", { name: "Delete card" }));
+      await userEvent.click(within(await screen.findByRole("dialog", { name: "Delete Venture X?" })).getByRole("button", { name: "Delete card" }));
+      await waitFor(() => expect(calls("/api/churning/cards/1/remove")).toHaveLength(1));
+      await waitFor(() => expect(onclose).toHaveBeenCalledWith(true));
+    });
+
+    it("closes an edited card with Close, telling whether anything changed", async () => {
+      const onclose = vi.fn();
+      render(CardForm, { c: card({ product: "Venture X" }), d: churning(), person: "", onclose, onchanged: vi.fn() });
+      await userEvent.click(screen.getByRole("button", { name: "Close" }));
+      expect(onclose).toHaveBeenCalledWith(false);
+    });
+
+    it("shows a refused autosave on the field too, not only as a toast", async () => {
+      vi.mocked(api).mockRejectedValue(new Error("Enter the card’s name"));
+      render(CardForm, { c: card({ product: "Venture X" }), d: churning(), person: "", onclose: vi.fn(), onchanged: vi.fn() });
+      const product = screen.getByLabelText(/^Card/);
+      await userEvent.clear(product);
+      await userEvent.tab();
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Enter the card’s name"));
+      expect(product).toHaveAttribute("aria-invalid", "true");
     });
   });
 });
