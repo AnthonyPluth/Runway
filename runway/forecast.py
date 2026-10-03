@@ -11,7 +11,8 @@ Nothing is taken out for spending that isn't scheduled or budgeted: there's no a
 A card's statement balance comes from the issuer (or it's the amount you entered, if you know it). Statements that
 haven't closed yet are estimated, and flagged as estimates: what's been charged since the last one closed, plus the
 budgets paid with the card (spent on it day by day), its recurring charges and any annual fee. A card with no statement
-yet that has budgets charged to it is taken to close at each month's end (NO_STATEMENT_DUE_DAYS).
+yet that has budgets charged to it is taken to close at each month's end (NO_STATEMENT_DUE_DAYS). Each estimated
+statement says what it's made of (estimate_parts). An amount you've changed is yours, not an estimate.
 
 Each card is paid the way you pay it (Settings → Accounts): the whole statement (the default), the issuer's minimum, or
 a fixed amount. What isn't paid carries into the next statement, with a month's interest at the card's APR if you've
@@ -438,6 +439,67 @@ def annual_fees(conn, card: dict, today: date, end: date, closing_day: int | Non
     return out
 
 
+def to_cents(values: list[float], total: float) -> list[float]:
+    """Each value rounded to the cent so that they add up to `total` rounded to the cent: the cents rounding leaves over
+    go to the values nearest to rounding the other way (largest remainder)."""
+    if not values:
+        return []
+    cents = [round(v * 100) for v in values]
+    gap = round(round(total, 2) * 100) - sum(cents)
+    step = 1 if gap > 0 else -1
+    order = sorted(range(len(values)), key=lambda i: (values[i] * 100 - cents[i]) * step, reverse=True)
+    for k in range(abs(gap)):
+        cents[order[k % len(order)]] += step
+    return [c / 100 for c in cents]
+
+
+def estimate_parts(*, close: date, due: date, budgets: dict[str, dict[str, float]], start: date, recurring: list[dict],
+                   fees: list[dict], carried: float, interest: float, statement: float, payment: float, plan: dict,
+                   charged_so_far: float | None = None, owed_now: float | None = None, assumed: bool = False) -> dict:
+    """What an estimated statement (build) is made of, for the Overview to show: only what went into it, each part
+    rounded so that they add up to the statement to the cent (to_cents), as the event's amount is rounded.
+
+    Its parts: what's been charged since the last statement closed (`charged_so_far`, the cycle in progress) or, on a
+    card with no statement yet (`assumed`: its cycle taken to end with the month), what it owes today (`owed_now`); the
+    budgets paid with the card, each one's spending after `start` to the close (`budgets`: {category: {date: amount}});
+    its `recurring` charges (events) and annual `fees`, as many as aren't in a budget; what the statement before left
+    unpaid (`carried`, below zero for a credit) and its `interest`. A statement that isn't paid in full pays `payment`
+    of it (total), the way `plan` (payment_plan) says, and carries the rest."""
+    lines: dict[str, float] = {}
+    named: list[tuple[str, str, list[tuple[str, float]]]] = []   # parts made of named items: (part, item's key, items)
+    if charged_so_far is not None:
+        lines["charged_so_far"] = charged_so_far
+    if owed_now is not None:
+        lines["owed_now"] = owed_now
+    spent = {c: sum(v for d, v in days.items() if start.isoformat() < d <= close.isoformat()) for c, days in budgets.items()}
+    spent = {c: v for c, v in spent.items() if v >= 0.005}
+    if spent:
+        lines["budgets_total"] = sum(spent.values())
+        named.append(("budgets", "category", sorted(spent.items(), key=lambda kv: -kv[1])))
+    extra = max(0.0, -sum(e["amount"] for e in recurring))
+    if extra >= 0.005:
+        lines["recurring_total"] = extra
+        named.append(("recurring", "name", [(e["name"], -e["amount"]) for e in recurring]))
+    if fees:
+        lines["fees_total"] = -sum(f["amount"] for f in fees)
+        named.append(("fees", "name", [(f["name"], -f["amount"]) for f in fees]))
+    if abs(carried) >= 0.005:
+        lines["carried"] = carried
+    if interest >= 0.005:
+        lines["interest"] = interest
+    out: dict = {"close": close.isoformat(), "due": due.isoformat(), **({"assumed_cycle": True} if assumed else {}),
+                 **dict(zip(lines, to_cents(list(lines.values()), statement), strict=True))}
+    for part, label, items in named:
+        out[part] = [{label: k, "amount": v}
+                     for (k, _), v in zip(items, to_cents([v for _, v in items], out[f"{part}_total"]), strict=True)]
+    if interest >= 0.005:
+        out["apr"] = plan["apr"]
+    out.update(statement=round(statement, 2), total=round(payment, 2))
+    if out["total"] != out["statement"]:
+        out["pay_mode"] = plan["pay_mode"]   # paying the minimum or a fixed amount: the rest carries
+    return out
+
+
 def statement_href(card_id: str) -> str:
     """Where a card's statement is entered: its row in Settings → Accounts, opened at its Statement section."""
     return "#setup/accounts?account=" + urllib.parse.quote(card_id, safe="")
@@ -545,7 +607,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 continue  # this one already posted (possibly early), don't count it twice
             usual_left = rec.still_due(item, d, paid, today, amount)
             events.append({"date": max(d, today).isoformat(), "account_id": item["account_id"], "name": item["name"],
-                           "amount": left, "kind": "recurring", "estimated": (item.get("amount_mode") or "fixed") != "fixed",
+                           # an amount you've set for this one is yours, not an estimate
+                           "amount": left, "kind": "recurring",
+                           "estimated": (item.get("amount_mode") or "fixed") != "fixed" and edited is None,
                            "recurring_id": item["id"], "key": key,
                            "category": cat_row["category"] if cat_row else None, **({"late_from": d.isoformat()} if d < today else {}),
                            **({"paid_so_far": paid[d]} if abs(paid.get(d, 0.0)) >= rec.CENT else {}),
@@ -558,6 +622,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     budgeted = {n for p in plan for n in p["names"]}
     cash_ids = {a["id"] for a in cash}
     spend: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))   # account or card -> date -> amount
+    spend_of: dict[str, dict[str, dict[str, float]]] = defaultdict(dict)   # card -> budget -> date -> amount (its parts)
     used: list[dict] = []
     skipped: list[dict] = []
     days_of = budget_days(conn, today, horizon_days, plan, events, cash_ids) if plan else {}
@@ -576,6 +641,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             continue
         for d, v in days.items():
             spend[acct][d] += v
+        spend_of[acct][p["category"]] = days
         used.append({"category": p["category"], "amount": p["amount"], "account_id": acct,
                      "account": db.account_label(a), "chosen": bool(p["pay_with"])})
     no_statement: dict[str, list[dict]] = {}   # cards without a statement -> their annual fees
@@ -649,11 +715,13 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             upcoming = [e for e in events if e["account_id"] == card["id"] and e["kind"] == "recurring"
                         and prev_close.isoformat() < e["date"] <= close.isoformat()]
             # A recurring charge (or a fee) in a budgeted category is in that budget already.
+            on_top = [e for e in upcoming if e.get("category") not in budgeted]
             est = (info["new_charges"] if first else 0.0) \
                 + sum(v for d, v in charged.items() if prev_close.isoformat() < d <= close.isoformat()) \
                 + max(0.0, -sum(e["amount"] for e in upcoming if e.get("category") not in budgeted))
             fees_here = [f for f in on_card if prev_close.isoformat() < f["_on"] <= close.isoformat()]
             est += -sum(f["amount"] for f in fees_here if f["category"] not in budgeted)
+            carried_in = carried
             owed_interest = interest(info, carried, est)
             statement = carried + owed_interest + est
             key = f"cardclose:{card['id']}:{close.isoformat()}"
@@ -666,9 +734,13 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             if pays_k < today:
                 stale = True   # the issuer's latest statement is older than this one; nothing to put on the chart
             elif planned > 0.005:
+                parts = estimate_parts(
+                    close=close, due=due_k, start=prev_close, budgets=spend_of.get(card["id"], {}), recurring=on_top,
+                    fees=[f for f in fees_here if f["category"] not in budgeted], carried=carried_in, interest=owed_interest,
+                    statement=statement, payment=planned, plan=info, charged_so_far=info["new_charges"] if first else None)
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(planned, 2), "kind": "card", "estimated": True,
-                               "key": key, "category": "Credit Card Payment", "card_id": card["id"]})
+                               "key": key, "category": "Credit Card Payment", "card_id": card["id"], "estimate": parts})
                 for f in fees_here:
                     f.update(paid_on=pays_k.isoformat(), paid_from=db.account_label(payer))
             prev_close, close, first = close, next_after(close, card["closing_day"]), False
@@ -701,9 +773,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 break
             charges = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat())
             # Its recurring charges this cycle, unless a budget has them (as for a card with statements).
-            charges += max(0.0, -sum(e["amount"] for e in events if e["account_id"] == cid and e["kind"] == "recurring"
-                                     and prev.isoformat() < e["date"] <= close.isoformat()
-                                     and e.get("category") not in budgeted))
+            on_top = [e for e in events if e["account_id"] == cid and e["kind"] == "recurring"
+                      and prev.isoformat() < e["date"] <= close.isoformat() and e.get("category") not in budgeted]
+            charges += max(0.0, -sum(e["amount"] for e in on_top))
             # A churning card's annual fee charged this cycle (annual_fees), unless a budget covers its category.
             # An overdue fee is dated today, so the first statement takes it too.
             fees_here = [f for f in no_statement[cid] if (first or prev.isoformat() < f["date"]) and f["date"] <= close.isoformat()]
@@ -712,13 +784,18 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             owed_interest = 0.0 if first else interest(card_plan, owing, charges)
             statement = owing + owed_interest + charges
             pay = statement_payment(card_plan, statement, charged=owed_interest)
-            owing = statement - pay
             if pay > 0.005:
+                parts = estimate_parts(
+                    close=close, due=close + timedelta(days=NO_STATEMENT_DUE_DAYS), start=prev, budgets=spend_of.get(cid, {}),
+                    recurring=on_top, fees=[f for f in fees_here if f["category"] not in budgeted],
+                    carried=0.0 if first else owing, interest=owed_interest, statement=statement, payment=pay, plan=card_plan,
+                    owed_now=owing if first else None, assumed=True)
                 events.append({"date": pays_on.isoformat(), "account_id": payer["id"], "name": f"{db.account_label(card)} statement",
                                "amount": -round(pay, 2), "kind": "card", "estimated": True, "assumed_cycle": True,
-                               "category": "Credit Card Payment", "card_id": cid})
+                               "category": "Credit Card Payment", "card_id": cid, "estimate": parts})
                 for f in fees_here:
                     f.update(paid_on=pays_on.isoformat(), paid_from=db.account_label(payer))
+            owing = statement - pay
             prev, first = close, False
             close = clamp_day(close.year + close.month // 12, close.month % 12 + 1, 31)
 
@@ -774,6 +851,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     for e in events:
         if e.get("key") in overrides and not e.get("overridden"):   # recurring items' edits are applied above
             e["original_amount"], e["amount"], e["overridden"] = e["amount"], round(overrides[e["key"]], 2), True
+        if e.get("overridden"):   # an amount you've changed is yours, not an estimate
+            e["estimated"] = False
+            e.pop("estimate", None)
     # Only what lands on the chart, today through its last day (a payment moved off a weekend can land past it).
     events = [e for e in events if today.isoformat() <= e["date"] <= end.isoformat()]
 

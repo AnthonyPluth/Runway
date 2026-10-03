@@ -723,7 +723,8 @@ class ForecastAssumptionTests(LedgerCase):
         # an amount set on the October statement's estimate still applies when the bank's statement has a different
         # due date
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
-        self.assertEqual(self.estimates()["2026-11-05"], 123.0)
+        e = next(e for e in forecast.build(self.conn, TODAY, 90)["events"] if e.get("key") == "cardclose:cc:2026-10-10")
+        self.assertEqual((e["date"], e["amount"]), ("2026-11-05", -123.0))
         self.stmt("cc", 500.0, "2026-10-10", "2026-11-06")
         self.conn.execute(update(Account).where(Account.id == "cc").values(balance=-500.0))
         e = next(e for e in forecast.build(self.conn, date(2026, 10, 12), 30)["events"] if e["kind"] == "card")
@@ -1102,6 +1103,117 @@ class PaymentModeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         i1 = (550 + charged / 2) * 0.02
         self.assertAlmostEqual(self.payments(fc)["2026-11-05"], self.minimum(550 + i1 + charged, i1), delta=0.01)
+
+
+class EstimatePartsTests(LedgerCase):
+    """What an estimated statement is made of (forecast.estimate_parts), on ForecastTests' card: its statements close the
+    10th and are due the 5th; $300 charged since the Sep 10 close."""
+    pay = PaymentModeTests.pay
+
+    def setUp(self):
+        super().setUp()
+        ForecastTests.card_setup(self)
+
+    def estimates(self, days=90, card="cc"):
+        """{payment date: estimate} for a card's estimated statements, each checked to add up to the cent."""
+        out = {}
+        for e in forecast.build(self.conn, TODAY, days)["events"]:
+            if e["kind"] != "card" or not e["estimated"] or e["card_id"] != card:
+                continue
+            est = e["estimate"]
+            cents = lambda v: round(v * 100)
+            parts = [est.get(k, 0.0) for k in ("charged_so_far", "owed_now", "budgets_total", "recurring_total", "fees_total",
+                                                "carried", "interest")]
+            self.assertEqual(sum(map(cents, parts)), cents(est["statement"]), est)
+            for name in ("budgets", "recurring", "fees"):
+                self.assertEqual(name in est, f"{name}_total" in est, est)
+                if name in est:
+                    self.assertEqual(sum(cents(i["amount"]) for i in est[name]), cents(est[f"{name}_total"]), est)
+            self.assertEqual(est["total"], -e["amount"])
+            out[e["date"]] = est
+        return out
+
+    def test_whats_charged_and_the_budgets_on_the_card(self):
+        # Groceries ($500 a month, $200 spent) and Restaurants ($93, $100 spent: none left this month) on the card
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Restaurants", amount=93, pay_with="cc"))
+        est = self.estimates()
+        oct10 = est["2026-11-05"]
+        self.assertEqual((oct10["close"], oct10["due"], oct10["charged_so_far"]), ("2026-10-10", "2026-11-05", 300.0))
+        # Groceries: the $300 left of September's and 10 days of October's; Restaurants: 10 days of October's
+        self.assertEqual([b["category"] for b in oct10["budgets"]], ["Groceries", "Restaurants"])
+        self.assertAlmostEqual(oct10["budgets"][0]["amount"], 300 + 500 / 31 * 10, delta=0.01)
+        self.assertAlmostEqual(oct10["budgets"][1]["amount"], 93 / 31 * 10, delta=0.01)
+        self.assertAlmostEqual(oct10["total"], 300 + 300 + 593 / 31 * 10, delta=0.01)
+        for k in ("recurring", "fees", "carried", "interest", "pay_mode", "owed_now", "assumed_cycle"):
+            self.assertNotIn(k, oct10)
+        # a later cycle: nothing charged yet, only its budgets
+        nov10 = est["2026-12-07"]
+        self.assertNotIn("charged_so_far", nov10)
+        self.assertAlmostEqual(nov10["budgets_total"], 593 / 31 * 21 + 593 / 30 * 10, delta=0.01)
+
+    def test_recurring_charges_and_an_annual_fee(self):
+        self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-600, frequency="yearly",
+                                                   anchor_date="2025-10-20", match="insurer"))
+        self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30"))
+        AnnualFeeTests.churn(self, opened="2023-11-02", account_id="cc")   # on the statement closing Nov 10
+        nov10 = self.estimates(days=120)["2026-12-07"]
+        self.assertEqual(nov10["recurring"], [{"name": "Insurance", "amount": 600.0}, {"name": "Streaming", "amount": 15.0}])
+        self.assertEqual(nov10["fees"], [{"name": "Sapphire annual fee", "amount": 95.0}])
+        self.assertEqual(nov10["total"], 710.0)
+
+    def test_paying_the_minimum_with_interest(self):
+        self.conn.execute(insert(Recurring).values(name="Insurance", account_id="cc", amount=-450, frequency="monthly",
+                                                   anchor_date="2026-09-25"))
+        self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
+        self.pay("minimum", apr="24")
+        oct10 = self.estimates()["2026-11-05"]
+        i1 = (550 + 750 / 2) * 0.02
+        self.assertEqual((oct10["charged_so_far"], oct10["recurring_total"]), (300.0, 450.0))
+        self.assertEqual((oct10["carried"], oct10["interest"], oct10["apr"]), (550.0, round(i1, 2), 24.0))
+        self.assertEqual(oct10["statement"], round(550 + i1 + 750, 2))
+        self.assertEqual((oct10["total"], oct10["pay_mode"]), (PaymentModeTests.minimum(oct10["statement"], i1), "minimum"))
+
+    def test_a_card_with_no_statement_yet(self):
+        # A new card owing $40, with $310 a month of Travel on it: its cycle is taken to end with the month.
+        self.acct("cc3", "credit", -40.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        est = self.estimates(card="cc3")
+        sep = est["2026-10-26"]
+        self.assertEqual((sep["assumed_cycle"], sep["close"], sep["due"], sep["owed_now"]), (True, "2026-09-30", "2026-10-25", 40.0))
+        self.assertEqual((sep["budgets"], sep["total"]), ([{"category": "Travel", "amount": 310.0}], 350.0))
+        self.assertNotIn("charged_so_far", sep)
+        oct_ = est["2026-11-25"]
+        self.assertEqual((oct_["close"], oct_["total"]), ("2026-10-31", 310.0))
+        self.assertNotIn("owed_now", oct_)
+
+    def test_an_amount_you_set_is_not_an_estimate(self):
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
+        fc = forecast.build(self.conn, TODAY, 90)
+        e = next(e for e in fc["events"] if e.get("key") == "cardclose:cc:2026-10-10")
+        self.assertEqual((e["amount"], e["overridden"], e["estimated"]), (-123.0, True, False))
+        self.assertNotIn("estimate", e)
+        nxt = next(e for e in fc["events"] if e.get("key") == "cardclose:cc:2026-11-10")   # the next one still is
+        self.assertTrue(nxt["estimated"] and nxt["estimate"])
+
+    def test_an_amount_you_set_on_a_learned_recurring_amount_is_not_an_estimate(self):
+        rid = self.conn.execute(insert(Recurring).values(name="Power", account_id="chk", amount=-120, frequency="monthly",
+                                                         anchor_date="2026-08-15", match="power co", amount_mode="avg3")).lastrowid
+        events = lambda: {e["key"]: e for e in forecast.build(self.conn, TODAY, 60)["events"] if e.get("recurring_id") == rid}
+        self.assertTrue(events()[f"rec:{rid}:2026-10-15"]["estimated"])
+        self.conn.execute(insert(Override).values(key=f"rec:{rid}:2026-10-15", amount=-140.0))
+        got = events()
+        self.assertEqual((got[f"rec:{rid}:2026-10-15"]["amount"], got[f"rec:{rid}:2026-10-15"]["estimated"]), (-140.0, False))
+        self.assertGreater(len(got), 1)
+        self.assertTrue(all(e["estimated"] for k, e in got.items() if k != f"rec:{rid}:2026-10-15"))   # the others are still learned
+
+    def test_to_cents(self):
+        self.assertEqual(forecast.to_cents([1 / 3, 1 / 3, 1 / 3], 1.0), [0.34, 0.33, 0.33])
+        self.assertEqual(forecast.to_cents([0.005, 0.005], 0.0), [0.0, 0.0])
+        self.assertEqual(forecast.to_cents([10.004, 5.003, -2.0], 13.01), [10.01, 5.0, -2.0])
+        self.assertEqual(forecast.to_cents([], 0.0), [])
 
 
 class AnnualFeeTests(LedgerCase):

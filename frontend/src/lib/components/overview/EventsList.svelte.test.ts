@@ -9,12 +9,14 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
-import type { ForecastEvent } from "$lib/types";
+import type { ForecastEvent, StatementEstimate } from "$lib/types";
 import { toast } from "svelte-sonner";
 import { category } from "../../../test/fixtures";
 import EventsList from "./EventsList.svelte";
 
 type Ev = ForecastEvent & { late_from?: string | null };
+const estimate = (): StatementEstimate => ({ close: "2026-03-01", due: "2026-03-26", charged_so_far: 300,
+  budgets: [{ category: "Groceries", amount: 500 }, { category: "Dining", amount: 266.67 }], budgets_total: 766.67, statement: 1066.67, total: 1066.67 });
 const ev = (extra: Partial<Ev> = {}): Ev => ({ date: "2026-03-15", name: "Rent", amount: -1500, kind: "recurring", key: "k1", balance_after: 900, ...extra });
 // `events` is also a Testing Library mount option, so props go under `props`.
 const show = (events: Ev[], extra: Record<string, unknown> = {}) => render(EventsList, { props: { events, onchanged: vi.fn(), ...extra } });
@@ -85,14 +87,57 @@ describe("EventsList", () => {
     });
 
     it("flags estimates, late items and edited amounts", () => {
-      show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
+      show([ev({ estimated: true, late_from: "2026-03-01" })]);
       // an estimate is an asterisk right after the amount, not a word or a badge
       const mark = screen.getByRole("img", { name: "estimate" });
       expect(mark).toHaveTextContent("*");
       expect(mark.parentElement).toHaveTextContent(/1,500\.00\*$/);
       expect(screen.queryByText("estimate")).not.toBeInTheDocument();
       expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-03-01 and hasn't shown up yet");
+    });
+
+    it("drops the asterisk once you've changed the amount: it's yours, not an estimate", () => {
+      // (the forecast doesn't mark an edited one as an estimate; this holds even if it did)
+      show([ev({ estimated: true, overridden: true, original_amount: -1400, kind: "card", estimate: estimate() })]);
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
+      expect(screen.queryByRole("img", { name: "estimate" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "What this estimate is made of" })).toBeNull();
+      expect(screen.getByRole("button", { name: "reset" })).toBeInTheDocument();
+    });
+
+    it("drops the asterisk from a recurring item with a learned amount once you've set this one", () => {
+      show([ev({ name: "Power", estimated: true, overridden: true, original_amount: -120, amount: -140, recurring_id: 3 })]);
+      expect(screen.getByText("edited")).toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "estimate" })).toBeNull();
+      expect(screen.getByRole("button", { name: "−$140.00" }).parentElement).not.toHaveTextContent("*");
+    });
+
+    it("lets a card with no statement yet (no key to edit it by) open its breakdown too", async () => {
+      show([ev({ kind: "card", estimated: true, assumed_cycle: true, key: undefined, name: "New card statement", amount: -350,
+        estimate: { close: "2026-02-28", due: "2026-03-25", assumed_cycle: true, owed_now: 40, budgets: [{ category: "Travel", amount: 310 }],
+          budgets_total: 310, statement: 350, total: 350 } })]);
+      const mark = screen.getByRole("button", { name: "What this estimate is made of" });
+      await userEvent.click(mark);
+      expect(document.getElementById(mark.getAttribute("aria-controls")!)).toHaveTextContent(/Owed on the card now \$40\.00/);
+    });
+
+    it("lists what a card statement's estimate is made of: in its tooltip, and under the row on a tap", async () => {
+      show([ev({ kind: "card", estimated: true, name: "Visa statement", key: "cardclose:cc:2026-03-01", amount: -1066.67, estimate: estimate() })]);
+      const mark = screen.getByRole("button", { name: "What this estimate is made of" });
+      expect(mark).toHaveTextContent("*");
+      expect(mark).toHaveClass("absolute", "left-full");
+      expect(mark.title.split("\n")).toEqual(["Estimate for the Mar 1 statement", "Charged so far · $300.00",
+        "Budgets on this card to Mar 1 · $766.67 (Groceries $500.00, Dining $266.67)", "= $1,066.67"].map((l) => l.replace(/Mar 1/g, "Mar\u00a01")));
+      expect(mark).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("Charged so far")).toBeNull();   // collapsed by default
+      await userEvent.click(mark);
+      expect(mark).toHaveAttribute("aria-expanded", "true");
+      const breakdown = document.getElementById(mark.getAttribute("aria-controls")!)!;
+      expect(breakdown).toHaveTextContent(/Charged so far \$300\.00\s*Budgets on this card to/);
+      expect(breakdown).toHaveTextContent("= $1,066.67");
+      expect(api).not.toHaveBeenCalled();   // a tap on the asterisk doesn't edit the amount
+      await userEvent.click(mark);
+      expect(screen.queryByText("Charged so far")).toBeNull();
     });
 
     it("explains a card estimate differently from a recurring one", () => {

@@ -104,6 +104,8 @@ export interface ForecastEvent {
   estimated?: boolean;
   /** A card with no statement yet: its cycle is assumed (closes at the month's end, paid 25 days later). */
   assumed_cycle?: boolean;
+  /** An estimated card statement: what it's made of. Never on one whose amount you've changed (that's not an estimate). */
+  estimate?: StatementEstimate;
   overridden?: boolean;
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
@@ -122,6 +124,37 @@ export interface ForecastEvent {
    *  (null when that payment isn't in the forecast). */
   paid_on?: string | null;
   paid_from?: string | null;
+}
+
+/** What an estimated card statement is made of (forecast.estimate_parts). Only what went into it is there; the parts
+ *  (charged_so_far or owed_now, budgets_total, recurring_total, fees_total, carried, interest) add up to `statement` to
+ *  the cent, and each list adds up to its total. */
+export interface StatementEstimate {
+  close: string;
+  due: string;
+  /** A card with no statement yet: its cycle is taken to end with the month. */
+  assumed_cycle?: boolean;
+  /** On the card since the last statement closed (the cycle in progress). */
+  charged_so_far?: number;
+  /** A card with no statement yet: what it owes today, in its first statement (below zero: a credit). */
+  owed_now?: number;
+  /** The budgets paid with the card, each one's spending to the close. */
+  budgets?: { category: string; amount: number }[];
+  budgets_total?: number;
+  /** The card's recurring charges in the cycle that no budget has. */
+  recurring?: { name: string; amount: number }[];
+  recurring_total?: number;
+  /** Annual fees charged in the cycle. */
+  fees?: { name: string; amount: number }[];
+  fees_total?: number;
+  /** What the statement before leaves unpaid (below zero: a credit on the card), and a month's interest at `apr`. */
+  carried?: number;
+  interest?: number;
+  apr?: number | null;
+  statement: number;
+  /** What's paid toward it: the event's amount. Less than the statement when paying the minimum or a fixed amount. */
+  total: number;
+  pay_mode?: "full" | "minimum" | "fixed";
 }
 
 export interface CardSummary {
