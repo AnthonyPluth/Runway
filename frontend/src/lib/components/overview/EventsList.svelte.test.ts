@@ -149,6 +149,21 @@ describe("EventsList", () => {
     expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
   });
 
+  it("shows the budget line's balance beside a day's projected balance, once for several accounts", () => {
+    const { unmount } = show([ev({ account_id: "chk", balance_after: 900 })], { onBudget: { "2026-03-15": 850 } });
+    expect(screen.getByText("· on budget $850.00")).toHaveClass("text-chart-2");
+    unmount();
+    show([ev({ key: "a", account_id: "chk", balance_after: 900 }), ev({ key: "b", account_id: "sav", balance_after: 400 })],
+      { onBudget: { "2026-03-15": 1200 } });
+    expect(screen.queryByText(/· on budget/)).not.toBeInTheDocument();
+    expect(screen.getByText("on budget, all accounts $1,200.00")).toBeInTheDocument();
+  });
+
+  it("shows no budget figure on a day it isn't given", () => {
+    show([ev()], { onBudget: { "2026-03-16": 850 } });
+    expect(screen.queryByText(/on budget/)).not.toBeInTheDocument();
+  });
+
   it("groups items by day under the date, with no dividers inside a day, and the projected balance once a day per account", () => {
     show([
       ev({ key: "a", name: "Taxes", account_id: "chk", balance_after: 5000 }),

@@ -98,6 +98,14 @@ describe("Overview", () => {
     expect(screen.queryByRole("button", { name: "choose one account" })).not.toBeInTheDocument();
   });
 
+  it("has no Day by day table: Coming up shows the budget line's balance beside each day's instead", async () => {
+    serve(() => fc({ events: [{ date: "2026-10-01", account_id: "chk", name: "Rent", amount: -200, kind: "recurring", key: "r", balance_after: 800 }],
+      budget: { total: [1000, 750], low: { date: "2026-10-01", balance: 750 }, monthly: 500, changes: [], skipped: [] } }));
+    render(Overview);
+    expect(await screen.findByText("· on budget $750.00")).toBeInTheDocument();
+    expect(screen.queryByText("Day by day")).not.toBeInTheDocument();
+  });
+
   it("labels the budget line without a second low figure", async () => {
     serve(() => fc({ budget: { total: [1000, 800], low: { date: "2026-10-01", balance: 800 }, monthly: 500, changes: [], skipped: [] } }));
     render(Overview);

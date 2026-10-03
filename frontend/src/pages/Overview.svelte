@@ -17,7 +17,6 @@
   import { comingUp } from "$lib/components/overview/comingUp";
   import SetupChecklist from "$lib/components/overview/SetupChecklist.svelte";
   import ThisMonth from "$lib/components/overview/ThisMonth.svelte";
-  import ForecastTable from "$lib/components/overview/ForecastTable.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt, fmt0, fmt0Down, nb, parseDate, relDay } from "$lib/format";
@@ -52,6 +51,14 @@
 
   const span = (d: number) => (d === 180 ? "6 months" : `${d} days`);
   const short = (d: number) => (d % 30 === 0 ? `${d / 30}M` : `${d}D`);
+  // The budget line's balance by day, from the first day it differs from the forecast's (Coming up shows it beside each
+  // day's projected balance); none when there are no budgets or it never differs.
+  function onBudget(fc: Overview): Record<string, number> | undefined {
+    const alt = fc.budget?.total;
+    if (!alt || alt.length !== fc.total.length) return undefined;
+    const first = alt.findIndex((v, i) => Math.abs(v - fc.total[i]) >= 0.005);
+    return first < 0 ? undefined : Object.fromEntries(fc.dates.slice(first).map((d, k) => [d, alt[first + k]]));
+  }
   const lowWhen = (fc: Overview) => (fc.low.date === fc.today ? "today" : relDay(fc.low.date, fc.today));
 
   // "Left out: Mortgage and Utilities, which recurring items already cover; Medical, whose account isn't in the forecast."
@@ -164,17 +171,13 @@
       </div>
       <Segmented label="Forecast length" value={String(days)} onchange={setDays} class="mt-3 flex w-full"
         options={[...new Set([30, 60, 90, 180, days])].sort((a, b) => a - b).map((d) => ({ value: String(d), label: short(d) }))} />
-      <details class="group/table mt-3">
-        <summary class="flex cursor-pointer list-none items-center gap-1 text-[15px] text-primary [&::-webkit-details-marker]:hidden">
-          Day by day<ChevronRight class="size-4 transition-transform group-open/table:rotate-90" aria-hidden="true" />
-        </summary>
-        <div class="mt-2 rounded-2xl bg-card p-4"><ForecastTable {fc} /></div>
-      </details>
     </section>
 
     <div class="grid items-start gap-6 lg:grid-cols-2">
       <div class="flex min-w-0 flex-col gap-6">
-        <Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll} onchanged={() => load(days)} /></Group>
+        <!-- On budget figures in the budget line's blue, as on the chart. -->
+        <div style:--chart-2="#64d2ff"><Group title="Coming up" inset="3.75rem"><EventsList events={comingUp(fc)} limit={6} bind:all={comingAll}
+          onchanged={() => load(days)} onBudget={onBudget(fc)} /></Group></div>
         <Group title="Credit cards"><CardsTable cards={fc.cards} onchanged={() => load(days)} /></Group>
       </div>
       <ThisMonth />
