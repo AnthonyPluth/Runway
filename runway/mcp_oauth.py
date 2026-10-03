@@ -5,8 +5,10 @@ The pieces: protected-resource metadata (RFC 9728), authorization-server metadat
 registration (RFC 7591, without the management API of RFC 7592), the authorization code flow with PKCE (S256 only),
 refresh tokens that rotate, with a replayed one revoking its grant, revocation (RFC 7009), resource indicators
 (RFC 8707) and the iss parameter on redirects (RFC 9207). Scopes: "read" (always), "churning:write" (opt-in, and
-only effective while "Let assistants change churning" is on: mcp_access.allow_writes) and "categorize:write" (opt-in,
-and only effective while "Let assistants categorize" is on: mcp_access.allow_categorize).
+only effective while "Let assistants change churning" is on: mcp_access.allow_writes), "categorize:write" (opt-in,
+and only effective while "Let assistants categorize" is on: mcp_access.allow_categorize) and "write" (opt-in, any
+change outside mcp_access.BLOCKED, only while "Let assistants change anything" is on: mcp_access.allow_all; it implies
+the other two). What the consent page says each opt-in allows is CONSENT.
 
 A grant is one approval on the consent page: the unit Settings lists and revokes. Codes and tokens are random
 (secrets.token_urlsafe(32), with a prefix) and only their sha256 is stored; revoke_grant() ends everything under a
@@ -38,7 +40,15 @@ from sqlalchemy import delete, exists, insert, or_, select, true, update
 from . import oidc
 from .models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken
 
-SCOPES = ("read", "churning:write", "categorize:write")
+SCOPES = ("read", "churning:write", "categorize:write", "write")
+# What the consent page says ticking each opt-in scope lets the assistant do (and, switched off, what to do first).
+CONSENT = {
+    "write": ("Change anything",
+              "Add, change and remove your financial data: transactions, budgets, categories, rules, recurring items, accounts, "
+              "net worth items, equity, churning and orders. Never bank connections, API keys, notifications or these "
+              "assistant settings. It's told to ask you before every change.",
+              "Turn on Let assistants change anything in Settings → Data first. Until then this connection can't make those changes."),
+}
 ACCESS_TTL = 3600                 # seconds
 REFRESH_TTL = 90 * 86400
 CODE_TTL = 600
