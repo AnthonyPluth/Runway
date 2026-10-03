@@ -87,7 +87,7 @@ export async function resumePlaidOAuth(): Promise<boolean> {
     const p = await api<{ link_token: string; item_id: string | null; kind: string }>("/api/plaid/oauth_resume", { keep: true });
     await loadPlaid();
     const linked = await runPlaidLink(p.link_token, p.item_id, p.kind, back);
-    if (linked) reload();
+    if (linked) { if (p.item_id) reload(); else showAccounts(); }
     return linked;
   } catch (err) { toast.error((err as Error).message); return false; }
 }
@@ -104,11 +104,34 @@ export async function matchPlaidAccount(plaidAccountId: string, target: string, 
   } catch (err) { toast.error((err as Error).message); return false; }
 }
 
-/** The Connect buttons: opens Link and stays where you are. A new bank's connection row links to the accounts
- *  waiting for a decision in Settings → Accounts. */
+/** Adds each of these Plaid accounts as its own account (New from Plaid's "Add all"), one after another, then says how
+ *  many made it. One that fails stops the rest, and the toast says which. */
+export async function addPlaidAccounts(ids: string[]): Promise<number> {
+  let added = 0;
+  try {
+    for (const id of ids) {
+      await api("/api/plaid/match", { method: "POST", body: { plaid_account_id: id, target: "new" } });
+      added++;
+    }
+    toast.success(added === 1 ? "Added to your accounts" : `Added ${added} accounts`);
+  } catch (err) {
+    toast.error(added ? `Added ${added} of ${ids.length}: ${(err as Error).message}` : (err as Error).message);
+  }
+  if (added) { try { await refreshState(); } catch { /* the reload below still shows them */ } reload(); }
+  return added;
+}
+
+/** Settings → Accounts, where a new connection's accounts wait for a decision (or the page again, when already there). */
+function showAccounts(): void {
+  if (location.hash.split("?")[0] === "#setup/accounts") reload();
+  else location.hash = "#setup/accounts";
+}
+
+/** The Connect buttons: opens Link, and once a bank or investment account is connected, Settings → Accounts, so its
+ *  accounts are in view. */
 export async function connectPlaid(kind: string): Promise<void> {
   try {
     if (!(await openPlaidLink(null, kind))) return;
-    reload();
+    showAccounts();
   } catch (err) { toast.error((err as Error).message); }
 }

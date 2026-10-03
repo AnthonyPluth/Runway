@@ -1,18 +1,21 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
-  import * as Alert from "$lib/components/ui/alert";
   import { Button } from "$lib/components/ui/button";
   import { fmtDate } from "$lib/format";
   import { toast } from "svelte-sonner";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import ProblemNote from "./ProblemNote.svelte";
+  import SecretInput from "./SecretInput.svelte";
   import type { CartaStatus } from "./types";
   import { fieldCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
 
   // Carta (stock options, RSUs and shares) as a row of the browser extension's list: read by the extension, or through
-  // Carta's Portfolio API (which needs Carta to approve your app), or Carta's sample data.
+  // Carta's Portfolio API (which needs Carta to approve your app), or Carta's sample data. `onproblem` tells the
+  // extension's row whether the last read went wrong, so it shows that it needs attention.
+  let { onproblem }: { onproblem?: (on: boolean) => void } = $props();
   let c = $state<CartaStatus | null>(null);
+  $effect(() => { onproblem?.(!!(c?.web_error || c?.last_error)); });
   let env = $state("production");
   let clientId = $state("");
   let secret = $state("");
@@ -56,7 +59,7 @@
       {#if c.web_capture}{" · "}<a class={linkCls} href="/api/carta/capture" download>Download what the extension read</a> (to see why something's missing){/if}
     </span>
   </div>
-  {#if c.web_error}<Alert.Root class="my-2"><TriangleAlert /><Alert.Description><p>{c.web_error}</p></Alert.Description></Alert.Root>{/if}
+  {#if c.web_error}<ProblemNote class="my-2" text="The extension couldn’t read Carta last time." detail={c.web_error} />{/if}
   <details class="group mt-1" open={c.connected || !!c.client_id}>
     <summary class="flex cursor-pointer list-none items-center gap-1.5 py-1 text-sm text-muted-foreground select-none [&::-webkit-details-marker]:hidden"
       title="Carta's Portfolio API works only for apps Carta approves. An app made in Carta's developer portal is a Playground app (Carta's test environment, dummy data) until Carta grants it production access. Carta's sample data works without any of that, to see how it looks.">
@@ -74,8 +77,7 @@
           <span class={`${fieldCls} w-full sm:w-56`}>Redirect URI<code class={`${code} h-9 content-center truncate`} title="Register this as the app's redirect URI in Carta">{redirect}</code></span>
           <label class={`${fieldCls} w-full sm:w-56`}>Client id
             <input class={inputCls} bind:value={clientId} autocomplete="off" spellcheck="false" use:autosave={saveField} /></label>
-          <label class={`${fieldCls} w-full sm:w-56`}>Client secret
-            <input class={inputCls} type="password" bind:value={secret} placeholder={c.has_secret ? "•••••••• saved" : ""} autocomplete="off" use:autosave={saveField} /></label>
+          <SecretInput label="Client secret" class="w-full sm:w-56" bind:value={secret} placeholder={c.has_secret ? "Key saved" : ""} save={saveField} />
         {/if}
       </div>
       <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -87,7 +89,7 @@
           <Button variant="outline" onclick={connect}>Connect Carta's API</Button>
         {/if}
       </div>
-      {#if c.last_error}<Alert.Root variant="destructive"><TriangleAlert /><Alert.Description><p>{c.last_error}</p></Alert.Description></Alert.Root>{/if}
+      {#if c.last_error}<ProblemNote text="Carta’s API didn’t answer as expected last time." detail={c.last_error} />{/if}
     </div>
   </details>
 {/if}

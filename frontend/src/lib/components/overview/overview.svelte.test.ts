@@ -43,7 +43,7 @@ describe("SetupChecklist", () => {
     expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "#budget");
   });
 
-  it("chooses the main account in the forecast settings, right there on Overview", async () => {
+  it("chooses the forecast account in the forecast settings, right there on Overview", async () => {
     setup({ bank: true });
     render(SetupChecklist);
     expect(screen.queryByRole("link", { name: "Choose" })).not.toBeInTheDocument();
@@ -51,19 +51,42 @@ describe("SetupChecklist", () => {
     expect(forecastSheet.open).toBe(true);
   });
 
-  it("can't choose the main account before a bank is connected", () => {
+  it("greys out every step after the first until a bank is connected, on the welcome screen", () => {
     setup();
     render(SetupChecklist, { welcome: true });
-    const choose = screen.getByRole("button", { name: "Choose" });
-    expect(choose).toBeDisabled();
-    expect(choose).toHaveAccessibleDescription("after your bank connects");
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute("href", "#setup/connections");
+    for (const name of ["Choose", "Add", "Budget"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAccessibleDescription("after your bank connects");
+      expect(button.closest("li")).toHaveClass("opacity-50");
+    }
+    expect(screen.queryByRole("link", { name: "Add" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Budget" })).toBeNull();
   });
 
-  it("keeps each step's sentence in a tooltip, not on the page", () => {
-    setup();
+  it("says what each step means on a short line under it, until it's done", () => {
+    setup({ bank: true });
     render(SetupChecklist);
-    expect(screen.queryByText(/The first sync brings in months of history/)).not.toBeInTheDocument();
-    expect(screen.getByText("Connect a bank")).toHaveAttribute("title", expect.stringContaining("The first sync brings in months of history"));
+    expect(screen.getByText("Choose your forecast account").nextElementSibling).toHaveTextContent("Where your pay lands and bills come out");
+    expect(screen.getByText("Connect a bank").nextElementSibling).toBeNull();
+    expect(screen.getByText("Connect a bank")).not.toHaveAttribute("title");
+  });
+
+  it("points at Settings → Accounts while accounts from Plaid wait for a decision", () => {
+    app.state = { connected: true, plaid_undecided: 2, setup: { bank: true, primary: false, recurring: false, budgets: false, dismissed: false } };
+    render(SetupChecklist);
+    expect(screen.getByText("Choose your forecast account").nextElementSibling).toHaveTextContent("First add the 2 new accounts from Plaid in Settings → Accounts");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "#setup/accounts");
+    expect(screen.queryByRole("button", { name: "Choose" })).toBeNull();
+  });
+
+  it("points the first step at them too when Plaid is connected but nothing is added yet", () => {
+    app.state = { connected: true, plaid_undecided: 1, setup: { bank: false, primary: false, recurring: false, budgets: false, dismissed: false } };
+    render(SetupChecklist);
+    expect(screen.getByText("Connect a bank").nextElementSibling).toHaveTextContent("Add the 1 account Plaid found in Settings → Accounts");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "#setup/accounts");
+    expect(screen.getByRole("button", { name: "Add" })).toHaveAccessibleDescription("after you add an account");
   });
 
   it("welcomes a new user on its own, without a Dismiss button", () => {
@@ -73,21 +96,29 @@ describe("SetupChecklist", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
   });
 
-  it("can be put away, remembering that on the server", async () => {
+  it("can be put away, remembering that on the server, with Undo", async () => {
     setup({ bank: true });
     vi.mocked(api).mockResolvedValue({});
+    vi.mocked(toast).mockClear();
     render(SetupChecklist);
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: true } });
     expect(api).toHaveBeenCalledWith("/api/state", { keep: true });
+    const [message, opts] = vi.mocked(toast).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => Promise<void> } }];
+    expect(message).toBe("Setup checklist dismissed");
+    expect(opts.action.label).toBe("Undo");
+    await opts.action.onClick();
+    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: false } });
   });
 
   it("shows the error when dismissing fails", async () => {
     setup();
     vi.mocked(api).mockRejectedValueOnce(new Error("Nope"));
     render(SetupChecklist);
+    vi.mocked(toast).mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast.error).toHaveBeenCalledWith("Nope");
+    expect(toast).not.toHaveBeenCalled();   // no Undo for what didn't happen
   });
 });
 
