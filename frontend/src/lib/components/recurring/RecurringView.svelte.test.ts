@@ -36,6 +36,19 @@ beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; 
 const AMOUNT = { selector: 'input[name="amount"]' };
 
 describe("Recurring page", () => {
+  it("opens the item a link names (#recurring?item=2) and brings it into view", async () => {
+    const seen = vi.fn();
+    Element.prototype.scrollIntoView = seen;
+    location.hash = "#recurring?item=2";
+    serve([item(), item({ id: 2, name: "Paycheck", amount: 3000 })]);
+    render(Recurring);
+    await screen.findByText("Paycheck");
+    expect(document.querySelector("[data-recurring='2']")).toHaveAttribute("open");
+    expect(document.querySelector("[data-recurring='1']")).not.toHaveAttribute("open");
+    expect(seen).toHaveBeenCalledTimes(1);
+    location.hash = "";
+  });
+
   it("splits items into money in and money out", async () => {
     serve([item(), item({ id: 2, name: "Paycheck", amount: 3000 })]);
     render(Recurring);

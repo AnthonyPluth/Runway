@@ -103,14 +103,20 @@ describe("EventsList", () => {
       expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
     });
 
-    it("marks recurring items with the repeat icon, which opens Recurring to change every one", () => {
-      show([ev()]);
-      expect(screen.getByRole("link", { name: "Open in Recurring" })).toHaveAttribute("href", "#recurring");
+    it("links a recurring item's name to it in Recurring, with no repeat icon", () => {
+      show([ev({ recurring_id: 7 })]);
+      expect(screen.getByRole("link", { name: "Rent" })).toHaveAttribute("href", "#recurring?item=7");
+      expect(screen.queryByRole("link", { name: "Open in Recurring" })).not.toBeInTheDocument();
     });
 
     it("has no Recurring link on a card payment", () => {
-      show([ev({ kind: "card", key: undefined })]);
-      expect(screen.queryByRole("link", { name: "Open in Recurring" })).not.toBeInTheDocument();
+      show([ev({ kind: "card", key: undefined, name: "Visa statement" })]);
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    });
+
+    it("hangs an estimate's asterisk past the amount, so amounts line up", () => {
+      show([ev({ estimated: true })]);
+      expect(screen.getByRole("img", { name: "estimate" })).toHaveClass("absolute", "left-full");
     });
   });
 

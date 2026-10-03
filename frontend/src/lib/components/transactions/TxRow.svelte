@@ -1,7 +1,6 @@
 <script lang="ts">
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
-  import CatIcon from "$lib/components/CatIcon.svelte";
   import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
   import { orderLabel } from "$lib/components/orders/retail";
   import { Badge } from "$lib/components/ui/badge";
@@ -67,6 +66,8 @@
   const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
   // Shown on hover (and always on touch screens, and while focused).
   const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
+  // Shown on hover only: a touch screen leaves them out (fewer icons on a phone), and has them in the details instead.
+  const hoverOnly = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:hidden";
 
   // A big merchant's name: the brand's a sync gave it, or the bank's text instead (for this one, or for all of the brand's
   // and the syncs from now on), and back. Undo puts back the names and the brand's setting.
@@ -101,7 +102,10 @@
       onclick={(e) => onselect(e, e.currentTarget.checked)} />
   </label>
 
-  <div class="col-start-2 row-span-2 mr-3 self-center md:row-span-2 lg:row-span-1 lg:mr-2.5">
+  <!-- The account is a small badge on the merchant's logo, at every width (wider screens also name it, in its own column). -->
+  <div class="relative col-start-2 row-span-2 mr-3 self-center md:row-span-2 lg:row-span-1 lg:mr-2.5">
+    {#if !oneAccount}<span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md ring-2 ring-card lg:-right-1 lg:-bottom-1 lg:rounded-[3px]" title={t.account_name || undefined}
+      data-account-badge><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="size-4! lg:size-3! lg:rounded-[3px]! lg:text-[8px]!" labelClass="hidden" /></span>{/if}
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
            so a dark mark doesn't vanish on the dark page). -->
@@ -134,7 +138,7 @@
           title={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           aria-label={linked ? `Recurring: ${t.recurring_name} (click to change)` : "Link to a recurring item"}
           class={cn("inline-flex shrink-0 cursor-pointer items-center rounded px-1 text-[13px] text-muted-foreground hover:text-foreground",
-            linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!" : onHover)}>
+            linked ? "font-semibold text-primary @sm/title:min-w-0 @sm/title:shrink-[8] @sm/title:overflow-hidden @sm/title:bg-primary/15 max-lg:[@media(max-height:500px)]:bg-transparent!" : hoverOnly)}>
           <Repeat class="size-3.5" aria-hidden="true" />{#if linked}<span class="ml-1 hidden truncate text-xs font-normal @sm/title:inline max-lg:[@media(max-height:500px)]:hidden!">{t.recurring_name}</span>{/if}
         </button>
       {/if}
@@ -155,20 +159,17 @@
        is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
        text only shows once the cell is 24rem wide, so it never lands on the account. -->
   <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
+    {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
     {#if detail}{#if !oneAccount}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span>{/if}<span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
   <!-- Category: under the merchant on a phone, its own column on a wider screen. -->
   <div class="@container/cat col-start-3 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 pr-3 md:col-start-4 md:row-span-2 md:row-start-1 md:flex-nowrap lg:row-span-1">
-    <!-- On a phone the account is only its bank's logo, ahead of the category. -->
-    {#if !oneAccount}<span class="shrink-0 md:hidden" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} labelClass="hidden" /></span>{/if}
     {#if part}
       <!-- Only the part in the filter's category: picking another changes just that part. -->
-      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
-        <CatIcon name={part.categories[0]} size={22} />
+      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-2 text-sm transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
         <span class="truncate" title={part.categories.join(", ")}>{part.categories.join(", ")}</span>
-        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
+        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
         <CategorySelect value={part.categories.length === 1 ? part.categories[0] : ""} disabled={saving} label={`Category for the ${part.categories.join(", ")} part of ${name}`}
           class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />
       </span>
@@ -177,18 +178,17 @@
       <button type="button" class="flex min-w-0 cursor-pointer items-center gap-1.5 text-left text-xs" title="Edit the split" onclick={() => (splitting = true)}>
         <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground">
           {#each t.splits ?? [] as s, i (i)}
-            <span class="inline-flex items-center gap-1" title={s.note || undefined}><CatIcon name={s.category} size={16} />{s.category} {fmt(Math.abs(s.amount))}</span>
+            <span class="inline-flex items-center gap-1" title={s.note || undefined}>{s.category} {fmt(Math.abs(s.amount))}</span>
           {/each}
         </span>
       </button>
     {:else}
       <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
-      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-0.5 text-sm transition-colors",
+      <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-2 text-sm transition-colors",
         t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
         "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
-        {#if t.category}<CatIcon name={t.category} size={22} />{/if}
         <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
-        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", onHover)} aria-hidden="true" />
+        <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
         <CategorySelect value={t.category ?? ""} disabled={saving} label={`Category for ${name}`}
           class="absolute inset-0 h-full w-full cursor-pointer opacity-0" onchange={save} />
       </span>
@@ -233,6 +233,10 @@
         </dd></div>
       {/if}
       {#if sourceLabel && t.category}<div><dt class="text-muted-foreground">Category set by</dt><dd>{sourceLabel}</dd></div>{/if}
+      {#if !linked}
+        <!-- On a touch screen the row has no repeat icon until it's linked: linking is here instead. -->
+        <div class="hidden [@media(hover:none)]:block"><dd><Button variant="outline" size="sm" class="h-10" onclick={() => (picking = true)}>Link to a recurring item</Button></dd></div>
+      {/if}
       {#if !split}
         <!-- The row's own Split link is left out on narrow screens. -->
         <div class="md:hidden"><dd><Button variant="outline" size="sm" class="h-10" onclick={() => (splitting = true)}>Split across categories</Button></dd></div>
