@@ -99,14 +99,11 @@
         {/if}
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
-        {#if e.key}
-          <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
-        {:else}{fmt(e.amount)}{/if}
-        {#if e.estimated}
-          <span class="text-xs text-muted-foreground italic" title={e.kind !== "card" ? "Based on recent payments" : e.from_budgets
-            ? "Statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
-            : "Statement hasn't closed yet; based on the card's average over its last 3 statements"}>estimate</span>
-        {/if}
+        <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. -->
+        <span class="flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
+            save={(v) => change(e, v)} />{:else}{fmt(e.amount)}{/if}{#if e.estimated}<span class="ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
+              ? "the statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
+              : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}</span>
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}

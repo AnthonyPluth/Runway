@@ -84,22 +84,23 @@ describe("EventsList", () => {
 
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
-      // an estimate is a word in italics under the amount, not a badge by the name
-      expect(screen.getByText("estimate")).toHaveClass("italic");
-      expect(screen.getByText("estimate").closest("[data-slot=badge]")).toBeNull();
-      expect(screen.getByText("estimate").parentElement).toHaveTextContent(/1,500\.00/);
+      // an estimate is an asterisk right after the amount, not a word or a badge
+      const mark = screen.getByRole("img", { name: "estimate" });
+      expect(mark).toHaveTextContent("*");
+      expect(mark.parentElement).toHaveTextContent(/1,500\.00\*$/);
+      expect(screen.queryByText("estimate")).not.toBeInTheDocument();
       expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-03-01 and hasn't shown up yet");
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
     });
 
     it("explains a card estimate differently from a recurring one", () => {
       show([ev({ kind: "card", estimated: true, key: undefined })]);
-      expect(screen.getByText("estimate").title).toMatch(/Statement hasn't closed yet/);
+      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/statement hasn't closed yet/);
     });
 
     it("says when a card estimate comes from the budgets paid with it", () => {
       show([ev({ kind: "card", estimated: true, from_budgets: true, key: undefined })]);
-      expect(screen.getByText("estimate").title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
+      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
     });
 
     it("marks recurring items with the repeat icon, which opens Recurring to change every one", () => {
