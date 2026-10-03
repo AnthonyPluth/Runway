@@ -3,11 +3,11 @@ budgets and a home. Nothing here is real, and seeding refuses to touch a databas
 import random
 from datetime import date, timedelta
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 
 from . import db
 from . import settings_keys as sk
-from .models import Account, Asset, Budget, ManualStatement, Recurring, SyncLog, Transaction
+from .models import Account, Asset, Budget, Category, ManualStatement, Recurring, SyncLog, Transaction
 
 ACCOUNTS = [
     # id, name, org, kind, balance
@@ -88,7 +88,8 @@ def seed(conn, today: date | None = None) -> int:
 
     cols = ("id", "account_id", "posted", "amount", "description", "payee", "category")
     conn.execute(insert(Transaction), [{**dict(zip(cols, t, strict=True)), "category_source": "rule"} for t in txs])
-    conn.execute(insert(Budget), [{"category": c, "amount": a, "pay_with": "demo-card"} for c, a in BUDGETS])
+    conn.execute(insert(Budget), [{"category": c, "amount": a} for c, a in BUDGETS])
+    conn.execute(update(Category).where(Category.name.in_([c for c, _ in BUDGETS])).values(pay_with="demo-card"))
     # The card's latest statement, entered by hand (a card without Plaid): it closes on the 28th, due 25 days later.
     close = today.replace(day=28) if today.day >= 28 else (today.replace(day=1) - timedelta(days=1)).replace(day=28)
     prev = (close.replace(day=1) - timedelta(days=1)).replace(day=28)

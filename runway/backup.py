@@ -17,10 +17,10 @@ import zlib
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import column, delete, false, func, insert, inspect, select, table
+from sqlalchemy import column, delete, false, func, insert, inspect, select, table, update
 
 from . import db, schema, secretbox
-from .models import PlaidItem, Setting
+from .models import Category, PlaidItem, Setting
 
 FORMAT = "runway-backup"
 VERSION = 1
@@ -168,6 +168,17 @@ def unreadable_secrets(conn) -> list[str]:
     return out
 
 
+def _budget_cards(conn, tables: dict) -> None:
+    """A backup from before a category kept its own card (migration 0035) has it on the budget: it goes to the category."""
+    b, c = tables.get("budgets") or {}, tables.get("categories") or {}
+    if "pay_with" not in (b.get("columns") or []) or "pay_with" in (c.get("columns") or []):
+        return
+    cat, acct = b["columns"].index("category"), b["columns"].index("pay_with")
+    for r in b.get("rows") or []:
+        if r[acct]:
+            conn.execute(update(Category).where(Category.name == r[cat], Category.pay_with.is_(None)).values(pay_with=r[acct]))
+
+
 def restore(conn, data: dict) -> dict:
     """Replace everything with the backup's contents (in one transaction). Returns rows restored per table. Secrets
     the backup holds encrypted are kept as they are (see unreadable_secrets for the ones this key can't read); a
@@ -186,6 +197,7 @@ def restore(conn, data: dict) -> dict:
         if rows and cols:
             conn.execute(insert(_table(t, cols)), [dict(zip(cols, r, strict=True)) for r in rows])
         counts[t] = len(rows)
+    _budget_cards(conn, data["tables"])
     if conn.postgres:   # auto-numbered ids continue after the restored ones
         for t in sorted(schema.AUTO_ID):
             last = select(func.max(schema.metadata.tables[t].c.id)).scalar_subquery()

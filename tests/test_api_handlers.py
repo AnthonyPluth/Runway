@@ -272,18 +272,23 @@ class HandlerTests(DbCase):
             budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": True})
         with self.assertRaises(ApiError):
             budget.api_budget_set(self.c, {}, {"category": "Groceries", "pay_with": "nope"})
+        paid = lambda: self.one(select(Category.pay_with).where(Category.name == "Travel"))[0]
+        # The card is the category's (still accepted here, for now): no budget needed, and the budget coming and going
+        # leaves it alone.
+        budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": "demo-checking"})
+        self.assertEqual(paid(), "demo-checking")
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": "-250"})
         budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": True})
-        budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": "demo-checking"})
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": 300})
-        row = self.one(select(Budget.amount, Budget.pay_with, Budget.rollover_from).where(Budget.category == "Travel"))
-        self.assertEqual(tuple(row), (300.0, "demo-checking", f"{TODAY:%Y-%m}"))
+        row = self.one(select(Budget.amount, Budget.rollover_from).where(Budget.category == "Travel"))
+        self.assertEqual(tuple(row), (300.0, f"{TODAY:%Y-%m}"))
         budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": False})
-        budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": ""})
-        self.assertEqual(tuple(self.one(select(Budget.pay_with, Budget.rollover_from)
-                                        .where(Budget.category == "Travel"))), (None, None))
+        self.assertIsNone(self.one(select(Budget.rollover_from).where(Budget.category == "Travel"))[0])
         budget.api_budget_set(self.c, {}, {"category": "Travel", "amount": "0"})
         self.assertIsNone(self.one(select(Budget.category).where(Budget.category == "Travel")))
+        self.assertEqual(paid(), "demo-checking")
+        budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": ""})
+        self.assertIsNone(paid())
 
     # ------------------------------------------------------------------------------------------ transactions
 

@@ -26,7 +26,7 @@ from sqlalchemy import delete, func, or_, select, update
 from . import db, plaidbank, sfinvest
 from . import settings_keys as sk
 from .schema import now_text
-from .models import (Account, Asset, Budget, CardStatement, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount, Holding,
+from .models import (Account, Asset, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount, Holding,
                      HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition, ManualState,
                      ManualStatement, Override, PlaidAccount, Recurring, RecurringDismissed, RetailCharge, Rule, Transaction,
                      TxSplit)
@@ -108,7 +108,7 @@ def remove(conn, account_id: str) -> dict:
     if seen.pop(account_id, None) is not None:
         db.set_setting(conn, sk.SIMPLEFIN_HOLDINGS_SEEN, json.dumps(seen))
     # What pointed at it lets go.
-    conn.execute(update(Budget).where(Budget.pay_with == account_id).values(pay_with=None))
+    conn.execute(update(Category).where(Category.pay_with == account_id).values(pay_with=None))
     conn.execute(update(Asset).where(Asset.loan_account_id == account_id).values(loan_account_id=None))
     conn.execute(update(ChurnCard).where(ChurnCard.account_id == account_id).values(account_id=None))
     conn.execute(update(ChurnBankBonus).where(ChurnBankBonus.account_id == account_id).values(account_id=None))

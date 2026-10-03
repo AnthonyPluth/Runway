@@ -14,6 +14,10 @@ budgets paid with the card (spent on it day by day), its recurring charges and a
 yet that has budgets charged to it is taken to close at each month's end (NO_STATEMENT_DUE_DAYS). Each estimated
 statement says what it's made of (estimate_parts). An amount you've changed is yours, not an estimate.
 
+A budget goes on its category's account (Settings → Categories), else the one used most for it. A subcategory's budget
+with an account of its own goes on that account, and only the rest of its parent's budget on the parent's (budget_days),
+so the budgets still come to the same each day.
+
 Each card is paid the way you pay it (Settings → Accounts): the whole statement (the default), the issuer's minimum, or
 a fixed amount. What isn't paid carries into the next statement, with a month's interest at the card's APR if you've
 entered one.
@@ -627,23 +631,28 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     skipped: list[dict] = []
     days_of = budget_days(conn, today, horizon_days, plan, events, cash_ids) if plan else {}
     for p in plan:
-        acct = p["pay_with"] or p["usual"] or cash[0]["id"]
-        a = by_id.get(acct)
-        if not a or (acct not in cash_ids and a["kind"] != "credit"):
-            skipped.append({"category": p["category"], "reason": "its account isn't in the forecast"})
-            continue
-        if a["kind"] == "credit" and a["pay_from"] not in cash_ids:
-            skipped.append({"category": p["category"], "reason": "its card isn't paid from a forecast account"})
-            continue
-        days = days_of[p["category"]]
-        if days is None:
+        # The budget's own share, then each part's (a subcategory's budget on its own account, budget_plan): each is
+        # spent on its account, or left out on its own, saying why.
+        ways = days_of[p["category"]]
+        if ways is None:
             skipped.append({"category": p["category"], "reason": "a recurring item already covers it"})
             continue
-        for d, v in days.items():
-            spend[acct][d] += v
-        spend_of[acct][p["category"]] = days
-        used.append({"category": p["category"], "amount": p["amount"], "account_id": acct,
-                     "account": db.account_label(a), "chosen": bool(p["pay_with"])})
+        for q, way, monthly in zip([p, *p["parts"]], ways, monthly_shares(p), strict=True):
+            if p["parts"] and monthly < 0.005 and not any(v > 0.005 for v in way["days"].values()):
+                continue   # its parts take the whole budget (or the earlier parts take this one's): nothing to spend
+            acct = q["pay_with"] or q["usual"] or cash[0]["id"]
+            a = by_id.get(acct)
+            if not a or (acct not in cash_ids and a["kind"] != "credit"):
+                skipped.append({"category": q["category"], "reason": "its account isn't in the forecast"})
+                continue
+            if a["kind"] == "credit" and a["pay_from"] not in cash_ids:
+                skipped.append({"category": q["category"], "reason": "its card isn't paid from a forecast account"})
+                continue
+            for d, v in way["days"].items():
+                spend[acct][d] += v
+            spend_of[acct][q["category"]] = way["days"]   # each share's days, for the statement's estimate breakdown
+            used.append({"category": q["category"], "amount": round(monthly, 2), "account_id": acct,
+                         "account": db.account_label(a), "chosen": bool(q["pay_with"])})
     no_statement: dict[str, list[dict]] = {}   # cards without a statement -> their annual fees
     stale_cards: set[str] = set()   # cards whose statement you entered a while ago: nothing estimated on them
 
@@ -927,38 +936,81 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
 def budget_plan(conn, today: date) -> list[dict]:
     """Each budget that counts (a parent's budget covers its subcategories), with what's been spent this month and the
-    account it's paid with: the one you chose, else the account used most for it over the last 90 days."""
+    account it's paid with: its category's (Settings → Categories), else the account used most for it over the last 90
+    days.
+
+    A subcategory with a budget and an account of its own is one of its parent's `parts`: its budget is spent on that
+    account and only the rest of the parent's on the parent's (budget_days). One without an account of its own goes on
+    the parent's, as does a subcategory's spending without a budget. The parent's usual account is then the one used
+    most outside those parts."""
     cats = catmod.all_categories(conn)
     by_name = {c["name"]: c for c in cats}
+    pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
     budgets = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
     p = splits.parts()
-    month_start = today.replace(day=1).isoformat()
-    since = (today - timedelta(days=90)).isoformat()
+    base = (Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))
+    spent_by: dict[str | None, float] = dict(conn.execute(   # this month, by category (refunds come off)
+        select(p.c.category, -func.sum(p.c.amount)).select_from(p).join(Account, Account.id == p.c.account_id)
+        .where(*base, p.c.posted >= today.replace(day=1).isoformat(), p.c.posted <= today.isoformat())
+        .group_by(p.c.category)).fetchall())
+    used = account_use(conn, today)
+
+    def subtree(name: str) -> list[str]:
+        return [name] + [k["name"] for k in cats if name in k["path"][:-1]]
+
+    def spent(names: list[str]) -> float:
+        return round(max(0.0, sum(spent_by.get(n) or 0.0 for n in names)), 2)
+
     out = []
     for name, b in budgets.items():
         c = by_name.get(name)
-        if not c or c["is_transfer"] or c["is_income"] or any(p in budgets for p in c["path"][:-1]):
+        if not c or c["is_transfer"] or c["is_income"] or any(a in budgets for a in c["path"][:-1]):
             continue
-        names = [name] + [k["name"] for k in cats if name in k["path"][:-1]]
-        base = (p.c.category.in_(names), Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))
-        spent = -(conn.execute(
-            select(func.coalesce(func.sum(p.c.amount), 0)).select_from(p).join(Account, Account.id == p.c.account_id)
-            .where(*base, p.c.posted >= month_start, p.c.posted <= today.isoformat())).fetchone()[0] or 0.0)
-        s = func.sum(-p.c.amount).label("s")
-        usual = conn.execute(
-            select(p.c.account_id, s).join(Account, Account.id == p.c.account_id)
-            .where(*base, p.c.posted > since, p.c.amount < 0).group_by(p.c.account_id).order_by(s.desc()).limit(1)).fetchone()
-        out.append({"category": name, "amount": b["amount"], "names": names, "spent": round(max(0.0, spent), 2),
-                    "pay_with": b.get("pay_with"), "usual": usual["account_id"] if usual else None})
+        names = subtree(name)
+        # Budgeted subcategories with an account of their own (the outermost, if they nest), in tree order.
+        own = [k for k in names[1:] if k in budgets and pay_with.get(k)]
+        own = [k for k in own if not any(a in own for a in by_name[k]["path"][:-1])]
+        parts = [{"category": k, "amount": budgets[k]["amount"], "names": subtree(k), "spent": spent(subtree(k)),
+                  "pay_with": pay_with[k], "usual": None} for k in own]
+        rest = [n for n in names if not any(n in q["names"] for q in parts)]
+        out.append({"category": name, "amount": b["amount"], "names": names, "spent": spent(names),
+                    "pay_with": pay_with.get(name), "usual": usual_account(used, rest), "parts": parts})
     return out
 
 
+def account_use(conn, today: date) -> dict[str | None, dict[str, float]]:
+    """What's gone out of each account for each category over the last 90 days: {category: {account id: amount}}."""
+    p = splits.parts()
+    out: dict[str | None, dict[str, float]] = defaultdict(dict)
+    for cat, acct, amount in conn.execute(
+            select(p.c.category, p.c.account_id, func.sum(-p.c.amount)).join(Account, Account.id == p.c.account_id)
+            .where(Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
+                   p.c.posted > (today - timedelta(days=90)).isoformat(), p.c.amount < 0)
+            .group_by(p.c.category, p.c.account_id)).fetchall():
+        out[cat][acct] = amount
+    return out
+
+
+def usual_account(used: dict[str | None, dict[str, float]], names: list[str]) -> str | None:
+    """The account the most went out of for these categories (account_use), or None when nothing did."""
+    total: dict[str, float] = defaultdict(float)
+    for n in names:
+        for acct, v in used.get(n, {}).items():
+            total[acct] += v
+    return max(total, key=lambda a: (total[a], a)) if total else None
+
+
 def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: list[dict], cash_ids: set[str]) -> dict:
-    """Each budget's spending day by day over the horizon, from tomorrow: {category: {date: amount}}. This month it's
-    what's left of the budget (plus what a budget that rolls over carried into it, less what's been spent) over the days
-    left; after that, each month's budget over its days. A budget includes its category's recurring payments: the ones
-    the forecast already takes out of its accounts are subtracted from it each month, so they aren't counted twice. A
-    budget they cover entirely is None."""
+    """Each budget's spending day by day over the horizon, from tomorrow, by the account it goes on: {category:
+    [{"category", "pay_with", "usual", "days": {date: amount}}]}, the budget's own share first, then each of its parts
+    (budget_plan). This month it's what's left of the budget (plus what a budget that rolls over carried into it, less
+    what's been spent) over the days left; after that, each month's budget over its days. A budget includes its
+    category's recurring payments: the ones the forecast already takes out of its accounts are subtracted from it each
+    month, so they aren't counted twice. A budget they cover entirely is None.
+
+    A part gets its own budget's worth of each month's (less what it's spent this month, and its own recurring payments),
+    as far as the whole budget's month goes; the budget's share is what's left. So the parts never take the budget below
+    nothing, and the shares always add up to the budget's month as a whole."""
     # The recurring payments the forecast takes out of its accounts, by category and month (from today on).
     recurring: dict[tuple[str, str], float] = defaultdict(float)
     for e in events:
@@ -979,21 +1031,43 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
             return max(0.0, p["amount"] + carried.get(p["category"], 0.0) - p["spent"] - covered(p, month))
         return max(0.0, p["amount"] - covered(p, month))
 
+    def shares(p: dict, month: str) -> list[float]:
+        """The month's budget (left) split between the budget's own share and each of its parts, in that order."""
+        whole = left(p, month)
+        got: list[float] = []
+        for q in p.get("parts", []):
+            want = max(0.0, q["amount"] - covered(q, month) - (q["spent"] if month == this_month else 0.0))
+            got.append(min(want, whole - sum(got)))
+        return [max(0.0, whole - sum(got)), *got]
+
     months = sorted({(today + timedelta(days=i)).isoformat()[:7] for i in range(1, horizon_days + 1)})
-    out: dict[str, dict[str, float] | None] = {}
+    out: dict[str, list[dict] | None] = {}
     for p in plan:
         if all(left(p, m) < 0.005 for m in months if m != this_month) and any(covered(p, m) for m in months):
             out[p["category"]] = None
             continue
-        days: dict[str, float] = {}
+        split = {m: shares(p, m) for m in months}
+        ways = [p, *p.get("parts", [])]
+        days: list[dict[str, float]] = [{} for _ in ways]
         for i in range(1, horizon_days + 1):
             d = today + timedelta(days=i)
             dim = calendar.monthrange(d.year, d.month)[1]
             month = d.isoformat()[:7]
-            # this month: whatever's left, over the days left
-            days[d.isoformat()] = left(p, month) / (dim - today.day) if month == this_month else left(p, month) / dim
-        out[p["category"]] = days
+            for k, v in enumerate(split[month]):
+                # this month: whatever's left, over the days left
+                days[k][d.isoformat()] = v / (dim - today.day) if month == this_month else v / dim
+        out[p["category"]] = [{"category": q["category"], "pay_with": q["pay_with"], "usual": q["usual"], "days": dd}
+                              for q, dd in zip(ways, days, strict=True)]
     return out
+
+
+def monthly_shares(p: dict) -> list[float]:
+    """A budget's monthly amount split as budget_days splits a month with nothing spent or covered: each part its own
+    budget, as far as the whole goes, and the rest the budget's own. Same order as budget_days."""
+    out: list[float] = []
+    for q in p.get("parts", []):
+        out.append(min(q["amount"], p["amount"] - sum(out)))
+    return [p["amount"] - sum(out), *out]
 
 
 # ------------------------------------------------------------------------------------------------ suggestions

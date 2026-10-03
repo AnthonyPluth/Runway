@@ -21,6 +21,10 @@ def api_budget(conn, q, _b):
     totals = month_totals(conn, start, end)
     budget_rows = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
     budgets = {k: r["amount"] for k, r in budget_rows.items()}
+    # The account each category's spending goes on: the one chosen for it, and the one used most lately (for a budget
+    # that counts, as the forecast works it out: outside its subcategories that have their own).
+    pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
+    used = forecast.account_use(conn, today)
     usual = {p["category"]: p["usual"] for p in forecast.budget_plan(conn, today)}
     own = {c["name"]: round(-totals.get(c["name"], 0.0), 2) for c in cats}
     carry = budget_carry(conn, cats, budget_rows, start)
@@ -33,11 +37,11 @@ def api_budget(conn, q, _b):
         carried = carry.get(c["name"], 0.0)
         out.append({"name": c["name"], "parent": c["parent"], "path": c["path"], "depth": c["depth"], "top": c["top"],
                     "has_children": bool(below), "budget": b,
-                    "pay_with": row.get("pay_with"),
+                    "pay_with": pay_with.get(c["name"]),
                     "rollover_from": row.get("rollover_from"),
                     "carried": carried,   # from earlier months, when the budget rolls over
                     "available": round(b + carried, 2) if b is not None else None,
-                    "usual_account": usual.get(c["name"]),
+                    "usual_account": usual[c["name"]] if c["name"] in usual else forecast.usual_account(used, [c["name"], *below]),
                     "spent": spent, "own_spent": own[c["name"]], "left": round(b + carried - spent, 2) if b is not None else None})
     current = start <= today < end
     return {
@@ -65,11 +69,11 @@ def api_budget_set(conn, _q, body):
         if not conn.execute(update(Budget).where(Budget.category == cat).values(rollover_from=start)).rowcount:
             raise ApiError("Set a budget for this category first")
         return {"ok": True}
-    if "pay_with" in body and "amount" not in body:   # just choosing the card
-        acct = body.get("pay_with") or None
-        if acct and not conn.execute(select(Account.id).where(Account.id == acct)).fetchone():
-            raise ApiError("Account not found")
-        conn.execute(update(Budget).where(Budget.category == cat).values(pay_with=acct))
+    if "pay_with" in body and "amount" not in body:   # the category's card (kept here for a release: /api/categories/pay-with)
+        try:
+            categories.set_pay_with(conn, cat, body.get("pay_with") or None)
+        except categories.CategoryError as e:
+            raise ApiError(str(e)) from e
         return {"ok": True}
     amt = body.get("amount")
     if amt in (None, "", 0, "0"):

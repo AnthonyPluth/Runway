@@ -213,6 +213,7 @@ class Category(Base):
     parent: Mapped[str | None]
     icon: Mapped[str | None]
     color: Mapped[str | None]
+    pay_with: Mapped[str | None]
 
 
 class Rule(Base):
@@ -258,7 +259,6 @@ class Budget(Base):
     __table__ = schema.budgets
     category: Mapped[str]
     amount: Mapped[float]
-    pay_with: Mapped[str | None]
     rollover_from: Mapped[str | None]
 
 

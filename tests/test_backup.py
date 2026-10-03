@@ -14,7 +14,7 @@ from sqlalchemy import func, insert, select
 
 from runway import backup, db, networth, server
 from runway import settings_keys as sk
-from runway.models import Account, AuthSession, Budget, OAuthClient, OAuthGrant, OAuthToken, Rule, Transaction
+from runway.models import Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken, Rule, Transaction
 from tests.shared import own_database
 
 
@@ -82,6 +82,23 @@ class BackupTests(unittest.TestCase):
         dst = db.connect(self.b)
         backup.restore(dst, data)
         self.assertEqual(dst.execute(select(Account.name)).fetchone()[0], "Checking")
+        src.close(); dst.close()
+
+    def test_a_backup_from_before_categories_had_cards_keeps_each_budgets_card(self):
+        src = self.fill(self.a)
+        src.execute(insert(Budget), [{"category": "Groceries", "amount": 500}, {"category": "Shopping", "amount": 100}])
+        data = backup.load(backup.dump(src))
+        b, c = data["tables"]["budgets"], data["tables"]["categories"]
+        b["columns"].append("pay_with")   # as 0034 and earlier had it: on the budget, not the category
+        for r in b["rows"]:
+            r.append("chk" if r[b["columns"].index("category")] == "Groceries" else None)
+        drop = c["columns"].index("pay_with")
+        c["columns"].pop(drop)
+        c["rows"] = [r[:drop] + r[drop + 1:] for r in c["rows"]]
+        dst = db.connect(self.b)
+        backup.restore(dst, data)
+        self.assertEqual(dict(dst.execute(select(Category.name, Category.pay_with).where(Category.pay_with.is_not(None))).fetchall()),
+                         {"Groceries": "chk"})
         src.close(); dst.close()
 
     def test_a_column_only_the_database_has_travels(self):

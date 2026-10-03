@@ -11,8 +11,8 @@ from .api.accounts import (
 )
 from .api.budget import api_budget, api_budget_set
 from .api.categories import (
-    api_categories, api_category_add, api_category_look, api_category_move, api_category_remove, api_category_rename,
-    api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
+    api_categories, api_category_add, api_category_look, api_category_move, api_category_pay_with, api_category_remove,
+    api_category_rename, api_rule_add, api_rule_apply, api_rule_delete, api_rule_preview, api_rule_update, api_rules
 )
 from .api.churning import (
     api_bank_bonus_add, api_bank_bonus_remove, api_bank_bonus_update, api_churn_balance, api_churn_benefit_add,
@@ -107,6 +107,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/categories/remove", api_category_remove),
     ("POST", "/api/categories/move", api_category_move),
     ("POST", "/api/categories/look", api_category_look),
+    ("POST", "/api/categories/pay-with", api_category_pay_with),
     ("GET", "/api/cashflow", api_cashflow),
     ("GET", "/api/month_pace", api_month_pace),
     ("GET", "/api/reports/spending", api_report_spending),

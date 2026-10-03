@@ -6,7 +6,7 @@ import unicodedata
 from sqlalchemy import delete, func, insert, select, update
 
 from . import db, rules
-from .models import Budget, Category, RetailItem, RetailItemMemory, Transaction, TxSplit
+from .models import Account, Budget, Category, RetailItem, RetailItemMemory, Transaction, TxSplit
 
 MAX_DEPTH = 2   # levels including the top one: Food > Restaurants
 
@@ -82,6 +82,20 @@ def set_look(conn, name: str, icon: str | None, color: str | None) -> None:
     if color and not (len(color) == 7 and color[0] == "#" and all(ch in "0123456789abcdef" for ch in color[1:])):
         raise CategoryError("Pick a color")
     conn.execute(update(Category).where(Category.name == name).values(icon=icon, color=color))
+
+
+def set_pay_with(conn, name: str, account_id: str | None) -> None:
+    """Choose the card or account a spending category's spending goes on (the budget forecast spends its budget there,
+    budget_plan), or None to go by the one used most."""
+    row = conn.execute(select(Category.is_transfer, Category.is_income).where(Category.name == name)).fetchone()
+    if not row:
+        raise CategoryError("Category not found")
+    if row["is_transfer"] or row["is_income"]:
+        raise CategoryError("Pick a spending category")
+    account_id = account_id or None
+    if account_id and not conn.execute(select(Account.id).where(Account.id == account_id)).fetchone():
+        raise CategoryError("Account not found")
+    conn.execute(update(Category).where(Category.name == name).values(pay_with=account_id))
 
 
 def _exists(conn, name: str) -> bool:

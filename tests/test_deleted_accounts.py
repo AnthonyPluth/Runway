@@ -3,11 +3,11 @@ sync (SimpleFIN's, Plaid's banks and cards, Plaid's investments) doesn't bring i
 import json
 from unittest import mock
 
-from sqlalchemy import func, insert, select
+from sqlalchemy import func, insert, select, update
 
 from runway import db, deleted_accounts, forecast, plaid, plaidbank, simplefin
 from runway import settings_keys as sk
-from runway.models import (Account, Asset, Budget, CardStatement, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount,
+from runway.models import (Account, Asset, Budget, CardStatement, Category, ChurnBankBonus, ChurnCard, CostOverride, DeletedAccount,
                            Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, ManualContribution, ManualPosition,
                            ManualState, ManualStatement, Override, PlaidAccount, PlaidItem, Recurring, RecurringDismissed,
                            RetailCharge, RetailOrder, Rule, Transaction, TxSplit)
@@ -50,7 +50,8 @@ class DeleteAccountTests(LedgerCase):
         c.execute(insert(RecurringDismissed), [{"key": "rec:41:2026-08-05"}, {"key": "rec:42:2026-08-01"}])
         c.execute(insert(Rule), [{"match": "netflix", "category": "Streaming", "account_id": "cc"},
                                  {"match": "netflix", "category": "Streaming", "account_id": None}])
-        c.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        c.execute(insert(Budget).values(category="Groceries", amount=500))
+        c.execute(update(Category).where(Category.name.in_(["Groceries", "Restaurants"])).values(pay_with="cc"))
         c.execute(insert(Asset).values(id=1, name="Home", kind="home", loan_account_id="loan"))
         c.execute(insert(ChurnCard).values(id=1, owner="Sam", issuer="chase", product="Sapphire", opened_on="2026-01-01", account_id="cc"))
         c.execute(insert(ChurnBankBonus).values(id=1, owner="Sam", bank="Chase", opened_on="2026-01-01", bonus=300, account_id="chk"))
@@ -77,7 +78,7 @@ class DeleteAccountTests(LedgerCase):
         self.assertEqual([r[0] for r in c.execute(select(ManualStatement.account_id))], ["cc2"])
         self.assertEqual(self.count(CardStatement), 0)
         self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)
-        self.assertIsNone(c.execute(select(Budget.pay_with)).scalar())
+        self.assertEqual(self.count(Category, Category.pay_with.is_not(None)), 0)   # budgeted or not
         self.assertIsNone(c.execute(select(ChurnCard.account_id)).scalar())
         self.assertEqual(c.execute(select(Account.pay_from).where(Account.id == "cc2")).scalar(), "chk")   # untouched
         self.assertEqual(self.count(Transaction), 2)

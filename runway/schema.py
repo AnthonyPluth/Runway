@@ -204,6 +204,7 @@ categories = Table(
     Column('parent', Text, doc='subcategories: name of the top-level category'),
     Column('icon', Text, doc='an emoji you picked; NULL = the default for its name'),
     Column('color', Text, doc='a #rrggbb color you picked; NULL = the default (a subcategory: its parent\'s)'),
+    Column('pay_with', Text, doc='account id its spending goes on, for the budget forecast; NULL = the one used most'),
 )
 
 rules = Table(
@@ -252,7 +253,6 @@ budgets = Table(
     'budgets', metadata,
     Column('category', Text, primary_key=True),
     Column('amount', Float, nullable=False, doc='monthly limit, positive'),
-    Column('pay_with', Text, doc='account id this category is usually paid with'),
     Column('rollover_from', Text, doc='YYYY-MM: from this month on, what\'s left over carries into the next month; NULL = off'),
 )
 
