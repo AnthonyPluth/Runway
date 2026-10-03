@@ -98,9 +98,11 @@ describe("EventsList", () => {
       expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/statement hasn't closed yet/);
     });
 
-    it("says when a card estimate comes from the budgets paid with it", () => {
-      show([ev({ kind: "card", estimated: true, from_budgets: true, key: undefined })]);
-      expect(screen.getByRole("img", { name: "estimate" }).title).toMatch(/your budgets paid with this card, plus its average spending outside them/);
+    it("says a card estimate is what's on the card plus its budgets and recurring charges, with no average", () => {
+      show([ev({ kind: "card", estimated: true, key: undefined })]);
+      const title = screen.getByRole("img", { name: "estimate" }).title;
+      expect(title).toMatch(/your budgets paid with it and its recurring charges/);
+      expect(title).not.toMatch(/average/);
     });
 
     it("links a recurring item's name to it in Recurring, with no repeat icon", () => {
@@ -147,21 +149,6 @@ describe("EventsList", () => {
     show([ev({ account: "Checking" })], { accounts: true });
     expect(screen.getByText("Checking", { selector: "div" })).toBeInTheDocument();          // under the item's name
     expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
-  });
-
-  it("shows the budget line's balance beside a day's projected balance, once for several accounts", () => {
-    const { unmount } = show([ev({ account_id: "chk", balance_after: 900 })], { onBudget: { "2026-03-15": 850 } });
-    expect(screen.getByText("· on budget $850.00")).toHaveClass("text-chart-2");
-    unmount();
-    show([ev({ key: "a", account_id: "chk", balance_after: 900 }), ev({ key: "b", account_id: "sav", balance_after: 400 })],
-      { onBudget: { "2026-03-15": 1200 } });
-    expect(screen.queryByText(/· on budget/)).not.toBeInTheDocument();
-    expect(screen.getByText("on budget, all accounts $1,200.00")).toBeInTheDocument();
-  });
-
-  it("shows no budget figure on a day it isn't given", () => {
-    show([ev()], { onBudget: { "2026-03-16": 850 } });
-    expect(screen.queryByText(/on budget/)).not.toBeInTheDocument();
   });
 
   it("groups items by day under the date, with no dividers inside a day, and the projected balance once a day per account", () => {

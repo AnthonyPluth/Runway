@@ -98,23 +98,24 @@ describe("Overview", () => {
     expect(screen.queryByRole("button", { name: "choose one account" })).not.toBeInTheDocument();
   });
 
-  it("has no Day by day table: Coming up shows the budget line's balance beside each day's instead", async () => {
+  it("draws one line, with no budget line or on-budget figures beside the balances", async () => {
     serve(() => fc({ events: [{ date: "2026-10-01", account_id: "chk", name: "Rent", amount: -200, kind: "recurring", key: "r", balance_after: 800 }],
-      budget: { total: [1000, 750], low: { date: "2026-10-01", balance: 750 }, monthly: 500, changes: [], skipped: [] } }));
+      budget: { monthly: 500, used: [{ category: "Groceries", amount: 500, account_id: "chk", account: "Checking", chosen: true }], skipped: [] } }));
     render(Overview);
-    expect(await screen.findByText("· on budget $750.00")).toBeInTheDocument();
+    expect(await screen.findByText(/Spends your budgets, \$500 a month/)).toBeInTheDocument();
+    expect(screen.queryByText("If you stick to your budget")).not.toBeInTheDocument();
+    expect(screen.queryByText(/on budget/)).not.toBeInTheDocument();
     expect(screen.queryByText("Day by day")).not.toBeInTheDocument();
   });
 
-  it("labels the budget line without a second low figure", async () => {
-    serve(() => fc({ budget: { total: [1000, 800], low: { date: "2026-10-01", balance: 800 }, monthly: 500, changes: [], skipped: [] } }));
+  it("points to Budget when there are no budgets for the forecast to spend", async () => {
+    serve(() => fc({ budget: null }));
     render(Overview);
-    expect(await screen.findByText("If you stick to your budget")).toBeInTheDocument();
-    expect(screen.queryByText(/low \$800/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "set budgets" })).toHaveAttribute("href", "#budget");
   });
 
   it("says why a budget on a card paid from outside the forecast is left out", async () => {
-    serve(() => fc({ budget: { total: [1000, 900], low: { date: "2026-10-01", balance: 900 }, monthly: 0, changes: [],
+    serve(() => fc({ budget: { monthly: 0, used: [],
       skipped: [{ category: "Groceries", reason: "its card isn't paid from a forecast account" }] } }));
     render(Overview);
     expect(await screen.findByTitle(/Left out: Groceries, whose card isn't paid from a forecast account\./)).toBeInTheDocument();

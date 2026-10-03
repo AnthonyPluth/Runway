@@ -30,8 +30,8 @@ describe("Settings", () => {
     render(Settings, { sub: "rules" });
     const tabs = await screen.findByRole("navigation", { name: "Settings" });
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim().replace(/\d+$/, ""))).toEqual(
-      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Advanced"]);
-    expect(await screen.findByText("Rules", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
+      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Data"]);
+    expect(await screen.findByRole("heading", { level: 2, name: "Rules" })).toBeInTheDocument();
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 
@@ -40,7 +40,7 @@ describe("Settings", () => {
     render(Settings, { sub: "notifications" });
     const tabs = await screen.findByRole("navigation", { name: "Settings" });
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim().replace(/\d+$/, ""))).toEqual(
-      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Advanced"]);
+      ["Accounts", "Connections", "Categories", "Rules", "Notifications", "Data"]);
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
   });
 });

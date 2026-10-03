@@ -4,9 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
-vi.mock("$lib/app.svelte", () => ({ app: { state: { database: "sqlite" } }, reload: vi.fn(), refreshState: vi.fn(async () => {}) }));
+vi.mock("$lib/app.svelte", () => ({ app: { state: { database: "sqlite", last_backup: null } }, reload: vi.fn(), refreshState: vi.fn(async () => {}) }));
 
-import { reload } from "$lib/app.svelte";
+import { app, refreshState, reload } from "$lib/app.svelte";
+import { cleanup } from "@testing-library/svelte";
 import { toast } from "svelte-sonner";
 import BackupSection from "./BackupSection.svelte";
 
@@ -24,11 +25,38 @@ const choose = async (name = "runway-backup.json.gz") => {
   await userEvent.upload(input, new File([new Uint8Array([0x1f, 0x8b])], name, { type: "application/gzip" }));
 };
 
-describe("Settings → Advanced: restore", () => {
+describe("Settings → Data: download", () => {
+  it("says the file holds the bank keys, and when one was last downloaded", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      app.state!.last_backup = `${new Date().getFullYear()}-09-28T12:15:00-04:00`;
+      render(BackupSection);
+      expect(screen.getByText("Your bank keys are in it, encrypted. Keep the file private.")).toBeInTheDocument();
+      expect(screen.getByText("Last backup: Sep 28")).toBeInTheDocument();
+      const link = screen.getByRole("link", { name: "Download a backup" });
+      expect(link).toHaveAttribute("href", "/api/backup");
+      link.addEventListener("click", (e) => e.preventDefault());   // jsdom can't download
+      link.click();
+      vi.mocked(refreshState).mockClear();
+      vi.advanceTimersByTime(3000);
+      expect(refreshState).toHaveBeenCalled();                     // to pick up the new "Last backup"
+      cleanup();
+      app.state!.last_backup = "2025-01-05T08:00:00-05:00";
+      render(BackupSection);
+      expect(screen.getByText("Last backup: Jan 5, 2025")).toBeInTheDocument();
+      cleanup();
+      app.state!.last_backup = null;
+      render(BackupSection);
+      expect(screen.queryByText(/Last backup/)).not.toBeInTheDocument();
+    } finally { vi.useRealTimers(); app.state!.last_backup = null; }
+  });
+});
+
+describe("Settings → Data: restore", () => {
   it("shows what the backup holds, and restores only once RESTORE is typed", async () => {
     fetchMock.mockImplementation(async (path: string) => path === "/api/backup/inspect"
       ? reply(200, { created: "2026-09-01T09:30:00", source: "postgres", version: 1, counts: counts(3, 1234), current: counts(5, 2500), database: "sqlite" })
-      : reply(200, { ok: true, created: "2026-09-01T09:30:00", safety_copy: "/data/runway-before-restore-2026-09-30-101500.json.gz" }));
+      : reply(200, { ok: true, created: "2026-09-01T09:30:00", safety_copy: "/data/runway-before-restore-2026-09-30-101500.json.gz", unreadable_secrets: ["plaid:x"] }));
     render(BackupSection);
     const user = userEvent.setup();
     const open = screen.getByRole("button", { name: "Restore…" });
@@ -50,8 +78,22 @@ describe("Settings → Advanced: restore", () => {
     await user.click(go);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith("/api/restore", expect.objectContaining({ method: "POST" }));
-    expect(toast.success).toHaveBeenCalledWith("Restored. A copy of what was here is at /data/runway-before-restore-2026-09-30-101500.json.gz");
+    expect(toast.success).toHaveBeenCalledWith("Restored");
     expect(reload).toHaveBeenCalled();
+
+    // What's worth keeping stays under Restore, through the page redrawing, until it's dismissed.
+    const note = () => screen.getByRole("alert");
+    expect(note()).toHaveTextContent("Restored the backup from Sep 1, 2026, 9:30 AM.");
+    expect(note()).toHaveTextContent("A copy of what was here before is at /data/runway-before-restore-2026-09-30-101500.json.gz.");
+    expect(note()).toHaveTextContent("1 saved key or connection can’t be read with this Runway’s secret key. Set the key the backup was made with as RUNWAY_SECRET_KEY_OLD");
+    cleanup();
+    render(BackupSection);
+    expect(note()).toHaveTextContent("Restored the backup from Sep 1, 2026");
+    await user.click(within(note()).getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    cleanup();
+    render(BackupSection);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("says why a file can't be restored, and keeps Restore off", async () => {

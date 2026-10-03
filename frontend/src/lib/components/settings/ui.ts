@@ -9,6 +9,8 @@ export const fieldCls = "flex min-w-0 flex-col gap-1.5 text-sm text-muted-foregr
 export const rowCls = "flex flex-wrap items-end gap-3";
 /** A checkbox with its text beside it; on a phone the whole row is a 44px target. */
 export const checkCls = "flex w-fit cursor-pointer items-start gap-2 text-sm phone:min-h-11 phone:py-3 [&>input]:mt-0.5 [&>input]:size-4 [&>input]:shrink-0 [&>input]:cursor-pointer [&>input]:accent-primary";
+/** A ghost button for something that removes or deletes: red text, a faint red wash on hover. */
+export const dangerGhost = "text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/15";
 export const linkCls = "font-medium text-foreground underline underline-offset-4";
 export const helpCls = "text-sm leading-relaxed text-muted-foreground";
 /** Something that needs a look ("no paying account"): the classic app's orange. */

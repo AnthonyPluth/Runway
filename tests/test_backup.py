@@ -4,14 +4,16 @@ import os
 import stat
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import func, insert, select
 
 from runway import backup, db, networth, server
+from runway import settings_keys as sk
 from runway.models import Account, AuthSession, Budget, OAuthClient, OAuthGrant, OAuthToken, Rule, Transaction
 from tests.shared import own_database
 
@@ -156,6 +158,30 @@ class BackupServerTests(unittest.TestCase):
         except urllib.error.HTTPError as e:
             with e:
                 return e.code, json.loads(e.read())
+
+    def get(self, path, method="GET"):
+        with urllib.request.urlopen(urllib.request.Request(self.base + path, method=method), timeout=10) as resp:
+            return resp.status, resp.read()
+
+    def test_downloading_a_backup_records_when(self):
+        self.assertIsNone(json.loads(self.get("/api/state")[1])["last_backup"])   # never downloaded
+        self.assertEqual(self.get("/api/backup", "HEAD")[0], 200)
+        self.assertIsNone(json.loads(self.get("/api/state")[1])["last_backup"])   # a HEAD isn't a download
+        before = datetime.now().replace(microsecond=0)
+        code, raw = self.get("/api/backup")
+        self.assertEqual(code, 200)
+        self.assertIn("tables", backup.load(raw))
+        stamp = None
+        for _ in range(50):   # recorded once the file has been sent, so just after the client has it
+            with db.session() as c:
+                stamp = db.get_setting(c, sk.LAST_BACKUP)
+            if stamp:
+                break
+            time.sleep(0.05)
+        self.assertLessEqual(before, datetime.fromisoformat(stamp))           # the machine's local time, no offset stored
+        got = json.loads(self.get("/api/state")[1])["last_backup"]
+        self.assertTrue(got.startswith(stamp))                                 # sent with its UTC offset
+        self.assertEqual(datetime.fromisoformat(got).replace(tzinfo=None), datetime.fromisoformat(stamp))
 
     def test_inspect_then_restore_keeps_a_copy(self):
         with db.session() as c:

@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+const phone = vi.hoisted(() => ({ phone: false }));
+vi.mock("$lib/phone.svelte", () => ({ viewport: phone, isPhone: () => phone.phone, PHONE_QUERY: "" }));
 vi.mock("$lib/app.svelte", () => ({ app: { state: { brands: {}, connected: true }, version: 0 }, refreshState: vi.fn(), reload: vi.fn() }));
 
 import { api } from "$lib/api";
@@ -29,6 +31,7 @@ const nw = {
 };
 
 beforeEach(() => {
+  phone.phone = false;
   vi.mocked(api).mockReset();
   vi.mocked(api).mockImplementation((async (path: string) => {
     if (path === "/api/networth") return nw;
@@ -163,5 +166,129 @@ describe("#networth/equity when it can't load", () => {
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Vested now")).toBeInTheDocument();
+  });
+});
+
+describe("#networth/equity's states", () => {
+  const serve = (eq: object, over: (path: string) => unknown = () => undefined) => vi.mocked(api).mockImplementation((async (path: string) => {
+    const r = over(path);
+    if (r !== undefined) return r;
+    if (path === "/api/networth") return nw;
+    if (path === "/api/equity") return eq;
+    return { ok: true };
+  }) as never);
+  afterEach(() => vi.useRealTimers());
+
+  it("says what the figures are, under them", async () => {
+    serve(equity);
+    render(NetWorth, { sub: "equity" });
+    expect(await screen.findByText("Vested value at the last price you entered, before tax")).toBeInTheDocument();
+  });
+
+  it("warns, in the warning color, when a share price is months old", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 30, 12));
+    serve({ ...equity, companies: [{ ...equity.companies[0], price_as_of: "2026-02-15" }] });
+    const { unmount } = render(NetWorth, { sub: "equity" });
+    const warn = await screen.findByTestId("stale-price");
+    expect(warn).toHaveTextContent("price from 7 months ago");
+    expect(warn).toHaveClass("text-warning");
+    unmount();
+    serve(equity);   // priced Sep 1: recent
+    render(NetWorth, { sub: "equity" });
+    await screen.findByText("Vested now");
+    expect(screen.queryByTestId("stale-price")).toBeNull();
+  });
+
+  it("explains Carta's errors in a first line, with the way to Settings", async () => {
+    serve({ ...equity, carta: { ...equity.carta, last_error: "Carta answered 500 for /portfolios", web_error: "Runway didn’t find any grants in what it read from Carta." } });
+    render(NetWorth, { sub: "equity" });
+    const problems = await screen.findAllByTestId("carta-problem");
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toHaveTextContent("Couldn’t sync from Carta · Fix in Settings");
+    expect(problems[0]).toHaveTextContent("Carta answered 500 for /portfolios");
+    expect(problems[1]).toHaveTextContent("Couldn’t read Carta through the browser extension");
+    for (const p of problems) expect(within(p).getByRole("link", { name: "Fix in Settings" })).toHaveAttribute("href", "#setup/connections");
+  });
+
+  it("draws every company: past four, the smaller ones as Other", async () => {
+    const co = (id: string, name: string, n: number) => ({ ...equity.companies[0], id, name, share_price: 1,
+      grants: [{ ...grant, id: `g-${id}`, kind: "rsu", schedule: [["2026-01-01", n], ["2027-01-01", n * 2]] }] });
+    serve({ ...equity, companies: [co("a", "Alpha", 100), co("b", "Beta", 400), co("c", "Gamma", 300), co("d", "Delta", 200), co("e", "Epsilon", 50)] });
+    const { container } = render(NetWorth, { sub: "equity" });
+    await screen.findByText("Vesting over time");
+    const svg = container.querySelector("svg[role=slider]")!;
+    expect(svg.textContent).toContain("Other");
+    expect(svg.textContent).not.toContain("Epsilon");
+    expect(svg.textContent).not.toContain("Alpha");
+    expect(svg.textContent).toContain("Beta");
+  });
+
+  it("keeps the figures when loading them again fails, under a Couldn't refresh line", async () => {
+    let fail = false;
+    serve(equity, (path) => { if (path === "/api/equity" && fail) throw new Error("Server down"); });
+    render(NetWorth, { sub: "equity" });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("checkbox", { name: /Count in net worth/ }));   // saved; the reload after it fails
+    fail = true;
+    await user.click(screen.getByRole("checkbox", { name: /Count in net worth/ }));
+    expect(await screen.findByTestId("refresh-failed")).toHaveTextContent("Couldn’t refresh");
+    expect(screen.getByText("Vested now")).toBeInTheDocument();
+    expect(screen.getByText("Acme Robotics")).toBeInTheDocument();
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByTestId("refresh-failed")).toBeNull());
+  });
+
+  it("adds a company with Enter, once, and says what's missing", async () => {
+    let finish: () => void = () => {};
+    serve(equity, (path) => path === "/api/equity/companies" ? new Promise((r) => { finish = () => r({ ok: true }); }) : undefined);
+    render(NetWorth, { sub: "equity" });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Add a company" }));
+    const name = screen.getByPlaceholderText("Acme, Inc.");
+    await user.type(name, "{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("Give the company a name");
+    expect(calls("/api/equity/companies")).toHaveLength(0);
+    await user.type(name, "Initech{Enter}");
+    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    await user.type(name, "{Enter}");   // a second Enter while it saves doesn't add it twice
+    expect(calls("/api/equity/companies")).toHaveLength(1);
+    expect((calls("/api/equity/companies")[0][1] as { body: unknown }).body).toEqual({ name: "Initech", share_price: "" });
+    finish();
+    await waitFor(() => expect(screen.queryByPlaceholderText("Acme, Inc.")).toBeNull());
+  });
+
+  it("previews the vesting in a line as you fill in the grant, and wants the shares", async () => {
+    serve(equity, (path) => path === "/api/equity/companies/c1/grants" ? Promise.reject(new Error("Shares must be a number")) : undefined);
+    render(NetWorth, { sub: "equity" });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Add a grant" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a grant" });
+    expect(within(dialog).queryByTestId("vesting-preview")).toBeNull();   // no start date yet
+    await fireEvent.input(within(dialog).getByLabelText("Vesting starts"), { target: { value: "2026-01-15" } });
+    expect(within(dialog).getByTestId("vesting-preview").textContent!.replace(/\u00a0/g, " ")).toBe("25% on Jan 2027, then monthly until Jan 2030");
+    await user.selectOptions(within(dialog).getByLabelText("Every"), "quarter");
+    expect(within(dialog).getByTestId("vesting-preview")).toHaveTextContent(/then quarterly/);
+
+    await user.click(within(dialog).getByRole("button", { name: "Add grant" }));
+    expect(within(dialog).getByText("Enter how many shares")).toBeInTheDocument();
+    expect(calls("/api/equity/companies/c1/grants")).toHaveLength(0);
+    await user.type(within(dialog).getByLabelText("Shares"), "1000");
+    await user.click(within(dialog).getByRole("button", { name: "Add grant" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Shares must be a number");   // refused: stays open, says why
+    expect(screen.getByRole("dialog", { name: "Add a grant" })).toBeInTheDocument();
+  });
+
+  it("on a phone, shows each grant as a card with every figure, and actions to tap", async () => {
+    phone.phone = true;
+    serve(equity);
+    render(NetWorth, { sub: "equity" });
+    const cards = await screen.findByTestId("grant-cards");
+    expect(screen.queryByRole("table")).toBeNull();
+    const card = within(cards).getAllByRole("listitem")[0];
+    for (const label of ["Granted", "Shares", "Strike", "Still to vest"]) expect(within(card).getByText(label)).toBeInTheDocument();
+    expect(card).toHaveTextContent("$0.85");
+    expect(within(card).getByRole("button", { name: "Edit ES-1" })).toHaveClass("min-h-11");
   });
 });

@@ -312,7 +312,7 @@ class ConsentTests(OAuthServer):
         page = self.authorize(c, scope="read churning:write").body.decode()      # asked, switch off: shown, off, and why
         self.assertIn("Change churning", page)
         self.assertIn('type="checkbox" disabled><span><b>Change churning', page)
-        self.assertIn("Turn on Let assistants change churning in Settings → Advanced first", page)
+        self.assertIn("Turn on Let assistants change churning in Settings → Data first", page)
         self.switch(True)
         page = self.authorize(c, scope="read churning:write").body.decode()      # asked, switch on: ticked
         self.assertIn('name="churning" value="1" checked', page)
@@ -323,7 +323,7 @@ class ConsentTests(OAuthServer):
         c = self.client()
         page = self.authorize(c, scope="read categorize:write").body.decode()    # asked, switch off: shown, off, and why
         self.assertIn('type="checkbox" disabled><span><b>Categorize', page)
-        self.assertIn("Turn on Let assistants categorize in Settings → Advanced first", page)
+        self.assertIn("Turn on Let assistants categorize in Settings → Data first", page)
         self.assertNotIn("Change churning", page)
         self.switch(True)                                                         # the churning switch isn't this one
         self.assertIn('type="checkbox" disabled><span><b>Categorize', self.authorize(c, scope="read categorize:write").body.decode())
