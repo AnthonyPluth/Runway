@@ -128,7 +128,7 @@
     {#if alerts}
       <Group title="Needs attention" inset="3.75rem" class="mb-6">
         {#each fc.warning_links as w (w.text)}{@render attention(w.text, `/${w.href}`)}{/each}
-        {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} />{/each}
+        {#each fc.missed ?? [] as m (m.key)}<MissedAlert {m} today={fc.today} />{/each}
         {#if !fc.accounts.length}{@render attention("No account to forecast yet. Choose your main checking account.", "/#overview?forecast")}{/if}
       </Group>
     {/if}

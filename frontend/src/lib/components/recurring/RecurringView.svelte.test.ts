@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("$lib/api")>()), api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
@@ -30,7 +30,9 @@ const serve = (items: RecurringItem[], suggestions: Suggestion[] = [], more: Rec
     return { linked: 0 } as never;
   });
 
-beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; });
+// Today is Friday Mar 20, 2026 (only the date is faked: timers stay real for the events the tests fire).
+beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true }; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(2026, 2, 20, 12)); });
+afterEach(() => { vi.useRealTimers(); });
 
 // The amount field (other labels say "Amount" too); a text box with commas until you're in it, so found by its label.
 const AMOUNT = { selector: 'input[name="amount"]' };
@@ -55,7 +57,7 @@ describe("Recurring page", () => {
     const inn = await screen.findByRole("region", { name: "Money in" });
     const out = screen.getByRole("region", { name: "Money out" });
     expect(within(inn).getByText("Paycheck")).toBeInTheDocument();
-    expect(within(inn).getByText("+$3,000.00")).toHaveClass("text-emerald-500");
+    expect(within(inn).getByText("+$3,000.00")).toHaveClass("text-good");
     expect(within(out).getByText("Rent")).toBeInTheDocument();
     expect(within(out).getByText("−$1,500.00")).toBeInTheDocument();
   });
@@ -69,7 +71,33 @@ describe("Recurring page", () => {
   it("summarizes an item: how often, when it's next due and how many matched", async () => {
     serve([item({ matched_count: 4 })]);
     render(Recurring);
-    expect(await screen.findByText("monthly · next Apr 1 · 4 matched")).toBeInTheDocument();
+    expect(await screen.findByText("monthly · in 12 days · 4 matched")).toBeInTheDocument();
+  });
+
+  it("says when one is late, in the warning color, and lists each group late first, then soonest due", async () => {
+    serve([item({ id: 1, name: "Water", next_date: "2026-05-02" }), item({ id: 2, name: "Phone", next_date: "2026-03-21" }),
+      item({ id: 3, name: "Rent", late_date: "2026-03-17", next_date: "2026-04-17" }), item({ id: 4, name: "Gym", active: 0, next_date: "2026-03-20" })]);
+    render(Recurring);
+    const out = await screen.findByRole("region", { name: "Money out" });
+    expect([...out.querySelectorAll("[data-recurring]")].map((d) => d.getAttribute("data-recurring"))).toEqual(["3", "2", "1", "4"]);
+    expect(within(out).getByText("3 days late")).toHaveClass("text-warning");
+    expect(within(out).getByText("monthly · tomorrow")).not.toHaveClass("text-warning");
+    expect(within(out).getByText(/^monthly · next May.2$/)).toBeInTheDocument();
+  });
+
+  it("says what each group comes to a month, at the amounts the forecast expects", async () => {
+    serve([item({ amount: -1200 }), item({ id: 2, name: "Gym", amount: -30, expected_amount: -30, frequency: "weekly" }),
+      item({ id: 3, name: "Pay", amount: 1500, frequency: "biweekly" }), item({ id: 4, name: "Old", amount: -500, active: 0 })]);
+    render(Recurring);
+    expect(within(await screen.findByRole("region", { name: "Money out" })).getByText("≈ $1,330 a month out")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Money in" })).getByText("≈ $3,250 a month in")).toBeInTheDocument();
+  });
+
+  it("badges a fixed amount the last payments all missed with what they came to", async () => {
+    serve([item({ amount: -80, suggested_amount: -87.4 }), item({ id: 2, name: "Electric", amount_mode: "avg3", suggested_amount: -90 })]);
+    render(Recurring);
+    expect(await screen.findByText("Usually $87.40")).toBeInTheDocument();
+    expect(screen.getAllByText(/^Usually/)).toHaveLength(1);
   });
 
   it("summarizes a one-time item by its date, before and after it comes", async () => {
@@ -81,10 +109,50 @@ describe("Recurring page", () => {
   });
 
   it("marks a paused item, and one that missed a payment", async () => {
-    serve([item({ active: 0, missed: [{ key: "k", name: "Rent", amount: -1500, date: "2026-03-01", recurring_id: 1 }] })]);
+    serve([item({ active: 0 }), item({ id: 2, name: "Water", missed: [{ key: "rec:2:2026-03-01", name: "Water", amount: -40, date: "2026-03-01", recurring_id: 2 }] })]);
     render(Recurring);
-    expect(await screen.findByText("paused")).toBeInTheDocument();
-    expect(screen.getByText("missed a payment")).toBeInTheDocument();
+    expect(await screen.findByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("missed a payment")).toHaveClass("text-warning");
+  });
+
+  describe("needs attention", () => {
+    const missed = { key: "rec:2:2026-03-02", name: "Water", amount: -40, date: "2026-03-02", recurring_id: 2 };
+
+    it("lists missed payments at the top, how late each is, with Link a transaction and Skip this one", async () => {
+      serve([item(), item({ id: 2, name: "Water", account_name: "Checking", missed: [missed] })]);
+      render(Recurring);
+      const group = await screen.findByRole("heading", { name: "Needs attention" });
+      const list = group.closest("section")!;
+      expect(within(list).getByText("Water")).toBeInTheDocument();
+      expect(within(list).getByText("18 days late")).toBeInTheDocument();
+      expect(within(list).getByText(/due Mar.2 · Checking/)).toBeInTheDocument();
+      expect(group.compareDocumentPosition(screen.getByRole("region", { name: "Money out" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(list).getByRole("button", { name: "Link a transaction" })).toBeInTheDocument();
+    });
+
+    it("skipping one takes it off the list and off its item's line; Undo puts both back", async () => {
+      serve([item({ id: 2, name: "Water", missed: [missed] })], [], { "/api/overrides": { ok: true } });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Skip this one" }));
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Needs attention" })).not.toBeInTheDocument());
+      expect(screen.queryByText("missed a payment")).not.toBeInTheDocument();
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: missed.key, amount: 0 } });
+      const [, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+      await opts.action.onClick();
+      expect(await screen.findByRole("heading", { name: "Needs attention" })).toBeInTheDocument();
+      expect(screen.getByText("missed a payment")).toBeInTheDocument();
+    });
+
+    it("links a payment from the list it offers", async () => {
+      serve([item({ id: 2, name: "Water", missed: [missed] })], [], {
+        "/api/recurring/2/candidates?date=2026-03-02": [{ id: "t9", posted: "2026-03-04", amount: -41.2, name: "City Water" }],
+        "/api/transactions/t9/recurring": { ok: true } });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Link a transaction" }));
+      await userEvent.click(await screen.findByRole("button", { name: /^Link City Water on Mar.4$/ }));
+      expect(api).toHaveBeenCalledWith("/api/transactions/t9/recurring", { method: "POST", body: { recurring_id: 2 } });
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Needs attention" })).not.toBeInTheDocument());
+    });
   });
 
   it("opens the add form by itself when there's nothing yet, with the primary account chosen", async () => {
@@ -140,6 +208,19 @@ describe("Recurring page", () => {
       await userEvent.click(screen.getByRole("button", { name: /Landlord/ }));
       expect(api).toHaveBeenCalledWith("/api/merchants/logo", { method: "POST", body: { name: "Rent", website: "landlord.com" } });
       await waitFor(() => expect(container.querySelector("img[src='/api/merchants/site%3Alandlord.com/logo']")).toBeInTheDocument());
+    });
+
+    it("wears its account's bank as a small badge on the logo, and none without one or when the bank's mark is the icon", async () => {
+      app.state = { connected: true, brands: { a1: { institution: "Chase", src: "/api/merchants/brand%3Achase/logo" } } };
+      serve([item({ logo: "/api/merchants/m-rent/logo", account_name: "Checking" }), item({ id: 2, name: "Water", account_id: "gone", logo: "/api/merchants/m-w/logo" }),
+        item({ id: 3, name: "Gym", logo: null })]);
+      render(Recurring);
+      await screen.findByText("Rent");
+      const badges = document.querySelectorAll("[data-account-badge]");
+      expect(badges).toHaveLength(1);
+      expect(badges[0].closest("[data-recurring]")).toHaveAttribute("data-recurring", "1");
+      expect(badges[0]).toHaveAttribute("title", "Checking");
+      expect(badges[0].querySelector("img")).toHaveAttribute("src", "/api/merchants/brand%3Achase/logo");
     });
 
     it("doesn't open the item when you click its logo", async () => {
@@ -217,17 +298,19 @@ describe("Recurring page", () => {
     it("starts on money out and today's date, with the amount asking for a plain positive number", async () => {
       await open();
       expect(screen.getByRole("radio", { name: "Money out" })).toBeChecked();
-      expect(screen.getByLabelText(/Next date/)).toHaveValue(isoDay());
+      expect(screen.getByLabelText(/Repeats from/)).toHaveValue(isoDay());
       expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveAttribute("placeholder", "120.00");
       expect(screen.getByRole("textbox", { name: /Name/ })).toHaveAttribute("aria-required", "true");
     });
 
-    it("keeps account, amount to forecast and merchant text under More options, says what's in it, and puts the help in tooltips", async () => {
+    it("keeps account, amount to forecast, merchant text and the end date under More options, says what's in it, and puts the help in tooltips", async () => {
       await open();
       expect(screen.getByText("More options")).toBeInTheDocument();
       expect(screen.getByText("Checking · always the amount above · matches the name")).toBeInTheDocument();
-      expect(screen.queryByText(/Text on the bank statement/)).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: /Merchant text/ })).toHaveAttribute("title", expect.stringMatching(/^Text on the bank statement/));
+      // What the merchant text is, in its placeholder rather than a tooltip.
+      expect(screen.getByRole("textbox", { name: /Merchant text/ })).toHaveAttribute("placeholder", "Text in the bank’s description");
+      expect(screen.getByRole("textbox", { name: /Merchant text/ })).not.toHaveAttribute("title");
+      expect(screen.getByLabelText("Ends on")).toHaveValue("");
       expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveAttribute("title", expect.stringMatching(/^Use the recent payments/));
       expect(screen.getByRole("combobox", { name: /Account/ })).toHaveValue("a1");
     });
@@ -299,18 +382,77 @@ describe("Recurring page", () => {
     const form = () => within(screen.getByRole("heading", { name: "Add a recurring item" }).closest<HTMLElement>("section")!);
     const posts = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { method?: string } | undefined)?.method === "POST");
 
-    it("lists what's spotted in your history, and Add fills the form to adjust rather than adding at once", async () => {
+    // With items, suggestions sit below them, collapsed to a line.
+    const showSpotted = async () => userEvent.click(await screen.findByRole("button", { name: "Show" }));
+
+    it("collapses what's spotted to a line under the items, and Show lists them", async () => {
+      serve([item()], [suggestion(), suggestion({ key: "a1|acme|biweekly", name: "Acme Payroll", amount: 3100, frequency: "biweekly" })]);
+      render(Recurring);
+      expect(await screen.findByText(/2 spotted in your history/)).toBeInTheDocument();
+      expect(screen.queryByText("Netflix")).not.toBeInTheDocument();
+      await showSpotted();
+      expect(screen.getByText("Netflix")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Spotted in your history" }).compareDocumentPosition(screen.getByRole("region", { name: "Money out" }))
+        & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "Hide suggestions" }));
+      expect(screen.queryByText("Netflix")).not.toBeInTheDocument();
+    });
+
+    it("says how often in words, and the range when the amounts vary", async () => {
+      serve([], [suggestion({ amount: -13.5, amount_low: 12.49, amount_high: 15.49 }), suggestion({ key: "a1|acme|biweekly", name: "Acme Payroll", amount: 3100, amount_low: 3100, amount_high: 3100, frequency: "biweekly" })]);
+      render(Recurring);
+      expect(await screen.findByText("every 2 weeks · 6× · last Mar 5")).toBeInTheDocument();
+      expect(screen.getByText("−$12–$15")).toBeInTheDocument();
+      expect(screen.getByText("+$3,100.00")).toHaveClass("text-good");
+    });
+
+    it("adds one as it is with one click, and Undo removes it", async () => {
+      let added = false;
+      serve([], [suggestion()], { "/api/recurring/9": { ok: true } });
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/recurring" && opts?.method === "POST") { added = true; return { id: 9, linked: 6 } as never; }
+        if (path === "/api/recurring" && !opts?.method) return (added ? [item({ id: 9, name: "Netflix", amount: -15.49 })] : []) as never;
+        return base(path, opts as never);
+      });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Add Netflix" }));
+      expect((posts("/api/recurring")[0][1] as { body: unknown }).body).toMatchObject({ name: "Netflix", account_id: "a1", amount: -15.49, frequency: "monthly", anchor_date: "2026-03-05", match: "NETFLIX", amount_mode: "fixed", active: 1 });
+      expect(await within(await screen.findByRole("region", { name: "Money out" })).findByText("Netflix")).toBeInTheDocument();
+      const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+      expect(msg).toBe("Added Netflix · matched 6");
+      added = false;
+      await opts.action.onClick();
+      expect(api).toHaveBeenCalledWith("/api/recurring/9", { method: "DELETE" });
+      await waitFor(() => expect(screen.queryByRole("region", { name: "Money out" })).not.toBeInTheDocument());
+    });
+
+    it("shows the error when adding one fails, and keeps it", async () => {
+      serve([], [suggestion()]);
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/recurring" && opts?.method === "POST") throw new Error("Boom");
+        return base(path, opts as never);
+      });
+      render(Recurring);
+      await userEvent.click(await screen.findByRole("button", { name: "Add Netflix" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Boom"));
+      expect(screen.getByText("Netflix")).toBeInTheDocument();
+    });
+
+    it("lists what's spotted in your history, and Edit first fills the form to adjust rather than adding at once", async () => {
       serve([item()], [suggestion()]);
       render(Recurring);
+      await showSpotted();
       expect(await screen.findByText("Netflix")).toBeInTheDocument();
       expect(screen.getByText("monthly · 6× · last Mar 5")).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "Add a recurring item" })).not.toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Add Netflix" }));
+      await userEvent.click(screen.getByRole("button", { name: "Edit Netflix first" }));
       expect(await screen.findByRole("heading", { name: "Add a recurring item" })).toBeInTheDocument();
       expect(form().getByRole("textbox", { name: /Name/ })).toHaveValue("Netflix");
       expect(form().getByLabelText(/Amount/, AMOUNT)).toHaveValue("15.49");
       expect(form().getByRole("radio", { name: "Money out" })).toBeChecked();
-      expect(form().getByLabelText(/Next date/)).toHaveValue("2026-03-05");
+      expect(form().getByLabelText(/Repeats from/)).toHaveValue("2026-03-05");
       expect(form().getByRole("textbox", { name: /Merchant text/ })).toHaveValue("NETFLIX");
       expect(posts("/api/recurring")).toHaveLength(0);
       await userEvent.clear(form().getByRole("textbox", { name: /Name/ }));
@@ -323,7 +465,8 @@ describe("Recurring page", () => {
     it("prefills a paycheck as money in", async () => {
       serve([item()], [suggestion({ key: "a1|acme|biweekly", name: "Acme Payroll", amount: 3100, frequency: "biweekly" })]);
       render(Recurring);
-      await userEvent.click(await screen.findByRole("button", { name: "Add Acme Payroll" }));
+      await showSpotted();
+      await userEvent.click(await screen.findByRole("button", { name: "Edit Acme Payroll first" }));
       expect(await form().findByRole("radio", { name: "Money in" })).toBeChecked();
       expect(form().getByLabelText(/Amount/, AMOUNT)).toHaveValue("3100");
     });
@@ -331,6 +474,7 @@ describe("Recurring page", () => {
     it("dismisses a suggestion with Not recurring, and it stays gone", async () => {
       serve([item()], [suggestion(), suggestion({ key: "a1|gym|monthly", name: "Gym", match: "GYM" })]);
       render(Recurring);
+      await showSpotted();
       await userEvent.click(await screen.findByRole("button", { name: "Netflix is not recurring" }));
       await waitFor(() => expect(screen.queryByText("Netflix")).not.toBeInTheDocument());
       expect(screen.getByText("Gym")).toBeInTheDocument();
@@ -344,7 +488,7 @@ describe("Recurring page", () => {
         if (path === "/api/accounts") return accounts as never;
         if (path === "/api/recurring" && !opts?.method) return [item()] as never;
         if (path === "/api/recurring/suggestions") return (restored ? [hulu] : []) as never;
-        if (path === "/api/recurring/suggestions/dismissed") return (restored ? [] : [gone(), gone({ key: "a1|gym|weekly", match: "gym", frequency: "weekly" })]) as never;
+        if (path === "/api/recurring/suggestions/dismissed") return (restored ? [] : [gone(), gone({ key: "a1|gym|weekly", match: "gym", name: "Gym", frequency: "weekly" })]) as never;
         if (path === "/api/recurring/suggestions/restore") { restored = true; return { ok: true } as never; }
         return {} as never;
       });
@@ -354,8 +498,9 @@ describe("Recurring page", () => {
       await userEvent.click(screen.getByRole("button", { name: "Show" }));
       expect(screen.getByText("monthly · Checking")).toBeInTheDocument();
       expect(screen.getByText("weekly · Checking")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restore Gym" })).toBeInTheDocument();   // by its name, when its transactions still give one
       await userEvent.click(screen.getByRole("button", { name: "Restore hulu" }));
-      expect(await screen.findByRole("button", { name: "Add Hulu" })).toBeInTheDocument();
+      expect(await screen.findByText(/1 spotted in your history/)).toBeInTheDocument();
       expect(posts("/api/recurring/suggestions/restore")[0][1]).toMatchObject({ body: { key: "a1|hulu|monthly" } });
       expect(toast.success).toHaveBeenCalledWith("hulu can be suggested again");
       expect(screen.queryByText(/dismissed ·/)).not.toBeInTheDocument();
@@ -364,15 +509,17 @@ describe("Recurring page", () => {
     it("lists a suggestion you just dismissed, ready to restore", async () => {
       serve([item()], [suggestion()]);
       render(Recurring);
+      await showSpotted();
       await userEvent.click(await screen.findByRole("button", { name: "Netflix is not recurring" }));
       expect(await screen.findByText("1 dismissed ·")).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Show" }));
-      expect(screen.getByRole("button", { name: "Restore NETFLIX" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restore Netflix" })).toBeInTheDocument();
     });
 
     it("says nothing when none are dismissed", async () => {
       serve([item()], [suggestion()]);
       render(Recurring);
+      await showSpotted();
       await screen.findByText("Netflix");
       expect(screen.queryByText(/dismissed/)).not.toBeInTheDocument();
     });
@@ -390,6 +537,7 @@ describe("Recurring page", () => {
     it("keeps a suggestion when dismissing it fails", async () => {
       serve([item()], [suggestion()]);
       render(Recurring);
+      await showSpotted();
       await screen.findByText("Netflix");
       vi.mocked(api).mockRejectedValueOnce(new Error("Boom"));
       await userEvent.click(screen.getByRole("button", { name: "Netflix is not recurring" }));
@@ -411,14 +559,62 @@ describe("Recurring page", () => {
       render(Recurring);
       await screen.findByText("Rent");
       expect(api).not.toHaveBeenCalledWith("/api/recurring/suggestions");
-      expect(screen.queryByText("Netflix")).not.toBeInTheDocument();
+      expect(screen.queryByText(/spotted in your history/)).not.toBeInTheDocument();
+    });
+
+    it("goes on without them when they can't be looked up", async () => {
+      serve([item()]);
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path.startsWith("/api/recurring/suggestions")) throw new Error("Boom");
+        return base(path, opts as never);
+      });
+      render(Recurring);
+      expect(await screen.findByText("Rent")).toBeInTheDocument();
+      expect(screen.queryByText(/spotted/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 
-  it("shows the error when loading fails", async () => {
-    vi.mocked(api).mockRejectedValue(new Error("Boom"));
+  it("shows a list-shaped placeholder while loading", async () => {
+    let done!: (v: never) => void;
+    serve([item()]);
+    const base = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) =>
+      path === "/api/recurring" ? new Promise((res) => { done = res; }) : base(path, opts as never));
     render(Recurring);
-    expect(await screen.findByText("Something went wrong: Boom")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Loading recurring items" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Recurring");
+    done([item()] as never);
+    expect(await screen.findByText("Rent")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading recurring items" })).not.toBeInTheDocument();
+  });
+
+  it("says when loading fails, and Retry loads this page again", async () => {
+    let fail = true;
+    serve([item()]);
+    const base = vi.mocked(api).getMockImplementation()!;
+    vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+      if (path === "/api/recurring" && fail) throw new Error("Boom");
+      return base(path, opts as never);
+    });
+    render(Recurring);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t load your recurring items.");
+    expect(screen.queryByText(/Boom/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Rent")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("works without a bank: your items and Add, with a line saying what a bank adds", async () => {
+    app.state = { connected: false };
+    serve([item()]);
+    render(Recurring);
+    expect(await screen.findByText("Rent")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect a bank" })).toHaveAttribute("href", "#setup/connections");
   });
 
   describe("an item", () => {
@@ -447,6 +643,127 @@ describe("Recurring page", () => {
       expect(dates).toHaveFocus();
       expect(dates).toHaveAttribute("aria-invalid", "true");
       expect(freq.closest("label")).not.toHaveClass("just-saved");
+    });
+
+    const posts = (path: string) => vi.mocked(api).mock.calls.filter((c) => c[0] === path && (c[1] as { method?: string } | undefined)?.method);
+    const undoLast = async () => {
+      const [, opts] = vi.mocked(toast).mock.calls.at(-1)! as unknown as [string, { action: { onClick: () => Promise<void> } }];
+      await opts.action.onClick();
+    };
+
+    it("labels its date as the one it repeats from, and says when it's next due beside it", async () => {
+      serve([item({ anchor_date: "2025-12-01", next_date: "2026-04-01" })]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      expect(screen.getByLabelText(/Repeats from/)).toHaveValue("2025-12-01");
+      expect(screen.getByText(/^Next: Apr.1$/)).toBeInTheDocument();
+    });
+
+    it("pauses with a button, says Paused, and Undo resumes it", async () => {
+      serve([item()], [], { "/api/recurring/1": { linked: 0 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(1));
+      expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { active: 0, name: "Rent" } });
+      expect(screen.getByText("Paused")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Skip the next one" })).not.toBeInTheDocument();
+      expect(vi.mocked(toast).mock.calls.at(-1)![0]).toBe("Paused Rent");
+      await undoLast();
+      expect(posts("/api/recurring/1")[1][1]).toMatchObject({ body: { active: 1 } });
+      expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+
+    it("resumes a paused one", async () => {
+      serve([item({ active: 0 })], [], { "/api/recurring/1": { linked: 0 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Rent is back in the forecast"));
+      expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { active: 1 } });
+      expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+    });
+
+    it("stays active when pausing fails", async () => {
+      serve([item()]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
+      await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
+      expect(screen.queryByText("Paused")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Pause" })).toBeEnabled();
+    });
+
+    it("skips the next one only, as a $0 for that date, and Undo takes it back", async () => {
+      let skipped = false;
+      serve([item()], [], { "/api/overrides": { ok: true } });
+      const base = vi.mocked(api).getMockImplementation()!;
+      vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+        if (path === "/api/overrides") skipped = opts?.method === "POST";
+        if (path === "/api/recurring" && !opts?.method) return [skipped ? item({ next_date: "2026-05-01", skipped: ["2026-04-01"] }) : item()] as never;
+        return base(path, opts as never);
+      });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Skip the next one" }));
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "rec:1:2026-04-01", amount: 0 } });
+      expect(await screen.findByText(/^Skipping Apr.1 ·/)).toBeInTheDocument();
+      expect(screen.getByText(/^monthly · next May.1$/)).toBeInTheDocument();
+      expect(vi.mocked(toast).mock.calls.at(-1)![0]).toBe("Skipped Rent on Apr\u00a01");
+      await undoLast();
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "rec:1:2026-04-01" } });
+      await waitFor(() => expect(screen.queryByText(/^Skipping/)).not.toBeInTheDocument());
+    });
+
+    it("puts a skipped date back", async () => {
+      serve([item({ next_date: "2026-05-01", skipped: ["2026-04-01"] })], [], { "/api/overrides": { ok: true } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Put it back" }));
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "rec:1:2026-04-01" } });
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Apr\u00a01 is back in the forecast"));
+    });
+
+    it("says so when skipping fails", async () => {
+      serve([item()]);
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
+      await userEvent.click(screen.getByRole("button", { name: "Skip the next one" }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
+    });
+
+    it("saves an end date, won't save one before it starts, and clears it", async () => {
+      serve([item()], [], { "/api/recurring/1": { linked: 0 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      const ends = screen.getByLabelText("Ends on");
+      await userEvent.type(ends, "2026-12-31");
+      await userEvent.tab();
+      await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(1));
+      expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { end_date: "2026-12-31" } });
+      await fireEvent.input(ends, { target: { value: "2026-01-01" } });   // as a date picker sets it
+      await fireEvent.change(ends);
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not saved yet. It ends before it starts."));
+      expect(ends).toHaveAttribute("aria-invalid", "true");
+      expect(posts("/api/recurring/1")).toHaveLength(1);
+      await userEvent.click(screen.getByRole("button", { name: "Clear the end date" }));
+      await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(2));
+      expect(posts("/api/recurring/1")[1][1]).toMatchObject({ body: { end_date: "" } });
+      expect(ends).toHaveValue("");
+    });
+
+    it("can follow the average of the last 3 payments instead of a fixed amount the payments missed", async () => {
+      serve([item({ amount: -80, suggested_amount: -87.4 })], [], { "/api/recurring/1": { linked: 0 } });
+      render(Recurring);
+      await userEvent.click(await screen.findByText("Rent"));
+      await userEvent.click(screen.getByRole("button", { name: "Average of last 3" }));
+      await waitFor(() => expect(posts("/api/recurring/1")).toHaveLength(1));
+      expect(posts("/api/recurring/1")[0][1]).toMatchObject({ body: { amount_mode: "avg3", amount: -80 } });
+      expect(screen.getByRole("combobox", { name: /Amount to forecast/ })).toHaveValue("avg3");
+      expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
     });
 
     it("shows money out or in by the sign of its amount, and the amount without it", async () => {
@@ -493,18 +810,18 @@ describe("Recurring page", () => {
       await userEvent.click(screen.getByRole("radio", { name: "Money in" }));
       expect(await within(await screen.findByRole("region", { name: "Money in" })).findByText("+$1,500.00")).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Money out" })).not.toBeInTheDocument();
-      expect(screen.getByText("monthly · next May 1 · 3 matched")).toBeInTheDocument();
+      expect(screen.getByText(/^monthly · next May.1 · 3 matched$/)).toBeInTheDocument();
     });
 
     it("offers the recent payments' amount when they all missed a fixed amount, and saves it when you take it", async () => {
       serve([item({ name: "Paycheck", amount: 5000, frequency: "semimonthly", dates: "15,31", suggested_amount: 2100.47 })], [], { "/api/recurring/1": { linked: 0 } });
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
-      expect(screen.getByText("The last payments were about $2,100, not $5,000.")).toBeInTheDocument();
+      expect(screen.getByText("The last payments were about $2,100.47, not $5,000.00.")).toBeInTheDocument();
       expect(api).not.toHaveBeenCalledWith("/api/recurring/1", expect.anything());   // nothing changes until you say so
-      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
-      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ method: "POST", body: expect.objectContaining({ amount: 2100, amount_mode: "fixed" }) })));
-      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("2100");
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100.47" }));
+      await waitFor(() => expect(api).toHaveBeenCalledWith("/api/recurring/1", expect.objectContaining({ method: "POST", body: expect.objectContaining({ amount: 2100.47, amount_mode: "fixed" }) })));
+      expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("2100.47");
       expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();
     });
 
@@ -514,7 +831,7 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
       expect(screen.getByLabelText("Smallest amount")).toHaveValue("3500");
-      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100.47" }));
       await waitFor(() => expect(screen.getByLabelText("Smallest amount")).toHaveValue("1470"));
       expect(screen.getByLabelText("Largest amount")).toHaveValue("2730");
     });
@@ -529,7 +846,7 @@ describe("Recurring page", () => {
       expect(screen.queryByText(/The last payments were about/)).not.toBeInTheDocument();   // not "about $2,100, not $2,500"
       await userEvent.clear(amount);
       await userEvent.type(amount, "5000");
-      expect(screen.getByText("The last payments were about $2,100, not $5,000.")).toBeInTheDocument();
+      expect(screen.getByText("The last payments were about $2,100.47, not $5,000.00.")).toBeInTheDocument();
     });
 
     it("keeps offering the amount when saving it fails, with the old amount back", async () => {
@@ -537,10 +854,10 @@ describe("Recurring page", () => {
       render(Recurring);
       await userEvent.click(await screen.findByText("Paycheck"));
       vi.mocked(api).mockRejectedValueOnce(new Error("Offline"));
-      await userEvent.click(screen.getByRole("button", { name: "Use $2,100" }));
+      await userEvent.click(screen.getByRole("button", { name: "Use $2,100.47" }));
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Offline"));
       expect(screen.getByLabelText(/Amount/, AMOUNT)).toHaveValue("5000");
-      expect(screen.getByRole("button", { name: "Use $2,100" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Use $2,100.47" })).toBeInTheDocument();
     });
 
     it("saves an amount range, and says when its ends are the wrong way round", async () => {
