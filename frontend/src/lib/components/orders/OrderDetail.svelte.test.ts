@@ -111,6 +111,19 @@ describe("undo and failures", () => {
     return {};
   }) as never);
 
+  it("shows each item with just its price and category picker, without saying who chose the category", async () => {
+    vi.mocked(api).mockResolvedValue({ ...order, items: [
+      { id: 7, title: "Tea", quantity: 1, amount: 10, category: "Groceries", category_source: "manual" },
+      { id: 8, title: "Lamp", quantity: 1, amount: 20, category: "Shopping", category_source: "memory" },
+      { id: 9, title: "Mug", quantity: 1, amount: 5, category: "Shopping", category_source: "ai" },
+      { id: 10, title: "Bag", quantity: 1, amount: 2, category: null, category_source: null }] } as never);
+    render(OrderDetail, { orderId: "x" });
+    expect(await screen.findByText("Tea")).toBeInTheDocument();
+    for (const label of [/you picked/, /as before/, /^AI$/, /store's department/, /uses the transaction's category/])
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Category for Tea" }).closest(".col-span-2, [class*='col-span-2']")).not.toBeNull();   // the line's width on a phone
+  });
+
   it("says a picked category applies to the item in every order", async () => {
     serveOrder({});
     render(OrderDetail, { orderId: "x" });

@@ -7,7 +7,7 @@
   import { fmt, fmtDate } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
-  import { ITEM_SOURCES, STORES, STORE_SITES, type RetailOrder } from "./retail";
+  import { STORES, STORE_SITES, type RetailOrder } from "./retail";
 
   // An Amazon or Target order: its items, each with a category you can change (remembered for the next time you
   // buy it), and the card charges it was paid with. `onchange` runs after anything here changes a transaction.
@@ -110,18 +110,18 @@
       {@const items = mine.length && !showAll ? mine : o.items}
       <div class="flex flex-col">
         {#each items as i (i.id)}
-          <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
+          <!-- The item, its price and its category: the picker takes the rest of the line on a phone (its own line under
+               the item), and a fixed column beside the price on a wider screen. -->
+          <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_16rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
-            <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
+            <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="col-span-2 w-full sm:col-span-1"
               onchange={(v) => v && undoablePost(`/api/retail/items/${i.id}`, `/api/retail/items/${i.id}/restore`, { category: v },
                 (r) => `${i.title} → ${v}${(r.orders ?? 0) > 1 ? ` · ${r.orders} orders` : ""}`)} />
             {#if !i.category && suggestions[i.id]}
               {@const s = suggestions[i.id]}
-              <Button size="sm" variant="outline" class="h-auto justify-start py-1 whitespace-normal" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
+              <Button size="sm" variant="outline" class="col-span-2 h-auto justify-self-start py-1 whitespace-normal sm:col-start-3 sm:col-span-1" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
                 onclick={() => useSuggestion(s)}>{s.new_category ? `New: ${s.new_category.name}` : `Use ${s.category}`}</Button>
-            {:else}
-              <span class="text-xs text-muted-foreground">{i.category ? ITEM_SOURCES[i.category_source ?? ""] ?? "" : "uses the transaction's category"}</span>
             {/if}
           </div>
         {/each}
