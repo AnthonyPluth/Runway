@@ -54,6 +54,47 @@ describe("upcoming", () => {
     await waitFor(() => expect(calls("/api/churning/cards/1/plan/undo")).toHaveLength(1));
   });
 
+  it("checks a to-do off, and its toast puts it back", async () => {
+    const onchanged = setup([item({ kind: "task", task_id: 9, card_id: 1, title: "Call Citi" })]);
+    await userEvent.click(screen.getByRole("button", { name: 'Mark "Call Citi" done' }));
+    await waitFor(() => expect(bodyOf(calls("/api/churning/tasks/9")[0])).toEqual({ done: true }));
+    const [msg, opts] = vi.mocked(toast).mock.calls.at(-1)! as [string, { description: string; action: { label: string; onClick: () => void } }];
+    expect(msg).toBe("Done");
+    expect(opts.description).toBe("Call Citi");
+    expect(opts.action.label).toBe("Undo");
+    expect(onchanged).toHaveBeenCalled();
+    opts.action.onClick();
+    await waitFor(() => expect(bodyOf(calls("/api/churning/tasks/9")[1])).toEqual({ done: false }));
+  });
+
+  it("says why a to-do couldn't be checked off, and offers no undo", async () => {
+    vi.mocked(api).mockRejectedValue(new Error("To-do not found"));
+    const onchanged = setup([item({ kind: "task", task_id: 9, card_id: 1, title: "Call Citi" })]);
+    await userEvent.click(screen.getByRole("button", { name: 'Mark "Call Citi" done' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("To-do not found"));
+    expect(toast).not.toHaveBeenCalled();
+    expect(onchanged).not.toHaveBeenCalled();
+  });
+
+  it("colors a deadline's date red within 7 days or late, amber within 30, and muted after", () => {
+    setup([
+      item({ title: "Late", date: "2026-09-27", card_id: 1 }), item({ title: "Soon", date: "2026-10-07", card_id: 2 }),
+      item({ title: "Month", date: "2026-10-30", card_id: 3 }), item({ title: "Later", date: "2026-12-20", card_id: 4 }),
+    ]);
+    const date = (title: string) => screen.getByText(title).closest("li")!.firstElementChild as HTMLElement;
+    expect(date("Late")).toHaveTextContent("3 days overdue");
+    expect(date("Late")).toHaveClass("text-loss");
+    expect(date("Soon")).toHaveClass("text-loss");        // 7 days
+    expect(date("Month")).toHaveClass("text-warning");    // 30 days
+    expect(date("Later")).toHaveClass("text-muted-foreground");
+    expect(date("Soon")).toHaveAttribute("title", "in 7 days");
+  });
+
+  it("doesn't color a chance to apply, which is good news and not a deadline", () => {
+    setup([item({ kind: "apply", card_id: null, title: "You can apply for Gold", date: "2026-10-01" })]);
+    expect(screen.getByText("You can apply for Gold").closest("li")!.firstElementChild).toHaveClass("text-muted-foreground");
+  });
+
   it("marks a credit used from Upcoming", async () => {
     vi.mocked(api).mockResolvedValue({ id: 2 } as never);
     setup([item({ kind: "benefit", benefit_id: 4, title: "Travel credit: $200 left" })]);

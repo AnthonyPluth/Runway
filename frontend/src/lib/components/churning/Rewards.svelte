@@ -3,16 +3,18 @@
   import { autosave } from "$lib/autosave";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { toast } from "svelte-sonner";
+  import { balanceRemove } from "./actions";
   import { balanceText, balanceValue, currencyGroups, fullDate, points, valueSource } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import Section from "./Section.svelte";
-  import type { Churning } from "./types";
+  import type { Churning, Currency } from "./types";
 
   // Points, in two views. Balances: what you have now (the balances you enter, each as of a day, worth what you set per point,
   // with an estimate of the balance today: yours plus what the cards earned since its day). Earned this year: what each
@@ -45,11 +47,9 @@
     await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: balanceValue(f.value), as_of: d.today } });
     onchanged();
   };
-  // Takes a balance off the list (a program you no longer use); the row stays only while a card still earns in it.
-  const remove = (owner: string, currency: string) => async () => {
-    await api("/api/churning/balances", { method: "POST", body: { owner, currency, points: null } });
-    onchanged();
-  };
+  // Takes a balance off the list (a program you no longer use); the row stays only while a card still earns in it. The toast puts it back.
+  const remove = (owner: string, currency: string, name: string, was: { points: number; as_of: string | null | undefined }) =>
+    balanceRemove(owner, currency, name, was, onchanged);
   const setCents = (k: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     await api("/api/churning/currencies", { method: "POST", body: { key: k, cents: f.value } });
     onchanged();
@@ -57,6 +57,14 @@
   async function reset(k: string) {
     try { await api(`/api/churning/currencies/${encodeURIComponent(k)}/remove`, { method: "POST" }); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
+  }
+  // A currency of your own goes with its balances, which can't be brought back, so it asks first.
+  let deleting = $state<Currency | null>(null);
+  let asking = $state(false);
+  const askDelete = (c: Currency) => { deleting = c; asking = true; };
+  async function deleteCurrency(c: Currency): Promise<boolean> {
+    try { await api(`/api/churning/currencies/${encodeURIComponent(c.key)}/remove`, { method: "POST" }); toast(`Deleted ${c.name}`); onchanged(); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
   async function addCurrency() {
     try {
@@ -83,15 +91,15 @@
           <h4 class="mt-2 mb-0.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase first:mt-0">{g.label}</h4>
           <div class="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
             {#each g.currencies as c (c.key)}
-              <div class="flex min-h-8 items-center gap-1.5 text-sm">
+              <div class="flex min-h-8 items-center gap-1.5 text-sm phone:min-h-11">
                 <label class="flex min-w-0 flex-1 items-center gap-1.5"><span class="min-w-0 truncate" title={c.name}>{c.name}</span>
                   <span class="shrink-0 text-[11px] text-muted-foreground" title={c.source_note}>{valueSource(c, d.values_as_of)}</span>
                   <span class="ml-auto flex shrink-0 items-center gap-0.5"><input type="number" min="0" step="0.05" value={c.cents} use:autosave={setCents(c.key)}
-                    aria-label={`Cents a ${c.name} point`} class="h-7 w-14 rounded-md border border-transparent bg-transparent px-1.5 text-right text-sm tabular-nums hover:border-input focus-visible:border-ring" />¢</span>
+                    aria-label={`Cents a ${c.name} point`} class="h-7 w-14 rounded-md border border-transparent bg-transparent px-1.5 text-right text-[13px] tabular-nums hover:border-input focus-visible:border-ring phone:h-9 phone:w-16 phone:border-input" />¢</span>
                 </label>
                 <!-- Always takes the space, so the inputs line up whether or not a row has Remove or Reset. -->
-                <span class="w-11 shrink-0 text-xs">
-                  {#if c.custom}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => reset(c.key)}>Remove</Button>
+                <span class="w-11 shrink-0 text-xs phone:w-14">
+                  {#if c.custom}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => askDelete(c)}>Delete</Button>
                   {:else if c.default != null && c.cents !== c.default}<Button variant="link" size="sm" class="h-auto px-0 text-xs" onclick={() => reset(c.key)} title={`Back to ${c.default}¢`}>Reset</Button>{/if}
                 </span>
               </div>
@@ -105,7 +113,7 @@
         </div>
       </div>
     </Section>
-    <div class="mt-5 grid gap-6 lg:grid-cols-2">
+    <div class="mt-5 grid gap-6 xl:grid-cols-2">
       {#each people as person (person)}
         {@const r = d.rewards[person]}
         <div class="min-w-0">
@@ -120,18 +128,20 @@
           {#if view === "earned"}
             {@const earned = r?.currencies.filter((x) => x.earned + x.bonuses > 0) ?? []}
             {#if earned.length}
-              <table class="w-full text-sm">
-                <thead><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal">
+              <!-- Five columns when there's room (xl: the sidebar takes a quarter of the width); each row a stacked cell otherwise. -->
+              <table class="w-full text-sm max-xl:block">
+                <thead class="max-xl:hidden"><tr class="text-xs text-muted-foreground [&>th]:py-1 [&>th]:font-normal">
                   <th class="text-left">Currency</th><th class="text-right">Spending</th><th class="text-right">Bonuses</th><th class="text-right">Total</th><th class="text-right">Worth</th>
                 </tr></thead>
-                <tbody>
+                <tbody class="max-xl:block">
                   {#each earned as row (row.currency)}
-                    <tr class="border-t align-top [&>td]:py-1.5">
-                      <td class="pr-2">{row.name}</td>
-                      <td class="text-right tabular-nums">{row.earned ? `~${points(row.earned)}` : "—"}</td>
-                      <td class="text-right tabular-nums">{row.bonuses ? points(row.bonuses) : "—"}</td>
-                      <td class="text-right tabular-nums">~{points(row.earned + row.bonuses)}</td>
-                      <td class="text-right tabular-nums" title={`At ${row.cents}¢ a point`}>~{fmt0(row.value)}</td>
+                    <tr class="border-t align-top [&>td]:py-1.5 max-xl:grid max-xl:grid-cols-3 max-xl:gap-x-3 max-xl:py-1.5 max-xl:[&>td]:py-0.5 max-xl:[&>td:not(:first-child):not(:last-child)]:text-xs
+                      max-xl:[&>td[data-label]]:before:block max-xl:[&>td[data-label]]:before:text-[11px] max-xl:[&>td[data-label]]:before:text-muted-foreground max-xl:[&>td[data-label]]:before:content-[attr(data-label)]">
+                      <td class="pr-2 max-xl:col-span-2 max-xl:row-start-1 max-xl:font-medium">{row.name}</td>
+                      <td data-label="Spending" class="text-right tabular-nums max-xl:text-left">{row.earned ? `~${points(row.earned)}` : "—"}</td>
+                      <td data-label="Bonuses" class="text-right tabular-nums max-xl:text-left">{row.bonuses ? points(row.bonuses) : "—"}</td>
+                      <td data-label="Total" class="text-right tabular-nums max-xl:text-left">~{points(row.earned + row.bonuses)}</td>
+                      <td class="text-right tabular-nums max-xl:col-start-3 max-xl:row-start-1" title={`At ${row.cents}¢ a point`}>~{fmt0(row.value)}</td>
                     </tr>
                   {/each}
                 </tbody>
@@ -154,7 +164,7 @@
                     </td>
                     <td class="text-right">
                       <input type="text" inputmode="numeric" min="0" step="1" value={balanceText(row.balance)} placeholder="—" aria-label={`${person}'s ${row.name} balance`}
-                        use:commas use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums" />
+                        use:commas use:autosave={setBalance(person, row.currency)} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm tabular-nums phone:h-9" />
                     </td>
                     <td class="text-right tabular-nums">{row.balance_value == null ? "—" : fmt0(row.balance_value)}</td>
                   </tr>
@@ -164,12 +174,12 @@
                         <div class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-muted-foreground">
                           {#if row.est_balance != null}
                             <span title={`Your balance plus the ${points(row.earned_since)} points your linked cards earned since ${row.as_of ? fullDate(row.as_of) : "then"}, at their normal rates. An estimate: redemptions and portal bookings aren't counted.`}>
-                              Estimated now: <span class="tabular-nums">~{row.est_balance.toLocaleString("en-US")}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>{#if row.est_value != null}<span class="tabular-nums" title="Worth of the estimated balance"> · ~{fmt0(row.est_value)}</span>{/if}
+                              Estimated now: <span class="tabular-nums">~{points(row.est_balance)}</span> <span class="italic">(+{points(row.earned_since)} earned since)</span>{#if row.est_value != null}<span class="tabular-nums" title="Worth of the estimated balance"> · ~{fmt0(row.est_value)}</span>{/if}
                             </span>
                           {/if}
                           {#if row.as_of}<span>Entered {fullDate(row.as_of)}</span>{/if}
                           <button type="button" class="underline hover:text-foreground"
-                            aria-label={`Remove ${person}'s ${row.name} balance`} onclick={remove(person, row.currency)}>Remove</button>
+                            aria-label={`Remove ${person}'s ${row.name} balance`} onclick={() => remove(person, row.currency, row.name, { points: row.balance!, as_of: row.as_of })}>Remove</button>
                         </div>
                       </td>
                     </tr>
@@ -183,7 +193,7 @@
               only={(c) => !r?.currencies.some((x) => x.currency === c)} class="h-8 py-0" />
             {#if addFor[person]}
               <input type="text" inputmode="numeric" min="0" step="1" placeholder="points" aria-label="Balance"
-                use:commas use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm" />
+                use:commas use:autosave={setBalance(person, addFor[person])} class="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-right text-sm phone:h-9" />
             {/if}
           </div>{/if}
         </div>
@@ -191,3 +201,8 @@
     </div>
   </Card.Content>
 </Card.Root>
+
+{#if deleting}
+  <ConfirmDialog bind:open={asking} title={`Delete ${deleting.name}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive
+    description="Its balances are deleted too, for good." onconfirm={() => deleteCurrency(deleting!)} />
+{/if}

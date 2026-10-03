@@ -1,9 +1,8 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import EmptyLine from "$lib/components/EmptyLine.svelte";
   import { Input } from "$lib/components/ui/input";
   import { fmt0 } from "$lib/format";
@@ -13,8 +12,12 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import { toast } from "svelte-sonner";
+  import { wishDrop } from "./actions";
+  import Chip from "./Chip.svelte";
   import { BLOCKER_LABEL, bonusLabel, fullDate, mine, reorder, scoreProgress, splitWishes, wishName } from "./churning";
+  import Popover from "./Popover.svelte";
   import type { Churning, Wish } from "./types";
   import WishForm from "./WishForm.svelte";
 
@@ -55,14 +58,18 @@
       onchanged();
     } catch (err) { toast.error((err as Error).message); }
   }
-  async function setStatus(w: Wish, status: "wanted" | "dropped") {
-    try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status } }); toast(status === "dropped" ? `Dropped ${wishName(w)}` : `${wishName(w)} is wanted again`); onchanged(); }
+  // Dropping can be undone from its toast; "Want again" is the way back from the list.
+  async function wantAgain(w: Wish) {
+    try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status: "wanted" } }); toast(`${wishName(w)} is wanted again`); onchanged(); }
     catch (err) { toast.error((err as Error).message); }
   }
-  // Applied or dropped: gone for good (what applying made, the card or bonus, stays).
-  async function remove(w: Wish) {
-    try { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+  // Applied or dropped: deleted for good (what applying made, the card or bonus, stays), so it asks first.
+  let deleting = $state<Wish | null>(null);
+  let asking = $state(false);
+  const askDelete = (w: Wish) => { deleting = w; asking = true; };
+  async function remove(w: Wish): Promise<boolean> {
+    try { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
   async function applied(w: Wish) {
     try {
@@ -92,16 +99,16 @@
   {@const sc = scoreProgress(w, d.scores)}
   {@const open = w.status === "wanted" || w.status === "ready"}
   <li class="py-3" data-wish={w.id}>
-    <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+    <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-x-3">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-1.5 font-medium">
           {#if open}<span class="text-xs font-normal text-muted-foreground tabular-nums" title="Priority">#{n + 1}</span>{/if}
           {wishName(w)}
-          <Badge variant="outline">{w.kind === "card" ? "Card" : "Bank bonus"}</Badge>
-          {#if w.business}<Badge variant="outline">Business</Badge>{/if}
-          {#if w.status === "applied"}<Badge variant="secondary">Applied{w.applied_on ? ` ${fullDate(w.applied_on)}` : ""}</Badge>
-          {:else if w.status === "dropped"}<Badge variant="secondary">Dropped</Badge>{/if}
-          {#if w.ready}<Badge class="border-transparent bg-[var(--good)]/15 text-[var(--good)]"><CircleCheck aria-hidden="true" />Ready to apply</Badge>{/if}
+          <Chip>{w.kind === "card" ? "Card" : "Bank bonus"}</Chip>
+          {#if w.business}<Chip>Business</Chip>{/if}
+          {#if w.status === "applied"}<Chip tone="good">Applied{w.applied_on ? ` ${fullDate(w.applied_on, d.today)}` : ""}</Chip>
+          {:else if w.status === "dropped"}<Chip tone="neutral">Dropped</Chip>{/if}
+          {#if w.ready}<Chip tone="good"><CircleCheck aria-hidden="true" />Ready to apply</Chip>{/if}
         </div>
         <div class="text-xs text-muted-foreground">
           {#if showOwner}{w.owner} · {/if}{#if w.kind === "card" && w.issuer}{d.issuers.find((i) => i.key === w.issuer)?.name ?? w.issuer} · {/if}{expect(w) || "No details yet"}
@@ -109,18 +116,28 @@
       </div>
       <div class="flex shrink-0 flex-wrap items-center gap-1">
         {#if open}
-          <Button variant="ghost" size="icon" class="size-8" disabled={n === 0} aria-label={`Move ${wishName(w)} up`} onclick={() => move(w, -1)}><ArrowUp class="size-4" /></Button>
-          <Button variant="ghost" size="icon" class="size-8" disabled={n === count - 1} aria-label={`Move ${wishName(w)} down`} onclick={() => move(w, 1)}><ArrowDown class="size-4" /></Button>
           {#if w.apply_url}<Button size="sm" variant="outline" href={w.apply_url} target="_blank" rel="noopener noreferrer" aria-label={`Open the application for ${wishName(w)}`}>Apply<ExternalLink class="size-3.5" aria-hidden="true" /></Button>{/if}
           <Button size="sm" variant={w.ready ? "default" : "outline"} aria-label={`I applied for ${wishName(w)}`} onclick={() => applied(w)}>I applied</Button>
-          <Button size="sm" variant="link" class="px-1" aria-label={`Edit ${wishName(w)}`} onclick={() => (form = w)}>Edit</Button>
-          <Button size="sm" variant="link" class="px-1" aria-label={`Drop ${wishName(w)}`} onclick={() => setStatus(w, "dropped")}>Drop</Button>
+          <Popover label={`More actions for ${wishName(w)}`}>
+            {#snippet trigger()}<Ellipsis class="size-4" aria-hidden="true" />{/snippet}
+            {#snippet children(close)}
+              <Button size="sm" variant="ghost" class="justify-start" disabled={n === 0} aria-label={`Move ${wishName(w)} up`} onclick={() => { close(); move(w, -1); }}><ArrowUp class="size-4" aria-hidden="true" />Move up</Button>
+              <Button size="sm" variant="ghost" class="justify-start" disabled={n === count - 1} aria-label={`Move ${wishName(w)} down`} onclick={() => { close(); move(w, 1); }}><ArrowDown class="size-4" aria-hidden="true" />Move down</Button>
+              <Button size="sm" variant="ghost" class="justify-start" aria-label={`Edit ${wishName(w)}`} onclick={() => { close(); form = w; }}>Edit</Button>
+              <Button size="sm" variant="ghost" class="justify-start" aria-label={`Drop ${wishName(w)}`} onclick={() => { close(); wishDrop(w.id, wishName(w), w.status, onchanged); }}>Drop</Button>
+            {/snippet}
+          </Popover>
         {:else if w.status === "dropped"}
-          <Button size="sm" variant="link" class="px-1" onclick={() => setStatus(w, "wanted")}>Want again</Button>
-          <Button size="sm" variant="link" class="px-1" onclick={() => (form = w)} aria-label={`Edit ${wishName(w)}`}>Edit</Button>
-        {/if}
-        {#if !open}
-          <ConfirmButton class="px-1" confirm={`Delete ${wishName(w)}?`} title={`Delete ${wishName(w)} from Planned`} onconfirm={() => remove(w)}>Delete</ConfirmButton>
+          <Button size="sm" variant="outline" onclick={() => wantAgain(w)}>Want again</Button>
+          <Popover label={`More actions for ${wishName(w)}`}>
+            {#snippet trigger()}<Ellipsis class="size-4" aria-hidden="true" />{/snippet}
+            {#snippet children(close)}
+              <Button size="sm" variant="ghost" class="justify-start" aria-label={`Edit ${wishName(w)}`} onclick={() => { close(); form = w; }}>Edit</Button>
+              <Button size="sm" variant="ghost" class="justify-start" aria-label={`Delete ${wishName(w)}`} onclick={() => { close(); askDelete(w); }}>Delete</Button>
+            {/snippet}
+          </Popover>
+        {:else}
+          <Button size="sm" variant="link" class="px-1" aria-label={`Delete ${wishName(w)}`} onclick={() => askDelete(w)}>Delete</Button>
         {/if}
       </div>
     </div>
@@ -128,14 +145,14 @@
       {#if w.blockers.length}
         <ul class="mt-1.5 space-y-0.5 text-sm" aria-label={`What's in the way of ${wishName(w)}`}>
           {#each w.blockers as b, i (i)}
-            <li class="flex flex-wrap gap-x-1.5"><span class="text-xs font-medium text-[var(--warning)]">{BLOCKER_LABEL[b.kind]}</span><span>{b.text}{b.date ? ` (${fullDate(b.date)})` : ""}</span></li>
+            <li class="flex flex-wrap gap-x-1.5"><span class="text-xs font-medium text-warning">{BLOCKER_LABEL[b.kind]}</span><span>{b.text}{b.date ? ` (${fullDate(b.date, d.today)})` : ""}</span></li>
           {/each}
         </ul>
-        {#if w.earliest_apply}<p class="mt-1 text-xs text-muted-foreground">Earliest you can apply: {fullDate(w.earliest_apply)}</p>{/if}
+        {#if w.earliest_apply}<p class="mt-1 text-xs text-muted-foreground">Earliest you can apply: {fullDate(w.earliest_apply, d.today)}</p>{/if}
       {/if}
       {#if sc && !w.blockers.some((b) => b.text.includes(sc))}<p class="mt-1 text-xs font-medium">{sc}</p>{/if}
       {#each w.hints as h (h)}<p class="mt-1 text-xs text-muted-foreground italic">{h}</p>{/each}
-      {#if w.offer_expires_on}<p class="mt-1 text-xs text-muted-foreground">Offer ends {fullDate(w.offer_expires_on)}</p>{/if}
+      {#if w.offer_expires_on}<p class="mt-1 text-xs text-muted-foreground">Offer ends {fullDate(w.offer_expires_on, d.today)}</p>{/if}
     {/if}
   </li>
 {/snippet}
@@ -156,7 +173,7 @@
           <span class="inline-flex flex-wrap items-center gap-x-2">
             <span class="text-muted-foreground">{p}'s credit score</span>
             <b class="font-medium tabular-nums">{s ? s.score : "not entered"}</b>
-            {#if s}<span class="text-xs text-muted-foreground">as of {fullDate(s.as_of)}{s.source ? ` · ${s.source}` : ""}</span>{/if}
+            {#if s}<span class="text-xs text-muted-foreground">as of {fullDate(s.as_of, d.today)}{s.source ? ` · ${s.source}` : ""}</span>{/if}
             <Button variant="link" size="sm" class="h-auto px-0" aria-label={`Update ${p}'s credit score`} onclick={() => openScore(p)}>{s ? "Update" : "Add"}</Button>
           </span>
         {/each}
@@ -182,4 +199,10 @@
     {/if}
   </Card.Content>
 </Card.Root>
+{/if}
+
+{#if deleting}
+  <ConfirmDialog bind:open={asking} title={`Delete ${wishName(deleting)}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive
+    description={deleting.status === "applied" ? "It’s deleted for good. The card or bank bonus it became stays." : "It’s deleted for good."}
+    onconfirm={() => remove(deleting!)} />
 {/if}
