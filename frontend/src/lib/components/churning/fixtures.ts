@@ -1,7 +1,7 @@
 // Churning data for component tests: a page's reply with just enough in it, each piece overridable.
 import { api } from "$lib/api";
 import { vi } from "vitest";
-import type { Benefit, ChurnCard, Churning, FoundDraft, Wish } from "./types";
+import type { BankBonus, Benefit, ChurnCard, Churning, FoundDraft, Wish } from "./types";
 
 /** The requests made to a path (or paths matching a pattern), from a test file that mocks `$lib/api`. */
 export const calls = (path: string | RegExp) =>
@@ -26,6 +26,15 @@ export const card = (over: Partial<ChurnCard> = {}): ChurnCard => ({
   deadline: null, spent: null, spend_source: "manual", bonus_state: null, counts_524: true, falls_off: "2027-03-14",
   eligibility: { status: "now", on: null, why: "", override: false }, points_ytd: null, value_ytd: null, ...over,
 });
+
+export const bankBonus = (over: Partial<BankBonus> = {}): BankBonus => ({
+  id: 1, owner: "Alex", bank: "Chase", account_type: "checking", account_id: null, opened_on: "2026-01-05", bonus: 300, dd_total: 500, dd_count: null,
+  debit_count: null, min_balance: null, hold_until: null, other_reqs: null, deadline_days: 90, deadline: "2026-04-05", post_days: 30, manual_dd: null,
+  manual_debits: null, status: "open", received_on: null, received_amount: null, closed_on: null, monthly_fee: 0, fee_waiver: null, early_close_fee: null,
+  keep_open_days: null, repeat_months: null, once_per_lifetime: 0, eligible_on: null, notes: null,
+  progress: { dd_total: 0, dd_count: 0, debits: 0, balance: null, balance_ok: null, source: "auto" }, state: "active", due: "2026-12-05", expected_on: null,
+  safe_close_on: null, fee_reminder: null, eligibility: { status: "now", on: null, why: "", override: false }, ...over,
+}) as unknown as BankBonus;
 
 export const found = (over: Partial<FoundDraft> = {}): FoundDraft => ({
   account_id: "acct-1", account_name: "Chase Sapphire Reserve (8814)", org: "Chase Bank Alex", owner: "Alex", issuer: "chase",

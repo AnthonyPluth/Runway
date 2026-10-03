@@ -2,21 +2,25 @@
   import { commas } from "$lib/commas";
   import { api } from "$lib/api";
   import { autosave } from "$lib/autosave";
-  import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { BANK_TYPE_LABEL, wishExpectSummary, wishName, wishTimingSummary } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
+  import FieldNote from "./FieldNote.svelte";
+  import { fieldProps, focusFirstInvalid } from "./form";
+  import FormFooter from "./FormFooter.svelte";
   import Section from "./Section.svelte";
   import type { Churning, Wish } from "./types";
+  import { validateWish } from "./validate";
 
   // Planning a card or a bank bonus: what you expect it to cost and pay, and what you're waiting for. Adding sends it
-  // all with Add; editing saves each field as you change it (Done redraws the page).
+  // all with Add; editing saves each field as you change it (Close redraws the page).
   let { w, d, person, onclose }: { w: Wish | null; d: Churning; person: string; onclose: (changed: boolean) => void } = $props();
 
   const str = (x: unknown) => (x == null ? "" : String(x));
@@ -34,34 +38,59 @@
   };
   const v = $state(initial());
   let changed = false;
-  let error = $state("");
+  const uid = $props.id();
+  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
+  let attempted = $state(false);
+  const errors = $derived(attempted ? validateWish(v) : {});
+  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!w) return;
-    await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } });
+    try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
+    catch (err) { attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (w ? fromAction(autosave, () => save(key)) : null);
   // Only the fields that belong to the kind go.
   const CARD = ["issuer", "product", "family", "business", "annual_fee", "currency", "bonus_spend", "bonus_months"];
   const BANK = ["bank", "product", "account_type", "requirements", "repeat_months", "once_per_lifetime"];
+
+  // Which section a refusal is about (the server's messages name the field), so that section opens.
+  type Key = "expect" | "timing";
+  let flagged = $state<Key | null>(null);
+  let error = $state(""), busy = $state(false);
+  const SECTION_OF: [Key, RegExp][] = [
+    ["timing", /day the offer ends|day to wait until|credit score|offer|wait/i],
+    ["expect", /annual fee|bonus|spending needed|months|requirements|paid in|between bonuses/i],
+  ];
+  const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
   async function add() {
+    if (busy) return;
+    attempted = true; error = ""; flagged = null;
+    await tick();
+    if (Object.keys(validateWish(v)).length) { focusFirstInvalid(box); return; }
     const own = v.kind === "card" ? CARD : BANK;
     const body: Record<string, unknown> = { owner: v.owner, kind: v.kind, bonus: v.bonus, offer_expires_on: v.offer_expires_on, wait_until: v.wait_until,
       min_score: v.min_score, assume_prior_planned: v.assume_prior_planned, notes: v.notes, apply_url: v.apply_url };
     for (const k of own) body[k] = v[k as keyof typeof v];
+    busy = true;
     try { await api("/api/churning/wishlist", { method: "POST", body }); toast(`Planned ${wishName({ ...v, kind: v.kind as Wish["kind"] })}`); onclose(true); }
-    catch (err) { error = (err as Error).message; toast.error(error); }
+    catch (err) { error = (err as Error).message; flagged = sectionOf(error); if (flagged) open[flagged] = true; }
+    finally { busy = false; }
   }
-  async function remove() {
-    try { await api(`/api/churning/wishlist/${w!.id}/remove`, { method: "POST" }); toast(`Removed ${wishName(w!)}`); onclose(true); }
-    catch (err) { toast.error((err as Error).message); }
+  // Deleting a planned item can't be taken back, so it asks first.
+  let asking = $state(false);
+  async function remove(): Promise<boolean> {
+    try { await api(`/api/churning/wishlist/${w!.id}/remove`, { method: "POST" }); toast(`Deleted ${wishName(w!)}`); onclose(true); return true; }
+    catch (err) { toast.error((err as Error).message); return false; }
   }
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
-  const open = $state({ expect: false, timing: false });
+  const open = $state<Record<Key, boolean>>({ expect: false, timing: false });
 </script>
+
+{#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
 
 <div bind:this={box} class="mb-4 rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">{w ? `Edit ${wishName(w)}` : "Plan a card or bank bonus"}</h3>
@@ -79,10 +108,16 @@
       <label class={lbl}>Bank
         <NativeSelect bind:value={v.issuer} {@attach edit("issuer")}>{#each d.issuers as i (i.key)}<option value={i.key}>{i.name}</option>{/each}</NativeSelect>
       </label>
-      <label class={`${lbl} min-w-48 flex-1`}>Card<Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" /></label>
+      <div class="flex min-w-48 flex-1 flex-col gap-1">
+        <label class={lbl}><span>Card{@render star()}</span><Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" {...fp("product", true)} /></label>
+        <FieldNote {uid} name="product" {errors} />
+      </div>
       <label class={lbl}><span>Family <span class="text-muted-foreground">(optional)</span></span><Input class="w-40" bind:value={v.family} {@attach edit("family")} placeholder="e.g. Sapphire" /></label>
     {:else}
-      <label class={`${lbl} min-w-40 flex-1`}>Bank<Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" /></label>
+      <div class="flex min-w-40 flex-1 flex-col gap-1">
+        <label class={lbl}><span>Bank{@render star()}</span><Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" {...fp("bank", true)} /></label>
+        <FieldNote {uid} name="bank" {errors} />
+      </div>
       <label class={lbl}>Account
         <NativeSelect bind:value={v.account_type} {@attach edit("account_type")}>{#each Object.entries(BANK_TYPE_LABEL) as [k, l] (k)}<option value={k}>{l}</option>{/each}</NativeSelect>
       </label>
@@ -90,7 +125,7 @@
     {/if}
   </div>
 
-  <Section id="expect" title="What you expect" bind:open={open.expect} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
+  <Section id="expect" title="What you expect" bind:open={open.expect} flagged={flagged === "expect"} {error} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
   <div class="flex flex-wrap items-end gap-3">
     {#if v.kind === "card"}
       <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="$" /></label>
@@ -109,7 +144,7 @@
   </div>
   </Section>
 
-  <Section id="timing" title="Timing" bind:open={open.timing} summary={wishTimingSummary(v)}>
+  <Section id="timing" title="Timing" bind:open={open.timing} flagged={flagged === "timing"} {error} summary={wishTimingSummary(v, d.today)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}><span>Offer ends <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.offer_expires_on} {@attach edit("offer_expires_on")} /></label>
     <label class={lbl}><span>Don't apply before <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.wait_until} {@attach edit("wait_until")} /></label>
@@ -127,13 +162,17 @@
   <label class={`${lbl} mt-3`}><span>Application link <span class="text-muted-foreground">(optional)</span></span><Input type="url" bind:value={v.apply_url} {@attach edit("apply_url")} placeholder="https://…" /></label>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
-  <div class="mt-4 flex flex-wrap items-center gap-2">
+  <FormFooter {error} sticky={!w}>
     {#if w}
-      <Button size="sm" onclick={() => onclose(changed)}>Done</Button>
-      <ConfirmButton confirm={`Remove ${wishName(w)}?`} onconfirm={remove}>Remove</ConfirmButton>
+      <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
+      <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete</Button>
     {:else}
-      <Button size="sm" onclick={add}>Add</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
-  </div>
-  {#if error}<p class="mt-2 text-sm text-red-500" role="alert">{error}</p>{/if}
+  </FormFooter>
 </div>
+
+{#if w}
+  <ConfirmDialog bind:open={asking} title={`Delete ${wishName(w)}?`} confirmLabel="Delete" busyLabel="Deleting…" destructive
+    description="It’s deleted for good." onconfirm={remove} />
+{/if}

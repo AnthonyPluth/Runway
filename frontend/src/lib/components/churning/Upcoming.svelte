@@ -5,7 +5,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { fmtDate, relDay } from "$lib/format";
+  import { relDay } from "$lib/format";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
@@ -18,8 +18,8 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Target from "@lucide/svelte/icons/target";
   import Ticket from "@lucide/svelte/icons/ticket";
-  import { benefitUse, planDone, taskSnooze } from "./actions";
-  import { KIND_LABEL, daysUntil } from "./churning";
+  import { benefitUse, planDone, taskDone, taskSnooze } from "./actions";
+  import { DEADLINE_KINDS, KIND_LABEL, URGENCY_CLASS, fullDate, urgency } from "./churning";
   import type { ChurnCard, UpcomingItem } from "./types";
 
   // What's coming up, soonest first, with your own to-dos (tick one off when it's done) and a way to add one.
@@ -33,10 +33,6 @@
   let card = $state(""), due = $state(""), action = $state("");
   const SUGGEST = ["Close", "Product change (downgrade)", "Call for a retention offer", "Check the bonus posted", "Move spending elsewhere"];
 
-  async function done(i: UpcomingItem) {
-    try { await api(`/api/churning/tasks/${i.task_id}`, { method: "POST", body: { done: true } }); toast("Done"); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
-  }
   // An icon per kind, so a plan, a credit or a chance to apply stands out from a fee.
   const ICON = {
     task: ListChecks, fee: CreditCard, plan: Flag, bonus: Target, benefit: Ticket, five24: CalendarCheck, eligible: RotateCcw,
@@ -53,10 +49,14 @@
       onchanged();
     } catch (err) { toast.error((err as Error).message); }
   }
-  const when = (d: string) => {
-    const n = daysUntil(d, today);
-    return n < 0 ? `${-n} day${n === -1 ? "" : "s"} overdue` : n < 7 ? relDay(d, today) : fmtDate(d);
-  };
+  // The date column: "3 days overdue", today or a weekday within the week, else the day. Red within 7 days or once
+  // overdue and amber within 30, for what has a deadline (a chance to apply or a safe day to close isn't late).
+  function when(i: UpcomingItem) {
+    const u = urgency(i.date, today);
+    const text = u.days < 0 ? u.label : u.days < 7 ? relDay(i.date, today) : fullDate(i.date, today);
+    const tone = DEADLINE_KINDS.has(i.kind) ? u.tone : "muted";
+    return { text, title: u.label, cls: cn("w-24 shrink-0 text-sm tabular-nums", URGENCY_CLASS[tone], tone !== "muted" && "font-medium") };
+  }
 </script>
 
 {#if !items.length && !adding}
@@ -87,12 +87,12 @@
     {#if items.length}
       <ul class="divide-y">
         {#each shown as i, n (`${i.kind}:${i.card_id ?? i.bank_id ?? i.owner}:${i.task_id ?? ""}:${i.date}:${n}`)}
-          {@const late = daysUntil(i.date, today) < 0}
+          {@const w = when(i)}
           {@const Icon = ICON[i.kind]}
           <li class="flex flex-wrap items-start gap-x-3 gap-y-1 py-2.5">
-            <div class={cn("w-24 shrink-0 text-sm tabular-nums", late ? "font-medium text-red-500" : i.warn ? "font-medium text-[var(--warning)]" : "text-muted-foreground")}>{when(i.date)}</div>
+            <div class={w.cls} title={w.title}>{w.text}</div>
             <div class="min-w-0 flex-1 max-sm:basis-[calc(100%-6.75rem)]">
-              <div class="text-sm"><span class={cn("mr-1.5 inline-flex items-center gap-1 text-xs", i.kind === "apply" ? "text-[var(--good)]" : "text-muted-foreground")}><Icon class="size-3.5" aria-hidden="true" />{KIND_LABEL[i.kind]}</span>{i.title}</div>
+              <div class="text-sm"><span class={cn("mr-1.5 inline-flex items-center gap-1 text-xs", i.kind === "apply" ? "text-good" : "text-muted-foreground")}><Icon class="size-3.5" aria-hidden="true" />{KIND_LABEL[i.kind]}</span>{i.title}</div>
               <div class="text-xs text-muted-foreground">{i.detail}{showOwner && i.owner && !i.title.startsWith(i.owner) ? ` · ${i.owner}` : ""}</div>
               {#if snoozing === i.task_id && i.task_id != null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="Snooze for">
@@ -104,7 +104,7 @@
             <div class="flex shrink-0 flex-wrap justify-end gap-1.5 max-sm:basis-full max-sm:justify-start max-sm:pl-[6.75rem]">
               {#if i.kind === "task"}
                 <Button variant="ghost" size="sm" aria-expanded={snoozing === i.task_id} onclick={() => (snoozing = snoozing === i.task_id ? null : (i.task_id ?? null))} aria-label={`Snooze "${i.title}"`}>Snooze</Button>
-                <Button variant="outline" size="sm" onclick={() => done(i)} aria-label={`Mark "${i.title}" done`}>Done</Button>
+                <Button variant="outline" size="sm" onclick={() => taskDone(i.task_id!, i.title, onchanged)} aria-label={`Mark "${i.title}" done`}>Done</Button>
               {:else if i.kind === "plan" && i.card_id != null}
                 <Button variant="outline" size="sm" onclick={() => planDone(i.card_id!, onchanged)} aria-label={`Mark "${i.title}" done`}>Done</Button>
               {:else if i.kind === "benefit" && i.benefit_id != null}

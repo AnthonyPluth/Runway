@@ -69,7 +69,7 @@ describe("an order's items", () => {
 });
 
 describe("a recurring item's fields", () => {
-  const v = () => ({ name: "Rent", account_id: "a1", amount: -1200, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-10-01", match: "", amount_min: "", amount_max: "" });
+  const v = () => ({ name: "Rent", account_id: "a1", amount: -1200, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: "2026-10-01", match: "", amount_min: "", amount_max: "", end_date: "" });
   const accounts = [{ id: "a1", name: "Checking", kind: "checking" }] as never;
 
   it("have More options on a phone", () => {
@@ -101,13 +101,13 @@ describe("churning benefits with none yet", () => {
   it("are one muted line, with no computer note (the Churning page says that once)", () => {
     viewport.phone = true;
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.getByText(/^none yet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();
   });
 
-  it("are one muted line on a computer screen too, without telling you to edit a card", () => {
+  it("are one muted line on a computer screen too, saying only where benefits come from", () => {
     render(Benefits, { cards: [], showOwner: false, onchanged: vi.fn() });
-    expect(screen.getByText("none yet")).toBeInTheDocument();
+    expect(screen.getByText(/^none yet\./)).toBeInTheDocument();
     expect(screen.queryByText(/Edit a card and add its lounge access/)).not.toBeInTheDocument();
   });
 });

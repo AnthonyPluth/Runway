@@ -24,11 +24,11 @@ describe("Recurring page", () => {
     expect(screen.queryByRole("button", { name: "Previous month" })).not.toBeInTheDocument();
   });
 
-  it("asks you to connect a bank first", () => {
+  it("works without a bank, with a line about connecting one", async () => {
     app.state = { connected: false };
     render(Recurring);
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Recurring");
-    expect(screen.getByText("Connect a bank to track your bills and income")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect a bank" })).toBeInTheDocument();
+    expect((await screen.findAllByRole("button", { name: "Add" })).length).toBeGreaterThan(0);
   });
 });

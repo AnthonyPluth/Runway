@@ -13,7 +13,7 @@ from ... import settings_keys as sk
 from ...models import Account, Budget, Override, Recurring, SyncLog, Transaction, User
 from ..common import ApiError, _current
 from ..sync import _inv_lock, _sync_lock, bank_configured
-from .recurring import recurring_logos
+from .recurring import one_time_item, recurring_logos, set_amount
 
 
 def api_state(conn, _q, _b):
@@ -107,6 +107,13 @@ def api_override_set(conn, _q, body):
         amount = db.number(body.get("amount"))
     except (TypeError, ValueError):
         raise ApiError("Enter an amount") from None
+    # A one-time item has no usual amount to differ from: changing its one date changes the item (Recurring shows it),
+    # and any old edit of that date goes with it. What it had before comes back for Undo.
+    item = one_time_item(conn, key)
+    if item:
+        previous = set_amount(conn, item["id"], amount)
+        conn.execute(delete(Override).where(Override.key == key))
+        return {"ok": True, "item": {"id": item["id"], "name": item["name"]}, "previous": previous}
     db.upsert(conn, Override, {"key": key, "amount": amount}, key=["key"])
     return {"ok": True}
 
