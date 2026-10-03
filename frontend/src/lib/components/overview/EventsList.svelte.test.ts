@@ -84,7 +84,10 @@ describe("EventsList", () => {
 
     it("flags estimates, late items and edited amounts", () => {
       show([ev({ estimated: true, late_from: "2026-03-01", overridden: true, original_amount: -1400 })]);
-      expect(screen.getByText("estimate")).toBeInTheDocument();
+      // an estimate is a word in italics under the amount, not a badge by the name
+      expect(screen.getByText("estimate")).toHaveClass("italic");
+      expect(screen.getByText("estimate").closest("[data-slot=badge]")).toBeNull();
+      expect(screen.getByText("estimate").parentElement).toHaveTextContent(/1,500\.00/);
       expect(screen.getByText("late")).toHaveAttribute("title", "Was due 2026-03-01 and hasn't shown up yet");
       expect(screen.getByText("edited")).toHaveAttribute("title", "Usually -$1,400.00");
     });

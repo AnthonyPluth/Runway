@@ -77,9 +77,6 @@
             <a class="-my-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href="#recurring"
               title="Recurring item: change every one in Recurring" aria-label="Open in Recurring"><Repeat class="size-3.5" aria-hidden="true" /></a>
           {/if}
-          {#if e.estimated}
-            <Badge variant="secondary" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</Badge>
-          {/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
@@ -103,6 +100,9 @@
         {#if e.key}
           <AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only" save={(v) => change(e, v)} />
         {:else}{fmt(e.amount)}{/if}
+        {#if e.estimated}
+          <span class="text-xs text-muted-foreground italic" title={e.kind === "card" ? "Statement hasn't closed yet; based on the card's average over its last 3 statements" : "Based on recent payments"}>estimate</span>
+        {/if}
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
