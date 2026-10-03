@@ -5,6 +5,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
   import { fmt, fmtDate } from "$lib/format";
+  import { undoable } from "$lib/undo";
   import { toast } from "svelte-sonner";
   import { ITEM_SOURCES, STORES, STORE_SITES, type RetailOrder } from "./retail";
 
@@ -42,6 +43,15 @@
       changed();
     } catch (err) { toast.error((err as Error).message); }
   }
+  // A change with an Undo: the reply's `was`, sent back to `restore` (the charge's or the item's), puts back exactly
+  // what was there, the transactions it changed included.
+  async function undoablePost(path: string, restore: string, body: unknown, msg: (r: { was: unknown; orders?: number }) => string) {
+    try {
+      const r = await api<{ was: unknown; orders?: number }>(path, { method: "POST", body });
+      undoable(msg(r), async () => { await api(restore, { method: "POST", body: { was: r.was } }); changed(); });
+      changed();
+    } catch (err) { toast.error((err as Error).message); }
+  }
   // The AI's suggestions for items that have no category, from the button above the items: nothing is saved until you use
   // one (a suggested new category is created then).
   type Suggestion = { item_id: number; category: string | null; new_category: { name: string; parent: string | null } | null };
@@ -72,11 +82,12 @@
 
 <div class="flex flex-col gap-3 rounded-lg bg-muted/40 p-4 text-sm">
   {#if failed && !order}
-    <p class="text-muted-foreground">{failed}</p>
+    <p class="text-muted-foreground" role="alert">{failed} <Button variant="link" size="sm" class="h-auto p-0" onclick={load}>Retry</Button></p>
   {:else if !order}
     <div class="h-16 animate-pulse motion-reduce:animate-none rounded-md bg-muted" aria-busy="true"></div>
   {:else}
     {@const o = order}
+    {#if failed}<p class="text-xs text-muted-foreground" role="alert">Couldn’t refresh this order · <Button variant="link" size="sm" class="h-auto p-0 text-xs" onclick={load}>Retry</Button></p>{/if}
     {@const totals = [o.subtotal != null ? `items ${fmt(o.subtotal)}` : "", o.shipping ? `shipping ${fmt(o.shipping)}` : "",
       o.tax != null ? `tax ${fmt(o.tax)}` : ""].filter(Boolean).join(" · ")}
     <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -97,13 +108,14 @@
       {/if}
       {@const mine = family?.length ? o.items.filter((x) => x.category && family.includes(x.category)) : []}
       {@const items = mine.length && !showAll ? mine : o.items}
-      <div class="flex flex-col" title="A category you pick here is used for this item in every order, now and next time">
+      <div class="flex flex-col">
         {#each items as i (i.id)}
           <div class="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 border-t py-2 first:border-t-0 sm:grid-cols-[1fr_auto_14rem_9rem]">
             <span class="truncate" title={i.title}>{#if i.quantity > 1}<span class="text-muted-foreground">{i.quantity}×</span> {/if}{i.title}</span>
             <span class="text-right text-muted-foreground tabular-nums">{fmt(i.amount)}</span>
             <CategorySelect short ghost value={i.category ?? ""} label={`Category for ${i.title}`} class="w-full"
-              onchange={(v) => v && post(`/api/retail/items/${i.id}`, { category: v }, (r) => (r.orders > 1 ? `Saved · used in ${r.orders} orders` : "Saved"))} />
+              onchange={(v) => v && undoablePost(`/api/retail/items/${i.id}`, `/api/retail/items/${i.id}/restore`, { category: v },
+                (r) => `${i.title} → ${v}${(r.orders ?? 0) > 1 ? ` · ${r.orders} orders` : ""}`)} />
             {#if !i.category && suggestions[i.id]}
               {@const s = suggestions[i.id]}
               <Button size="sm" variant="outline" class="h-auto justify-start py-1 whitespace-normal" aria-label={`${s.new_category ? `Create ${s.new_category.name} and use it` : `Use ${s.category}`} for ${i.title}`}
@@ -114,6 +126,8 @@
           </div>
         {/each}
       </div>
+      <!-- One of the few lines spelled out: without it a pick here looks like it changes only this order. -->
+      <p class="text-xs text-muted-foreground">A category picked for an item applies to it in every order.</p>
       {#if mine.length}
         <div class="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
           {#if !showAll}<span class="tabular-nums">{extras(o, mine.reduce((n, x) => n + x.amount, 0))}</span>{/if}
@@ -137,10 +151,10 @@
             <span class="ml-auto flex gap-4">
               {#if c.amount < 0 && !c.applied && o.items.length}
                 <Button variant="link" size="sm" class="h-auto p-0" title="Replace the category you set with the order's items"
-                  onclick={() => post(charge(c.id, "apply"), undefined, "Split by items")}>Split by items</Button>
+                  onclick={() => undoablePost(charge(c.id, "apply"), charge(c.id, "restore"), undefined, () => "Split by items")}>Split by items</Button>
               {/if}
               <Button variant="link" size="sm" class="h-auto p-0" title="This charge isn't that transaction"
-                onclick={() => post(charge(c.id, "unlink"), undefined, "Unmatched, and the transaction is back as it was")}>Not this transaction</Button>
+                onclick={() => undoablePost(charge(c.id, "unlink"), charge(c.id, "restore"), undefined, () => "Unmatched, and the transaction is back as it was")}>Not this transaction</Button>
             </span>
           {:else}
             <span class="text-muted-foreground">not matched to a transaction</span>

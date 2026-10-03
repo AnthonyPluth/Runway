@@ -54,7 +54,8 @@ from .api.reports import (
     api_report_spending, api_report_transactions
 )
 from .api.retail import (
-    api_retail, api_retail_apply, api_retail_candidates, api_retail_item, api_retail_link, api_retail_match,
+    api_retail, api_retail_apply, api_retail_candidates, api_retail_charge_restore, api_retail_item, api_retail_item_restore,
+    api_retail_link, api_retail_match,
     api_retail_order, api_retail_settings, api_retail_suggest, api_retail_token, api_retail_token_remove, api_retail_unlink
 )
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
@@ -216,10 +217,12 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("POST", "/api/retail/match", api_retail_match),
     ("GET", "/api/retail/orders/{id}", api_retail_order),
     ("POST", "/api/retail/items/{id}", api_retail_item),
+    ("POST", "/api/retail/items/{id}/restore", api_retail_item_restore),
     ("POST", "/api/retail/orders/{id}/suggest", api_retail_suggest),
     ("POST", "/api/retail/charges/{id}/unlink", api_retail_unlink),
     ("POST", "/api/retail/charges/{id}/link", api_retail_link),
     ("POST", "/api/retail/charges/{id}/apply", api_retail_apply),
+    ("POST", "/api/retail/charges/{id}/restore", api_retail_charge_restore),
     ("GET", "/api/retail/charges/{id}/candidates", api_retail_candidates),
     ("POST", "/api/recategorize", api_recategorize),
 ]
