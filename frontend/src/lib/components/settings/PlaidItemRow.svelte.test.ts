@@ -34,10 +34,33 @@ describe("a Plaid connection's problem", () => {
   it("keeps Sync for a bank that's down, and says so in words", async () => {
     row(item({ error: "INSTITUTION_DOWN" }));
     expect(screen.getByText("The bank isn’t answering right now; Runway will try again")).toBeInTheDocument();
-    expect(screen.getByText(/synced Sep 30/)).toBeInTheDocument();
+    expect(screen.getByText(/last successful sync Sep 30/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sync" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reconnect" })).not.toBeInTheDocument();
     expect(screen.queryByText("INSTITUTION_DOWN")).not.toBeInTheDocument();
+    expect(screen.queryByText("Details")).not.toBeInTheDocument();
+  });
+
+  it("says an error it has no words for plainly, with Plaid's own behind Details, in the warning tone", () => {
+    row(item({ error: "WEIRD_NEW_CODE" }));
+    expect(screen.getByText("Couldn’t sync; Runway will try again")).toHaveClass("text-warning");
+    const raw = screen.getByText("WEIRD_NEW_CODE");
+    expect(raw.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText(/last successful sync Sep 30/)).toBeInTheDocument();
+  });
+});
+
+describe("syncing a Plaid connection", () => {
+  it("counts what came in, in the singular for one", async () => {
+    vi.mocked(api).mockResolvedValue({ bank: true, new_transactions: 1, statements: 1 });
+    const { unmount } = row(item());
+    await userEvent.click(screen.getByRole("button", { name: "Sync" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced · 1 new transaction · 1 statement"));
+    unmount();
+    vi.mocked(api).mockResolvedValue({ bank: true, new_transactions: 3, statements: 0 });
+    row(item());
+    await userEvent.click(screen.getByRole("button", { name: "Sync" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced · 3 new transactions · 0 statements"));
   });
 });
 

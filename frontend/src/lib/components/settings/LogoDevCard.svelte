@@ -1,11 +1,12 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, refreshState, reload } from "$lib/app.svelte";
-  import { autosave } from "$lib/autosave";
+  import { app, refreshState } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
   import { toast } from "svelte-sonner";
+  import ProblemNote from "./ProblemNote.svelte";
+  import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
-  import { fieldCls, helpCls, inputCls, linkCls, rowCls } from "./ui";
+  import { helpCls, linkCls, rowCls } from "./ui";
 
   // Merchant logos through Logo.dev, for merchants Plaid has no logo for.
   const configured = $derived(!!app.state?.logodev_configured);
@@ -24,34 +25,35 @@
   async function saveKey(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     if (!f.value.trim()) return;
     await api("/api/logodev/settings", { method: "POST", body: { token: f.value } });
-    toast.success("Logo.dev key saved: fetching logos for the past year now. They fill in over the next few minutes."); await refreshState(); reload();
+    f.value = "";
+    toast.success("Key saved: fetching logos for the past year now. They fill in over the next few minutes."); await refreshState(); loadStatus();
   }
   async function saveSecret(f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) {
     if (!f.value.trim()) return;
     await api("/api/logodev/settings", { method: "POST", body: { secret: f.value } });
-    toast.success("Secret key saved: looking merchants up again with Brand Search."); f.value = ""; loadStatus();
+    f.value = "";
+    toast.success("Key saved: looking merchants up again with Brand Search."); loadStatus();
   }
   async function clearSecret() {
     try { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); }
     catch (err) { toast.error((err as Error).message); }
   }
   async function clearKey() {
-    try { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); reload(); }
+    try { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); }
     catch (err) { toast.error((err as Error).message); }
   }
 </script>
 
-<ServiceRow name="Merchant and bank logos" purpose="Logo.dev · logos for merchants Plaid has none for" on={configured}>
+<ServiceRow name="Merchant and bank logos" purpose="Logo.dev · logos for merchants Plaid has none for" on={configured}
+  warn={configured && !!(st?.last_error || st?.last_error_name)}>
   <p class={helpCls}>Get a free <a class={linkCls} href="https://www.logo.dev" target="_blank" rel="noopener">Logo.dev publishable key</a>.</p>
   <div class={rowCls}>
-    <label class={`${fieldCls} w-full sm:w-72`}>Publishable key
-      <input class={inputCls} type="password" autocomplete="off" placeholder={configured ? "•••••••• saved" : "pk_…"} use:autosave={saveKey} /></label>
+    <SecretInput label="Publishable key" class="w-full sm:w-72" placeholder={configured ? "Key saved" : "pk_…"} save={saveKey} />
     {#if configured}<Button variant="link" onclick={clearKey}>Remove key</Button>{/if}
   </div>
   {#if configured}
     <div class={rowCls}>
-      <label class={`${fieldCls} w-full sm:w-72`}>Secret key <span class="font-normal text-muted-foreground">(optional)</span>
-        <input class={inputCls} type="password" autocomplete="off" placeholder={st?.searchable ? "•••••••• saved" : "sk_…"} use:autosave={saveSecret} /></label>
+      <SecretInput label="Secret key" optional class="w-full sm:w-72" placeholder={st?.searchable ? "Key saved" : "sk_…"} save={saveSecret} />
       {#if st?.searchable}<Button variant="link" onclick={clearSecret}>Remove secret key</Button>{/if}
     </div>
   {/if}
@@ -65,8 +67,10 @@
       {#if !configured && !st.plaid}
         <p class="mt-1 text-muted-foreground">No logos yet: Plaid hasn't sent any, and there's no Logo.dev key. Add one above to get logos for most merchants.</p>
       {/if}
-      {#if st.last_error}<p class="mt-1 text-destructive">Looking up by website: {st.last_error}</p>{/if}
-      {#if st.last_error_name}<p class="mt-1 text-destructive">Looking up by name: {st.last_error_name}</p>{/if}
+      {#if st.last_error || st.last_error_name}
+        <ProblemNote class="mt-1" text={`Logo.dev lookups ${st.last_error && st.last_error_name ? "are" : `by ${st.last_error ? "website" : "name"} are`} failing.`}
+          detail={[st.last_error && `By website: ${st.last_error}`, st.last_error_name && `By name: ${st.last_error_name}`].filter(Boolean).join("\n")} />
+      {/if}
       {#if [st.last_error, st.last_error_name].some((e) => e && /40[13]/.test(e))}
         <p class="mt-1 text-muted-foreground">Logo.dev refused the key. Check that it's the publishable one (<code>pk_…</code>), and in
           Logo.dev's dashboard that it isn't limited to particular websites: Runway asks from its server, not from a web page.

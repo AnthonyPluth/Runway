@@ -10,7 +10,7 @@ from datetime import date, datetime
 
 from sqlalchemy import insert
 
-from runway import db
+from runway import categorize, db
 from runway.models import Account, Transaction
 
 
@@ -108,6 +108,8 @@ class ServerTests(unittest.TestCase):
         self.req("POST", "/api/settings", {"llm_model": "", "card_ai_model": ""})
         _, st = self.req("GET", "/api/state")
         self.assertEqual((st["llm_model"], st["card_ai_model"]), ("openrouter/free", "anthropic/claude-haiku-4.5"))
+        # the defaults, for the empty fields' placeholders
+        self.assertEqual((st["llm_model_default"], st["card_ai_model_default"]), (categorize.DEFAULT_MODEL, categorize.DEFAULT_CARD_MODEL))
         code, fc = self.req("GET", "/api/overview?days=30")
         self.assertEqual(code, 200)
         self.assertEqual(len(fc["dates"]), 31)

@@ -16,8 +16,9 @@
 
   // The Runway browser extension: how to set it up (with the key it needs), what it has imported from each store
   // (`children` adds Carta's row to that list), and the recent orders, each opening to its items and charges. Its row
-  // under Connections is On once it has a key, and amber when that key no longer works.
-  let { children }: { children?: Snippet } = $props();
+  // under Connections is On once it has a key, and needs attention when that key no longer works, or (`problem`) when
+  // Carta's last read went wrong.
+  let { children, problem = false }: { children?: Snippet; problem?: boolean } = $props();
   let data = $state<RetailStatus | null>(null);
   let error = $state("");
   let shownKey = $state("");
@@ -72,7 +73,7 @@
 </script>
 
 <ServiceRow name="Browser extension" purpose="Amazon, Target, Costco and Carta, read in your browser" on={!!data?.token}
-  status={data?.token_problem ? "New key needed" : undefined} warn={!!data?.token_problem}>
+  status={data?.token_problem ? "New key needed" : undefined} warn={!!data?.token_problem || problem}>
   {#if error}
     <p class="text-sm text-muted-foreground">{error}</p>
   {:else if !data}
