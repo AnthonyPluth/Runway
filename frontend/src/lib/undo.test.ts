@@ -53,4 +53,23 @@ describe("undoable", () => {
     await shown()[1].action.onClick();
     expect(toast.error).toHaveBeenCalledWith("Couldn’t undo that");
   });
+
+  it("can offer another button beside Undo, which becomes the cancel-style one", async () => {
+    const undo = vi.fn(async () => {}), run = vi.fn(async () => {});
+    undoable("Changed for Oct 13 only", undo, { also: { label: "From now on", run } });
+    const opts = shown()[1] as Opts & { cancel: { label: string; onClick: () => Promise<void> } };
+    expect(opts.action.label).toBe("From now on");
+    expect(opts.cancel.label).toBe("Undo");
+    await opts.action.onClick();
+    expect(run).toHaveBeenCalledOnce();
+    expect(undo).not.toHaveBeenCalled();
+    await opts.cancel.onClick();
+    expect(undo).toHaveBeenCalledOnce();
+  });
+
+  it("shows the error when the other button fails", async () => {
+    undoable("Done", async () => {}, { also: { label: "More", run: async () => { throw new Error("Nope"); } } });
+    await shown()[1].action.onClick();
+    expect(toast.error).toHaveBeenCalledWith("Nope");
+  });
 });

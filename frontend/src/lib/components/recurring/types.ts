@@ -15,6 +15,8 @@ export interface RecurringValues {
   /** "Only amounts between": either end may be blank (any amount matches when both are). */
   amount_min: number | string | null;
   amount_max: number | string | null;
+  /** "Ends on": the last day it can come (blank: it carries on). */
+  end_date: string;
 }
 
 /** GET /api/recurring: a row of the recurring table, plus what's been matched and when it's next due. */
@@ -37,7 +39,12 @@ export interface RecurringItem {
   expected_amount?: number | null;
   /** A fixed amount's last few posted payments all came to something else: about this much (signed like amount). */
   suggested_amount?: number | null;
+  /** The first date from today on that it's still expected (a skipped one isn't). */
   next_date?: string | null;
+  /** An earlier date it's still expected while its window is open: it's late (the forecast has it today). */
+  late_date?: string | null;
+  /** Dates from today on you've skipped (a one-off $0 edit). */
+  skipped?: string[];
   last_matched?: MatchedTx | null;
   /** Its logo: the one you chose, else its last matched transaction's merchant's (null: its category's icon). */
   logo?: string | null;
@@ -52,6 +59,9 @@ export interface Suggestion {
   name: string;
   match: string;
   amount: number;
+  /** What the last few came to, smallest and largest (unsigned): "$12–$15" when they vary. */
+  amount_low?: number;
+  amount_high?: number;
   frequency: string;
   anchor_date: string;
   count: number;
@@ -64,8 +74,13 @@ export interface DismissedSuggestion {
   account_name?: string | null;
   /** The merchant text, lowercased. */
   match: string;
+  /** The payee as its transactions name it (the merchant text when none is left). */
+  name?: string;
   frequency: string;
 }
+
+/** GET /api/recurring/{id}/candidates: a transaction that could be the payment a missed date was for. */
+export interface Candidate { id: string; posted: string; amount: number; name: string; pending?: number }
 
 /** A matched transaction, as GET /api/transactions?recurring=… lists it. */
 export interface MatchedTx {
@@ -86,7 +101,7 @@ export const FREQ: Record<string, string> = { monthly: "monthly", biweekly: "eve
 export const needsDates = (freq: string) => freq === "dates" || freq === "semimonthly";
 
 /** The fields that can be wrong, and what to tell you about each. */
-export type Errors = Partial<Record<"name" | "account_id" | "amount" | "dates" | "anchor_date" | "amount_max", string>>;
+export type Errors = Partial<Record<"name" | "account_id" | "amount" | "dates" | "anchor_date" | "amount_max" | "end_date", string>>;
 
 /** The stored amount for what you typed: negative for money out, positive for money in (the forecast relies on the sign). */
 export function signedAmount(magnitude: number | string | null, out: boolean): number | null {
@@ -107,5 +122,6 @@ export function validate(v: RecurringValues): Errors {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v.anchor_date)) e.anchor_date = "Pick a date.";
   const [lo, hi] = [v.amount_min, v.amount_max].map((x) => (x === null || String(x).trim() === "" ? NaN : Math.abs(Number(x))));
   if (lo > hi) e.amount_max = "The largest amount is smaller than the smallest.";
+  if (v.end_date && /^\d{4}-\d{2}-\d{2}$/.test(v.anchor_date) && v.end_date < v.anchor_date) e.end_date = "It ends before it starts.";
   return e;
 }

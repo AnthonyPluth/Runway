@@ -5,58 +5,91 @@
 
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, reload } from "$lib/app.svelte";
+  import { app } from "$lib/app.svelte";
+  import MissedAlert from "$lib/components/MissedAlert.svelte";
   import RecIcon from "$lib/components/recurring/RecIcon.svelte";
   import RecurringFields from "$lib/components/recurring/RecurringFields.svelte";
   import RecurringItem from "$lib/components/recurring/RecurringItem.svelte";
+  import { byDue, monthlyTotal } from "$lib/components/recurring/schedule";
   import { FREQ, validate, type RecurringItem as Item, type RecurringValues, type DismissedSuggestion, type Suggestion } from "$lib/components/recurring/types";
   import { linkCls } from "$lib/components/settings/ui";
   import { Button } from "$lib/components/ui/button";
   import * as Card from "$lib/components/ui/card";
-  import { fmt, fmtDate, isoDay, nb } from "$lib/format";
-  import type { Account } from "$lib/types";
+  import Group from "$lib/components/ui/group/Group.svelte";
+  import { fmt0, fmtDate, fmtSigned, isoDay, nb } from "$lib/format";
+  import type { Account, Missed } from "$lib/types";
+  import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import { tick } from "svelte";
+
+  // The Recurring page: its heading and Add, missed payments (Needs attention), the add form, the items in Money in and
+  // Money out (each soonest due first, with what they come to a month), and what's spotted in your history. Without a
+  // bank, the items you add by hand still work; a line says what a bank adds.
 
   // #recurring?item=7 (an upcoming item's name links here): that item starts open and comes into view.
   const asked = new URLSearchParams(location.hash.split("?")[1] ?? "").get("item");
   if (asked) openRecurring.add(asked);
 
-  type Data = { accounts: Account[] };
-  async function load(): Promise<Data> {
-    const [accounts, list] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
-    items = list;
-    if (app.state?.connected) await loadSuggestions(); else { suggestions = []; dismissed = []; }
-    // The Add form starts open when there's nothing yet, with your primary account chosen.
-    adding = !list.length;
-    primary = app.state?.primary_account || accounts.find((a) => !a.hidden)?.id || "";
-    blank.account_id = primary;
-    return { accounts };
-  }
-  async function loadSuggestions() {
-    [suggestions, dismissed] = await Promise.all([api<Suggestion[]>("/api/recurring/suggestions"), api<DismissedSuggestion[]>("/api/recurring/suggestions/dismissed")]);
-    if (!dismissed.length) showDismissed = false;
-  }
-  // A new item starts today, monthly, for the primary account.
-  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "" });
-  let primary = "";
-  let adding = $state(false);
-  let blank: RecurringValues = $state(fresh());
+  const connected = $derived(!!app.state?.connected);
+  const today = isoDay();
+  let accounts = $state<Account[]>([]);
   let items = $state<Item[]>([]);
   let suggestions = $state<Suggestion[]>([]);
   let dismissed = $state<DismissedSuggestion[]>([]);
+  let loaded = $state(false);    // the first load came in
+  let failed = $state(false);    // the latest load didn't: the page says so (no stale list) and offers Retry
+  let loading = $state(false);
+
+  // Loads (or loads again) this page's data. A failure shows the error in place of the list, never the old list.
+  async function load() {
+    loading = true;
+    try {
+      const [a, list] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
+      accounts = a; items = list; failed = false;
+      if (!loaded) {
+        // The Add form starts open when there's nothing yet, with your primary account chosen.
+        adding = !list.length;
+        primary = app.state?.primary_account || a.find((x) => !x.hidden)?.id || "";
+        blank.account_id = primary;
+      }
+      loaded = true;
+    } catch { failed = true; }
+    finally { loading = false; }
+    if (!failed) await loadSuggestions();
+  }
+  // What's spotted in your history is extra: if it can't be looked up, the page goes on without it.
+  async function loadSuggestions() {
+    if (!connected) { suggestions = []; dismissed = []; return; }
+    try {
+      [suggestions, dismissed] = await Promise.all([api<Suggestion[]>("/api/recurring/suggestions"), api<DismissedSuggestion[]>("/api/recurring/suggestions/dismissed")]);
+    } catch { suggestions = []; dismissed = []; }
+    if (!dismissed.length) showDismissed = false;
+  }
+  // A new item starts today, monthly, for the primary account.
+  const fresh = (): RecurringValues => ({ name: "", account_id: primary, amount: null, amount_mode: "fixed", frequency: "monthly", dates: "", anchor_date: isoDay(), match: "", amount_min: "", amount_max: "", end_date: "" });
+  let primary = "";
+  let adding = $state(false);
+  let blank: RecurringValues = $state(fresh());
   let showDismissed = $state(false);
+  let showSpotted = $state(false);
   let busy = $state(false);
   let submitted = $state(false);   // after the first Add, the fields that need fixing say so
   let formKey = $state(0);         // a new key starts the fields over (they read the amount once)
   const errors = $derived(submitted ? validate(blank) : {});
-  const data = load();
   let form = $state<HTMLElement | null>(null);
+  load();
 
-  // Money in and money out, by what the forecast expects (the usual amount, or the fixed one).
-  const moneyIn = (items: Item[]) => items.filter((r) => (r.expected_amount ?? r.amount) > 0);
-  const moneyOut = (items: Item[]) => items.filter((r) => !((r.expected_amount ?? r.amount) > 0));
+  // Money in and money out, by what the forecast expects (the usual amount, or the fixed one); soonest due first.
+  const moneyIn = $derived(items.filter((r) => (r.expected_amount ?? r.amount) > 0).sort(byDue));
+  const moneyOut = $derived(items.filter((r) => !((r.expected_amount ?? r.amount) > 0)).sort(byDue));
+
+  // Missed payments, newest first, until you link or skip them (Undo puts one back).
+  let cleared = $state<string[]>([]);
+  const attention = $derived(items.flatMap((r) => (r.missed ?? []).filter((m) => !cleared.includes(m.key))
+    .map((m): Missed => ({ ...m, recurring_id: r.id, account_id: r.account_id, account_name: r.account_name ?? undefined })))
+    .sort((a, b) => b.date.localeCompare(a.date)));
+  const missedFor = (r: Item) => (r.missed ?? []).filter((m) => !cleared.includes(m.key)).length;
 
   async function focusForm() { await tick(); form?.querySelector<HTMLInputElement>("input[name=name]")?.focus(); }
   async function openForm() { if (!adding) startOver(); adding = true; await focusForm(); }
@@ -69,13 +102,26 @@
     busy = true;
     try {
       const r = await api<{ linked: number }>("/api/recurring", { method: "POST", body: { ...blank, active: 1 } });
-      toast.success(r.linked ? `Added · matched ${r.linked} past transactions` : "Added"); reload();
+      toast.success(r.linked ? `Added · matched ${r.linked} past transactions` : "Added");
+      adding = false; startOver();
+      await load();
     } catch (err) { toast.error((err as Error).message); }
     finally { busy = false; }
   }
-  // "Add" on a suggestion fills the form with it, so you can adjust the name, amount or schedule first.
-  async function useSuggestion(s: Suggestion) {
-    Object.assign(blank, { name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "" });
+  // "Add" on a suggestion adds it as it is (Undo removes it); "Edit first" fills the form with it to adjust.
+  const values = (s: Suggestion): RecurringValues => ({ name: s.name, account_id: s.account_id, amount: s.amount, amount_mode: "fixed", frequency: s.frequency, dates: "", anchor_date: s.anchor_date, match: s.match, amount_min: "", amount_max: "", end_date: "" });
+  async function addSuggestion(s: Suggestion) {
+    let r: { id: number; linked: number };
+    try { r = await api<{ id: number; linked: number }>("/api/recurring", { method: "POST", body: { ...values(s), active: 1 } }); }
+    catch (err) { toast.error((err as Error).message); return; }
+    await load();
+    undoable(r.linked ? `Added ${s.name} · matched ${r.linked}` : `Added ${s.name}`, async () => {
+      await api(`/api/recurring/${r.id}`, { method: "DELETE" });
+      await load();
+    });
+  }
+  async function editSuggestion(s: Suggestion) {
+    Object.assign(blank, values(s));
     submitted = false; formKey++; adding = true;
     await focusForm();
   }
@@ -83,7 +129,7 @@
     try {
       await api("/api/recurring/suggestions/dismiss", { method: "POST", body: { key: s.key } });
       suggestions = suggestions.filter((x) => x.key !== s.key);
-      dismissed = [...dismissed, { key: s.key, account_id: s.account_id, match: s.match, frequency: s.frequency }];
+      dismissed = [...dismissed, { key: s.key, account_id: s.account_id, match: s.match, name: s.name, frequency: s.frequency }];
       toast(`Okay, ${s.name} won’t be suggested again`);
     } catch (err) { toast.error((err as Error).message); }
   }
@@ -92,28 +138,35 @@
     try {
       await api("/api/recurring/suggestions/restore", { method: "POST", body: { key: d.key } });
       await loadSuggestions();
-      toast.success(`${d.match} can be suggested again`);
+      toast.success(`${d.name ?? d.match} can be suggested again`);
     } catch (err) { toast.error((err as Error).message); }
   }
   function toggle(id: number, open: boolean) { if (open) openRecurring.add(String(id)); else openRecurring.delete(String(id)); }
+
+  // "−$12–$15" when the last few came to different amounts, else the usual one.
+  function suggestionAmount(s: Suggestion): string {
+    const [lo, hi] = [s.amount_low, s.amount_high];
+    return lo != null && hi != null && fmt0(lo) !== fmt0(hi) ? `${s.amount > 0 ? "+" : "−"}${fmt0(lo)}–${fmt0(hi)}` : fmtSigned(s.amount);
+  }
+  const perMonth = (list: Item[], way: string) => { const n = monthlyTotal(list); return n >= 0.5 ? `≈ ${fmt0(n)} a month ${way}` : undefined; };
 </script>
 
-{#snippet group(title: string, list: Item[], accounts: Account[])}
+{#snippet group(title: string, list: Item[], way: string)}
   {#if list.length}
-    <section aria-label={title}>
-      <h2 class="mb-1 text-xs font-medium tracking-wider text-muted-foreground uppercase">{title}</h2>
-      <div>
+    <div role="region" aria-label={title}>
+      <Group {title} inset="3.75rem" class="mb-6" footer={perMonth(list, way)}>
         {#each list as r (r.id)}
-          <RecurringItem {r} {accounts} open={openRecurring.has(String(r.id))} focus={asked === String(r.id)} ontoggle={(o) => toggle(r.id, o)} onsaved={(list) => (items = list)} />
+          <RecurringItem {r} {accounts} {today} missed={missedFor(r)} open={openRecurring.has(String(r.id))} focus={asked === String(r.id)}
+            ontoggle={(o) => toggle(r.id, o)} onsaved={(list) => (items = list)} />
         {/each}
-      </div>
-    </section>
+      </Group>
+    </div>
   {/if}
 {/snippet}
 
 {#snippet dismissedList()}
   {#if dismissed.length}
-    <section class="text-sm text-muted-foreground" aria-label="Dismissed suggestions">
+    <section class="px-4 text-sm text-muted-foreground" aria-label="Dismissed suggestions">
       <p>{dismissed.length} dismissed ·
         <button type="button" class={linkCls} aria-expanded={showDismissed} onclick={() => (showDismissed = !showDismissed)}>{showDismissed ? "Hide" : "Show"}</button></p>
       {#if showDismissed}
@@ -121,10 +174,10 @@
           {#each dismissed as d (d.key)}
             <li class="flex items-center gap-3">
               <span class="flex min-w-0 flex-1 flex-col">
-                <span class="truncate text-foreground">{d.match}</span>
+                <span class="truncate text-foreground">{d.name ?? d.match}</span>
                 <span class="text-xs">{nb(FREQ[d.frequency] ?? d.frequency)}{d.account_name ? ` · ${d.account_name}` : ""}</span>
               </span>
-              <Button variant="outline" size="sm" aria-label={`Restore ${d.match}`} onclick={() => restoreSuggestion(d)}>Restore</Button>
+              <Button variant="outline" size="sm" aria-label={`Restore ${d.name ?? d.match}`} onclick={() => restoreSuggestion(d)}>Restore</Button>
             </li>
           {/each}
         </ul>
@@ -133,72 +186,97 @@
   {/if}
 {/snippet}
 
-{#snippet suggestionsCard()}
-  {#if !suggestions.length && dismissed.length}
-    <div class="mb-6">{@render dismissedList()}</div>
-  {:else if suggestions.length}
-    <Card.Root class="mb-6">
-      <Card.Header>
-        <Card.Title><h2>Spotted in your history</h2></Card.Title>
-      </Card.Header>
-      <Card.Content class="flex flex-col">
-        {#each suggestions as s (s.key)}
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-2 border-t py-3 first:border-t-0 first:pt-0">
-            <RecIcon id={s.account_id} />
-            <span class="flex min-w-40 flex-1 flex-col gap-0.5">
-              <span class="truncate font-medium">{s.name}</span>
-              <span class="text-xs text-muted-foreground">{nb(s.frequency)} · {nb(`${s.count}×`)} · {nb(`last ${fmtDate(s.anchor_date)}`)}</span>
-            </span>
-            <span class={cn("shrink-0 font-medium tabular-nums", s.amount > 0 && "text-emerald-500")}>{fmt(s.amount)}</span>
-            <span class="flex shrink-0 gap-1">
-              <Button variant="outline" size="sm" aria-label={`Add ${s.name}`} onclick={() => useSuggestion(s)}>Add</Button>
-              <Button variant="ghost" size="sm" aria-label={`${s.name} is not recurring`} onclick={() => dismissSuggestion(s)}>Not recurring</Button>
-            </span>
-          </div>
-        {/each}
-        {#if dismissed.length}<div class="border-t pt-3">{@render dismissedList()}</div>{/if}
-      </Card.Content>
-    </Card.Root>
-  {/if}
+{#snippet spotted()}
+  <Group title="Spotted in your history" inset="3.75rem" class="mb-3">
+    {#each suggestions as s (s.key)}
+      <div class="cell flex-wrap" data-suggestion={s.key}>
+        <RecIcon id={s.account_id} />
+        <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span class="truncate text-[15px] font-medium">{s.name}</span>
+          <span class="text-[13px] text-muted-foreground">{nb(FREQ[s.frequency] ?? s.frequency)} · {nb(`${s.count}×`)} · {nb(`last ${fmtDate(s.anchor_date)}`)}</span>
+        </span>
+        <span class={cn("shrink-0 text-[15px] font-medium tabular-nums", s.amount > 0 && "text-good")}>{suggestionAmount(s)}</span>
+        <span class="flex shrink-0 gap-1 max-lg:basis-full max-lg:pl-10">
+          <Button variant="outline" size="sm" aria-label={`Add ${s.name}`} onclick={() => addSuggestion(s)}>Add</Button>
+          <Button variant="ghost" size="sm" aria-label={`Edit ${s.name} first`} onclick={() => editSuggestion(s)}>Edit first</Button>
+          <Button variant="ghost" size="sm" class="text-muted-foreground" aria-label={`${s.name} is not recurring`} onclick={() => dismissSuggestion(s)}>Not recurring</Button>
+        </span>
+      </div>
+    {/each}
+  </Group>
 {/snippet}
 
-{#await data}
-  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
-{:then d}
-  <!-- With nothing yet, what's spotted in your history comes first: it's the quickest way to start. -->
-  {#if !items.length}{@render suggestionsCard()}{/if}
+<div class="mb-6 flex items-center justify-between gap-3">
+  <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Recurring</h1>
+  {#if loaded && !failed}
+    <Button variant="outline" size="sm" title="You can also start one from any transaction, with its repeat button" onclick={openForm}>Add</Button>
+  {/if}
+</div>
+{#if !connected}
+  <p class="-mt-3 mb-6 text-sm text-muted-foreground">No bank connected, so payments aren’t matched or spotted. <a class="font-medium text-primary" href="#setup/connections">Connect a bank</a></p>
+{/if}
 
-  <Card.Root class="mb-6">
-    <Card.Header>
-      <Card.Title><h2>Paychecks & bills</h2></Card.Title>
-      <Card.Action>
-        <Button variant="outline" size="sm" title="You can also start one from any transaction, with its repeat button" onclick={openForm}>Add</Button>
-      </Card.Action>
-    </Card.Header>
-    <Card.Content class="flex flex-col gap-6">
-      {#if adding}
-        <section bind:this={form} aria-labelledby="add-recurring" class={cn(items.length && "border-b pb-6")}>
-          <h3 id="add-recurring" class="mb-3 text-sm font-medium">Add a recurring item</h3>
+{#if failed}
+  <div class="tile flex flex-wrap items-center gap-3" role="alert">
+    <p class="min-w-0 flex-1 text-sm">Couldn’t load your recurring items.</p>
+    <Button variant="outline" size="sm" disabled={loading} onclick={load}>{loading ? "Retrying…" : "Retry"}</Button>
+  </div>
+{:else if !loaded}
+  <!-- Shaped like the list it stands in for: a heading, then rows of a logo, two lines and an amount. -->
+  <div class="animate-pulse motion-reduce:animate-none" role="status" aria-label="Loading recurring items">
+    <div class="mb-2.5 ml-4 h-3 w-24 rounded bg-muted"></div>
+    <div class="group-list" style:--inset="3.75rem">
+      {#each [0, 1, 2, 3] as i (i)}
+        <div class="cell">
+          <div class="size-7 shrink-0 rounded-md bg-muted"></div>
+          <div class="flex flex-1 flex-col gap-1.5"><div class="h-3.5 w-36 max-w-full rounded bg-muted"></div><div class="h-3 w-52 max-w-full rounded bg-muted/60"></div></div>
+          <div class="h-3.5 w-16 shrink-0 rounded bg-muted"></div>
+        </div>
+      {/each}
+    </div>
+  </div>
+{:else}
+  {#if attention.length}
+    <Group title="Needs attention" inset="3.75rem" class="mb-6">
+      {#each attention as m (m.key)}
+        <MissedAlert {m} {today} ondone={(k) => (cleared = [...cleared, k])} onundone={(k) => (cleared = cleared.filter((x) => x !== k))} />
+      {/each}
+    </Group>
+  {/if}
+
+  <!-- With nothing yet, what's spotted in your history comes first: it's the quickest way to start. -->
+  {#if !items.length && suggestions.length}<div class="mb-6">{@render spotted()}{@render dismissedList()}</div>{/if}
+
+  {#if adding}
+    <Card.Root class="mb-6">
+      <Card.Content>
+        <section bind:this={form} aria-labelledby="add-recurring">
+          <h2 id="add-recurring" class="mb-3 text-sm font-medium">Add a recurring item</h2>
           <form novalidate onsubmit={(e) => { e.preventDefault(); add(); }}>
-            {#key formKey}<RecurringFields bind:v={blank} accounts={d.accounts} {errors} />{/key}
+            {#key formKey}<RecurringFields bind:v={blank} {accounts} {errors} />{/key}
             <div class="mt-4 flex items-center gap-2">
               <Button type="submit" disabled={busy}>{busy ? "Adding…" : "Add"}</Button>
               {#if items.length}<Button type="button" variant="link" onclick={cancel}>Cancel</Button>{/if}
             </div>
           </form>
         </section>
-      {/if}
-      {@render group("Money in", moneyIn(items), d.accounts)}
-      {@render group("Money out", moneyOut(items), d.accounts)}
-    </Card.Content>
-  </Card.Root>
+      </Card.Content>
+    </Card.Root>
+  {/if}
 
-  {#if items.length}{@render suggestionsCard()}{/if}
-{:catch err}
-  <Card.Root>
-    <Card.Content>
-      <p class="text-sm">Something went wrong: {err.message}</p>
-      <Button class="mt-3" variant="outline" onclick={reload}>Try again</Button>
-    </Card.Content>
-  </Card.Root>
-{/await}
+  {@render group("Money in", moneyIn, "in")}
+  {@render group("Money out", moneyOut, "out")}
+
+  {#if items.length && suggestions.length}
+    {#if showSpotted}
+      <div class="mb-6">{@render spotted()}
+        <p class="mb-3 px-4 text-sm text-muted-foreground"><button type="button" class={linkCls} aria-expanded="true" onclick={() => (showSpotted = false)}>Hide suggestions</button></p>
+        {@render dismissedList()}</div>
+    {:else}
+      <p class="mb-6 px-4 text-sm text-muted-foreground">{suggestions.length} spotted in your history ·
+        <button type="button" class={linkCls} aria-expanded="false" onclick={() => (showSpotted = true)}>Show</button></p>
+    {/if}
+  {:else if !suggestions.length && dismissed.length}
+    <div class="mb-6">{@render dismissedList()}</div>
+  {/if}
+{/if}

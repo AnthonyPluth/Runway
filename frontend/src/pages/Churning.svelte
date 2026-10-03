@@ -22,23 +22,25 @@
   import { Segmented } from "$lib/components/ui/toggle-group";
   import { fmt0 } from "$lib/format";
 
-  // Churning: credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. #churning
-  // shows the cards, #churning/bank the bank account bonuses, #churning/benefits the card benefits; the tiles and Upcoming cover both.
+  // Churning: credit cards and bank accounts opened for their sign-up bonuses, for you and your partner. #churning is the
+  // Overview (Upcoming, Planned, Best card, Rewards), #churning/cards the cards, #churning/benefits the card benefits and
+  // #churning/bank the bank account bonuses; the tiles above the tabs cover both cards and bank bonuses.
   let { sub = "" }: { sub?: string } = $props();
-  const tab = $derived(sub === "benefits" ? "benefits" : sub === "bank" ? "bank" : "cards");
 
   let d = $state.raw<Churning | null>(null);
-  let error = $state<string | null>(null);
+  let failed = $state(false);   // the last load of the page's data failed (what shows, if anything, may be out of date)
   let version = $state(0);
   async function load() {
-    try { d = await api<Churning>("/api/churning"); error = null; version++; }
-    catch (err) { error = (err as Error).message; }
+    try { d = await api<Churning>("/api/churning"); failed = false; version++; }
+    catch { failed = true; }
   }
-  // Credit card accounts that aren't churning cards yet: an extra on the page, so it never blocks it.
+  // Credit card accounts that aren't churning cards yet: an extra on the page, so it never blocks it; when it can't be
+  // loaded, the Cards tab says so in one line.
   let found = $state.raw<Found | null>(null);
+  let foundFailed = $state(false);
   async function loadFound() {
-    try { const f = await api<Found>("/api/churning/found"); found = Array.isArray(f?.drafts) ? f : null; }
-    catch { found = null; }
+    try { const f = await api<Found>("/api/churning/found"); found = Array.isArray(f?.drafts) ? f : null; foundFailed = false; }
+    catch { found = null; foundFailed = true; }
   }
   const refresh = () => Promise.all([load(), loadFound()]);
   load();
@@ -58,8 +60,14 @@
   const openBank = $derived(bank.filter((b) => b.state !== "received" && b.state !== "closed"));
   const doneBank = $derived(bank.filter((b) => b.state === "received" || b.state === "closed"));
 
-  // A brand-new page: no cards, bank bonuses or plans yet. Upcoming, Planned, Best card and Rewards give way to one block.
+  // A brand-new page: no cards, bank bonuses or plans yet. There's no Overview to show: just the way to add a card.
   const noData = $derived(!!d && !d.cards.length && !d.bank.length && !d.wishlist.length && !d.tasks.length);
+  const tab = $derived(sub === "benefits" ? "benefits" : sub === "bank" ? "bank" : sub === "cards" || noData ? "cards" : "overview");
+  const tabs = $derived([
+    ...(noData ? [] : [{ id: "overview", href: "#churning", label: "Overview" }]),
+    { id: "cards", href: "#churning/cards", label: "Cards" }, { id: "benefits", href: "#churning/benefits", label: "Benefits" },
+    { id: "bank", href: "#churning/bank", label: "Bank bonuses" },
+  ]);
   // Best card ranks open cards, and Rewards shows what linked cards earned or a balance you entered: with neither they'd be empty.
   const hasOpenCards = $derived(cards.some((c) => c.status === "open"));
   const hasRewards = $derived(people.some((p) => d?.rewards[p]?.currencies.some((r) => r.earned + r.bonuses > 0 || r.balance != null)));
@@ -87,57 +95,72 @@
   async function applied(kind: Wish["kind"], id: number) {
     await load();
     showClosed = false;
-    if (kind === "card") { bankFormId = null; formId = id; location.hash = "#churning"; }
+    if (kind === "card") { bankFormId = null; formId = id; location.hash = "#churning/cards"; }
     else { formId = null; bankFormId = id; location.hash = "#churning/bank"; }
   }
 </script>
 
-{#if error && !d}
-  <Card.Root>
-    <Card.Content>
-      <p class="text-sm">Something went wrong: {error}</p>
-      <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
-    </Card.Content>
-  </Card.Root>
-{:else if !d}
-  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
-{:else}
-  <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-    <div class="flex items-center gap-1">
-      <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Churning</h1>
-    </div>
-    {#if d.people.length > 1}
-      <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}
-        options={[...d.people.map((p) => ({ value: p, label: p })), { value: "all", label: "Both" }]} />
-    {/if}
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <div class="flex items-center gap-1">
+    <h1 class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em]">Churning</h1>
   </div>
+  {#if d && d.people.length > 1}
+    <Segmented label="Whose" value={person || "all"} onchange={(v) => (person = v === "all" ? BOTH : v)}
+      options={[...d.people.map((p) => ({ value: p, label: p })), { value: "all", label: d.people.length > 2 ? "Everyone" : "Both" }]} />
+  {/if}
+</div>
+
+{#if !d}
+  {#if failed}
+    <Card.Root>
+      <Card.Content>
+        <p class="text-sm" role="alert">Couldn’t load Churning. Check your connection and try again.</p>
+        <Button class="mt-3" variant="outline" onclick={refresh}>Try again</Button>
+      </Card.Content>
+    </Card.Root>
+  {:else}
+    <!-- The page's shape while it loads: the tiles, the tabs and a list. -->
+    <div aria-busy="true" aria-label="Loading Churning">
+      <div class="mb-6 grid grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fill,minmax(12rem,15.5rem))]">
+        {#each [0, 1, 2] as i (i)}<div class="h-[84px] animate-pulse motion-reduce:animate-none rounded-[14px] bg-muted"></div>{/each}
+      </div>
+      <div class="mb-6 h-10 w-72 max-w-full animate-pulse motion-reduce:animate-none rounded-[10px] bg-muted"></div>
+      <div class="space-y-3 rounded-xl border bg-card p-6">
+        {#each [0, 1, 2, 3] as i (i)}<div class="h-12 animate-pulse motion-reduce:animate-none rounded-lg bg-muted"></div>{/each}
+      </div>
+    </div>
+  {/if}
+{:else}
+  {#if failed}
+    <p class="mb-4 flex flex-wrap items-center gap-x-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="alert">
+      Couldn’t refresh this page, so what’s shown may be out of date.
+      <Button variant="link" size="sm" class="h-auto px-0" onclick={refresh}>Try again</Button>
+    </p>
+  {/if}
 
   {#if !noData}
   <StatStrip class="mb-6" items={[
     ...(people.length === 1
-      ? [{ label: `${people[0]}’s 5/24`, value: five24Line(d.five24[people[0]]).count, sub: five24Line(d.five24[people[0]]).next, tone: five24Tone(people[0]) }]
+      ? [{ label: `${people[0]}’s 5/24`, value: five24Line(d.five24[people[0]], d.today).count, sub: five24Line(d.five24[people[0]], d.today).next, tone: five24Tone(people[0]) }]
       : people.length === 0
         ? [{ label: "5/24", value: "0/24", sub: "Add cards you’ve opened in the last 24 months" }]
-        : people.map((p) => ({ label: `${p}’s 5/24`, value: five24Line(d!.five24[p]).count, sub: five24Line(d!.five24[p]).next, tone: five24Tone(p) }))),
-    { label: "Annual fees, next 90 days", value: fmt0(fees.total), sub: fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}` : "None due" },
+        : people.map((p) => ({ label: `${p}’s 5/24`, value: five24Line(d!.five24[p], d!.today).count, sub: five24Line(d!.five24[p], d!.today).next, tone: five24Tone(p) }))),
+    { label: "Annual fees within 30 days", value: fmt0(fees.total), sub: fees.count ? `${fees.count} card${fees.count === 1 ? "" : "s"}` : "None due" },
     { label: "Bonuses in progress", value: String(activeCards.length + activeBank.length),
       sub: [activeCards.length ? `${activeCards.length} card${activeCards.length === 1 ? "" : "s"}, ${fmt0(activeCards.reduce((s, c) => s + Math.max(0, (c.bonus_spend ?? 0) - (c.spent ?? 0)), 0))} left to spend` : "",
         activeBank.length ? `${activeBank.length} bank, ${fmt0(activeBank.reduce((s, b) => s + b.bonus, 0))}` : ""].filter(Boolean).join(" · ") || "None right now" },
   ]} />
   {/if}
 
-  {#if !noData}
+  <SubTabs label="Churning sections" current={tab} class="mb-4" {tabs} />
+
+  {#if tab === "overview"}
     <Upcoming items={upcoming} cards={cards.filter((c) => c.status === "open")} today={d.today} showOwner={people.length > 1} onchanged={load} />
     <Planned {d} {person} showOwner={people.length > 1} onchanged={load} onapplied={applied} />
-      {#if hasOpenCards}<BestCard {person} {version} showOwner={people.length > 1} />{/if}
-      {#if hasRewards || addingBalance}<Rewards {d} {people} onchanged={load} />
+    {#if hasOpenCards}<BestCard {person} {version} today={d.today} showOwner={people.length > 1} />{/if}
+    {#if hasRewards || addingBalance}<Rewards {d} {people} onchanged={load} />
     {:else}<EmptyLine label="Rewards" message="no points tracked yet" action="Add a balance" onaction={() => (addingBalance = true)} />{/if}
-  {/if}
-
-  <SubTabs label="Cards or bank bonuses" current={tab} class="mb-4"
-      tabs={[{ id: "cards", href: "#churning", label: "Cards" }, { id: "benefits", href: "#churning/benefits", label: "Benefits" }, { id: "bank", href: "#churning/bank", label: "Bank bonuses" }]} />
-
-  {#if tab === "cards"}
+  {:else if tab === "cards"}
     <Card.Root class="mb-6">
       <Card.Header>
         <Card.Title>Cards</Card.Title>
@@ -145,6 +168,12 @@
       </Card.Header>
       <Card.Content>
         {#if form}{#key `${formId}:${draft?.account_id ?? ""}`}<CardForm c={form === "new" ? null : form} {d} {person} {draft} onclose={closeForm} onchanged={load} />{/key}{/if}
+        {#if foundFailed}
+          <p class="mb-4 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground" data-testid="found-failed">
+            Couldn’t check your accounts for cards to add.
+            <Button variant="link" size="sm" class="h-auto px-0" onclick={loadFound}>Try again</Button>
+          </p>
+        {/if}
         {#if found && (drafts.length || found.dismissed.length)}<FoundCards found={{ ...found, drafts }} {d} onadd={(x) => addCard(x)} onchanged={loadFound} />{/if}
         {#if visibleCards.length}
           <CardList cards={visibleCards} {d} showOwner={people.length > 1} onedit={(c) => { draft = null; formId = c.id; }} onchanged={load} />
