@@ -296,8 +296,8 @@ describe("TxRow", () => {
       expect(badge).not.toHaveClass("md:hidden");
       expect(badge.className).not.toMatch(/\bring-/);   // straight over the logo's corner, no outline
       expect(badge).toHaveAttribute("title", "Shared Checking");
-      expect(within(badge as HTMLElement).getByText("Shared Checking")).toHaveClass("hidden");   // its logo only
-      expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4!");
+      expect(badge).not.toHaveTextContent("Shared Checking");   // its logo (here its letter) only
+      expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4", "lg:size-3");
       // the account's column names it without its logo again
       expect(within(row()).getAllByText("S").filter((e) => !badge.contains(e)).every((e) => e.classList.contains("hidden"))).toBe(true);
     });
