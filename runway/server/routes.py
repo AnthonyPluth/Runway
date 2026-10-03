@@ -61,7 +61,7 @@ from .api.retail import (
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
 from .api.transactions import (
     api_ai_apply, api_ai_log, api_ai_suggest, api_recategorize, api_transactions, api_tx_accept, api_tx_bulk,
-    api_tx_brand_name, api_tx_category, api_tx_create, api_tx_delete, api_tx_split, api_tx_update
+    api_tx_brand_name, api_tx_category, api_tx_create, api_tx_delete, api_tx_import, api_tx_split, api_tx_update
 )
 
 
@@ -82,6 +82,7 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
     ("GET", "/api/transactions", api_transactions),
     ("POST", "/api/transactions", api_tx_create),
     ("POST", "/api/transactions/bulk", api_tx_bulk),
+    ("POST", "/api/transactions/import", api_tx_import),
     ("POST", "/api/transactions/{id}/category", api_tx_category),
     ("POST", "/api/transactions/{id}/accept", api_tx_accept),
     ("POST", "/api/transactions/{id}/split", api_tx_split),
