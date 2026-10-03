@@ -19,6 +19,10 @@
   import { toast } from "svelte-sonner";
   import { tick } from "svelte";
 
+  // #recurring?item=7 (an upcoming item's name links here): that item starts open and comes into view.
+  const asked = new URLSearchParams(location.hash.split("?")[1] ?? "").get("item");
+  if (asked) openRecurring.add(asked);
+
   type Data = { accounts: Account[] };
   async function load(): Promise<Data> {
     const [accounts, list] = await Promise.all([api<Account[]>("/api/accounts"), api<Item[]>("/api/recurring")]);
@@ -100,7 +104,7 @@
       <h2 class="mb-1 text-xs font-medium tracking-wider text-muted-foreground uppercase">{title}</h2>
       <div>
         {#each list as r (r.id)}
-          <RecurringItem {r} {accounts} open={openRecurring.has(String(r.id))} ontoggle={(o) => toggle(r.id, o)} onsaved={(list) => (items = list)} />
+          <RecurringItem {r} {accounts} open={openRecurring.has(String(r.id))} focus={asked === String(r.id)} ontoggle={(o) => toggle(r.id, o)} onsaved={(list) => (items = list)} />
         {/each}
       </div>
     </section>

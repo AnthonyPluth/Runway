@@ -11,7 +11,6 @@
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
-  import Repeat from "@lucide/svelte/icons/repeat";
 
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's repeat icon opens Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
@@ -66,7 +65,7 @@
   <div class="px-4 pt-2.5 pb-1 text-[13px] font-medium text-muted-foreground" role="heading" aria-level="3">{fmtDow(d.date)}</div>
   {#each d.rows as { e, i } (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
-    <div class="cell">
+    <div class="cell min-h-12 py-2">
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}
         <Logo src={e.logo} />
@@ -77,11 +76,10 @@
       {/if}
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
-          <span class="truncate">{e.name}</span>
-          {#if e.kind === "recurring"}
-            <a class="-my-1 rounded-md px-1 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground" href="#recurring"
-              title="Recurring item: change every one in Recurring" aria-label="Open in Recurring"><Repeat class="size-3.5" aria-hidden="true" /></a>
-          {/if}
+          {#if e.recurring_id}
+            <!-- A recurring item's name opens it in Recurring, to change every one. -->
+            <a class="truncate hover:underline" href={`#recurring?item=${e.recurring_id}`} title="Open in Recurring">{e.name}</a>
+          {:else}<span class="truncate">{e.name}</span>{/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
           {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
@@ -100,8 +98,9 @@
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
         <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. -->
-        <span class="flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
-            save={(v) => change(e, v)} />{:else}{fmt(e.amount)}{/if}{#if e.estimated}<span class="ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
+        <!-- The asterisk hangs past the amount, so amounts line up on the right with or without one. -->
+        <span class="relative flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
+            save={(v) => change(e, v)} />{:else}{fmt(e.amount)}{/if}{#if e.estimated}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
               ? "the statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
               : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}</span>
         {#if e.overridden}

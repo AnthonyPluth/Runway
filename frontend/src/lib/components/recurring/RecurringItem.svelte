@@ -21,7 +21,9 @@
 
   // One recurring item: a summary line that opens into its fields, each saved as you change it. After a save,
   // `onsaved` gets the fresh list, so the summary (amount, next date, matches) and its Money in/out group catch up.
-  let { r, accounts, open, ontoggle, onsaved }: { r: RecurringItem; accounts: Account[]; open: boolean; ontoggle: (open: boolean) => void; onsaved?: (items: RecurringItem[]) => void } = $props();
+  // `focus`: opened from a link to this item (an upcoming item's name): it comes into view.
+  let { r, accounts, open, focus = false, ontoggle, onsaved }: { r: RecurringItem; accounts: Account[]; open: boolean; focus?: boolean; ontoggle: (open: boolean) => void; onsaved?: (items: RecurringItem[]) => void } = $props();
+  function intoView(el: HTMLElement) { if (focus) el.scrollIntoView?.({ block: "center" }); }
 
   const init = () => ({
     name: r.name, account_id: r.account_id, amount: r.amount, amount_mode: r.amount_mode || "fixed", frequency: r.frequency,
@@ -88,7 +90,7 @@
   }
 </script>
 
-<details class="group border-t first:border-t-0" bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
+<details class="group border-t first:border-t-0" data-recurring={r.id} use:intoView bind:open={isOpen} ontoggle={(e) => ontoggle(e.currentTarget.open)}>
   <summary class="-mx-2 flex cursor-pointer list-none items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/50 group-open:bg-muted/40 [&::-webkit-details-marker]:hidden">
     <!-- A button inside the summary doesn't toggle it. -->
     <LogoPicker name={r.name} onchanged={logoChanged}>
