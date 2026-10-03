@@ -8,7 +8,7 @@ from runway import db, forecast
 from runway import settings_keys as sk
 from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
-from runway.models import Recurring
+from runway.models import Recurring, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -29,6 +29,12 @@ class SuggestionDismissTests(LedgerCase):
         s = {x["match"]: x for x in forecast.suggest_recurring(self.conn, TODAY)}
         self.assertEqual(s["mortgage co"]["key"], "chk|mortgage co|monthly")
         self.assertEqual(s["acme payroll"]["key"], forecast.suggestion_key("chk", "ACME Payroll ", "biweekly"))
+
+    def test_a_suggestion_says_the_range_its_amounts_came_in(self):
+        self.tx("chk", "2026-09-30", -2600.0, "MORTGAGE CO", "Mortgage")
+        s = {x["match"]: x for x in forecast.suggest_recurring(self.conn, TODAY)}
+        self.assertEqual((s["mortgage co"]["amount_low"], s["mortgage co"]["amount_high"]), (2500.0, 2600.0))
+        self.assertEqual((s["acme payroll"]["amount_low"], s["acme payroll"]["amount_high"]), (3100.0, 3100.0))
 
     def test_dismissing_hides_that_suggestion_only(self):
         self.assertEqual({s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)}, {"mortgage co", "acme payroll"})
@@ -85,7 +91,14 @@ class SuggestionRestoreTests(LedgerCase):
     def test_a_merchant_with_a_bar_and_a_gone_account_still_list(self):
         key = forecast.suggestion_key("old", "A|B pay", "weekly")
         db.set_setting(self.conn, sk.RECURRING_SUGGESTIONS_DISMISSED, json.dumps([key, "junk"]))
-        self.assertEqual(self.dismissed(), [{"key": key, "account_id": "old", "account_name": None, "match": "a|b pay", "frequency": "weekly"}])
+        self.assertEqual(self.dismissed(), [{"key": key, "account_id": "old", "account_name": None, "match": "a|b pay", "name": "a|b pay",
+                                             "frequency": "weekly"}])
+
+    def test_a_dismissed_one_is_named_as_its_transactions_are(self):
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": self.key})
+        payee = self.conn.execute(select(Transaction.payee).where(Transaction.account_id == "chk")).scalar()
+        self.assertNotEqual(payee, "mortgage co")
+        self.assertEqual(self.dismissed()[0]["name"], payee)
 
     def test_restoring_offers_it_again_and_keeps_the_others_dismissed(self):
         other = "chk|acme payroll|biweekly"
