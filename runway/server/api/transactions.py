@@ -172,11 +172,8 @@ def _net(conn, where: list, family: list[str], kind: str) -> float:
 def api_transactions(conn, q, _b):
     T = Transaction
     where, family = tx_where(conn, q)
-    try:
-        limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
-        offset = max(0, int(q.get("offset", ["0"])[0]))
-    except ValueError:
-        raise ApiError("limit and offset must be whole numbers") from None
+    limit = max(1, min(int(q.get("limit", ["200"])[0]), 1000))
+    offset = max(0, int(q.get("offset", ["0"])[0]))
     items = db.rows(conn.execute(
         select(T, db.account_label_expr().label("account_name"), Account.kind.label("account_kind"),
                Recurring.name.label("recurring_name"))
