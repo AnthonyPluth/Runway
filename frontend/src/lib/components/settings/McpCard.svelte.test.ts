@@ -7,6 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { toast } from "svelte-sonner";
 import McpCard from "./McpCard.svelte";
 
 beforeEach(() => { vi.mocked(api).mockReset(); });
@@ -60,9 +61,9 @@ describe("AI assistants (MCP)", () => {
     expect(screen.getByText("Read + churning + categorizing")).toBeInTheDocument();
     expect(screen.getByText(/by me@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/not used yet/)).toBeInTheDocument();
-    const revoke = screen.getAllByRole("button", { name: "Revoke" })[0];
+    const revoke = screen.getAllByRole("button", { name: "Disconnect" })[0];
     await userEvent.click(revoke);                                   // asks first
-    await userEvent.click(screen.getByRole("button", { name: "Disconnect it?" }));
+    await userEvent.click(screen.getByRole("button", { name: "Disconnect?" }));
     await waitFor(() => expect(screen.queryByText("Claude")).not.toBeInTheDocument());
     expect(vi.mocked(api)).toHaveBeenCalledWith("/api/mcp-settings/connections/1/revoke", { method: "POST" });
     expect(screen.getByText("Unnamed app")).toBeInTheDocument();
@@ -94,5 +95,26 @@ describe("AI assistants (MCP)", () => {
     expect(screen.getByRole("checkbox", { name: "Let assistants change churning" })).not.toBeChecked();
     await userEvent.click(box);
     await waitFor(() => expect(posts()).toEqual([{ allow: true }, { allow: false }]));
+  });
+
+  it("says under each switch what it lets an assistant do", async () => {
+    serve({ allow_writes: false, allow_categorize: false, oauth: true, url: "https://r.example/mcp", reason: null, connections: [] });
+    render(McpCard);
+    expect(await screen.findByRole("checkbox", { name: "Let assistants change churning" }))
+      .toHaveAccessibleDescription("Mark benefits used; add or update cards, benefits, to-dos and plans. Never deletes.");
+    expect(screen.getByRole("checkbox", { name: "Let assistants categorize" }))
+      .toHaveAccessibleDescription("Set or accept the category of a transaction or order item. No deleting, splitting or renaming.");
+    expect(screen.getByRole("link", { name: "How to connect" })).toHaveAttribute("href", "https://anthonypluth.github.io/Runway/using/mcp/");
+  });
+
+  it("selects the address and says how to copy it where the browser has no clipboard (plain http)", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+    serve({ allow_writes: false, allow_categorize: false, oauth: true, url: "http://192.168.1.5:8000/mcp", reason: null, connections: [] });
+    render(McpCard);
+    const box = await screen.findByLabelText("MCP address");
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(box).toHaveFocus();
+    expect((box as HTMLInputElement).selectionEnd).toBe("http://192.168.1.5:8000/mcp".length);
+    expect(toast).toHaveBeenCalledWith(expect.stringMatching(/^Selected\. /));
   });
 });

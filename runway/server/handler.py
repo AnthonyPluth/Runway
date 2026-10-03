@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 import urllib.parse
-from datetime import date
+from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sqlalchemy.exc
@@ -432,6 +432,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             if self.command != "HEAD":
                 self.wfile.write(data)
+                with db.session() as conn:   # for "Last backup" in Settings → Data
+                    db.set_setting(conn, sk.LAST_BACKUP, datetime.now().isoformat(timespec="seconds"))
             return
         if method == "GET" and url.path.startswith("/api/merchants/") and url.path.endswith("/logo"):
             mid = urllib.parse.unquote(url.path[len("/api/merchants/"):-len("/logo")])
@@ -857,7 +859,7 @@ class Handler(BaseHTTPRequestHandler):
         if asked:
             state = ('name="churning" value="1" checked' if writes_on else "disabled")
             note = ("Mark benefits used; add and update cards, benefits, to-dos and planned items; check off plans. Never deletes."
-                    if writes_on else "Turn on Let assistants change churning in Settings → Advanced first. Until then this "
+                    if writes_on else "Turn on Let assistants change churning in Settings → Data first. Until then this "
                                       "connection can only read.")
             churning = (f'<label class="choice"><input type="checkbox" {state}><span><b>Change churning</b>'
                         f'<span class="help">{html.escape(note)}</span></span></label>')
@@ -866,7 +868,7 @@ class Handler(BaseHTTPRequestHandler):
             state = ('name="categorize" value="1" checked' if categorize_on else "disabled")
             note = ("Set the category of a transaction or an order item, or accept the one Runway suggested. Never deletes, "
                     "splits or renames anything." if categorize_on else
-                    "Turn on Let assistants categorize in Settings → Advanced first. Until then this connection can't categorize.")
+                    "Turn on Let assistants categorize in Settings → Data first. Until then this connection can't categorize.")
             categorize = (f'<label class="choice"><input type="checkbox" {state}><span><b>Categorize</b>'
                           f'<span class="help">{html.escape(note)}</span></span></label>')
         name = req.client_name or "An app"
