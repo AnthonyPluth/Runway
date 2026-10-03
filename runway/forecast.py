@@ -1038,6 +1038,13 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
             if due.isoformat() > dates[-1]:
                 break
             amt = sum(v for d, v in days.items() if prev.isoformat() < d <= close.isoformat()) + (info["new_charges"] if first else 0.0)
+            # The card's spending outside budgets happens either way: its average, and the recurring charges the average
+            # leaves out, as the forecast counts them, so a card's statements come out the same on both lines.
+            if info.get("avg_outside") is not None:
+                amt += info["avg_outside"] * (min(1.0, max(0, (close - today).days) / max(1, (close - prev).days)) if first else 1.0)
+                amt += max(0.0, -sum(e["amount"] for e in events if e["account_id"] == cid and e["kind"] == "recurring"
+                                     and prev.isoformat() < e["date"] <= close.isoformat()
+                                     and e.get("recurring_id") in info["avg_separate"] and e.get("category") not in budgeted))
             # An annual fee is charged whatever you budget, unless a budget covers its category (then it's in that).
             amt += -sum(f["amount"] for f in info.get("annual_fees", []) if prev.isoformat() < f["date"] <= close.isoformat()
                         and f["category"] not in budgeted)
@@ -1052,7 +1059,8 @@ def budget_scenario(conn, today: date, horizon_days: int, dates: list[str], cash
                     changes.append({"date": paid, "account_id": payer, "kind": "card", "name": f"{db.account_label(card)} statement",
                                     "amount": -round(pay, 2), "account": db.account_label(by_id[payer]),
                                     # what it's made of: charges already on the card (first statement), plus budgeted ones
-                                    "charged": round(info["new_charges"], 2) if first else 0.0})
+                                    "charged": round(info["new_charges"], 2) if first else 0.0,
+                                    "outside": round(info["avg_outside"], 2) if info.get("avg_outside") is not None else None})
             prev, close, first = close, next_after(close, card["closing_day"]), False
 
     # Cards without a statement: their budgeted charges (and what they owe today) on statements that close at each
