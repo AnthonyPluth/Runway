@@ -428,6 +428,32 @@ class MigrationTests(unittest.TestCase):
             self.assertTrue(rules.matches(rule, {"payee": "Amazon", "description": digital, "amount": -9.99}))
             self.assertFalse(rules.matches(rule, {"payee": "Amazon", "description": "AMAZON.COM*ZZ1", "amount": -9.99}))
 
+    def test_0036_moves_each_budgets_card_to_its_category(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0035")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
+            c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Visa', 'credit'), ('chk', 'Checking', 'checking')")
+            c.exec_driver_sql("INSERT INTO categories(name, parent) VALUES ('Crafts', NULL), ('Pottery', 'Crafts'), ('Aquarium', NULL)")
+            c.exec_driver_sql("INSERT INTO budgets(category, amount, pay_with) VALUES ('Crafts', 300, 'cc'), ('Pottery', 80, 'chk'), "
+                              "('Aquarium', 50, NULL), ('Gone', 20, 'cc')")   # a budget whose category was removed by hand
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        with db.session(self.path) as conn:
+            paid = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
+            self.assertEqual({k: paid[k] for k in ("Crafts", "Pottery", "Aquarium")}, {"Crafts": "cc", "Pottery": "chk", "Aquarium": None})
+            self.assertEqual(sum(1 for v in paid.values() if v), 2)   # nothing else got one
+            self.assertEqual(conn.execute(select(func.count()).select_from(schema.budgets)).scalar(), 4)   # budgets stay
+            conn.execute(sa.update(Category).where(Category.name == "Aquarium").values(pay_with="chk"))   # no budget's? still kept
+        with db.engine(self.path).begin() as c:   # and back down: a budget's category's choice goes back to it
+            command.downgrade(db.alembic_config(c), "0035")
+            self.assertEqual(dict(c.exec_driver_sql("SELECT category, pay_with FROM budgets").fetchall()),
+                             {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
+            self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating

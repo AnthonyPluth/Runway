@@ -49,6 +49,13 @@
     if (newCat) saveBudget(newCat, e.currentTarget.value); else toast.error("Choose a category first");
   }
 
+  // The card or account a category's spending goes on (Settings → Categories): its own, else the nearest parent's
+  // with one, else the one used most for it.
+  function accountOf(c: BudgetCategory, bm: BudgetMonth): string | null {
+    const chosen = (name: string) => bm.categories.find((x) => x.name === name)?.pay_with;
+    return c.pay_with || c.path.slice(0, -1).reverse().map(chosen).find(Boolean) || c.usual_account || null;
+  }
+
   const view = $derived.by(() => {
     if (!b) return null;
     // Group into families: a top-level category plus everything under it. A category's "spent" already includes its subcategories.
@@ -75,17 +82,17 @@
       if (c.spent - avail > 0.005) { totOver += c.spent - avail; overCount++; }
     }
     const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
-    return { inBudget, notBudget, unusedTops, countsToward, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
+    return { inBudget, notBudget, unusedTops, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
       // pace: the share of the month gone, counting today as half gone (at the end of today the marker would sit a
       // day ahead of the date all day long)
       pace: b.month !== thisMonth() ? (b.day >= b.days_in_month ? 1 : 0) : Math.max(0, b.day - 0.5) / b.days_in_month };
   });
 </script>
 
-{#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number, counts: (c: BudgetCategory) => boolean)}
+{#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number)}
   <div class="group/family px-4 py-1">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
-      <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} counts={counts(c)} {pace} payAccounts={bm.pay_accounts}
+      <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} {pace} payAccounts={bm.pay_accounts} account={accountOf(c, bm)}
         onsave={saveBudget} onchanged={refresh} />
     {/each}
   </div>
@@ -125,14 +132,14 @@
 
   <Group title="Budgets" inset="3.4rem" class="mb-8">
       {#if v.inBudget.length}
-        {#each v.inBudget as f (f.top.name)}{@render family(f, true, b, v.pace, v.countsToward)}{/each}
+        {#each v.inBudget as f (f.top.name)}{@render family(f, true, b, v.pace)}{/each}
       {:else}
         <p class="cell text-sm text-muted-foreground">No budgets yet. Set one below.</p>
       {/if}
   </Group>
 
   <Group title="Not budgeted" inset="3.4rem" class="mb-4">
-      {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace, v.countsToward)}{/each}
+      {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace)}{/each}
       {#if v.unusedTops.length}
         <div class="flex min-h-12 items-center gap-2.5 px-2 py-2">
           <select bind:value={newCat} aria-label="Category to budget"

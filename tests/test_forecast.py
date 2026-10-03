@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 from runway import churning, db, forecast, plaidapi, recurring
 from runway import settings_keys as sk
-from runway.models import Account, Budget, CardStatement, ChurnCard, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
+from runway.models import Account, Budget, CardStatement, Category, ChurnCard, Override, PlaidAccount, Recurring, RecurringDismissed, Transaction
 from tests.shared import TODAY, LedgerCase
 
 
@@ -102,7 +102,8 @@ class ForecastTests(LedgerCase):
 
     def test_sticking_to_the_budget(self):
         # $500/month on Groceries, paid with the card. $200 already spent in September, so $300 over Sep 24-30.
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         b = fc["budget"]
         self.assertEqual(set(b), {"used", "skipped", "monthly"})
@@ -124,7 +125,8 @@ class ForecastTests(LedgerCase):
 
     def test_a_budget_paid_from_checking_comes_out_day_by_day(self):
         # $310/month on Groceries from checking; $200 spent in September, so $110 over Sep 24-30 ($15.71 a day)
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 40)
         self.assertEqual([(u["category"], u["account_id"]) for u in fc["budget"]["used"]], [("Groceries", "chk")])
         self.assertEqual(fc["total"][0], 5000.0)                                    # from tomorrow
@@ -144,7 +146,8 @@ class ForecastTests(LedgerCase):
     def test_balance_after_takes_in_the_days_budgeted_spending(self):
         # $310/month on Groceries from checking ($10 a day in October) and a $50 gym on Oct 15, the day's only event:
         # its balance after is the day's balance, with the day's $10 out before it.
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         self.conn.execute(insert(Recurring).values(name="Gym", account_id="chk", amount=-50, frequency="monthly",
                                                    anchor_date="2026-10-15"))
         fc = forecast.build(self.conn, TODAY, 40)
@@ -167,7 +170,8 @@ class ForecastTests(LedgerCase):
     def test_a_budget_counts_its_recurring_payments_once(self):
         # $500 on Groceries from checking includes the $100 box: $400 a month more, not $500 on top of it
         self.grocery_box()
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         box = [e for e in fc["events"] if e.get("recurring_id") == 7]
         self.assertEqual([(e["date"], e["category"]) for e in box], [("2026-10-01", "Groceries"), ("2026-11-02", "Groceries")])
@@ -180,13 +184,15 @@ class ForecastTests(LedgerCase):
 
     def test_a_budget_its_recurring_payments_cover_adds_nothing(self):
         self.grocery_box()
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=80, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=80))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         b = forecast.build(self.conn, TODAY, 60)["budget"]
         self.assertEqual((b["used"], b["skipped"][0]), ([], {"category": "Groceries", "reason": "a recurring item already covers it"}))
 
     def test_a_recurring_item_with_nothing_linked_yet_takes_its_category_from_what_it_matches(self):
         self.grocery_box(link=False)
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 7}, {"Groceries"})
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)   # counted once all the same
@@ -481,7 +487,8 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual((fc["accounts"][0]["balance"], fc["accounts"][0]["pending"]), (7625.0, 2625.0))
         self.assertEqual([e["date"] for e in fc["events"] if e["name"] == "Paycheck"], ["2026-10-07", "2026-10-21"])
         # with a budget paid from checking, today starts from the same balance (its spending starts tomorrow)
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 30)
         self.assertEqual(fc["total"][0], 7625.0)
         self.assertLess(fc["total"][1], 7625.0)
@@ -624,7 +631,8 @@ class ForecastAssumptionTests(LedgerCase):
         self.acct("sav", "savings", 20000.0)    # not forecast: checking is the only checking account
         self.acct("cc2", "credit", -50.0, pay_from="sav")
         self.stmt("cc2", 50.0, "2026-09-10", "2026-10-05")
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc2"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc2"))
         b = forecast.build(self.conn, TODAY, 60)["budget"]
         self.assertEqual(b["used"], [])
         self.assertEqual(b["skipped"], [{"category": "Groceries", "reason": "its card isn't paid from a forecast account"}])
@@ -637,7 +645,8 @@ class ForecastAssumptionTests(LedgerCase):
     def test_a_budget_on_a_card_with_no_statement_yet_still_counts(self):
         # A new card, paid from checking, with no statement yet and $40 on it: $310 a month of Travel is budgeted on it.
         self.acct("cc3", "credit", -40.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         fc = forecast.build(self.conn, TODAY, 90)
         b = fc["budget"]
         self.assertEqual(([u["account_id"] for u in b["used"]], b["skipped"]), (["cc3"], []))
@@ -657,7 +666,8 @@ class ForecastAssumptionTests(LedgerCase):
     def test_a_card_with_no_statement_has_its_recurring_charges_in_its_assumed_statements(self):
         # $310 a month of Travel on a new card, and a $15 subscription on it from Oct 15: October's statement has both.
         self.acct("cc3", "credit", 0.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         self.conn.execute(insert(Recurring).values(id=9, name="Streaming", account_id="cc3", amount=-15, frequency="monthly",
                                                    anchor_date="2026-10-15"))
         self.assertEqual(self.no_statement_payments("cc3"), {"2026-10-26": -310.0, "2026-11-25": -325.0})
@@ -666,7 +676,8 @@ class ForecastAssumptionTests(LedgerCase):
         # Plaid reports what a card owes as a positive number (owed_positive): $40 owed is in the first statement, and a
         # $20 credit comes off it, as the bank would bill it.
         self.acct("cc3", "credit", 40.0, pay_from="chk", owed_positive=1)
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         self.assertEqual(self.no_statement_payments("cc3")["2026-10-26"], -350.0)
         self.conn.execute(update(Account).where(Account.id == "cc3").values(balance=-20.0))
         card = self.no_statement_payments("cc3")
@@ -682,22 +693,106 @@ class ForecastAssumptionTests(LedgerCase):
         db.set_setting(self.conn, sk.card_pay_mode("cc3"), "fixed")
         db.set_setting(self.conn, sk.card_pay_amount("cc3"), "100")
         db.set_setting(self.conn, sk.card_apr("cc3"), "24")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         self.assertEqual(self.no_statement_payments("cc3"), {"2026-10-26": -100.0, "2026-11-25": -100.0})
         # paid in full when nothing's set
         db.set_setting(self.conn, sk.card_pay_mode("cc3"), "full")
         self.assertEqual(self.no_statement_payments("cc3"), {"2026-10-26": -310.0, "2026-11-25": -310.0})
 
+    # A subcategory's own card. Medical is budgeted from checking; Dentist, under it, may have a budget and an account of
+    # its own: cc3, a new card paid from checking, whose statements are taken to close at each month's end.
+    drop = ForecastTests.drop
+
+    def medical(self, medical=400.0, dentist=None, dentist_pays=None, medical_pays="chk"):
+        from runway import categories
+        self.acct("cc3", "credit", 0.0, pay_from="chk")
+        categories.add(self.conn, "Dentist", "Medical")
+        self.conn.execute(insert(Budget).values(category="Medical", amount=medical))
+        if dentist is not None:
+            self.conn.execute(insert(Budget).values(category="Dentist", amount=dentist))
+        self.conn.execute(update(Category).where(Category.name == "Medical").values(pay_with=medical_pays))
+        self.conn.execute(update(Category).where(Category.name == "Dentist").values(pay_with=dentist_pays))
+        fc = forecast.build(self.conn, TODAY, 90)
+        cards = {e["date"]: -e["amount"] for e in fc["events"] if e.get("card_id") == "cc3"}
+        used = [(u["category"], u["account_id"], u["amount"]) for u in fc["budget"]["used"]]
+        return fc, cards, used
+
+    def test_a_parents_budget_alone_goes_on_its_account(self):
+        fc, cards, used = self.medical()
+        self.assertEqual((used, fc["budget"]["monthly"], fc["budget"]["skipped"]), ([("Medical", "chk", 400.0)], 400.0, []))
+        self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 400 / 7, delta=0.01)
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
+        self.assertEqual(cards, {})
+
+    def test_a_category_with_an_account_but_no_budget_changes_nothing(self):
+        alone = self.medical()
+        self.tearDown(); self.setUp()
+        fc, cards, used = self.medical(dentist_pays="cc3")   # its spending is in Medical's budget, on Medical's account
+        self.assertEqual((fc["total"], fc["events"], used), (alone[0]["total"], alone[0]["events"], alone[2]))
+        self.assertEqual(cards, {})
+
+    def test_a_subcategorys_budget_goes_on_its_own_card_and_the_rest_on_the_parents(self):
+        self.tx("chk", "2026-09-05", -30.0, "DENTAL", "Dentist")    # this month: $30 of Dentist's $100, $50 of the rest
+        self.tx("chk", "2026-09-06", -50.0, "CLINIC", "Medical")
+        fc, cards, used = self.medical(dentist=100.0, dentist_pays="cc3")
+        # The same $400 a month, split: Dentist's $100 on its card, the other $300 from checking.
+        self.assertEqual((used, fc["budget"]["monthly"]), ([("Medical", "chk", 300.0), ("Dentist", "cc3", 100.0)], 400.0))
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 300 / 31, delta=0.01)
+        self.assertEqual((cards["2026-10-26"], cards["2026-11-25"]), (70.0, 100.0))   # Sep: Dentist's $70 left; Oct: $100
+        # September: $320 left of the whole ($400 - $80), $70 of it Dentist's: the other $250 from checking over 7 days
+        self.assertAlmostEqual(self.drop(fc, "2026-09-24"), 250 / 7, delta=0.01)
+        # Day by day, the shares add up to what Medical's budget alone spends (only the accounts change).
+        plan = forecast.budget_plan(self.conn, TODAY)
+        split = forecast.budget_days(self.conn, TODAY, 90, plan, [], {"chk"})["Medical"]
+        whole = forecast.budget_days(self.conn, TODAY, 90, [{**p, "parts": []} for p in plan], [], {"chk"})["Medical"]
+        self.assertEqual([s["category"] for s in split], ["Medical", "Dentist"])
+        for d, v in whole[0]["days"].items():
+            self.assertAlmostEqual(sum(s["days"][d] for s in split), v, places=9)
+
+    def test_a_subcategorys_budget_bigger_than_its_parents_leaves_the_parent_nothing(self):
+        fc, cards, used = self.medical(medical=100.0, dentist=150.0, dentist_pays="cc3")
+        # Dentist takes all of Medical's $100 (not $150, and Medical's share doesn't go below nothing)
+        self.assertEqual((used, fc["budget"]["monthly"], fc["budget"]["skipped"]), ([("Dentist", "cc3", 100.0)], 100.0, []))
+        self.assertEqual(self.drop(fc, "2026-10-15"), 0.0)   # nothing from checking day by day
+        self.assertEqual(cards["2026-11-25"], 100.0)
+
+    def test_a_subcategorys_budget_without_an_account_goes_on_its_parents(self):
+        fc, cards, used = self.medical(dentist=100.0)
+        self.assertEqual((used, fc["budget"]["monthly"]), ([("Medical", "chk", 400.0)], 400.0))
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
+        self.assertEqual(cards, {})
+
+    def test_a_subcategorys_card_paid_from_outside_the_forecast_is_skipped_on_its_own(self):
+        self.acct("sav", "savings", 20000.0)    # not forecast
+        self.acct("cc2", "credit", 0.0, pay_from="sav")
+        fc, _cards, used = self.medical(dentist=100.0, dentist_pays="cc2")
+        self.assertEqual((used, fc["budget"]["monthly"]), ([("Medical", "chk", 300.0)], 300.0))
+        self.assertEqual(fc["budget"]["skipped"], [{"category": "Dentist", "reason": "its card isn't paid from a forecast account"}])
+
+    def test_a_parents_usual_account_leaves_out_subcategories_with_their_own(self):
+        from runway import categories
+        categories.add(self.conn, "Dentist", "Medical")
+        self.tx("chk", "2026-09-06", -50.0, "CLINIC", "Medical")
+        self.tx("cc", "2026-09-05", -500.0, "DENTAL", "Dentist")
+        self.conn.execute(insert(Budget), [{"category": "Medical", "amount": 400}, {"category": "Dentist", "amount": 100}])
+        usual = lambda: next(p["usual"] for p in forecast.budget_plan(self.conn, TODAY) if p["category"] == "Medical")
+        self.assertEqual(usual(), "cc")    # Dentist's spending is Medical's...
+        self.conn.execute(update(Category).where(Category.name == "Dentist").values(pay_with="cc"))
+        self.assertEqual(usual(), "chk")   # ...until it has an account of its own
+
     def test_a_budget_on_a_card_with_no_statement_and_no_paying_account_is_skipped(self):
         self.acct("cc3", "credit", 0.0)
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         b = forecast.build(self.conn, TODAY, 60)["budget"]
         self.assertEqual(b["skipped"], [{"category": "Travel", "reason": "its card isn't paid from a forecast account"}])
 
     def test_a_budget_spends_what_it_carried_over(self):
         # $310 a month from checking, rolling over since August, when $250 was spent: $60 carried into September
         self.tx("chk", "2026-08-12", -250.0, "GROCER", "Groceries")
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, pay_with="chk", rollover_from="2026-08"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=310, rollover_from="2026-08"))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 40)
         drop = lambda d: fc["total"][fc["dates"].index(d) - 1] - fc["total"][fc["dates"].index(d)]
         self.assertAlmostEqual(drop("2026-09-24"), (310 + 60 - 200) / 7, delta=0.01)   # $200 spent in September, over Sep 24-30
@@ -763,7 +858,8 @@ class ForecastAssumptionTests(LedgerCase):
         self.tx("chk", "2026-09-01", -2000.0, "LANDLORD LLC", "Rent")             # not linked yet
         self.tx("chk", "2026-09-22", -40.0, "GAS STATION", "Auto", pending=1)
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc", rollover_from="2026-08"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, rollover_from="2026-08"))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.no_writes(AssertionError("the forecast wrote to the database"))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual(next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-10-10")["amount"], -123.0)
@@ -981,7 +1077,8 @@ class PaymentModeTests(LedgerCase):
 
     def test_a_credit_carries_with_budgets(self):
         self.tx("cc", "2026-09-22", 1000.0, "STORE REFUND", "Refunds")
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         # the credit, then Groceries' $300 left this month over its 7 days and $500 a month after, plus the insurance:
         # Oct 10's comes to $211.29
@@ -995,7 +1092,8 @@ class PaymentModeTests(LedgerCase):
     def test_with_budgets_a_cards_statements_are_its_budgets_plus_its_charges(self):
         # Groceries ($500 a month, $200 spent this month) is paid with the card, on top of what's on it since the close
         # and its insurance.
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         oct10 = 300 + self.INSURANCE + 300 + 500 / 31 * 10    # on the card already, insurance, Groceries to Oct 10
         nov10 = self.INSURANCE + 500 / 31 * 21 + 500 / 30 * 10
@@ -1007,7 +1105,7 @@ class PaymentModeTests(LedgerCase):
         self.assertTrue(est and all(e["key"].startswith("cardclose:cc:") and not e.get("assumed_cycle") for e in est))
         # A budget paid from checking isn't on the card: the card's statements are only its own charges, and checking
         # pays the budget day by day instead
-        self.conn.execute(update(Budget).where(Budget.category == "Groceries").values(pay_with="chk"))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="chk"))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": self.EST1, "2026-12-07": self.EST2})
         i = fc["dates"].index("2026-10-20")
@@ -1020,19 +1118,22 @@ class PaymentModeTests(LedgerCase):
                                                    anchor_date="2025-10-20", match="streamflix"))
         self.assertEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], self.EST2 + 600)
         # A budget for Groceries leaves it on the card, on top of the budgets ...
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         nov10 = self.EST2 + 500 / 31 * 21 + 500 / 30 * 10
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], nov10 + 600, delta=0.01)
         # ... and one for Subscriptions (paid from checking) has it already, so it isn't added again
-        self.conn.execute(insert(Budget).values(category="Subscriptions", amount=50, pay_with="chk"))
+        self.conn.execute(insert(Budget).values(category="Subscriptions", amount=50))
+        self.conn.execute(update(Category).where(Category.name == "Subscriptions").values(pay_with="chk"))
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], nov10, delta=0.01)
         # nor when that budget is paid with the card: the budget's $50 a month is on it instead
-        self.conn.execute(update(Budget).where(Budget.category == "Subscriptions").values(pay_with="cc"))
+        self.conn.execute(update(Category).where(Category.name == "Subscriptions").values(pay_with="cc"))
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"],
                                nov10 + 50 / 31 * 21 + 50 / 30 * 10, delta=0.01)
 
     def test_with_budgets_a_carried_balance_is_charged_interest_on_the_budgeted_charges_too(self):
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.pay("minimum", apr="24")
         fc = forecast.build(self.conn, TODAY, 90)
         # Sep 10's $800, minimum $40, already met by the $200 paid: $600 carries into Oct 10's statement. Carrying a
@@ -1046,7 +1147,8 @@ class PaymentModeTests(LedgerCase):
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
         self.pay("minimum", apr="24")
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-09-10", amount=-300.0))
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.no_writes(AssertionError("the forecast wrote to the database"))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual((self.card(fc)["pay_mode"], self.card(fc)["payment"]), ("minimum", 300.0))
@@ -1088,7 +1190,8 @@ class PaymentModeTests(LedgerCase):
     def test_budgeted_charges_are_paid_the_way_the_card_is_set(self):
         self.stmt("cc", 800.0, "2026-09-10", "2026-10-05", minimum=250.0)
         self.pay("minimum")
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         fc = forecast.build(self.conn, TODAY, 90)
         payments = self.payments(fc)
         self.assertEqual(payments["2026-10-05"], 50.0)   # the closed statement
@@ -1135,8 +1238,10 @@ class EstimatePartsTests(LedgerCase):
 
     def test_whats_charged_and_the_budgets_on_the_card(self):
         # Groceries ($500 a month, $200 spent) and Restaurants ($93, $100 spent: none left this month) on the card
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
-        self.conn.execute(insert(Budget).values(category="Restaurants", amount=93, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Restaurants", amount=93))
+        self.conn.execute(update(Category).where(Category.name == "Restaurants").values(pay_with="cc"))
         est = self.estimates()
         oct10 = est["2026-11-05"]
         self.assertEqual((oct10["close"], oct10["due"], oct10["charged_so_far"]), ("2026-10-10", "2026-11-05", 300.0))
@@ -1178,7 +1283,8 @@ class EstimatePartsTests(LedgerCase):
     def test_a_card_with_no_statement_yet(self):
         # A new card owing $40, with $310 a month of Travel on it: its cycle is taken to end with the month.
         self.acct("cc3", "credit", -40.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         est = self.estimates(card="cc3")
         sep = est["2026-10-26"]
         self.assertEqual((sep["assumed_cycle"], sep["close"], sep["due"], sep["owed_now"]), (True, "2026-09-30", "2026-10-25", 40.0))
@@ -1189,7 +1295,8 @@ class EstimatePartsTests(LedgerCase):
         self.assertNotIn("owed_now", oct_)
 
     def test_an_amount_you_set_is_not_an_estimate(self):
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.conn.execute(insert(Override).values(key="cardclose:cc:2026-10-10", amount=-123.0))
         fc = forecast.build(self.conn, TODAY, 90)
         e = next(e for e in fc["events"] if e.get("key") == "cardclose:cc:2026-10-10")
@@ -1358,12 +1465,14 @@ class AnnualFeeTests(LedgerCase):
         self.assertEqual(on(date(2026, 11, 1), date(2027, 9, 30)), [])
 
     def test_a_budget_for_fees_has_the_fee_already(self):
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         before = self.payments(forecast.build(self.conn, TODAY, 90))
         self.churn(account_id="cc")
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-11-05"] - before["2026-11-05"], -95.0, places=2)
         # a budget for fees has it already
-        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=10, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=10))
+        self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with="cc"))
         with_fees = self.payments(forecast.build(self.conn, TODAY, 90))
         self.churn(product="Second", account_id="cc")
         again = forecast.build(self.conn, TODAY, 90)
@@ -1374,7 +1483,8 @@ class AnnualFeeTests(LedgerCase):
         # A new card with no statement yet, $310 a month budgeted on it and a $95 fee on Oct 20: the fee is on October's
         # assumed statement (closing Oct 31, paid Nov 25), with October's charges.
         self.acct("cc3", "credit", 0.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         self.churn(account_id="cc3")
         fc = forecast.build(self.conn, TODAY, 90)
         card = {e["date"]: e["amount"] for e in fc["events"] if e.get("card_id") == "cc3"}
@@ -1382,14 +1492,16 @@ class AnnualFeeTests(LedgerCase):
         self.assertNotIn("fee", [e["kind"] for e in fc["events"]])   # in the payment, not on its own
         self.assertEqual((fc["fees"][0]["paid_on"], fc["fees"][0]["paid_from"]), ("2026-11-25", "chk"))   # and says which
         # a budget for fees has it already
-        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=0.01, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=0.01))
+        self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with="cc3"))
         card = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e.get("card_id") == "cc3"}
         self.assertAlmostEqual(card["2026-11-25"], -310.01, places=2)
 
     def test_an_overdue_fee_of_a_card_with_no_statement_is_on_its_first_statement(self):
         # Its anniversary was Sep 10 and the fee hasn't posted: it's expected today, on the first assumed statement.
         self.acct("cc3", "credit", 0.0, pay_from="chk")
-        self.conn.execute(insert(Budget).values(category="Travel", amount=310, pay_with="cc3"))
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc3"))
         self.churn(opened="2024-09-10", account_id="cc3")
         card = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e.get("card_id") == "cc3"}
         self.assertEqual(card["2026-10-26"], -405.0)

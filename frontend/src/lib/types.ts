@@ -78,6 +78,9 @@ export interface Category {
   rules?: number;
   budgeted?: boolean;
   items?: number;
+  /** Settings' list only: the card or account its spending goes on (null: automatic), and the one used most for it lately. */
+  pay_with?: string | null;
+  usual_account?: string | null;
   [key: string]: unknown;
 }
 

@@ -81,3 +81,43 @@ describe("removing a category", () => {
     expect(screen.getByText("built-in")).toBeInTheDocument();
   });
 });
+
+describe("the account a category is paid with", () => {
+  const pay = [{ id: "c1", name: "Visa", kind: "credit" }, { id: "b1", name: "Checking", kind: "checking" }];
+  const select = (name: string) => screen.getByRole("combobox", { name: `Account ${name} is paid with` });
+
+  it("is picked on a nested category with no budget, saved at once, and the list reloads", async () => {
+    vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/categories" ? categories.list : { ok: true }) as never);
+    render(CategoryRow, { c: { ...categories.list[1], budgeted: false, usual_account: "b1" }, payAccounts: pay });
+    expect(select("Pharmacy")).toHaveDisplayValue("Automatic (usually Checking)");
+    expect(select("Pharmacy")).toHaveClass("text-muted-foreground");
+    expect(within(select("Pharmacy")).getByRole("group", { name: "Cards" })).toHaveTextContent("Visa");
+    await userEvent.selectOptions(select("Pharmacy"), "c1");
+    await waitFor(() => expect(calls("/api/categories/pay-with")).toEqual([{ name: "Pharmacy", pay_with: "c1" }]));
+    await waitFor(() => expect(vi.mocked(api).mock.calls.some((c) => c[0] === "/api/categories" && !(c[1] as { method?: string })?.method)).toBe(true));
+    await waitFor(() => expect(select("Pharmacy").parentElement).toHaveClass("just-saved"));
+  });
+
+  it("names the one chosen, and a nested one's Automatic is its parent's", () => {
+    categories.list[0].pay_with = "c1";
+    const { unmount } = render(CategoryRow, { c: categories.list[0], payAccounts: pay });
+    expect(select("Medical")).toHaveDisplayValue("Visa");
+    expect(select("Medical")).not.toHaveClass("text-muted-foreground");
+    unmount();
+    render(CategoryRow, { c: categories.list[1], payAccounts: pay });
+    expect(select("Pharmacy")).toHaveDisplayValue("Automatic (Visa, as Medical)");
+  });
+
+  it("says why it wasn't saved, and keeps your choice to try again", async () => {
+    vi.mocked(api).mockRejectedValue(new Error("Account not found"));
+    render(CategoryRow, { c: categories.list[1], payAccounts: pay });
+    await userEvent.selectOptions(select("Pharmacy"), "b1");
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Account not found"));
+    expect(select("Pharmacy")).toHaveValue("b1");
+  });
+
+  it("isn't offered on money in or transfers", () => {
+    render(CategoryRow, { c: category("Transfer", { protected: true, is_transfer: true }), payAccounts: pay });
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  });
+});

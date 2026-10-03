@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 import { api } from "$lib/api";
+import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { txFilters } from "$lib/filters.svelte";
 import { toast } from "svelte-sonner";
@@ -37,6 +38,52 @@ describe("BudgetRow", () => {
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
+  });
+
+  describe("a subcategory", () => {
+    const produce = (extra: Partial<BudgetCategory> = {}) =>
+      cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, top: "Groceries", budget: 100, spent: 40, left: 60, ...extra });
+
+    it("has its figures but no bar or pace mark (only its parent has those)", () => {
+      setup(produce(), { sub: true, budgets: true });
+      expect(screen.getByText("$40")).toBeInTheDocument();
+      expect(screen.getByLabelText("Budget for Produce")).toHaveValue("100");
+      expect(screen.queryByRole("img", { name: /of budget used/ })).not.toBeInTheDocument();
+      expect(screen.queryByTitle("Where you'd be at an even pace today")).not.toBeInTheDocument();
+      expect(screen.queryByText(/left/)).not.toBeInTheDocument();
+    });
+
+    it("shows it's over in red, without the bar", () => {
+      setup(produce({ spent: 130, left: -30 }), { sub: true, budgets: true });
+      const spent = screen.getByTitle("$30 over");
+      expect(spent).toHaveClass("text-destructive");
+      expect(spent).toHaveTextContent("$130 ($30 over)");
+    });
+  });
+
+  describe("the account it's paid with", () => {
+    beforeEach(() => { app.state = { connected: true, brands: { c1: { institution: "Big Bank", src: "/logo/c1.png", initial: "B" }, b1: { institution: "Credit Union", src: null, initial: "C" } } }; });
+    afterEach(() => { app.state = null; });
+    const badge = (container: HTMLElement) => container.querySelector("[data-account-badge]");
+
+    it("sits on the emoji as its bank's logo, named in its title", () => {
+      const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onsave: vi.fn(), onchanged: vi.fn() });
+      expect(badge(container)).toHaveAttribute("title", "Visa");
+      expect(badge(container)!.querySelector("img")).toHaveAttribute("src", "/logo/c1.png");
+      expect(badge(container)).not.toHaveClass("ring-2");
+    });
+
+    it("is the bank's letter without a logo, on a subcategory or a row without a budget too", () => {
+      const { container } = render(BudgetRow, { c: cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, budget: null, left: null }),
+        sub: true, month: "2026-03", pace: 0.5, payAccounts: pay, account: "b1", onsave: vi.fn(), onchanged: vi.fn() });
+      expect(badge(container)).toHaveAttribute("title", "Checking");
+      expect(screen.getByRole("img", { name: "Checking" })).toHaveTextContent("C");
+    });
+
+    it("isn't there when no account applies", () => {
+      setup();
+      expect(badge(document.body)).toBeNull();
+    });
   });
 
   it("shows a subcategory's emoji too, a little smaller", () => {
@@ -107,7 +154,7 @@ describe("BudgetRow", () => {
 
   describe("in the Budgets card", () => {
     it("offers to roll over what's left, and says so once it does", async () => {
-      const { onchanged } = setup(cat(), { budgets: true, counts: true });
+      const { onchanged } = setup(cat(), { budgets: true });
       await userEvent.click(screen.getByRole("button", { name: /Roll over/ }));
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: true } });
       expect(toast.success).toHaveBeenCalledWith("Groceries rolls over from this month on");
@@ -115,46 +162,18 @@ describe("BudgetRow", () => {
     });
 
     it("turns rollover off", async () => {
-      setup(cat({ rollover_from: "2026-01" }), { budgets: true, counts: true });
+      setup(cat({ rollover_from: "2026-01" }), { budgets: true });
       const btn = screen.getByRole("button", { name: /Rolls over/ });
       expect(btn).toHaveAttribute("aria-pressed", "true");
       await userEvent.click(btn);
       expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", rollover: false } });
     });
 
-    it("lets you pick the card the budget is paid with", async () => {
-      const { onchanged } = setup(cat({ usual_account: "b1" }), { budgets: true, counts: true });
-      await userEvent.click(screen.getByRole("button", { name: "Set card" }));
-      const select = screen.getByRole("combobox", { name: "Account Groceries is paid with" });
-      expect(screen.getByRole("option", { name: "Automatic (usually Checking)" })).toBeInTheDocument();
-      await userEvent.selectOptions(select, "c1");
-      expect(api).toHaveBeenCalledWith("/api/budget", { method: "POST", body: { category: "Groceries", pay_with: "c1" } });
-      expect(toast.success).toHaveBeenCalledWith("Saved");
-      expect(onchanged).toHaveBeenCalled();
-    });
-
-    it("shows Set card on a budget with no card yet, without having to hover", () => {
-      setup(cat(), { budgets: true, counts: true });
-      expect(screen.getByRole("button", { name: "Set card" }).className).not.toMatch(/opacity-0/);
-    });
-
-    it("names the chosen card on the button", () => {
-      setup(cat({ pay_with: "c1" }), { budgets: true, counts: true });
-      expect(screen.getByRole("button", { name: "Visa" })).toBeInTheDocument();
-    });
-
-    it("closes the card picker on Escape without saving", async () => {
-      setup(cat(), { budgets: true, counts: true });
-      await userEvent.click(screen.getByRole("button", { name: "Set card" }));
-      await userEvent.keyboard("{Escape}");
-      expect(api).not.toHaveBeenCalled();
-      expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    });
-
-    it("doesn't offer rollover or a card on a subcategory or outside the Budgets card", () => {
-      setup(cat(), { sub: true, budgets: true, counts: true });
+    it("doesn't offer rollover on a subcategory, nor a card anywhere (that's in Settings › Categories)", () => {
+      setup(cat(), { sub: true, budgets: true });
       expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Set card" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Set card/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     });
   });
 });

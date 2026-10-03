@@ -2,18 +2,23 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from sqlalchemy import delete, func, select
 
-from ... import categories, db, rules, splits
-from ...models import Account, Budget, RetailItem, Rule, Transaction
+from ... import categories, db, forecast, rules, splits
+from ...models import Account, Budget, Category, RetailItem, Rule, Transaction
 from ..common import ApiError
 
 
 def api_categories(conn, _q, _b):
     """Every category, with how many transactions use it, and what else removing it would change: the rules that set
-    it, whether it has a budget, and the order items in it (Settings asks first when there's any of these)."""
+    it, whether it has a budget, and the order items in it (Settings asks first when there's any of these). And the
+    card or account its spending goes on: the one you chose (pay_with), and the one used most for it lately, which the
+    forecast goes by without a choice (usual_account)."""
     cats = categories.all_categories(conn)
+    pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
+    used = forecast.account_use(conn, date.today())
     p = splits.parts()
     counts = {r["category"]: r["n"] for r in conn.execute(select(p.c.category, func.count().label("n")).group_by(p.c.category))}
     in_rules: dict[str, int] = {}
@@ -28,6 +33,8 @@ def api_categories(conn, _q, _b):
         c["rules"] = in_rules.get(c["name"], 0)
         c["budgeted"] = c["name"] in budgeted
         c["items"] = items.get(c["name"], 0)
+        c["pay_with"] = pay_with.get(c["name"])
+        c["usual_account"] = forecast.usual_account(used, [c["name"]] + [k["name"] for k in cats if c["name"] in k["path"][:-1]])
     return cats
 
 
@@ -59,6 +66,14 @@ def api_category_move(conn, _q, body):
 def api_category_look(conn, _q, body):
     try:
         categories.set_look(conn, body.get("name") or "", body.get("icon"), body.get("color"))
+    except categories.CategoryError as e:
+        raise ApiError(str(e)) from e
+    return {"ok": True}
+
+
+def api_category_pay_with(conn, _q, body):
+    try:
+        categories.set_pay_with(conn, body.get("name") or "", body.get("pay_with") or None)
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}

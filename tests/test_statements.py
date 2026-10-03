@@ -7,7 +7,7 @@ from sqlalchemy import delete, insert, update
 
 from runway import db, forecast, notify, statements
 from runway import settings_keys as sk
-from runway.models import Account, Budget, CardStatement, ManualStatement, Override, Recurring
+from runway.models import Account, Budget, CardStatement, Category, ManualStatement, Override, Recurring
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
 from tests.shared import TODAY, LedgerCase
@@ -138,7 +138,8 @@ class ManualStatementForecastTests(LedgerCase):
 
     def test_a_stale_card_has_no_estimated_statements_with_budgets_either(self):
         # Groceries is paid with the card, but its statement is stale: nothing is estimated from it, budgets or not.
-        self.conn.execute(insert(Budget).values(category="Groceries", amount=500, pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         self.manual("cc", 800.0, "2026-07-10", "2026-08-05")
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual(self.card_events(fc), [])

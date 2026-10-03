@@ -2,7 +2,7 @@
 removal or rename cascades to, the recurring list and its edits, auto-matching edge cases, and bulk edits."""
 import json
 import unittest
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, literal, select, update
 
@@ -165,6 +165,29 @@ class CategoryCascadeTests(Base):
         self.assertEqual((cats["Pharmacy"]["rules"], cats["Pharmacy"]["budgeted"], cats["Pharmacy"]["items"]), (3, True, 1))
         self.assertEqual((cats["Groceries"]["rules"], cats["Groceries"]["budgeted"], cats["Groceries"]["items"]), (1, False, 0))
         self.assertEqual((cats["Travel"]["rules"], cats["Travel"]["budgeted"], cats["Travel"]["items"]), (0, False, 0))
+
+    def test_any_spending_category_has_a_card_of_its_own(self):
+        categories.add(self.c, "Dentist", "Pharmacy")
+        recent = (date.today() - timedelta(days=3)).isoformat()
+        self.tx(-4000, "DENTAL CARE", acct="cc", posted=recent, category="Dentist")
+        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": "chk"})   # nested, no budget
+        api_categories.api_category_pay_with(self.c, None, {"name": "Travel", "pay_with": "cc"})
+        cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
+        self.assertEqual((cats["Dentist"]["pay_with"], cats["Travel"]["pay_with"], cats["Groceries"]["pay_with"]), ("chk", "cc", None))
+        # what it goes on without a choice: the account used most lately, its subcategories' spending included
+        self.assertEqual((cats["Dentist"]["usual_account"], cats["Pharmacy"]["usual_account"], cats["Travel"]["usual_account"]),
+                         ("cc", "cc", None))
+        api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": ""})   # back to automatic
+        self.assertIsNone(self.one(select(Category.pay_with).where(Category.name == "Dentist"))[0])
+        for body, error in (({"name": "Nope", "pay_with": "cc"}, "Category not found"),
+                            ({"name": "Travel", "pay_with": "nope"}, "Account not found"),
+                            ({"name": "Income", "pay_with": "cc"}, "Pick a spending category")):
+            with self.assertRaises(ApiError) as e:
+                api_categories.api_category_pay_with(self.c, None, body)
+            self.assertEqual(str(e.exception), error)
+        self.assertEqual(self.one(select(Category.pay_with).where(Category.name == "Travel"))[0], "cc")   # untouched
+        categories.rename(self.c, "Travel", "Trips")   # a rename keeps it
+        self.assertEqual(self.one(select(Category.pay_with).where(Category.name == "Trips"))[0], "cc")
 
     def test_rule_list_and_delete(self):
         self.c.execute(insert(Rule).values(match="", account_id="chk", review=1))
