@@ -38,4 +38,31 @@ describe("ForecastTable", () => {
     expect([...pop.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["Groceries$25.50", "Dining$10.00"]);
     expect(pop).toHaveTextContent("That day$35.50");
   });
+
+  it("shows a card payment both lines make alike once, with no badge, and keeps different ones apart", () => {
+    const f = fc(0, false);
+    f.total = [1000, 650];
+    f.budget!.total = [1000, 640];   // the lines differ (by other budgeted spending), so the budget column shows
+    f.events = [{ date: "2026-10-26", account_id: "chk", kind: "card", name: "New card statement", amount: -350, estimated: true }] as Overview["events"];
+    const { unmount } = render(ForecastTable, { fc: f });
+    expect(screen.getAllByText(/New card statement/)).toHaveLength(1);
+    expect(screen.getByText(/New card statement \(estimate\)/)).toBeInTheDocument();
+    expect(screen.queryByText("forecast only")).not.toBeInTheDocument();
+    expect(screen.queryByText("budget only")).not.toBeInTheDocument();
+    unmount();
+    // an amount you changed for the forecast's payment: no longer the same, so one of each
+    f.events = [{ ...f.events[0], amount: -400 }];
+    render(ForecastTable, { fc: f });
+    expect(screen.getAllByText(/New card statement/)).toHaveLength(2);
+    expect(screen.getByText("forecast only")).toBeInTheDocument();
+    expect(screen.getByText("budget only")).toBeInTheDocument();
+  });
+
+  it("leaves out what comes to $0, and a day with nothing else", () => {
+    const f = fc(0, false);
+    f.events = [{ date: "2026-10-26", account_id: "chk", kind: "card", name: "Zero card statement", amount: -0.001, estimated: true }] as Overview["events"];
+    render(ForecastTable, { fc: f });
+    expect(screen.queryByText(/Zero card statement/)).not.toBeInTheDocument();
+    expect(screen.queryByText("forecast only")).not.toBeInTheDocument();
+  });
 });

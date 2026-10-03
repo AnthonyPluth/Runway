@@ -1029,11 +1029,9 @@ class PaymentModeTests(LedgerCase):
         s1 = -700 + outside * 17 / 30 + 300 + 500 / 31 * 10
         self.assertEqual(self.payments(fc), {"2026-10-05": 600.0, "2026-11-05": round(s1, 2),
                                              "2026-12-07": round(outside + 500 / 31 * 21 + 500 / 30 * 10, 2)})
-        # the budget line: Oct 10's statement is the credit plus budgeted charges, still below zero
+        # the budget line pays the card's statements the same: its budgets plus its spending outside them
         card = {c["date"]: -c["amount"] for c in fc["budget"]["changes"] if c["kind"] == "card"}
-        s1 = -700 + 300 + 500 / 31 * 10
-        self.assertNotIn("2026-11-05", card)
-        self.assertAlmostEqual(card["2026-12-07"], s1 + 500 / 31 * 21 + 500 / 30 * 10, places=1)
+        self.assertEqual(card, {d: v for d, v in self.payments(fc).items() if d != "2026-10-05"})
 
     def test_with_budgets_a_cards_statements_are_its_budgets_plus_its_other_spending(self):
         # Groceries ($500 a month, $200 spent this month) is paid with the card. The card's other spending averaged
@@ -1130,12 +1128,17 @@ class PaymentModeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         paid = lambda due: fc["budget"]["total"][fc["dates"].index(due) - 1] - fc["budget"]["total"][fc["dates"].index(due)]
         self.assertAlmostEqual(paid("2026-10-05"), 50.0, places=2)   # the closed statement: the forecast's own event
-        charged = 300 + 300 + 500 / 31 * 10   # as in test_sticking_to_the_budget
+        # charged so far, the card's spending outside budgets (933.33 a statement) for the days left, and Groceries
+        outside = (1200 + 800 + 800) / 3
+        charged = 300 + outside * 17 / 30 + 300 + 500 / 31 * 10
         s1 = 550 + charged
         card = {c["date"]: c for c in fc["budget"]["changes"] if c["kind"] == "card"}
         self.assertAlmostEqual(-card["2026-11-05"]["amount"], self.minimum(s1), places=1)
-        s2 = s1 - self.minimum(s1) + 500 / 31 * 21 + 500 / 30 * 10
+        self.assertEqual(card["2026-11-05"]["outside"], round(outside, 2))
+        s2 = s1 - self.minimum(s1) + outside + 500 / 31 * 21 + 500 / 30 * 10
         self.assertAlmostEqual(-card["2026-12-07"]["amount"], self.minimum(s2), places=1)
+        # the same payments as the forecast's own
+        self.assertEqual({d: -c["amount"] for d, c in card.items()}, {d: v for d, v in self.payments(fc).items() if d != "2026-10-05"})
         # with an APR, the budget line charges the same interest as the forecast
         self.pay("minimum", apr="24")
         fc = forecast.build(self.conn, TODAY, 90)

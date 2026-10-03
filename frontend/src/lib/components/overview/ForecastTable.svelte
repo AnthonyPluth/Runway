@@ -19,17 +19,27 @@
 
   const rows = $derived.by(() => {
     const byDate: Record<string, Item[]> = {};
-    const add = (d: string, it: Item) => (byDate[d] ||= []).push(it);
+    // Nothing to show for what comes to $0 (a payment edited down to nothing, say): it doesn't move either line.
+    const add = (d: string, it: Item) => { if (Math.abs(it.amount) >= 0.005) (byDate[d] ||= []).push(it); };
+    // A card payment both lines make alike (same card, day and amount: its statements are its budgets plus its other
+    // spending on both) is one line, not one of each.
+    const same = (e: { date: string; name: string; amount: number }) => (c: { kind: string; date: string; name: string; amount: number }) =>
+      c.kind === "card" && c.date === e.date && c.name === e.name && Math.abs(c.amount - e.amount) < 0.005;
+    const shared = new Set<unknown>();
     for (const e of fc.events) {
       const estCard = e.kind === "card" && !!e.estimated;
+      const both = alt && estCard ? fc.budget?.changes?.find(same(e)) : undefined;
+      if (both) shared.add(both);
       add(e.date, { name: e.name + (e.estimated ? " (estimate)" : ""), amount: e.amount,
-        only: alt && estCard ? "forecast" : undefined,
-        note: alt && estCard ? "the budget line pays this card from its budgets instead" : undefined });
+        only: alt && estCard && !both ? "forecast" : undefined,
+        note: both ? "the same on the budget line: the card's budgets plus its other spending"
+          : alt && estCard ? "the budget line pays this card from its budgets instead" : undefined });
     }
     if (alt) {
       // budgets paid from a forecast account come out a little each day: one line a day, made of each budget's share
       const spend: Record<string, { total: number; parts: { name: string; amount: number }[] }> = {};
       for (const c of fc.budget?.changes ?? []) {
+        if (shared.has(c)) continue;
         if (c.kind === "budget") {
           const s = (spend[c.date] ||= { total: 0, parts: [] });
           s.total += c.amount; s.parts.push({ name: c.name, amount: -c.amount });
