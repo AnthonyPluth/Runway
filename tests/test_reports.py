@@ -125,6 +125,10 @@ class ReportTests(DbCase):
         self.assertEqual((sept["income"], sept["spending"], sept["net"]), (3100.0, 302.0, 2798.0))
         self.assertAlmostEqual(sept["rate"], 2798 / 3100, places=4)
         self.assertEqual((d["year"]["income"], d["year"]["spending"]), (9100.0, 532.0))
+        # Fewer months on the chart don't shorten the year
+        two = reports.income_vs_spending(self.c, "2026-09", 2)
+        self.assertEqual([m["month"] for m in two["months"]], ["2026-08", "2026-09"])
+        self.assertEqual(two["year"], d["year"])
 
     def test_months_before_the_first_transaction_are_left_out(self):
         # History starts in July: a 12-month view is July to September, and the year counts three months, not nine

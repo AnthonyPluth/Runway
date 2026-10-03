@@ -156,11 +156,7 @@ def spending_over_time(conn, end: str, months: int = 12, group: str = "category"
             "through": f"{today:%Y-%m-%d}" if today is not None and partial else None}
 
 
-def income_vs_spending(conn, end: str, months: int = 12) -> dict:
-    """Money in and money out each month, what was left, and the share of income kept (savings rate). Months before the
-    first transaction are left out, so the year's count of months is the months with history."""
-    ms = _with_data(conn, month_list(end, max(2, min(months, 36))))
-    kinds = _Kinds(conn)
+def _in_and_out(conn, kinds: _Kinds, ms: list[str]) -> list[dict[str, Any]]:
     inc = {m: 0.0 for m in ms}
     out = {m: 0.0 for m in ms}
     for r in _rows(conn, *_bounds(ms)):
@@ -174,8 +170,21 @@ def income_vs_spending(conn, end: str, months: int = 12) -> dict:
         i, o = round(max(0.0, inc[m]), 2), round(max(0.0, out[m]), 2)
         rows.append({"month": m, "income": i, "spending": o, "net": round(i - o, 2),
                      "rate": round((i - o) / i, 4) if i > 0 else None})
+    return rows
+
+
+def income_vs_spending(conn, end: str, months: int = 12) -> dict:
+    """Money in and money out each month, what was left, and the share of income kept (savings rate). Months before the
+    first transaction are left out, so the year's count of months is the months with history. The year is January to
+    `end` whatever number of months is asked for."""
+    ms = _with_data(conn, month_list(end, max(2, min(months, 36))))
+    kinds = _Kinds(conn)
+    rows = _in_and_out(conn, kinds, ms)
     year = ms[-1][:4]
-    ytd = [r for r in rows if r["month"].startswith(year)]
+    year_ms = _with_data(conn, month_list(ms[-1], int(ms[-1][5:7])))
+    have = {r["month"]: r for r in rows}
+    ytd = [have[m] for m in year_ms] if all(m in have for m in year_ms) else _in_and_out(conn, kinds, year_ms)
+    ytd = [r for r in ytd if r["month"].startswith(year)]
     ti, to = round(sum(r["income"] for r in ytd), 2), round(sum(r["spending"] for r in ytd), 2)
     return {"months": rows, "year": {"year": year, "months": len(ytd), "income": ti, "spending": to, "net": round(ti - to, 2),
                                      "rate": round((ti - to) / ti, 4) if ti > 0 else None}}
