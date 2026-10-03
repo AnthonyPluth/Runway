@@ -598,8 +598,9 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
     return out
 
 
-def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[dict]:
-    """Suggestions for everything waiting in Review, one per merchant. Nothing is applied."""
+def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120, skip: list[str] | None = None) -> list[dict]:
+    """Suggestions for everything waiting in Review, one per merchant. Nothing is applied. `skip`: merchants (as the
+    suggestions name them) you skipped before, left out so the model isn't asked about them again."""
     t = Transaction
     txs = db.rows(conn.execute(
         select(t, Account.kind, db.account_label_expr().label("account_name"))
@@ -608,6 +609,8 @@ def suggest_for_review(conn, caller=call_llm, limit_groups: int = 120) -> list[d
                Account.kind != "investment")
         .order_by(t.posted.desc())))
     groups = group_by_merchant(txs)
+    skipped = {" ".join(str(m).split()).lower() for m in skip or []}
+    groups = [g for g in groups if " ".join((g[0]["payee"] or g[0]["description"] or "").split()).lower() not in skipped]
     groups.sort(key=lambda g: -len(g))
     groups = groups[:limit_groups]
     conn.commit()
@@ -683,12 +686,35 @@ def rule_offer(conn, tx_id: str, category: str) -> dict | None:
     have = conn.execute(select(Rule.category).where(Rule.match == key, *rulesmod.plain())).fetchone()
     if have and have["category"] == category:
         return None
-    return {"merchant": tx["payee"] or tx["description"], "match": key, "replaces": have["category"] if have else None}
+    return {"merchant": tx["payee"] or tx["description"], "match": key, "replaces": have["category"] if have else None,
+            "also_updated": len(_rule_would_update(conn, key, [tx_id]))}
 
 
-def accept_suggestion(conn, tx_id: str) -> None:
-    conn.execute(update(Transaction).where(Transaction.id == tx_id, Transaction.category.is_not(None))
-                 .values(needs_review=0, category_source="manual", confidence=1))
+def _rule_would_update(conn, key: str, besides: list[str]):
+    """What a rule for `key` made now would also categorize (set_category with remember=True): the other transactions
+    with that text still waiting for review or a category, not chosen by you nor split."""
+    t = Transaction
+    return list(conn.execute(select(t.id).where(
+        t.id.not_in(besides), func.coalesce(t.category_source, "") != "manual", func.coalesce(t.is_split, 0) == 0,
+        or_(t.needs_review == 1, t.category.is_(None)),
+        or_(db.instr(func.lower(t.payee), key) > 0, db.instr(func.lower(t.description), key) > 0))).scalars())
+
+
+def bulk_rule_offer(conn, tx_ids: list[str], category: str) -> dict | None:
+    """After setting a category on several transactions: the same offer as rule_offer, when they're all one merchant."""
+    keys = {rule_key(dict(r)) for r in conn.execute(select(Transaction.payee, Transaction.description).where(Transaction.id.in_(tx_ids[:MAX_BULK])))}
+    if len(keys) != 1 or not tx_ids:
+        return None
+    offer = rule_offer(conn, tx_ids[0], category)
+    if offer:
+        offer["also_updated"] = len(_rule_would_update(conn, offer["match"], tx_ids))
+    return offer
+
+
+def accept_suggestion(conn, tx_id: str) -> bool:
+    """Keep the category a transaction has and take it out of Review. False when it has none to keep."""
+    return conn.execute(update(Transaction).where(Transaction.id == tx_id, Transaction.category.is_not(None))
+                        .values(needs_review=0, category_source="manual", confidence=1)).rowcount > 0
 
 
 MAX_BULK = 2000
