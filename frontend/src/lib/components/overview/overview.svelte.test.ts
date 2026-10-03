@@ -8,7 +8,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
-import type { CardSummary } from "$lib/types";
+import type { CardSummary, StatementEstimate } from "$lib/types";
 import { tx } from "../../../test/fixtures";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
@@ -189,6 +189,20 @@ describe("CardsTable", () => {
     // paid in full: no "pays", as before
     render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
     expect(screen.queryByText(/pays/)).toBeNull();
+  });
+
+  it("lists what the next statement's estimate is made of, from its usual spending", async () => {
+    at("2026-03-10");
+    const next_estimate: StatementEstimate = { basis: "average", close: "2026-04-01", due: "2026-04-26", usual: 700, average: 700,
+      cycles: [{ close: "2026-02-01", amount: 600 }, { close: "2026-03-01", amount: 800 }], fees: [{ name: "Sapphire annual fee", amount: 95 }],
+      fees_total: 95, statement: 795, total: 795 };
+    render(CardsTable, { onchanged: vi.fn(), cards: [card({ next_estimate })] });
+    const usual = screen.getByRole("button", { name: "about $700.00 a statement" });
+    expect(usual.title).toContain("Sapphire annual fee · $95.00\n= $795.00");
+    expect(screen.queryByText("Sapphire annual fee")).toBeNull();
+    await userEvent.click(usual);
+    expect(usual).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(usual.getAttribute("aria-controls")!)).toHaveTextContent(/Sapphire annual fee \$95\.00 = \$795\.00$/);
   });
 
   it("says \"about\" only for an average over two or more statements", () => {

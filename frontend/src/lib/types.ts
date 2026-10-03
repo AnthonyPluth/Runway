@@ -95,6 +95,8 @@ export interface ForecastEvent {
   estimated?: boolean;
   /** A card statement estimated from the budgets paid with the card plus its usual spending outside them. */
   from_budgets?: boolean;
+  /** An estimated card statement: what it's made of. Never on one whose amount you've changed (that's not an estimate). */
+  estimate?: StatementEstimate;
   overridden?: boolean;
   original_amount?: number;
   /** The forecast account's balance right after it (not on a fee: that's a charge on a card). */
@@ -113,6 +115,47 @@ export interface ForecastEvent {
    *  (null when that payment isn't in the forecast). */
   paid_on?: string | null;
   paid_from?: string | null;
+}
+
+/** What an estimated card statement is made of (forecast.estimate_parts). Only what went into it is there; the parts
+ *  (charged_so_far, budgets_total, usual, separate_total, fees_total, carried, interest) add up to `statement` to the
+ *  cent, and each list adds up to its total. */
+export interface StatementEstimate {
+  /** budgets: the budgets paid with the card plus its usual spending outside them; average: its average spending;
+   *  recent: its recent daily rate (not enough history for an average). */
+  basis: "budgets" | "average" | "recent";
+  close: string;
+  due: string;
+  /** On the card already this cycle (the one in progress). */
+  charged_so_far?: number;
+  budgets?: { category: string; amount: number }[];
+  budgets_total?: number;
+  /** What the average (or the daily rate) adds; on the cycle in progress, its share of the days left. */
+  usual: number;
+  /** The average it's from (budgets: of the spending outside budgets), and the statements averaged, oldest first. */
+  average?: number | null;
+  outside_average?: number | null;
+  cycles?: { close: string; amount: number }[];
+  /** The cycle in progress: the days left to the close, and their share of the cycle. */
+  days_left?: number;
+  days_left_share?: number;
+  /** basis recent: the daily rate, over this many days. */
+  daily_rate?: number;
+  days?: number;
+  /** Recurring charges on the card added on their dates (the average doesn't have them). */
+  separate?: { name: string; amount: number }[];
+  separate_total?: number;
+  /** Annual fees charged in the cycle. */
+  fees?: { name: string; amount: number }[];
+  fees_total?: number;
+  /** What the statement before leaves unpaid (below zero: a credit on the card), and a month's interest at `apr`. */
+  carried?: number;
+  interest?: number;
+  apr?: number | null;
+  statement: number;
+  /** What's paid toward it: the event's amount. Less than the statement when paying the minimum or a fixed amount. */
+  total: number;
+  pay_mode?: "full" | "minimum" | "fixed";
 }
 
 export interface CardSummary {
@@ -140,6 +183,8 @@ export interface CardSummary {
   due_date: string;
   avg_monthly_spend?: number | null;
   avg_cycles?: number;
+  /** The card's next estimated statement in the forecast (one whose payment you haven't changed), if any. */
+  next_estimate?: StatementEstimate | null;
   /** Where the statement is from: Plaid, or entered by you. */
   statement_source?: "plaid" | "manual";
   /** One you entered that a newer one should have replaced by now. */

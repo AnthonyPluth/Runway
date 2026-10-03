@@ -11,6 +11,8 @@
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
   import { toast } from "svelte-sonner";
+  import EstimateBreakdown from "./EstimateBreakdown.svelte";
+  import { estimateTitle } from "./estimate";
 
   // What's coming up. Click an amount to change just that one occurrence; a recurring item's name opens it in Recurring, to
   // change every one. A churning card's annual fee (kind "fee") says which card payment it's in, instead of a balance.
@@ -24,6 +26,9 @@
     limit?: number; accounts?: boolean; all?: boolean; onchanged: () => void; onBudget?: Record<string, number>;
   } = $props();
   const shown = $derived(all ? events : events.slice(0, limit));
+  // Estimated statements whose breakdown is open under the row (by key): its asterisk toggles it.
+  let explained = $state<Record<string, boolean>>({});
+  const uid = $props.id();
   // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
   // projected balance shows once a day for each account, under the day's items: the balance after its last item that day
   // (an annual fee is a card charge: it never moves one).
@@ -68,7 +73,8 @@
   <div class="px-4 pt-2.5 pb-1 text-[13px] font-medium text-muted-foreground" role="heading" aria-level="3">{fmtDow(d.date)}</div>
   {#each d.rows as { e, i } (e.key ?? `${e.date}-${e.name}-${i}`)}
     {@const bank = e.kind === "card" && e.card_id ? app.state?.brands?.[e.card_id] : undefined}
-    <div class="cell min-h-12 py-2">
+    <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
+    <div class={["cell min-h-12 flex-wrap py-2", e.key && explained[e.key] && "items-start"]}>
       <!-- Logos as they are, with nothing behind them, as in Transactions. -->
       {#if e.logo}
         <Logo src={e.logo} />
@@ -100,16 +106,25 @@
         {/if}
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-good"]}>
-        <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. -->
+        <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. A card statement's
+             asterisk is a button: its tooltip lists what the estimate is made of, and a tap shows the same under the row. -->
         <!-- The asterisk hangs past the amount, so amounts line up on the right with or without one. -->
         <span class="relative flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
-            save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
+            save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated && !e.overridden}{#if e.estimate && e.key}{@const k = e.key}<button type="button"
+            class="absolute top-0 left-full ml-0.5 cursor-pointer text-muted-foreground after:absolute after:-inset-y-3 after:left-0 after:-right-3 hover:text-foreground"
+            aria-label="What this estimate is made of" aria-expanded={!!explained[k]} aria-controls={`${uid}-${k}`}
+            title={estimateTitle(e.estimate)} onclick={() => (explained[k] = !explained[k])}>*</button>{:else}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
               ? "the statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
-              : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}</span>
+              : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}{/if}</span>
         {#if e.overridden}
           <Button variant="link" size="sm" class="h-auto p-0 text-xs" title="Go back to the usual amount" onclick={() => reset(e)}>reset</Button>
         {/if}
       </div>
+
+      {#if e.estimate && !e.overridden && e.key && explained[e.key]}
+        <!-- under the name (past the icon), its amounts lined up under the row's -->
+        <EstimateBreakdown estimate={e.estimate} id={`${uid}-${e.key}`} class="-mt-2 basis-full pl-11" />
+      {/if}
     </div>
   {/each}
   {#each d.balances as b, k (k)}
