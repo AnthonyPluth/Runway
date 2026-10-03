@@ -198,6 +198,71 @@ def api_recurring_candidates(conn, q, _b, rid):
     return [{**t, "name": t["payee"] or t["description"]} for t in recurring.candidates(conn, item, day, amount)]
 
 
+# What set_amount changes on an item, so putting it back (restore_amount) restores exactly what was there.
+AMOUNT_COLUMNS = ("amount", "amount_mode", "amount_since", "amount_min", "amount_max")
+
+
+def set_amount(conn, rid: int, amount: float) -> dict:
+    """Make `amount` (signed) the item's own amount from now on, as a fixed amount: what an edit of a one-time item's
+    amount does, and "From now on" after an edit of one date. Its range moves with it as an edit in Recurring moves it
+    (_range_for_new_amount), the "use $X" hint looks at payments from today, and what's matched stays. Returns what it
+    had before (AMOUNT_COLUMNS), for restore_amount."""
+    old = conn.execute(select(Recurring).where(Recurring.id == rid)).fetchone()
+    if not old:
+        raise ApiError("Recurring item not found", 404)
+    vals = {"amount": round(amount, 2), "amount_mode": "fixed", "amount_min": old["amount_min"], "amount_max": old["amount_max"]}
+    if abs(vals["amount"] - (old["amount"] or 0)) >= 0.005:
+        vals["amount_since"] = date.today().isoformat()
+        vals.update(_range_for_new_amount(old, vals))
+    conn.execute(update(Recurring).where(Recurring.id == rid).values(vals))
+    recurring.auto_match(conn, [rid])
+    return {k: old[k] for k in AMOUNT_COLUMNS}
+
+
+def restore_amount(conn, rid: int, previous) -> None:
+    """Put back what set_amount changed, as it was (Undo)."""
+    if not isinstance(previous, dict) or set(previous) != set(AMOUNT_COLUMNS):
+        raise ApiError("Nothing to put back")
+    try:
+        vals = {"amount": db.number(previous["amount"]),
+                **{k: None if previous[k] is None else db.number(previous[k]) for k in ("amount_min", "amount_max")}}
+    except (TypeError, ValueError):
+        raise ApiError("Nothing to put back") from None
+    mode, since = previous["amount_mode"], previous["amount_since"]
+    if mode not in (None, *recurring.AMOUNT_MODES) or not (since is None or isinstance(since, str)):
+        raise ApiError("Nothing to put back")
+    if not conn.execute(update(Recurring).where(Recurring.id == rid).values({**vals, "amount_mode": mode, "amount_since": since})).rowcount:
+        raise ApiError("Recurring item not found", 404)
+
+
+def one_time_item(conn, key: str):
+    """The one-time item a forecast key (rec:<id>:<date>) belongs to; None for any other key or item."""
+    parts = key.split(":")
+    if len(parts) != 3 or parts[0] != "rec" or not parts[1].isdigit():
+        return None
+    item = conn.execute(select(Recurring).where(Recurring.id == int(parts[1]))).fetchone()
+    return item if item and item["frequency"] == "once" else None
+
+
+def api_recurring_amount(conn, _q, body, rid):
+    """An item's own amount, from Overview's Coming up: "From now on" after changing one date's amount ({amount, key}:
+    the new amount becomes the item's, as a fixed amount, and that date's edit goes, since it's the usual now), or
+    putting back what that changed ({restore}: Undo)."""
+    rid = int(rid)
+    if "restore" in body:
+        restore_amount(conn, rid, body["restore"])
+        return {"ok": True}
+    try:
+        amount = db.number(body.get("amount"))
+    except (TypeError, ValueError):
+        raise ApiError("Enter an amount") from None
+    previous = set_amount(conn, rid, amount)
+    key = str(body.get("key") or "")
+    if key.startswith(f"rec:{rid}:"):
+        conn.execute(delete(Override).where(Override.key == key))
+    return {"ok": True, "previous": previous}
+
+
 def api_recurring_add_text(conn, _q, body, rid):
     """"Also match this from now on": add another merchant text to an item."""
     try:

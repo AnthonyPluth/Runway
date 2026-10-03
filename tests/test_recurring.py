@@ -523,6 +523,34 @@ class ScheduleTests(LedgerCase):
         # One due today is next, not late.
         self.assertEqual(self.listed(date(2026, 11, 2))["next_date"], "2026-11-02")
 
+    def test_from_now_on_makes_one_dates_new_amount_the_items_and_drops_that_dates_edit(self):
+        from runway.server.api.state import api_override_set
+        self.conn.execute(update(Recurring).values(amount_mode="avg3", amount_min=1400, amount_max=1600))
+        api_override_set(self.conn, None, {"key": f"rec:{self.rid}:2026-10-01", "amount": -1650})   # Oct 1's only
+        self.assertEqual(self.events()[:2], [("2026-10-01", -1650), ("2026-11-02", -1500)])
+        before = dict(self.conn.execute(select(Recurring)).fetchone())
+        with mock.patch.object(self.api, "date", wraps=date) as d:
+            d.today.return_value = TODAY
+            r = self.api.api_recurring_amount(self.conn, None, {"amount": -1650, "key": f"rec:{self.rid}:2026-10-01"}, str(self.rid))
+        item = dict(self.conn.execute(select(Recurring)).fetchone())
+        # A fixed amount now (it was the average of the last 3), its range moved with it, the hint counting from today
+        self.assertEqual((item["amount"], item["amount_mode"], item["amount_since"]), (-1650, "fixed", TODAY.isoformat()))
+        self.assertEqual((item["amount_min"], item["amount_max"]), (1540, 1760))
+        self.assertIsNone(self.conn.execute(select(Override.key)).scalar())   # no edit left: it's the usual amount now
+        fc = forecast.build(self.conn, TODAY, 120)
+        self.assertFalse(any(e.get("overridden") for e in fc["events"]))
+        self.assertEqual({a for e, a in self.events()}, {-1650})
+        self.assertEqual(len(recurring.matched(self.conn, self.rid)), 3)   # what's matched stays
+        # Undo puts back exactly what was there.
+        self.assertEqual(r["previous"], {k: before[k] for k in self.api.AMOUNT_COLUMNS})
+        self.api.api_recurring_amount(self.conn, None, {"restore": r["previous"]}, str(self.rid))
+        self.assertEqual(dict(self.conn.execute(select(Recurring)).fetchone()), before)
+        for bad in ({"amount": "lots"}, {"restore": {"amount": -1}}, {"restore": {**r["previous"], "amount_mode": "guess"}}):
+            with self.subTest(body=bad), self.assertRaises(ApiError):
+                self.api.api_recurring_amount(self.conn, None, bad, str(self.rid))
+        with self.assertRaises(ApiError):
+            self.api.api_recurring_amount(self.conn, None, {"amount": -10}, "999")
+
     def test_payments_to_link_to_a_missed_one(self):
         self.tx("chk", "2026-10-05", -1500.0, "CITY RNT PMT ONLINE")      # the rent, under another text
         self.tx("chk", "2026-10-02", -1480.0, "SOFA STORE")               # about the same amount
@@ -591,6 +619,25 @@ class OneTimeTests(LedgerCase):
         self.assertEqual(self.events(date(2026, 10, 25)), [("2026-10-25", 1240, "2026-10-20")])
         self.assertEqual(self.events(date(2026, 11, 2)), [])   # its window has closed
         self.assertEqual([m["date"] for m in recurring.missed(self.conn, date(2026, 11, 10))], ["2026-10-20"])
+
+    def test_changing_its_amount_on_overview_changes_the_item(self):
+        from runway.server.api.state import api_override_set
+        key = f"rec:{self.rid}:2026-10-20"
+        self.conn.execute(insert(Override).values(key=key, amount=1000.0))   # an edit from before this
+        before = self.item()
+        r = api_override_set(self.conn, None, {"key": key, "amount": 1310.5})
+        self.assertEqual(r["item"], {"id": self.rid, "name": "Tax refund"})
+        self.assertEqual(self.item()["amount"], 1310.5)   # Recurring shows it
+        self.assertIsNone(self.conn.execute(select(Override.key)).scalar())   # no per-date edit (and nothing to reset)
+        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e.get("recurring_id") == self.rid)
+        self.assertEqual((e["amount"], e.get("overridden")), (1310.5, None))
+        self.api.api_recurring_amount(self.conn, None, {"restore": r["previous"]}, str(self.rid))   # Undo
+        self.assertEqual(self.item(), before)
+        # A repeating item's date still gets an edit of its own.
+        rent = self.api.api_recurring_add(self.conn, None, {**self.body, "name": "Rent", "amount": -1500, "frequency": "monthly",
+                                                            "match": "rent"})["id"]
+        self.assertEqual(api_override_set(self.conn, None, {"key": f"rec:{rent}:2026-11-20", "amount": -1600}), {"ok": True})
+        self.assertEqual(self.conn.execute(select(Override.amount)).scalar(), -1600)
 
     def test_moving_its_date_lets_go_of_what_matched_far_from_the_new_one(self):
         self.tx("chk", "2026-10-16", 1240.0, "IRS TREAS 310 TAX REF")
