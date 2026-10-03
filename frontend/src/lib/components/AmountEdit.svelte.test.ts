@@ -21,7 +21,7 @@ describe("AmountEdit", () => {
     setup({ amount: 100, signed: true });
     const inc = screen.getByRole("button");
     expect(inc).toHaveTextContent("+$100.00");
-    expect(inc).toHaveClass("text-emerald-500");
+    expect(inc).toHaveClass("text-good");
   });
 
   it("uses a real minus sign for an outgoing signed amount", () => {

@@ -9,6 +9,7 @@ vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import type { CardSummary } from "$lib/types";
+import { tx } from "../../../test/fixtures";
 import { toast } from "svelte-sonner";
 import CardsTable from "./CardsTable.svelte";
 import { forecastSheet } from "./forecastSheet.svelte";
@@ -96,6 +97,21 @@ describe("ThisMonth", () => {
     render(ThisMonth);
     expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
   });
+
+  it("signs Recent's amounts, and shows a dash, not 0%, for a budget with nothing spent", async () => {
+    const cat = (name: string, budget: number, spent: number) => ({ name, parent: null, path: [name], depth: 0, top: name, has_children: false,
+      budget, pay_with: null, usual_account: null, available: budget, spent, own_spent: spent, left: budget - spent });
+    vi.mocked(api)
+      .mockResolvedValueOnce({ month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 10, last_same_point: 12, last_total: 300 })
+      .mockResolvedValueOnce({ month: "2026-03", days_in_month: 31, day: 10, categories: [cat("Dining", 200, 50), cat("Travel", 500, 0)], income: 0, uncategorized: 0, pay_accounts: [] })
+      .mockResolvedValueOnce({ items: [tx({ id: "a", amount: -12.5 }), tx({ id: "b", payee: "Payroll", amount: 2000 })], total: 2 });
+    render(ThisMonth);
+    expect(await screen.findByText("−$12.50")).toBeInTheDocument();
+    expect(screen.getByText("+$2,000.00")).toHaveClass("text-good");
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.queryByText("0%")).not.toBeInTheDocument();
+    expect(screen.getByText("nothing spent yet")).toHaveClass("sr-only");
+  });
 });
 
 describe("CardsTable", () => {
@@ -142,14 +158,14 @@ describe("CardsTable", () => {
     expect(screen.getByText(/owes \$800\.00 now/)).toBeInTheDocument();
     expect(screen.getByText("about $700.00 a statement")).toHaveAttribute("title", expect.stringContaining("last 3 statements"));
     expect(screen.getByRole("button", { name: "$600.00" })).toBeInTheDocument();
-    expect(screen.getByText("due Mar 26")).not.toHaveClass("text-amber-400");
+    expect(screen.getByText("due Mar 26")).not.toHaveClass("text-warning");
     expect(screen.getByText(/min \$35\.00/)).toBeInTheDocument();
   });
 
   it("highlights a payment due within a week", () => {
     at("2026-03-22");
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
-    expect(screen.getByText("due Mar 26")).toHaveClass("text-amber-400");
+    expect(screen.getByText("due Mar 26")).toHaveClass("text-warning");
   });
 
   it("says Paid once nothing remains, and what's left after a part payment", () => {

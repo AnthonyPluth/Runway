@@ -47,7 +47,7 @@
       <!-- A problem links to Settings › Connections, with the bank's message on a line of its own (not only on hover). -->
       <div class="flex min-w-0 flex-col text-xs text-muted-foreground" title={sync.title} role="status">
         {#if sync.href}
-          <a href={sync.href} class={cn("flex items-center gap-1.5 underline-offset-4 hover:underline", sync.tone === "warn" ? "text-amber-500" : "text-destructive")}>
+          <a href={sync.href} class={cn("flex items-center gap-1.5 underline-offset-4 hover:underline", sync.tone === "warn" ? "text-warning" : "text-destructive")}>
             <span class={cn("size-1.5 shrink-0 rounded-full", syncDot(sync.tone))}></span>{sync.text}
           </a>
         {:else}

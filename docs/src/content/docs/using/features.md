@@ -9,7 +9,7 @@ The [home page](/Runway/) has the short list. This is what each part does and wh
 
 Runway's pages, in the sidebar (or the tab bar on a phone): **Overview**, **Transactions** (All and To review), **Budget**, **Recurring**, **Reports**, then **Net worth** (Summary, Investments, Equity and Retirement) and **Churning**, and **Settings** at the bottom.
 
-**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a tab bar at the bottom (Recurring, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, and wide tables that keep their main columns (the rest fold under each row or are left out).
+**On a phone** (a narrow screen, or a phone turned sideways), every page and editor is there, laid out for the screen: a tab bar at the bottom (Recurring, Net worth, Churning and Settings are under **More**), sheets that rise from the bottom, rows that stack, wide tables that keep their main columns (the rest fold under each row or are left out), and buttons big enough to tap. On a touch screen, actions that a mouse shows on hover (Split, a row's checkbox) are always there.
 
 Settings has these tabs: **Accounts**, **Connections** (SimpleFIN, Plaid, the browser extension for Amazon, Target, Costco and Carta, and the optional services: OpenRouter, Realie, Finnhub and Logo.dev), **Categories**, **Rules**, **Notifications** and **Advanced** (MCP keys, backup and restore, and the version). Until a bank is connected, Settings opens on Connections.
 
@@ -31,7 +31,7 @@ On the Overview page.
 - **One-off edits:** click any upcoming amount (dotted underline) to change it for that date only; a recurring item’s name opens it in Recurring to change every one.
 - **Warnings link to their fix:** a card with no statement (or an out-of-date one you entered) opens that card in Settings → Accounts at its Statement; one with no paying account opens Settings → Accounts, and big payments the forecast leaves out open Recurring.
 - **Known limitations:** with more than one account in the forecast, a recurring transfer from one to another (to savings, say) only counts as money out unless you add the matching money in on the other account as its own recurring item. Plaid reports the date a statement was issued, which Runway takes as its closing date; for an issuer that posts the statement a day or two after it closes, charges in those days are counted toward the next statement rather than this one.
-- **This month:** spending so far against the same point last month, the budgets closest to their limit, and the latest transactions (leaving out what you marked Ignore).
+- **This month:** spending so far against the same point last month, the budgets closest to their limit (a dash for one with nothing spent yet), and the latest transactions (leaving out what you marked Ignore). Money in shows with a +, money out with a −, here and on Transactions.
 
 ## Connections
 

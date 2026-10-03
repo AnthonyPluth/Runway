@@ -57,7 +57,7 @@
 <div bind:this={box} class="rounded-lg bg-muted/40 p-4" data-editor>
   <h3 class="font-semibold">What this account holds</h3>
   {#if err}<p class="mt-2 text-sm text-destructive">{err}</p>
-  {:else if !t}<div class="mt-3 h-20 animate-pulse rounded-md bg-muted"></div>
+  {:else if !t}<div class="mt-3 h-20 animate-pulse motion-reduce:animate-none rounded-md bg-muted"></div>
   {:else}
     <div class="mt-3 overflow-x-auto">
       <table class="text-sm">

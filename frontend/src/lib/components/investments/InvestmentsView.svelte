@@ -110,7 +110,7 @@
     </Card.Content>
   </Card.Root>
 {:else if !status}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else if !status.inv_accounts || !d}
   <Card.Root class="mb-6" data-testid="getting-started">
     <Card.Content class="flex flex-col gap-3">

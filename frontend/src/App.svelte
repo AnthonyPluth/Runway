@@ -73,9 +73,9 @@
         {/key}
       {:else}
         <div class="space-y-4" aria-busy="true" aria-label="Loading">
-          <div class="h-9 w-48 animate-pulse rounded-md bg-muted"></div>
-          <div class="grid gap-4 md:grid-cols-3">{#each [0, 1, 2] as i (i)}<div class="h-28 animate-pulse rounded-xl bg-muted"></div>{/each}</div>
-          <div class="h-72 animate-pulse rounded-xl bg-muted"></div>
+          <div class="h-9 w-48 animate-pulse motion-reduce:animate-none rounded-md bg-muted"></div>
+          <div class="grid gap-4 md:grid-cols-3">{#each [0, 1, 2] as i (i)}<div class="h-28 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>{/each}</div>
+          <div class="h-72 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
         </div>
       {/if}
     </div>

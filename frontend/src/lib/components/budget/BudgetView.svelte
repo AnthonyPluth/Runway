@@ -103,7 +103,7 @@
     </Card.Content>
   </Card.Root>
 {:else if !b || !view}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else}
   {@const v = view}
   {@const over = v.totLeft < 0.005 && v.totOver > 0.005}

@@ -89,7 +89,7 @@
                 <span class="min-w-0 basis-full text-sm md:basis-auto md:flex-[0_1_360px]">{r.summary || "any transaction"}</span>
                 <span class="text-muted-foreground" aria-hidden="true">→</span>
                 <span class="min-w-0 text-sm">{ruleActions(r)}</span>
-                <span class="ml-auto flex shrink-0 items-center md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                <span class="ml-auto flex shrink-0 items-center hoverable:md:opacity-0 hoverable:md:group-hover:opacity-100 hoverable:md:group-focus-within:opacity-100">
                   <Button variant="link" size="sm" aria-expanded={editing === r.id} onclick={() => (editing = editing === r.id ? null : r.id!)}>Edit</Button>
                   <Button variant="link" size="sm" title="Run this rule over past transactions (not ones you categorized yourself)" onclick={() => apply(r)}>Apply</Button>
                   <ConfirmButton confirm="Remove?" onconfirm={() => remove(r.id!)}>Remove</ConfirmButton>

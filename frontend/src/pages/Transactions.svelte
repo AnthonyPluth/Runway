@@ -174,11 +174,10 @@
 </script>
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-  <div class="flex items-center gap-1">
-    <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em] outline-none">
-      Transactions
-      <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
-    </h1>
+  <!-- The count sits beside the heading, not in it, so the heading reads as just "Transactions". -->
+  <div class="flex items-baseline gap-2">
+    <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em] outline-none">Transactions</h1>
+    <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
   </div>
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}
@@ -197,7 +196,7 @@
   <NotConnected title={review ? "Connect a bank to review transactions" : "Connect a bank to see your transactions"} />
 {:else}
 {#await setup}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:then [, accounts, recurring]}
   {#if review}
     <AiSuggest bind:this={ai} bind:status={aiStatus} onasked={(failed) => aiLog?.refresh(failed)} onchanged={load} />
@@ -248,7 +247,7 @@
       <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
     </Card.Content></Card.Root>
   {:else if !list}
-    <div class="h-40 animate-pulse rounded-xl bg-muted" role="status" aria-busy="true"><span class="sr-only">Loading…</span></div>
+    <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted" role="status" aria-busy="true"><span class="sr-only">Loading…</span></div>
   {:else if !list.items.length}
     {@const sync = syncStatus(app.state).text}
     <Card.Root><Card.Content class="py-6 text-center text-sm text-muted-foreground">
@@ -257,6 +256,7 @@
         <Button class="mt-3" variant="outline" onclick={clearFilters}>Clear filters</Button>
       {:else if review}
         <p bind:this={caughtUp} tabindex="-1" class="outline-none">All caught up.</p>
+        <p class="mt-1"><a href="#transactions" class="font-medium text-primary">See all transactions</a> or check back after the next sync.</p>
       {:else}
         <p bind:this={caughtUp} tabindex="-1" class="outline-none">No transactions yet. The first sync brings in months of history.</p>
         {#if sync}<p class="mt-1 text-xs">{sync}</p>{/if}

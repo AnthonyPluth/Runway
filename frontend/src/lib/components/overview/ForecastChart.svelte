@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { fmt, fmt0, fmt0Down, fmtDate, fmtDow, parseDate, shortMoney } from "$lib/format";
+  import { fmt, fmt0, fmt0Down, fmtDate, fmtSigned, fmtDow, parseDate, shortMoney } from "$lib/format";
   import type { ForecastEvent, Overview } from "$lib/types";
 
-  // The projected balance, day by day: the low point, where estimated spending starts, and what each day brings.
+  // The projected balance, day by day: the low point and what each day brings.
   let { fc }: { fc: Overview } = $props();
 
   let width = $state(0);
@@ -59,11 +59,6 @@
       if (dt.getDate() === 1 && x(i) - m.left > 56) out.push({ i, label: dt.toLocaleDateString("en-US", { month: "short" }) });
     }
     return out;
-  });
-  // From the first estimated card payment on, the line includes spending that hasn't happened yet.
-  const estIndex = $derived.by(() => {
-    const first = fc.events.filter((e) => e.kind === "card" && e.estimated).map((e) => e.date).sort()[0];
-    return first ? fc.dates.indexOf(first) : -1;
   });
   const lowIndex = $derived(fc.dates.indexOf(fc.low.date));
   const lowColor = $derived(lowIndex >= 0 && series[lowIndex] < 0 ? "var(--destructive)" : "var(--foreground)");
@@ -154,10 +149,6 @@
       <path d={`M${path(series)} L${x(v1)},${y(y0)} L${x(v0)},${y(y0)} Z`} fill="url(#fc-area)" />
       {#if alt}<path d={`M${path(alt)}`} fill="none" stroke="var(--chart-2)" stroke-width="1.6" stroke-dasharray="5 4" />{/if}
       <path d={`M${path(series)}`} fill="none" stroke="var(--chart-1)" stroke-width="2.2" stroke-linejoin="round" />
-      {#if estIndex > v0 && estIndex <= v1}
-        {@const ex = x(estIndex)}
-        <line x1={ex} x2={ex} y1={m.top - 6} y2={m.top + ih} stroke="var(--muted-foreground)" stroke-dasharray="2 3" />
-      {/if}
       {#if lowIndex >= 0 && inView(lowIndex)}
         {@const lx = x(lowIndex)}
         {@const ly = y(series[lowIndex])}
@@ -188,7 +179,7 @@
         <div class="text-base font-semibold tabular-nums">{fmt(series[hover])}</div>
         {#if alt}<div class="flex justify-between gap-4" style:color="var(--chart-2)"><span>If you stick to your budget</span><span class="tabular-nums">{fmt(alt[hover])}</span></div>{/if}
         {#each eventsByDate[fc.dates[hover]] ?? [] as ev, j (j)}
-          <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular-nums">{fmt(ev.amount)}</span></div>
+          <div class="flex justify-between gap-4"><span>{ev.name}{ev.estimated ? " (est.)" : ""}</span><span class="tabular-nums">{fmtSigned(ev.amount)}</span></div>
         {/each}
       </div>
     {/if}

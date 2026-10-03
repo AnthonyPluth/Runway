@@ -49,7 +49,9 @@ describe("Transactions page", () => {
     serve(rows(), 2);
     render(Transactions);
     expect(await screen.findByText("Alpha")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Transactions 2");
+    const h1 = screen.getByRole("heading", { level: 1 });
+    expect(h1).toHaveAccessibleName("Transactions");   // the count is beside the heading, not part of its name
+    expect(h1.nextElementSibling).toHaveTextContent("2");
     expect(screen.getByRole("link", { name: /To review/ })).toHaveTextContent("3");
     expect(lastList()).toContain("limit=100");
     expect(lastList()).not.toContain("review=1");
@@ -271,7 +273,7 @@ describe("Transactions page", () => {
       await screen.findByText("Alpha");
       expect(lastList()).toContain("review=1");
       expect(lastList()).not.toContain("ignored=");   // review shows everything that needs a decision
-      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("2 to go");
+      expect(screen.getByText("2 to go")).toBeInTheDocument();
       expect(api).not.toHaveBeenCalledWith(expect.stringContaining("/api/overview"));
     });
 
@@ -281,7 +283,7 @@ describe("Transactions page", () => {
       await screen.findByText("Alpha");
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
       await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
-      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("1 to go");
+      expect(screen.getByText("1 to go")).toBeInTheDocument();
     });
 
     // A server that remembers: categorizing takes a transaction out of Review, restoring puts it back.
@@ -337,6 +339,7 @@ describe("Transactions page", () => {
       serve([], 0);
       const { unmount } = render(Transactions, { page: "review" });
       expect(await screen.findByText(/All caught up/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "See all transactions" })).toHaveAttribute("href", "#transactions");
       unmount();
       txFilters.review.q = "zzz";
       render(Transactions, { page: "review" });

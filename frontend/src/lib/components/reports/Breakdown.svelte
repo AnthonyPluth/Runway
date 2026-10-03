@@ -85,7 +85,7 @@
         <p class="py-6 text-center text-sm text-muted-foreground">No spending in this period.</p>
       {:else if leaf}
         {#await txs}
-          <div class="h-24 animate-pulse rounded-lg bg-muted" role="status"><span class="sr-only">Loading…</span></div>
+          <div class="h-24 animate-pulse motion-reduce:animate-none rounded-lg bg-muted" role="status"><span class="sr-only">Loading…</span></div>
         {:then list}
           {#if list?.length}
             <div class="overflow-x-auto">

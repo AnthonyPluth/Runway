@@ -100,7 +100,7 @@
     </Card.Content>
   </Card.Root>
 {:else if !d}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else}
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <div class="flex items-center gap-1">

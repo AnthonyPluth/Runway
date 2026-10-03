@@ -6,7 +6,7 @@
   import Logo from "$lib/components/Logo.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
-  import { fmt, fmtDate, fmtDow } from "$lib/format";
+  import { fmt, fmtDate, fmtDow, fmtSigned } from "$lib/format";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import type { ForecastEvent } from "$lib/types";
@@ -99,11 +99,11 @@
           <div class="truncate text-[13px] text-muted-foreground">{e.account}</div>
         {/if}
       </div>
-      <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-emerald-400"]}>
+      <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-good"]}>
         <!-- An estimate is marked with an asterisk after its amount; what it's based on is in its tooltip. -->
         <!-- The asterisk hangs past the amount, so amounts line up on the right with or without one. -->
         <span class="relative flex items-baseline">{#if e.key}<AmountEdit amount={e.amount} signed label="Amount" title="Change this amount for this date only"
-            save={(v) => change(e, v)} />{:else}{fmt(e.amount)}{/if}{#if e.estimated}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
+            save={(v) => change(e, v)} />{:else}<span class={e.amount > 0 ? "font-semibold" : undefined}>{fmtSigned(e.amount)}</span>{/if}{#if e.estimated}<span class="absolute top-0 left-full ml-0.5 cursor-help text-muted-foreground" role="img" aria-label="estimate" title={`Estimate: ${e.kind !== "card" ? "based on recent payments" : e.from_budgets
               ? "the statement hasn't closed yet; your budgets paid with this card, plus its average spending outside them over its last 3 statements"
               : "the statement hasn't closed yet; based on the card's average over its last 3 statements"}`}>*</span>{/if}</span>
         {#if e.overridden}

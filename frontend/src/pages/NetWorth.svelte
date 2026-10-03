@@ -190,7 +190,7 @@
     </Card.Content>
   </Card.Root>
 {:else if !d}
-  <div class="h-40 animate-pulse rounded-xl bg-muted"></div>
+  <div class="h-40 animate-pulse motion-reduce:animate-none rounded-xl bg-muted"></div>
 {:else}
 {#if !app.state?.connected && !hasAssetItems}
   <NotConnected title="Connect a bank to track your net worth"

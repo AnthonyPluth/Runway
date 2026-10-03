@@ -81,7 +81,7 @@
                 aria-expanded={open === keyOf(x)} onclick={() => (open === keyOf(x) ? finish() : openEditor(x))}>
                 {x.gain == null ? "Add" : fmt(x.cost_basis)}
                 {#if x.cost_manual}<Badge variant="secondary" class="px-1.5 py-0 text-[11px]">edited</Badge>{/if}
-                <Pencil class={cn("size-3", x.gain == null ? "opacity-70" : "opacity-0 group-hover:opacity-70 group-focus-visible:opacity-70")} aria-hidden="true" />
+                <Pencil class={cn("size-3", x.gain == null ? "opacity-70" : "opacity-70 hoverable:opacity-0 hoverable:group-hover:opacity-70 hoverable:group-focus-visible:opacity-70")} aria-hidden="true" />
               </button>
             {/if}
 {/snippet}

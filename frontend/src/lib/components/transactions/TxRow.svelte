@@ -6,7 +6,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { app } from "$lib/app.svelte";
-  import { fmt, fmtDate } from "$lib/format";
+  import { fmt, fmtDate, fmtSigned } from "$lib/format";
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { RecurringItem } from "$lib/components/recurring/types";
@@ -64,10 +64,10 @@
   const brand = $derived(app.state?.brands?.[t.account_id]);
   const sourceLabel = $derived(t.category_source === "manual" ? "You" : t.category_source === "ai" ? "AI suggestion" : t.category_source === "rule" ? "A rule" : t.category_source === "retail" ? "The store order" : t.category_source ?? "");
   const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
-  // Shown on hover (and always on touch screens, and while focused).
-  const onHover = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100";
+  // Shown on hover (and always on touch screens, which can't hover, and while the row has focus).
+  const onHover = "hoverable:opacity-0 hoverable:group-hover:opacity-100 hoverable:group-focus-within:opacity-100";
   // Shown on hover only: a touch screen leaves them out (fewer icons on a phone), and has them in the details instead.
-  const hoverOnly = "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:hidden";
+  const hoverOnly = "hoverable:opacity-0 hoverable:group-hover:opacity-100 hoverable:group-focus-within:opacity-100 [@media(hover:none)]:hidden";
 
   // A big merchant's name: the brand's a sync gave it, or the bank's text instead (for this one, or for all of the brand's
   // and the syncs from now on), and back. Undo puts back the names and the brand's setting.
@@ -97,7 +97,7 @@
 <div role="listitem" data-tx={t.id} class={cn("group grid grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-y-1 px-4 py-2.5 md:grid-cols-[auto_auto_minmax(10rem,1.2fr)_minmax(11rem,1fr)_7.5rem] md:gap-y-0 md:px-4 lg:grid-cols-[auto_auto_minmax(12rem,1.2fr)_minmax(10rem,1.5fr)_minmax(6rem,1fr)_7.5rem_2.5rem] lg:grid-rows-[minmax(2.5rem,auto)] lg:py-0",
   selected ? "bg-primary/15" : "hover:bg-white/[0.03]")}>
   <label class={cn("col-start-1 row-span-2 mr-3 flex items-center self-center md:row-span-2 lg:row-span-1 lg:mr-2.5", !selecting && "max-md:hidden",
-    !selecting && !selected && "md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100")}>
+    !selecting && !selected && "hoverable:md:opacity-0 hoverable:md:group-hover:opacity-100 hoverable:md:group-focus-within:opacity-100")}>
     <input type="checkbox" class="size-4 cursor-pointer accent-primary" aria-label={`Select ${name}`} checked={selected}
       onclick={(e) => onselect(e, e.currentTarget.checked)} />
   </label>
@@ -129,7 +129,7 @@
       {/if}
       {#if t.pending}<Badge variant="secondary" title="pending" class="shrink-0 px-1.5 @sm/title:px-2 max-sm:px-2">
         <Clock class="size-3 @sm/title:hidden max-sm:hidden" aria-label="pending" /><span class="hidden @sm/title:inline max-sm:inline">pending</span></Badge>{/if}
-      {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-amber-500/50 px-1.5 text-amber-500 @sm/title:px-2 max-sm:px-2">
+      {#if !review && t.needs_review}<Badge variant="outline" title="review" class="shrink-0 border-warning/50 px-1.5 text-warning @sm/title:px-2 max-sm:px-2">
         <Flag class="size-3 @sm/title:hidden max-sm:hidden" aria-label="review" /><span class="hidden @sm/title:inline max-sm:inline">review</span></Badge>{/if}
       {#if picking}
         <RecurringPicker {t} items={recurring} onclose={() => (picking = false)} {onchanged} />
@@ -185,7 +185,7 @@
     {:else}
       <!-- The chip shows the category; the (invisible) native picker on top of it does the choosing. -->
       <span class={cn("relative inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full py-0.5 pr-2 pl-2 text-sm transition-colors",
-        t.category ? "hover:bg-muted" : "border border-dashed border-amber-500/60 pl-2 text-amber-500 hover:bg-amber-500/10",
+        t.category ? "hover:bg-muted" : "border border-dashed border-warning/60 pl-2 text-warning hover:bg-warning/10",
         "focus-within:ring-2 focus-within:ring-ring", saving && "opacity-60")}>
         <span class="truncate" title={t.category || undefined}>{#if t.category}{t.category}{:else}<span class="@[12rem]/cat:hidden">Category</span><span class="hidden @[12rem]/cat:inline">Choose category</span>{/if}</span>
         <ChevronDown class={cn("size-3.5 shrink-0 text-muted-foreground", hoverOnly)} aria-hidden="true" />
@@ -205,9 +205,9 @@
   </div>
 
   <div class={cn("col-start-4 row-span-2 self-center whitespace-nowrap text-right tabular-nums md:col-start-5 md:row-span-2 lg:col-start-6 lg:row-span-1",
-    (part?.amount ?? t.amount) > 0 ? "font-semibold text-emerald-500" : "font-medium")}>
-    {#if part}{fmt(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
-    {:else}{fmt(t.amount)}{/if}</div>
+    (part?.amount ?? t.amount) > 0 ? "font-semibold text-good" : "font-medium")}>
+    {#if part}{fmtSigned(part.amount)}<span class="block text-[11px] leading-tight font-normal text-muted-foreground" title="The whole transaction">of {fmt(Math.abs(t.amount))}</span>
+    {:else}{fmtSigned(t.amount)}{/if}</div>
 
   <button type="button" class={cn("col-start-7 row-start-1 hidden size-7 cursor-pointer justify-self-end items-center justify-center rounded text-muted-foreground hover:text-foreground lg:flex", !open && onHover)}
     aria-expanded={open} aria-controls={`detail-${t.id}`} aria-label={`Details for ${name}`} title={open ? "Hide the details" : "Show the details"} onclick={() => (open = !open)}>
