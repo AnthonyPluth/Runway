@@ -23,7 +23,7 @@
         <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
           <dt class="text-muted-foreground">Balance</dt><dd class="text-right font-semibold tabular-nums">{fmt(acct.balance)}</dd>
           {#if acct.as_of}<dt class="text-muted-foreground">Last synced</dt><dd class="text-right">{fmtDate(acct.as_of, { month: "short", day: "numeric", year: "numeric" })}</dd>{/if}
-          {#if acct.synced != null}<dt class="text-muted-foreground">Balance then</dt><dd class="text-right tabular-nums">{fmt(acct.synced)}</dd>{/if}
+          {#if acct.synced != null}<dt class="text-muted-foreground" title="The balance the lender last sent, before the payments since then">Synced balance</dt><dd class="text-right tabular-nums">{fmt(acct.synced)}</dd>{/if}
         </dl>
         <div class="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
           <span id="count-in-nw" class="font-medium">Count in net worth</span>

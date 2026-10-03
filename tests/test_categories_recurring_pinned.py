@@ -159,6 +159,13 @@ class CategoryCascadeTests(Base):
         cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
         self.assertEqual((cats["Pharmacy"]["transactions"], cats["Groceries"]["transactions"], cats["Travel"]["transactions"]), (2, 1, 0))
 
+    def test_category_list_says_what_else_removing_one_changes(self):
+        cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}
+        # Pharmacy: two rules set it and one splits into it, it has a budget, and an order item is in it
+        self.assertEqual((cats["Pharmacy"]["rules"], cats["Pharmacy"]["budgeted"], cats["Pharmacy"]["items"]), (3, True, 1))
+        self.assertEqual((cats["Groceries"]["rules"], cats["Groceries"]["budgeted"], cats["Groceries"]["items"]), (1, False, 0))
+        self.assertEqual((cats["Travel"]["rules"], cats["Travel"]["budgeted"], cats["Travel"]["items"]), (0, False, 0))
+
     def test_rule_list_and_delete(self):
         self.c.execute(insert(Rule).values(match="", account_id="chk", review=1))
         out = api_categories.api_rules(self.c, None, None)

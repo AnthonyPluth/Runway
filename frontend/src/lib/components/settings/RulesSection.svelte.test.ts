@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from "@testing-library/svelte";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,5 +83,40 @@ describe("Rules → Apply", () => {
     await userEvent.click(within(row()).getByRole("button", { name: "Apply" }));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: /^Change/ }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("5000 transactions updated", { description: "That’s too many to undo from here." }));
+  });
+});
+
+describe("Rules → Remove", () => {
+  it("removes a rule at once, and Undo adds it back as it was", async () => {
+    const split = { ...rule, id: 5, category: null, rename: null, amount_min: 10, direction: "out" as const, split: [{ category: "Groceries", percent: 60 }, { category: "Coffee", percent: 40 }] };
+    vi.mocked(api).mockResolvedValue({ ok: true, id: 6 } as never);
+    cleanup();   // this one, not the list beforeEach drew
+    render(RulesSection, { rules: [split], accounts });
+    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/rules/5", { method: "DELETE" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("Rule removed", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) })));
+    const { action } = vi.mocked(toast).mock.calls.at(-1)![1] as unknown as { action: { onClick: () => Promise<void> } };
+    await action.onClick();
+    expect(posts("/api/rules")[0][1]).toEqual({ method: "POST", body: {
+      match: "whole foods", match_mode: "contains", amount_min: 10, amount_max: undefined, direction: "out", account_id: undefined,
+      category: null, rename: null, review: 0, split: split.split, apply: false } });
+  });
+
+  it("shows the error, and offers no Undo, when it can't be removed", async () => {
+    vi.mocked(api).mockRejectedValue(new Error("Rule not found"));
+    await userEvent.click(within(row()).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Rule not found"));
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe("Rules tab", () => {
+  it("says which rule wins when several match", () => {
+    expect(screen.getByText("When several rules match, the most specific one wins.")).toBeInTheDocument();
+  });
+
+  it("lists the rules under a heading, below the page's title", () => {
+    expect(screen.getByRole("heading", { level: 2, name: "Rules" })).toBeInTheDocument();
   });
 });

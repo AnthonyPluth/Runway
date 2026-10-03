@@ -117,7 +117,7 @@ describe("ThisMonth", () => {
 describe("CardsTable", () => {
   const card = (extra: Partial<CardSummary> = {}): CardSummary => ({
     id: "c1", name: "Sapphire", owed_now: 800, statement_key: "stmt-c1", statement_balance: 600, last_close: "2026-03-01", remaining: 600,
-    due_date: "2026-03-26", avg_monthly_spend: 700, avg_cycles: 3, minimum_payment: 35, ...extra,
+    due_date: "2026-03-26", minimum_payment: 35, ...extra,
   });
   const at = (iso: string) => vi.useFakeTimers({ toFake: ["Date"], now: new Date(`${iso}T12:00:00`) });
 
@@ -152,11 +152,10 @@ describe("CardsTable", () => {
     expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
-  it("shows what a card owes, its statement, due date, minimum and usual spending", () => {
+  it("shows what a card owes, its statement, due date and minimum", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.getByText(/owes \$800\.00 now/)).toBeInTheDocument();
-    expect(screen.getByText("about $700.00 a statement")).toHaveAttribute("title", expect.stringContaining("last 3 statements"));
     expect(screen.getByRole("button", { name: "$600.00" })).toBeInTheDocument();
     expect(screen.getByText("due Mar 26")).not.toHaveClass("text-warning");
     expect(screen.getByText(/min \$35\.00/)).toBeInTheDocument();
@@ -191,24 +190,15 @@ describe("CardsTable", () => {
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
-  it("says \"about\" only for an average over two or more statements", () => {
-    at("2026-03-10");
-    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_cycles: 1 })] });
-    expect(screen.getByText("$700.00 a statement")).toBeInTheDocument();
-    unmount();
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_cycles: 2 })] });
-    expect(screen.getByText("about $700.00 a statement")).toBeInTheDocument();
-  });
-
   it("separates the notes with dots and spaces", () => {
     at("2026-03-10");
     render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
     const line = screen.getByText(/owes \$800\.00 now/).textContent!.replace(/\s+/g, " ");
-    expect(line).toBe("owes $800.00 now · entered by hand · about $700.00 a statement");
+    expect(line).toBe("owes $800.00 now · entered by hand");
   });
 
-  it("leaves the average out when there isn't one yet", () => {
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ avg_monthly_spend: null })] });
+  it("doesn't show an average spend a statement", () => {
+    render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
     expect(screen.queryByText(/a statement/)).not.toBeInTheDocument();
     expect(screen.getByText(/owes/)).toBeInTheDocument();
   });

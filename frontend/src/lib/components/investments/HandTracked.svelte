@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { pctAbs } from "./numbers";
   import TrackedEditor from "./TrackedEditor.svelte";
   import type { InvAccount } from "./types";
 
@@ -23,7 +24,7 @@
   <details class="group mb-6 rounded-xl border bg-card" data-testid="hand-tracked">
     <summary class="flex min-h-11 cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-2 select-none [&::-webkit-details-marker]:hidden">
       <span class="text-sm font-medium">Accounts without automatic holdings</span>
-      <span class={drifting ? "min-w-0 flex-1 truncate text-xs text-amber-500" : "min-w-0 flex-1 truncate text-xs text-muted-foreground"}
+      <span class={drifting ? "min-w-0 flex-1 truncate text-xs text-warning" : "min-w-0 flex-1 truncate text-xs text-muted-foreground"}
         data-testid="hand-tracked-summary">{summary}</span>
       <ChevronRight class="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
     </summary>
@@ -35,7 +36,7 @@
           onclick={() => (editing = editing === a.id ? null : a.id)}>{a.tracked ? "Edit holdings" : "Enter holdings"}</Button>
         {#if a.tracked && a.drift != null && a.drift > 0.02}
           <Alert.Root class="mt-2"><TriangleAlert /><Alert.Description>
-            {a.name}: the funds you entered are {(a.drift * 100).toFixed(1)}% off the synced balance. Update the share counts from your latest statement.
+            {a.name}: the funds you entered are {pctAbs(a.drift)} off the synced balance. Update the share counts from your latest statement.
           </Alert.Description></Alert.Root>
         {/if}
         {#if editing === a.id}

@@ -31,7 +31,7 @@ in `docker-compose.yml`; every released version stays in the registry.
 
 Each of those pushes is also a release: it gets the next version tag (`v1.0.0`, `v1.0.1`, …) and a GitHub Release with
 notes listing what changed. Every push bumps the last number; put `#minor` in a commit message (or start it with
-`feat:`) to bump the middle one, or `#major` for the first. The running version is shown under Settings → Advanced,
+`feat:`) to bump the middle one, or `#major` for the first. The running version is shown under Settings → Data,
 and on the image as the `org.opencontainers.image.version` label.
 
 To try a pull request before merging it, add the `needs_preview` label to it. A comment on the pull request soon
@@ -63,8 +63,8 @@ If a setting is missing, the container stops with a message saying which one (se
 
 ## Moving your data from another machine
 
-1. On the old machine: Settings → Advanced → Backup → **Download a backup** (or `poetry run python run.py backup`).
-2. Start the container on the server, sign in, and go to Settings → Advanced → Backup → **Restore**, choosing that file.
+1. On the old machine: Settings → Data → Backup → **Download a backup** (or `poetry run python run.py backup`).
+2. Start the container on the server, sign in, and go to Settings → Data → Backup → **Restore**, choosing that file.
    (Or copy the file into `./data` and run `docker compose run --rm runway python run.py restore /data/<file> --yes`.)
 
 The backup holds your bank access and API keys encrypted with your key: set the same `RUNWAY_SECRET_KEY` on the
@@ -112,7 +112,7 @@ Runway is built to be reachable from anywhere, as long as it's set up like this:
   (or let Watchtower do it automatically). If you pinned a version, change the tag first. Database changes are
   applied automatically when the new version starts; take a backup first if you like to be careful.
 - Stop: `docker compose down` (data stays in `./data`)
-- Back up: Settings → Advanced → Backup → Download a backup (works for either database)
+- Back up: Settings → Data → Backup → Download a backup (works for either database)
 
 ## Error reports (optional)
 
@@ -142,7 +142,7 @@ Everything is sent once there's a DSN, at full rate (it's your own Sentry projec
   fails. Any bank sync counts, the Sync button's too. Sentry makes the monitor in Runway's time zone (`TZ`, or the
   system's); if `TZ` is a rule like `EST5EDT` rather than a name like `America/New_York`, or automatic syncing is off
   (`RUNWAY_NO_SYNC=1`), create the monitor in Sentry yourself with that slug.
-- **"Send feedback"** at the bottom of Settings → Advanced: a message to Sentry, without your name or email or a
+- **"Send feedback"** at the bottom of Settings → Data: a message to Sentry, without your name or email or a
   screenshot.
 - **Who's signed in**, so Sentry counts the people an error, a slow page or a profile affects instead of
   calling everyone "anonymous user". Each person is a 16-character code made from their sign-in id and Runway's key

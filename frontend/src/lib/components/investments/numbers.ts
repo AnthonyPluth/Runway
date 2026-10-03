@@ -1,21 +1,18 @@
-// How the Investments page writes returns and gains, as in the classic app.
-import { fmt } from "$lib/format";
+// How the Investments page writes returns and gains: signed, with a real minus (−) for a loss, as everywhere in Runway.
+import { fmtSigned } from "$lib/format";
 
-/** "+4.2%", "(1.0%)" for a loss, "0.0%" (never a negative zero), or "—". Losses are in parentheses, as on a
- *  statement. */
+/** "+4.2%", "−1.0%" for a loss, "0.0%" (never a negative zero), or "—" for nothing (or not a number). */
 export function pct(x: number | null | undefined, digits = 1): string {
-  if (x == null) return "—";
+  if (x == null || !isFinite(x)) return "—";
   const shown = Math.abs(x * 100).toFixed(digits);
-  return Number(shown) === 0 ? `${shown}%` : x > 0 ? `+${shown}%` : `(${shown}%)`;
+  return Number(shown) === 0 ? `${shown}%` : `${x > 0 ? "+" : "−"}${shown}%`;
 }
-/** Gains are green, losses a soft red (--loss); nothing (or what rounds to nothing) keeps the ordinary color. */
-export const gainCls = (x: number | null | undefined) => (x == null ? "" : x > 0 ? "text-emerald-500" : x < 0 ? "text-[var(--loss)]" : "");
-/** "+$1,234.00", "($12.00)" for a loss, "$0.00" for what rounds to nothing, or "—". */
-export function signed(x: number | null | undefined): string {
-  if (x == null) return "—";
-  const shown = fmt(Math.abs(x));
-  return shown === fmt(0) ? shown : x > 0 ? `+${shown}` : `(${shown})`;
-}
+/** A percentage without its sign, for "ahead by 1.2%": "1.2%", "0.0%", or "—". */
+export const pctAbs = (x: number | null | undefined, digits = 1) => (x == null || !isFinite(x) ? "—" : pct(Math.abs(x), digits).replace(/^\+/, ""));
+/** Gains are green (text-good), losses a soft red (text-loss); nothing (or what rounds to nothing) keeps the ordinary color. */
+export const gainCls = (x: number | null | undefined) => (x == null ? "" : x > 0 ? "text-good" : x < 0 ? "text-loss" : "");
+/** "+$1,234.00", "−$12.00" for a loss, "$0.00" for what rounds to nothing, or "—". */
+export const signed = (x: number | null | undefined): string => (x == null || !isFinite(x) ? "—" : fmtSigned(x));
 /** Round axis steps (1, 2, 2.5, 5 × 10ⁿ) covering min…max. */
 export function niceTicks(min: number, max: number, count = 5): number[] {
   const span = max - min || Math.abs(max) || 1, raw = span / count;

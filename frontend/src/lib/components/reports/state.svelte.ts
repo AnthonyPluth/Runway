@@ -6,11 +6,14 @@ export type RangeKey = "1m" | "3m" | "12m" | "ytd";
 
 export const reportState = $state({
   group: "category" as "category" | "merchant" | "account",   // Over time: what the columns are stacked by
-  months: 12,                                                  // Over time and Income vs spending
+  months: 12,                                                  // Over time and Income
   range: "3m" as RangeKey,                                     // Merchants and Breakdown
   focus: null as string | null,                                // Over time: the one series shown on its own
   path: [] as string[],                                        // Breakdown: where you've clicked in to
   month: null as string | null,                                // Cash flow: the month shown (this month at first)
+  monthPicked: false,                                          // Cash flow: a month was picked, so it no longer follows the calendar
+  merchantQ: "",                                               // Merchants: the search
+  merchantsOpen: [] as string[],                               // Merchants: the ones opened in the table
 });
 
 // Date ranges for Merchants and Breakdown: [start, end) as YYYY-MM-DD.
