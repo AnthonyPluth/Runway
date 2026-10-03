@@ -146,7 +146,7 @@ export interface CardSummary {
   statement_stale?: boolean;
 }
 
-export interface Missed { key: string; name: string; amount: number; date: string; account_id?: string; account_name?: string }
+export interface Missed { key: string; name: string; amount: number; date: string; account_id?: string; account_name?: string; recurring_id?: number }
 
 export interface Overview {
   today: string;

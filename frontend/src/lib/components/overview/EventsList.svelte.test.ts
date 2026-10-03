@@ -265,6 +265,14 @@ describe("EventsList", () => {
       expect(screen.getByText("−$1,500.00")).toBeInTheDocument();
     });
 
+    it("calls a recurring date edited to $0 skipped (Recurring's Skip the next one), with the same reset", async () => {
+      show([ev({ amount: 0, recurring_id: 3, overridden: true, original_amount: -1500 })]);
+      expect(screen.getByText("skipped")).toHaveAttribute("title", "Usually -$1,500.00");
+      expect(screen.queryByText("edited")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "reset" }));
+      expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "k1" } });
+    });
+
     it("resets an edited amount to the usual one", async () => {
       show([ev({ overridden: true, original_amount: -1400 })]);
       await userEvent.click(screen.getByRole("button", { name: "reset" }));

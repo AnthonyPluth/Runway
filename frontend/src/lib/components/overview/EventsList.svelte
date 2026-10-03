@@ -85,7 +85,8 @@
           {:else}<span class="truncate">{e.name}</span>{/if}
           {#if e.paid_so_far}<Badge variant="secondary" title={`${fmt(Math.abs(e.paid_so_far))} has ${e.amount > 0 ? "come in" : "gone out"} already; this is the rest`}>rest</Badge>{/if}
           {#if e.late_from}<Badge variant="secondary" title={`Was due ${e.late_from} and ${e.paid_so_far ? "the rest " : ""}hasn't shown up yet`}>late</Badge>{/if}
-          {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>edited</Badge>{/if}
+          <!-- A recurring date edited to $0 is one you skipped (Recurring's "Skip the next one"); reset puts it back. -->
+          {#if e.overridden}<Badge variant="secondary" title={`Usually ${fmt(e.original_amount)}`}>{e.recurring_id && Math.abs(e.amount) < 0.005 ? "skipped" : "edited"}</Badge>{/if}
         </div>
         {#if e.kind === "fee"}
           <!-- An annual fee is a charge on its card: it reaches cash in the card's statement payment, not on its own. -->
