@@ -1,12 +1,14 @@
 <script lang="ts">
   import { api } from "$lib/api";
-  import { app, refreshState } from "$lib/app.svelte";
+  import { app, refreshState, route, setQuery } from "$lib/app.svelte";
   import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
   import AiSuggest from "$lib/components/transactions/AiSuggest.svelte";
   import RememberBar from "$lib/components/transactions/RememberBar.svelte";
   import TxTable from "$lib/components/transactions/TxTable.svelte";
+  import TxSheet from "$lib/components/transactions/TxSheet.svelte";
+  import Plus from "@lucide/svelte/icons/plus";
   import NotConnected from "$lib/components/NotConnected.svelte";
   import Upcoming from "$lib/components/transactions/Upcoming.svelte";
   import { comingUp } from "$lib/components/overview/comingUp";
@@ -18,12 +20,15 @@
   import * as Card from "$lib/components/ui/card";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { clearAll, isFiltered, txFilters, txShow, type TxFilters } from "$lib/filters.svelte";
-  import { monthLabel } from "$lib/format";
+  import { amountLabel, clearAll, fromQuery, isFiltered, KINDS, sameFilters, toQuery, txFilters, txShow, type TxFilters } from "$lib/filters.svelte";
+  import { fmtSigned, plural } from "$lib/format";
+  import DateRange from "$lib/components/transactions/DateRange.svelte";
+  import MoreFilters from "$lib/components/transactions/MoreFilters.svelte";
   import { syncStatus } from "$lib/nav.svelte";
   import { undoable } from "$lib/undo";
+  import { cn } from "$lib/utils";
   import { accountName, type Account, type Overview } from "$lib/types";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { toast } from "svelte-sonner";
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
@@ -34,9 +39,26 @@
   // svelte-ignore state_referenced_locally
   const review = page === "review";
   const f: TxFilters = review ? txFilters.review : txFilters.transactions;
+  // All's filters are in the address too (#transactions?q=…): opened from one, it has those filters; opened plainly
+  // (the sidebar), the ones from last time, written into the address.
+  if (!review) {
+    if (route.query) Object.assign(f, fromQuery(route.query));
+    setQuery(toQuery(f));
+  }
+  // Back, Forward or a link to other filters while the page is open: load those.
+  $effect(() => {
+    const q = route.query;   // only the address: what you type changes the filters first, and the address after
+    untrack(() => {
+      if (review || route.page !== "transactions" || q === toQuery(f)) return;
+      const next = fromQuery(q);
+      if (sameFilters(next, f)) return;
+      clearTimeout(timer); Object.assign(f, next); load();
+    });
+  });
 
   // What the page needs before the list: categories, accounts (for the filter) and recurring items (for ↻).
-  const setup = Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
+  const loadSetup = () => Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
+  let setup = $state(loadSetup());
   // Upcoming (projected) items for the forecast account, on All only.
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
   let upcoming = $state<UpcomingEvent[]>([]);
@@ -47,11 +69,12 @@
   loadUpcoming();
 
   let list = $state<TxList | null>(null);
-  let listError = $state("");
+  let listError = $state("");        // the list couldn't be loaded at all
+  let refreshError = $state("");     // it couldn't be loaded again: the old one stays, marked as not up to date
   let count = $state(0);             // the count in the heading (in Review, goes down as you categorize)
   let loads = $state(0);             // a new search starts the table afresh (no leftover ticks); a reload after a change keeps it
   let applied = $state<TxFilters>({ ...f });   // the filters the list (and Upcoming) was last loaded with
-  let appliedIgnored = txShow.ignored;
+  let appliedIgnored = $state(txShow.ignored);
   // What's marked Ignore under the same search and filters (All only, without a category filter); null while it isn't
   // known (it couldn't be counted), when the line still offers to show them.
   let ignoredCount = $state<number | null>(0);
@@ -60,7 +83,8 @@
   async function countIgnored(mine: number, now: TxFilters) {
     if (review) return;
     if (now.category) { ignoredCount = 0; return; }
-    const qs = new URLSearchParams({ q: now.q, account: now.account, ignored: "only", month: now.month, scope: now.scope, limit: "1", offset: "0" });
+    const qs = params(now);
+    qs.set("ignored", "only"); qs.set("limit", "1"); qs.set("offset", "0");
     try {
       const r = await api<TxList>(`/api/transactions?${qs}`);
       if (mine === seq) ignoredCount = r.total;
@@ -70,6 +94,7 @@
   async function load() {
     const mine = ++seq;
     const now = { ...f }, ignored = txShow.ignored;
+    if (!review) setQuery(toQuery(now));
     // After a change with the same filters, load as many as were showing, so the list (and where you are in it) stays.
     const same = !!list && ignored === appliedIgnored && (Object.keys(now) as (keyof TxFilters)[]).every((k) => now[k] === applied[k]);
     const qs = query(0, same ? Math.min(1000, Math.max(PAGE, list!.items.length)) : PAGE);
@@ -78,22 +103,38 @@
       if (mine !== seq) return;   // a newer search has been asked for meanwhile
       // The same search again (after a change): the rows are updated where they are, so nothing redraws or jumps. A new
       // search starts the table afresh.
-      applied = now; appliedIgnored = ignored; list = data; count = data.total; listError = "";
+      applied = now; appliedIgnored = ignored; list = data; count = data.total; listError = ""; refreshError = "";
       if (!same) loads++;
       countIgnored(mine, now);
-    } catch (err) { if (mine === seq) listError = (err as Error).message; }
+    } catch (err) {
+      if (mine !== seq) return;
+      // With a list on screen it stays (you may be part way down it), under a line saying it isn't up to date.
+      if (list) refreshError = (err as Error).message; else listError = (err as Error).message;
+    }
   }
   const PAGE = 100;
   load();
 
-  function query(offset: number, limit = PAGE) {
-    const qs = new URLSearchParams({ q: f.q, account: f.account, category: f.category, month: f.month, scope: f.scope,
-      limit: String(limit), offset: String(offset) });
-    if (review) qs.set("review", "1");
-    else if (!txShow.ignored) qs.set("ignored", "0");   // what's marked Ignore stays out of All unless asked for
+  // The filters that are set, as the list's query.
+  function params(now: TxFilters): URLSearchParams {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(now)) if (v) qs.set(k, v);
     return qs;
   }
-  // The next page, added to the end (skipping any that shifted in since, e.g. after a sync).
+  // The list's own conditions besides the filters: Review's queue, or All without what's marked Ignore.
+  function scopeOf(): Record<string, string> {
+    return review ? { review: "1" } : txShow.ignored ? {} : { ignored: "0" };   // what's marked Ignore stays out of All unless asked for
+  }
+  function query(offset: number, limit = PAGE) {
+    const qs = params(f);
+    for (const [k, v] of Object.entries(scopeOf())) qs.set(k, v);
+    qs.set("limit", String(limit)); qs.set("offset", String(offset));
+    return qs;
+  }
+  // Every transaction the list shows, for a change to all of them at once ("Select all 212"): its filters as loaded.
+  const everyFilter = $derived({ ...Object.fromEntries(params(applied)), ...(review ? { review: "1" } : appliedIgnored ? {} : { ignored: "0" }) });
+  // The next page, added to the end (skipping any that shifted in since, e.g. after a sync). A failure is the table's
+  // to show (with a Retry).
   async function more() {
     if (!list) return;
     const mine = seq, have = new Set(list.items.map((t) => t.id));
@@ -108,14 +149,17 @@
 
   let timer: ReturnType<typeof setTimeout>;
   function search(v: string) { f.q = v; clearTimeout(timer); timer = setTimeout(load, 250); }
-  function clearMonth() { f.month = ""; f.scope = ""; load(); }
+  function setDates(from: string, to: string) { clearTimeout(timer); f.from = from; f.to = to; if (!from && !to) f.scope = ""; load(); }
+  function setMore(next: Partial<TxFilters>) { clearTimeout(timer); Object.assign(f, next); load(); }
   function clearFilters() { clearTimeout(timer); clearAll(f); load(); }
 
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = applied, q = a.q.trim().toLowerCase();
     return events.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!a.account || e.account_id === a.account) &&
       (!a.category || (a.category === "__none__" ? !e.category : e.category === a.category || catParentOf(e.category) === a.category)) &&
-      (!a.month || e.date.startsWith(a.month)));
+      (!a.from || e.date >= a.from) && (!a.to || e.date <= a.to) && (!a.min || Math.abs(e.amount) >= Number(a.min) - 0.005) &&
+      (!a.max || Math.abs(e.amount) <= Number(a.max) + 0.005) && (a.kind !== "transfer") &&
+      (!a.kind || (a.kind === "in" ? e.amount > 0 : e.amount < 0)));
   };
 
   // After a transaction leaves the list, keyboard focus goes to the next row's category (else the row before it), or,
@@ -130,7 +174,8 @@
   // The category filter the list was loaded with, when it's a category: a split transaction's part in it is what shows.
   const only = $derived(applied.category && applied.category !== "__none__" ? applied.category : "");
 
-  async function save(t: Tx, category: string) {
+  // Saves a category picked for a transaction; false when it couldn't be saved (the picker then shows the saved one again).
+  async function save(t: Tx, category: string): Promise<boolean> {
     if (t.match && only) return savePart(t, category);
     const prev = t.category ?? "";
     const at = list?.items.findIndex((x) => x.id === t.id) ?? -1;
@@ -143,17 +188,19 @@
       undoable(prev === category ? `Kept ${category}` : `${prev || "Uncategorized"} → ${category}`,
         async () => { await restoreTx(r.was); await load(); }, { description: t.payee || t.description || undefined });
       refreshState();
-      if (r.also_updated) return load();
+      if (r.also_updated) { await load(); return true; }
       if (review && list) {
         list.items = list.items.filter((x) => x.id !== t.id);
-        if (!list.items.length) { await load(); return focusAfter(undefined); }
+        if (!list.items.length) { await load(); await focusAfter(undefined); return true; }
         if (count > 0) count--;
         if (list.total > 0) list.total--;
         focusAfter(next);
       } else {
         t.category = category; t.needs_review = 0; t.category_source = "manual";
+        load();   // the sum above the list (and a filter it may have left) follow
       }
-    } catch (err) { toast.error((err as Error).message); }
+      return true;
+    } catch (err) { toast.error((err as Error).message); return false; }
   }
 
   // Only the part shown changes (its order's items, when an order split it); the whole transaction takes the category
@@ -165,7 +212,22 @@
         { description: t.payee || t.description || undefined });
       refreshState();
       await load();
-    } catch (err) { toast.error((err as Error).message); }
+      return true;
+    } catch (err) { toast.error((err as Error).message); return false; }
+  }
+
+  // The sheet: a transaction's details (by id, so it shows the list's latest copy after a reload; the one it was opened
+  // with if it has left the list, as in Review), or a new one to add.
+  let sheetOpen = $state(false);
+  let sheetTx = $state<Tx | null>(null);
+  const shown = $derived(sheetTx ? (list?.items.find((x) => x.id === sheetTx!.id) ?? sheetTx) : null);
+  function openTx(t: Tx) { sheetTx = t; sheetOpen = true; }
+  function openAdd() { sheetTx = null; sheetOpen = true; }
+  // A category saved from the sheet: as from the row, and the sheet's copy follows (it may have left Review's list).
+  async function saveFromSheet(t: Tx, category: string) {
+    const ok = await save(t, category);
+    if (ok && sheetTx?.id === t.id) sheetTx = { ...sheetTx, category, needs_review: 0, category_source: "manual", is_split: 0, splits: [] };
+    return ok;
   }
 
   let ai = $state<AiSuggest>();
@@ -174,11 +236,15 @@
 </script>
 
 <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
-  <!-- The count sits beside the heading, not in it, so the heading reads as just "Transactions". -->
+  <!-- Review's count sits beside the heading, not in it, so the heading reads as just "Transactions". All's is in the
+       line under the filters, with what they add up to. -->
   <div class="flex items-baseline gap-2">
     <h1 bind:this={heading} tabindex="-1" class="text-[34px] leading-[1.05] font-extrabold tracking-[-0.035em] outline-none">Transactions</h1>
-    <span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected ? (review ? (count ? `${count} to go` : "") : String(count)) : ""}</span>
+    {#if review}<span class="text-base font-normal text-muted-foreground tabular-nums">{list && app.state?.connected && count ? `${count} to go` : ""}</span>{/if}
   </div>
+  {#if !review && app.state?.connected}
+    <Button variant="outline" onclick={openAdd} title="Add a transaction by hand"><Plus />Add</Button>
+  {/if}
   {#if review}
     <Button disabled={!app.state?.has_api_key || aiStatus === "asking"} onclick={() => ai?.run()}
       title={app.state?.has_api_key ? undefined : "Add an OpenRouter key in Settings → Connections first"}>
@@ -203,45 +269,54 @@
     {#if app.state?.has_api_key}<AiLog bind:this={aiLog} />{/if}
   {/if}
 
-  <div class="mb-4 flex flex-wrap items-center gap-2">
-    <div class="relative w-full sm:w-72">
+  <div class="mb-3 flex flex-wrap items-center gap-2">
+    <div class="relative w-full sm:w-64">
       <Search class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <Input type="search" placeholder="Search" aria-label="Search merchant or description" class="h-10 pl-8"
+      <Input type="search" placeholder="Search" aria-label="Search transactions" title="Merchant, bank’s text, category, note or amount" class="h-10 pl-8"
         value={f.q} oninput={(e) => search(e.currentTarget.value)} />
     </div>
-    <NativeSelect aria-label="Account" class="h-10 max-sm:flex-1" bind:value={f.account} onchange={load}>
+    <NativeSelect aria-label="Account" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-48" bind:value={f.account} onchange={load}>
       <option value="">All accounts</option>
       {#each accounts.filter((a) => a.kind !== "investment") as a (a.id)}<option value={a.id}>{accountName(a)}</option>{/each}
     </NativeSelect>
-    <NativeSelect aria-label="Category" class="h-10 max-sm:flex-1" bind:value={f.category} onchange={load}>
+    <NativeSelect aria-label="Category" class="h-10 max-sm:min-w-0 max-sm:flex-[1_1_40%] sm:max-w-52" bind:value={f.category} onchange={load}>
       <option value="">All categories</option>
       <option value="__none__">Uncategorized</option>
       {#each categories.list as c (c.name)}<option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{catLabel(c)}</option>{/each}
     </NativeSelect>
-    {#if f.month}
-      <span class="inline-flex items-center gap-1 rounded-full bg-primary/15 py-1 pr-1 pl-3 text-sm text-primary">
-        {monthLabel(f.month)}{f.scope === "budget" ? " · accounts counted in Budget" : ""}
-        <button type="button" class="flex size-5 cursor-pointer items-center justify-center rounded-full hover:bg-primary/20" aria-label="Show all dates"
-          onclick={clearMonth}><X class="size-3.5" /></button>
-      </span>
-    {/if}
-    {#if !review}
-      {#if ignoredCount !== 0 || txShow.ignored}
-        <span class="ml-1 text-sm text-muted-foreground max-sm:w-full">{ignoredCount == null ? "Ignored" : `${ignoredCount} ignored`} · <button type="button" class="cursor-pointer font-medium text-primary"
-          aria-expanded={txShow.ignored} aria-label={`${txShow.ignored ? "Hide" : "Show"} ignored transactions`}
-          onclick={() => { txShow.ignored = !txShow.ignored; load(); }}>{txShow.ignored ? "Hide" : "Show"}</button></span>
-      {/if}
-    {/if}
+    <DateRange from={f.from} to={f.to} note={f.scope === "budget" ? "Budget accounts" : ""} onchange={setDates} />
+    <MoreFilters kind={f.kind} min={f.min} max={f.max} onchange={setMore} />
+    {#if f.kind}{@render chip(KINDS.find((k) => k.value === f.kind)?.label ?? f.kind, "Show every kind", () => setMore({ kind: "" }))}{/if}
+    {#if f.min || f.max}{@render chip(amountLabel(f.min, f.max), "Any amount", () => setMore({ min: "", max: "" }))}{/if}
     {#if isFiltered(f)}
       <Button variant="link" size="sm" class="h-auto px-1 py-0" onclick={clearFilters}>Clear filters</Button>
     {/if}
   </div>
 
+  {#if !review && list}
+    <!-- How many, and what they add up to (as the day totals count: transfers aren't money in or out). Not up to date
+         after a failed reload, so it's dimmed then. -->
+    <p class={cn("mb-4 text-sm text-muted-foreground tabular-nums", refreshError && "opacity-50")} data-summary>
+      {plural(list.total, "transaction")} · <span title={applied.kind === "transfer" ? undefined : "Transfers not counted"}>{fmtSigned(list.sum ?? 0)} net</span>
+      {#if ignoredCount !== 0 || txShow.ignored}
+        · {ignoredCount == null ? "Ignored" : `${ignoredCount} ignored`} <button type="button" class="cursor-pointer font-medium text-primary"
+          aria-expanded={txShow.ignored} aria-label={`${txShow.ignored ? "Hide" : "Show"} ignored transactions`}
+          onclick={() => { txShow.ignored = !txShow.ignored; load(); }}>{txShow.ignored ? "Hide" : "Show"}</button>
+      {/if}
+    </p>
+  {/if}
+
   {#if !review}
     <Upcoming events={shownEvents(upcoming)} oneAccount={!!applied.account} onchanged={loadUpcoming} />
   {/if}
 
-  {#if listError}
+  {#if refreshError && list}
+    <div role="alert" class="mb-3 flex flex-wrap items-center gap-x-2 rounded-lg bg-warning/10 px-3 py-2 text-sm">
+      <span>Couldn’t refresh</span><span class="text-muted-foreground">· {refreshError}</span>
+      <Button variant="link" size="sm" class="ml-auto h-auto p-0" onclick={load}>Retry</Button>
+    </div>
+  {/if}
+  {#if listError && !list}
     <Card.Root><Card.Content>
       <p class="text-sm">Something went wrong: {listError}</p>
       <Button class="mt-3" variant="outline" onclick={load}>Try again</Button>
@@ -264,16 +339,30 @@
     </Card.Content></Card.Root>
   {:else}
     {#key loads}
-      <TxTable items={list.items} total={list.total} {review} {recurring} {only} family={list.family} oneAccount={!!applied.account} bind:selecting onsave={save} onchanged={load} onmore={more} />
+      <TxTable items={list.items} total={list.total} {review} {recurring} {only} family={list.family} oneAccount={!!applied.account} every={everyFilter}
+        bind:selecting onsave={save} onchanged={load} onmore={more} onopen={openTx} />
     {/key}
   {/if}
+
+  <TxSheet bind:open={sheetOpen} t={shown} {accounts} account={applied.account} {recurring} family={list?.family} onsave={saveFromSheet} onchanged={load} />
 
   {#if app.state?.logodev_configured}
     <p class="mt-3 text-xs text-muted-foreground"><a class="underline underline-offset-4 hover:text-foreground" href="https://logo.dev" target="_blank" rel="noopener">Logos provided by Logo.dev</a></p>
   {/if}
 {:catch err}
-  <Card.Root><Card.Content><p class="text-sm">Something went wrong: {err.message}</p></Card.Content></Card.Root>
+  <Card.Root><Card.Content>
+    <p class="text-sm">Something went wrong: {err.message}</p>
+    <Button class="mt-3" variant="outline" onclick={() => (setup = loadSetup())}>Try again</Button>
+  </Card.Content></Card.Root>
 {/await}
 {/if}
 
 <RememberBar />
+
+{#snippet chip(label: string, clear: string, onclear: () => void)}
+  <span class="inline-flex h-8 items-center gap-1 rounded-full bg-primary/15 pr-1 pl-3 text-sm text-primary">
+    {label}
+    <button type="button" class="flex size-6 cursor-pointer items-center justify-center rounded-full hover:bg-primary/20" aria-label={clear} title={clear}
+      onclick={onclear}><X class="size-3.5" /></button>
+  </span>
+{/snippet}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,7 @@ vi.mock("$lib/api", () => ({ api: vi.fn(), newPage: vi.fn() }));
 vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() }) }));
 
 import { api } from "$lib/api";
-import { app } from "$lib/app.svelte";
+import { app, route } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { txFilters, txShow } from "$lib/filters.svelte";
 import type { Tx } from "$lib/components/transactions/types";
@@ -16,6 +16,8 @@ import { toast } from "svelte-sonner";
 import { category, tx } from "../test/fixtures";
 import Transactions from "./Transactions.svelte";
 
+const none = () => ({ q: "", account: "", category: "", from: "", to: "", min: "", max: "", kind: "" as const, scope: "" });
+const summary = () => document.querySelector("[data-summary]");
 const accounts = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "inv", name: "Brokerage", kind: "investment" }];
 const rows = (): Tx[] => [tx({ id: "a", payee: "Alpha", category: "Coffee" }), tx({ id: "b", payee: "Bravo", category: "Groceries" })];
 type Handler = (path: string, opts?: { method?: string; body?: unknown }) => unknown;
@@ -28,7 +30,7 @@ const serve = (list: Tx[] = rows(), total = list.length, extra: Handler = () => 
     if (path === "/api/recurring") return [];
     if (path === "/api/state") return { connected: true, review_count: 3 };   // refreshState after a change
     if (path.startsWith("/api/overview")) return { events: [] };
-    if (path.startsWith("/api/transactions?")) return { items: list, total };
+    if (path.startsWith("/api/transactions?")) return { items: list, total, sum: list.reduce((n, t) => n + t.amount, 0) };
     return {};
   }) as never);
 const lastList = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => p.startsWith("/api/transactions?") && !p.includes("ignored=only")).at(-1)!;
@@ -39,9 +41,11 @@ beforeEach(() => {
   vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear();
   app.state = { connected: true, review_count: 3 };
   categories.list = [];
-  Object.assign(txFilters.transactions, { q: "", account: "", category: "", month: "", scope: "" });
-  Object.assign(txFilters.review, { q: "", account: "", category: "", month: "", scope: "" });
+  Object.assign(txFilters.transactions, none());
+  Object.assign(txFilters.review, none());
   txShow.ignored = false;
+  route.query = ""; route.page = "transactions";   // the address's filters are module state too
+  history.replaceState(null, "", "/#transactions");
 });
 
 describe("Transactions page", () => {
@@ -50,8 +54,8 @@ describe("Transactions page", () => {
     render(Transactions);
     expect(await screen.findByText("Alpha")).toBeInTheDocument();
     const h1 = screen.getByRole("heading", { level: 1 });
-    expect(h1).toHaveAccessibleName("Transactions");   // the count is beside the heading, not part of its name
-    expect(h1.nextElementSibling).toHaveTextContent("2");
+    expect(h1).toHaveAccessibleName("Transactions");
+    expect(summary()).toHaveTextContent("2 transactions · −$25.00 net");   // the count, with what they add up to, under the filters
     expect(screen.getByRole("link", { name: /To review/ })).toHaveTextContent("3");
     expect(lastList()).toContain("limit=100");
     expect(lastList()).not.toContain("review=1");
@@ -84,7 +88,7 @@ describe("Transactions page", () => {
     serve(rows(), 2, (path) => (path.includes("ignored=only") ? Promise.reject(new Error("offline")) : undefined));
     render(Transactions);
     await screen.findByText("Alpha");
-    expect(await screen.findByText(/^Ignored ·/)).toBeInTheDocument();
+    await waitFor(() => expect(summary()).toHaveTextContent("· Ignored Show"));
     await userEvent.click(screen.getByRole("button", { name: "Show ignored transactions" }));
     await waitFor(() => expect(lastList()).not.toContain("ignored="));
   });
@@ -102,9 +106,10 @@ describe("Transactions page", () => {
     serve();
     render(Transactions);
     await screen.findByText("Alpha");
-    await userEvent.type(screen.getByRole("searchbox", { name: "Search merchant or description" }), "blue");
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search transactions" }), "blue");
     await waitFor(() => expect(lastList()).toContain("q=blue"));
     expect(txFilters.transactions.q).toBe("blue");
+    expect(location.hash).toBe("#transactions?q=blue");   // in the address, for a reload, Back or a bookmark
   });
 
   it("filters by account", async () => {
@@ -116,14 +121,15 @@ describe("Transactions page", () => {
   });
 
   it("starts with a month filter set from elsewhere (a budget line), and clears it", async () => {
-    Object.assign(txFilters.transactions, { month: "2026-03", scope: "budget", category: "Coffee" });
+    Object.assign(txFilters.transactions, { from: "2026-03-01", to: "2026-03-31", scope: "budget", category: "Coffee" });
     serve();
     render(Transactions);
-    expect(await screen.findByText(/March 2026 · accounts counted in Budget/)).toBeInTheDocument();
-    expect(lastList()).toContain("month=2026-03");
+    expect(await screen.findByRole("button", { name: "Dates: March 2026 · Budget accounts" })).toBeInTheDocument();
+    expect(lastList()).toContain("from=2026-03-01&to=2026-03-31&scope=budget");
     await userEvent.click(screen.getByRole("button", { name: "Show all dates" }));
-    await waitFor(() => expect(lastList()).not.toContain("month=2026-03"));
-    expect(screen.queryByText(/March 2026/)).not.toBeInTheDocument();
+    await waitFor(() => expect(lastList()).not.toContain("from="));
+    expect(lastList()).not.toContain("scope=");
+    expect(screen.getByRole("button", { name: "Dates: All dates" })).toBeInTheDocument();
   });
 
   it("asks you to connect a bank first, without the list or its filters", async () => {
@@ -147,16 +153,17 @@ describe("Transactions page", () => {
   });
 
   it("says when the filters match nothing, and clears them all", async () => {
-    Object.assign(txFilters.transactions, { q: "zzz", account: "a1", category: "Coffee", month: "2026-03", scope: "budget" });
+    Object.assign(txFilters.transactions, { q: "zzz", account: "a1", category: "Coffee", from: "2026-03-01", to: "2026-03-31", scope: "budget" });
     serve([], 0);
     render(Transactions);
     expect(await screen.findByText("No transactions match these filters.")).toBeInTheDocument();
     expect(screen.queryByText(/No transactions yet/)).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Clear filters" })).toHaveLength(2);   // beside the filters, and in the empty card
     await userEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[1]);
-    expect(txFilters.transactions).toEqual({ q: "", account: "", category: "", month: "", scope: "" });
+    expect(txFilters.transactions).toEqual(none());
     await waitFor(() => expect(lastList()).not.toContain("zzz"));
-    expect(lastList()).toContain("q=&account=&category=&month=&scope=");
+    expect(lastList()).toBe("/api/transactions?ignored=0&limit=100&offset=0");
+    expect(location.hash).toBe("#transactions");
     expect(await screen.findByText(/No transactions yet/)).toBeInTheDocument();
     expect(screen.getByRole("searchbox")).toHaveValue("");
     expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument();
@@ -232,6 +239,119 @@ describe("Transactions page", () => {
     await screen.findByText("Alpha");
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Cannot save"));
+  });
+
+  describe("filters in the address", () => {
+    it("opens with the filters the address has", async () => {
+      route.query = "q=rent&from=2026-01-01&to=2026-01-31&min=50&kind=out";
+      serve();
+      render(Transactions);
+      await screen.findByText("Alpha");
+      expect(lastList()).toContain("q=rent&from=2026-01-01&to=2026-01-31&min=50&kind=out");
+      expect(screen.getByRole("searchbox")).toHaveValue("rent");
+      expect(screen.getByRole("button", { name: "Dates: January 2026" })).toBeInTheDocument();
+      expect(screen.getByText("Money out")).toBeInTheDocument();   // a chip for each filter behind More
+      expect(screen.getByText("$50 or more")).toBeInTheDocument();
+    });
+
+    it("writes the filters it has into a plain address (the sidebar's)", async () => {
+      txFilters.transactions.category = "Coffee";
+      serve();
+      render(Transactions);
+      await screen.findByText("Alpha");
+      expect(location.hash).toBe("#transactions?category=Coffee");
+    });
+
+    it("loads other filters when the address changes (Back, Forward)", async () => {
+      serve();
+      render(Transactions);
+      await screen.findByText("Alpha");
+      route.query = "account=a1";
+      await waitFor(() => expect(lastList()).toContain("account=a1"));
+      expect(screen.getByRole("combobox", { name: "Account" })).toHaveValue("a1");
+    });
+
+    it("leaves Review's filters out of the address", async () => {
+      txFilters.review.q = "zzz";
+      serve();
+      render(Transactions, { page: "review" });
+      await screen.findByText("Alpha");
+      expect(location.hash).toBe("#transactions");
+    });
+  });
+
+  it("filters by a date range from the presets", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    await userEvent.click(screen.getByRole("button", { name: "Dates: All dates" }));
+    // (the panel is positioned by measuring, which jsdom can't, so role queries don't find what's in it here)
+    await userEvent.click(await screen.findByText("This year"));
+    const y = new Date().getFullYear();
+    await waitFor(() => expect(lastList()).toContain(`from=${y}-01-01&to=${y}-12-31`));
+    expect(screen.getByRole("button", { name: "Dates: This year" })).toBeInTheDocument();
+  });
+
+  it("filters by kind and amount from More, each a chip you can remove", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    await userEvent.click(screen.getByRole("button", { name: "More filters" }));
+    await userEvent.click(await screen.findByText("Transfers"));
+    await waitFor(() => expect(lastList()).toContain("kind=transfer"));
+    await userEvent.type(screen.getByLabelText("Smallest amount"), "20{Enter}");
+    await waitFor(() => expect(lastList()).toContain("min=20"));
+    expect(screen.getByRole("button", { name: "More filters (2 on)" })).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: "Any amount" }));
+    await waitFor(() => expect(lastList()).not.toContain("min="));
+    expect(lastList()).toContain("kind=transfer");
+  });
+
+  it("keeps the list and says so when loading it again fails", async () => {
+    let fail = false;
+    serve(rows(), 2, (path, o) => {
+      if (path.startsWith("/api/transactions?") && !path.includes("ignored=only") && fail) throw new Error("offline");
+      if (path.endsWith("/category") && o?.method === "POST") { fail = true; return { also_updated: 2, offer_rule: null, was: [] }; }
+      return undefined;
+    });
+    render(Transactions);
+    await screen.findByText("Alpha");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
+    expect(await screen.findByText("Couldn’t refresh")).toBeInTheDocument();
+    expect(screen.getByText("Alpha")).toBeInTheDocument();   // the list stays
+    expect(summary()).toHaveClass("opacity-50");             // its numbers marked as not up to date
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByText("Couldn’t refresh")).not.toBeInTheDocument());
+    expect(summary()).not.toHaveClass("opacity-50");
+  });
+
+  it("offers to try again when the page's setup fails", async () => {
+    let fail = true;
+    serve(rows(), 2, (path) => { if (path === "/api/accounts" && fail) throw new Error("offline"); return undefined; });
+    render(Transactions);
+    expect(await screen.findByText("Something went wrong: offline")).toBeInTheDocument();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Alpha")).toBeInTheDocument();
+  });
+
+  it("opens a transaction's details in the sheet from its row", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    await userEvent.click(screen.getByRole("button", { name: "Details for Alpha" }));
+    expect(await screen.findByRole("dialog", { name: "Alpha" })).toBeInTheDocument();
+  });
+
+  it("adds a transaction from the button beside the heading", async () => {
+    serve();
+    render(Transactions);
+    await screen.findByText("Alpha");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a transaction" });
+    expect(within(dialog).getByRole("combobox", { name: "Account" })).toHaveValue("a1");
   });
 
   describe("upcoming", () => {

@@ -79,8 +79,8 @@ describe("MissedAlert", () => {
   it("'Find it' opens Transactions on that account and month", async () => {
     render(MissedAlert, { m });
     await userEvent.click(screen.getByRole("link", { name: "Find it" }));
-    expect(txFilters.transactions).toMatchObject({ account: "a1", month: "2026-03" });
-    expect(location.hash).toBe("#transactions");
+    expect(txFilters.transactions).toMatchObject({ account: "a1", from: "2026-03-01", to: "2026-03-31" });
+    expect(location.hash).toBe("#transactions?account=a1&from=2026-03-01&to=2026-03-31");
     expect(toast).toHaveBeenCalled();
   });
 

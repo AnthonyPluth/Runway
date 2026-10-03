@@ -53,6 +53,12 @@ describe("TxTable", () => {
       tx({ id: "s", amount: -100, payee: "Split", category: "Groceries", is_split: 1, splits: [{ category: "Groceries", amount: -60 }, { category: "Transfer", amount: -40 }] }),
     ], total: 4 });
     expect(screen.getByRole("heading", { level: 3 }).textContent!.replace(/\u00a0/g, " ")).toMatch(/\$2,940\.00$/);
+    expect(screen.getByText("+$2,940.00")).toHaveAttribute("title", "Transfers not counted");
+  });
+
+  it("says nothing about transfers on a day without one", () => {
+    setup();
+    expect(screen.getByText("−$15.00")).not.toHaveAttribute("title");
   });
 
   it("counts only the matching part of a split one under a category filter", () => {
@@ -248,9 +254,51 @@ describe("TxTable", () => {
       expect(await screen.findByRole("button", { name: /Show more/ })).toBeEnabled();
     });
 
+    it("says when more couldn't be loaded, and tries again only when asked", async () => {
+      const onmore = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce(undefined);
+      setup({ total: 10, onmore });
+      await userEvent.click(screen.getByRole("button", { name: "Show more (6 left)" }));
+      expect(await screen.findByText(/Couldn’t load more/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(onmore).toHaveBeenCalledTimes(2);
+      expect(await screen.findByRole("button", { name: /Show more/ })).toBeEnabled();
+    });
+
     it("has no Show more once everything is loaded", () => {
       setup();
       expect(screen.queryByRole("button", { name: /Show more/ })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("select all", () => {
+    const every = { q: "coffee", ignored: "0" };
+    it("offers every one the filters match once all the loaded ones are ticked, and changes them by the filters", async () => {
+      vi.mocked(api).mockResolvedValue({ updated: 212, was: [] });
+      const p = setup({ total: 212, every, onmore: vi.fn() });
+      expect(screen.queryByRole("button", { name: /Select all 212/ })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+      expect(screen.getByText("212 selected")).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
+      expect(screen.getByRole("dialog")).toHaveTextContent("Mark 212 transactions reviewed?");   // that many: it asks first
+      await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Mark reviewed" }));
+      await vi.waitFor(() => expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { filter: every, reviewed: true } }));
+      expect(p.onchanged).toHaveBeenCalled();
+    });
+
+    it("goes back to the ticked ones when one is unticked", async () => {
+      setup({ total: 212, every });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      await userEvent.click(screen.getByRole("button", { name: "Select all 212" }));
+      await userEvent.click(tick("Alpha"));
+      expect(screen.getByText("3 selected")).toBeInTheDocument();
+    });
+
+    it("isn't offered when everything is loaded", async () => {
+      setup({ every });
+      await userEvent.click(screen.getByRole("checkbox", { name: "Select all shown" }));
+      expect(screen.queryByRole("button", { name: /Select all/ })).not.toBeInTheDocument();
     });
   });
 

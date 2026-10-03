@@ -101,8 +101,8 @@ describe("BudgetRow", () => {
     setup();
     location.hash = "";
     await userEvent.click(screen.getByRole("link", { name: "Groceries" }));
-    expect(txFilters.transactions).toMatchObject({ category: "Groceries", month: "2026-03", scope: "budget" });
-    expect(location.hash).toBe("#transactions");
+    expect(txFilters.transactions).toMatchObject({ category: "Groceries", from: "2026-03-01", to: "2026-03-31", scope: "budget" });
+    expect(location.hash).toBe("#transactions?category=Groceries&from=2026-03-01&to=2026-03-31&scope=budget");
   });
 
   describe("in the Budgets card", () => {
