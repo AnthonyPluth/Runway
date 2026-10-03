@@ -32,6 +32,7 @@ def api_state(conn, _q, _b):
         "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
         "sync_warnings": json.loads(db.get_setting(conn, sk.LAST_SYNC_WARNINGS) or "[]"),   # what banks said on that sync
         "last_llm_error": db.get_setting(conn, sk.LAST_LLM_ERROR),
+        "last_backup": with_offset(db.get_setting(conn, sk.LAST_BACKUP)),   # the last backup downloaded from Settings
         "review_count": conn.execute(select(func.count()).select_from(Transaction)
                                      .where(Transaction.needs_review == 1, db.not_investment())).fetchone()[0],
         "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are

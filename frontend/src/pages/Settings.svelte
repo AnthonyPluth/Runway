@@ -98,7 +98,7 @@
   {/await}
 {/if}
 
-{#if section === "advanced" && (version || app.state?.sentry)}
+{#if section === "data" && (version || app.state?.sentry)}
 <p class="mt-8 text-center text-sm text-muted-foreground">
   {#if version}<a class={linkCls} target="_blank" rel="noopener"
     href={`https://github.com/AnthonyPluth/Runway/releases/tag/${encodeURIComponent(version)}`}>What's new in {version}</a>{/if}

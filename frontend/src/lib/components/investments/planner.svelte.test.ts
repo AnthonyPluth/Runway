@@ -48,7 +48,7 @@ describe("RetirementPlanner", () => {
     expect(screen.getByText("Chance your money lasts")).toBeInTheDocument();
     expect(screen.getByText(/^\d+%$/)).toBeInTheDocument();
     expect(screen.getByText("Invested at retirement")).toBeInTheDocument();
-    expect(screen.getByText(/to age 95, across 1,000 markets/)).toBeInTheDocument();
+    expect(screen.getByText(/to age 95, across 1,000 simulated market paths/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Projected investments by age/ })).toBeInTheDocument();
   });
 
@@ -68,18 +68,53 @@ describe("RetirementPlanner", () => {
     } finally { viewport.phone = false; }
   });
 
-  it("shows the results muted, with no label, while it starts from Runway's own figures", () => {
+  it("shows the results muted, marked as a starting estimate, while it starts from Runway's own figures", () => {
     setup(data({ is_default: true }));
-    expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/to make it yours/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("starting-estimate")).toHaveTextContent("Starting estimate · edit below");
     expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
     expect(screen.queryByRole("button", { name: /Start over/ })).not.toBeInTheDocument();
   });
 
-  it("colours the result once the plan is your own", () => {
+  it("colours the result once the plan is your own, without the estimate mark", () => {
     setup();
-    expect(screen.queryByText(/Sample ·/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("starting-estimate")).not.toBeInTheDocument();
     expect(screen.getByText(/^\d+%$/).className).not.toContain("text-muted-foreground");
+  });
+
+  it("says the odds in a word, by the same thresholds as their color, with the thresholds in its tooltip", () => {
+    const { unmount } = setup();
+    const odds = () => Number(screen.getByText(/^\d+%$/).textContent!.slice(0, -1)) / 100;
+    const word = (s: number) => (s >= 0.85 ? "Likely" : s >= 0.7 ? "Uncertain" : "Unlikely");
+    expect(screen.getByTestId("verdict")).toHaveTextContent(word(odds()));
+    expect(screen.getByTestId("verdict")).toHaveAttribute("title", "Likely at 85% or more, uncertain from 70%, unlikely below 70%");
+    unmount();
+    setup(data({ current: 1000 }, { spending: 200000, people: [{ name: "Ann", birth_year: 1961, retire_age: 65, savings: 0 }] }));
+    expect(screen.getByTestId("verdict")).toHaveTextContent("Unlikely");
+  });
+
+  it("says what it starts from: what's invested today and in how many accounts", () => {
+    render(RetirementPlanner, { data: data(), accounts: 3 });
+    expect(screen.getByTestId("starting-from")).toHaveTextContent("Starting from $400,000 invested today (3 accounts)");
+  });
+
+  it("says when an age can't be, under its field, instead of projecting it", async () => {
+    setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const retires = screen.getByRole("spinbutton", { name: /Retires at/ });
+    await user.clear(retires);
+    await user.type(retires, "30");   // born 1986: 40 this year
+    expect(screen.getByText("At least 40, your age now")).toBeInTheDocument();
+    expect(retires).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Fix the ages below to see the projection.")).toBeInTheDocument();
+    expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
+    await user.clear(retires);
+    await user.type(retires, "67");
+    expect(screen.queryByText(/your age now/)).not.toBeInTheDocument();
+    const planTo = screen.getByRole("spinbutton", { name: /Plan until age/ });
+    await user.clear(planTo);
+    await user.type(planTo, "60");
+    expect(screen.getByText("Past the retirement age (67)")).toBeInTheDocument();
+    expect(screen.queryByText("Chance your money lasts")).not.toBeInTheDocument();
   });
 
   it("shows an empty state, not a projection, with nothing invested and no plan", () => {
@@ -670,12 +705,20 @@ describe("PlannerChart", () => {
 
   it("labels the axis with the first person's age", () => {
     setup2();
-    expect(screen.getByText("Your age")).toBeInTheDocument();
+    expect(screen.getByText("Your age · year")).toBeInTheDocument();
+  });
+
+  it("puts the calendar year under each age, and marks today where the plan starts", () => {
+    const { container } = setup2();
+    const years = [...container.querySelectorAll("text[data-year]")].map((t) => Number(t.textContent));
+    expect(years.length).toBeGreaterThan(2);
+    expect(years.every((y) => y >= 2026)).toBe(true);
+    expect(screen.getByTestId("today-mark")).toHaveTextContent("today");
   });
 
   it("names the person when it isn't 'You'", () => {
     render(PlannerChart, { p: proj, names: ["Ann"] });
-    expect(screen.getByText("Ann's age")).toBeInTheDocument();
+    expect(screen.getByText("Ann's age · year")).toBeInTheDocument();
   });
 
   it("has a table of every year", async () => {

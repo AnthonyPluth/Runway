@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "$lib/api";
+  import { copyText } from "$lib/copy";
   import { app, refreshState } from "$lib/app.svelte";
   import ConfirmButton from "$lib/components/ConfirmButton.svelte";
   import OrderDetail from "$lib/components/orders/OrderDetail.svelte";
@@ -45,10 +46,7 @@
     try { await api("/api/retail/token/remove", { method: "POST" }); toast.success("Key removed"); shownKey = ""; again(); }
     catch (err) { toast.error((err as Error).message); }
   }
-  function copy(input: HTMLInputElement | null) {
-    navigator.clipboard?.writeText(shownKey).then(() => toast.success("Copied"), () => {});
-    input?.select();
-  }
+  const copy = (input: HTMLInputElement | null) => copyText(shownKey, input);
   async function setAi(e: Event) {
     try { await api("/api/retail/settings", { method: "POST", body: { ai: (e.currentTarget as HTMLInputElement).checked } }); toast.success("Saved"); }
     catch (err) { toast.error((err as Error).message); }
