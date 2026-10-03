@@ -13,6 +13,7 @@ haven't closed yet are estimated from the card's average spending over its last 
 progress, what's already been charged plus the average's share of the days left), plus the recurring charges on the
 card the average doesn't have, and flagged as estimates. With budgets, the budgets paid with the card are spent on it
 day by day instead (as the budget line spends them), and the average is of its spending outside budgeted categories.
+Each estimated statement says what it's made of (estimate_parts). An amount you've changed is yours, not an estimate.
 
 Each card is paid the way you pay it (Settings → Accounts): the whole statement (the default), the issuer's minimum, or
 a fixed amount. What isn't paid carries into the next statement, with a month's interest at the card's APR if you've
@@ -577,11 +578,11 @@ def estimate_parts(info: dict, *, today: date, close: date, due: date, first: bo
     if interest >= 0.005:
         lines["interest"] = interest
     out: dict = {"basis": basis, "close": close.isoformat(), "due": due.isoformat(),
-                 **dict(zip(lines, to_cents(list(lines.values()), statement)))}
+                 **dict(zip(lines, to_cents(list(lines.values()), statement), strict=True))}
     for name, items in named:
         total = out[f"{name}_total"]
         out[name] = [{"name" if name != "budgets" else "category": k, "amount": v}
-                     for (k, _), v in zip(items, to_cents([v for _, v in items], total))]
+                     for (k, _), v in zip(items, to_cents([v for _, v in items], total), strict=True)]
     if basis == "budgets":
         out["outside_average"] = info["avg_outside"]
     elif basis == "average":
@@ -808,15 +809,15 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 # What's on the card already (this cycle), its budgets' spending to the close, and its share of the
                 # spending outside budgets; plus the recurring charges the average leaves out, unless a budget has them.
                 share = min(1.0, max(0, (close - today).days) / max(1, (close - prev_close).days)) if first else 1.0
-                ran = None
-                in_cycle = {c: sum(v for d, v in days.items() if prev_close.isoformat() < d <= close.isoformat())
-                            for c, days in budget_cats.get(card["id"], {}).items()}
+                rate_days = None
+                in_cycle = {c: sum(v for d, v in cat_days.items() if prev_close.isoformat() < d <= close.isoformat())
+                            for c, cat_days in budget_cats.get(card["id"], {}).items()}
                 on_top = [e for e in upcoming if e["recurring_id"] in info["avg_separate"] and e.get("category") not in budgeted]
                 usual = outside * share
                 est = now + usual + sum(v for d, v in charged.items() if prev_close.isoformat() < d <= close.isoformat())
                 est += max(0.0, -sum(e["amount"] for e in on_top))
             elif avg is not None:
-                in_cycle, ran = None, None
+                in_cycle, rate_days = None, None
                 on_top = [e for e in upcoming if e["recurring_id"] in info["avg_separate"]]
                 if first:
                     share = min(1.0, max(0, (close - today).days) / max(1, (close - prev_close).days))
@@ -828,7 +829,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 est += max(0.0, -sum(e["amount"] for e in on_top))
             else:
                 in_cycle, share = None, 1.0
-                days_in_cycle = ran = max(0, (close - max(today, prev_close)).days)
+                days_in_cycle = rate_days = max(0, (close - max(today, prev_close)).days)
                 # The recent daily rate leaves out recurring charges on the card, so add all of them.
                 on_top = upcoming
                 usual = info["daily_rate"] * days_in_cycle
@@ -854,7 +855,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 parts = estimate_parts(
                     info, today=today, close=close, due=due_k, first=first, share=share, usual=usual, budgets=in_cycle,
                     on_top=on_top, fees=fees_in, carried=carried_in, interest=owed_interest, statement=statement,
-                    payment=planned, days=ran)
+                    payment=planned, days=rate_days)
                 events.append({"date": pays_k.isoformat(), "account_id": payer["id"], "name": f"{label} statement",
                                "amount": -round(planned, 2), "kind": "card", "estimated": True,
                                **({"from_budgets": True} if outside is not None else {}),
