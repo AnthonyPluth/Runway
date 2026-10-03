@@ -76,11 +76,11 @@ describe("TxRow", () => {
   });
 
   it("opens the details (the sheet) from the name and from the chevron, at every width", async () => {
-    const p = props(tx(), { onopen: vi.fn() });
-    render(TxRow, p);
+    const onopen = vi.fn();
+    render(TxRow, props(tx(), { onopen }));
     await userEvent.click(within(row()).getByRole("button", { name: "Blue Bottle" }));
     await userEvent.click(within(row()).getByRole("button", { name: "Details for Blue Bottle" }));
-    expect(p.onopen).toHaveBeenCalledTimes(2);
+    expect(onopen).toHaveBeenCalledTimes(2);
     expect(within(row()).getByRole("button", { name: "Details for Blue Bottle" })).not.toHaveClass("hidden");
   });
 
