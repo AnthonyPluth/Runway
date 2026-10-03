@@ -278,14 +278,17 @@ describe("TxRow", () => {
       expect(bankText.parentElement).toHaveClass("@container/acct", "min-w-0");
     });
 
-    it("shows the account on a phone as a small badge on the merchant's logo", () => {
+    it("shows the account as a small badge on the merchant's logo, at every width", () => {
       app.state = { connected: true, brands: { a1: { institution: "SimpleFIN Bridge", initial: "S" } } };
       render(TxRow, props(tx({ account_name: "Shared Checking" })));
       const badge = row().querySelector("[data-account-badge]")!;
-      expect(badge).toHaveClass("absolute", "md:hidden");
+      expect(badge).toHaveClass("absolute");
+      expect(badge).not.toHaveClass("md:hidden");
       expect(badge).toHaveAttribute("title", "Shared Checking");
       expect(within(badge as HTMLElement).getByText("Shared Checking")).toHaveClass("hidden");   // its logo only
       expect(within(badge as HTMLElement).getByText("S")).toHaveClass("size-4!");
+      // the account's column names it without its logo again
+      expect(within(row()).getAllByText("S").filter((e) => !badge.contains(e)).every((e) => e.classList.contains("hidden"))).toBe(true);
     });
 
     it("has no badge when the list is filtered to one account", () => {

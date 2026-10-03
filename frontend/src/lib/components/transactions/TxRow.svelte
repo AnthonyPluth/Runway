@@ -102,10 +102,10 @@
       onclick={(e) => onselect(e, e.currentTarget.checked)} />
   </label>
 
-  <!-- On a phone the account is a small badge on the merchant's logo (wider screens give it a column of its own). -->
+  <!-- The account is a small badge on the merchant's logo, at every width (wider screens also name it, in its own column). -->
   <div class="relative col-start-2 row-span-2 mr-3 self-center md:row-span-2 lg:row-span-1 lg:mr-2.5">
-    {#if !oneAccount}<span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md ring-2 ring-card md:hidden" title={t.account_name || undefined}
-      data-account-badge><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="size-4!" labelClass="hidden" /></span>{/if}
+    {#if !oneAccount}<span class="pointer-events-none absolute -right-1.5 -bottom-1.5 z-[1] rounded-md ring-2 ring-card lg:-right-1 lg:-bottom-1 lg:rounded-[3px]" title={t.account_name || undefined}
+      data-account-badge><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="size-4! lg:size-3! lg:rounded-[3px]! lg:text-[8px]!" labelClass="hidden" /></span>{/if}
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
            so a dark mark doesn't vanish on the dark page). -->
@@ -159,7 +159,7 @@
        is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
        text only shows once the cell is 24rem wide, so it never lands on the account. -->
   <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
-    {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="lg:hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
+    {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
     {#if detail}{#if !oneAccount}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span>{/if}<span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>
 
