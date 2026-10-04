@@ -96,6 +96,7 @@ class MigrationTests(unittest.TestCase):
                     c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
                     c.exec_driver_sql("DELETE FROM settings WHERE key='migrated_daily_spend_off'")
                     if flag is not None:
+                        # raw SQL: on the raw connection, with a parameter either database's driver takes
                         c.execute(sa.text("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', :v)"), {"v": flag})
                     command.upgrade(db.alembic_config(c), "0036")
                 with db.engine(self.path).begin() as c:
@@ -563,6 +564,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(kept["revision"], "0039")
         self.assertEqual(len(kept["tables"]["transactions"]["rows"]), 3)
         with db.engine(self.path).begin() as c:
+            # raw SQL: what the migration left, on the raw connection (text() so Postgres takes LIKE's %)
             q = lambda sql: sorted(tuple(r) for r in c.execute(sa.text(sql)).fetchall())
             self.assertEqual(q("SELECT id, recurring_id FROM transactions"), [("chk|1", None)])
             self.assertEqual(q("SELECT tx_id FROM tx_splits"), [("chk|1",)])

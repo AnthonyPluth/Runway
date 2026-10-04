@@ -108,6 +108,7 @@ class MonitoringTests(unittest.TestCase):
         transport = start({"SENTRY_DSN": DSN})
         try:
             with engine.begin() as c:
+                # raw SQL: a throwaway table on a plain engine, with the bound parameters the error report must drop
                 c.execute(sa.text("INSERT INTO tx VALUES (:id, :payee, :amount)"), {"id": 1, "payee": "WHOLE FOODS", "amount": 87.12})
         except sa.exc.IntegrityError as e:
             self.assertIn("WHOLE FOODS", str(e))
