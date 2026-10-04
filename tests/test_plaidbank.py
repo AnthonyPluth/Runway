@@ -13,9 +13,8 @@ from sqlalchemy import delete, insert, select, update
 from runway import db, forecast, plaid, plaidbank, simplefin
 from runway.models import (Account, CardStatement, Holding, InvAccount, InvSnapshot, InvTransaction, LoanTerms,
                            Merchant, Override, PlaidAccount, PlaidItem, Security, Transaction)
-from tests.shared import DbCase
+from tests.shared import DbCase, TODAY
 
-TODAY = date(2026, 9, 23)
 
 
 class MockBank(BaseHTTPRequestHandler):

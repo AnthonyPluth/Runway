@@ -5,7 +5,7 @@ from sqlalchemy import insert, update
 
 from runway import categories, reports, splits
 from runway.models import Account, Transaction
-from tests.shared import DbCase
+from tests.shared import DbCase, add_tx
 
 
 class ReportTests(DbCase):
@@ -38,10 +38,7 @@ class ReportTests(DbCase):
 
     def tx(self, acct, day, amt, payee, cat):
         self.n += 1
-        tid = f"t{self.n}"
-        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=day, amount=amt,
-                                                  description=payee.upper(), payee=payee, category=cat))
-        return tid
+        return add_tx(self.c, acct, day, amt, id=f"t{self.n}", description=payee.upper(), payee=payee, category=cat)
 
     def test_month_pace(self):
         from datetime import date

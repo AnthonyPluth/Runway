@@ -6,23 +6,19 @@ import gzip
 import json
 import os
 import socket
-import tempfile
-import threading
 import time
 import unittest
-import urllib.error
-import urllib.request
 from datetime import date
 from unittest import mock
 
 
 from cryptography.fernet import Fernet
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import insert, select
 
 from runway import backup, carta, db, notify, oidc, secretbox, server, simplefin
 from runway.models import AuthSession, Merchant, NotifyLog, PushSubscription, Setting
-from tests.shared import own_database
+from tests.shared import ServerCase, fetch, own_database
 
 ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OIDC_TRUST_UNVERIFIED_EMAIL")
 
@@ -66,37 +62,11 @@ class SignInTests(unittest.TestCase):
             self.assertIsNone(oidc.session_user(c, "tok"))
 
 
-class ServerTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
-        cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown(); cls.httpd.server_close()
-        with db.session() as c:   # on Postgres the tests share one database: leave it as found
-            c.execute(delete(Merchant).where(Merchant.id.like("test:%")))
-            db.set_setting(c, "carta_env", None)
-        cls.tmp.cleanup()
-        if cls.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = cls.saved
+class ServerTests(ServerCase):
+    server_class = server.Server
 
     def open(self, path, method="GET", body=None, headers=None):
-        r = urllib.request.Request(self.base + path, method=method, data=body, headers=headers or {})
-        opener = urllib.request.build_opener(NoRedirect)
-        try:
-            resp = opener.open(r, timeout=10)
-        except urllib.error.HTTPError as e:
-            resp = e
-        return resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read()
+        return fetch(self.base, method, path, body, headers, timeout=10, follow=False)
 
     def test_trickled_headers_are_hung_up_on(self):
         with mock.patch.object(server.handler, "HEADER_DEADLINE", 1):
@@ -192,31 +162,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((code, h["Location"], h["Set-Cookie"]), (302, "/", None))
 
 
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):
-        return None
-
-
 class SyncOnVisitTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = self.tmp.name
-        db.init()
+        own_database(self)
         with db.session() as c:
             db.set_setting(c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
-            db.set_setting(c, "last_auto_sync_attempt", None)
-            db.set_setting(c, "last_sync_ok", None)
-
-    def tearDown(self):
-        with db.session() as c:
-            db.set_setting(c, "simplefin_access_url", None)
-            db.set_setting(c, "last_auto_sync_attempt", None)
-        self.tmp.cleanup()
-        if self.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = self.saved
 
     def test_a_skipped_sync_isnt_an_attempt(self):
         with server._sync_lock:
@@ -301,12 +251,7 @@ class BackupSizeTests(unittest.TestCase):
 
 class NotifyTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "n.db")
-        db.init(self.path)
-
-    def tearDown(self):
-        self.tmp.cleanup()
+        self.path = own_database(self)
 
     def test_alert_is_remembered_even_if_the_run_fails_after_sending(self):
         alert = {"key": "test:1", "title": "Hello", "body": "b"}
@@ -325,19 +270,11 @@ class NotifyTests(unittest.TestCase):
 
 class SecretKeyTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "s.db")
-        self.env = mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "correct horse battery staple, but longer than 32"})
-        self.env.start()
+        self.path = own_database(self, RUNWAY_SECRET_KEY="correct horse battery staple, but longer than 32")
         secretbox._cache.clear()
-        db.init(self.path)
+        self.addCleanup(secretbox._cache.clear)
         self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close()
-        self.env.stop()
-        secretbox._cache.clear()
-        self.tmp.cleanup()
+        self.addCleanup(self.c.close)       # (cleanups run last first: the connection closes before the database goes)
 
     def test_passphrase_is_stretched_and_old_keys_still_open(self):
         key = os.environ["RUNWAY_SECRET_KEY"]

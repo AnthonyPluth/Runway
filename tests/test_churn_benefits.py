@@ -11,7 +11,7 @@ from runway.churning import ChurnError
 from runway.models import ChurnBenefit, ChurnBenefitUse
 from tests.shared import DbCase
 
-TODAY = date(2026, 9, 29)
+TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and benefit dates are written around it
 
 
 def per(period, basis="calendar", opened="2025-03-15", day=TODAY, **kw):

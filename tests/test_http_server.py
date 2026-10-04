@@ -1,8 +1,5 @@
 """The HTTP server end to end: requests through server.Handler."""
 import json
-import os
-import tempfile
-import threading
 import unittest
 import urllib.error
 import urllib.request
@@ -12,24 +9,14 @@ from sqlalchemy import insert
 
 from runway import categorize, db
 from runway.models import Account, Transaction
+from tests.shared import ServerCase, freeze_today
 
 
-class ServerTests(unittest.TestCase):
+class ServerTests(ServerCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        from runway import server
-        db.init()
-        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.tmp.cleanup()
-        os.environ.pop("RUNWAY_DATA", None)
+        super().setUpClass()
+        freeze_today(cls)       # the tests add transactions dated today
 
     def test_sync_schedule(self):
         from runway import server
@@ -64,16 +51,6 @@ class ServerTests(unittest.TestCase):
 
     def test_sync_on_visit_needs_a_connection(self):
         self.assertEqual(self.req("POST", "/api/sync/auto"), (200, {"started": False}))
-
-    def req(self, method, path, body=None, headers=None):
-        h = {"X-Runway": "1", "Content-Type": "application/json", **(headers or {})}
-        r = urllib.request.Request(self.base + path, method=method, headers=h,
-                                   data=json.dumps(body).encode() if body is not None else None)
-        try:
-            with urllib.request.urlopen(r) as resp:
-                return resp.status, json.loads(resp.read() or b"{}")
-        except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}")
 
     def test_state_and_static(self):
         code, st = self.req("GET", "/api/state")

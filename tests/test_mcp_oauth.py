@@ -4,7 +4,6 @@ import base64
 import hashlib
 import json
 import os
-import tempfile
 import time
 import unittest
 from unittest import mock
@@ -12,6 +11,7 @@ from unittest import mock
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, mcp_access, mcp_oauth
+from tests.shared import add_database, database_path
 from runway.mcp_oauth import OAuthError, PageError, RedirectError
 from runway.models import OAuthClient, OAuthCode, OAuthConsent, OAuthGrant, OAuthToken, User
 
@@ -38,13 +38,7 @@ class Db(unittest.TestCase):
     while other test modules run alongside."""
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.path = os.path.join(cls.tmp.name, "oauth.db")
-        db.init(cls.path)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
+        cls.path = add_database(cls, database_path(cls, "oauth.db"))
 
     def setUp(self):
         self.conn = db.connect(self.path)

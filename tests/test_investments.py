@@ -1,6 +1,5 @@
 import json
 import os
-import tempfile
 import threading
 import unittest
 from unittest import mock
@@ -12,9 +11,8 @@ from sqlalchemy import func, insert, select, update
 from runway import db, plaid, planner, portfolio, prices
 from runway.models import (Account, Asset, Holding, InvAccount, InvTransaction, PlaidItem, Price, PriceMeta, Security,
                            Transaction)
-from tests.shared import DbCase
+from tests.shared import DbCase, TODAY, fetch, own_database, serve
 
-TODAY = date(2026, 9, 23)
 
 
 class Base(DbCase):
@@ -698,21 +696,13 @@ class QuoteStreamTests(unittest.TestCase):
 
 class QuoteStreamEndpointTests(unittest.TestCase):
     def test_streams_server_sent_events(self):
-        from http.server import ThreadingHTTPServer
-        import urllib.request
-        from runway import server
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"RUNWAY_DATA": tmp}):
-            db.init()
-            httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-            threading.Thread(target=httpd.serve_forever, daemon=True).start()
-            try:
-                update = {"quotes": {"VTI": q(250)}, "market": "closed", "as_of": "2026-09-28T17:00:00"}
-                with mock.patch.object(prices, "quote_stream", side_effect=lambda *_a, **_k: (u for u in [update])):
-                    resp = urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/api/investments/stream", timeout=10)
-                    self.assertEqual(resp.headers["Content-Type"], "text/event-stream")
-                    body = resp.read().decode()
-            finally:
-                httpd.shutdown(); httpd.server_close()
+        own_database(self)
+        base = serve(self)
+        update = {"quotes": {"VTI": q(250)}, "market": "closed", "as_of": "2026-09-28T17:00:00"}
+        with mock.patch.object(prices, "quote_stream", side_effect=lambda *_a, **_k: (u for u in [update])):
+            _, headers, raw = fetch(base, "GET", "/api/investments/stream", timeout=10)
+            self.assertEqual(headers["Content-Type"], "text/event-stream")
+            body = raw.decode()
         self.assertIn("event: quotes\ndata: " + json.dumps(update) + "\n\n", body)
         self.assertTrue(body.rstrip().endswith(f"retry: {prices.CLOSED_RETRY * 1000}"))   # closed: come back later
 
@@ -810,7 +800,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.inv("a1", "Individual", 5000)
         plaid.update_investment_accounts(self.c, "wf")
         self.c.execute(update(Account).where(Account.id == "pl:a1").values(hidden=1))
-        acct = next(a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if a["id"] == "a1")
+        acct = next(a for a in portfolio.overview(self.c, "1Y", TODAY)["accounts"] if a["id"] == "a1")
         self.assertEqual((acct["hidden"], acct["hidden_in_accounts"]), (1, 1))
 
     def test_same_as_simplefin_when_the_balance_says_so_and_asks_otherwise(self):
@@ -839,7 +829,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.c.execute(insert(InvAccount).values(id="sf:sf-roth", item_id="sf", name="Roth IRA", balance=4943.43,
                                                  source="simplefin"))
         self.inv("roth", "Roth IRA", 4943.43)
-        ids = lambda: {a["id"] for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if not a["hidden"]}
+        ids = lambda: {a["id"] for a in portfolio.overview(self.c, "1Y", TODAY)["accounts"] if not a["hidden"]}
         self.assertEqual(ids(), {"sf:sf-roth", "roth"})                     # not matched yet: both
         plaid.match_investment(self.c, "roth", "sf-roth")
         self.assertEqual(ids(), {"roth"})
@@ -858,7 +848,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         # "(6702)" at another firm is a different account
         self.c.execute(insert(InvAccount).values(id="sf:rh", item_id="sf", name="Individual (6702)", balance=1,
                                                  source="simplefin", institution="Robinhood"))
-        listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"]}
+        listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", TODAY)["accounts"]}
         self.assertNotIn("sf:et1", listed)                                   # the SimpleFIN copy isn't listed...
         self.assertTrue(listed["et-6702"]["also_simplefin"])                 # ...the Plaid one says so
         self.assertFalse(listed["et-1111"]["also_simplefin"])

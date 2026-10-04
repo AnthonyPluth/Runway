@@ -8,8 +8,6 @@ import tempfile
 import threading
 import time
 import unittest
-import urllib.error
-import urllib.request
 from datetime import date, datetime
 from unittest import mock
 
@@ -18,20 +16,16 @@ from sqlalchemy import func, insert, select, update
 from runway import backup, db, networth, server
 from runway import settings_keys as sk
 from runway.models import Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken, PlaidItem, Rule, Transaction
-from tests.shared import own_database
+from tests.shared import add_database, fetch, own_database, serve
 
 db_session = db.session
 
 
 class BackupTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.a, self.b = os.path.join(self.tmp.name, "a.db"), os.path.join(self.tmp.name, "b.db")
-        db.init(self.a)
-        db.init(self.b)
-
-    def tearDown(self):
-        self.tmp.cleanup()
+        self.a = own_database(self)
+        self.dir = os.path.dirname(self.a)
+        self.b = add_database(self, os.path.join(self.dir, "b.db"))
 
     def fill(self, path):
         c = db.connect(path)
@@ -143,7 +137,7 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(dst.execute(select(Category.pay_with).where(Category.name == "Groceries")).scalar(), "cc")
         self.assertEqual(dst.execute(select(Budget.amount)).scalar(), 500)
         # The backup is the copy: restoring it doesn't save one of it (0040 does for a database it changes).
-        self.assertFalse([f for f in os.listdir(self.tmp.name) if f.startswith("runway-before-migration")])
+        self.assertFalse([f for f in os.listdir(self.dir) if f.startswith("runway-before-migration")])
         src.close(); dst.close()
 
     def test_a_backup_from_before_backups_recorded_their_revision(self):
@@ -281,10 +275,10 @@ class BackupTests(unittest.TestCase):
         with mock.patch.object(db, "session", lambda p=None: db_session(p or self.b)):
             data = backup.load(backup.dump(self.fill(self.a)))
             with lock, self.assertRaises(backup.Busy):
-                backup.restore_all(data, locks=(threading.Lock(), lock), directory=self.tmp.name)
+                backup.restore_all(data, locks=(threading.Lock(), lock), directory=self.dir)
             with db.session() as c:
                 self.assertEqual(c.execute(select(func.count()).select_from(Transaction)).scalar(), 0)   # nothing restored
-            done = backup.restore_all(data, locks=(lock,), directory=self.tmp.name)
+            done = backup.restore_all(data, locks=(lock,), directory=self.dir)
             self.assertFalse(lock.locked())
             self.assertEqual((done["counts"]["transactions"], done["safety_copy"], done["unreadable_secrets"], done["warning"]),
                              (20, None, [], None))   # nothing was here to keep a copy of
@@ -311,7 +305,7 @@ class BackupTests(unittest.TestCase):
         src.close()
 
     def test_safety_copy_keeps_what_was_here(self):
-        out = os.path.join(self.tmp.name, "copies")
+        out = os.path.join(self.dir, "copies")
         os.mkdir(out)
         empty = db.connect(self.b)
         self.assertIsNone(backup.safety_copy(empty, out))                    # nothing to keep
@@ -336,31 +330,17 @@ class BackupServerTests(unittest.TestCase):
     other modules' tests (test_mcp got a grant id that was already taken)."""
     HEADERS = {"X-Runway": "1", "Content-Type": "application/octet-stream"}
 
-    @classmethod
-    def setUpClass(cls):
-        cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown(); cls.httpd.server_close()
-
     def setUp(self):
         self.data = os.path.dirname(own_database(self))   # RUNWAY_DATA, where the safety copy goes
+        self.base = serve(self, server.Server)
 
     def post(self, path, body):
-        r = urllib.request.Request(self.base + path, method="POST", data=body, headers=self.HEADERS)
-        try:
-            with urllib.request.urlopen(r, timeout=10) as resp:
-                return resp.status, json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            with e:
-                return e.code, json.loads(e.read())
+        status, _, raw = fetch(self.base, "POST", path, body, self.HEADERS, timeout=10)
+        return status, json.loads(raw)
 
     def get(self, path, method="GET"):
-        with urllib.request.urlopen(urllib.request.Request(self.base + path, method=method), timeout=10) as resp:
-            return resp.status, resp.read()
+        status, _, raw = fetch(self.base, method, path, timeout=10)
+        return status, raw
 
     def test_downloading_a_backup_records_when(self):
         self.assertIsNone(json.loads(self.get("/api/state")[1])["last_backup"])   # never downloaded

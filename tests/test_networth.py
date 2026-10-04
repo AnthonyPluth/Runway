@@ -1,6 +1,5 @@
 import json
 import os
-import tempfile
 import threading
 import unittest
 from datetime import date, timedelta
@@ -11,9 +10,8 @@ from sqlalchemy import func, insert, select, update
 
 from runway import db, loans, networth, prices, realie
 from runway.models import Account, Asset, AssetValue, LoanTerms, NetworthSnapshot, Transaction
-from tests.shared import DbCase
+from tests.shared import DbCase, TODAY, own_database
 
-TODAY = date(2026, 9, 23)
 
 
 class Base(DbCase):
@@ -380,11 +378,12 @@ class ReplyParsingTests(unittest.TestCase):
 
     def test_unreadable_reply_is_an_error_not_silence(self):
         from runway import categorize
-        tmp = tempfile.TemporaryDirectory(); path = os.path.join(tmp.name, "t.db"); db.init(path); c = db.connect(path)
+        path = own_database(self)
+        c = db.connect(path)
+        self.addCleanup(c.close)
         db.set_setting(c, "openrouter_api_key", "k"); db.set_setting(c, "llm_model", "openrouter/free")
         group = [[{"posted": "2026-09-01", "amount": -5, "kind": "credit", "payee": "X", "description": "X"}]]
         with self.assertRaises(RuntimeError) as cm:
             categorize.ask_model(c, group, caller=lambda k, m, p: "Sure! I'd categorize these as groceries.")
         self.assertIn("openrouter/free", str(cm.exception))
         self.assertIn("openrouter/free", db.get_setting(c, "last_llm_error"))
-        c.close(); tmp.cleanup()

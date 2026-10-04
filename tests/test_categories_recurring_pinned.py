@@ -12,7 +12,7 @@ from runway.server.api import recurring as api_recurring
 from runway.server.common import ApiError
 from runway.models import (Account, AiLog, Budget, Category, Override, Recurring, RetailItem, RetailItemMemory,
                            RetailOrder, Rule, Transaction, TxSplit)
-from tests.shared import DbCase
+from tests.shared import DbCase, add_tx, freeze_today
 
 
 class Base(DbCase):
@@ -25,12 +25,9 @@ class Base(DbCase):
 
     def tx(self, amount, desc, acct="chk", posted=None, category=None, source=None, review=0, payee=None):
         self.n += 1
-        tid = f"{acct}|{self.n}"
-        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=posted or f"2026-09-{self.n:02d}",
-                                                  amount=amount, description=desc,
-                                                  payee=categorize.clean_payee(desc) if payee is None else payee,
-                                                  category=category, category_source=source, needs_review=review))
-        return tid
+        return add_tx(self.c, acct, posted or f"2026-09-{self.n:02d}", amount, id=f"{acct}|{self.n}", description=desc,
+                      **({} if payee is None else {"payee": payee}), category=category, category_source=source,
+                      needs_review=review)
 
     def one(self, stmt):
         return self.c.execute(stmt).fetchone()
@@ -165,7 +162,7 @@ class CategoryCascadeTests(Base):
 
     def test_any_spending_category_has_a_card_of_its_own(self):
         categories.add(self.c, "Dentist", "Pharmacy")
-        recent = (date.today() - timedelta(days=3)).isoformat()
+        recent = (freeze_today(self) - timedelta(days=3)).isoformat()
         self.tx(-4000, "DENTAL CARE", acct="cc", posted=recent, category="Dentist")
         api_categories.api_category_pay_with(self.c, None, {"name": "Dentist", "pay_with": "chk"})   # nested, no budget
         api_categories.api_category_pay_with(self.c, None, {"name": "Travel", "pay_with": "cc"})

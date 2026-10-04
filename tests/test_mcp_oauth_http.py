@@ -15,11 +15,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, select, update
 
-from runway import db, mcp_access, mcp_oauth, mcp_server, oidc, server
+from runway import db, mcp_access, mcp_oauth, mcp_server, oidc
 from runway.server import common
 from runway.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
-from tests.shared import forget_oauth, own_database, tag
-from tests.test_server import NoRedirect, Provider
+from tests.shared import ServerCase, fetch, forget_oauth, tag
+from tests.test_server import Provider
 
 VERIFIER = "correct-horse-battery-staple-" + "x" * 30
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).rstrip(b"=").decode()
@@ -50,28 +50,18 @@ class Reply:
         return None
 
 
-class OAuthServer(unittest.TestCase):
+class OAuthServer(ServerCase):
     """A real Runway on a database of its own (tests/shared.py's own_database, for the whole class; on Postgres its own
     schema), with no sign-in (so you're "signed in" on this computer). Nothing else writes to it, so another module's
     tests can't end a session or flip a switch under these, and the churning switch needn't be held. Each test still
     removes what it made and turns the switches off, so the tests don't depend on each other's order."""
-    env: dict = {}
+    unset = ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER")
 
     @classmethod
     def setUpClass(cls):
-        own_database(cls, **cls.env)        # undone, with the environment, after tearDownClass has stopped the server
-        for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER"):
-            os.environ.pop(k, None)
-        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
+        super().setUpClass()
         cls.iss = cls.base
         cls.resource = cls.base + "/mcp"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.httpd.server_close()
 
     def setUp(self):
         self.tag = tag()
@@ -98,13 +88,7 @@ class OAuthServer(unittest.TestCase):
         h = dict(headers or {})
         if cookies:
             h["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
-        r = urllib.request.Request(self.base + path if path.startswith("/") else path, method=method, headers=h, data=body)
-        try:
-            resp = urllib.request.build_opener(NoRedirect).open(r, timeout=20)
-        except urllib.error.HTTPError as e:
-            resp = e
-        with resp:
-            return Reply(resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read())
+        return Reply(*fetch(self.base if path.startswith("/") else "", method, path, body, h, follow=False))
 
     def form(self, path, fields, headers=None, cookies=None):
         return self.http("POST", path, urllib.parse.urlencode(fields).encode(),

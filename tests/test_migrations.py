@@ -1,7 +1,6 @@
 """The schema comes from Alembic migrations; they must match runway/schema.py, and older databases must upgrade."""
 import json
 import os
-import tempfile
 import unittest
 
 import sqlalchemy as sa
@@ -13,6 +12,7 @@ from sqlalchemy import func, insert, select
 from runway import db, schema
 from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
                            ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
+from tests.shared import database_path, scratch_dir
 
 
 def drift(path):
@@ -31,7 +31,7 @@ def drift(path):
 
 class MigrationTests(unittest.TestCase):
     def setUp(self):
-        self.path = os.path.join(tempfile.mkdtemp(), "m.db")
+        self.path = database_path(self, "m.db")
 
     def test_fresh_database_matches_schema(self):
         db.init(self.path)
@@ -520,7 +520,7 @@ class MigrationTests(unittest.TestCase):
         from unittest import mock
         from alembic import command
         from runway import backup
-        data = tempfile.mkdtemp()   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
+        data = scratch_dir(self)   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0039")
@@ -616,7 +616,7 @@ class MigrationTests(unittest.TestCase):
     def test_0040_saves_no_copy_when_nothing_refers_to_nothing(self):
         from unittest import mock
         from alembic import command
-        data = tempfile.mkdtemp()
+        data = scratch_dir(self)
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0039")
@@ -688,36 +688,34 @@ class MigrationTests(unittest.TestCase):
                 db.migrate(path)
             except Exception as e:
                 errors.append(e)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "together.db")   # on Postgres the path only picks the test's own schema
-            threads = [threading.Thread(target=start, args=(path,)) for _ in range(6)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(60)
-            self.assertFalse([t for t in threads if t.is_alive()], "the migrations are stuck waiting on each other")
-            self.assertEqual(errors, [])
-            self.assertEqual(drift(path), [])
+        path = database_path(self, "together.db")   # on Postgres the path only picks the test's own schema
+        threads = [threading.Thread(target=start, args=(path,)) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        self.assertFalse([t for t in threads if t.is_alive()], "the migrations are stuck waiting on each other")
+        self.assertEqual(errors, [])
+        self.assertEqual(drift(path), [])
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: the lock is Postgres's")
     def test_a_tests_own_schema_migrates_without_waiting_for_another(self):
         # Each test's own schema has its own lock, so parallel tests don't all queue on one (the whole Postgres run
         # used to wait on it). Two migrations of the same schema still take turns (the test above).
         import threading
-        with tempfile.TemporaryDirectory() as tmp:
-            held, free = os.path.join(tmp, "held.db"), os.path.join(tmp, "free.db")
-            db.migrate(held)
-            with db.engine(held).connect() as other:                            # hold held's lock, as a migration would
-                other.exec_driver_sql(f"SELECT pg_advisory_xact_lock({db.SCHEMA_LOCK}, hashtext(current_schema()))")
-                waiting = threading.Thread(target=db.migrate, args=(held,))
-                waiting.start()
-                db.migrate(free)                                                 # another schema: doesn't wait
-                self.assertEqual(drift(free), [])
-                waiting.join(1)
-                self.assertTrue(waiting.is_alive())                             # the same schema: waits for its turn
-                other.rollback()                                                  # the lock goes with the transaction
-            waiting.join(30)
-            self.assertFalse(waiting.is_alive())
+        held, free = database_path(self, "held.db"), database_path(self, "free.db")
+        db.migrate(held)
+        with db.engine(held).connect() as other:                            # hold held's lock, as a migration would
+            other.exec_driver_sql(f"SELECT pg_advisory_xact_lock({db.SCHEMA_LOCK}, hashtext(current_schema()))")
+            waiting = threading.Thread(target=db.migrate, args=(held,))
+            waiting.start()
+            db.migrate(free)                                                 # another schema: doesn't wait
+            self.assertEqual(drift(free), [])
+            waiting.join(1)
+            self.assertTrue(waiting.is_alive())                             # the same schema: waits for its turn
+            other.rollback()                                                  # the lock goes with the transaction
+        waiting.join(30)
+        self.assertFalse(waiting.is_alive())
 
     def test_connection_wrapper(self):
         db.init(self.path)

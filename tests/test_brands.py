@@ -1,7 +1,5 @@
 """Institution logos for accounts, and which big merchant a transaction is from."""
 import base64
-import os
-import tempfile
 import unittest
 from unittest import mock
 
@@ -9,6 +7,7 @@ from sqlalchemy import func, insert, select, update
 
 from runway import brands, db
 from runway.models import Account, Merchant, PlaidAccount, PlaidItem
+from tests.shared import own_database
 
 
 class BrandTests(unittest.TestCase):
@@ -42,8 +41,7 @@ class BrandTests(unittest.TestCase):
         from unittest import mock
 
         from runway import merchants
-        path = os.path.join(tempfile.mkdtemp(), "b.db")
-        db.init(path)
+        path = own_database(self)
         png = base64.b64encode(b"png").decode()
         with db.session(path) as c:
             c.execute(insert(PlaidItem).values(item_id="i", access_token="t", institution_name="Citibank Online",
@@ -91,8 +89,7 @@ class BrandTests(unittest.TestCase):
                 self.assertIsNone(brands.account_brands(c)["w"]["src"])
 
     def test_connections_logos(self):
-        path = os.path.join(tempfile.mkdtemp(), "n.db")
-        db.init(path)
+        path = own_database(self)
         with db.session(path) as c:
             c.execute(insert(PlaidItem).values(item_id="i", access_token="t", institution_name="Citibank Online",
                                                products="transactions"))
@@ -117,8 +114,7 @@ class BrandTests(unittest.TestCase):
         from runway.server.api.accounts import api_account_logo, api_account_logo_options
         from runway.server.common import ApiError
         from runway import merchants
-        path = os.path.join(tempfile.mkdtemp(), "c.db")
-        db.init(path)
+        path = own_database(self)
         with db.session(path) as c:
             c.execute(insert(Account).values(id="a", name="Card", org="Northwind", kind="credit"))
             with self.assertRaises(ApiError):                                           # no key: can't fetch a website's
@@ -170,8 +166,7 @@ if __name__ == "__main__":
 
 class LabelTests(unittest.TestCase):
     def test_owner_in_account_names(self):
-        path = os.path.join(tempfile.mkdtemp(), "l.db")
-        db.init(path)
+        path = own_database(self)
         with db.session(path) as c:
             c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o, "kind": "credit"} for i, n, d, o in [
                 ("a", "Citi AAdvantage 4400", "AAdvantage", "Sam"),     # -> AAdvantage (Sam)

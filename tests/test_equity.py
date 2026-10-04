@@ -13,7 +13,7 @@ from runway import carta, db, equity, networth
 from runway.models import EquityGrant, Setting
 from tests.shared import DbCase
 
-TODAY = date(2026, 9, 27)
+TODAY = date(2026, 9, 27)   # not shared.TODAY, the 27th: its grant and vesting dates are written around it
 
 
 def grant(**kw):

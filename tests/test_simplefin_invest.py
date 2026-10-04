@@ -7,10 +7,9 @@ from runway import db, portfolio, prices, sfinvest, simplefin
 from runway import settings_keys as sk
 from runway.models import (Account, Holding, HoldingSnapshot, InvAccount, ManualContribution, ManualPosition,
                            ManualState, Price, PriceMeta, Security)
-from tests.shared import DbCase
+from tests.shared import TODAY, DbCase, freeze_today
 
-TODAY = date(2026, 9, 23)
-RECENT = (date.today() - timedelta(days=1)).isoformat()   # a price the checks still count as current, whenever the tests run
+RECENT = (TODAY - timedelta(days=1)).isoformat()   # a price the checks still count as current (the clock is frozen at TODAY)
 
 
 def account(acct_id="wf1", name="Wealthfront Automated Investing", balance="3500.00", holdings=None, transactions=None):
@@ -27,6 +26,10 @@ MMF = {"id": "h2", "symbol": "SPAXX", "description": "Fidelity Government Money 
 
 
 class Base(DbCase):
+    def setUp(self):
+        super().setUp()
+        freeze_today(self)
+
     def price(self, ticker, d, close):
         db.upsert(self.c, Price, {"ticker": ticker, "date": d, "close": close, "adjclose": close}, key=["ticker", "date"])
 

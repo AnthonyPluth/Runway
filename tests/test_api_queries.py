@@ -15,9 +15,9 @@ from runway.models import (Account, Budget, CardStatement, Override, PlaidAccoun
                            Transaction)
 from runway.server import routes
 from runway.server.api import accounts, recurring as api_recurring, state
-from tests.shared import DbCase
+from tests.shared import TODAY, DbCase, freeze_today
 
-TODAY = date.today()
+# (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
 
 
 # ------------------------------------------------------------------------------------------ the pages as they were
@@ -196,6 +196,7 @@ class Queries:
 class ListPageTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
         self.cards = 0
         self.add(3)
@@ -268,6 +269,10 @@ class ListPageTests(DbCase):
 
 
 class SettingsTests(DbCase):
+    def setUp(self):
+        super().setUp()
+        freeze_today(self)
+
     def test_get_settings_is_get_setting_for_each(self):
         db.set_setting(self.c, sk.HORIZON_DAYS, "45")
         db.set_setting(self.c, sk.OPENROUTER_API_KEY, "sk-or-secret")   # kept encrypted

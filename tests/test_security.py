@@ -6,14 +6,13 @@ import re
 import tempfile
 import threading
 import unittest
-import urllib.error
-import urllib.request
 from unittest import mock
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import insert, select
 
 from runway import backup, categories, db, oidc, secretbox, server, simplefin
 from runway.models import PlaidItem, Setting, SyncLog
+from tests.shared import ServerCase, add_database, database_path, fetch, own_database
 from tests.test_web_app import built_app, serving
 
 
@@ -48,13 +47,10 @@ class PublicUrlTests(unittest.TestCase):
 
 class SecretsTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "s.db")
-        db.init(self.path)
+        self.path = own_database(self)
+        self.dir = os.path.dirname(self.path)
         self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
+        self.addCleanup(self.c.close)
 
     def raw(self, key):
         return self.c.execute(select(Setting.value).where(Setting.key == key)).fetchone()[0]
@@ -91,8 +87,7 @@ class SecretsTests(unittest.TestCase):
         self.assertTrue(settings["finnhub_api_key"].startswith("enc:v1:"))
         self.assertTrue(data["tables"]["plaid_items"]["rows"][0][1].startswith("enc:v1:"))
         # restored under the same key, they read as before
-        other = os.path.join(self.tmp.name, "o.db")
-        db.init(other)
+        other = add_database(self, os.path.join(self.dir, "o.db"))
         with db.session(other) as c2:
             backup.restore(c2, data)
             self.assertEqual(backup.unreadable_secrets(c2), [])
@@ -101,7 +96,7 @@ class SecretsTests(unittest.TestCase):
                                        .where(Setting.key == "realie_api_key")).fetchone()[0].startswith("enc:v1:"))
             self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
         # under another key they can't be read, and the restore says which
-        elsewhere = os.path.join(self.tmp.name, "e.db")
+        elsewhere = database_path(self, "e.db")
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machine-key-abcdefghijklmnopqrstuv"}):
             db.init(elsewhere)
             with db.session(elsewhere) as c3:
@@ -126,33 +121,11 @@ class SecretsTests(unittest.TestCase):
             self.assertTrue(secretbox.check_config())
 
 
-class HttpTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
-        cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown(); cls.httpd.server_close()
-        cls.tmp.cleanup()
-        if cls.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = cls.saved
+class HttpTests(ServerCase):
+    server_class = server.Server
 
     def open(self, path, method="GET", body=None, headers=None):
-        r = urllib.request.Request(self.base + path, method=method, data=body, headers=headers or {})
-        try:
-            resp = urllib.request.urlopen(r, timeout=10)
-        except urllib.error.HTTPError as e:
-            resp = e
-        return resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read()
+        return fetch(self.base, method, path, body, headers, timeout=10)
 
     def api(self, method, path, body=None, headers=None):
         h = {"X-Runway": "1", "Content-Type": "application/json", **(headers or {})}
@@ -211,23 +184,10 @@ class HttpTests(unittest.TestCase):
 
 class SyncStatusTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = self.tmp.name
-        db.init()
+        own_database(self)
+        self.addCleanup(setattr, server.sync, "AUTO_SYNC", True)
         with db.session() as c:
             db.set_setting(c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
-
-    def tearDown(self):
-        server.sync.AUTO_SYNC = True
-        with db.session() as c:   # on Postgres the tests share one database: leave it as found
-            db.set_setting(c, "simplefin_access_url", None)
-            c.execute(delete(SyncLog))
-        self.tmp.cleanup()
-        if self.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = self.saved
 
     def test_a_failed_sync_is_recorded(self):
         with mock.patch.object(simplefin, "sync", side_effect=simplefin.SimpleFinError("SimpleFIN is down")):

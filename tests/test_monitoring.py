@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import threading
 import time
 import unittest
 import urllib.request
@@ -14,7 +13,7 @@ from runway import categorize, db, monitoring, server, simplefin
 from runway.server import sync
 from runway.server.handler import _traced, trace_name
 
-from tests.shared import own_database
+from tests.shared import own_database, serve
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
@@ -287,17 +286,14 @@ class MonitoringTests(unittest.TestCase):
     def test_a_request_is_traced_without_its_query_or_values(self):
         own_database(self)
         transport = start()
-        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        self.addCleanup(httpd.server_close)
-        self.addCleanup(httpd.shutdown)
+        base = serve(self)
         trace_id = "abcdef0123456789abcdef0123456789"
-        req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/transactions?q=rent-money&limit=5",
+        req = urllib.request.Request(f"{base}/api/transactions?q=rent-money&limit=5",
                                      headers={"sentry-trace": f"{trace_id}-1234567890abcdef-1"})
         with mock.patch("builtins.print"):
             with urllib.request.urlopen(req, timeout=20) as r:
                 self.assertEqual(r.status, 200)
-            urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
+            urllib.request.urlopen(f"{base}/healthz", timeout=20).close()
         # The server finishes a request's transaction just after it has sent the response, so on a busy machine the
         # transaction can still be on its way: wait for it (briefly) rather than read the transport too soon.
         deadline = time.monotonic() + 10

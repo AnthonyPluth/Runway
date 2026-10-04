@@ -11,7 +11,7 @@ from runway.churning import ChurnError
 from runway.models import Account, Category, Transaction, User
 from tests.shared import DbCase
 
-TODAY = date(2026, 9, 29)
+TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and plan dates are written around it
 VALS = {"cash": {"name": "Cash back", "cents": 1.0}, "c1": {"name": "Capital One miles", "cents": 1.4},
         "ur": {"name": "UR", "cents": 1.5}}
 PARENTS = {"Travel": None, "Hotels": "Travel", "Restaurants": None}

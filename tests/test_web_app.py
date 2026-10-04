@@ -3,13 +3,13 @@ policy, with a fresh script nonce on its page; its routes and the old /next/ add
 import mimetypes
 import os
 import tempfile
-import threading
 import unittest
 import urllib.error
 import urllib.request
 from unittest import mock
 
-from runway import db, server
+from runway import server
+from tests.shared import ServerCase, scratch_dir
 
 PAGE = b'<!doctype html><head><script type="module" crossorigin src="/assets/index-abc.js"></script></head><div id="app"></div>'
 
@@ -34,26 +34,14 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class WebAppTests(unittest.TestCase):
+class WebAppTests(ServerCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
-        cls.static = os.path.join(cls.tmp.name, "static")
+        super().setUpClass()
+        cls.static = os.path.join(scratch_dir(cls), "static")
         built_app(cls.static)
         with open(os.path.join(cls.static, "sw.js"), "wb") as f:
             f.write(b"// service worker")
-        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.httpd.server_close()
-        cls.tmp.cleanup()
-        os.environ.pop("RUNWAY_DATA", None)
 
     def get(self, path, static=None):
         with serving(static or self.static):

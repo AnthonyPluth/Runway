@@ -1,7 +1,6 @@
 """What the API's handlers do with values they can't use: each is refused with a message saying which (ApiError, a 400
 or a 404), never left to fail as a bug would. Switches sent as text ("false", "0", "no") are off; amounts that aren't
 numbers, or are too large, are refused; so are days that aren't days and whole numbers that aren't whole."""
-from datetime import date
 
 from sqlalchemy import select
 
@@ -10,9 +9,9 @@ from runway import settings_keys as sk
 from runway.models import Account, Budget, Category, Override, Recurring, Rule, Transaction
 from runway.server.api import (accounts, budget, categories, mcp, merchants, recurring, reports, state, transactions)
 from runway.server.common import ApiError, clamped_int, query_int, row_id
-from tests.shared import DbCase
+from tests.shared import TODAY, DbCase, freeze_today
 
-TODAY = date.today()
+# (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
 OFF = ("false", "0", "no", "off", "", None, 0, False, [], {})
 NOT_AMOUNTS = ("nan", "inf", "-inf", "NaN", float("nan"), float("inf"), "1e9", 1e9, -1e9, "1e300", 1e300, 10 ** 30, True,
                "abc", [], {})
@@ -25,6 +24,7 @@ def q(**kw):
 class FlagTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
         self.tx = self.c.execute(select(Transaction.id).where(Transaction.account_id == "demo-card")
                                  .order_by(Transaction.id).limit(1)).scalar()
@@ -91,6 +91,7 @@ class FlagTests(DbCase):
 class AmountTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
 
     def test_a_transaction_you_add(self):
@@ -139,6 +140,7 @@ class AmountTests(DbCase):
 class DayTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
 
     def test_bad_days(self):
@@ -164,6 +166,7 @@ class DayTests(DbCase):
 class WholeNumberTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
 
     def test_query_numbers(self):
@@ -222,6 +225,7 @@ class TextTests(DbCase):
 
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
 
     def test_not_text(self):
