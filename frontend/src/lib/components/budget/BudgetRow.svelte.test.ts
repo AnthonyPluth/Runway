@@ -32,7 +32,6 @@ beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).moc
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
-    // the name and the amount both open Transactions
     expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["Groceries", "$200"]);
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
@@ -68,7 +67,8 @@ describe("BudgetRow", () => {
     it("sits on the emoji as its bank's logo (the shared badge, sized to the emoji), named in its title", () => {
       const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onsave: vi.fn(), onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Visa");
-      expect(badge(container)).toHaveClass("pointer-events-auto");   // so its title shows on hover
+      expect(badge(container)).toHaveClass("pointer-events-auto");
+      expect(badge(container)).toHaveClass("phone:hidden");
       expect(badge(container)!.querySelector("img")).toHaveAttribute("src", "/logo/c1.png");
       expect(badge(container)!.querySelector("img")!.parentElement).toHaveClass("size-4");
     });
@@ -99,7 +99,7 @@ describe("BudgetRow", () => {
     setup(cat({ spent: 620, left: -120 }));
     expect(screen.getByText("▲ $120 over")).toHaveClass("text-destructive");
     expect(bar().firstElementChild).toHaveClass("bg-destructive");
-    expect(bar()).toHaveAttribute("aria-label", "124% of budget used");   // said as it is; the drawn bar stops at full
+    expect(bar()).toHaveAttribute("aria-label", "124% of budget used");
     expect(bar().firstElementChild).toHaveStyle({ width: "100%" });
   });
 
@@ -119,7 +119,7 @@ describe("BudgetRow", () => {
   it("includes what rolled over from earlier months", () => {
     setup(cat({ carried: 50, available: 550 }));
     expect(screen.getByText("$500 + $50 rolled over from earlier months")).toBeInTheDocument();
-    expect(bar()).toHaveAttribute("aria-label", "36% of budget used");   // 200 of 550
+    expect(bar()).toHaveAttribute("aria-label", "36% of budget used");
   });
 
   it("says nothing about what's left when nothing is spent yet, and keeps cents a rounding would hide", () => {
@@ -158,10 +158,10 @@ describe("BudgetRow", () => {
 
     it("is the lighter part of the bar after what's spent, and what's left after it", () => {
       setup(cat({ expected: 100 }));
-      expect(screen.getByText("$200 left · $100 coming")).toBeInTheDocument();   // 500 − 200 − 100
+      expect(screen.getByText("$200 left · $100 coming")).toBeInTheDocument();
       expect(expectedBar()).toHaveClass("opacity-45");
       expect(expectedBar()).not.toHaveClass("bg-destructive");
-      expect(expectedBar()).toHaveStyle({ width: "60%" });   // drawn from the start, under the 40% spent
+      expect(expectedBar()).toHaveStyle({ width: "60%" });
       expect(bar()).toHaveAttribute("aria-label", "40% of budget used, 20% more coming");
     });
 
@@ -171,10 +171,10 @@ describe("BudgetRow", () => {
       expect(note).toHaveClass("text-destructive");
       expect(note).not.toHaveClass("font-semibold");
       expect(expectedBar()).toHaveClass("bg-destructive", "opacity-45");
-      expect(expectedBar()).toHaveStyle({ width: "100%" });   // stops at the bar's end
+      expect(expectedBar()).toHaveStyle({ width: "100%" });
       const spentBar = bar().querySelector(":scope > div:not([data-expected])");
       expect(spentBar).toHaveStyle({ width: "90%" });
-      expect(spentBar).not.toHaveClass("bg-destructive");   // what's spent isn't over yet
+      expect(spentBar).not.toHaveClass("bg-destructive");
     });
 
     it("leaves nothing left rather than a negative amount when it fills the budget exactly", () => {
@@ -218,7 +218,6 @@ describe("BudgetRow", () => {
       expect(coming).toHaveClass("opacity-45");
       expect(incomeBar()).toHaveAttribute("aria-label", "50% of expected income received, 50% more scheduled");
       expect(screen.getByTitle("Where you'd be at an even pace today")).toBeInTheDocument();
-      // no rollover for income
       expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
     });
 

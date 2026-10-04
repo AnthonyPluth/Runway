@@ -22,8 +22,6 @@ beforeEach(() => {
   vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/accounts" ? accounts : path === "/api/state" ? { connected: true, primary_account: "sav", horizon_days: 60 } : {}));
   app.state = { connected: true, primary_account: "chk", horizon_days: 90 };
 });
-// An open sheet makes the rest of the page inert (pointer-events: none on body), and unmounting it mid-test doesn't
-// undo that, so each test unmounts its own and hands the next one a clickable page.
 afterEach(() => { cleanup(); forecastSheet.open = false; document.body.style.pointerEvents = ""; });
 
 const open = async () => {

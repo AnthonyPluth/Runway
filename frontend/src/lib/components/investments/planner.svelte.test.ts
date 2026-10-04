@@ -1,6 +1,4 @@
 // @vitest-environment jsdom
-// The retirement planner form and its chart. The projection maths has its own tests (planner.test.ts); these check
-// what the page shows from it and what it saves.
 import { cleanup, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,7 +76,7 @@ describe("RetirementPlanner", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const retires = screen.getByRole("spinbutton", { name: /Retires at/ });
     await user.clear(retires);
-    await user.type(retires, "30");   // born 1986: 40 this year
+    await user.type(retires, "30");
     expect(screen.getByText("At least 40, your age now")).toBeInTheDocument();
     expect(retires).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("Fix the ages below to see the projection.")).toBeInTheDocument();
@@ -208,7 +206,7 @@ describe("RetirementPlanner", () => {
       setup();
       await userEvent.click(screen.getByRole("button", { name: /Add a partner/ }));
       await userEvent.click(screen.getByRole("button", { name: /Social Security/ }));
-      await userEvent.selectOptions(screen.getByRole("combobox"), "1");   // whose income: the partner's
+      await userEvent.selectOptions(screen.getByRole("combobox"), "1");
       await userEvent.click(screen.getByRole("button", { name: /Remove Partner/ }));
       expect(screen.queryByLabelText("Social Security a year")).not.toBeInTheDocument();
     });
@@ -245,7 +243,7 @@ describe("RetirementPlanner", () => {
       expect(screen.getByRole("textbox", { name: /Amount/ })).toHaveValue("10000");
       await userEvent.selectOptions(screen.getByLabelText("Money"), "in");
       expect(screen.getByLabelText("Money")).toHaveValue("in");
-      expect(screen.getByRole("textbox", { name: /Amount/ })).toHaveValue("10000");   // the amount stays positive; only the sign flips
+      expect(screen.getByRole("textbox", { name: /Amount/ })).toHaveValue("10000");
     });
 
     it("removes an event", async () => {
@@ -274,10 +272,10 @@ describe("RetirementPlanner", () => {
       setup();
       await userEvent.click(screen.getByRole("radio", { name: "Future dollars" }));
       expect(figure(/^Invested at retirement · 2051$/)).toHaveTextContent(fmt0(f.atRetirement));
-      expect(f.atRetirement).toBeCloseTo(p.atRetirement * 1.025 ** 25, 4);   // 2051 is 25 years out
+      expect(f.atRetirement).toBeCloseTo(p.atRetirement * 1.025 ** 25, 4);
       expect(figure(/^Invested at retirement/).nextElementSibling).toHaveTextContent(`${fmt0(f.low[25])} – ${fmt0(f.high[25])} likely`);
       expect(figure(/^Left at age 95 · 2081$/)).toHaveTextContent(fmt0(f.atEnd));
-      expect(screen.getByText(/^\d+%$/)).toHaveTextContent(`${Math.round(p.success * 100)}%`);   // the odds don't change
+      expect(screen.getByText(/^\d+%$/)).toHaveTextContent(`${Math.round(p.success * 100)}%`);
       expect(screen.getByRole("img", { name: /^Projected investments by age, in each year’s dollars: median/ })).toBeInTheDocument();
       await userEvent.click(screen.getByRole("radio", { name: "Today’s dollars" }));
       expect(figure(/^Invested at retirement$/)).toHaveTextContent(fmt0(p.atRetirement));
@@ -326,7 +324,7 @@ describe("RetirementPlanner", () => {
       for (const name of ["Born in", "Plan until age", "Inflation", "Return while saving", "Social Security a year"]) {
         expect(details()).toContainElement(screen.getByLabelText(name));
       }
-      expect(details()).not.toContainElement(screen.getByLabelText("Retires at · age"));   // changed more often: left out
+      expect(details()).not.toContainElement(screen.getByLabelText("Retires at · age"));
     });
 
     it("is open while something's missing: Runway's sample plan, or a birth year that isn't one", () => {
@@ -356,7 +354,7 @@ describe("RetirementPlanner", () => {
       expect(screen.getByRole("img", { name: /with home equity$/ })).toBeInTheDocument();
       await userEvent.click(screen.getByText("Show as table"));
       expect(screen.getByRole("columnheader", { name: "Home equity" })).toBeInTheDocument();
-      expect(within(screen.getAllByRole("row")[1]).getByText("$300,000")).toBeInTheDocument();   // this year: 500k less 200k owed
+      expect(within(screen.getAllByRole("row")[1]).getByText("$300,000")).toBeInTheDocument();
     });
 
     it("leaves vehicles out of it", () => {
@@ -371,7 +369,7 @@ describe("RetirementPlanner", () => {
       expect(screen.queryByText(/is what went into your investments/)).not.toBeInTheDocument();
       unmount();
       setup(data({ computed: { annual_spending: 55000, yearly_savings: 3000, expected_return: 0.05, savings_measured: true, savings_since: "2026-05-31" } }));
-      expect(screen.getByTitle(/only goes back to May\s31,\s2026/)).toBeInTheDocument();   // a tooltip on Saves a year, not a paragraph
+      expect(screen.getByTitle(/only goes back to May\s31,\s2026/)).toBeInTheDocument();
     });
 
     it("doesn't call a figure typed on the old card a measurement", () => {
@@ -407,8 +405,8 @@ describe("RetirementPlanner", () => {
     await userEvent.click(screen.getByRole("button", { name: /Start over/ }));
     await userEvent.click(screen.getByRole("button", { name: /Start over\? This clears/ }));
     expect(api).toHaveBeenCalledWith("/api/investments/plan", { method: "POST", body: { plan: null } });
-    await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));   // year - 40
-    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");   // the sample, muted
+    await waitFor(() => expect(screen.getByLabelText("Born in")).toHaveValue(1986));
+    expect(screen.getByText(/^\d+%$/).className).toContain("text-muted-foreground");
     expect(screen.getByRole("textbox", { name: "Yearly spending in retirement" })).toHaveValue("55000");
   });
 

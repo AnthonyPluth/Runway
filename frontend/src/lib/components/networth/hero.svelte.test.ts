@@ -28,7 +28,6 @@ describe("the net worth hero", () => {
     const history = [365, 200, 90, 60, 30, 10, 0].map((n, i) => ({ date: day(n), net: 1000 + i * 500 }));
     serve(nw(history, { "30d": 300, "90d": 1200, "1y": null }));
     const { container } = render(NetWorth);
-    // Net worth is $5,000: $300 up on the month is +6.4% of the $4,700 it started from
     expect(await change()).toBe("+$300 (+6.4%) in the last month");
     expect(screen.getByTestId("nw-change")).toHaveClass("text-good");
     expect(screen.queryByText("Over time")).not.toBeInTheDocument();
@@ -41,7 +40,6 @@ describe("the net worth hero", () => {
   });
 
   it("says since when the change really is, when the snapshot it's measured from is older than the range", async () => {
-    // Opened 400, 51 and 31 days ago and today: "30 days" is from 31 days ago (close enough), "90 days" really from a year ago
     const history = [400, 51, 31, 0].map((n, i) => ({ date: day(n), net: 1000 + i * 500 }));
     serve({ ...nw(history, { "30d": 300, "90d": 1200, "1y": 2000 }), change_since: { "30d": day(31), "90d": day(400), "1y": day(400) } });
     const { unmount } = render(NetWorth);
@@ -75,25 +73,23 @@ describe("the net worth hero", () => {
     const history = [40, 30, 0].map((n, i) => ({ date: day(n), net: 6000 - i * 500 }));
     serve(nw(history, { "30d": -1000, "90d": null, "1y": null }));
     render(NetWorth);
-    // $1,000 down from $6,000 is −16.7%
     expect(await change()).toBe("−$1,000 (−16.7%) in the last month");
     expect(screen.getByTestId("nw-change")).toHaveClass("text-loss");
   });
 
   it("leaves the percentage off when net worth started at or below zero", async () => {
     const history = [40, 30, 0].map((n) => ({ date: day(n), net: 100 }));
-    serve(nw(history, { "30d": 6000, "90d": null, "1y": null }));   // from −$1,000 to $5,000
+    serve(nw(history, { "30d": 6000, "90d": null, "1y": null }));
     render(NetWorth);
     expect(await change()).toBe("+$6,000 in the last month");
   });
 
   it("starts the chart where the change is measured from, so a sparse history doesn't fall back to all of it", async () => {
-    // Snapshots 400 and 31 days ago and today: the month's change is from 31 days ago, and so is the chart
     const history = [400, 31, 0].map((n, i) => ({ date: day(n), net: 1000 + i * 500 }));
     serve({ ...nw(history, { "30d": 500, "90d": 1500, "1y": 1500 }), change_since: { "30d": day(31), "90d": day(400), "1y": day(400) } });
     render(NetWorth);
     const chart = await screen.findByRole("slider");
-    expect(chart).toHaveAttribute("aria-valuemax", "1");   // two days: 31 days ago and today
+    expect(chart).toHaveAttribute("aria-valuemax", "1");
     await userEvent.click(screen.getByRole("radio", { name: "1Y" }));
     await waitFor(() => expect(screen.getByRole("slider")).toHaveAttribute("aria-valuemax", "2"));
   });
@@ -126,7 +122,7 @@ describe("the net worth summary", () => {
     render(NetWorth);
     expect(await screen.findByText("Nothing owed")).toBeInTheDocument();
     expect(screen.queryByText("Credit cards")).toBeNull();
-    expect(screen.getByText("nothing owed")).toBeInTheDocument();   // under the Liabilities figure
+    expect(screen.getByText("nothing owed")).toBeInTheDocument();
   });
 
   it("keeps each kind of asset's color whatever else there is, and puts it before the group's heading", async () => {
@@ -135,9 +131,9 @@ describe("the net worth summary", () => {
     const { container } = render(NetWorth);
     await screen.findByText("What makes it up");
     const bar = container.querySelector("[role=img][aria-label^='Share of assets']")!;
-    expect((bar.querySelector("span") as HTMLElement).style.background).toBe("var(--nw-4)");   // Real estate's, not the first color
+    expect((bar.querySelector("span") as HTMLElement).style.background).toBe("var(--nw-4)");
     expect((container.querySelector("[data-color=home]") as HTMLElement).style.background).toBe("var(--nw-4)");
-    expect(container.querySelector("[data-color=cash]")).toBeNull();   // nothing in it, so not in the bar either
+    expect(container.querySelector("[data-color=cash]")).toBeNull();
   });
 
   it("names an account's kind in words in the list of accounts left out", async () => {
@@ -160,16 +156,15 @@ describe("a reload that fails", () => {
     render(NetWorth);
     await screen.findByTestId("nw-headline");
     expect(screen.queryByTestId("refresh-failed")).toBeNull();
-    // Leave the account out: the save goes through, the reload after it doesn't
     fail = true;
     await userEvent.click(screen.getByRole("button", { name: "Checking, $5,500.00" }));
     await userEvent.click(await screen.findByRole("switch", { name: "Count in net worth" }));
     const banner = await screen.findByTestId("refresh-failed");
     expect(banner).toHaveTextContent("Couldn’t refresh · showing earlier numbers");
     expect(banner).toHaveAttribute("title", "Server down");
-    expect(screen.getByTestId("nw-headline")).toHaveTextContent("$5,000");   // the old figure stays
+    expect(screen.getByTestId("nw-headline")).toHaveTextContent("$5,000");
     fail = false;
-    await fireEvent.click(within(banner).getByRole("button", { name: "Retry" }));   // the account's panel is still open over the page
+    await fireEvent.click(within(banner).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.queryByTestId("refresh-failed")).toBeNull());
   });
 });

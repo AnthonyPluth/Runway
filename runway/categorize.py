@@ -588,7 +588,7 @@ def ask_model(conn, groups: list[list[dict]], caller=call_llm, allow_new: bool =
                 db.set_setting(conn, sk.LAST_LLM_ERROR, said[:300])
                 log_call(conn, purpose, model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
                 conn.commit()
-                raise RuntimeError(f"The AI request failed: {e}") from e
+                raise RuntimeError(f"The AI request failed: {said[:300]}") from e
             conn.commit()
             out += [results.get(i, empty) for i in range(len(batch))]
     return out

@@ -5,8 +5,6 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ForecastEvent, Overview } from "$lib/types";
 import ForecastChart from "./ForecastChart.svelte";
 
-// jsdom doesn't lay out SVG: the chart measures its labels, and finds the day under the pointer from where it's drawn.
-// At 320 wide (the chart's least) its three days are at x = 52, 182 and 312.
 beforeAll(() => {
   Object.assign(SVGElement.prototype, {
     getBBox: () => ({ x: 0, y: 0, width: 0, height: 0 }),
@@ -22,7 +20,6 @@ const fc = (extra: Partial<Overview> = {}): Overview => ({
   events: [statement], cards: [], warnings: [], warning_links: [], ...extra,
 });
 const hover = (container: HTMLElement, clientX: number) => fireEvent.mouseMove(container.querySelector("rect.cursor-crosshair")!, { clientX });
-// jsdom has no Touch, so a finger is a plain event carrying its touches (the chart's own listeners read nothing else).
 const finger = (container: HTMLElement, type: "touchstart" | "touchmove", clientX: number) => {
   const e = Object.assign(new Event(type, { cancelable: true }), { touches: [{ clientX, clientY: 100 }] });
   return fireEvent(container.querySelector("rect.cursor-crosshair")!, e);
@@ -40,7 +37,7 @@ describe("ForecastChart's readout", () => {
 
   it("has no budgeted line on a day without any", async () => {
     const { container } = render(ForecastChart, { props: { fc: fc({ spend: { "2026-10-19": 15.08 } }) } });
-    await hover(container, 182);   // a Saturday: its share goes out on Monday
+    await hover(container, 182);
     expect(screen.getByText("Sat, Oct 17")).toBeInTheDocument();
     expect(screen.queryByText("Budgeted spending (est.)")).not.toBeInTheDocument();
   });
@@ -78,10 +75,10 @@ describe("ForecastChart's readout on a phone", () => {
     await finger(container, "touchstart", 182);
     await finger(container, "touchmove", 182);
     expect(tip(container).style.top).toBe("0px");
-    await hover(container, 312);   // the tap's own mouse move, right after the touch
+    await hover(container, 312);
     expect(tip(container).style.left).toBe("52px");
     vi.advanceTimersByTime(2000);
-    await hover(container, 312);   // a real mouse, later
+    await hover(container, 312);
     expect(tip(container).style.left).not.toBe("52px");
     expect(tip(container).style.top).not.toBe("0px");
   });

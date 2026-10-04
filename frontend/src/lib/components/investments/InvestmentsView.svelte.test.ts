@@ -39,8 +39,8 @@ describe("InvestmentsView", () => {
     expect(screen.queryByText("Accounts")).toBeNull();
     expect(screen.queryByRole("checkbox")).toBeNull();
     expect(screen.queryByRole("button", { name: /Show .* again/ })).toBeNull();
-    expect(container.querySelector('#inv-holdings img[src="/api/merchants/ticker%3AVTI/logo"]')).not.toBeNull();   // a holding's logo
-    expect(container.querySelectorAll("#inv-holdings img")).toHaveLength(1);                                        // the other keeps its letter
+    expect(container.querySelector('#inv-holdings img[src="/api/merchants/ticker%3AVTI/logo"]')).not.toBeNull();
+    expect(container.querySelectorAll("#inv-holdings img")).toHaveLength(1);
     expect(vi.mocked(api).mock.calls.some((c) => String(c[0]).startsWith("/api/plaid/accounts/"))).toBe(false);
   });
 
@@ -56,7 +56,7 @@ describe("InvestmentsView", () => {
     vi.mocked(api).mockImplementation((async (path: string) => path.startsWith("/api/investments?") ? data : { inv_accounts: 1, items: [] }) as never);
     const { container } = render(InvestmentsView);
     await screen.findByText("Holdings");
-    expect(container.querySelector("dl")).not.toBeNull();   // StatStrip
+    expect(container.querySelector("dl")).not.toBeNull();
     for (const l of ["Total value", "Today", "Total gain", "Return · 1Y"]) expect(screen.getByText(l, { selector: "dt span" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /2 holdings .* need a cost basis/ })).toBeInTheDocument();
     expect(screen.getByText("Checks", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
@@ -84,7 +84,7 @@ describe("InvestmentsView", () => {
       page([acct({})], [{ id: "vw", name: "Vestwell 401k", positions: 0, fields: [] }]);
       render(InvestmentsView);
       const line = await screen.findByTestId("hand-tracked");
-      expect(line).not.toHaveAttribute("open");   // folded away at the bottom
+      expect(line).not.toHaveAttribute("open");
       expect(screen.getByTestId("hand-tracked-summary")).toHaveTextContent("1 account");
       expect(line).toHaveTextContent("Vestwell 401k · balance only ·");
       await fireEvent.click(within(line).getByRole("button", { name: "Enter holdings" }));
@@ -123,7 +123,6 @@ describe("InvestmentsView", () => {
     });
     const tile = (label: string) => screen.getByText(label, { selector: "dt span" }).closest("div")!;
     afterEach(() => vi.useRealTimers());
-    // Live prices are left out (they'd re-price the page from its holdings): their endpoint doesn't answer here.
     const serve = (f: (path: string) => unknown) => vi.mocked(api).mockImplementation((async (path: string) => {
       if (path === "/api/investments/live") throw new Error("no live prices in tests");
       return f(path);
@@ -137,10 +136,10 @@ describe("InvestmentsView", () => {
       expect(tile("Total gain")).toHaveAttribute("data-tone", "down");
       expect(within(tile("Total gain")).getByText("−$500.00")).toHaveClass("text-loss");
       expect(tile("Total gain")).toHaveTextContent("−16.7% on $3,000 cost basis");
-      expect(tile("Return · 1Y")).toHaveTextContent("S&P 500 +10.0% · level with it");   // not "ahead by .0%"
-      expect(screen.getByText("−$40.00")).toHaveClass("text-loss");   // the period table's gain
+      expect(tile("Return · 1Y")).toHaveTextContent("S&P 500 +10.0% · level with it");
+      expect(screen.getByText("−$40.00")).toHaveClass("text-loss");
       expect(screen.getByText("Gain", { selector: "td" })).toBeInTheDocument();
-      expect(screen.getByText("33%", { selector: "td" })).toBeInTheDocument();   // allocation, as a whole percentage
+      expect(screen.getByText("33%", { selector: "td" })).toBeInTheDocument();
     });
 
     it("says nothing about a total gain it doesn't know, rather than a broken percentage", async () => {
@@ -188,13 +187,13 @@ describe("InvestmentsView", () => {
       const banner = await screen.findByTestId("refresh-failed");
       expect(banner).toHaveTextContent("Couldn’t refresh");
       expect(inv.period).toBe("1Y");
-      await waitFor(() => expect(screen.getByRole("radio", { name: "1Y" })).toHaveAttribute("data-state", "on"));   // the picker goes back
+      await waitFor(() => expect(screen.getByRole("radio", { name: "1Y" })).toHaveAttribute("data-state", "on"));
       expect(screen.getByText("Return · 1Y", { selector: "dt span" })).toBeInTheDocument();
       expect(tile("Total value")).toHaveTextContent("$2,500");
       fail = false;
       await fireEvent.click(within(banner).getByRole("button", { name: "Retry" }));
       await waitFor(() => expect(screen.queryByTestId("refresh-failed")).toBeNull());
-      expect(tile("Total value")).toHaveTextContent("$2,500");   // Retry reloads what's shown
+      expect(tile("Total value")).toHaveTextContent("$2,500");
       await fireEvent.click(screen.getByRole("radio", { name: "3M" }));
       await waitFor(() => expect(tile("Total value")).toHaveTextContent("$2,600"));
       expect(inv.period).toBe("3M");

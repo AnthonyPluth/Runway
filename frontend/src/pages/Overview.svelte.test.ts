@@ -20,7 +20,6 @@ const fc = (extra: Partial<OverviewData> = {}): OverviewData => ({
   events: [{ date: "2026-10-01", name: "Rent", amount: -100, kind: "recurring", key: "rec:1:2026-10-01", balance_after: 900, recurring_id: 1 }],
   cards: [], unlinked_cards: [], warnings: [], warning_links: [], missed: [], budget: null, ...extra,
 });
-// Overview's own figures; the rest of the page (This month) just keeps loading.
 const serve = (data: () => OverviewData) => vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
   if (opts?.method) return { ok: true } as never;
   if (path.startsWith("/api/overview")) return data() as never;
@@ -35,7 +34,6 @@ const forecast = (days: number, balance: number): OverviewData => ({
   events: [], cards: [], warnings: [], warning_links: [],
 });
 
-// jsdom doesn't lay out SVG; the chart measures its labels.
 Object.assign(SVGElement.prototype, { getBBox: () => ({ x: 0, y: 0, width: 0, height: 0 }) });
 
 beforeEach(() => {
@@ -142,14 +140,13 @@ describe("Overview", () => {
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === "/api/overview?days=90") return forecast(90, 1000) as never;
       if (path === "/api/overview?days=30") return new Promise((r) => { answer = r as typeof answer; }) as never;
-      return new Promise(() => {}) as never;   // This month isn't under test
+      return new Promise(() => {}) as never;
     });
     render(Overview);
     expect(await screen.findByText(/stays above \$1,000 for 90\sdays/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: "1M" }));
     expect(api).toHaveBeenCalledWith("/api/overview?days=30");
-    // Still the 90-day forecast, not the loading placeholder, until the new one arrives.
     expect(screen.getByText(/stays above \$1,000 for 90\sdays/)).toBeInTheDocument();
     expect(document.querySelector("[aria-busy=true]")).toBeNull();
 

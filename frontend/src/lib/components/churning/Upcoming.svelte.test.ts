@@ -84,8 +84,8 @@ describe("upcoming", () => {
     const date = (title: string) => screen.getByText(title).closest("li")!.firstElementChild as HTMLElement;
     expect(date("Late")).toHaveTextContent("3 days overdue");
     expect(date("Late")).toHaveClass("text-loss");
-    expect(date("Soon")).toHaveClass("text-loss");        // 7 days
-    expect(date("Month")).toHaveClass("text-warning");    // 30 days
+    expect(date("Soon")).toHaveClass("text-loss");
+    expect(date("Month")).toHaveClass("text-warning");
     expect(date("Later")).toHaveClass("text-muted-foreground");
     expect(date("Soon")).toHaveAttribute("title", "in 7 days");
   });

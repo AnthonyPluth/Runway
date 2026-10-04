@@ -49,7 +49,7 @@ class CentTests(unittest.TestCase):
     def test_cents(self):
         self.assertEqual(money.cents(12.34), 1234)
         self.assertEqual(money.cents(-12.34), -1234)
-        self.assertEqual(money.cents(0.285), 28)     # 0.28499… as a float
+        self.assertEqual(money.cents(0.285), 28)
         self.assertEqual(money.cents(19.999), 2000)
         self.assertEqual(money.cents(0.0), 0)
 
@@ -59,10 +59,10 @@ class AllocateTests(unittest.TestCase):
         self.assertEqual(money.allocate_cents([], 0), [])
         self.assertEqual(money.allocate_cents([33.333, 33.333, 33.333], 100), [34, 33, 33])
         self.assertEqual(money.allocate_cents([50.4, 50.4], 100), [50, 50])
-        self.assertEqual(money.allocate_cents([10.6, 10.6, 10.6], 31), [10, 10, 11])   # 33 rounded: two too many
-        self.assertEqual(money.allocate_cents([1.5, 1.5], 3, start=int), [2, 1])   # from the floor: the first of equal ones
+        self.assertEqual(money.allocate_cents([10.6, 10.6, 10.6], 31), [10, 10, 11])
+        self.assertEqual(money.allocate_cents([1.5, 1.5], 3, start=int), [2, 1])
         self.assertEqual(money.allocate_cents([-20.4, 120.4], 100), [-20, 120])
-        self.assertEqual(money.allocate_cents([1.0, 1.0], 7), [4, 3])   # more cents than shares: round again
+        self.assertEqual(money.allocate_cents([1.0, 1.0], 7), [4, 3])
 
     def test_as_the_forecast_and_rules_worked_them_out(self):
         rng = random.Random(20261004)
@@ -70,7 +70,7 @@ class AllocateTests(unittest.TestCase):
             n = rng.randint(1, 7)
             values = [round(rng.uniform(-400, 1200), rng.choice([2, 3, 6])) for _ in range(n)]
             if rng.random() < 0.3:
-                values = [rng.choice([0.125, 0.375, 1.005, 2.675, 0.5, 16.666666]) for _ in range(n)]   # ties and floats
+                values = [rng.choice([0.125, 0.375, 1.005, 2.675, 0.5, 16.666666]) for _ in range(n)]
             total = sum(values) + rng.choice([0.0, 0.0, 0.01, -0.02, 0.07])
             self.assertEqual(forecast.to_cents(values, total), old_to_cents(values, total), (values, total))
             parts = [{"category": f"C{i}", "percent": rng.choice([50, 33.33, 33.34, 25, 12.5, 0.01, rng.randint(1, 99)])}

@@ -39,7 +39,6 @@ describe("leaving an account out of net worth", () => {
     expect((calls("/api/accounts/chk")[0][1] as { body: unknown }).body).toEqual({ networth_hidden: 1 });
     expect(await screen.findByText(/Not counted:/)).toHaveTextContent("Checking $1,234");
     expect(screen.queryByText("Left out of net worth")).not.toBeInTheDocument();
-    // the panel stays open and now shows it off; flipping the switch counts it again
     await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("switch", { name: "Count in net worth" })).not.toBeChecked());
     await userEvent.click(within(screen.getByRole("dialog")).getByRole("switch", { name: "Count in net worth" }));
     await waitFor(() => expect(calls("/api/accounts/chk")).toHaveLength(2));
@@ -66,7 +65,6 @@ describe("the not-counted footnote", () => {
     const { unmount } = render(NetWorth);
     expect(await screen.findByText(/Not counted:/)).toHaveTextContent("4 accounts ($400)");
     unmount();
-    // cash and a card together: no total, since adding what you have to what you owe means nothing
     const mixed = [...ex.slice(0, 3), { id: "cc", name: "Card", org: null, kind: "credit", balance: 50 }];
     vi.mocked(api).mockImplementation((async (path: string) => (path === "/api/networth" ? nw(mixed) : {})) as never);
     const second = render(NetWorth);

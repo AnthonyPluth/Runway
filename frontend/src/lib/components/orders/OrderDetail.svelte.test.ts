@@ -34,7 +34,7 @@ describe("a receipt opened from a category filter", () => {
     render(OrderDetail, { orderId: "x", family: ["Groceries"] });
     expect(await screen.findByText("Tea")).toBeInTheDocument();
     expect(screen.queryByText("Lamp")).not.toBeInTheDocument();
-    expect(screen.getByText("+ ~$3.00 tax & shipping")).toBeInTheDocument();   // 30 × (110 − 100) / 100
+    expect(screen.getByText("+ ~$3.00 tax & shipping")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Show all 2 items" }));
     expect(screen.getByText("Lamp")).toBeInTheDocument();
   });
@@ -62,7 +62,6 @@ describe("changing something in an order", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Not this transaction" }));
     await waitFor(() => expect(onchange).toHaveBeenCalled());
     await waitFor(() => expect(vi.mocked(api).mock.calls.filter((c) => String(c[0]).startsWith("/api/retail/orders/"))).toHaveLength(2));
-    // the second read hasn't answered: the order is still there
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
     expect(screen.getByText(/Costco purchase 77/)).toBeInTheDocument();
     reload({ ...order, charges: [] });
@@ -121,7 +120,7 @@ describe("undo and failures", () => {
     expect(await screen.findByText("Tea")).toBeInTheDocument();
     for (const label of [/you picked/, /as before/, /^AI$/, /store's department/, /uses the transaction's category/])
       expect(screen.queryByText(label)).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Category for Tea" }).closest(".col-span-2, [class*='col-span-2']")).not.toBeNull();   // the line's width on a phone
+    expect(screen.getByRole("combobox", { name: "Category for Tea" }).closest(".col-span-2, [class*='col-span-2']")).not.toBeNull();
   });
 
   it("says a picked category applies to the item in every order", async () => {

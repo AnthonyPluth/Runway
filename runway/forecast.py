@@ -1344,7 +1344,7 @@ def list_dismissed_suggestions(conn) -> list[dict]:
 
 
 def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150) -> list[dict]:
-    """Payees on cash accounts that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
+    """Payees on cash accounts and credit cards that show up on a regular schedule with similar amounts, minus the ones you've dismissed."""
     today = today or date.today()
     dismissed = dismissed_suggestions(conn)
     transfers = _transfer_categories(conn)
@@ -1354,7 +1354,7 @@ def suggest_recurring(conn, today: date | None = None, lookback_days: int = 150)
     T = Transaction
     txs = db.rows(conn.execute(
         select(T.account_id, T.posted, T.amount, T.payee, T.category).join(Account, Account.id == T.account_id)
-        .where(Account.kind.in_(["checking", "savings"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
+        .where(Account.kind.in_(["checking", "savings", "credit"]), T.pending == 0, func.coalesce(T.recurring_id, 0) == 0,
                T.posted > (today - timedelta(days=lookback_days)).isoformat())
     ))
     groups: dict[tuple, list[dict]] = {}

@@ -29,7 +29,6 @@ class PayeeTests(unittest.TestCase):
 
     def test_the_banks_transfer_words_come_off_the_merchant(self):
         cases = {
-            # What banks send through SimpleFIN for a Target debit card or a loan paid on the bank's website
             "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)": "Target",
             "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)": "Target",
             "DIRECT DEPOSIT TARGET DEBITACH TRAN (Cash)": "Target",
@@ -40,14 +39,11 @@ class PayeeTests(unittest.TestCase):
         }
         for raw, want in cases.items():
             self.assertEqual(categorize.clean_payee(raw), want, raw)
-        # And payees synced before, as they were stored
         for long in ("Target Cach Tran Cash", "Target C Cash", "Direct Deposit Target Debitach Tran Cash", "Target Debit Cach Tran"):
             self.assertEqual(payees.shorten(long), "Target", long)
         self.assertEqual(payees.shorten("Lakeside Bank Baweb Pay Cash"), "Lakeside Bank")
 
     def test_a_merchants_own_name_stays_as_it_is(self):
-        # Transfer words alone aren't enough: a merchant's name can end with them. Only an ACH code (or "web pay", or a
-        # cut-off letter before one) says the tail is the bank's.
         for name in ("Apple Cash", "Apple Pay", "Charlotte's Web", "Vitamin C", "Target C", "Discover Credit", "Ach Payment",
                      "Direct Deposit Acme Payroll", "Cash App", "Chase Bill Pay", "Bach Pay", "Coach", "Ppd", "Target"):
             self.assertEqual(payees.shorten(name), name, name)
@@ -58,7 +54,6 @@ class PayeeTests(unittest.TestCase):
         self.assertTrue(payees.from_bank("Target C Cash", "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)"))
         self.assertFalse(payees.from_bank("Groceries Run", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"))
         self.assertFalse(payees.from_bank("Target", None))
-        # punctuation is plain on both sides
         self.assertTrue(payees.from_bank("Trader Joe's", "TRADER JOE'S #123"))
         self.assertTrue(payees.from_bank("At&t", "AT&T BILL PAYMENT"))
         self.assertTrue(payees.from_bank("Amazon.com", "AMAZON.COM*2K3AB1"))
@@ -73,7 +68,6 @@ class BrandNameTests(unittest.TestCase):
             "TARGET T-1234": "Target", "COSTCO WHSE #0123": "Costco", "NETFLIX.COM": "Netflix", "SPOTIFY USA": "Spotify",
             "MCDONALD'S F1234": "McDonald’s", "APPLE.COM/BILL 866-712-7753 CA": "Apple", "Disney Plus 888-905-7888": "Disney+",
             "Delta Air Lines 0062": "Delta Air Lines",
-            # The sub-brands stay apart
             "PRIME VIDEO*2K3AB1": "Prime Video", "Amazon Prime*2K3AB1": "Amazon Prime", "AUDIBLE*2K3AB1": "Audible",
             "UBER *EATS PENDING": "Uber Eats", "UBER *TRIP": "Uber", "UBER *ONE": "Uber One",
         }
@@ -81,8 +75,6 @@ class BrandNameTests(unittest.TestCase):
             self.assertEqual(categorize.clean_payee(raw), want, raw)
 
     def test_not_every_mention_of_a_brand_is_the_brand(self):
-        # A wrong brand is worse than a long name: the payee has to start with the brand, as a whole word, and not be a
-        # payment, a part of the business worth telling apart, or a word other businesses use too.
         for raw in ("PAYMENT TO AMAZON", "AMAZONIA CAFE", "AMAZON CORP SYF PAYMNT", "AMAZON.COM SVCS PAYROLL PPD ID: 123",
                     "COSTCO GAS #123", "TARGET CARD SRVC", "APPLE CASH", "APPLE PAY", "APPLE MUSIC", "UBER *PASS",
                     "PEACOCK CAFE", "HILTON HEAD PIZZA", "SOUTHWEST GAS", "DD *DOORDASH MCDONALDS", "VENMO *JOHN",
@@ -100,9 +92,9 @@ class BrandNameTests(unittest.TestCase):
                          {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "brand"})
         self.assertEqual(choice({"payee": "Amzn Mktp Us", "description": mktp}),
                          {"brand": "Amazon", "bank_name": "Amzn Mktp Us", "using": "bank"})
-        self.assertIsNone(choice({"payee": "Birthday Gift", "description": mktp}))             # a name you gave it
-        self.assertIsNone(choice({"payee": "Amazon", "description": mktp, "merchant_id": "m"}))  # Plaid's
-        self.assertIsNone(choice({"payee": "Uber Eats", "description": "UBER *EATS"}))          # the bank's says it already
+        self.assertIsNone(choice({"payee": "Birthday Gift", "description": mktp}))
+        self.assertIsNone(choice({"payee": "Amazon", "description": mktp, "merchant_id": "m"}))
+        self.assertIsNone(choice({"payee": "Uber Eats", "description": "UBER *EATS"}))
         self.assertIsNone(choice({"payee": "Costco Gas", "description": "COSTCO GAS #1"}))
         self.assertIsNone(choice({"payee": "Amazon", "description": None}))
 
@@ -113,12 +105,10 @@ class BrandNameTests(unittest.TestCase):
         for mode in ("exact", "starts", "contains"):
             r = {"match": "amzn mktp us", "match_mode": mode}
             self.assertTrue(rules.matches(r, mktp), mode)
-            self.assertFalse(rules.matches(r, other), mode)   # not every Amazon order
-        # Not one you renamed "Amazon" by hand from someone else's text, nor one whose text names another brand.
+            self.assertFalse(rules.matches(r, other), mode)
         r = {"match": "amzn mktp us", "match_mode": "exact"}
         self.assertFalse(rules.matches(r, {"payee": "Amazon", "description": "WM SUPERCENTER #1", "amount": -5}))
         self.assertFalse(rules.matches(r, {"payee": "Walmart", "description": "AMZN Mktp US*2K3AB1 X", "amount": -5}))
-        # A rule for a text that isn't a brand's name learns nothing new.
         r = {"match": "costco gas", "match_mode": "exact"}
         self.assertFalse(rules.matches(r, {"payee": "Costco", "description": "COSTCO WHSE #1", "amount": -5}))
 
@@ -131,7 +121,7 @@ class BrandNameApiTests(LedgerCase):
             self.tx("chk", "2026-09-01", -10.0, desc)
         self.tx("chk", "2026-09-02", -10.0, "AMZN Mktp US*9P8O7I")
         self.tx("chk", "2026-09-02", -10.0, "AMZN Mktp US*1A2S3D")
-        self.conn.execute(update(Transaction).where(Transaction.id == "chk|5").values(payee="Gift For Sam"))   # yours
+        self.conn.execute(update(Transaction).where(Transaction.id == "chk|5").values(payee="Gift For Sam"))
 
     def payees(self):
         return dict(self.conn.execute(select(Transaction.id, Transaction.payee)).fetchall())
@@ -146,12 +136,12 @@ class BrandNameApiTests(LedgerCase):
 
     def test_rules_and_recurring_items_made_from_the_brands_name_keep_working_with_the_banks_name(self):
         from runway import recurring, rules
-        self.call("chk|0", use="bank", all=True)   # every Amazon transaction back to the bank's name, from now on
+        self.call("chk|0", use="bank", all=True)
         self.assertEqual(self.payees()["chk|0"], "Amzn Mktp Us")
         rule = {"match": "amazon", "match_mode": "exact"}
         self.assertTrue(rules._text_matches(rule, {"payee": "Amzn Mktp Us", "description": "AMZN Mktp US*2K3AB1"}))
         self.assertFalse(rules._text_matches(rule, {"payee": "Walmart", "description": "WM SUPERCENTER #1"}))
-        self.assertFalse(rules._text_matches(rule, {"payee": "Gift For Sam", "description": "AMZN Mktp US*2K3AB1"}))   # yours
+        self.assertFalse(rules._text_matches(rule, {"payee": "Gift For Sam", "description": "AMZN Mktp US*2K3AB1"}))
         self.assertFalse(rules._text_matches({"match": "walmart", "match_mode": "exact"},
                                              {"payee": "Amzn Mktp Us", "description": "AMZN Mktp US*2K3AB1"}))
         self.conn.execute(insert(Recurring).values(name="Amazon", account_id="chk", amount=-10.0, frequency="monthly",
@@ -159,17 +149,16 @@ class BrandNameApiTests(LedgerCase):
         rid = self.conn.execute(select(Recurring.id)).scalar()
         recurring.auto_match(self.conn, [rid])
         linked = {r[0] for r in self.conn.execute(select(Transaction.id).where(Transaction.recurring_id == rid))}
-        self.assertEqual(linked, {"chk|0", "chk|1", "chk|2", "chk|4"})   # Amazon's: not Walmart's, nor one you named
+        self.assertEqual(linked, {"chk|0", "chk|1", "chk|2", "chk|4"})
 
     def test_the_banks_name_for_one_and_undo(self):
         before = self.payees()
         r = self.call("chk|0", use="bank")
         self.assertEqual((r["updated"], r["payee"], r["brand"]), (1, "Amzn Mktp Us", "Amazon"))
         self.assertEqual(self.payees(), {**before, "chk|0": "Amzn Mktp Us"})
-        self.assertEqual(categorize.kept_bank_names(self.conn), set())   # just this one
+        self.assertEqual(categorize.kept_bank_names(self.conn), set())
         server.api_tx_bulk(self.conn, {}, {"restore": r["was"], "keep_bank": r["keep_bank"]})
         self.assertEqual(self.payees(), before)
-        # And back to the brand's
         self.call("chk|0", use="bank")
         self.assertEqual(self.call("chk|0", use="brand")["payee"], "Amazon")
 
@@ -180,14 +169,12 @@ class BrandNameApiTests(LedgerCase):
         self.assertEqual(self.payees(), {"chk|0": "Amzn Mktp Us", "chk|1": "Amazon.com", "chk|2": "Amzn Digital",
                                          "chk|3": "Walmart", "chk|4": "Amzn Mktp Us", "chk|5": "Gift For Sam"})
         self.assertEqual(categorize.kept_bank_names(self.conn), {"Amazon"})
-        # The next sync keeps the bank's name for Amazon, and only Amazon.
         simplefin.store_payload(self.conn, {"errors": [], "accounts": [{
             "org": {"name": "Chase"}, "id": "chk", "name": "Checking", "currency": "USD", "balance": "100",
             "balance-date": ts(TODAY), "transactions": [
                 {"id": "n1", "posted": ts(TODAY), "amount": "-3.00", "description": "AMZN Mktp US*1Q2W3E"},
                 {"id": "n2", "posted": ts(TODAY), "amount": "-3.00", "description": "WM SUPERCENTER #9"}]}]}, TODAY)
         self.assertEqual((self.payees()["chk|n1"], self.payees()["chk|n2"]), ("Amzn Mktp Us", "Walmart"))
-        # a payee SimpleFIN named itself, other than the bank's text, stays as it was: a rule made from it still matches
         db.set_setting(self.conn, sk.BRAND_NAMES_OFF, "[]")
         self.conn.execute(insert(Rule).values(match="walmart supercenter", match_mode="exact", category="Groceries"))
         simplefin.store_payload(self.conn, {"errors": [], "accounts": [{
@@ -202,12 +189,10 @@ class BrandNameApiTests(LedgerCase):
         self.conn.execute(delete(Rule))
         self.conn.execute(delete(Transaction).where(Transaction.id.in_(["chk|n3", "chk|n4"])))
         db.set_setting(self.conn, sk.BRAND_NAMES_OFF, '["Amazon"]')
-        # Undo puts back the names and the brand's own
         self.conn.execute(delete(Transaction).where(Transaction.id.in_(["chk|n1", "chk|n2"])))
         server.api_tx_bulk(self.conn, {}, {"restore": r["was"], "keep_bank": r["keep_bank"]})
         self.assertEqual(self.payees(), before)
         self.assertEqual(categorize.kept_bank_names(self.conn), set())
-        # "Use Amazon" for all goes back to the brand's name, from now on too
         self.call("chk|0", use="bank", all=True)
         r = self.call("chk|4", use="brand", all=True)
         self.assertEqual((r["updated"], r["keep_bank"]), (4, {"brand": "Amazon", "keep": True}))
@@ -215,12 +200,11 @@ class BrandNameApiTests(LedgerCase):
         self.assertEqual(categorize.kept_bank_names(self.conn), set())
 
     def test_what_cant_be_renamed(self):
-        for tx_id, body in (("chk|5", {"use": "bank"}),        # a name you gave it
+        for tx_id, body in (("chk|5", {"use": "bank"}),
                             ("nope", {"use": "bank"}), ("chk|0", {"use": "sideways"})):
             with self.assertRaises(server.ApiError):
                 self.call(tx_id, **body)
         self.assertEqual(self.payees()["chk|5"], "Gift For Sam")
-        # A broken setting reads as none, and is replaced the next time
         db.set_setting(self.conn, "brand_names_off", "{oops")
         self.assertEqual(categorize.kept_bank_names(self.conn), set())
         self.call("chk|0", use="bank", all=True)
@@ -262,7 +246,7 @@ class CategorizeTests(LedgerCase):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY MERCHANT 123")
         db.set_setting(self.conn, "openrouter_api_key", "k")
         db.set_setting(self.conn, "llm_model", "openai/gpt-4o-mini")
-        db.set_setting(self.conn, "card_ai_model", "some/card-model")   # not used for categorizing
+        db.set_setting(self.conn, "card_ai_model", "some/card-model")
         seen = []
         categorize.categorize(self.conn, None, caller=lambda k, m, p: seen.append(m) or "[]")
         self.assertEqual(seen, ["openai/gpt-4o-mini"])
@@ -270,7 +254,7 @@ class CategorizeTests(LedgerCase):
     def test_one_question_per_merchant_and_history_reuse(self):
         for d in range(5):
             self.tx("cc", f"2026-09-0{d + 1}", -3.0, "MTA*NYCT PAYGO")
-        self.tx("cc", "2026-09-06", 5.0, "MTA*NYCT PAYGO")  # a refund is asked about separately
+        self.tx("cc", "2026-09-06", 5.0, "MTA*NYCT PAYGO")
         db.set_setting(self.conn, "openrouter_api_key", "k")
         asked = []
 
@@ -282,7 +266,6 @@ class CategorizeTests(LedgerCase):
         counts = categorize.categorize(self.conn, None, caller=fake)
         self.assertEqual(len(asked), 2)
         self.assertEqual(counts["ai"], 6)
-        # Next sync: same merchant is settled from history without asking again.
         self.tx("cc", "2026-09-09", -3.0, "MTA*NYCT PAYGO")
         asked.clear()
         counts = categorize.categorize(self.conn, None, caller=fake)
@@ -294,11 +277,10 @@ class CategorizeTests(LedgerCase):
         db.set_setting(self.conn, "openrouter_api_key", "k")
         other = db.connect(self.path)
         if not db.using_postgres():
-            other.sa.exec_driver_sql("PRAGMA busy_timeout=1000")  # fail fast if the lock were still held
+            other.sa.exec_driver_sql("PRAGMA busy_timeout=1000")
         edited = {}
 
         def slow(key, model, prompt):
-            # While "waiting on the model", the user changes the same transaction from the UI.
             categorize.set_category(other, "cc|0", "Groceries")
             other.commit()
             edited["ok"] = True
@@ -327,7 +309,6 @@ class CategorizeTests(LedgerCase):
         sug = categorize.suggest_for_review(self.conn, caller=fake)
         self.assertEqual([(s["merchant"], s["count"], s["category"]) for s in sug],
                          [("Blue Bottle", 3, "Coffee & Snacks"), ("Z & H Grill Corp", 1, "Restaurants")])
-        # nothing applied yet
         self.assertEqual(self.conn.execute(select(func.count())
                                            .select_from(Transaction)
                                            .where(Transaction.needs_review == 1)).fetchone()[0], 4)
@@ -350,9 +331,9 @@ class CategorizeTests(LedgerCase):
             asked.extend(it["payee"] for it in items)
             return json.dumps([{"i": it["i"], "category": "Restaurants", "confidence": 0.9} for it in items])
 
-        sug = categorize.suggest_for_review(self.conn, caller=fake, skip=["blue  bottle"])   # as typed, any case or spacing
+        sug = categorize.suggest_for_review(self.conn, caller=fake, skip=["blue  bottle"])
         self.assertEqual([s["merchant"] for s in sug], ["Z & H Grill Corp"])
-        self.assertNotIn("Blue Bottle", asked)                                     # not even asked about
+        self.assertNotIn("Blue Bottle", asked)
 
     def test_sync_can_skip_ai(self):
         self.tx("cc", "2026-09-04", -40.0, "MYSTERY")
@@ -383,8 +364,6 @@ class CategorizeTests(LedgerCase):
         self.tx("cc", "2026-09-03", -12.0, "SQ *BLUE BOTTLE 123")
         self.tx("cc", "2026-09-10", -9.0, "SQ *BLUE BOTTLE 456")
         self.conn.execute(update(Transaction).values(needs_review=1))
-        # Last month's, already categorized by Runway (reviewed, not by hand): "always" corrects it too. One you
-        # categorized yourself stays yours.
         self.tx("cc", "2026-08-03", -12.0, "SQ *BLUE BOTTLE 123", "Restaurants")
         self.tx("cc", "2026-07-03", -12.0, "SQ *BLUE BOTTLE 123", "Restaurants")
         self.conn.execute(update(Transaction).where(Transaction.id == "cc|2").values(category_source="ai", needs_review=0))
@@ -410,23 +389,22 @@ class CategoryTests(LedgerCase):
         self.conn.execute(insert(Budget).values(category="Restaurants", amount=300))
 
     def test_budget_rollover(self):
-        # Restaurants: $300 a month, rolling over from July. The setUp's $12 CHIPOTLE is on Sep 1.
         categories.add(self.conn, "Fast food", parent="Restaurants")
         self.conn.execute(update(Budget).where(Budget.category == "Restaurants").values(rollover_from="2026-07"))
-        self.tx("cc", "2026-06-10", -50.0, "BEFORE", "Restaurants")        # before it rolled over: not counted
-        self.tx("cc", "2026-07-10", -200.0, "JULY", "Restaurants")         # $100 left
-        self.tx("cc", "2026-08-10", -350.0, "AUGUST", "Fast food")         # a subcategory counts: $50 of $400 left
+        self.tx("cc", "2026-06-10", -50.0, "BEFORE", "Restaurants")
+        self.tx("cc", "2026-07-10", -200.0, "JULY", "Restaurants")
+        self.tx("cc", "2026-08-10", -350.0, "AUGUST", "Fast food")
         cats = [c for c in categories.all_categories(self.conn) if not c["is_transfer"] and not c["is_income"]]
         rows = {r["category"]: dict(r) for r in self.conn.execute(select(Budget))}
         carry = lambda m: server.budget_carry(self.conn, cats, rows, date.fromisoformat(m))["Restaurants"]
         self.assertEqual((carry("2026-07-01"), carry("2026-08-01"), carry("2026-09-01")), (0.0, 100.0, 50.0))
-        self.tx("cc", "2026-08-20", -500.0, "BIG NIGHT", "Restaurants")     # going over isn't carried
+        self.tx("cc", "2026-08-20", -500.0, "BIG NIGHT", "Restaurants")
         self.assertEqual(carry("2026-09-01"), 0.0)
-        self.assertEqual(carry("2026-10-01"), 288.0)                        # September: $300 - $12
+        self.assertEqual(carry("2026-10-01"), 288.0)
         server.api_budget_set(self.conn, {}, {"category": "Restaurants", "rollover": False})
         self.assertIsNone(self.conn.execute(select(Budget.rollover_from)).fetchone()[0])
         with self.assertRaises(server.ApiError):
-            server.api_budget_set(self.conn, {}, {"category": "Groceries", "rollover": True})   # no budget to roll over
+            server.api_budget_set(self.conn, {}, {"category": "Groceries", "rollover": True})
 
     def test_investment_accounts_stay_out_of_transactions(self):
         self.acct("brk", "investment", 5000.0)
@@ -435,7 +413,7 @@ class CategoryTests(LedgerCase):
         got = server.api_transactions(self.conn, {}, None)
         self.assertEqual([t["description"] for t in got["items"]], ["CHIPOTLE"])
         self.assertEqual(got["total"], 1)
-        self.assertEqual(server.api_state(self.conn, {}, None)["review_count"], 1)   # the card's, not the buy
+        self.assertEqual(server.api_state(self.conn, {}, None)["review_count"], 1)
 
     def test_coming_up_wears_its_merchants_logo(self):
         self.acct("chk", "checking", 1000.0)
@@ -471,7 +449,6 @@ class CategoryTests(LedgerCase):
             return items, {e["recurring_id"]: e["logo"] for e in ev if e.get("recurring_id")}
         netflix = "/api/merchants/m-netflix/logo"
         self.assertEqual(logos(), ({rid: netflix, rent: None}, {rid: netflix, rent: None}))
-        # chosen by the item's name: it works for an item with nothing matched, and wins over its matched transaction's logo
         self.conn.execute(insert(MerchantLogo).values(key="rent", website="landlord.com", hidden=0))
         self.conn.execute(insert(MerchantLogo).values(key="netflix", website=None, hidden=1))
         site = "/api/merchants/site%3Alandlord.com/logo"
@@ -480,7 +457,7 @@ class CategoryTests(LedgerCase):
     def test_setup_steps(self):
         steps = server.setup_steps(self.conn)
         self.assertEqual((steps["primary"], steps["recurring"], steps["budgets"], steps["dismissed"]), (False, False, True, False))
-        self.acct("chk", "checking", 10.0)        # the only checking account is the primary one
+        self.acct("chk", "checking", 10.0)
         self.assertTrue(server.setup_steps(self.conn)["primary"])
         server.api_settings(self.conn, {}, {"setup_dismissed": True})
         self.assertTrue(server.setup_steps(self.conn)["dismissed"])
@@ -490,19 +467,19 @@ class CategoryTests(LedgerCase):
         categories.add(self.conn, "Zebra Rides")
         by = {c["name"]: c for c in categories.all_categories(self.conn)}
         self.assertEqual((by["Groceries"]["icon"], by["Groceries"]["custom_icon"]), ("🛒", None))
-        self.assertEqual(by["Fast food"]["color"], by["Restaurants"]["color"])   # a subcategory wears its parent's color
-        self.assertIn(by["Zebra Rides"]["color"], categories.PALETTE)            # an unknown name still gets one
+        self.assertEqual(by["Fast food"]["color"], by["Restaurants"]["color"])
+        self.assertIn(by["Zebra Rides"]["color"], categories.PALETTE)
         categories.set_look(self.conn, "Restaurants", "🍔", "#1C9AA8")
         by = {c["name"]: c for c in categories.all_categories(self.conn)}
         self.assertEqual((by["Restaurants"]["icon"], by["Restaurants"]["color"]), ("🍔", "#1c9aa8"))
         self.assertEqual(by["Fast food"]["color"], "#1c9aa8")
-        categories.rename(self.conn, "Restaurants", "Eating out")                 # the look goes with the name
+        categories.rename(self.conn, "Restaurants", "Eating out")
         self.assertEqual(self.conn.execute(select(Category.icon)
                                            .where(Category.name == "Eating out")).fetchone()[0], "🍔")
-        categories.set_look(self.conn, "Eating out", "", "")                      # back to the default
+        categories.set_look(self.conn, "Eating out", "", "")
         self.assertEqual(self.conn.execute(select(Category.icon)
                                            .where(Category.name == "Eating out")).fetchone()[0], None)
-        for icon in ("1️⃣", "#️⃣", "🇯🇵", "👍🏽", "👨‍👩‍👧‍👦", "❤️", "↩️", "▶️", "ℹ️", "‼️", "〰️", "↔️"):             # anything the emoji keyboard types
+        for icon in ("1️⃣", "#️⃣", "🇯🇵", "👍🏽", "👨‍👩‍👧‍👦", "❤️", "↩️", "▶️", "ℹ️", "‼️", "〰️", "↔️"):
             categories.set_look(self.conn, "Eating out", icon, None)
             self.assertEqual(self.conn.execute(select(Category.icon)
                                                .where(Category.name == "Eating out")).fetchone()[0], icon)
@@ -518,19 +495,17 @@ class CategoryTests(LedgerCase):
         sub = self.conn.execute(select(Category).where(Category.name == "Fast food")).fetchone()
         self.assertEqual((sub["parent"], sub["is_transfer"], sub["is_income"]), ("Restaurants", 0, 0))
         with self.assertRaises(categories.CategoryError):
-            categories.add(self.conn, "Burgers", parent="Fast food")  # one level only
+            categories.add(self.conn, "Burgers", parent="Fast food")
         with self.assertRaises(categories.CategoryError):
-            categories.add(self.conn, "restaurants")  # duplicate, any case
+            categories.add(self.conn, "restaurants")
         tree = [c["name"] for c in categories.all_categories(self.conn)]
         self.assertEqual(tree[tree.index("Restaurants") + 1], "Fast food")
-        # rename carries transactions, rules, budgets and children along
         categories.rename(self.conn, "Restaurants", "Dining")
         self.assertEqual(self.conn.execute(select(Transaction.category)).fetchone()[0], "Dining")
         self.assertEqual(self.conn.execute(select(Rule.category)).fetchone()[0], "Dining")
         self.assertEqual(self.conn.execute(select(Budget.category)).fetchone()[0], "Dining")
         self.assertEqual(self.conn.execute(select(Category.parent)
                                            .where(Category.name == "Fast food")).fetchone()[0], "Dining")
-        # can't remove a parent that still has subcategories, or a built-in
         with self.assertRaises(categories.CategoryError):
             categories.remove(self.conn, "Dining")
         with self.assertRaises(categories.CategoryError):
@@ -547,14 +522,13 @@ class CategoryTests(LedgerCase):
         categories.move(self.conn, "Restaurants", "Food")
         categories.add(self.conn, "Groceries & more", parent="Food")
         with self.assertRaises(categories.CategoryError):
-            categories.add(self.conn, "Burgers", parent="Restaurants")      # no sub-subcategories
+            categories.add(self.conn, "Burgers", parent="Restaurants")
         with self.assertRaises(categories.CategoryError):
-            categories.move(self.conn, "Food", "Other")                     # Food has subcategories
+            categories.move(self.conn, "Food", "Other")
         with self.assertRaises(categories.CategoryError):
-            categories.move(self.conn, "Other", "Restaurants")              # under a subcategory
+            categories.move(self.conn, "Other", "Restaurants")
         tree = {c["name"]: c for c in categories.all_categories(self.conn)}
         self.assertEqual((tree["Restaurants"]["path"], tree["Restaurants"]["depth"], tree["Restaurants"]["top"]), (["Food", "Restaurants"], 1, "Food"))
-        # budget and reports roll subcategories into the parent
         self.tx("cc", "2026-09-02", -8.0, "FIVE GUYS", "Groceries & more")
         self.conn.commit()
         from runway import server
@@ -564,7 +538,6 @@ class CategoryTests(LedgerCase):
         food = next(n for n in cf["spending"] if n["name"] == "Food")
         self.assertEqual((food["value"], sorted(k["name"] for k in food["children"])), (20.0, ["Groceries & more", "Restaurants"]))
         self.assertEqual(len(server.api_transactions(self.conn, {"category": ["Food"]}, None)["items"]), 2)
-        # (anything nested deeper by an earlier version was moved up by migration 0039: tests/test_migrations.py)
         categories.add(self.conn, "Burgers", parent="Food")
         categories.move(self.conn, "Burgers", None)
         categories.move(self.conn, "Burgers", "Income")
@@ -579,9 +552,9 @@ class CategoryTests(LedgerCase):
         categories.move(self.conn, "Restaurants", "Food")
         self.acct("loan", "loan", -5000.0)
         self.tx("cc", "2026-09-05", -30.0, "SUSHI", "Restaurants")
-        self.tx("cc", "2026-09-06", 5.0, "SUSHI REFUND", "Restaurants")      # refunds count against spending
-        self.tx("cc", "2026-08-30", -99.0, "LAST MONTH", "Restaurants")       # other month
-        self.tx("loan", "2026-09-07", -40.0, "ODD LOAN ITEM", "Food")         # not an account the budget counts
+        self.tx("cc", "2026-09-06", 5.0, "SUSHI REFUND", "Restaurants")
+        self.tx("cc", "2026-08-30", -99.0, "LAST MONTH", "Restaurants")
+        self.tx("loan", "2026-09-07", -40.0, "ODD LOAN ITEM", "Food")
         self.conn.commit()
         spent = {c["name"]: c["spent"] for c in server.api_budget(self.conn, {"month": ["2026-09"]}, None)["categories"]}
         items = server.api_transactions(self.conn, {"category": ["Food"], "month": ["2026-09"], "scope": ["budget"]}, None)["items"]
@@ -649,7 +622,7 @@ class ReportRefundTests(LedgerCase):
         self.tx("chk", "2026-09-01", 3000.0, "ACME PAYROLL", "Income")
         self.tx("chk", "2026-09-05", -400.0, "STORE", "Shopping")
         self.tx("chk", "2026-09-06", 100.0, "STORE REFUND", "Refunds")
-        self.tx("chk", "2026-09-07", 500.0, "ZELLE FROM SAM")                     # not categorized yet
+        self.tx("chk", "2026-09-07", 500.0, "ZELLE FROM SAM")
         m = reports.income_vs_spending(self.conn, "2026-09", 2)["months"][-1]
         self.assertEqual((m["income"], m["spending"]), (3000.0, 300.0))
         self.conn.commit()

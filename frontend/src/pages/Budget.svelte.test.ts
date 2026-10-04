@@ -33,7 +33,6 @@ const serve = (m: BudgetMonth | ((path: string) => BudgetMonth)) => vi.mocked(ap
   return {} as never;
 });
 
-// The page remembers the month you were on (module state), so tests that move it put it back at March.
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-03-15T12:00:00") });
   vi.mocked(api).mockReset();
@@ -48,8 +47,8 @@ describe("Budget page", () => {
     serve(month());
     render(Budget);
     expect(await screen.findByText("Budgeted")).toBeInTheDocument();
-    expect(screen.getByText("$600")).toBeInTheDocument();                       // 500 + 100
-    expect(screen.getByText("$360")).toBeInTheDocument();                       // 200 + 160
+    expect(screen.getByText("$600")).toBeInTheDocument();
+    expect(screen.getByText("$360")).toBeInTheDocument();
     expect(screen.getByText("$300 left · ▲ $60 over in 1 budget")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Budget" })).toBeInTheDocument();
     expect(screen.getByText("March 2026")).toBeInTheDocument();
@@ -99,7 +98,6 @@ describe("Budget page", () => {
   it("counts what's spent outside any budget as other spending, and mentions uncategorized", async () => {
     serve(month({ uncategorized: 25 }));
     render(Budget);
-    // Gas 80 is unbudgeted; the 25 uncategorized goes on top
     expect(await screen.findByText("$105")).toBeInTheDocument();
     expect(screen.getByText("incl. $25 uncategorized")).toBeInTheDocument();
   });
@@ -113,7 +111,7 @@ describe("Budget page", () => {
     expect(within(budgets).getByRole("link", { name: "Groceries" })).toBeInTheDocument();
     expect(within(budgets).getByRole("link", { name: "Dining" })).toBeInTheDocument();
     expect(within(not).getByRole("link", { name: "Gas" })).toBeInTheDocument();
-    expect(within(not).queryByRole("link", { name: "Pets" })).not.toBeInTheDocument();   // nothing spent: only in the picker
+    expect(within(not).queryByRole("link", { name: "Pets" })).not.toBeInTheDocument();
     expect(within(not).getByRole("option", { name: "Pets" })).toBeInTheDocument();
   });
 
@@ -187,10 +185,8 @@ describe("Budget page", () => {
       expect(group.compareDocumentPosition(screen.getByRole("heading", { name: "Budgets" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByText("$3,150 to come · $3,150 scheduled")).toBeInTheDocument();
       expect(screen.getByText("of $6,300 expected")).toBeInTheDocument();
-      // the spending totals leave it out
       expect(screen.getByText("$600")).toBeInTheDocument();
       expect(screen.getByText("$300 left · ▲ $60 over in 1 budget")).toBeInTheDocument();
-      // an income category without a budget can be given one from the list at the bottom
       const income = within(screen.getByLabelText("Category to budget")).getByRole("group", { name: "Income" });
       expect(within(income).getAllByRole("option").map((o) => o.textContent)).toEqual(["Side gigs"]);
     });
@@ -198,7 +194,7 @@ describe("Budget page", () => {
     it("keeps the strip's money in as it was without an income budget", async () => {
       serve(withIncome(null));
       render(Budget);
-      await screen.findByRole("heading", { name: "Income" });   // money came in: its row offers a box for what's expected
+      await screen.findByRole("heading", { name: "Income" });
       expect(screen.getByLabelText("Budget for Income")).toHaveAttribute("placeholder", "Expected");
       expect(screen.queryByText(/expected$/)).not.toBeInTheDocument();
     });

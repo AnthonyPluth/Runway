@@ -1,5 +1,3 @@
-// The browser extension's background worker (extension/*.js): classic scripts that share one global scope, so they're
-// run here the same way, as one function body, with a stub of the `chrome` API. Only the pure helpers are tested.
 import { describe, expect, it, vi } from "vitest";
 import amazon from "../../../extension/amazon.js?raw";
 import background from "../../../extension/background.js?raw";
@@ -13,7 +11,6 @@ import stores from "../../../extension/stores.js?raw";
 import target from "../../../extension/target.js?raw";
 import util from "../../../extension/util.js?raw";
 
-// In the order the manifest lists them (Firefox) and background.js imports them (Chrome).
 const FILES: Record<string, string> = {
   "page.js": page, "util.js": util, "runway.js": runwayClient, "stores.js": stores, "frames.js": frames,
   "amazon.js": amazon, "target.js": target, "costco.js": costco, "carta.js": carta,
@@ -281,7 +278,7 @@ describe("inParallel", () => {
       if (n === 2) throw new Error("boom");
     });
     await expect(run).rejects.toThrow("boom");
-    expect(started).toEqual([1, 2, 3]);   // 3 was already under way on the other worker when 2 failed
+    expect(started).toEqual([1, 2, 3]);
   });
 });
 

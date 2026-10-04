@@ -18,7 +18,6 @@ beforeEach(() => {
   vi.mocked(toast.error).mockReset();
 });
 
-/** Opens a row's "…" menu. */
 const menu = (name: string) => userEvent.click(screen.getByRole("button", { name: `More actions for ${name}` }));
 
 describe("empty sections", () => {
@@ -134,7 +133,7 @@ describe("planned", () => {
     for (const n of ["Move Sapphire Preferred down", "Edit Sapphire Preferred", "Drop Sapphire Preferred"]) expect(screen.queryByRole("button", { name: n })).toBeNull();
     await menu("Sapphire Preferred");
     expect(screen.getByRole("button", { name: "Edit Sapphire Preferred" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Move Sapphire Preferred up" })).toBeDisabled();   // first
+    expect(screen.getByRole("button", { name: "Move Sapphire Preferred up" })).toBeDisabled();
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("button", { name: "Edit Sapphire Preferred" })).toBeNull();
     expect(screen.getByRole("button", { name: "More actions for Sapphire Preferred" })).toHaveFocus();

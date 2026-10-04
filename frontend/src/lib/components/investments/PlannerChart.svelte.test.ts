@@ -18,7 +18,7 @@ describe("PlannerChart", () => {
 
   it("draws the likely band, the median line and a retirement marker", () => {
     const { container } = setup2();
-    expect(container.querySelectorAll("svg path").length).toBeGreaterThanOrEqual(4);   // band, high, low, median
+    expect(container.querySelectorAll("svg path").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByText("retirement")).toBeInTheDocument();
     expect(screen.getByRole("img")).toHaveAttribute("aria-label", expect.stringMatching(/median \$[\d,]+ at the end/));
   });

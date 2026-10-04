@@ -26,7 +26,7 @@ describe("Transactions page", () => {
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
       expect(lastList()).toContain("review=1");
-      expect(lastList()).not.toContain("ignored=");   // review shows everything that needs a decision
+      expect(lastList()).not.toContain("ignored=");
       expect(screen.getByText("2 to go")).toBeInTheDocument();
       expect(api).not.toHaveBeenCalledWith(expect.stringContaining("/api/overview"));
     });
@@ -40,7 +40,6 @@ describe("Transactions page", () => {
       expect(screen.getByText("1 to go")).toBeInTheDocument();
     });
 
-    // A server that remembers: categorizing takes a transaction out of Review, restoring puts it back.
     const queue = (list: Tx[]) => {
       let open = list;
       serve(list, list.length, (path, o) => {
@@ -131,11 +130,11 @@ describe("Transactions page", () => {
       render(Transactions, { page: "review" });
       await screen.findByText("Alpha");
       await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
-      expect(screen.queryByText("Alpha")).not.toBeInTheDocument();   // straight away
+      expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
       expect(screen.getByText("1 to go")).toBeInTheDocument();
       fail(new Error("Locked"));
       expect(await screen.findByText("Alpha")).toBeInTheDocument();
-      expect(screen.getAllByRole("listitem").map((r) => r.dataset.tx)).toEqual(["a", "b"]);   // where it was
+      expect(screen.getAllByRole("listitem").map((r) => r.dataset.tx)).toEqual(["a", "b"]);
       expect(screen.getByText("2 to go")).toBeInTheDocument();
       expect(toast.error).toHaveBeenCalledWith("Couldn’t save Alpha", { description: "Locked" });
     });
@@ -171,7 +170,7 @@ describe("Transactions page", () => {
       await userEvent.click(screen.getByRole("button", { name: /Accept all ≥ 90%/ }));
       expect(api).toHaveBeenCalledWith("/api/transactions/bulk", { method: "POST", body: { ids: ["a"], reviewed: true } });
       await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
-      expect(screen.getByText("Bravo")).toBeInTheDocument();   // 60%: left for you
+      expect(screen.getByText("Bravo")).toBeInTheDocument();
       expect(toast).toHaveBeenLastCalledWith("Accepted 1 transaction", expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }));
     });
 
@@ -216,7 +215,7 @@ describe("Transactions page", () => {
         await screen.findByText("Alpha");
         await userEvent.keyboard("j{Enter}");
         expect(api).toHaveBeenCalledWith("/api/transactions/a/accept", { method: "POST" });
-        await waitFor(() => expect(rowOf("b")).toHaveAttribute("data-focused"));   // on to the next
+        await waitFor(() => expect(rowOf("b")).toHaveAttribute("data-focused"));
         await userEvent.keyboard("j");
         expect(rowOf("c")).toHaveAttribute("data-focused");
         await userEvent.keyboard("{Enter}");

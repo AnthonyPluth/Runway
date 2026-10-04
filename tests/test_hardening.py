@@ -29,7 +29,7 @@ ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OID
 
 class SignInTests(unittest.TestCase):
     def setUp(self):
-        own_database(self)   # its sessions are its own, and the environment is put back afterwards
+        own_database(self)
         for k in ENV:
             os.environ.pop(k, None)
         os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com"
@@ -60,7 +60,7 @@ class SignInTests(unittest.TestCase):
         os.environ["OIDC_ALLOWED_EMAILS"] = "someone@example.com"
         with db.session() as c:
             self.assertIsNone(oidc.session_user(c, "tok"))
-            self.assertIsNone(c.execute(select(AuthSession.token_hash)).fetchone())   # and it's gone for good
+            self.assertIsNone(c.execute(select(AuthSession.token_hash)).fetchone())
         os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com"
         with db.session() as c:
             self.assertIsNone(oidc.session_user(c, "tok"))
@@ -80,7 +80,7 @@ class ServerTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.httpd.server_close()
-        with db.session() as c:   # on Postgres the tests share one database: leave it as found
+        with db.session() as c:
             c.execute(delete(Merchant).where(Merchant.id.like("test:%")))
             db.set_setting(c, "carta_env", None)
         cls.tmp.cleanup()
@@ -106,7 +106,7 @@ class ServerTests(unittest.TestCase):
             try:
                 s.sendall(b"GET /healthz HTTP/1.1\r\n")
                 while time.monotonic() - started < 5 and not closed:
-                    s.send(b"X")   # a header byte every 0.1s: each read is quick, the headers never finish
+                    s.send(b"X")
                     time.sleep(0.1)
                     with contextlib.suppress(BlockingIOError):
                         closed = s.recv(1024) == b""
@@ -116,11 +116,9 @@ class ServerTests(unittest.TestCase):
             s.close()
         self.assertTrue(closed)
         self.assertLess(elapsed, 3.5)
-        self.assertEqual(self.open("/healthz")[0], 200)   # everyone else is served as usual
+        self.assertEqual(self.open("/healthz")[0], 200)
 
     def test_restore_waits_for_a_running_sync(self):
-        # A restore replaces the whole database (and on Postgres restarts its ids), so not the one the other modules
-        # share: that gave test_mcp a grant id that was already taken.
         own_database(self)
         with db.session() as c:
             raw = backup.dump(c)
@@ -132,9 +130,7 @@ class ServerTests(unittest.TestCase):
         for lock in (server._inv_lock, server._retail_categorize_lock):
             with lock:
                 self.assertEqual(self.open("/api/restore", "POST", raw, headers)[0], 409)
-        self.assertFalse(server._sync_lock.locked())   # released after refusing
-        # Background work other tests started (an order import's categorizing) may still be finishing: wait for it,
-        # as someone restoring would, rather than race it.
+        self.assertFalse(server._sync_lock.locked())
         for lock in (server._sync_lock, server._inv_lock, server._retail_categorize_lock):
             self.assertTrue(lock.acquire(timeout=30))
             lock.release()
@@ -166,8 +162,6 @@ class ServerTests(unittest.TestCase):
             sync.assert_called_once()
 
     def test_a_header_is_never_split(self):
-        # Any header with a line break in it is refused: the request fails cleanly (500), and nothing of the half-built
-        # answer (not the 200, not the injected cookie) goes out.
         def bad_header(handler, _method):
             handler._send(200, b"ok", "text/plain", extra={"X-Next": "/x\r\nSet-Cookie: stolen=1"})
         with mock.patch.object(server.Handler, "_route", bad_header), mock.patch("runway.monitoring.report"):
@@ -176,7 +170,6 @@ class ServerTests(unittest.TestCase):
         self.assertIsNone(h["Set-Cookie"])
         self.assertIsNone(h["X-Next"])
         self.assertIn("reference", json.loads(body)["error"])
-        # The same for a cookie queued for whatever the request answers: the 500 goes out without it.
         def bad_cookie(handler, _method):
             handler._set_cookies.append("runway_session=x\r\nX-Injected: 1")
             handler._send(200, b"ok", "text/plain")
@@ -184,7 +177,6 @@ class ServerTests(unittest.TestCase):
             code, h, body = self.open("/api/anything")
         self.assertEqual((code, h["Set-Cookie"], h["X-Injected"]), (500, None, None))
         self.assertIn("reference", json.loads(body)["error"])
-        # A redirect somewhere with a line break in it goes home instead.
         def bad_redirect(handler, _method):
             handler._redirect("/x\r\nSet-Cookie: stolen=1")
         with mock.patch.object(server.Handler, "_route", bad_redirect):
@@ -222,7 +214,7 @@ class SyncOnVisitTests(unittest.TestCase):
         with server._sync_lock:
             self.assertEqual(server.sync_on_visit(), {"started": False})
         with db.session() as c:
-            self.assertIsNone(db.get_setting(c, "last_auto_sync_attempt"))   # the next visit still syncs
+            self.assertIsNone(db.get_setting(c, "last_auto_sync_attempt"))
         with mock.patch.object(server.sync, "_sync_everything"):
             self.assertEqual(server.sync_on_visit(), {"started": True})
         with db.session() as c:
@@ -240,12 +232,11 @@ class LimitsTests(unittest.TestCase):
         from runway.server.common import ApiError, _month_range
         start, end = _month_range({"month": ["2026-09"]})
         self.assertEqual((start.isoformat(), end.isoformat()), ("2026-09-01", "2026-10-01"))
-        for far in ("9999-11", "1999-01"):   # a rollover budget would be added up month by month to get there
+        for far in ("9999-11", "1999-01"):
             with self.assertRaises(ApiError):
                 _month_range({"month": [far]})
 
     def test_the_answer_is_json(self):
-        # An overflowed sum (inf) would otherwise go out as `Infinity`, which no browser reads.
         from runway.server import handler
         h = handler.Handler.__new__(handler.Handler)
         sent = []
@@ -262,14 +253,13 @@ class OutboundTests(unittest.TestCase):
             self.assertTrue(notify.push_host_allowed(ok), ok)
         for bad in ("https://169.254.169.254/latest", "https://evil.example/x", "https://fcm.googleapis.com.evil.example/",
                     "https://localhost/x",
-                    # an address urllib and requests read differently: refused outright rather than read around
                     "https://evil.example\\@fcm.googleapis.com/x", "https://user@fcm.googleapis.com/x",
                     "https://fcm.googleapis.com/x y", "http://fcm.googleapis.com/x", "https://fcm.googleapis.com:x/",
                     "https://fcm.googleapis.com\t/x"):
             self.assertFalse(notify.push_host_allowed(bad), bad)
         with mock.patch.dict(os.environ, {"RUNWAY_PUSH_HOSTS": "ntfy.example.org"}):
             self.assertTrue(notify.push_host_allowed("https://ntfy.example.org/up123"))
-            self.assertTrue(notify.push_host_allowed("http://ntfy.example.org:8080/up123"))   # yours: plain http and a port
+            self.assertTrue(notify.push_host_allowed("http://ntfy.example.org:8080/up123"))
             self.assertFalse(notify.push_host_allowed("https://x@ntfy.example.org/up123"))
 
     def test_simplefin_addresses_must_be_public(self):
@@ -284,7 +274,7 @@ class OutboundTests(unittest.TestCase):
             opener.assert_not_called()
         with mock.patch.object(socket, "getaddrinfo",
                                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]):
-            simplefin.check_address("https://beta-bridge.simplefin.org/simplefin")   # a public address is fine
+            simplefin.check_address("https://beta-bridge.simplefin.org/simplefin")
 
 
 class BackupSizeTests(unittest.TestCase):
@@ -319,7 +309,7 @@ class NotifyTests(unittest.TestCase):
                 with db.session(self.path) as c:
                     notify.run(c, date(2026, 9, 28))
             send.assert_called_once()
-        with db.session(self.path) as c:   # rolled back, but the alert was saved first: it won't go out twice
+        with db.session(self.path) as c:
             self.assertIsNotNone(c.execute(select(NotifyLog.key).where(NotifyLog.key == "test:1")).fetchone())
 
 
@@ -344,8 +334,8 @@ class SecretKeyTests(unittest.TestCase):
         self.assertNotEqual(secretbox._from_passphrase(key), secretbox._from_passphrase_v1(key))
         legacy = secretbox.PREFIX + Fernet(secretbox._from_passphrase_v1(key)).encrypt(b"sk-old").decode()
         self.c.execute(insert(Setting).values(key="openrouter_api_key", value=legacy))
-        self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-old")   # saved by an earlier version
-        self.assertEqual(secretbox.encrypt_stored(self.c), 1)                    # moved to the stretched key
+        self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-old")
+        self.assertEqual(secretbox.encrypt_stored(self.c), 1)
         stored = self.c.execute(select(Setting.value).where(Setting.key == "openrouter_api_key")).fetchone()[0]
         Fernet(secretbox._from_passphrase(key)).decrypt(stored[len(secretbox.PREFIX):].encode())
         self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-old")

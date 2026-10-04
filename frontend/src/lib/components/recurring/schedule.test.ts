@@ -14,7 +14,7 @@ describe("when an item comes", () => {
     expect(dueIn("2026-10-12", "2026-10-03")).toBe("in 9 days");
     expect(dueIn("2026-11-02", "2026-10-03")).toBe("in 30 days");
     expect(dueIn("2026-11-20", "2026-10-03")).toBe(`next ${nb("Nov 20")}`);
-    expect(dueIn("2026-11-02", "2026-10-31")).toBe("in 2 days");   // across a month (and the clocks going back)
+    expect(dueIn("2026-11-02", "2026-10-31")).toBe("in 2 days");
   });
 
   it("says how late, in days", () => {

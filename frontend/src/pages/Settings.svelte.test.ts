@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// Settings loads each tab's data on its own, so one request that fails only takes its own tab with it.
 import { render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +11,6 @@ import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
 import Settings from "./Settings.svelte";
 
-// Every request answers, except the ones that `fail` (and the ones held, which never do).
 const serve = (fail: string[] = [], hold: string[] = []) => vi.mocked(api).mockImplementation((async (path: string) => {
   if (hold.includes(path)) return new Promise(() => {});
   if (fail.includes(path)) throw new Error(`${path} broke`);

@@ -67,7 +67,7 @@ describe("AI suggestions → Apply", () => {
     expect(applies()).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
     await waitFor(() => expect(applies()).toHaveLength(1));
-    await waitFor(() => expect(screen.queryByText("Trader Joe's")).not.toBeInTheDocument());   // the line is done
+    await waitFor(() => expect(screen.queryByText("Trader Joe's")).not.toBeInTheDocument());
   });
 
   it("applies nothing when you cancel, and keeps the line", async () => {
@@ -110,7 +110,7 @@ describe("AI suggestions → the card", () => {
     await waitFor(() => expect(applies()).toHaveLength(2));
     expect(applies().map((c) => (c[1] as { body: { tx_ids: string[] } }).body.tx_ids)).toEqual([["a"], ["b"]]);
     expect(screen.getByText("C")).toBeInTheDocument();
-    expect(vi.mocked(toast).mock.calls.at(-1)![0]).toBe("2 changed");   // one toast, one Undo for both
+    expect(vi.mocked(toast).mock.calls.at(-1)![0]).toBe("2 changed");
   });
 
   it("asks first when High adds up to ten or more", async () => {

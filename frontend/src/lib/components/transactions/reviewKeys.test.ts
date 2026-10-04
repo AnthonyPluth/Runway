@@ -10,7 +10,7 @@ describe("reviewAction", () => {
     const row = document.createElement("div");
     expect(["j", "ArrowDown", "k", "ArrowUp", "Enter", "c", "i", "t", "s", "Escape"].map((k) => reviewAction(press(k, row), true)))
       .toEqual(["next", "next", "prev", "prev", "enter", "pick", "ignore", "transfer", "split", "clear"]);
-    expect(reviewAction(press("J", row), true)).toBe("next");   // caps lock on
+    expect(reviewAction(press("J", row), true)).toBe("next");
     expect(reviewAction(press("x", row), true)).toBeNull();
   });
 
@@ -45,7 +45,7 @@ describe("reviewAction", () => {
   });
 
   it("ignores keys with a modifier, or already handled", () => {
-    expect(reviewAction(press("c", document.body, { metaKey: true }), true)).toBeNull();   // copy
+    expect(reviewAction(press("c", document.body, { metaKey: true }), true)).toBeNull();
     expect(reviewAction(press("j", document.body, { ctrlKey: true }), true)).toBeNull();
     expect(reviewAction(press("j", document.body, { defaultPrevented: true }), true)).toBeNull();
   });

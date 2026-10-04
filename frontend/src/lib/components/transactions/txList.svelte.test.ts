@@ -88,7 +88,7 @@ describe("TxListing", () => {
     expect(l.list?.items).toHaveLength(101);
     await l.load();
     expect(paths().at(-1)).toContain("limit=101");
-    expect(l.loads).toBe(1);   // same search: the table isn't redrawn
+    expect(l.loads).toBe(1);
     l.f.account = "a1";
     await l.load();
     expect(paths().at(-1)).toContain("limit=100");

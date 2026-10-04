@@ -21,29 +21,28 @@ class SessionLayerTests(DbCase):
         self.assertEqual((row[0], row["id"], row["n"], dict(row)), ("a", "a", "Checking", {"id": "a", "n": "Checking"}))
         self.assertEqual(db.rows(self.c.execute(select(Account.id))), [{"id": "a"}])
         self.assertEqual(db.rows(self.c.orm.execute(select(Account.id))), [{"id": "a"}])
-        whole = db.rows(self.c.execute(select(Account)))[0]   # select(Model): every column, as SELECT * gave
+        whole = db.rows(self.c.execute(select(Account)))[0]
         self.assertEqual(list(whole), [c.name for c in schema.accounts.c])
         self.assertEqual((whole["id"], whole["name"], whole["kind"], whole["display_name"]), ("a", "Checking", "checking", None))
         self.assertEqual(db.as_dict(self.c.orm.get(Account, "a")), whole)
-        self.assertRaisesRegex(TypeError, "SQL text isn't supported", self.c.execute, "SELECT * FROM accounts")   # only statements
+        self.assertRaisesRegex(TypeError, "SQL text isn't supported", self.c.execute, "SELECT * FROM accounts")
 
     def test_insert_gives_lastrowid_and_rowcount(self):
         r = self.c.execute(insert(Rule).values(match="coffee", category="Coffee & Snacks"))
         self.assertTrue(r.lastrowid)
         self.assertEqual(self.c.execute(select(Rule.match).where(Rule.id == r.lastrowid)).fetchone()[0], "coffee")
         self.assertEqual(self.c.execute(update(Rule).where(Rule.match == "coffee").values(category=None)).rowcount, 1)
-        self.c.execute(insert(Rule), [])   # no rows: nothing inserted, not a row of defaults
+        self.c.execute(insert(Rule), [])
         self.c.execute(insert(Rule), [{"match": "a"}, {"match": "b"}])
         self.assertEqual(self.c.execute(select(func.count()).select_from(Rule)).scalar(), 3)
         self.assertEqual(self.c.execute(select(Rule.match).order_by(Rule.id)).scalars(), ["coffee", "a", "b"])
         self.assertIsNone(self.c.execute(select(Rule.match).where(Rule.id == -1)).scalar())
 
     def test_orm_and_statements_share_one_transaction(self):
-        self.c.execute(insert(Account).values(id="a", name="Checking"))   # a statement first: the Session joins
+        self.c.execute(insert(Account).values(id="a", name="Checking"))
         self.c.orm.add(Asset(name="House", kind="home", value=100.0))
-        # pending ORM changes are written before a statement runs, so it sees them
         self.assertEqual(self.c.execute(select(Asset.name)).fetchone()[0], "House")
-        self.assertEqual(self.others_see(select(Asset)), [])   # nothing committed yet
+        self.assertEqual(self.others_see(select(Asset)), [])
         self.c.commit()
         self.assertEqual(len(self.others_see(select(Asset))), 1)
         self.assertEqual(len(self.others_see(select(Account))), 1)
@@ -51,11 +50,10 @@ class SessionLayerTests(DbCase):
     def test_orm_first_then_statements_then_commit(self):
         car = Asset(name="Car", kind="vehicle", value=5.0)
         self.c.orm.add(car)
-        self.c.orm.flush()   # the Session began the transaction
+        self.c.orm.flush()
         self.c.execute(insert(AssetValue).values(asset_id=car.id, date="2024-01-01", value=5))
         self.c.commit()
         self.assertEqual(self.others_see(select(AssetValue.asset_id))[0][0], car.id)
-        # and both keep working after the commit (code commits before a slow network call, then carries on)
         car.value = 6.0
         self.c.execute(update(Account).values(hidden=1))
         self.c.commit()
@@ -90,7 +88,7 @@ class SessionLayerTests(DbCase):
         db.upsert(self.c, Setting, [{"key": "k", "value": "3"}, {"key": "j", "value": "4"}], key=["key"])
         self.assertEqual(db.rows(self.c.execute(select(Setting).where(Setting.key.in_(["j", "k"])).order_by(Setting.key))),
                          [{"key": "j", "value": "4"}, {"key": "k", "value": "3"}])
-        db.upsert(self.c, Setting, {"key": "k", "value": "5"}, key=["key"], update=[])   # DO NOTHING
+        db.upsert(self.c, Setting, {"key": "k", "value": "5"}, key=["key"], update=[])
         self.assertEqual(db.get_setting(self.c, "k"), "3")
         db.upsert(self.c, Setting, {"key": "k", "value": "x"}, key=["key"],
                   update=lambda ex: {"value": Setting.value + ex.value})
@@ -116,7 +114,7 @@ class SessionLayerTests(DbCase):
         got = sorted((r["id"], r["posted"], r["amount"], r["category"], r["category_source"])
                      for r in self.c.execute(select(p).where(db.not_investment(p.c.account_id))))
         self.assertEqual(got, [("t1", "2024-01-01", -60.0, "Groceries", "split"), ("t1", "2024-01-01", -40.0, "Shopping", "split"),
-                               ("t2", "2024-01-02", -5.0, "Coffee & Snacks", None)])   # t1 by its parts; t3 an investment
+                               ("t2", "2024-01-02", -5.0, "Coffee & Snacks", None)])
         self.assertEqual(len(self.c.execute(select(p)).fetchall()), 4)
         self.assertEqual(list(self.c.execute(select(p)).fetchone().keys()),
                          ["id", "account_id", "posted", "amount", "payee", "description", "category", "category_source",

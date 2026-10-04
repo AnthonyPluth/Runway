@@ -27,7 +27,6 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); categories.list = []; });
 
 describe("Income", () => {
-  // The server sends only the months from the first transaction on: three here, though 12 were asked for.
   const report: IncomeReport = {
     months: [
       { month: "2026-07", income: 3000, spending: 1000, net: 2000, rate: 0.6667 },
@@ -46,7 +45,7 @@ describe("Income", () => {
     expect(within(strip).getByText("Money out")).toBeInTheDocument();
     expect(strip).toHaveTextContent("$6,000");
     expect(strip).toHaveTextContent("$6,640");
-    expect(within(strip).getByText("−$640")).toBeInTheDocument();   // 6,000 − 6,640, with a real minus
+    expect(within(strip).getByText("−$640")).toBeInTheDocument();
     expect(within(strip).getByText("Savings rate −11%")).toBeInTheDocument();
   });
 
@@ -64,7 +63,7 @@ describe("Income", () => {
     render(Income);
     await screen.findByText("This year");
     const table = screen.getByRole("table");
-    expect(within(table).getAllByRole("row")).toHaveLength(4);   // the header and three months
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
     expect(within(table).getByRole("columnheader", { name: "Money out" })).toBeInTheDocument();
     expect(within(table).getByRole("row", { name: /September 2026.*\(so far\)/ })).toHaveTextContent("$2,140");
   });
@@ -86,7 +85,7 @@ describe("Income", () => {
     await fireEvent.keyDown(overlay, { key: "End" });
     await fireEvent.keyDown(overlay, { key: "Enter" });
     expect(showTransactions).toHaveBeenLastCalledWith({ scope: "budget", month: "2026-09", kind: "" });
-    expect(svg.querySelectorAll("path[data-partial]").length).toBeGreaterThan(0);   // September is under way
+    expect(svg.querySelectorAll("path[data-partial]").length).toBeGreaterThan(0);
   });
 });
 
@@ -101,7 +100,7 @@ describe("Over time", () => {
     render(Trends);
     const avg = await screen.findByText("$400 a month on average");
     expect(avg).toHaveAttribute("title", "Average of the 2 full months before this one");
-    expect(within(seriesTable()).getByRole("row", { name: /Groceries/ })).toHaveTextContent("$400");   // the row's monthly average too
+    expect(within(seriesTable()).getByRole("row", { name: /Groceries/ })).toHaveTextContent("$400");
     expect(document.querySelector("line[data-average]")).not.toBeNull();
   });
 
@@ -123,7 +122,7 @@ describe("Over time", () => {
     const table = await vi.waitFor(() => seriesTable());
     expect(within(table).getByRole("columnheader", { name: "Sep (so far)" })).toBeInTheDocument();
     expect(within(table).getByRole("columnheader", { name: "vs Aug 1–3" })).toBeInTheDocument();
-    expect(within(table).getByRole("row", { name: /Groceries/ })).toHaveTextContent("−20%");   // 40 against 50, not against 500
+    expect(within(table).getByRole("row", { name: /Groceries/ })).toHaveTextContent("−20%");
     expect(within(table).getByRole("row", { name: /Groceries/ })).not.toHaveTextContent("−92%");
     expect(within(table).getByRole("row", { name: /Dining/ })).toHaveTextContent("New");
   });

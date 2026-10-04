@@ -36,7 +36,6 @@ describe("syncStatus", () => {
   });
 
   it("reads the sync's UTC offset, so the time is this browser's", () => {
-    // 13:05 UTC is 9:05 in New York (the tests' time zone, on daylight time by Mar 10).
     expect(syncStatus(s({ last_sync_ok: "2026-03-10T13:05:00+00:00" })).text).toBe("Up to date · 9:05 AM");
     expect(syncStatus(s({ last_sync_ok: "2026-03-10T08:05:00-06:00" })).text).toBe("Up to date · 10:05 AM");
   });

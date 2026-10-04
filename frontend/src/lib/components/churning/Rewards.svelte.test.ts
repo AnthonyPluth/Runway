@@ -31,7 +31,6 @@ beforeEach(() => {
 
 describe("Rewards", () => {
   it("keeps this year's earnings out of the balances view", () => {
-    // ~4,183 points earned (worth $63 at 1.5¢) but no balance entered: nothing to value in Balances.
     setup([row({ currency: "amex_mr", name: "Amex Membership Rewards", earned: 4183, value: 62.75 })]);
     const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
     expect(within(r).queryByText("~4,183")).not.toBeInTheDocument();
@@ -44,11 +43,11 @@ describe("Rewards", () => {
       row({ currency: "airline", name: "Other airline miles", balance: 10, balance_value: 0.1 })]);
     await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
     const r = screen.getByText("Amex Membership Rewards").closest("tr")!;
-    expect(within(r).getByText("~4,183")).toBeInTheDocument();         // spending
-    expect(within(r).getByText("60,000")).toBeInTheDocument();            // bonuses
-    expect(within(r).getByText("~$963")).toBeInTheDocument();          // what that's worth
-    expect(screen.queryByText("Other airline miles")).not.toBeInTheDocument();   // earned nothing this year
-    expect(screen.queryByLabelText("Alex's Amex Membership Rewards balance")).not.toBeInTheDocument();   // no balances here
+    expect(within(r).getByText("~4,183")).toBeInTheDocument();
+    expect(within(r).getByText("60,000")).toBeInTheDocument();
+    expect(within(r).getByText("~$963")).toBeInTheDocument();
+    expect(screen.queryByText("Other airline miles")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Alex's Amex Membership Rewards balance")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("radio", { name: "Balances" }));
     expect(screen.getByLabelText("Alex's Amex Membership Rewards balance")).toBeInTheDocument();
   });
@@ -64,7 +63,7 @@ describe("Rewards", () => {
     setup([row({ earned: 5000, bonuses: 60000, value: 975, balance: 142000, balance_value: 2130 })]);
     const r = screen.getByText("Chase Ultimate Rewards").closest("tr")!;
     expect(within(r).getByText("$2,130")).toBeInTheDocument();
-    expect(screen.queryByText("$3,105")).not.toBeInTheDocument();   // balance + earnings
+    expect(screen.queryByText("$3,105")).not.toBeInTheDocument();
     expect(screen.getByTitle("What the balances you entered are worth")).toHaveTextContent("$2,130");
     await userEvent.click(screen.getByRole("radio", { name: "Earned this year" }));
     expect(screen.getByTitle(/What this year's points and bonuses are worth/)).toHaveTextContent("$975");
@@ -146,7 +145,7 @@ describe("rewards", () => {
     expect(document.querySelector('input[type="date"]')).toBeNull();
     expect(screen.getByText(/Estimated now/)).toHaveTextContent("~41,300");
     expect(screen.getByText(/1,300 earned since/)).toBeInTheDocument();
-    expect(screen.getByText("$560", { selector: "td" })).toBeInTheDocument();   // Worth stays the balance you entered
+    expect(screen.getByText("$560", { selector: "td" })).toBeInTheDocument();
   });
 
   it("saves a balance as of today", async () => {
@@ -184,8 +183,8 @@ describe("rewards", () => {
     setup();
     await userEvent.click(screen.getByText("Point values"));
     expect(screen.getByText("Airline miles")).toBeInTheDocument();
-    expect(screen.getByText("your value")).toBeInTheDocument();      // AA is overridden
+    expect(screen.getByText("your value")).toBeInTheDocument();
     expect(screen.getAllByText(/estimate \(as of Jun 2026\)/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/Estimates, not official values/)).toBeNull();   // that note is in the docs
+    expect(screen.queryByText(/Estimates, not official values/)).toBeNull();
   });
 });

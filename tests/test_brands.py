@@ -24,16 +24,14 @@ class BrandTests(unittest.TestCase):
             self.assertEqual(brands.brand(name), want, name)
 
     def test_same_institution_by_brand_then_by_name(self):
-        cases = [("E*TRADE from Morgan Stanley", "E*Trade", True),     # by brand, and by name
-                 ("Wealthfront Inc", "Wealthfront", True),               # no brand: by name
-                 ("Merrill", "Bank of America", True),                   # the same brand; the names alone didn't say so
-                 ("Bank of America", "BofA Securities", True),           # by brand: "bofasecurities" doesn't hold "ofamerica"
+        cases = [("E*TRADE from Morgan Stanley", "E*Trade", True),
+                 ("Wealthfront Inc", "Wealthfront", True),
+                 ("Merrill", "Bank of America", True),
+                 ("Bank of America", "BofA Securities", True),
                  ("Chase", "Citibank", False), ("Ally", "Wealthfront", False), (None, "Chase", False)]
         for a, b, want in cases:
             self.assertEqual(brands.same_institution(a, b), want, (a, b))
             self.assertEqual(brands.same_institution(b, a), want, (b, a))
-        # Matching a bank account: a known brand on each side decides, either way; else the institution names, if they
-        # agree; else it can't tell.
         self.assertIs(brands.institution_match(("Chase", None, "Card"), ("JPMorgan Chase", None, "Freedom")), True)
         self.assertIsNone(brands.institution_match((None, None, "Sapphire Reserve"), ("Citibank", None, "Card")))   # a card's name says nothing
         self.assertIs(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings")), True)
@@ -95,9 +93,9 @@ class BrandTests(unittest.TestCase):
             c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
                                                products="investments"))
             c.execute(insert(Account).values(id="x", name="Odd", org="?", kind="checking"))
-            got = brands.account_brands(c)                                              # no Logo.dev key: letters, nothing asked
+            got = brands.account_brands(c)
             self.assertEqual(got["a1"], {"src": None, "auto": None, "institution": "Citibank Online", "initial": "C"})
-            self.assertEqual(got["w"]["institution"], "Wealthfront")                   # without the owner's name
+            self.assertEqual(got["w"]["institution"], "Wealthfront")
             self.assertEqual(got["csr"]["institution"], "Chase Bank")
             self.assertEqual(c.execute(select(func.count()).select_from(Merchant)).fetchone()[0], 0)
             db.set_setting(c, "logodev_token", "pk_test")
@@ -106,7 +104,6 @@ class BrandTests(unittest.TestCase):
             # banks Runway knows by website; the rest by name, for the next fetch
             self.assertEqual(sorted(asked), ["brand:wealthfront", "site:chase.com", "site:citi.com", "site:fidelity.com"])
             self.assertTrue(asked["brand:wealthfront"].startswith("https://img.logo.dev/name/Wealthfront"))
-            # once a logo has been fetched (a sync does it), the account uses it
             c.execute(update(Merchant)
                       .where(Merchant.id.in_(["brand:wealthfront", "site:chase.com"]))
                       .values(logo=png, logo_type="image/png"))
@@ -117,14 +114,13 @@ class BrandTests(unittest.TestCase):
             self.assertEqual(got["cf"]["src"], "/api/merchants/site%3Achase.com/logo")
             self.assertEqual((got["vx"]["src"], got["vx"]["initial"]), (None, "V"))   # its letter
             self.assertEqual(merchants.logo(c, "brand:wealthfront"), (b"png", "image/png"))
-            # a logo you chose replaces the institution's (which stays as `auto`); "none" is the letter
             c.execute(update(Account).where(Account.id == "f").values(logo="chase.com"))
             c.execute(update(Account).where(Account.id == "csr").values(logo="none"))
             got = brands.account_brands(c)
             self.assertEqual(got["f"]["src"], "/api/merchants/site%3Achase.com/logo")
             self.assertIsNone(got["csr"]["src"])
             self.assertEqual(got["csr"]["auto"], "/api/merchants/site%3Achase.com/logo")
-            with mock.patch.object(merchants, "configured", return_value=False):       # without the key nothing is used
+            with mock.patch.object(merchants, "configured", return_value=False):
                 self.assertIsNone(brands.account_brands(c)["w"]["src"])
 
     def test_connections_logos(self):
@@ -135,7 +131,7 @@ class BrandTests(unittest.TestCase):
                                                products="transactions"))
             c.execute(insert(PlaidItem).values(item_id="i2", access_token="t", institution_name="Vestwell",
                                                products="investments"))
-            self.assertEqual(brands.connection_logos(c), {"Citibank Online": None, "Vestwell": None})   # no key
+            self.assertEqual(brands.connection_logos(c), {"Citibank Online": None, "Vestwell": None})
             db.set_setting(c, "logodev_token", "pk_test")
             brands.connection_logos(c)
             self.assertEqual(sorted(r["id"] for r in c.execute(select(Merchant.id))), ["brand:vestwell", "site:citi.com"])
@@ -146,7 +142,7 @@ class BrandTests(unittest.TestCase):
     def test_institution_drops_owners_names(self):
         self.assertEqual(brands.institution("Citibank Alex", {"Alex", "Sam"}), "Citibank")
         self.assertEqual(brands.institution("Chase Bank sam", {"Sam"}), "Chase Bank")
-        self.assertEqual(brands.institution("Sam", {"Sam"}), "Sam")             # never down to nothing
+        self.assertEqual(brands.institution("Sam", {"Sam"}), "Sam")
         self.assertEqual(brands.institution("Samford Bank", {"Sam"}), "Samford Bank")
         self.assertIsNone(brands.institution(None, {"Sam"}))
 
@@ -158,14 +154,14 @@ class BrandTests(unittest.TestCase):
         db.init(path)
         with db.session(path) as c:
             c.execute(insert(Account).values(id="a", name="Card", org="Northwind", kind="credit"))
-            with self.assertRaises(ApiError):                                           # no key: can't fetch a website's
+            with self.assertRaises(ApiError):
                 api_account_logo(c, {}, {"website": "northwind-bank.com"}, "a")
             db.set_setting(c, "logodev_token", "pk_test")
             with self.assertRaises(ApiError) as e:
                 api_account_logo(c, {}, {"website": "not a site"}, "a")
             self.assertIn("website", str(e.exception))
             with mock.patch.object(merchants, "_download", return_value=None), self.assertRaises(ApiError):
-                api_account_logo(c, {}, {"website": "northwind-bank.com"}, "a")              # Logo.dev has none: nothing changes
+                api_account_logo(c, {}, {"website": "northwind-bank.com"}, "a")
             self.assertIsNone(c.execute(select(Account.logo).where(Account.id == "a")).fetchone()[0])
             with mock.patch.object(merchants, "_download", return_value=(b"png", "image/png")):
                 api_account_logo(c, {}, {"website": "https://www.Northwind-Bank.com/"}, "a")
@@ -175,7 +171,7 @@ class BrandTests(unittest.TestCase):
             api_account_logo(c, {}, {"hidden": True}, "a")
             self.assertEqual(api_account_logo_options(c, {}, {}, "a")["choice"], {"website": None, "hidden": True})
             self.assertIsNone(brands.account_brands(c)["a"]["src"])
-            api_account_logo(c, {}, {}, "a")                                            # back to the institution's
+            api_account_logo(c, {}, {}, "a")
             self.assertIsNone(api_account_logo_options(c, {}, {}, "a")["choice"])
             with self.assertRaises(ApiError):
                 api_account_logo(c, {}, {}, "nope")
@@ -228,9 +224,9 @@ class LabelTests(unittest.TestCase):
         db.init(path)
         with db.session(path) as c:
             c.execute(insert(Account), [{"id": i, "name": n, "display_name": d, "owner": o, "kind": "credit"} for i, n, d, o in [
-                ("a", "Citi AAdvantage 4400", "AAdvantage", "Sam"),     # -> AAdvantage (Sam)
-                ("b", "CSP", "CSP (Sam)", "Sam"),                       # already says so
-                ("c", "Blue Cash", None, None),                           # no owner
+                ("a", "Citi AAdvantage 4400", "AAdvantage", "Sam"),
+                ("b", "CSP", "CSP (Sam)", "Sam"),
+                ("c", "Blue Cash", None, None),
                 ("d", "Checking", None, "Joint")]])
             got = {r[0]: r[1] for r in c.execute(select(Account.id, db.account_label_expr()))}
             py = {r["id"]: db.account_label(r) for r in c.execute(select(Account)).fetchall()}

@@ -92,12 +92,12 @@ describe("#networth/equity", () => {
     }) as never);
     render(NetWorth, { sub: "equity" });
     expect(await screen.findByText("This grant’s vesting can’t be worked out: check its dates and vesting length.")).toBeInTheDocument();
-    expect(screen.getAllByText(/of 40,000/)).toHaveLength(2);   // both grants are still listed
+    expect(screen.getAllByText(/of 40,000/)).toHaveLength(2);
   });
 
   it("shows vested and still-to-vest figures, the companies and the tab bar as the way back", async () => {
     render(NetWorth, { sub: "equity" });
-    expect(await screen.findByRole("button", { name: "Add a company" })).toBeInTheDocument();   // the tab's toolbar; no second "Equity" heading
+    expect(await screen.findByRole("button", { name: "Add a company" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Equity" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Summary" })).toHaveAttribute("href", "#networth");
     expect(screen.getByText("Vested now")).toBeInTheDocument();
@@ -133,7 +133,6 @@ describe("#networth/equity", () => {
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(calls("/api/equity/companies/c1/grants")).toHaveLength(0);
-    // Bits UI hands the page its pointer events back once the panel has finished closing.
     await waitFor(() => expect(document.body.style.pointerEvents).not.toBe("none"));
 
     await user.click(screen.getByRole("button", { name: "Add a grant" }));
@@ -194,7 +193,7 @@ describe("#networth/equity's states", () => {
     expect(warn).toHaveTextContent("price from 7 months ago");
     expect(warn).toHaveClass("text-warning");
     unmount();
-    serve(equity);   // priced Sep 1: recent
+    serve(equity);
     render(NetWorth, { sub: "equity" });
     await screen.findByText("Vested now");
     expect(screen.queryByTestId("stale-price")).toBeNull();
@@ -229,7 +228,7 @@ describe("#networth/equity's states", () => {
     serve(equity, (path) => { if (path === "/api/equity" && fail) throw new Error("Server down"); });
     render(NetWorth, { sub: "equity" });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("checkbox", { name: /Count in net worth/ }));   // saved; the reload after it fails
+    await user.click(await screen.findByRole("checkbox", { name: /Count in net worth/ }));
     fail = true;
     await user.click(screen.getByRole("checkbox", { name: /Count in net worth/ }));
     expect(await screen.findByTestId("refresh-failed")).toHaveTextContent("Couldn’t refresh");
@@ -252,7 +251,7 @@ describe("#networth/equity's states", () => {
     expect(calls("/api/equity/companies")).toHaveLength(0);
     await user.type(name, "Initech{Enter}");
     expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
-    await user.type(name, "{Enter}");   // a second Enter while it saves doesn't add it twice
+    await user.type(name, "{Enter}");
     expect(calls("/api/equity/companies")).toHaveLength(1);
     expect((calls("/api/equity/companies")[0][1] as { body: unknown }).body).toEqual({ name: "Initech", share_price: "" });
     finish();
@@ -265,7 +264,7 @@ describe("#networth/equity's states", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Add a grant" }));
     const dialog = await screen.findByRole("dialog", { name: "Add a grant" });
-    expect(within(dialog).queryByTestId("vesting-preview")).toBeNull();   // no start date yet
+    expect(within(dialog).queryByTestId("vesting-preview")).toBeNull();
     await fireEvent.input(within(dialog).getByLabelText("Vesting starts"), { target: { value: "2026-01-15" } });
     expect(within(dialog).getByTestId("vesting-preview").textContent!.replace(/\u00a0/g, " ")).toBe("25% on Jan 2027, then monthly until Jan 2030");
     await user.selectOptions(within(dialog).getByLabelText("Every"), "quarter");
@@ -276,7 +275,7 @@ describe("#networth/equity's states", () => {
     expect(calls("/api/equity/companies/c1/grants")).toHaveLength(0);
     await user.type(within(dialog).getByLabelText("Shares"), "1000");
     await user.click(within(dialog).getByRole("button", { name: "Add grant" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Shares must be a number");   // refused: stays open, says why
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Shares must be a number");
     expect(screen.getByRole("dialog", { name: "Add a grant" })).toBeInTheDocument();
   });
 

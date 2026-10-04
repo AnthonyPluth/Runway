@@ -29,7 +29,7 @@ describe("best card", () => {
     vi.mocked(api).mockImplementation((async (path: string) => ({ cards: [path.includes("portal=1") ? row : { ...row, multiplier: 2, needs_portal: false, note: null }] })) as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     await screen.findByText("Venture X");
-    await pickCategory(screen.getByLabelText("Category of the purchase"), "Hotels");   // under Travel
+    await pickCategory(screen.getByLabelText("Category of the purchase"), "Hotels");
     expect(calls(/best\?/).at(-1)![0]).not.toContain("portal=1");
     await userEvent.click(screen.getByLabelText("I'll book through the issuer's travel portal"));
     expect(await screen.findByText("Only when booked through Capital One Travel")).toBeInTheDocument();
@@ -41,7 +41,7 @@ describe("best card", () => {
     vi.mocked(api).mockResolvedValue({ cards: [] } as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     await screen.findByText("No open cards yet.");
-    expect(screen.queryByLabelText("I'll book through the issuer's travel portal")).not.toBeInTheDocument();   // Anything
+    expect(screen.queryByLabelText("I'll book through the issuer's travel portal")).not.toBeInTheDocument();
     await pickCategory(screen.getByLabelText("Category of the purchase"), "Travel");
     await userEvent.click(screen.getByLabelText("I'll book through the issuer's travel portal"));
     await waitFor(() => expect(calls(/best\?/).at(-1)![0]).toContain("portal=1"));
@@ -84,11 +84,11 @@ describe("asking for the ranking", () => {
     vi.mocked(api).mockResolvedValue({ cards: [rank("Freedom")] } as never);
     render(BestCard, { person: "", version: 0, showOwner: false });
     await vi.advanceTimersByTimeAsync(0);
-    expect(calls(/best\?/)).toHaveLength(1);   // the first ask goes at once
+    expect(calls(/best\?/)).toHaveLength(1);
     await user.type(screen.getByPlaceholderText("optional"), "250");
     await vi.advanceTimersByTimeAsync(299);
-    expect(calls(/best\?/)).toHaveLength(1);   // still typing, so nothing yet
-    await user.type(screen.getByPlaceholderText("optional"), "0");   // another key restarts the wait
+    expect(calls(/best\?/)).toHaveLength(1);
+    await user.type(screen.getByPlaceholderText("optional"), "0");
     await vi.advanceTimersByTimeAsync(299);
     expect(calls(/best\?/)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);

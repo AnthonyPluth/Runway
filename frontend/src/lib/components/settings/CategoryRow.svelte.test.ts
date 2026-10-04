@@ -54,7 +54,7 @@ describe("removing a category", () => {
     expect(dialog).toHaveTextContent("2 rules stop setting it");
     expect(dialog).toHaveTextContent("Its budget is deleted.");
     expect(dialog).toHaveTextContent("1 order item will be categorized again automatically.");
-    expect(calls("/api/categories/remove")).toHaveLength(0);              // not until it's confirmed
+    expect(calls("/api/categories/remove")).toHaveLength(0);
 
     await userEvent.selectOptions(within(dialog).getByRole("combobox"), "Medical");
     expect(dialog).toHaveTextContent("2 rules will set Medical instead.");
@@ -62,7 +62,7 @@ describe("removing a category", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(calls("/api/categories/remove")).toEqual([{ name: "Pharmacy", move_to: "Medical" }]));
     expect(toast.success).toHaveBeenCalledWith("Removed Pharmacy · 3 transactions moved to Medical");
-    expect(toast).not.toHaveBeenCalled();                                 // no Undo for this one
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it("changes nothing when you cancel", async () => {

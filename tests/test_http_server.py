@@ -35,22 +35,22 @@ class ServerTests(unittest.TestCase):
         from runway import server
         at = lambda s: datetime.fromisoformat(s)
         self.assertTrue(server.daily_due(None))
-        self.assertFalse(server.daily_due("2026-09-25T07:30:00", at("2026-09-25T23:00")))   # already synced today
-        self.assertTrue(server.daily_due("2026-09-25T06:30:00", at("2026-09-25T08:00")))    # an early sync doesn't skip 7am
-        self.assertFalse(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:45")))   # a new day, but before 7am
+        self.assertFalse(server.daily_due("2026-09-25T07:30:00", at("2026-09-25T23:00")))
+        self.assertTrue(server.daily_due("2026-09-25T06:30:00", at("2026-09-25T08:00")))
+        self.assertFalse(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T06:45")))
         self.assertTrue(server.daily_due("2026-09-24T22:00:00", at("2026-09-25T07:15")))
-        self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))    # missed yesterday's 7am
-        self.assertFalse(server.daily_due("2026-09-25T07:02:00", at("2026-09-25T13:00")))   # the hour's sync counts
+        self.assertTrue(server.daily_due("2026-09-24T04:00:00", at("2026-09-25T05:00")))
+        self.assertFalse(server.daily_due("2026-09-25T07:02:00", at("2026-09-25T13:00")))
 
     def test_plaid_once_a_day_at_7(self):
         from runway import server
         at = lambda s: datetime.fromisoformat(s)
         self.assertTrue(server.plaid_due(None))
-        self.assertTrue(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T07:00")))    # the 7am sync
-        self.assertFalse(server.plaid_due("2026-09-25T07:01:00", at("2026-09-25T23:00")))   # already asked today
-        self.assertFalse(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T06:59")))   # not 7am yet
-        self.assertFalse(server.plaid_due("2026-09-24T22:00:00", at("2026-09-25T02:00")))   # asked after yesterday's 7am
-        self.assertTrue(server.plaid_due("2026-09-24T06:00:00", at("2026-09-25T02:00")))    # missed yesterday's
+        self.assertTrue(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T07:00")))
+        self.assertFalse(server.plaid_due("2026-09-25T07:01:00", at("2026-09-25T23:00")))
+        self.assertFalse(server.plaid_due("2026-09-24T07:05:00", at("2026-09-25T06:59")))
+        self.assertFalse(server.plaid_due("2026-09-24T22:00:00", at("2026-09-25T02:00")))
+        self.assertTrue(server.plaid_due("2026-09-24T06:00:00", at("2026-09-25T02:00")))
         self.assertTrue(server.plaid_due("2026-09-20T09:00:00", at("2026-09-25T12:00")))
 
     def test_plaid_refresh_at_630(self):
@@ -58,9 +58,9 @@ class ServerTests(unittest.TestCase):
         at = lambda s: datetime.fromisoformat(s)
         self.assertTrue(server.plaid_refresh_due(None, at("2026-09-25T06:30")))
         self.assertTrue(server.plaid_refresh_due("2026-09-24T06:31:00", at("2026-09-25T06:45")))
-        self.assertFalse(server.plaid_refresh_due("2026-09-25T06:31:00", at("2026-09-25T06:45")))   # already told today
-        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T06:29")))                    # too early
-        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T07:00")))                    # the sync's due: too late
+        self.assertFalse(server.plaid_refresh_due("2026-09-25T06:31:00", at("2026-09-25T06:45")))
+        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T06:29")))
+        self.assertFalse(server.plaid_refresh_due(None, at("2026-09-25T07:00")))
 
     def test_sync_on_visit_needs_a_connection(self):
         self.assertEqual(self.req("POST", "/api/sync/auto"), (200, {"started": False}))
@@ -100,15 +100,14 @@ class ServerTests(unittest.TestCase):
         _, st = self.req("GET", "/api/state")
         self.assertTrue(st["has_api_key"])
         self.assertEqual(st["llm_model"], "openai/gpt-4o-mini")
-        self.assertNotIn("sk-or-x", json.dumps(st))  # key never sent back to the page
-        self.assertEqual(st["card_ai_model"], "anthropic/claude-haiku-4.5")   # each model has its own default
+        self.assertNotIn("sk-or-x", json.dumps(st))
+        self.assertEqual(st["card_ai_model"], "anthropic/claude-haiku-4.5")
         self.assertEqual(self.req("POST", "/api/settings", {"card_ai_model": " google/gemini-2.5-flash "})[0], 200)
         _, st = self.req("GET", "/api/state")
         self.assertEqual((st["llm_model"], st["card_ai_model"]), ("openai/gpt-4o-mini", "google/gemini-2.5-flash"))
         self.req("POST", "/api/settings", {"llm_model": "", "card_ai_model": ""})
         _, st = self.req("GET", "/api/state")
         self.assertEqual((st["llm_model"], st["card_ai_model"]), ("openrouter/free", "anthropic/claude-haiku-4.5"))
-        # the defaults, for the empty fields' placeholders
         self.assertEqual((st["llm_model_default"], st["card_ai_model_default"]), (categorize.DEFAULT_MODEL, categorize.DEFAULT_CARD_MODEL))
         code, fc = self.req("GET", "/api/overview?days=30")
         self.assertEqual(code, 200)
@@ -135,7 +134,6 @@ class ServerTests(unittest.TestCase):
         gas = next(c for c in b["categories"] if c["name"] == "Auto & Gas")
         self.assertIsNone(gas["budget"])
         self.assertFalse(any(c["name"] == "Credit Card Payment" for c in b["categories"]))
-        # rules: add, edit, apply
         self.req("POST", "/api/rules", {"match": "whole", "category": "Shopping"})
         _, rules = self.req("GET", "/api/rules")
         rid = next(r["id"] for r in rules if r["match"] == "whole")
@@ -143,7 +141,7 @@ class ServerTests(unittest.TestCase):
         _, res = self.req("POST", f"/api/rules/{rid}/apply", {})
         self.assertEqual(res["updated"], 1)
         _, res = self.req("POST", f"/api/rules/{rid}/apply", {})
-        self.assertEqual(res["updated"], 0)   # counts only what changed
+        self.assertEqual(res["updated"], 0)
 
     def test_subcategory_rollup_and_cashflow(self):
         today = date.today()
@@ -175,9 +173,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(rest["value"], 70.0)
         self.assertEqual(sorted((k["name"], k["value"]) for k in rest["children"]), [("Fast food", 20.0), ("Restaurants (general)", 50.0)])
         self.assertIn({"name": "Uncategorized", "value": 30.0, "children": []}, cf["spending"])
-        self.assertFalse(any(n["name"] == "Credit Card Payment" for n in cf["spending"]))  # transfers never count
+        self.assertFalse(any(n["name"] == "Credit Card Payment" for n in cf["spending"]))
         self.assertEqual(next(n for n in cf["income"] if n["name"] == "Income")["value"], 3000.0)
-        # removing via the API
         code, res = self.req("POST", "/api/categories/remove", {"name": "Fast food", "move_to": "Restaurants"})
         self.assertEqual((code, res["moved"]), (200, 1))
         self.assertEqual(self.req("POST", "/api/categories/remove", {"name": "Transfer"})[0], 400)

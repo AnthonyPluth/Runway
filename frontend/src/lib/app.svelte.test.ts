@@ -105,7 +105,7 @@ describe("session expiry", () => {
     app.state = state({ last_sync_ok: "old" });
     vi.mocked(api).mockImplementation(async (path: string) => {
       if (path === "/api/sync/auto") return { started: true } as never;
-      app.sessionExpired = true;   // what api's signed-out event does
+      app.sessionExpired = true;
       throw new Error("Your session expired.");
     });
     await syncOnVisit();
@@ -122,7 +122,7 @@ describe("state and reload", () => {
     await refreshState();
     expect(app.state?.version).toBe("1");
     expect(api).toHaveBeenCalledWith("/api/state", { keep: true });
-    await refreshState(true);   // Runway checking in on its own
+    await refreshState(true);
     expect(api).toHaveBeenLastCalledWith("/api/state", { keep: true, background: true });
   });
 
@@ -136,7 +136,6 @@ describe("state and reload", () => {
   it("reload puts you back at your scroll position while the page settles", () => {
     vi.useFakeTimers();
     const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
-    // you were at 400 when reload() looked; the redrawn page is back at the top by the time the next frame runs
     vi.spyOn(window, "scrollY", "get").mockReturnValueOnce(400).mockReturnValue(0);
     Object.defineProperty(document.documentElement, "scrollHeight", { value: 2000, configurable: true });
     reload();
@@ -168,7 +167,7 @@ describe("syncOnVisit", () => {
     await syncOnVisit();
     expect(app.state?.syncing).toBe(true);
     const v = app.version;
-    await vi.advanceTimersByTimeAsync(3000);   // still syncing
+    await vi.advanceTimersByTimeAsync(3000);
     expect(app.version).toBe(v);
     await vi.advanceTimersByTimeAsync(3000);
     expect(toast.success).toHaveBeenCalledWith("Synced · 3 new transactions");
@@ -210,14 +209,13 @@ describe("boot", () => {
     expect(loadCategories).toHaveBeenCalledOnce();
     expect(early).toHaveBeenCalledOnce();
     const late = vi.fn();
-    whenBooted(late);   // already booted: straight away
+    whenBooted(late);
     expect(late).toHaveBeenCalledOnce();
-    await boot();       // a second boot only refreshes state
+    await boot();
     expect(loadCategories).toHaveBeenCalledOnce();
   });
 });
 
-// After "boot": these need Runway booted, which lasts for the rest of the file.
 describe("checking in", () => {
   it("picks up changes every minute without sending you to sign in", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
@@ -230,7 +228,7 @@ describe("checking in", () => {
   it("stops, and doesn't sync on coming back to the tab, once signed out", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/sync/auto" ? { started: false } : state()) as never);
     await boot();
-    document.dispatchEvent(new Event("visibilitychange"));   // jsdom's tab is visible
+    document.dispatchEvent(new Event("visibilitychange"));
     expect(api).toHaveBeenCalledWith("/api/sync/auto", { method: "POST", background: true });
     vi.mocked(api).mockClear();
     app.sessionExpired = true;

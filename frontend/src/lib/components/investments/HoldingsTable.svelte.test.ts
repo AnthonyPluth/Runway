@@ -159,7 +159,7 @@ describe("HoldingsTable", () => {
       const a = holding({ security_id: "1", name: "Alpha", value: 300, lots: [lot()] }), b = holding({ security_id: "2", name: "Beta", value: 200, lots: [lot({ security_id: "2" })] });
       const { rerender } = render(HoldingsTable, { holdings: [a, b], onchanged: vi.fn() });
       await userEvent.click(screen.getAllByTitle("Edit cost basis")[0]);
-      await rerender({ holdings: [{ ...a, value: 100 }, b], onchanged: vi.fn() });   // Alpha's live price dropped below Beta's
+      await rerender({ holdings: [{ ...a, value: 100 }, b], onchanged: vi.fn() });
       expect(rowsText().slice(0, 2).map((t) => t.split(" ")[1])).toEqual(["Alpha", "Beta"]);
     });
   });

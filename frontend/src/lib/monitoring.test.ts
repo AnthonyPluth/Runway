@@ -24,7 +24,6 @@ type Options = Record<string, unknown> & {
 };
 const cfg = { dsn: "https://k@o.ingest/1", environment: "prod", release: "1.2.3" };
 
-/** A fresh copy of the module (it starts only once), started with `config`; returns what Sentry.init was given. */
 async function started(config: Record<string, unknown>) {
   vi.resetModules();
   init.mockClear();
@@ -70,11 +69,9 @@ describe("startMonitoring", () => {
   it("never turns on Session Replay: no replay integration and no replay sample rates", async () => {
     const { opts } = await started(cfg);
     expect(Object.keys(opts).filter((k) => /replay/i.test(k))).toEqual([]);
-    // Not even one the SDK offers among its defaults.
     const list = opts.integrations([{ name: "Replay" }, { name: "ReplayCanvas" }, { name: "Dedupe" }]);
     expect(list.map((i) => i.name).filter((n) => /replay/i.test(n))).toEqual([]);
     expect(list.map((i) => i.name)).toContain("Dedupe");
-    // (The mocked SDK has no replayIntegration, so calling it anywhere would fail these tests.)
   });
 
   it("isn't written to use Session Replay", async () => {
@@ -91,7 +88,7 @@ describe("startMonitoring", () => {
     expect(matches(location.origin + "/api/state")).toBe(true);
     expect(matches("https://production.plaid.com/link")).toBe(false);
     expect(matches("//evil.example/x")).toBe(false);
-    expect(matches(`https://evil.example/?next=${location.origin}/api`)).toBe(false);   // Runway's address, but not first
+    expect(matches(`https://evil.example/?next=${location.origin}/api`)).toBe(false);
     expect(matches(location.origin + ".evil.example/x")).toBe(false);
   });
 
@@ -149,7 +146,7 @@ describe("startMonitoring", () => {
     });
 
     it("keeps searches and merchants' names out of traces", () => {
-      expect(opts).not.toHaveProperty("beforeSendTransaction");   // ignored while spans are streamed
+      expect(opts).not.toHaveProperty("beforeSendTransaction");
       const fetch = opts.beforeSendSpan({ name: "GET /api/transactions?q=rent&limit=50", attributes: {
         "url.full": "https://runway.test/api/transactions?q=rent", "http.query": "q=rent", "sentry.op": "http.client", "http.response.status_code": 200 } });
       expect(fetch).toEqual({ name: "GET /api/transactions?[Filtered]", attributes: {
@@ -167,7 +164,7 @@ describe("startMonitoring", () => {
       const fb = processor({ type: "feedback", contexts: { feedback: { url: "https://runway.test/#transactions?q=rent", message: "It's slow" } } });
       expect(fb.contexts).toEqual({ feedback: { url: "https://runway.test/#transactions", message: "It's slow" } });
       const error = { message: "x?y=1" };
-      expect(processor(error)).toBe(error);   // errors have beforeSend
+      expect(processor(error)).toBe(error);
     });
 
     it("never sends a replay", () => {
@@ -196,7 +193,6 @@ describe("scrubText", () => {
     expect(scrubText("GET /api/tx?q=rent and https://a:b@x.test/y?z=1")).toBe("GET /api/tx?[Filtered] and https://[Filtered]@x.test/y?[Filtered]");
     expect(scrubText("/api/merchants/name:costco/logo")).toBe("/api/merchants/{id}/logo");
     expect(scrubText("Really? Yes.")).toBe("Really? Yes.");
-    // The app's searches are in the hash.
     expect(scrubText("http://localhost:8799/#transactions?q=Grocer")).toBe("http://localhost:8799/#transactions?[Filtered]");
     expect(scrubText("went /#reports/merchants?name=Target then #budget?m=1")).toBe("went /#reports/merchants?[Filtered] then #budget?[Filtered]");
     expect(scrubText(undefined)).toBeUndefined();

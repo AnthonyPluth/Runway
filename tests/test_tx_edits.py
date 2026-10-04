@@ -32,7 +32,6 @@ class Ledger(LedgerCase):
         ]:
             self.conn.execute(insert(Transaction).values(id=tid, account_id=acct, posted=posted, amount=amount, payee=payee,
                                                          description=payee.upper(), category=cat, pending=0))
-        # A split one: part groceries, part a card payment (a transfer).
         splits.set_splits(self.conn, "card|5", [{"amount": -50, "category": "Groceries"}, {"amount": -30, "category": "Credit Card Payment"}])
 
     def ids(self, **kw):
@@ -53,7 +52,7 @@ class FilterTests(Ledger):
     def test_amounts_either_way(self):
         self.assertEqual(self.ids(min=50, max=100), ["card|5", "chk|2"])
         self.assertEqual(self.ids(min="59.28", max="59.28"), ["chk|2"])
-        self.assertEqual(self.ids(max=-15), ["card|4"])   # the size of it, money in or out
+        self.assertEqual(self.ids(max=-15), ["card|4"])
         with self.assertRaises(ApiError):
             self.ids(min="lots")
         with self.assertRaises(ApiError):
@@ -61,8 +60,8 @@ class FilterTests(Ledger):
 
     def test_kind(self):
         self.assertEqual(self.ids(kind="in"), ["chk|1"])
-        self.assertEqual(self.ids(kind="out"), ["card|4", "card|5", "chk|2"])   # not the transfer, nor what's ignored
-        self.assertEqual(self.ids(kind="transfer"), ["card|5", "chk|3"])   # a split with a transfer part too
+        self.assertEqual(self.ids(kind="out"), ["card|4", "card|5", "chk|2"])
+        self.assertEqual(self.ids(kind="transfer"), ["card|5", "chk|3"])
         with self.assertRaises(ApiError):
             self.ids(kind="sideways")
 
@@ -71,7 +70,7 @@ class FilterTests(Ledger):
         self.assertEqual(self.ids(q="$59.28"), ["chk|2"])
         self.assertEqual(self.ids(q="−2,500"), ["chk|1"])
         self.assertEqual(self.ids(q="coffee"), ["card|4"])
-        self.assertEqual(self.ids(q="groc"), ["card|5", "chk|2"])   # the name, and a split's part
+        self.assertEqual(self.ids(q="groc"), ["card|5", "chk|2"])
         self.assertEqual(self.ids(q="paycheck"), ["chk|1"])
         self.conn.execute(update(Transaction).where(Transaction.id == "chk|3").values(notes="For the trip"))
         self.assertEqual(self.ids(q="trip"), ["chk|3"])
@@ -79,7 +78,6 @@ class FilterTests(Ledger):
     def test_sum_counts_as_the_day_totals_do(self):
         r = tx.api_transactions(self.conn, {}, {})
         self.assertEqual(r["total"], 6)
-        # payroll, groceries, coffee and the split's groceries part; not the transfer, the card payment part or Ignore
         self.assertEqual(r["sum"], round(2500 - 59.28 - 12.5 - 50, 2))
         self.assertEqual(tx.api_transactions(self.conn, q(category="Groceries"), {})["sum"], round(-59.28 - 50, 2))
         self.assertEqual(tx.api_transactions(self.conn, q(kind="transfer"), {})["sum"], -530.0)
@@ -94,7 +92,7 @@ class FilterTests(Ledger):
         r = tx.api_tx_bulk(self.conn, {}, {"filter": {"account": "card", "ignored": "0"}, "reviewed": True})
         self.assertEqual(r["updated"], 2)
         self.assertEqual(sorted(w["id"] for w in r["was"]), ["card|4", "card|5"])
-        with self.assertRaises(ApiError):   # matching nothing: nothing to change
+        with self.assertRaises(ApiError):
             tx.api_tx_bulk(self.conn, {}, {"filter": {"q": "nothing matches this"}, "reviewed": True})
 
 
@@ -112,9 +110,9 @@ class EditTests(Ledger):
         r = tx.api_tx_update(self.conn, {}, {"amount": "-61.00", "posted": "2026-09-06"}, "chk|2")
         t = self.row("chk|2")
         self.assertEqual((t["amount"], t["posted"], t["bank_amount"], t["bank_posted"]), (-61.0, "2026-09-06", -59.28, "2026-09-05"))
-        tx.api_tx_update(self.conn, {}, {"amount": -62}, "chk|2")   # changed again: the bank's is still the bank's
+        tx.api_tx_update(self.conn, {}, {"amount": -62}, "chk|2")
         self.assertEqual(self.row("chk|2")["bank_amount"], -59.28)
-        tx.api_tx_update(self.conn, {}, {"amount": -59.28}, "chk|2")   # back to the bank's: not yours any more
+        tx.api_tx_update(self.conn, {}, {"amount": -59.28}, "chk|2")
         self.assertIsNone(self.row("chk|2")["bank_amount"])
         tx.api_tx_update(self.conn, {}, {"restore": r["was"]}, "chk|2")
         t = self.row("chk|2")
@@ -129,14 +127,14 @@ class EditTests(Ledger):
             tx.api_tx_update(self.conn, {}, {"payee": "x"}, "nope")
         self.assertEqual(e.exception.status, 404)
         self.conn.execute(update(Transaction).where(Transaction.id == "chk|2").values(pending=1))
-        with self.assertRaises(ApiError):   # the bank still decides a pending one's
+        with self.assertRaises(ApiError):
             tx.api_tx_update(self.conn, {}, {"amount": -1}, "chk|2")
-        tx.api_tx_update(self.conn, {}, {"notes": "fine"}, "chk|2")   # but a note is yours
+        tx.api_tx_update(self.conn, {}, {"notes": "fine"}, "chk|2")
 
     def test_a_split_ones_parts_follow_its_amount_and_come_back_with_undo(self):
         r = tx.api_tx_update(self.conn, {}, {"amount": -100}, "card|5")
         self.assertEqual(sorted(p["amount"] for p in splits.get(self.conn, "card|5")), [-62.5, -37.5])
-        self.assertEqual(self.row("card|5")["needs_review"], 0)   # you changed it: nothing to check
+        self.assertEqual(self.row("card|5")["needs_review"], 0)
         tx.api_tx_update(self.conn, {}, {"restore": r["was"]}, "card|5")
         self.assertEqual(sorted(p["amount"] for p in splits.get(self.conn, "card|5")), [-50.0, -30.0])
 
@@ -156,7 +154,7 @@ class EditTests(Ledger):
         simplefin.store_payload(self.conn, payload("-10.50"), date(2026, 9, 1))
         t = self.row("A1|t1")
         self.assertEqual((t["amount"], t["posted"], t["notes"]), (-12.0, "2026-09-21", "tip"))
-        self.assertEqual((t["bank_amount"], t["bank_posted"]), (-10.5, "2026-09-20"))   # the bank's latest, beside yours
+        self.assertEqual((t["bank_amount"], t["bank_posted"]), (-10.5, "2026-09-20"))
 
     def test_plaid_sync_keeps_your_date_and_amount(self):
         self.conn.execute(update(Account).where(Account.id == "chk").values(provider="plaid", plaid_account_id="pa"))
@@ -167,7 +165,7 @@ class EditTests(Ledger):
         tx.api_tx_update(self.conn, {}, {"amount": -12.0}, "chk|pl:x1")
         plaidbank.sync_transactions(self.conn, item, TODAY, ([], [{**t1, "amount": 11.0, "date": "2026-09-21"}], [], "c2"))
         t = self.row("chk|pl:x1")
-        self.assertEqual((t["amount"], t["bank_amount"], t["posted"]), (-12.0, -11.0, "2026-09-21"))   # the date wasn't yours
+        self.assertEqual((t["amount"], t["bank_amount"], t["posted"]), (-12.0, -11.0, "2026-09-21"))
 
     def test_a_note_follows_a_pending_one_when_it_posts(self):
         self.conn.execute(update(Account).where(Account.id == "chk").values(provider="plaid", plaid_account_id="pa"))
@@ -191,11 +189,10 @@ class AddTests(Ledger):
                          (-23.4, "Groceries", "manual", 0, "cash", 0))
         listed = {x["id"]: x for x in tx.api_transactions(self.conn, q(account="chk"), {})["items"]}
         self.assertEqual(listed[r["id"]]["source"], "manual")
-        # Its date and amount are just yours: nothing kept beside them.
         tx.api_tx_update(self.conn, {}, {"amount": -25, "posted": "2026-09-16"}, r["id"])
         t = self.row(r["id"])
         self.assertEqual((t["amount"], t["bank_amount"], t["bank_posted"]), (-25.0, None, None))
-        with self.assertRaises(ApiError):   # and it keeps a name
+        with self.assertRaises(ApiError):
             tx.api_tx_update(self.conn, {}, {"payee": " "}, r["id"])
         tx.api_tx_delete(self.conn, {}, {}, r["id"])
         self.assertIsNone(self.row(r["id"]))
@@ -248,24 +245,24 @@ class ImportTests(Ledger):
         self.assertEqual(r["rows"][1]["error"], "Enter a date like 2026-09-30")
         self.assertIn("Unknown category", r["rows"][5]["error"])
         first, refund = self.row(r["rows"][0]["id"]), self.row(r["rows"][7]["id"])
-        self.assertTrue(first["id"].startswith("chk|manual:"))   # deletable later, like one added by hand
+        self.assertTrue(first["id"].startswith("chk|manual:"))
         self.assertEqual((first["payee"], first["amount"], first["category"], first["category_source"], first["needs_review"], first["notes"]),
                          ("Farmers Market", -23.4, "Groceries", "manual", 0, "cash"))
-        self.assertEqual((refund["amount"], refund["category"], refund["needs_review"]), (7.0, None, 1))   # nothing knew it: Review
+        self.assertEqual((refund["amount"], refund["category"], refund["needs_review"]), (7.0, None, 1))
         tx.api_tx_delete(self.conn, {}, {}, refund["id"])
 
     def test_duplicates_of_what_is_there_and_within_the_batch_are_skipped(self):
-        r = self.imp([{"posted": "2026-09-05", "payee": "green  GROCER", "amount": "-59.28"},   # chk|2, synced
-                      {"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.27},      # a cent off: new
-                      {"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28},      # another day: new
-                      {"posted": "2026-09-06", "payee": "Green  grocer", "amount": "-59.280"},  # again in this batch
+        r = self.imp([{"posted": "2026-09-05", "payee": "green  GROCER", "amount": "-59.28"},
+                      {"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.27},
+                      {"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28},
+                      {"posted": "2026-09-06", "payee": "Green  grocer", "amount": "-59.280"},
                       {"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.28, "category": "Groceries"}])
         self.assertEqual([(x["status"], x.get("of")) for x in r["rows"]],
                          [("duplicate", "chk|2"), ("added", None), ("added", None), ("duplicate", r["rows"][2]["id"]), ("duplicate", "chk|2")])
         self.assertEqual((r["added"], r["skipped"]), (2, 3))
-        again = self.imp([{"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28}])   # sent twice: nothing new
+        again = self.imp([{"posted": "2026-09-06", "payee": "Green Grocer", "amount": -59.28}])
         self.assertEqual((again["added"], again["rows"][0]["of"]), (0, r["rows"][2]["id"]))
-        other = self.imp([{"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.28}], "card")   # another account's
+        other = self.imp([{"posted": "2026-09-05", "payee": "Green Grocer", "amount": -59.28}], "card")
         self.assertEqual(other["added"], 1)
 
     def test_rules_categorize_what_has_no_category(self):
@@ -275,7 +272,7 @@ class ImportTests(Ledger):
                       {"posted": "2026-09-14", "payee": "Corner Bakery #2", "amount": -9, "category": "Coffee & Snacks"}])
         a, b = (self.row(x["id"]) for x in r["rows"])
         self.assertEqual((a["category"], a["category_source"], a["needs_review"]), ("Groceries", "rule", 0))
-        self.assertEqual((b["category"], b["category_source"]), ("Coffee & Snacks", "manual"))   # one you gave stays
+        self.assertEqual((b["category"], b["category_source"]), ("Coffee & Snacks", "manual"))
 
     def test_refusals(self):
         row = {"posted": "2026-09-14", "payee": "X", "amount": -1}

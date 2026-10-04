@@ -28,13 +28,13 @@ class TimestampDayTests(unittest.TestCase):
                 self.assertEqual(self.read_in(tz, monday), "2026-09-28")
 
     def test_a_bank_local_midnight_is_that_day_too(self):
-        self.assertEqual(self.read_in("America/New_York", stamp(2026, 9, 28, 4)), "2026-09-28")     # midnight Eastern
-        self.assertEqual(self.read_in("America/Los_Angeles", stamp(2026, 9, 28, 7)), "2026-09-28")  # midnight Pacific
+        self.assertEqual(self.read_in("America/New_York", stamp(2026, 9, 28, 4)), "2026-09-28")
+        self.assertEqual(self.read_in("America/Los_Angeles", stamp(2026, 9, 28, 7)), "2026-09-28")
 
     def test_a_stamp_with_a_real_time_is_the_day_it_was_where_runway_runs(self):
-        afternoon = stamp(2026, 9, 28, 20, 0)   # 3pm Monday in Chicago
+        afternoon = stamp(2026, 9, 28, 20, 0)
         self.assertEqual(self.read_in("America/Chicago", afternoon), "2026-09-28")
-        self.assertEqual(self.read_in("America/Chicago", stamp(2026, 9, 28, 23, 30)), "2026-09-28")   # 6:30pm Monday
+        self.assertEqual(self.read_in("America/Chicago", stamp(2026, 9, 28, 23, 30)), "2026-09-28")
 
     def test_nothing_or_junk_is_no_day(self):
         for bad in (None, "", 0, -5, "abc"):

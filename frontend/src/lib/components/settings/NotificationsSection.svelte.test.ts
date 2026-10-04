@@ -80,7 +80,7 @@ describe("Settings → Notifications: devices", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "Devices" })).toBeInTheDocument();
     expect(screen.getByText("this one")).toBeInTheDocument();
     expect(screen.getByText(/^Added .* · nothing delivered yet$/)).toBeInTheDocument();
-    expect(screen.queryByRole("table")).toBeNull();                 // rows that stack on a phone, not a table
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("says plainly why the last notification failed, with the push service's words behind Details", async () => {
@@ -89,7 +89,7 @@ describe("Settings → Notifications: devices", () => {
     expect(await screen.findByText("The last notification didn’t get through.")).toBeInTheDocument();
     expect(screen.getByText("Couldn’t reach its push service last time.")).toBeInTheDocument();
     const raw = screen.getByText("push service said 413");
-    expect(raw.closest("details")).not.toHaveAttribute("open");     // folded away until you ask
+    expect(raw.closest("details")).not.toHaveAttribute("open");
     await userEvent.click(screen.getAllByText("Details")[0]);
     expect(raw.closest("details")).toHaveAttribute("open");
   });

@@ -26,8 +26,8 @@ def grant(**kw):
 class VestingTests(unittest.TestCase):
     def test_cliff_then_monthly(self):
         g = grant()
-        self.assertEqual(equity.vested_on(g, date(2025, 1, 14)), 0)          # a day before the cliff
-        self.assertEqual(equity.vested_on(g, date(2025, 1, 15)), 1200)       # a year at once
+        self.assertEqual(equity.vested_on(g, date(2025, 1, 14)), 0)
+        self.assertEqual(equity.vested_on(g, date(2025, 1, 15)), 1200)
         self.assertEqual(equity.vested_on(g, date(2025, 2, 14)), 1200)
         self.assertEqual(equity.vested_on(g, date(2025, 2, 15)), 1300)
         self.assertEqual(equity.vested_on(g, date(2030, 1, 1)), 4800)
@@ -42,11 +42,11 @@ class VestingTests(unittest.TestCase):
 
     def test_values(self):
         g = grant(exercised=500)
-        v = equity.value(g, 5.0, 2000)   # 2,000 vested, 500 of them exercised
+        v = equity.value(g, 5.0, 2000)
         self.assertEqual(v["vested_value"], 4 * 1500 + 5 * 500)
         self.assertEqual(v["unvested_value"], 4 * 2800)
         self.assertEqual(v["exercise_cost"], 1500.0)
-        self.assertEqual(equity.value(g, 0.5, 2000)["vested_value"], 250.0)   # under water: only the exercised shares
+        self.assertEqual(equity.value(g, 0.5, 2000)["vested_value"], 250.0)
         self.assertEqual(equity.value(grant(kind="rsu", strike=None), 5.0, 100)["vested_value"], 500.0)
 
     def test_reported_vesting_wins(self):
@@ -65,7 +65,7 @@ class ModelTests(Base):
         equity.save_grant(self.c, cid, {"kind": "rsu", "quantity": 100, "vest_start": "2020-01-01", "vest_months": 12})
         o = equity.overview(self.c, TODAY)
         acme = o["companies"][0]
-        self.assertEqual(next(g for g in acme["grants"] if g["kind"] == "iso")["vested"], 3200)   # 32 months in
+        self.assertEqual(next(g for g in acme["grants"] if g["kind"] == "iso")["vested"], 3200)
         self.assertEqual(acme["vested_value"], 3200 * 4 + 100 * 5)
         nw = networth.summary(self.c, TODAY, save=False)
         eq = next(g for g in nw["groups"] if g["key"] == "equity")
@@ -80,13 +80,11 @@ class ModelTests(Base):
                          ({"kind": "rsu", "quantity": 10, "vest_months": 12, "cliff_months": 24}, "cliff"),
                          ({"kind": "iso", "quantity": 10, "strike": 1, "exercised": 11}, "More exercised"),
                          ({"kind": "rsu", "quantity": 10, "vest_start": "soon"}, "date"),
-                         # a length or date that runs off the calendar would stop every net-worth snapshot (the sync)
                          ({"kind": "rsu", "quantity": 10, "vest_months": 100000}, "600 months"),
                          ({"kind": "rsu", "quantity": 10, "vest_months": 12, "vest_every": 601}, "600 months"),
                          ({"kind": "rsu", "quantity": 10, "vest_start": "9999-01-01"}, "between 1900 and 2200")]:
             with self.assertRaisesRegex(equity.EquityError, msg):
                 equity.save_grant(self.c, cid, bad)
-        # one saved before the limits doesn't take the page (or the sync) down with it
         gid = equity.save_grant(self.c, cid, {"kind": "rsu", "quantity": 10, "vest_start": "2024-01-01", "vest_months": 12})
         self.c.execute(update(EquityGrant).where(EquityGrant.id == gid).values(vest_months=200000))
         self.c.commit()
@@ -137,13 +135,13 @@ class CartaTests(Base):
         self.assertTrue(url.startswith("https://login.app.carta.com/o/authorize/"))
         self.assertEqual((qs["client_id"], qs["scope"]), ("cid", carta.SCOPES))
         with self.assertRaises(carta.CartaError):
-            carta.finish_authorize(self.c, "code-1", "not-the-state", opener=api)   # a sign-in that didn't start here
+            carta.finish_authorize(self.c, "code-1", "not-the-state", opener=api)
         carta.authorize_url(self.c, "https://runway.example.com/carta/callback")
         state = db.get_setting(self.c, "carta_oauth_state").split(" ")[0]
         carta.finish_authorize(self.c, "code-1", state, opener=api)
         self.assertEqual(api.token_posts[0]["redirect_uri"], "https://runway.example.com/carta/callback")
         raw = self.c.execute(select(Setting.value).where(Setting.key == "carta_access_token")).fetchone()[0]
-        self.assertTrue(raw.startswith("enc:"))                                     # kept encrypted
+        self.assertTrue(raw.startswith("enc:"))
         out = carta.sync(self.c, opener=api)
         self.assertEqual(out, {"companies": 1, "grants": 2})
         self.assertTrue(all(auth == "Bearer at-1" for _, auth in api.calls))
@@ -156,7 +154,7 @@ class CartaTests(Base):
         shares = next(g for g in acme["grants"] if g["kind"] == "shares")
         self.assertEqual(shares["vested"], 500)
         self.assertEqual(acme["vested_value"], round(3300 * 3.25 + 500 * 4.25, 2))
-        carta.sync(self.c, opener=api)   # again: updated, not duplicated
+        carta.sync(self.c, opener=api)
         self.assertEqual(self.c.execute(select(func.count()).select_from(EquityGrant)).fetchone()[0], 2)
 
     def test_refresh_and_refusal(self):
@@ -181,13 +179,13 @@ class CartaTests(Base):
         db.set_setting(self.c, "carta_token_expires", str(int(time.time()) - 10))
         self.c.commit()
 
-        def rotate_then_fail(req):   # a new refresh token, then Carta fails the portfolio read
+        def rotate_then_fail(req):
             if req.get_method() == "POST":
                 return io.BytesIO(json.dumps({"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600}).encode())
             raise urllib.error.HTTPError(req.full_url, 500, "oops", {}, io.BytesIO(b"{}"))
         with self.assertRaises(carta.CartaError):
             carta.sync(self.c, opener=rotate_then_fail)
-        self.c.rollback()   # what the request's session does with an error
+        self.c.rollback()
         self.assertEqual(db.get_setting(self.c, "carta_refresh_token"), "rt-2")
         self.assertIn("500", db.get_setting(self.c, "carta_last_error"))
 

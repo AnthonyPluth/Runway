@@ -43,7 +43,7 @@ describe("Settings → Accounts: hidden accounts", () => {
     const row = screen.getByText("Savings").closest("details")!;
     await userEvent.click(within(row).getByRole("button", { name: "Hide" }));
     await waitFor(() => expect(screen.getByRole("region", { name: "Hidden accounts" })).toHaveTextContent("2 hidden accounts"));
-    expect(screen.queryByText("Savings")).toBeNull();   // left the list (the hidden ones stay collapsed)
+    expect(screen.queryByText("Savings")).toBeNull();
     expect(screen.getByText("Checking")).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
     const undo = vi.mocked(toast).mock.calls.findLast(([m]) => m === "Savings hidden")![1] as unknown as { action: { onClick: () => Promise<void> } };
@@ -92,13 +92,13 @@ describe("Settings → Accounts: New from Plaid", () => {
     render(AccountsSection, { accounts: [acct({ plaid_account_id: "pa2" }), card] });
     const group = await screen.findByRole("region", { name: "New from Plaid" });
     expect(within(group).getByText("Freedom")).toBeInTheDocument();
-    expect(within(group).queryByText("Total Checking")).toBeNull();   // already matched: it's in its type group instead
+    expect(within(group).queryByText("Total Checking")).toBeNull();
     const select = within(group).getByRole("combobox");
     expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Add as its own account", "Same as Amex Gold", "Don't use"]);
-    expect(select).toHaveValue("new");   // chosen to start with, saved with Add
+    expect(select).toHaveValue("new");
     expect(api).not.toHaveBeenCalledWith("/api/plaid/match", expect.anything());
     expect(within(group).getByRole("button", { name: "Add Freedom" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Add all/ })).toBeNull();   // just the one
+    expect(screen.queryByRole("button", { name: /^Add all/ })).toBeNull();
   });
 
   it("adds them all at once", async () => {

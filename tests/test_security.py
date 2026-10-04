@@ -61,7 +61,7 @@ class SecretsTests(unittest.TestCase):
 
     def test_secret_settings_are_encrypted(self):
         db.set_setting(self.c, "openrouter_api_key", "sk-or-123")
-        db.set_setting(self.c, "llm_model", "some/model")                  # not a secret: stored as is
+        db.set_setting(self.c, "llm_model", "some/model")
         self.assertTrue(self.raw("openrouter_api_key").startswith("enc:v1:"))
         self.assertNotIn("sk-or-123", self.raw("openrouter_api_key"))
         self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-or-123")
@@ -75,12 +75,11 @@ class SecretsTests(unittest.TestCase):
         tok = self.c.execute(select(PlaidItem.access_token)).fetchone()[0]
         self.assertTrue(tok.startswith("enc:v1:"))
         self.assertEqual(secretbox.decrypt(tok), "access-plain")
-        self.assertEqual(secretbox.encrypt_stored(self.c), 0)              # nothing left to do
+        self.assertEqual(secretbox.encrypt_stored(self.c), 0)
 
     def test_backups_carry_secrets_encrypted(self):
         db.set_setting(self.c, "realie_api_key", "rl-key")
         self.c.execute(insert(PlaidItem).values(item_id="i1", access_token=secretbox.encrypt("access-1")))
-        # a value saved by a version before encryption goes out encrypted too
         self.c.execute(insert(Setting).values(key="finnhub_api_key", value="fh-plain"))
         raw = backup.dump(self.c)
         for secret in (b"rl-key", b"access-1", b"fh-plain"):
@@ -90,7 +89,6 @@ class SecretsTests(unittest.TestCase):
         self.assertTrue(settings["realie_api_key"].startswith("enc:v1:"))
         self.assertTrue(settings["finnhub_api_key"].startswith("enc:v1:"))
         self.assertTrue(data["tables"]["plaid_items"]["rows"][0][1].startswith("enc:v1:"))
-        # restored under the same key, they read as before
         other = os.path.join(self.tmp.name, "o.db")
         db.init(other)
         with db.session(other) as c2:
@@ -100,7 +98,6 @@ class SecretsTests(unittest.TestCase):
             self.assertTrue(c2.execute(select(Setting.value)
                                        .where(Setting.key == "realie_api_key")).fetchone()[0].startswith("enc:v1:"))
             self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
-        # under another key they can't be read, and the restore says which
         elsewhere = os.path.join(self.tmp.name, "e.db")
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machine-key-abcdefghijklmnopqrstuv"}):
             db.init(elsewhere)
@@ -114,11 +111,10 @@ class SecretsTests(unittest.TestCase):
         old = os.environ["RUNWAY_SECRET_KEY"]
         new = "a-brand-new-key-abcdefghijklmnopqrstuvwxyz"
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new, "RUNWAY_SECRET_KEY_OLD": old}):
-            self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")   # read with the old key
-            secretbox.encrypt_stored(self.c)                                          # and moved to the new one
+            self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")
+            secretbox.encrypt_stored(self.c)
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new}):
             self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")
-        # the original key alone can't read it any more: treated as not entered, never a crash
         self.assertIsNone(db.get_setting(self.c, "openrouter_api_key"))
 
     def test_short_keys_are_refused(self):
@@ -172,12 +168,11 @@ class HttpTests(unittest.TestCase):
             self.assertIn(d, csp)
         self.assertEqual(h["X-Frame-Options"], "DENY")
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
-        self.assertEqual(h["Server"].strip(), "Runway")                           # no Python version
+        self.assertEqual(h["Server"].strip(), "Runway")
         self.assertNotEqual(nonce, re.search(r"'nonce-([^']+)'", second).group(1))
         self.assertIn("frame-ancestors 'none'", self.open("/api/state")[1]["Content-Security-Policy"])
 
     def test_errors_dont_show_internals(self):
-        # A value that can't be read is a 400 saying which one; a handler's own failure, a 500 with only a reference.
         code, body = self.api("GET", "/api/transactions?limit=x")
         self.assertEqual((code, body["error"]), (400, "The limit must be a whole number"))
         with mock.patch.object(categories, "all_categories", side_effect=RuntimeError("secret detail")):
@@ -200,7 +195,7 @@ class HttpTests(unittest.TestCase):
 
     def test_static_files(self):
         code, h, body = self.open("/../server/handler.py")
-        self.assertNotIn(b"def serve", body)                                        # never outside static/
+        self.assertNotIn(b"def serve", body)
         code, h, body = self.open("/sw.js", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(h["Content-Encoding"], "gzip")
         self.assertIn(b"service worker", gzip.decompress(body))
@@ -220,7 +215,7 @@ class SyncStatusTests(unittest.TestCase):
 
     def tearDown(self):
         server.sync.AUTO_SYNC = True
-        with db.session() as c:   # on Postgres the tests share one database: leave it as found
+        with db.session() as c:
             db.set_setting(c, "simplefin_access_url", None)
             c.execute(delete(SyncLog))
         self.tmp.cleanup()

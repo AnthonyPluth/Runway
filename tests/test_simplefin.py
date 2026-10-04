@@ -32,7 +32,6 @@ class SimpleFinStoreTests(LedgerCase):
         a = self.conn.execute(select(Account)).fetchone()
         self.assertEqual((a["kind"], a["balance"], a["org"]), ("credit", -123.45, "Chase"))
         self.conn.execute(update(Transaction).where(Transaction.id == "A1|p1").values(category="Rideshare & Taxi"))
-        # Pending posts with a new id: category carries over, not reported as new.
         p2 = self.payload([
             {"id": "t1", "posted": ts(date(2026, 9, 20)), "amount": "-10.00", "description": "SQ *CAFE"},
             {"id": "t2", "posted": ts(date(2026, 9, 23)), "amount": "-5.00", "description": "UBER *TRIP"},
@@ -58,12 +57,11 @@ class SimpleFinStoreTests(LedgerCase):
         simplefin.store_payload(self.conn, self.payload([pending("p1", "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)", "-35.91"),
                                                          pending("p2", "SQ *CAFE", "-4.00")]), date(2026, 9, 1))
         self.assertEqual(self.conn.execute(select(Transaction.payee).where(Transaction.id == "A1|p1")).scalar(), "Target")
-        # Renamed, not categorized (the bulk "rename their merchant"); the other one is left as the bank named it.
         self.conn.execute(update(Transaction).where(Transaction.id == "A1|p1").values(payee="Birthday Gifts"))
         new = simplefin.store_payload(self.conn, self.payload([
             {"id": "t1", "posted": ts(date(2026, 9, 23)), "amount": "-35.91", "description": "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)"},
             {"id": "t2", "posted": ts(date(2026, 9, 23)), "amount": "-4.00", "description": "SQ *CAFE"}]), date(2026, 9, 1))
-        self.assertEqual(sorted(new), ["A1|t1", "A1|t2"])   # still to be categorized
+        self.assertEqual(sorted(new), ["A1|t1", "A1|t2"])
         self.assertEqual(dict(self.conn.execute(select(Transaction.id, Transaction.payee)).fetchall()),
                          {"A1|t1": "Birthday Gifts", "A1|t2": "Cafe"})
 
@@ -97,7 +95,7 @@ class SimpleFinStoreTests(LedgerCase):
         new = simplefin.store_payload(self.conn, self.payload([posted("t1", "STREAMCO", "-15.49"), posted("t2", "GYMCO", "-40.00"),
                                                                posted("t3", "PHONECO", "-60.00"), posted("t4", "SQ *CAFE", "-4.00")]),
                                       date(2026, 9, 1), TODAY)
-        self.assertEqual(sorted(new), ["A1|t2", "A1|t4"])   # the uncategorized ones still go to review
+        self.assertEqual(sorted(new), ["A1|t2", "A1|t4"])
         got = {r["id"]: (r["recurring_id"], r["recurring_linked_by"], r["category"], r["notes"]) for r in self.conn.execute(
             select(Transaction.id, Transaction.recurring_id, Transaction.recurring_linked_by, Transaction.category, Transaction.notes))}
         self.assertEqual(got, {"A1|t1": (7, "you", "Subscriptions", "note 7"), "A1|t2": (0, "you", None, "note 0"),
@@ -125,10 +123,9 @@ class SimpleFinStoreTests(LedgerCase):
         old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
                              "description": "HOTEL HOLD", "pending": True}])
         simplefin.store_payload(self.conn, old, date(2026, 8, 1))
-        # Weeks later the hold is gone from the bank; routine syncs only re-read the last 14 days.
-        simplefin.store_payload(self.conn, self.payload([]), date(2026, 8, 20))   # a sync on Sep 3
-        self.assertTrue(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|h1")).fetchone())   # 24 days: could still post
-        simplefin.store_payload(self.conn, self.payload([]), date(2026, 9, 1))    # Sep 15: 36 days
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 8, 20))
+        self.assertTrue(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|h1")).fetchone())
+        simplefin.store_payload(self.conn, self.payload([]), date(2026, 9, 1))
         self.assertIsNone(self.conn.execute(select(Transaction.id).where(Transaction.id == "A1|h1")).fetchone())
 
     def test_sync_chunks_backfill(self):
@@ -164,7 +161,7 @@ class SimpleFinStoreTests(LedgerCase):
             simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
         calls.clear(); fail["at"] = 0
         r = simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)
-        self.assertTrue(r["backfill"])   # the middle is read, not just the last 14 days
+        self.assertTrue(r["backfill"])
         self.assertEqual(calls[0][0], TODAY - timedelta(days=simplefin.BACKFILL_DAYS))
         calls.clear()
         self.assertFalse(simplefin.sync(self.conn, "https://u:p@h/simplefin", today=TODAY, fetch=fake_fetch)["backfill"])
@@ -217,7 +214,6 @@ class SimpleFinHttpTests(unittest.TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             url = f"http://user:p%40ss@127.0.0.1:{srv.server_port}/simplefin"
-            # the mock bridge is plain http on this machine, which the real opener refuses (see test_hardening)
             plain = mock.patch.object(simplefin, "_opener", lambda: urllib.request.build_opener(simplefin._NoRedirects()))
             plain.start()
             self.addCleanup(plain.stop)
