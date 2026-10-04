@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/svelte";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ForecastEvent, Overview } from "$lib/types";
 import ForecastChart from "./ForecastChart.svelte";
@@ -22,6 +22,12 @@ const fc = (extra: Partial<Overview> = {}): Overview => ({
   events: [statement], cards: [], warnings: [], warning_links: [], ...extra,
 });
 const hover = (container: HTMLElement, clientX: number) => fireEvent.mouseMove(container.querySelector("rect.cursor-crosshair")!, { clientX });
+// jsdom has no Touch, so a finger is a plain event carrying its touches (the chart's own listeners read nothing else).
+const finger = (container: HTMLElement, type: "touchstart" | "touchmove", clientX: number) => {
+  const e = Object.assign(new Event(type, { cancelable: true }), { touches: [{ clientX, clientY: 100 }] });
+  return fireEvent(container.querySelector("rect.cursor-crosshair")!, e);
+};
+const tip = (container: HTMLElement) => container.querySelector<HTMLElement>(".pointer-events-none")!;
 
 describe("ForecastChart's readout", () => {
   it("shows the day's budgeted spending as one line after its events", async () => {
@@ -47,5 +53,36 @@ describe("ForecastChart's readout", () => {
       expect(name).toHaveClass("min-w-0");
       expect(name.nextElementSibling).toHaveClass("whitespace-nowrap", "shrink-0");
     }
+  });
+});
+
+describe("ForecastChart's readout on a phone", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("stays in the top left of the chart while a finger drags, so two days can be compared", async () => {
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    await finger(container, "touchstart", 182);
+    await finger(container, "touchmove", 182);
+    expect(screen.getByText("Sat, Oct 17")).toBeInTheDocument();
+    expect(tip(container).style.left).toBe("52px");
+    expect(tip(container).style.top).toBe("0px");
+    await finger(container, "touchmove", 312);
+    expect(screen.getByText("Mon, Oct 19")).toBeInTheDocument();
+    expect(tip(container).style.left).toBe("52px");
+    expect(tip(container).style.top).toBe("0px");
+  });
+
+  it("follows the mouse again once the pointer is a mouse, but not for the mouse move a tap sends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { container } = render(ForecastChart, { props: { fc: fc() } });
+    await finger(container, "touchstart", 182);
+    await finger(container, "touchmove", 182);
+    expect(tip(container).style.top).toBe("0px");
+    await hover(container, 312);   // the tap's own mouse move, right after the touch
+    expect(tip(container).style.left).toBe("52px");
+    vi.advanceTimersByTime(2000);
+    await hover(container, 312);   // a real mouse, later
+    expect(tip(container).style.left).not.toBe("52px");
+    expect(tip(container).style.top).not.toBe("0px");
   });
 });
