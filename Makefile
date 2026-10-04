@@ -12,10 +12,10 @@ MYPY ?= poetry run mypy
 UNITTEST_PARALLEL ?= poetry run unittest-parallel -t . -s tests -j 4
 
 .PHONY: check lint python-lint frontend-lint test test-parallel test-pg fix \
-	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build
+	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build feature-map feature-map-check
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
-check: lint test-parallel frontend-check docs-build
+check: lint feature-map-check test-parallel frontend-check docs-build
 
 # Ruff and mypy for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
 lint: python-lint frontend-lint
@@ -71,3 +71,11 @@ docs: docs/node_modules
 # Builds the site into docs/dist and checks every link between its pages, as docs.yml does.
 docs-build: docs/node_modules
 	cd docs && $(NPM) run build
+
+# The feature map (docs/feature-map.json and its docs page): each route's handler, web app callers, tests and docs.
+# feature-map-check fails when it is out of date or a route has no test (tools/feature_map_allowlist.txt only shrinks).
+feature-map:
+	$(PYTHON) tools/feature_map.py
+
+feature-map-check:
+	$(PYTHON) tools/feature_map.py --check
