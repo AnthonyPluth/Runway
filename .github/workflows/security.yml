@@ -69,7 +69,7 @@ jobs:
           if [ "$limit" -gt 0 ] && [ "$(grep -c . <<< "$files" || true)" -ge "$limit" ]; then files=".github/(too many to list)"; fi
           touches() { if grep -qE "$1|^\.github/" <<< "$files"; then echo true; else echo false; fi; }
           {
-            echo "code=$(touches '^(runway|frontend/src|extension)/')"                               # Semgrep's paths
+            echo "code=$(touches '^(runway|frontend/src|extension|\.semgrep)/')"                          # Semgrep's paths
             echo "web_deps=$(touches '^frontend/package(-lock)?\.json$')"                             # npm audit
             echo "image=$(touches '^(Dockerfile|\.dockerignore|pyproject\.toml|poetry\.lock)$')"     # what the image holds beyond Runway's own code
             echo "workflows=$(touches '^\.github/')"                                                 # zizmor
@@ -87,10 +87,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
+      # Runway's own rules (.semgrep/runway.yml) go with the registry packs; `make semgrep` runs them locally. The pin is
+      # the Makefile's too.
+      - name: Check the Runway rules against their examples
+        run: python3 .semgrep/check_examples.py pipx run "semgrep==1.146.0"
       - name: Semgrep
         run: >
           pipx run "semgrep==1.146.0" scan --metrics=off --sarif --output semgrep.sarif
-          --config p/python --config p/security-audit --config p/owasp-top-ten --config p/javascript runway frontend/src extension
+          --config p/python --config p/security-audit --config p/owasp-top-ten --config p/javascript
+          --config .semgrep/runway.yml runway run.py frontend/src extension
       - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2   # v4.38.2
         if: ${{ !cancelled() && hashFiles('semgrep.sarif') != '' }}
         with:

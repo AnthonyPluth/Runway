@@ -1,6 +1,7 @@
-# The checks to run before you push: `make check` runs ruff, mypy, the Python tests (in parallel, as CI does), the web app's type-check,
-# ESLint, Vitest tests and build, and the docs site's build, each once. The other targets run one part of it. The security
-# scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI, on the pull requests they can affect.
+# The checks to run before you push: `make check` runs ruff, mypy, Runway's own Semgrep rules, the Python tests (in parallel,
+# as CI does), the web app's type-check, ESLint, Vitest tests and build, and the docs site's build, each once. The other
+# targets run one part of it. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL)
+# run only in CI, on the pull requests they can affect.
 # Python commands go through Poetry, as in docs/src/content/docs/contributing/development.md.
 
 PYTHON ?= poetry run python
@@ -10,19 +11,30 @@ NPM ?= npm
 RUFF ?= poetry run ruff
 MYPY ?= poetry run mypy
 UNITTEST_PARALLEL ?= poetry run unittest-parallel -t . -s tests -j 4
+# Runway's own Semgrep rules (.semgrep/runway.yml), at the version .github/workflows/security.yml pins (change both
+# together). Semgrep isn't in the Poetry environment: it pins dependencies of its own and doesn't run on Python 3.14,
+# so it goes through pipx, on pipx's own Python.
+SEMGREP ?= pipx run semgrep==1.146.0
 
-.PHONY: check lint python-lint frontend-lint test test-parallel test-pg fix \
+.PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg fix \
 	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint test-parallel frontend-check docs-build
 
-# Ruff and mypy for Python, and ESLint over the web app, the extension and runway/static (the same lint CI runs).
-lint: python-lint frontend-lint
+# Ruff and mypy for Python, ESLint over the web app, the extension and runway/static (the same lint CI runs), and
+# Runway's own Semgrep rules.
+lint: python-lint frontend-lint semgrep
 
 python-lint:
 	$(RUFF) check .
 	$(MYPY)
+
+# Runway's own rules for the paved paths (.semgrep/runway.yml): first that each rule flags its failing examples and only
+# those (.semgrep/examples/), then the code. The ESLint rules' examples are frontend/src/lint-rules.test.ts.
+semgrep:
+	$(PYTHON) .semgrep/check_examples.py $(SEMGREP)
+	$(SEMGREP) scan --metrics=off --disable-version-check --error --config .semgrep/runway.yml runway run.py
 
 test:
 	$(PYTHON) -m unittest discover tests
