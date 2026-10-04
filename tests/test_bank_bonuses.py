@@ -11,7 +11,7 @@ from runway.churning import ChurnError
 from runway.models import Account, ChurnBankBonus, Transaction
 from tests.shared import DbCase
 
-TODAY = date(2026, 9, 29)
+TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card and bonus dates are written around it
 CATS = {"Paycheck": {"is_transfer": 0, "is_income": 1, "top": "Income"}, "Refunds": {"is_transfer": 0, "is_income": 1, "top": "Refunds"},
         "Transfer": {"is_transfer": 1, "is_income": 0, "top": "Transfer"}, "Groceries": {"is_transfer": 0, "is_income": 0, "top": "Groceries"}}
 

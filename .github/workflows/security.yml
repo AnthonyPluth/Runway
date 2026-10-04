@@ -23,9 +23,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  POETRY_VERSION: "2.5.1"   # the Poetry the Python jobs install the scanners with, as docker.yml's does
-
 # bash, which runs each step with -eo pipefail: a command that fails inside a pipeline fails the step (without it, only
 # the last command in a pipeline counts, and a failed gh or curl passes silently).
 defaults:
@@ -109,9 +106,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
         with:
-          node-version: 22
+          directory: frontend
+          install: "false"      # npm audit reads the lockfile
       - name: Audit the web app's dependencies
         working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
@@ -188,17 +186,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
-        id: python
-        with:
-          python-version: "3.14"
       # zizmor at the version poetry.lock pins (pyproject.toml's dev group), the same as `poetry install` gives you.
-      - name: Install Poetry and zizmor
-        env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-        run: |
-          pipx install --python "$PYTHON_PATH" "poetry==$POETRY_VERSION"
-          poetry install --no-root --only dev --no-interaction
+      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
+        with:
+          cache-name: dev
+          install-args: --only dev
       - name: Audit the workflows
         env:
           GH_TOKEN: ${{ github.token }}

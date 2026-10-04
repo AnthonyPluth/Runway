@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import threading
 import time
 import unittest
 import urllib.request
@@ -14,7 +13,7 @@ from runway import categorize, db, monitoring, server, simplefin
 from runway.server import sync
 from runway.server.handler import _traced, trace_name
 
-from tests.shared import own_database
+from tests.shared import own_database, serve
 
 DSN = "https://publickey@o123.ingest.us.sentry.io/456"
 SIMPLEFIN = "https://user:secretpass@beta-bridge.simplefin.org/simplefin"
@@ -24,7 +23,7 @@ class Capture(sentry_sdk.transport.Transport):
     def __init__(self, *a, **kw):
         super().__init__(*a, **kw)
         self.events = []
-        self.items: list[tuple[str, object]] = []
+        self.items: list[tuple[str, object]] = []   # everything else: transactions, check-ins, logs, metrics
 
     def capture_envelope(self, envelope):
         self.events += [i.payload.json for i in envelope.items if i.type == "event"]
@@ -34,7 +33,7 @@ class Capture(sentry_sdk.transport.Transport):
         return [p for t, p in self.items if t == kind]
 
 
-ALL_ON = {"SENTRY_DSN": DSN}
+ALL_ON = {"SENTRY_DSN": DSN}   # everything is on with just a DSN
 
 
 def start(env=None) -> Capture:
@@ -61,9 +60,10 @@ class MonitoringTests(unittest.TestCase):
                 raise RuntimeError("boom")
             except RuntimeError:
                 with mock.patch("traceback.print_exc"):
-                    monitoring.report()
+                    monitoring.report()   # just logged
 
     def test_what_a_service_said_is_kept_safe(self):
+        # A bank's message (through SimpleFIN or Plaid) or an API's error is kept and shown: no account numbers in it.
         self.assertEqual(monitoring.public_text("Chase: account 123456789 needs a new login (HTTP 401)"),
                          "Chase: account [number] needs a new login (HTTP 401)")
         self.assertEqual(monitoring.public_text(f"refused at {SIMPLEFIN}/accounts?x=1"),
@@ -82,7 +82,7 @@ class MonitoringTests(unittest.TestCase):
             self.assertTrue(monitoring.init())
         transport = Capture()
         sentry_sdk.get_client().transport = transport
-        balance = sum([1000, 234.56])   # noqa: F841
+        balance = sum([1000, 234.56])   # a local variable: its value must not be sent  # noqa: F841
         try:
             raise ValueError(f"SimpleFIN said no: {SIMPLEFIN}?token=abc")
         except ValueError:
@@ -111,15 +111,16 @@ class MonitoringTests(unittest.TestCase):
                 # raw SQL: a throwaway table on a plain engine, with the bound parameters the error report must drop
                 c.execute(sa.text("INSERT INTO tx VALUES (:id, :payee, :amount)"), {"id": 1, "payee": "WHOLE FOODS", "amount": 87.12})
         except sa.exc.IntegrityError as e:
-            self.assertIn("WHOLE FOODS", str(e))
+            self.assertIn("WHOLE FOODS", str(e))   # what SQLAlchemy says, and the local log keeps
             with mock.patch("traceback.print_exception"):
                 monitoring.report(e)
         sentry_sdk.flush()
         value = transport.events[0]["exception"]["values"][-1]["value"]
         self.assertNotIn("WHOLE FOODS", value)
         self.assertNotIn("87.12", value)
-        self.assertIn("[SQL: INSERT INTO tx VALUES", value)
+        self.assertIn("[SQL: INSERT INTO tx VALUES", value)   # the query itself helps, and holds no data
         self.assertIn("[parameters: [Filtered]]", value)
+        # Postgres's own details name the values too.
         pg = ("(psycopg.errors.NotNullViolation) null value in column \"category\" violates not-null constraint\n"
               "DETAIL:  Failing row contains (tx-9, 2026-09-01, -87.12, WHOLE FOODS, null).\n"
               "[SQL: INSERT INTO transactions ...]\n[parameters: {'id': 'tx-9', 'amount': -87.12}]\n"
@@ -131,6 +132,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertIn("Failing row contains ([Filtered])", out)
         self.assertIn("Key (plaid_account_id)=([Filtered]) already exists", out)
         self.assertIn("(Background on this error at: https://sqlalche.me/e/20/gkpj)", out)
+        # Text that repeats a marker is scrubbed in linear time (a regex could take minutes on it).
         import time
         for marker in ("[parameters: ", "Failing row contains (", "Key (", "Key ()=("):
             started = time.monotonic()
@@ -154,11 +156,12 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(monitoring.browser_config()["dsn"], DSN)
             self.assertIn("connect-src 'self' https://production.plaid.com https://o123.ingest.us.sentry.io;",
                           server.content_security_policy("n").replace(server.PLAID_API, "https://production.plaid.com"))
+            # Workers are the service worker (/sw.js) only: no blob: scripts, which a replay's compression worker would need.
             self.assertIn("worker-src 'self';", server.content_security_policy("n"))
             self.assertNotIn("blob:", server.content_security_policy("n"))
         with mock.patch.dict(os.environ, {"SENTRY_DSN": DSN, "RUNWAY_SENTRY_BROWSER": "0"}):
             self.assertIsNone(monitoring.browser_config())
-        with mock.patch.dict(os.environ, {"SENTRY_DSN": "http://k@evil.example/1"}):
+        with mock.patch.dict(os.environ, {"SENTRY_DSN": "http://k@evil.example/1"}):   # not https: never allowed
             self.assertIsNone(monitoring.browser_config())
             self.assertIsNone(monitoring.browser_origin())
 
@@ -168,15 +171,15 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch.dict(os.environ, key):
             ann = monitoring.user_id({"sub": "google|1234567890", "email": "ann@example.com", "name": "Ann"})
             self.assertRegex(ann, r"^[0-9a-f]{16}$")
-            self.assertEqual(monitoring.user_id({"sub": "google|1234567890"}), ann)
+            self.assertEqual(monitoring.user_id({"sub": "google|1234567890"}), ann)   # the same person, the same code
             self.assertNotEqual(monitoring.user_id({"sub": "google|1234567891"}), ann)
-            self.assertEqual(monitoring.user_id({"name": None, "email": None, "local": True}), "local")
+            self.assertEqual(monitoring.user_id({"name": None, "email": None, "local": True}), "local")   # no OIDC
             self.assertIsNone(monitoring.user_id(None))
-            self.assertIsNone(monitoring.user_id({"email": "ann@example.com"}))
+            self.assertIsNone(monitoring.user_id({"email": "ann@example.com"}))   # no sign-in id: nobody
             with mock.patch.dict(os.environ, {**ALL_ON, **key}):
                 self.assertEqual(monitoring.browser_config({"sub": "google|1234567890"})["user_id"], ann)
                 self.assertIsNone(monitoring.browser_config()["user_id"])
-        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "j" * 40}):
+        with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "j" * 40}):   # someone else's Runway: another code
             self.assertNotEqual(monitoring.user_id({"sub": "google|1234567890"}), ann)
 
     def test_a_request_says_who_asked_and_nothing_else_does(self):
@@ -184,7 +187,7 @@ class MonitoringTests(unittest.TestCase):
         ann = {"sub": "google|1234567890", "email": "ann@example.com", "name": "Ann"}
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "k" * 40}), mock.patch("sys.stderr"):
             code = monitoring.user_id(ann)
-            monitoring.set_user(ann)
+            monitoring.set_user(ann)   # outside a request: the scope is shared, so nothing is set
             monitoring.report(RuntimeError("before"))
             with monitoring.request("GET", "/api/state", {}):
                 monitoring.set_user(ann)
@@ -199,8 +202,8 @@ class MonitoringTests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
         with mock.patch.dict(os.environ, {**env, "SENTRY_DSN": DSN}, clear=True):
             cfg = monitoring.browser_config()
-            self.assertEqual(set(cfg), {"dsn", "environment", "release", "user_id"})
-            self.assertNotIn("replay", json.dumps(cfg).lower())
+            self.assertEqual(set(cfg), {"dsn", "environment", "release", "user_id"})   # the web app turns on all of its own
+            self.assertNotIn("replay", json.dumps(cfg).lower())   # and never Session Replay
             self.assertEqual(cfg["environment"], "production")
             self.assertTrue(monitoring.browser_profiling())
         transport = start({**env, "SENTRY_DSN": DSN})
@@ -227,14 +230,16 @@ class MonitoringTests(unittest.TestCase):
             start({**env, "SENTRY_DSN": DSN, "SENTRY_AI_CONTENT": "off"})
         self.assertIn("SENTRY_AI_CONTENT is no longer read", printed.getvalue())
         with mock.patch.dict(os.environ, {**env, "SENTRY_AI_CONTENT": "0"}, clear=True), mock.patch("sys.stderr", io.StringIO()) as quiet:
-            self.assertFalse(monitoring.init())
+            self.assertFalse(monitoring.init())   # without a DSN nothing's sent, so there's nothing to warn about
         self.assertEqual(quiet.getvalue(), "")
+        # The web app reports with its own DSN alone, so that's warned about too.
         with mock.patch.dict(os.environ, {**env, "SENTRY_BROWSER_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "0"}, clear=True), \
                 mock.patch("sys.stderr", io.StringIO()) as browser_only:
             self.assertFalse(monitoring.init())
         self.assertIn("SENTRY_REPLAY_SAMPLE_RATE is no longer read", browser_only.getvalue())
 
     def test_a_replay_setting_is_warned_about_whatever_its_value(self):
+        # Runway never sends replays, so a replay rate is warned about even set to on, not quietly ignored.
         env = {k: v for k, v in os.environ.items() if not k.startswith("SENTRY_")}
         for value in ("1", "1.0", "true", "on", "0", "0.25"):
             with self.subTest(value=value), mock.patch.dict(os.environ, {**env, "SENTRY_REPLAY_SAMPLE_RATE": value,
@@ -245,7 +250,7 @@ class MonitoringTests(unittest.TestCase):
             start({**env, "SENTRY_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "1"})
         self.assertIn("SENTRY_REPLAY_SAMPLE_RATE is no longer read", printed.getvalue())
         self.assertIn("never records sessions or sends replays", printed.getvalue())
-        self.assertNotIn("replays,", printed.getvalue())
+        self.assertNotIn("replays,", printed.getvalue())   # replays aren't among what's sent
         with mock.patch.dict(os.environ, {**env, "SENTRY_DSN": DSN, "SENTRY_REPLAY_SAMPLE_RATE": "1"}, clear=True):
             self.assertNotIn("replay", json.dumps(monitoring.browser_config()).lower())
 
@@ -281,17 +286,16 @@ class MonitoringTests(unittest.TestCase):
     def test_a_request_is_traced_without_its_query_or_values(self):
         own_database(self)
         transport = start()
-        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        self.addCleanup(httpd.server_close)
-        self.addCleanup(httpd.shutdown)
+        base = serve(self)
         trace_id = "abcdef0123456789abcdef0123456789"
-        req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/transactions?q=rent-money&limit=5",
+        req = urllib.request.Request(f"{base}/api/transactions?q=rent-money&limit=5",
                                      headers={"sentry-trace": f"{trace_id}-1234567890abcdef-1"})
         with mock.patch("builtins.print"):
             with urllib.request.urlopen(req, timeout=20) as r:
                 self.assertEqual(r.status, 200)
-            urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/healthz", timeout=20).close()
+            urllib.request.urlopen(f"{base}/healthz", timeout=20).close()
+        # The server finishes a request's transaction just after it has sent the response, so on a busy machine the
+        # transaction can still be on its way: wait for it (briefly) rather than read the transport too soon.
         deadline = time.monotonic() + 10
         while True:
             sentry_sdk.flush()
@@ -299,16 +303,16 @@ class MonitoringTests(unittest.TestCase):
             if txs or time.monotonic() > deadline:
                 break
             time.sleep(0.05)
-        self.assertEqual([t["transaction"] for t in txs], ["GET /api/transactions"])
+        self.assertEqual([t["transaction"] for t in txs], ["GET /api/transactions"])   # /healthz isn't traced
         tx = txs[0]
-        self.assertEqual(tx["contexts"]["trace"]["trace_id"], trace_id)
+        self.assertEqual(tx["contexts"]["trace"]["trace_id"], trace_id)   # continues the web app's trace
         self.assertEqual(tx["contexts"]["trace"]["data"]["http.response.status_code"], 200)
-        self.assertEqual(tx["user"], {"id": "local"})
-        self.assertTrue(any(sp["op"] == "db" for sp in tx["spans"]))
+        self.assertEqual(tx["user"], {"id": "local"})   # who asked (without OIDC everyone is "local"; see user_id)
+        self.assertTrue(any(sp["op"] == "db" for sp in tx["spans"]))   # database queries, as spans
         self.assertNotIn("rent-money", json.dumps(tx))
         logs = json.dumps(transport.of("log"))
         self.assertIn("GET /api/transactions 200", logs)
-        self.assertNotIn("127.0.0.1", logs)
+        self.assertNotIn("127.0.0.1", logs)   # the access log line in Sentry has no address
 
     def test_spans_lose_queries_and_credentials(self):
         tx = monitoring._before_send_transaction({
@@ -320,7 +324,7 @@ class MonitoringTests(unittest.TestCase):
         text = json.dumps(tx)
         for secret in ("secretpass", "start-date", "headers", "a@b.c", "10.1.2.3", "db.params"):
             self.assertNotIn(secret, text)
-        self.assertEqual(tx["user"], {"id": "3f2a9c1d0b7e4a65"})
+        self.assertEqual(tx["user"], {"id": "3f2a9c1d0b7e4a65"})   # the code for who's signed in, and nothing else
         self.assertEqual(tx["spans"][0]["data"]["url"], "https://beta-bridge.simplefin.org/simplefin/accounts")
 
     def test_background_work_is_traced_and_timed(self):
@@ -339,7 +343,7 @@ class MonitoringTests(unittest.TestCase):
         start()
         opts = sentry_sdk.get_client().options
         self.assertEqual((opts["profile_session_sample_rate"], opts["profile_lifecycle"]), (1.0, "trace"))
-        self.assertEqual(opts["trace_propagation_targets"], [])
+        self.assertEqual(opts["trace_propagation_targets"], [])   # no headers to banks
 
     def test_a_bank_sync_checks_in_and_one_that_cant_start_doesnt(self):
         own_database(self, TZ="America/Chicago")
@@ -347,9 +351,9 @@ class MonitoringTests(unittest.TestCase):
         with db.session() as conn:
             db.set_setting(conn, "simplefin_access_url", SIMPLEFIN)
         with mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}), mock.patch("builtins.print"):
-            sync.run_sync()
+            sync.run_sync()   # the Sync button's, or the daily one: either counts
             self.assertTrue(sync._sync_lock.acquire(blocking=False))
-            try:
+            try:   # another sync is running: this one doesn't start, so it's neither a success nor a failure
                 with self.assertRaises(sync.ApiError):
                     sync.run_sync()
             finally:
@@ -357,10 +361,11 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch("runway.simplefin.sync", side_effect=simplefin.SimpleFinError("bank said no")), \
                 mock.patch("builtins.print"), self.assertRaises(sync.ApiError):
             sync.run_sync()
+        # With automatic syncing off, a manual sync checks in without a schedule: it doesn't create a daily monitor.
         with mock.patch.object(sync, "AUTO_SYNC", False), mock.patch("builtins.print"), \
                 mock.patch("runway.simplefin.sync", return_value={"new": [], "errors": []}):
             sync.run_sync()
-        with db.session() as conn:
+        with db.session() as conn:   # nothing connected: nothing to check in
             db.set_setting(conn, "simplefin_access_url", None)
         with self.assertRaises(sync.ApiError):
             sync.run_sync()
@@ -379,12 +384,13 @@ class MonitoringTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"TZ": tz}):
                 self.assertEqual(monitoring.local_timezone(), zone, tz)
         env = {k: v for k, v in os.environ.items() if k != "TZ"}
-        with mock.patch.dict(os.environ, env, clear=True):
+        with mock.patch.dict(os.environ, env, clear=True):   # no TZ: the system's zone
             with mock.patch("os.path.realpath", return_value="/usr/share/zoneinfo/America/Denver"):
                 self.assertEqual(monitoring.local_timezone(), "America/Denver")
             with mock.patch("os.path.realpath", return_value="/etc/localtime"), \
                     mock.patch("builtins.open", mock.mock_open(read_data="Australia/Perth\n")):
                 self.assertEqual(monitoring.local_timezone(), "Australia/Perth")
+        # A zone that can't be told: the check-in doesn't create the monitor (its schedule would be off by hours).
         transport = start({**ALL_ON, "TZ": "EST5EDT"})
         with mock.patch.dict(os.environ, {"TZ": "EST5EDT"}):
             monitoring.cron_finish(monitoring.cron_start("runway-bank-sync", "0 7 * * *"), True)
@@ -397,7 +403,7 @@ class MonitoringTests(unittest.TestCase):
         with mock.patch("builtins.print") as printed:
             monitoring.log(f"Couldn't reach {SIMPLEFIN}", "warning")
             monitoring.log("bad value 1234.56", "warning", remote="bad value")
-        self.assertIn("secretpass", str(printed.call_args_list[0]))
+        self.assertIn("secretpass", str(printed.call_args_list[0]))   # the local log is unchanged
         sentry_sdk.flush()
         sent = json.dumps(transport.of("log"))
         self.assertIn("beta-bridge.simplefin.org", sent)
@@ -434,8 +440,9 @@ class MonitoringTests(unittest.TestCase):
                          ("gen_ai.chat", "Transaction categorizer", "openrouter"))
         self.assertEqual((chat["gen_ai.usage.input_tokens"], chat["gen_ai.usage.output_tokens"], chat["gen_ai.response.model"]),
                          (120, 8, "anthropic/claude-haiku-4.5"))
-        self.assertTrue(chat["gen_ai.conversation.id"].startswith("transaction-categorizer-"))
+        self.assertTrue(chat["gen_ai.conversation.id"].startswith("transaction-categorizer-"))   # the run is one conversation
         self.assertEqual(chat["trace_id"], transport.of("transaction")[0]["contexts"]["trace"]["trace_id"])
+        # The prompt and reply are on the chat span; nothing else carries what they do.
         items = json.loads(json.dumps(transport.items))
         for batch in (p for t, p in items if t == "span"):
             for sp in batch["items"]:

@@ -10,7 +10,7 @@ from runway import settings_keys as sk
 from runway.models import Account, Budget, CardStatement, Category, ManualStatement, Override, Recurring
 from runway.server.api import accounts as api
 from runway.server.common import ApiError
-from tests.shared import TODAY, LedgerCase
+from tests.shared import TODAY, LedgerCase, freeze_today
 
 
 class StalenessRuleTests(unittest.TestCase):
@@ -160,7 +160,7 @@ class ManualStatementForecastTests(LedgerCase):
 class StatementApiTests(LedgerCase):
     def setUp(self):
         super().setUp()
-        self.today = date.today()
+        self.today = freeze_today(self)
         self.acct("cc", "credit", -900.0)
         self.acct("chk", "checking", 100.0)
 

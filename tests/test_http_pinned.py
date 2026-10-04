@@ -28,7 +28,7 @@ from runway import settings_keys as sk
 from runway.models import Merchant
 from runway.server import common, mcp_http, sync
 from runway.server.api import retail
-from tests.shared import forget_oauth, own_database
+from tests.shared import forget_oauth, freeze_today, own_database
 from tests.test_web_app import built_app, serving
 
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(16)
@@ -103,6 +103,7 @@ class Pinned(unittest.TestCase):
         self.assertJson(self.api("POST", "/api/nothing-here", b"{}"), 404, {"error": "Not found"})
 
     def test_a_backup_download(self):
+        freeze_today(self)      # the file is named after today
         code, heads, data = self.send("GET", "/api/backup")
         self.assertEqual(code, 200)
         self.assertIn("accounts", json.loads(gzip.decompress(data))["tables"])

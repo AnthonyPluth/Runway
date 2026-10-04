@@ -17,9 +17,11 @@ updates:
     commit-message:
       prefix: deps
 
-  # Actions used by .github/workflows/docker.yml (checkout, setup-python, Docker build, ghcr cleanup)
+  # Actions used by the workflows (.github/workflows/) and by the composite actions they share (.github/actions/)
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
       day: monday

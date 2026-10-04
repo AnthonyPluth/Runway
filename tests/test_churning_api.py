@@ -8,9 +8,9 @@ from runway import demo
 from runway.server.api import churning as api
 from runway.server.common import ApiError
 from runway.models import User
-from tests.shared import DbCase
+from tests.shared import TODAY, DbCase, freeze_today
 
-TODAY = date.today()
+# (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
 
 
 def q(**kw):
@@ -20,6 +20,7 @@ def q(**kw):
 class ChurningApiTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
         self.c.execute(insert(User).values(sub="u1", first_name="Alex", last_seen=1))
 

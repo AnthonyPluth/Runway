@@ -8,7 +8,7 @@ from runway import bank_bonuses, churning, notify
 from runway.churning import ChurnError
 from tests.shared import DbCase
 
-TODAY = date(2026, 9, 29)
+TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its wishlist dates are written around it
 QUIET = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False,
          "sync_failed": False, "churn_fee": False, "churn_bonus": False, "churn_plan": False, "churn_benefit": False}
 

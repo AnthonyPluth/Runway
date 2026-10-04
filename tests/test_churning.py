@@ -7,10 +7,10 @@ from sqlalchemy import func, insert, select
 
 from runway import churning, notify
 from runway.churning import ChurnError
-from runway.models import Account, Category, ChurnBalance, ChurnCard, ChurnTask, Transaction, TxSplit
-from tests.shared import DbCase
+from runway.models import Account, Category, ChurnBalance, ChurnCard, ChurnTask, TxSplit
+from tests.shared import DbCase, add_tx
 
-TODAY = date(2026, 9, 29)
+TODAY = date(2026, 9, 29)   # not shared.TODAY, the 29th: its card dates are written around it
 
 
 def card(id, opened, owner="Alex", issuer="chase", product="Freedom", **kw):
@@ -135,8 +135,7 @@ class DbTests(DbCase):
         self.c.execute(insert(Category).values(name="Takeout", parent="Restaurants"))
 
     def tx(self, id, posted, amount, category, split=0):
-        self.c.execute(insert(Transaction).values(id=id, account_id="cc", posted=posted, amount=amount,
-                                                  category=category, is_split=split))
+        add_tx(self.c, "cc", posted, amount, id=id, description=None, payee=None, category=category, is_split=split)
 
     def test_spending_toward_the_bonus_and_points(self):
         gold = churning.save_card(self.c, {"owner": "Alex", "issuer": "amex", "product": "Gold", "opened_on": "2026-08-01",

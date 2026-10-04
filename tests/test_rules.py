@@ -1,13 +1,11 @@
 """Rules with conditions (text, amount, direction, account) and actions (category, rename, split, review)."""
-import os
-import tempfile
 import unittest
 
 from sqlalchemy import insert, select, update
 
 from runway import categories, categorize, db, rules, splits
 from runway.models import Account, Rule, Transaction
-from tests.shared import DbCase
+from tests.shared import DbCase, add_tx, database_path
 
 
 class Base(DbCase):
@@ -19,11 +17,8 @@ class Base(DbCase):
 
     def tx(self, amount, desc, acct="chk", category=None, source=None):
         self.n += 1
-        tid = f"{acct}|{self.n}"
-        self.c.execute(insert(Transaction).values(id=tid, account_id=acct, posted=f"2026-09-{self.n:02d}",
-                                                  amount=amount, description=desc, payee=categorize.clean_payee(desc),
-                                                  category=category, category_source=source))
-        return tid
+        return add_tx(self.c, acct, f"2026-09-{self.n:02d}", amount, id=f"{acct}|{self.n}", description=desc,
+                      category=category, category_source=source)
 
     def rule(self, **kw):
         return rules.save(self.c, kw)
@@ -258,7 +253,7 @@ class EditingTests(Base):
 class UpgradeTests(unittest.TestCase):
     def test_existing_rules_survive_and_texts_may_repeat(self):
         from alembic import command
-        path = os.path.join(tempfile.mkdtemp(), "old.db")
+        path = database_path(self, "old.db")
         with db.engine(path).begin() as sa_conn:
             command.upgrade(db.alembic_config(sa_conn), "0006")
             sa_conn.exec_driver_sql("INSERT INTO rules(match, category) VALUES ('venmo', 'Transfer')")

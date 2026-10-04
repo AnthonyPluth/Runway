@@ -1,7 +1,6 @@
 """Merchant logos: noted from Plaid, downloaded from Plaid (or the icon CDN for big names), served by Runway."""
 import io
 import unittest
-from datetime import date
 from unittest import mock
 import urllib.error
 import urllib.parse
@@ -12,7 +11,7 @@ from sqlalchemy import func, insert, select, update
 from runway import db, merchants, server
 from runway import settings_keys as sk
 from runway.models import Account, Holding, InvAccount, Merchant, MerchantLogo, Security, Transaction
-from tests.shared import DbCase
+from tests.shared import DbCase, freeze_today
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 40
 
@@ -104,7 +103,7 @@ class MerchantTests(DbCase):
 
     def test_a_sync_notes_the_websites_it_has_seen(self):
         self.c.execute(insert(Account).values(id="a", name="Card", kind="credit"))
-        today = date.today().isoformat()
+        today = freeze_today(self).isoformat()
         self.c.execute(insert(Transaction), [{"id": "t1", "account_id": "a", "posted": today, "amount": -5,
                                               "description": "STARBUCKS 123", "payee": "Starbucks"},
                                              {"id": "t2", "account_id": "a", "posted": today, "amount": -5,
@@ -196,7 +195,7 @@ class MerchantTests(DbCase):
 
     def test_adding_a_key_fetches_the_past_year_at_once(self):
         self.c.execute(insert(Account).values(id="a", name="Card", kind="credit"))
-        today = date.today().isoformat()
+        today = freeze_today(self).isoformat()
         self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "a", "posted": today, "amount": -5,
                                               "description": f"SHOP {i}", "payee": f"Shop Number {chr(65 + i)}"}
                                              for i in range(7)])

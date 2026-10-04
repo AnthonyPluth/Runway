@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, insert, select, update
 from runway import categories, categorize, db, payees, server, simplefin
 from runway import settings_keys as sk
 from runway.models import Budget, Category, Merchant, MerchantLogo, Recurring, RetailItem, RetailItemMemory, RetailOrder, Rule, Transaction
-from tests.shared import TODAY, LedgerCase, ts
+from tests.shared import TODAY, LedgerCase, freeze_today, ts
 
 
 class PayeeTests(unittest.TestCase):
@@ -417,7 +417,7 @@ class CategoryTests(LedgerCase):
 
     def test_coming_up_wears_its_merchants_logo(self):
         self.acct("chk", "checking", 1000.0)
-        last = (date.today() - timedelta(days=20)).isoformat()
+        last = (freeze_today(self) - timedelta(days=20)).isoformat()
         self.conn.execute(insert(Recurring).values(name="Netflix", account_id="chk", amount=-15.49,
                                                    frequency="monthly", anchor_date=last, active=1))
         rid = self.conn.execute(select(Recurring.id)).fetchone()[0]
@@ -432,7 +432,7 @@ class CategoryTests(LedgerCase):
 
     def test_a_logo_chosen_for_a_recurring_item_shows_on_it_and_its_coming_up_entries(self):
         self.acct("chk", "checking", 1000.0)
-        last = (date.today() - timedelta(days=20)).isoformat()
+        last = (freeze_today(self) - timedelta(days=20)).isoformat()
         for name, amount in (("Netflix", -15.49), ("Rent", -900)):
             self.conn.execute(insert(Recurring).values(name=name, account_id="chk", amount=amount,
                                                        frequency="monthly", anchor_date=last, active=1))

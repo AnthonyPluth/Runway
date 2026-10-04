@@ -93,9 +93,6 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    env:
-      POETRY_VERSION: "2.5.1"                 # the Poetry CI runs, also in security.yml and the Dockerfile
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"   # keep the virtualenv in .venv, where it's cached
     strategy:
       fail-fast: false         # one shard failing still shows what the others found
       matrix:
@@ -119,39 +116,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
-        id: python
+      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
         with:
+          cache-name: ${{ matrix.database }}
           python-version: ${{ matrix.python }}
-
-      # Poetry and the project's virtualenv are cached between runs; a new Python or poetry.lock starts afresh. The
-      # runner's pipx installs into /opt/pipx, outside the cached paths (so the cache was never saved), so point it here.
-      - name: Keep pipx's tools in the home directory
-        run: |
-          echo "PIPX_HOME=$HOME/.local/pipx" >> "$GITHUB_ENV"
-          echo "PIPX_BIN_DIR=$HOME/.local/bin" >> "$GITHUB_ENV"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Cache Poetry
-        id: poetry-cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
-        with:
-          path: |
-            ~/.local/pipx/venvs/poetry
-            ~/.local/bin/poetry
-          key: poetry-${{ env.POETRY_VERSION }}-${{ runner.os }}-py${{ steps.python.outputs.python-version }}
-      - name: Install Poetry
-        if: steps.poetry-cache.outputs.cache-hit != 'true'
-        env:
-          PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-        run: pipx install --python "$PYTHON_PATH" "poetry==$POETRY_VERSION"
-      - name: Cache dependencies
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py${{ steps.python.outputs.python-version }}-${{ matrix.database }}-${{ hashFiles('poetry.lock') }}
-      # Runway's dependencies and the tools below (the dev group in pyproject.toml, at the versions poetry.lock pins).
-      - name: Install dependencies
-        run: poetry install --no-root --no-interaction
       - name: Run tests (postgres, one shard)
         if: matrix.database == 'postgres'
         env:
@@ -202,12 +170,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020   # v7.0.0
+      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci --no-audit --no-fund
+          directory: frontend
       - name: Type-check (svelte-check)
         run: npm run check
       - name: Lint (ESLint, also over extension/ and runway/static/)

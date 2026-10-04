@@ -9,11 +9,11 @@ from sqlalchemy import insert, select
 
 from runway import categorize, churn_found, churning, db
 from runway import settings_keys as sk
-from runway.models import Account, ChurnCard, PlaidAccount, PlaidItem, Transaction
+from runway.models import Account, ChurnCard, PlaidAccount, PlaidItem
 from runway.server.api import churning as api
 from runway.server.api import state as api_state
 from runway.server.common import ApiError
-from tests.shared import DbCase
+from tests.shared import DbCase, add_acct, add_tx
 
 
 class CleanProductTests(unittest.TestCase):
@@ -57,11 +57,10 @@ class IssuerTests(unittest.TestCase):
 
 class FoundTests(DbCase):
     def account(self, id, name, **kw):
-        self.c.execute(insert(Account).values(id=id, name=name, kind="credit", owner="Alex", org="Chase Bank Alex", **kw))
+        add_acct(self.c, id, "credit", name=name, owner="Alex", org="Chase Bank Alex", **kw)
 
     def tx(self, id, account, posted, amount, payee="Shop", description=""):
-        self.c.execute(insert(Transaction).values(id=id, account_id=account, posted=posted, amount=amount, payee=payee,
-                                                  description=description))
+        add_tx(self.c, account, posted, amount, id=id, payee=payee, description=description)
 
     def drafts(self):
         return {d["account_id"]: d for d in churn_found.found(self.c)["drafts"]}

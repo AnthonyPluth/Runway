@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 
 from runway import db, oidc, server
 from runway.models import AuthPending, AuthSession
-from tests.shared import own_database
+from tests.shared import NoRedirect, own_database
 
 N = 0xf0e468c25263ab5b85ed863374cc64adae8284623519e21e7cbf01e2554656a58f8f69140ff8e701322655b598044841a7839a25b81c3737ee8141ee25ba7e6a46706540e49f61b7a321ad1e53d9bf44770558691d32aafb0edb49104ad0e9cc29074e856c22d864d285dbad96d228fb509f00b7d065ba0188d8c511efaee63001347fbe9939df1497b5efaf2e0d54626c6d1b3152397d3737b0e35141e1e58da75badd4f9897236e4d4c9b35ec9a0037c19152f1f7dc2cea916100588f76fd5ad4668da24e037339e9d34ab75ba37b91037a62ba7800df275f48651e231f021d7eb1c48006b016c1daff8d6d40a7446a8209b9666a85e5c04b999c38b3003a1
 D = 0xcea925b6903831aa331bb32631eda7f1d8e4dfede0e073bcf40869f5627315a2b3a6b4df2154c7d99ecc847b660f466e0ce83a3661dcd30288fb1b34d3e94acaa1e38afa4128fb0c304793dd90d21de4feb6f742366a618541199f74faba7fd946d99de39901cbe3b338635e6925a342f7c7713640f304c08c466bcb177554c3f024ea80a55aa110bd895aff210a164ecf7844e674ba9120f510f4b148d42e67136c701859afeb76c4526520b920afb22c594cee4c49098a9f5c150fffc6b709f9e4f14a4983fe079214de100fc0952b6a4dc0454c8fd6dec1f4748d59590a0aa048842308f7c31b07e53900cf55ebb68350d0e26cc69cbf83b88fb55f88b69
@@ -77,11 +77,6 @@ class Provider(BaseHTTPRequestHandler):
             claims["email"] = "attacker@example.com"
             tok = f"{h}.{b64(json.dumps(claims).encode())}.{s}"
         self.reply({"access_token": "at", "token_type": "Bearer", "id_token": tok})
-
-
-class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):
-        return None
 
 
 class OIDCTests(unittest.TestCase):

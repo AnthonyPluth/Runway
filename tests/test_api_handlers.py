@@ -13,9 +13,9 @@ from runway.server.common import ApiError
 from runway.models import (Account, AiLog, Budget, CardStatement, Category, Holding, InvAccount, InvTransaction, LoanTerms,
                            ManualPosition, NotifyLog, Override, PlaidAccount, PlaidItem, Recurring, Security, SyncLog,
                            Transaction, User)
-from tests.shared import DbCase
+from tests.shared import TODAY, DbCase, freeze_today
 
-TODAY = date.today()
+# (date.today() is frozen at shared.TODAY in each test's setUp: the handlers read the clock too)
 
 
 def q(**kw):
@@ -25,6 +25,7 @@ def q(**kw):
 class HandlerTests(DbCase):
     def setUp(self):
         super().setUp()
+        freeze_today(self)
         demo.seed(self.c, TODAY)
 
     def one(self, stmt):
@@ -414,8 +415,9 @@ class HandlerTests(DbCase):
         self.assertEqual(set(self.ids(ignored="0", category="Ignore")), {a, b})
         d = self.one(select(Transaction.id).where(Transaction.id.notin_([a, b, c])).order_by(Transaction.id))[0]
         amount = self.one(select(Transaction.amount).where(Transaction.id == d))[0]
-        splits.set_splits(self.c, d, [{"amount": amount / 2, "category": "Groceries"},
-                                      {"amount": amount - amount / 2, "category": "Ignore"}])
+        half = round(amount / 2, 2)    # whole cents, whatever the demo data's amount is on the day it's seeded
+        splits.set_splits(self.c, d, [{"amount": half, "category": "Groceries"},
+                                      {"amount": round(amount - half, 2), "category": "Ignore"}])
         self.assertEqual(set(self.ids(ignored="only", limit=1000)), {a, b})
         self.assertIn(d, set(self.ids(ignored="0", limit=1000)))
 
@@ -423,8 +425,9 @@ class HandlerTests(DbCase):
         categories.add(self.c, "Farmers Market", "Groceries")
         tid = self.one(select(Transaction.id).where(Transaction.category == "Shopping").order_by(Transaction.id))[0]
         amount = self.one(select(Transaction.amount).where(Transaction.id == tid))[0]
-        splits.set_splits(self.c, tid, [{"amount": amount / 2, "category": "Farmers Market"},
-                                        {"amount": amount - amount / 2, "category": "Pharmacy"}])
+        half = round(amount / 2, 2)
+        splits.set_splits(self.c, tid, [{"amount": half, "category": "Farmers Market"},
+                                        {"amount": round(amount - half, 2), "category": "Pharmacy"}])
         other = self.one(select(Transaction.id).where(Transaction.category == "Restaurants")
                          .order_by(Transaction.id))[0]
         self.c.execute(update(Transaction).where(Transaction.id == other).values(category=None, needs_review=1))

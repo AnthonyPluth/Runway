@@ -1,7 +1,6 @@
 """The schema comes from Alembic migrations; they must match runway/schema.py, and older databases must upgrade."""
 import json
 import os
-import tempfile
 import unittest
 
 import sqlalchemy as sa
@@ -13,6 +12,7 @@ from sqlalchemy import func, insert, select
 from runway import db, schema
 from runway.models import (Account, CardStatement, Category, ChurnBenefit, ChurnCard, ChurnRate, ChurnScore, ChurnTask,
                            ChurnWish, DeletedAccount, InvAccount, LoanTerms, ManualStatement, Recurring, Rule, Setting, Transaction)
+from tests.shared import database_path, scratch_dir
 
 
 def drift(path):
@@ -31,7 +31,7 @@ def drift(path):
 
 class MigrationTests(unittest.TestCase):
     def setUp(self):
-        self.path = os.path.join(tempfile.mkdtemp(), "m.db")
+        self.path = database_path(self, "m.db")
 
     def test_fresh_database_matches_schema(self):
         db.init(self.path)
@@ -41,6 +41,7 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.exec_driver_sql("SELECT version_num FROM alembic_version").scalar(), head)
 
     def test_database_from_before_migrations_is_upgraded(self):
+        # An early Runway database: a couple of tables, missing columns added later, no alembic_version.
         with db.engine(self.path).begin() as c:
             c.exec_driver_sql("CREATE TABLE accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, display_name TEXT, org TEXT, "
                               "currency TEXT DEFAULT 'USD', balance REAL DEFAULT 0, available REAL, balance_date TEXT, "
@@ -55,22 +56,24 @@ class MigrationTests(unittest.TestCase):
             row = conn.execute(select(Account.name, Account.owner)).fetchone()
             self.assertEqual((row["name"], row["owner"]), ("Checking", None))
             self.assertGreater(conn.execute(select(func.count()).select_from(Category)).fetchone()[0], 10)
-        db.init(self.path)
+        db.init(self.path)   # starting again changes nothing
 
     def test_database_from_before_migrations_without_accounts_yet_is_upgraded(self):
+        # The tables it lacks are made as the baseline had them, columns later migrations drop again included.
         with db.engine(self.path).begin() as c:
             c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
         db.init(self.path)
         self.assertEqual(drift(self.path), [])
 
     def test_database_from_before_migrations_keeps_daily_spend_switched_back_on(self):
+        # One that had v4's one-time switch-off (and noted it) before migrations came in: it isn't done again.
         with db.engine(self.path).begin() as c:
             c.exec_driver_sql("CREATE TABLE accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, daily_spend INTEGER DEFAULT 0)")
             c.exec_driver_sql("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
             c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('a1', 'Checking', 1)")
             c.exec_driver_sql("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
         from alembic import command
-        with db.engine(self.path).begin() as c:
+        with db.engine(self.path).begin() as c:   # what db.migrate does, as far as 0036 (0038 drops the column)
             db._upgrade_legacy(c)
             command.stamp(db.alembic_config(c), db.BASELINE)
             command.upgrade(db.alembic_config(c), "0036")
@@ -86,11 +89,12 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0025")
         with db.engine(self.path).begin() as c:
+            # Going back notes the switch-off as done, so the older version doesn't do it again at start-up
             self.assertEqual(c.exec_driver_sql("SELECT value FROM settings WHERE key='migrated_daily_spend_off'").scalar(), "1")
             c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('a1', 'Checking', 1), ('a2', 'Savings', 0)")
-        for flag, want in (("1", {"a1": 1, "a2": 0}),
-                           (None, {"a1": 0, "a2": 0}),
-                           ("", {"a1": 0, "a2": 0})):
+        for flag, want in (("1", {"a1": 1, "a2": 0}),     # done before (and a1 switched back on since): left alone
+                           (None, {"a1": 0, "a2": 0}),    # never done: switched off
+                           ("", {"a1": 0, "a2": 0})):     # an empty note reads as not done, as db.get_setting has it
             with self.subTest(flag=flag):
                 with db.engine(self.path).begin() as c:
                     c.exec_driver_sql("UPDATE accounts SET daily_spend=1 WHERE id='a1'")
@@ -104,7 +108,7 @@ class MigrationTests(unittest.TestCase):
                     self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
                     command.downgrade(db.alembic_config(c), "0025")
         with db.engine(self.path).begin() as c:
-            command.upgrade(db.alembic_config(c), "head")
+            command.upgrade(db.alembic_config(c), "head")   # and on to 0038, which drops the column
             self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
             self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts WHERE id='a1'").scalar(), "Checking")
         db.init(self.path)
@@ -127,6 +131,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(drift(self.path), [])
 
     def test_churning_data_survives_0019(self):
+        # Rates, cards, tasks and point values from before plans, benefits and portal-only rates came in.
         from alembic import command
         db.init(self.path)
         with db.engine(self.path).begin() as c:
@@ -150,11 +155,12 @@ class MigrationTests(unittest.TestCase):
                                        ChurnCard.hide_upcoming)).fetchone()
             self.assertEqual(tuple(card), ("airline", "undecided", 14, 0))
             self.assertIsNone(conn.execute(select(ChurnTask.snooze_until)).fetchone()[0])
+            # A portal rate beside the normal one in the same category is allowed now
             conn.execute(insert(ChurnRate).values(card_id=1, category="Travel", multiplier=10, portal_only=1))
             conn.execute(insert(ChurnBenefit).values(card_id=1, name="Lounge"))
             conn.execute(insert(ChurnWish).values(owner="Alex", product="Gold", issuer="amex"))
             conn.execute(insert(ChurnScore).values(owner="Alex", as_of="2026-09-01", score=720))
-        db.init(self.path)
+        db.init(self.path)   # starting again changes nothing
 
     def test_downgrade_plans_become_product_changes(self):
         from alembic import command
@@ -185,7 +191,7 @@ class MigrationTests(unittest.TestCase):
         with db.engine(self.path).begin() as c:
             left = dict(c.exec_driver_sql("SELECT key, value FROM settings WHERE key IN "
                                           "('mcp_token_hash', 'mcp_token_created', 'mcp_allow_writes')").fetchall())
-            self.assertEqual(left, {"mcp_allow_writes": "1"})
+            self.assertEqual(left, {"mcp_allow_writes": "1"})                     # the old key is gone; the switch stays
             self.assertLessEqual({"oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"},
                                  set(sa.inspect(c).get_table_names()))
         self.assertEqual(drift(self.path), [])
@@ -256,7 +262,7 @@ class MigrationTests(unittest.TestCase):
             self.assertTrue(conn.execute(select(DeletedAccount.deleted_at)).scalar())
             self.assertEqual(conn.execute(select(Account.name)).scalar(), "Visa")
         self.assertEqual(drift(self.path), [])
-        with db.engine(self.path).begin() as c:
+        with db.engine(self.path).begin() as c:   # and back down
             command.downgrade(db.alembic_config(c), "0029")
             self.assertFalse({"manual_statements", "deleted_accounts"} & set(sa.inspect(c).get_table_names()))
 
@@ -299,13 +305,13 @@ class MigrationTests(unittest.TestCase):
                 {"id": "chk|2", "account_id": "chk", "posted": "2026-09-02", "amount": -47.02,
                  "description": "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)", "payee": "Target C Cash"},
                 {"id": "chk|3", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": target,
-                 "payee": "Groceries Run"},
+                 "payee": "Groceries Run"},                                   # a name you gave it
                 {"id": "chk|4", "account_id": "chk", "posted": "2026-08-08", "amount": -512.40, "description": loan,
                  "payee": "Lakeside Bank Baweb Pay Cash", "recurring_id": 1},
                 {"id": "chk|5", "account_id": "chk", "posted": "2026-09-05", "amount": -9.00, "description": "ACME ACH",
-                 "payee": "Acme Ach"},
+                 "payee": "Acme Ach"},                                        # a rule renames to it
                 {"id": "chk|pl:6", "account_id": "chk", "posted": "2026-09-06", "amount": -5.00, "description": target,
-                 "payee": "Target Cach Tran Cash", "merchant_id": "ent-x"},
+                 "payee": "Target Cach Tran Cash", "merchant_id": "ent-x"},  # Plaid named the merchant
                 {"id": "chk|7", "account_id": "chk", "posted": "2026-09-07", "amount": -5.00, "description": "APPLE CASH",
                  "payee": "Apple Cash"},
             ]
@@ -335,6 +341,7 @@ class MigrationTests(unittest.TestCase):
                              {"target cach tran cash": "target.com", "target": "target.com"})
             self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
                              ["chk|apple cash|monthly", "chk|target c cash|weekly", "chk|target|weekly"])
+            # The next loan payment, synced with the shorter name, still finds its recurring item.
             conn.execute(insert(Transaction).values(id="chk|8", account_id="chk", posted="2026-09-08", amount=-512.40,
                                                     description=loan, payee="Lakeside Bank"))
             recurring.auto_match(conn, [1])
@@ -357,7 +364,7 @@ class MigrationTests(unittest.TestCase):
             command.upgrade(db.alembic_config(c), "head")
         with db.session(self.path) as conn:
             self.assertEqual(dict(conn.execute(select(InvAccount.id, InvAccount.hidden)).fetchall()),
-                             {"p1": 0, "p2": 0, "sf:dup": 0, "sf:401k": 0})
+                             {"p1": 0, "p2": 0, "sf:dup": 0, "sf:401k": 0})   # real twins are left out by portfolio, not by this
 
     def test_0034_gives_brands_their_names_and_leaves_yours(self):
         from alembic import command
@@ -373,21 +380,21 @@ class MigrationTests(unittest.TestCase):
                 {"id": "chk|3", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": "WM SUPERCENTER #123",
                  "payee": "Wm Supercenter"},
                 {"id": "chk|4", "account_id": "chk", "posted": "2026-09-03", "amount": -12.00, "description": mktp,
-                 "payee": "Birthday Gift"},
+                 "payee": "Birthday Gift"},                                   # a name you gave it
                 {"id": "chk|5", "account_id": "chk", "posted": "2026-09-05", "amount": -9.00, "description": "TARGET T-1234",
-                 "payee": "Target T-1234"},
+                 "payee": "Target T-1234"},                                   # a rule renames to it
                 {"id": "chk|pl:6", "account_id": "chk", "posted": "2026-09-06", "amount": -5.00, "description": mktp,
-                 "payee": "Amzn Mktp Us", "merchant_id": "ent-x"},
+                 "payee": "Amzn Mktp Us", "merchant_id": "ent-x"},           # Plaid named the merchant
                 {"id": "chk|7", "account_id": "chk", "posted": "2026-09-07", "amount": -50.00, "description": "COSTCO GAS #0123",
-                 "payee": "Costco Gas"},
+                 "payee": "Costco Gas"},                                      # not a brand's name
                 {"id": "chk|8", "account_id": "chk", "posted": "2026-09-08", "amount": -6.50, "description": "UBER *EATS",
-                 "payee": "Uber Eats"},
+                 "payee": "Uber Eats"},                                       # the brand's name already
                 {"id": "chk|9", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY USA 8777781161",
                  "payee": "Spotify Usa"},
                 {"id": "chk|13", "account_id": "chk", "posted": "2026-09-09", "amount": -11.99, "description": "SPOTIFY*USA 877-778-1161",
-                 "payee": "Spotify Usa"},
+                 "payee": "Spotify Usa"},                                     # not what a sync makes of its text ("Spotify")
                 {"id": "chk|12", "account_id": "chk", "posted": "2026-09-10", "amount": -40.00, "description": "WAL-MART SUPERCENTER #1234",
-                 "payee": "Walmart Supercenter"},
+                 "payee": "Walmart Supercenter"},                             # the provider's own name, not the bank's text
             ]
             conn.execute(insert(Transaction), [{"recurring_id": None, "merchant_id": None, **t} for t in txs])
             conn.execute(insert(Rule).values(match="target", rename="Target T-1234"))
@@ -402,7 +409,7 @@ class MigrationTests(unittest.TestCase):
             conn.execute(insert(Recurring), [{"amount_min": None, "amount_max": None, **r} for r in items])
             conn.execute(insert(schema.merchant_logos).values(key="amzn mktp us", website="amazon.com", hidden=1))
             conn.execute(insert(schema.merchant_logos).values(key="wm supercenter", website="walmart.com", hidden=0))
-            conn.execute(insert(schema.merchant_logos).values(key="walmart", website="example.com", hidden=0))
+            conn.execute(insert(schema.merchant_logos).values(key="walmart", website="example.com", hidden=0))   # chosen already
             conn.execute(insert(Rule).values(match="amzn digital", match_mode="exact", category="Subscriptions"))
             db.set_setting(conn, "recurring_suggestions_dismissed", '["chk|amzn digital|monthly", "chk|costco gas|weekly"]')
         with db.engine(self.path).begin() as c:
@@ -412,6 +419,8 @@ class MigrationTests(unittest.TestCase):
                 "chk|1": "Amazon", "chk|2": "Amazon", "chk|3": "Walmart", "chk|4": "Birthday Gift", "chk|5": "Target T-1234",
                 "chk|pl:6": "Amzn Mktp Us", "chk|7": "Costco Gas", "chk|8": "Uber Eats", "chk|9": "Spotify",
                 "chk|12": "Walmart Supercenter", "chk|13": "Spotify Usa"})
+            # Each description still has the bank's text: an item matching it keeps its text (written out when it matched
+            # by name), without taking in every Amazon order; Spotify's bank text still has "spotify usa".
             self.assertEqual([tuple(r) for r in conn.execute(select(Recurring.name, Recurring.match).order_by(Recurring.id))], [
                 ("Amazon", "amzn digital"), ("Music", "spotify usa"), ("Birthday Gift", "birthday gift")])
             logos = schema.merchant_logos.c
@@ -420,6 +429,7 @@ class MigrationTests(unittest.TestCase):
                               "walmart": ("example.com", 0)})
             self.assertEqual(json.loads(db.get_setting(conn, "recurring_suggestions_dismissed")),
                              ["chk|amazon|monthly", "chk|amzn digital|monthly", "chk|costco gas|weekly"])
+            # The next Kindle payment, synced with the brand's name, still finds its recurring item, and an Amazon order doesn't.
             conn.execute(insert(Transaction), [
                 {"id": "chk|10", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": digital, "payee": "Amazon"},
                 {"id": "chk|11", "account_id": "chk", "posted": "2026-10-02", "amount": -9.99, "description": "AMAZON.COM*ZZ1",
@@ -427,6 +437,7 @@ class MigrationTests(unittest.TestCase):
             recurring.auto_match(conn, [1])
             self.assertEqual(dict(conn.execute(select(Transaction.id, Transaction.recurring_id).where(
                 Transaction.id.in_(["chk|10", "chk|11"]))).fetchall()), {"chk|10": 1, "chk|11": None})
+            # The rule made from the bank's name still matches it (exactly, as made), not the other Amazon order.
             rule = {"match": "amzn digital", "match_mode": "exact"}
             self.assertTrue(rules.matches(rule, {"payee": "Amazon", "description": digital, "amount": -9.99}))
             self.assertFalse(rules.matches(rule, {"payee": "Amazon", "description": "AMAZON.COM*ZZ1", "amount": -9.99}))
@@ -441,17 +452,17 @@ class MigrationTests(unittest.TestCase):
             c.exec_driver_sql("INSERT INTO accounts(id, name, kind) VALUES ('cc', 'Visa', 'credit'), ('chk', 'Checking', 'checking')")
             c.exec_driver_sql("INSERT INTO categories(name, parent) VALUES ('Crafts', NULL), ('Pottery', 'Crafts'), ('Aquarium', NULL)")
             c.exec_driver_sql("INSERT INTO budgets(category, amount, pay_with) VALUES ('Crafts', 300, 'cc'), ('Pottery', 80, 'chk'), "
-                              "('Aquarium', 50, NULL), ('Gone', 20, 'cc')")
+                              "('Aquarium', 50, NULL), ('Gone', 20, 'cc')")   # a budget whose category was removed by hand
         with db.engine(self.path).begin() as c:
             command.upgrade(db.alembic_config(c), "head")
         self.assertEqual(drift(self.path), [])
         with db.session(self.path) as conn:
             paid = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
             self.assertEqual({k: paid[k] for k in ("Crafts", "Pottery", "Aquarium")}, {"Crafts": "cc", "Pottery": "chk", "Aquarium": None})
-            self.assertEqual(sum(1 for v in paid.values() if v), 2)
-            self.assertEqual(conn.execute(select(func.count()).select_from(schema.budgets)).scalar(), 4)
-            conn.execute(sa.update(Category).where(Category.name == "Aquarium").values(pay_with="chk"))
-        with db.engine(self.path).begin() as c:
+            self.assertEqual(sum(1 for v in paid.values() if v), 2)   # nothing else got one
+            self.assertEqual(conn.execute(select(func.count()).select_from(schema.budgets)).scalar(), 4)   # budgets stay
+            conn.execute(sa.update(Category).where(Category.name == "Aquarium").values(pay_with="chk"))   # no budget's? still kept
+        with db.engine(self.path).begin() as c:   # and back down: a budget's category's choice goes back to it
             command.downgrade(db.alembic_config(c), "0035")
             self.assertEqual(dict(c.exec_driver_sql("SELECT category, pay_with FROM budgets").fetchall()),
                              {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
@@ -478,10 +489,11 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.exec_driver_sql("SELECT opened_on FROM churn_cards").scalar(), "2025-03-10")
             if c.dialect.name == "postgresql":
                 self.assertEqual(c.exec_driver_sql(instr).scalar(), 0)
-            self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)
+            self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
     def test_0039_moves_categories_nested_too_deep_up(self):
+        # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.
         from alembic import command
         from runway import categories
         db.init(self.path)
@@ -497,8 +509,8 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual({k: parents[k] for k in ("Food", "Eating Out", "Burgers", "Sliders", "Lost", "Lost Too", "Under Lost",
                                                       "Loop A", "Loop B")},
                              {"Food": None, "Eating Out": "Food", "Burgers": "Food", "Sliders": "Food",
-                              "Lost": "Gone", "Lost Too": "Lost", "Under Lost": "Lost",
-                              "Loop A": "Loop B", "Loop B": "Loop A"})
+                              "Lost": "Gone", "Lost Too": "Lost", "Under Lost": "Lost",   # an orphan counts as top-level
+                              "Loop A": "Loop B", "Loop B": "Loop A"})                    # a loop is left alone
             self.assertTrue(all(c["depth"] <= 1 for c in categories.all_categories(conn) if not c["name"].startswith("Loop")))
 
     def test_0040_keeps_a_copy_then_removes_what_refers_to_nothing(self):
@@ -508,7 +520,7 @@ class MigrationTests(unittest.TestCase):
         from unittest import mock
         from alembic import command
         from runway import backup
-        data = tempfile.mkdtemp()
+        data = scratch_dir(self)   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0039")
@@ -552,9 +564,11 @@ class MigrationTests(unittest.TestCase):
             command.upgrade(db.alembic_config(c), "head")
         self.assertEqual(drift(self.path), [])
         log = out.getvalue()
+        # What went is logged as counts by table, never ids or values.
         self.assertIn("removed 2 rows from transactions", log)
         self.assertIn("cleared what 1 row in transactions referred to", log)
         self.assertNotRegex(log, r"gone|9\.99|Streaming|amazon|cafe")
+        # A copy of everything first, private, that restores what was there.
         where = data if db.using_postgres() else os.path.dirname(self.path)
         copies = [f for f in os.listdir(where) if f.startswith("runway-before-migration-0040-")]
         self.assertEqual(len(copies), 1)
@@ -584,24 +598,25 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(q("SELECT benefit_id FROM churn_benefit_uses"), [(6,)])
             self.assertEqual(q("SELECT id FROM equity_grants"), [])
             self.assertEqual(q("SELECT key FROM settings WHERE key LIKE 'card_%'"), [("card_apr:cc",)])
+        # From now on the database keeps it so.
         with db.session(self.path) as conn, self.assertRaises(sa.exc.IntegrityError):
             conn.execute(insert(Transaction).values(id="x|1", account_id="nobody", posted="2026-09-01", amount=-1))
         with db.session(self.path) as conn:
             conn.execute(sa.delete(Account).where(Account.id == "chk"))
-            self.assertEqual(conn.execute(select(func.count()).select_from(Transaction)).scalar(), 0)
+            self.assertEqual(conn.execute(select(func.count()).select_from(Transaction)).scalar(), 0)   # CASCADE
             self.assertEqual(conn.execute(select(func.count()).select_from(Rule)).scalar(), 0)
             self.assertEqual(conn.execute(select(func.count()).select_from(Recurring)).scalar(), 0)
             conn.execute(sa.delete(Account).where(Account.id == "cc"))
-            self.assertIsNone(conn.execute(select(Category.pay_with).where(Category.name == "Pottery")).scalar())
+            self.assertIsNone(conn.execute(select(Category.pay_with).where(Category.name == "Pottery")).scalar())   # SET NULL
             self.assertIsNone(conn.execute(select(ChurnCard.account_id).where(ChurnCard.id == 2)).scalar())
-        with db.engine(self.path).begin() as c:
+        with db.engine(self.path).begin() as c:   # and back down: the keys go
             command.downgrade(db.alembic_config(c), "0039")
             self.assertEqual([fk for t in ("transactions", "churn_cards") for fk in sa.inspect(c).get_foreign_keys(t)], [])
 
     def test_0040_saves_no_copy_when_nothing_refers_to_nothing(self):
         from unittest import mock
         from alembic import command
-        data = tempfile.mkdtemp()
+        data = scratch_dir(self)
         db.init(self.path)
         with db.engine(self.path).begin() as c:
             command.downgrade(db.alembic_config(c), "0039")
@@ -616,17 +631,19 @@ class MigrationTests(unittest.TestCase):
 
     @unittest.skipIf(db.using_postgres(), "SQLite only: it makes a table again to change it")
     def test_migrating_doesnt_cascade_on_sqlite(self):
+        # Batch mode drops the old copy of a table it changes; with foreign keys on, that would take every row referring
+        # to it along. db.migrate keeps them off while it migrates.
         from alembic import command
         db.init(self.path)
         with db.session(self.path) as conn:
             conn.execute(insert(Account).values(id="chk", name="Checking"))
             conn.execute(insert(Transaction).values(id="chk|1", account_id="chk", posted="2026-09-01", amount=-5))
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0036")
+            command.downgrade(db.alembic_config(c), "0036")   # 0038's way back remakes accounts
         db.migrate(self.path)
         with db.session(self.path) as conn:
             self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
-            self.assertEqual(conn.sa.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)
+            self.assertEqual(conn.sa.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)   # and on again for everything else
 
     def test_0037_gives_each_side_of_a_plaid_connection_its_own_error_and_time(self):
         from alembic import command
@@ -651,8 +668,8 @@ class MigrationTests(unittest.TestCase):
                                "old": (None, None, "2026-09-02 10:00:00", None),
                                "bank": ("2026-09-03 10:00:00", "X", None, None),
                                "cards": (None, "Y", None, None),
-                               "mix": ("2026-09-04 10:00:00", "Z", None, None)})
-        with db.engine(self.path).begin() as c:
+                               "mix": ("2026-09-04 10:00:00", "Z", None, None)})   # only ever synced as a bank one
+        with db.engine(self.path).begin() as c:   # and back down: each gets the side it was synced as
             c.exec_driver_sql("UPDATE plaid_items SET inv_error = 'W', inv_last_sync = '2026-09-05 10:00:00' WHERE item_id = 'mix'")
             command.downgrade(db.alembic_config(c), "0036")
             got = {r[0]: tuple(r[1:]) for r in c.exec_driver_sql("SELECT item_id, last_sync, error FROM plaid_items")}
@@ -661,6 +678,8 @@ class MigrationTests(unittest.TestCase):
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
+        # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating
+        # alembic_version ("duplicate key value violates unique constraint pg_type_typname_nsp_index").
         import threading
         errors = []
 
@@ -669,34 +688,34 @@ class MigrationTests(unittest.TestCase):
                 db.migrate(path)
             except Exception as e:
                 errors.append(e)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "together.db")
-            threads = [threading.Thread(target=start, args=(path,)) for _ in range(6)]
-            for t in threads:
-                t.start()
-            for t in threads:
-                t.join(60)
-            self.assertFalse([t for t in threads if t.is_alive()], "the migrations are stuck waiting on each other")
-            self.assertEqual(errors, [])
-            self.assertEqual(drift(path), [])
+        path = database_path(self, "together.db")   # on Postgres the path only picks the test's own schema
+        threads = [threading.Thread(target=start, args=(path,)) for _ in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+        self.assertFalse([t for t in threads if t.is_alive()], "the migrations are stuck waiting on each other")
+        self.assertEqual(errors, [])
+        self.assertEqual(drift(path), [])
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: the lock is Postgres's")
     def test_a_tests_own_schema_migrates_without_waiting_for_another(self):
+        # Each test's own schema has its own lock, so parallel tests don't all queue on one (the whole Postgres run
+        # used to wait on it). Two migrations of the same schema still take turns (the test above).
         import threading
-        with tempfile.TemporaryDirectory() as tmp:
-            held, free = os.path.join(tmp, "held.db"), os.path.join(tmp, "free.db")
-            db.migrate(held)
-            with db.engine(held).connect() as other:
-                other.exec_driver_sql(f"SELECT pg_advisory_xact_lock({db.SCHEMA_LOCK}, hashtext(current_schema()))")
-                waiting = threading.Thread(target=db.migrate, args=(held,))
-                waiting.start()
-                db.migrate(free)
-                self.assertEqual(drift(free), [])
-                waiting.join(1)
-                self.assertTrue(waiting.is_alive())
-                other.rollback()
-            waiting.join(30)
-            self.assertFalse(waiting.is_alive())
+        held, free = database_path(self, "held.db"), database_path(self, "free.db")
+        db.migrate(held)
+        with db.engine(held).connect() as other:                            # hold held's lock, as a migration would
+            other.exec_driver_sql(f"SELECT pg_advisory_xact_lock({db.SCHEMA_LOCK}, hashtext(current_schema()))")
+            waiting = threading.Thread(target=db.migrate, args=(held,))
+            waiting.start()
+            db.migrate(free)                                                 # another schema: doesn't wait
+            self.assertEqual(drift(free), [])
+            waiting.join(1)
+            self.assertTrue(waiting.is_alive())                             # the same schema: waits for its turn
+            other.rollback()                                                  # the lock goes with the transaction
+        waiting.join(30)
+        self.assertFalse(waiting.is_alive())
 
     def test_connection_wrapper(self):
         db.init(self.path)
@@ -706,7 +725,7 @@ class MigrationTests(unittest.TestCase):
             row = conn.execute(select(Rule.id, Rule.match).where(Rule.match.like("50%"))).fetchone()
             self.assertEqual((row[0], row["match"], dict(row)["id"]), (r.lastrowid, "50% off", r.lastrowid))
             self.assertEqual(conn.execute(select(db.instr("hello", "ll"))).fetchone()[0], 3)
-            conn.execute(insert(Setting).values(key="n", value=5))
+            conn.execute(insert(Setting).values(key="n", value=5))   # loose typing, as in SQLite
             self.assertEqual(db.get_setting(conn, "n"), "5")
 
 

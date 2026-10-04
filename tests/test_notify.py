@@ -2,7 +2,6 @@ import os
 import threading
 import time
 import unittest
-from datetime import date
 from http.server import HTTPServer
 from unittest import mock
 
@@ -11,9 +10,8 @@ from sqlalchemy import delete, func, insert, select, update
 from runway import db, notify, oidc, webpush
 from runway.models import Account, CardStatement, NotifyLog, PushSubscription, SyncLog, Transaction, User
 from tests.test_webpush import PushService, decrypt, receiver
-from tests.shared import DbCase
+from tests.shared import DbCase, TODAY
 
-TODAY = date(2026, 9, 23)
 
 
 class NotifyTests(DbCase):

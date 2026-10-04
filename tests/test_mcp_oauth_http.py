@@ -15,11 +15,11 @@ from unittest import mock
 
 from sqlalchemy import delete, func, select, update
 
-from runway import db, mcp_access, mcp_oauth, mcp_server, oidc, server
+from runway import db, mcp_access, mcp_oauth, mcp_server, oidc
 from runway.server import common
 from runway.models import ChurnCard, OAuthClient, OAuthCode, OAuthGrant, OAuthToken
-from tests.shared import forget_oauth, own_database, tag
-from tests.test_server import NoRedirect, Provider
+from tests.shared import ServerCase, fetch, forget_oauth, tag
+from tests.test_server import Provider
 
 VERIFIER = "correct-horse-battery-staple-" + "x" * 30
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).rstrip(b"=").decode()
@@ -50,32 +50,22 @@ class Reply:
         return None
 
 
-class OAuthServer(unittest.TestCase):
+class OAuthServer(ServerCase):
     """A real Runway on a database of its own (tests/shared.py's own_database, for the whole class; on Postgres its own
     schema), with no sign-in (so you're "signed in" on this computer). Nothing else writes to it, so another module's
     tests can't end a session or flip a switch under these, and the churning switch needn't be held. Each test still
     removes what it made and turns the switches off, so the tests don't depend on each other's order."""
-    env: dict = {}
+    unset = ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER")
 
     @classmethod
     def setUpClass(cls):
-        own_database(cls, **cls.env)
-        for k in ("RUNWAY_PUBLIC_URL", "OIDC_ISSUER"):
-            os.environ.pop(k, None)
-        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
+        super().setUpClass()
         cls.iss = cls.base
         cls.resource = cls.base + "/mcp"
 
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown()
-        cls.httpd.server_close()
-
     def setUp(self):
         self.tag = tag()
-        self.owner = "Alex " + self.tag
+        self.owner = "Alex " + self.tag                                           # the churning cards this test makes
         self.card = {"owner": self.owner, "issuer": "chase", "product": "Sapphire", "opened_on": "2025-01-15"}
         self.clients: list[str] = []
         self.addCleanup(self.forget)
@@ -98,13 +88,7 @@ class OAuthServer(unittest.TestCase):
         h = dict(headers or {})
         if cookies:
             h["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
-        r = urllib.request.Request(self.base + path if path.startswith("/") else path, method=method, headers=h, data=body)
-        try:
-            resp = urllib.request.build_opener(NoRedirect).open(r, timeout=20)
-        except urllib.error.HTTPError as e:
-            resp = e
-        with resp:
-            return Reply(resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read())
+        return Reply(*fetch(self.base if path.startswith("/") else "", method, path, body, h, follow=False))
 
     def form(self, path, fields, headers=None, cookies=None):
         return self.http("POST", path, urllib.parse.urlencode(fields).encode(),
@@ -185,7 +169,7 @@ class MetadataTests(OAuthServer):
                 self.assertEqual(r.status, 200)
                 self.assertEqual(r.json, {"resource": self.resource, "authorization_servers": [self.iss],
                                           "scopes_supported": ["read", "churning:write", "categorize:write", "write"], "bearer_methods_supported": ["header"]})
-                self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+                self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))   # no CORS
         m = self.http("GET", "/.well-known/oauth-authorization-server").json
         self.assertEqual(m, mcp_oauth.authorization_server_metadata(self.iss))
         self.assertEqual(m["token_endpoint"], self.iss + "/oauth/token")
@@ -209,7 +193,7 @@ class MetadataTests(OAuthServer):
                 r = self.http("GET", path, headers=host)
                 self.assertEqual(r.status, 404)
                 self.assertIn("RUNWAY_PUBLIC_URL", r.json["error"])
-            self.assertEqual(self.register().status, 201)
+            self.assertEqual(self.register().status, 201)                                     # on the home address, fine
             r = self.http("POST", "/oauth/register", b"{}", {"Content-Type": "application/json", **host})
             self.assertEqual(r.status, 404)
             page = self.http("GET", "/oauth/authorize?client_id=x", headers=host)
@@ -244,13 +228,13 @@ class RegistrationTests(OAuthServer):
         r = self.register(client_name="x" * 101)
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_client_metadata"))
         r = self.http("POST", "/oauth/register", json.dumps({"client_name": name, "redirect_uris": [CALLBACK]}).encode(),
-                      {"Content-Type": "application/x-www-form-urlencoded"})
+                      {"Content-Type": "application/x-www-form-urlencoded"})   # what a form on another site could send
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_client_metadata"))
         r = self.http("POST", "/oauth/register", b"{nope", {"Content-Type": "application/json"})
         self.assertEqual(r.status, 400)
         r = self.http("POST", "/oauth/register", json.dumps({"client_name": name, "redirect_uris": [CALLBACK], "x": "y" * 9000}).encode(),
                       {"Content-Type": "application/json"})
-        self.assertEqual(r.status, 413)
+        self.assertEqual(r.status, 413)                                           # over 8 KB
         self.assertEqual(self.http("GET", "/oauth/register").status, 405)
         with db.session() as conn:
             self.assertEqual(conn.execute(select(func.count())
@@ -292,7 +276,7 @@ class ConsentTests(OAuthServer):
         self.assertIn("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; wants to connect to Runway", page)
         self.assertIn("127.0.0.1:43210", page)
         self.assertIn("Read your finances", page)
-        self.assertNotIn("Change churning", page)
+        self.assertNotIn("Change churning", page)                                 # it didn't ask
         csp = r.headers["Content-Security-Policy"]
         self.assertIn("form-action 'self' http://127.0.0.1:*", csp)
         self.assertIn("default-src 'none'", csp)
@@ -302,58 +286,58 @@ class ConsentTests(OAuthServer):
 
     def test_the_churning_box_follows_the_switch(self):
         c = self.client()
-        page = self.authorize(c, scope="read churning:write").body.decode()
+        page = self.authorize(c, scope="read churning:write").body.decode()      # asked, switch off: shown, off, and why
         self.assertIn("Change churning", page)
         self.assertIn('type="checkbox" disabled><span><b>Change churning', page)
         self.assertIn("Turn on Let assistants change churning in Settings → Data first", page)
         self.switch(True)
-        page = self.authorize(c, scope="read churning:write").body.decode()
+        page = self.authorize(c, scope="read churning:write").body.decode()      # asked, switch on: ticked
         self.assertIn('name="churning" value="1" checked', page)
-        page = self.authorize(c, scope="read").body.decode()
+        page = self.authorize(c, scope="read").body.decode()                     # not asked: not there
         self.assertNotIn("Change churning", page)
 
     def test_the_categorize_box_follows_its_own_switch(self):
         c = self.client()
-        page = self.authorize(c, scope="read categorize:write").body.decode()
+        page = self.authorize(c, scope="read categorize:write").body.decode()    # asked, switch off: shown, off, and why
         self.assertIn('type="checkbox" disabled><span><b>Categorize', page)
         self.assertIn("Turn on Let assistants categorize in Settings → Data first", page)
         self.assertNotIn("Change churning", page)
-        self.switch(True)
+        self.switch(True)                                                         # the churning switch isn't this one
         self.assertIn('type="checkbox" disabled><span><b>Categorize', self.authorize(c, scope="read categorize:write").body.decode())
         with db.session() as conn:
             mcp_access.set_allow_categorize(conn, True)
         page = self.authorize(c, scope="read churning:write categorize:write")
         self.assertIn('name="categorize" value="1" checked', page.body.decode())
         self.assertIn('name="churning" value="1" checked', page.body.decode())
-        tokens = self.exchange(c, self.answer(page, categorize=True).query()["code"]).json
+        tokens = self.exchange(c, self.answer(page, categorize=True).query()["code"]).json   # you unticked churning
         self.assertEqual(tokens["scope"], "read categorize:write")
-        page = self.authorize(c, scope="read churning:write")
+        page = self.authorize(c, scope="read churning:write")                    # not asked: no box, and not granted
         self.assertNotIn("<b>Categorize", page.body.decode())
         self.assertEqual(self.exchange(c, self.answer(page, churning=True, categorize=True).query()["code"]).json["scope"],
                          "read churning:write")
         page = self.authorize(c, scope="read categorize:write")
         with db.session() as conn:
-            mcp_access.set_allow_categorize(conn, False)
+            mcp_access.set_allow_categorize(conn, False)                          # read again when you answer
         self.assertEqual(self.exchange(c, self.answer(page, categorize=True).query()["code"]).json["scope"], "read")
 
     def test_the_change_anything_box_follows_its_switch_and_is_never_ticked_for_you(self):
         c = self.client()
-        page = self.authorize(c, scope="read write").body.decode()
+        page = self.authorize(c, scope="read write").body.decode()               # asked, switch off: shown, off, and why
         self.assertIn('type="checkbox" disabled><span><b>Change anything', page)
         self.assertIn("Turn on Let assistants change anything in Settings → Data first", page)
         self.assertEqual(self.exchange(c, self.answer(self.authorize(c, scope="read write"), write=True).query()["code"]).json["scope"], "read")
         self.all(True)
         page = self.authorize(c, scope="read write")
         body = page.body.decode()
-        self.assertIn('<input type="checkbox" name="write" value="1"><span><b>Change anything', body)
+        self.assertIn('<input type="checkbox" name="write" value="1"><span><b>Change anything', body)   # not ticked
         self.assertIn("Add, change and remove your financial data", body)
         self.assertIn("Never bank connections, API keys, notifications or these assistant settings", body)
-        self.assertEqual(self.exchange(c, self.answer(page).query()["code"]).json["scope"], "read")
+        self.assertEqual(self.exchange(c, self.answer(page).query()["code"]).json["scope"], "read")   # left unticked: read only
         page = self.authorize(c, scope="read write")
         self.assertEqual(self.exchange(c, self.answer(page, write=True).query()["code"]).json["scope"], "read write")
-        self.assertNotIn("Change anything", self.authorize(c, scope="read churning:write").body.decode())
+        self.assertNotIn("Change anything", self.authorize(c, scope="read churning:write").body.decode())   # not asked: not there
         page = self.authorize(c, scope="read churning:write")
-        self.assertEqual(self.exchange(c, self.answer(page, write=True).query()["code"]).json["scope"], "read")
+        self.assertEqual(self.exchange(c, self.answer(page, write=True).query()["code"]).json["scope"], "read")   # nor granted
 
     def all(self, on):
         with db.session() as conn:
@@ -367,7 +351,7 @@ class ConsentTests(OAuthServer):
         q = r.query()
         self.assertTrue(q["code"].startswith("rwo_"))
         self.assertEqual((q["state"], q["iss"]), ("xyz/+&=", self.iss))
-        self.assertEqual(r.cookie("runway_consent").value, "")
+        self.assertEqual(r.cookie("runway_consent").value, "")                    # the cookie is cleared
         r = self.answer(self.authorize(c), "deny")
         self.assertEqual((r.query()["error"], r.query()["state"]), ("access_denied", "xyz/+&="))
 
@@ -382,7 +366,7 @@ class ConsentTests(OAuthServer):
                 r = self.answer(page, **kwargs)
                 self.assertEqual(r.status, 403)
                 self.assertIsNone(r.location)
-        r = self.answer(page)
+        r = self.answer(page)                                                     # the real one still works, once
         self.assertEqual(r.status, 302)
         again = self.answer(page, token=token)
         self.assertEqual((again.status, again.location), (403, None))
@@ -404,7 +388,7 @@ class ConsentTests(OAuthServer):
         self.assertEqual(tokens["scope"], "read")
         self.switch(True)
         page = self.authorize(c, scope="read churning:write")
-        tokens = self.exchange(c, self.answer(page, churning=False).query()["code"]).json
+        tokens = self.exchange(c, self.answer(page, churning=False).query()["code"]).json   # you unticked it
         self.assertEqual(tokens["scope"], "read")
 
 
@@ -439,7 +423,7 @@ class TokenTests(OAuthServer):
         self.assertEqual(first.status, 200)
         again = self.exchange(c, code)
         self.assertEqual((again.status, again.json["error"]), (400, "invalid_grant"))
-        self.assertEqual(self.rpc(first.json["access_token"], "ping").status, 401)
+        self.assertEqual(self.rpc(first.json["access_token"], "ping").status, 401)   # the tokens from it are gone too
 
     def test_an_expired_code(self):
         c = self.client()
@@ -457,7 +441,7 @@ class TokenTests(OAuthServer):
         fields = {"grant_type": "authorization_code", "code": code, "redirect_uri": CALLBACK, "code_verifier": VERIFIER}
         r = self.form("/oauth/token", fields, {"Authorization": wrong})
         self.assertEqual((r.status, r.json["error"], r.headers["WWW-Authenticate"]), (401, "invalid_client", 'Basic realm="Runway"'))
-        r = self.form("/oauth/token", {**fields, "client_id": c["client_id"]})
+        r = self.form("/oauth/token", {**fields, "client_id": c["client_id"]})       # no secret at all
         self.assertEqual(r.status, 401)
         r = self.form("/oauth/token", fields, {"Authorization": basic})
         self.assertEqual(r.status, 200, r.body)
@@ -467,7 +451,7 @@ class TokenTests(OAuthServer):
         t = self.tokens(c)
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
         r = self.form("/oauth/revoke", {"token": "rwr_unknown", "client_id": c["client_id"]})
-        self.assertEqual(r.status, 200)
+        self.assertEqual(r.status, 200)                                           # unknown tokens are fine too
         r = self.form("/oauth/revoke", {"token": t["refresh_token"], "client_id": c["client_id"], "token_type_hint": "refresh_token"})
         self.assertEqual(r.status, 200)
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
@@ -494,7 +478,7 @@ class McpTests(OAuthServer):
             grants = select(OAuthGrant.id).where(OAuthGrant.client_id == self.clients[-1])
             conn.execute(update(OAuthToken).where(OAuthToken.kind == "access", OAuthToken.grant_id.in_(grants)).values(expires=1))
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
-        with db.session() as conn:
+        with db.session() as conn:   # a token Runway issued at another address (another RUNWAY_PUBLIC_URL)
             c = mcp_oauth.register(conn, {"redirect_uris": [CALLBACK]})
             self.clients.append(c["client_id"])
             params = {"client_id": c["client_id"], "redirect_uri": CALLBACK, "code_challenge": CHALLENGE,
@@ -521,7 +505,7 @@ class McpTests(OAuthServer):
         token = t["access_token"]
         self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.TOOLS + mcp_server.WRITE_TOOLS})
         self.assertNotIn("isError", self.call(token, "add_card", {"fields": self.card}))
-        self.switch(False)
+        self.switch(False)                                                        # off: at once, without revoking
         self.assertEqual(self.tool_names(token), {x["name"] for x in mcp_server.TOOLS})
         result = self.call(token, "add_card", {"fields": self.card})
         self.assertTrue(result["isError"])
@@ -535,6 +519,7 @@ class McpTests(OAuthServer):
 
 class EndToEndTests(OAuthServer):
     def test_connect_use_refresh_replay(self):
+        # What an assistant does: find the server's metadata from the 401, register, send you to approve, get tokens.
         challenge = self.rpc(None, "initialize").headers["WWW-Authenticate"]
         prm_url = challenge.split('resource_metadata="')[1].split('"')[0]
         prm = self.http("GET", prm_url).json
@@ -558,11 +543,13 @@ class EndToEndTests(OAuthServer):
         self.switch(False)
         self.assertTrue(self.call(t["access_token"], "add_card", {"fields": self.card})["isError"])
         self.switch(True)
+        # Refresh: a new pair; the old refresh token is spent.
         r = self.form(asm["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": reg["client_id"]})
         self.assertEqual(r.status, 200, r.body)
         t2 = r.json
         self.assertEqual(t2["scope"], "read churning:write")
         self.assertEqual(self.rpc(t2["access_token"], "ping").status, 200)
+        # Someone replays the old one: the whole connection is revoked, the new tokens included.
         r = self.form(asm["token_endpoint"], {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": reg["client_id"]})
         self.assertEqual((r.status, r.json["error"]), (400, "invalid_grant"))
         self.assertEqual(self.rpc(t2["access_token"], "ping").status, 401)
@@ -606,7 +593,7 @@ class SignInTests(OAuthServer):
         q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(login.location).query))
         Provider.issued["c-oauth"] = {"nonce": q["nonce"], "challenge": q["code_challenge"], "email": "me@example.com"}
         done = self.http("GET", f"/auth/callback?code=c-oauth&state={q['state']}", cookies={"runway_login": login.cookie("runway_login").value})
-        self.assertEqual(done.location, back_to)
+        self.assertEqual(done.location, back_to)                                  # the whole request survived
         self.assertEqual(dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(back_to).query))["state"], "xyz/+&=")
         self.session = {"runway_session": done.cookie("runway_session").value}
         page = self.http("GET", done.location, cookies=self.session)
@@ -619,7 +606,8 @@ class SignInTests(OAuthServer):
             self.assertEqual(conn.execute(select(OAuthGrant.sub, OAuthGrant.email)
                                           .where(OAuthGrant.client_id == c["client_id"])).fetchone()[:],
                              ("user-1", "me@example.com"))
-        self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
+        self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)       # /mcp needs no session
+        # The answer must come from the person who was shown the page
         page = self.http("GET", done.location, cookies=self.session)
         self.assertEqual(page.status, 200, "the session ended between the two fetches (logged out)")
         self.assertIn(b'name="consent" value="', page.body)
@@ -643,7 +631,7 @@ class SignInTests(OAuthServer):
         t = self.tokens(c)
         self.assertEqual(self.rpc(t["access_token"], "ping").status, 200)
         with mock.patch.dict(os.environ, {"OIDC_ALLOWED_EMAILS": "someone-else@example.com"}):
-            r = self.rpc(t["access_token"], "ping")
+            r = self.rpc(t["access_token"], "ping")                               # the very next request
             self.assertEqual(r.status, 401)
             self.assertEqual(r.headers["WWW-Authenticate"], f'Bearer realm="Runway", resource_metadata="{self.iss}'
                                                               '/.well-known/oauth-protected-resource/mcp", error="invalid_token"')
@@ -653,7 +641,7 @@ class SignInTests(OAuthServer):
             self.assertNotIn("access_token", r.json)
             grants = select(OAuthGrant.id).where(OAuthGrant.client_id.in_(self.clients))
             self.assertEqual(self.mine(select(func.count()).select_from(OAuthToken).where(OAuthToken.grant_id.in_(grants))), 0)
-        self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)
+        self.assertEqual(self.rpc(t["access_token"], "ping").status, 401)       # back on the list: still ended (reconnect)
 
     def test_a_person_still_allowed_keeps_their_assistant(self):
         self.session = self.sign_in_as("me@example.com")

@@ -6,14 +6,13 @@ import re
 import tempfile
 import threading
 import unittest
-import urllib.error
-import urllib.request
 from unittest import mock
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import insert, select
 
 from runway import backup, categories, db, oidc, secretbox, server, simplefin
 from runway.models import PlaidItem, Setting, SyncLog
+from tests.shared import ServerCase, add_database, database_path, fetch, own_database
 from tests.test_web_app import built_app, serving
 
 
@@ -48,20 +47,17 @@ class PublicUrlTests(unittest.TestCase):
 
 class SecretsTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.path = os.path.join(self.tmp.name, "s.db")
-        db.init(self.path)
+        self.path = own_database(self)
+        self.dir = os.path.dirname(self.path)
         self.c = db.connect(self.path)
-
-    def tearDown(self):
-        self.c.close(); self.tmp.cleanup()
+        self.addCleanup(self.c.close)
 
     def raw(self, key):
         return self.c.execute(select(Setting.value).where(Setting.key == key)).fetchone()[0]
 
     def test_secret_settings_are_encrypted(self):
         db.set_setting(self.c, "openrouter_api_key", "sk-or-123")
-        db.set_setting(self.c, "llm_model", "some/model")
+        db.set_setting(self.c, "llm_model", "some/model")                  # not a secret: stored as is
         self.assertTrue(self.raw("openrouter_api_key").startswith("enc:v1:"))
         self.assertNotIn("sk-or-123", self.raw("openrouter_api_key"))
         self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-or-123")
@@ -75,11 +71,12 @@ class SecretsTests(unittest.TestCase):
         tok = self.c.execute(select(PlaidItem.access_token)).fetchone()[0]
         self.assertTrue(tok.startswith("enc:v1:"))
         self.assertEqual(secretbox.decrypt(tok), "access-plain")
-        self.assertEqual(secretbox.encrypt_stored(self.c), 0)
+        self.assertEqual(secretbox.encrypt_stored(self.c), 0)              # nothing left to do
 
     def test_backups_carry_secrets_encrypted(self):
         db.set_setting(self.c, "realie_api_key", "rl-key")
         self.c.execute(insert(PlaidItem).values(item_id="i1", access_token=secretbox.encrypt("access-1")))
+        # a value saved by a version before encryption goes out encrypted too
         self.c.execute(insert(Setting).values(key="finnhub_api_key", value="fh-plain"))
         raw = backup.dump(self.c)
         for secret in (b"rl-key", b"access-1", b"fh-plain"):
@@ -89,8 +86,8 @@ class SecretsTests(unittest.TestCase):
         self.assertTrue(settings["realie_api_key"].startswith("enc:v1:"))
         self.assertTrue(settings["finnhub_api_key"].startswith("enc:v1:"))
         self.assertTrue(data["tables"]["plaid_items"]["rows"][0][1].startswith("enc:v1:"))
-        other = os.path.join(self.tmp.name, "o.db")
-        db.init(other)
+        # restored under the same key, they read as before
+        other = add_database(self, os.path.join(self.dir, "o.db"))
         with db.session(other) as c2:
             backup.restore(c2, data)
             self.assertEqual(backup.unreadable_secrets(c2), [])
@@ -98,7 +95,8 @@ class SecretsTests(unittest.TestCase):
             self.assertTrue(c2.execute(select(Setting.value)
                                        .where(Setting.key == "realie_api_key")).fetchone()[0].startswith("enc:v1:"))
             self.assertEqual(db.get_setting(c2, "realie_api_key"), "rl-key")
-        elsewhere = os.path.join(self.tmp.name, "e.db")
+        # under another key they can't be read, and the restore says which
+        elsewhere = database_path(self, "e.db")
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": "another-machine-key-abcdefghijklmnopqrstuv"}):
             db.init(elsewhere)
             with db.session(elsewhere) as c3:
@@ -111,10 +109,11 @@ class SecretsTests(unittest.TestCase):
         old = os.environ["RUNWAY_SECRET_KEY"]
         new = "a-brand-new-key-abcdefghijklmnopqrstuvwxyz"
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new, "RUNWAY_SECRET_KEY_OLD": old}):
-            self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")
-            secretbox.encrypt_stored(self.c)
+            self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")   # read with the old key
+            secretbox.encrypt_stored(self.c)                                          # and moved to the new one
         with mock.patch.dict(os.environ, {"RUNWAY_SECRET_KEY": new}):
             self.assertEqual(db.get_setting(self.c, "openrouter_api_key"), "sk-1")
+        # the original key alone can't read it any more: treated as not entered, never a crash
         self.assertIsNone(db.get_setting(self.c, "openrouter_api_key"))
 
     def test_short_keys_are_refused(self):
@@ -122,33 +121,11 @@ class SecretsTests(unittest.TestCase):
             self.assertTrue(secretbox.check_config())
 
 
-class HttpTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
-        db.init()
-        cls.httpd = server.Server(("127.0.0.1", 0), server.Handler)
-        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
-        cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.httpd.shutdown(); cls.httpd.server_close()
-        cls.tmp.cleanup()
-        if cls.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = cls.saved
+class HttpTests(ServerCase):
+    server_class = server.Server
 
     def open(self, path, method="GET", body=None, headers=None):
-        r = urllib.request.Request(self.base + path, method=method, data=body, headers=headers or {})
-        try:
-            resp = urllib.request.urlopen(r, timeout=10)
-        except urllib.error.HTTPError as e:
-            resp = e
-        return resp.status if hasattr(resp, "status") else resp.code, resp.headers, resp.read()
+        return fetch(self.base, method, path, body, headers, timeout=10)
 
     def api(self, method, path, body=None, headers=None):
         h = {"X-Runway": "1", "Content-Type": "application/json", **(headers or {})}
@@ -168,11 +145,12 @@ class HttpTests(unittest.TestCase):
             self.assertIn(d, csp)
         self.assertEqual(h["X-Frame-Options"], "DENY")
         self.assertEqual(h["Referrer-Policy"], "no-referrer")
-        self.assertEqual(h["Server"].strip(), "Runway")
+        self.assertEqual(h["Server"].strip(), "Runway")                           # no Python version
         self.assertNotEqual(nonce, re.search(r"'nonce-([^']+)'", second).group(1))
         self.assertIn("frame-ancestors 'none'", self.open("/api/state")[1]["Content-Security-Policy"])
 
     def test_errors_dont_show_internals(self):
+        # A value that can't be read is a 400 saying which one; a handler's own failure, a 500 with only a reference.
         code, body = self.api("GET", "/api/transactions?limit=x")
         self.assertEqual((code, body["error"]), (400, "The limit must be a whole number"))
         with mock.patch.object(categories, "all_categories", side_effect=RuntimeError("secret detail")):
@@ -195,7 +173,7 @@ class HttpTests(unittest.TestCase):
 
     def test_static_files(self):
         code, h, body = self.open("/../server/handler.py")
-        self.assertNotIn(b"def serve", body)
+        self.assertNotIn(b"def serve", body)                                        # never outside static/
         code, h, body = self.open("/sw.js", headers={"Accept-Encoding": "gzip"})
         self.assertEqual(h["Content-Encoding"], "gzip")
         self.assertIn(b"service worker", gzip.decompress(body))
@@ -206,23 +184,10 @@ class HttpTests(unittest.TestCase):
 
 class SyncStatusTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.saved = os.environ.get("RUNWAY_DATA")
-        os.environ["RUNWAY_DATA"] = self.tmp.name
-        db.init()
+        own_database(self)
+        self.addCleanup(setattr, server.sync, "AUTO_SYNC", True)
         with db.session() as c:
             db.set_setting(c, "simplefin_access_url", "https://u:p@bridge.example/simplefin")
-
-    def tearDown(self):
-        server.sync.AUTO_SYNC = True
-        with db.session() as c:
-            db.set_setting(c, "simplefin_access_url", None)
-            c.execute(delete(SyncLog))
-        self.tmp.cleanup()
-        if self.saved is None:
-            os.environ.pop("RUNWAY_DATA", None)
-        else:
-            os.environ["RUNWAY_DATA"] = self.saved
 
     def test_a_failed_sync_is_recorded(self):
         with mock.patch.object(simplefin, "sync", side_effect=simplefin.SimpleFinError("SimpleFIN is down")):
