@@ -13,9 +13,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from datetime import date
 
-from dateutil.relativedelta import relativedelta
-
-from .. import monitoring, validate
+from .. import dates, monitoring, validate
 
 
 class ApiError(Exception):
@@ -139,7 +137,7 @@ def _month_range(q):
         raise ApiError("Month must look like 2026-09") from None
     if abs(y - today.year) > MONTH_YEARS:   # a budget's rollover is added up month by month from where it started
         raise ApiError(f"Month must be within {MONTH_YEARS} years of today")
-    return start, start + relativedelta(months=1)
+    return start, dates.add_months(start, 1)
 
 
 def request_ref() -> str:

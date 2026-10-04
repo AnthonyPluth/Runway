@@ -12,8 +12,8 @@ from __future__ import annotations
 from sqlalchemy import Integer, Text, delete, func, insert, literal_column, select, union_all, update
 
 from .models import Category, Transaction, TxSplit
+from .money import CENT
 
-CENT = 0.005
 
 def parts(name: str = "t"):
     """The transactions, a split one as its parts (category_source 'split', needs_review 0), as a subquery:

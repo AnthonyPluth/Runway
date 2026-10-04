@@ -29,7 +29,6 @@ it lands on, so it reaches cash through that statement's payment, and it's liste
 """
 from __future__ import annotations
 
-import calendar
 import itertools
 import json
 import re
@@ -45,7 +44,7 @@ from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import OperationalError
 
 from . import bankdays, budgets, churning, db, plaidapi, plaidbank, simplefin, splits, statements
-from .dates import month_end, month_start, next_after, parse_day
+from .dates import days_in_month, month_end, month_start, next_after, parse_day
 from .money import CENT, allocate_cents, cents, is_zero, same_amount
 from . import categories as catmod
 from . import settings_keys as sk
@@ -1277,7 +1276,7 @@ def budget_days(conn, today: date, horizon_days: int, plan: list[dict], events: 
         days: list[dict[str, float]] = [{} for _ in ways]
         for i in range(1, horizon_days + 1):
             d = today + timedelta(days=i)
-            dim = calendar.monthrange(d.year, d.month)[1]
+            dim = days_in_month(d)
             month = d.isoformat()[:7]
             for k, v in enumerate(split[month]):
                 # this month: whatever's left, over the days left

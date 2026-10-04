@@ -2,14 +2,15 @@
 in a month (an income category's budget) against what has come in."""
 from __future__ import annotations
 
-import calendar
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, select, update
 
 from ... import categories, db, forecast, validate
+from ...dates import days_in_month
 from ...budgets import budget_carry, month_totals
 from ...models import Account, Budget, Category
+from ...money import CENT
 from ..common import ApiError, _month_range, text
 
 EXPECTED_DAYS = 366   # how far ahead a month's expected payments are worked out (the forecast's longest horizon)
@@ -21,7 +22,7 @@ _amount = validate.Validator(ApiError, drop="", missing="Enter an amount", not_n
 def api_budget(conn, q, _b):
     today = date.today()
     start, end = _month_range(q)
-    days = calendar.monthrange(start.year, start.month)[1]
+    days = days_in_month(start)
     every = categories.all_categories(conn)
     cats = [c for c in every if not c["is_transfer"] and not c["is_income"]]
     # Refunds are money in but come off spending: they're not income here, nor in the total.
@@ -151,7 +152,7 @@ def raise_parents(conn, cat: str) -> list[dict]:
         if above not in budgets:
             continue
         total = round(sum(budgets[k] for k, p in parents.items() if p == above and k in budgets), 2)
-        if total > budgets[above] + 0.005:
+        if total > budgets[above] + CENT:
             conn.execute(update(Budget).where(Budget.category == above).values(amount=total))
             budgets[above] = total
             raised.append({"category": above, "amount": total})

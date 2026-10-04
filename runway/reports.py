@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 
 from . import categories, dates, db, splits
 from .models import Account, Transaction
+from .money import CENT
 
 TOP = 7                      # series shown by name; the rest are "Everything else"
 GROUPS = ("category", "merchant", "account")
@@ -125,7 +126,7 @@ def spending_over_time(conn, end: str, months: int = 12, group: str = "category"
     for key, by_month in per.items():
         values = [round(max(0.0, by_month.get(m, 0.0)), 2) for m in ms]
         total = round(sum(values), 2)
-        if total > 0.005:
+        if total > CENT:
             s: dict[str, Any] = {"name": label[key], "values": values, "total": total}
             if group == "account":
                 s["account"] = key
@@ -207,7 +208,7 @@ def merchants(conn, start: str, end: str, limit: int = 100, q: str = "") -> dict
         a["cats"][cat] = a["cats"].get(cat, 0.0) - r["amount"]
     out = []
     for a in agg.values():
-        if a["total"] <= 0.005:
+        if a["total"] <= CENT:
             continue
         out.append({"name": a["name"], "total": round(a["total"], 2), "count": a["count"],
                     "average": round(a["total"] / a["count"], 2), "last": a["last"],
@@ -264,7 +265,7 @@ def breakdown(conn, start: str, end: str) -> dict:
             node["value"] += v
 
     def finish(node, depth):
-        kids = [finish(k, depth + 1) for k in node["children"].values() if k["value"] > 0.005]
+        kids = [finish(k, depth + 1) for k in node["children"].values() if k["value"] > CENT]
         kids.sort(key=lambda k: -k["value"])
         # a category with only its "general" part skips a level
         if depth == 1 and len(kids) == 1 and kids[0]["name"].endswith("(general)"):

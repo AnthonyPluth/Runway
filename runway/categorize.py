@@ -15,6 +15,7 @@ from . import categories as catmod
 from . import settings_keys as sk
 from . import brands, db, monitoring, payees, rules as rulesmod, splits, tls
 from .models import Account, AiLog, Category, Rule, Transaction
+from .money import CENT
 
 REVIEW_THRESHOLD = 0.85
 DEFAULT_MODEL = "openrouter/free"  # OpenRouter's free-models router; any OpenRouter model id works
@@ -160,7 +161,7 @@ def is_card_payment(text: str) -> bool:
 def heuristic_category(tx: dict, account_kind: str) -> str | None:
     desc = f"{tx.get('description') or ''} {tx.get('payee') or ''}"
     amt = tx.get("amount") or 0
-    if abs(amt) < 0.005:
+    if abs(amt) < CENT:
         return "Ignore"
     if _SWEEP.search(desc):
         return "Ignore"
@@ -447,7 +448,7 @@ def _categorize_locally(conn, tx: dict, rules: list[dict], history: dict[tuple, 
     if acts["split"]:
         if rulesmod.apply_actions(conn, tx, {"split": acts["split"]}):
             return "rule"
-        if abs(tx["amount"] or 0) >= 0.005:
+        if abs(tx["amount"] or 0) >= CENT:
             review_after.append(tx["id"])   # the rule couldn't split it: categorize it as usual, and ask
     cat, source = acts["category"], "rule"
     if not cat:

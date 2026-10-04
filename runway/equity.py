@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 
 from . import db, validate
-from .dates import add_months, parse_day
+from .dates import add_months, months_between, parse_day
 from .models import EquityCompany, EquityGrant
 
 KINDS = {"iso": "ISO options", "nso": "NSO options", "rsu": "RSUs", "rsa": "Restricted stock", "shares": "Shares"}
@@ -38,7 +38,7 @@ MIN_YEAR, MAX_YEAR = 1900, 2200   # dates a grant can carry, for the same reason
 
 def _months_between(a: date, b: date) -> int:
     """Whole months from a to b (a vesting date counts on its day of the month)."""
-    n = (b.year - a.year) * 12 + (b.month - a.month)
+    n = months_between(a, b)
     return n - 1 if b.day < a.day and n > 0 else max(0, n)
 
 
