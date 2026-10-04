@@ -192,9 +192,12 @@ describe("EventsList", () => {
     });
   });
 
-  it("adds the account when several accounts' items are shown together", () => {
-    show([ev({ account: "Checking" })], { accounts: true });
-    expect(screen.getByText("Checking", { selector: "div" })).toBeInTheDocument();          // under the item's name
+  it("marks each item with its account's bank when several accounts' items are shown together", () => {
+    app.state = { connected: true, brands: { chk: { institution: "Chase", initial: "C" } } };
+    const { container } = show([ev({ account: "Checking", account_id: "chk" })], { accounts: true });
+    const badge = container.querySelector("[data-account-badge]");
+    expect(badge).toHaveAttribute("title", "Checking");                                      // on the logo's corner, as Transactions does
+    expect(screen.queryByText("Checking", { selector: "div" })).toBeNull();                  // not a line of its own under the name
     expect(screen.getByText("Checking ·")).toBeInTheDocument();                              // and beside its projected balance
   });
 
