@@ -9,12 +9,14 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, oidc, retail, splits
+from runway.retail import split as retail_split
+from runway.retail import store
 from runway.models import Account, AiLog, Category, RetailCharge, RetailItem, RetailItemMemory, RetailOrder, Transaction
 from runway.server.api import retail as api_retail
 from runway.server.api import transactions as api_tx
@@ -48,7 +50,7 @@ class Base(DbCase):
     def setUp(self):
         super().setUp()
         self.c.execute(insert(Account).values(id="card", name="Card", kind="credit", balance=0))
-        self.since = mock.patch.object(retail, "since", return_value="2024-01-01")
+        self.since = mock.patch.object(store, "since", return_value="2024-01-01")
         self.since.start()
 
     def tearDown(self):
@@ -67,7 +69,7 @@ class Base(DbCase):
 
     def amazon_order_with_charge(self, amount=-60.88, day="2024-09-09"):
         retail.amazon_order(self.c, ORDER, fixture(f"order-details-{ORDER}.html"))
-        retail._save_charge(self.c, f"amazon|{ORDER}|x", retail.order_key("amazon", ORDER), day, amount, None)
+        store.save_charge(self.c, f"amazon|{ORDER}|x", retail.order_key("amazon", ORDER), day, amount, None)
 
 
 class AmazonPagesTests(Base):
@@ -83,7 +85,7 @@ class AmazonPagesTests(Base):
         self.assertEqual(self.c.execute(select(func.count()).select_from(RetailCharge)).fetchone()[0], 2)
 
     def test_stops_paging_at_the_start_date(self):
-        with mock.patch.object(retail, "since", return_value="2024-10-10"):
+        with mock.patch.object(store, "since", return_value="2024-10-10"):
             r = retail.amazon_transactions(self.c, fixture("transactions-page.html"))
         self.assertIsNone(r["next_form"])
         self.assertEqual([tuple(c) for c in self.c.execute(select(RetailCharge.date))], [("2024-10-11",)])
@@ -103,9 +105,9 @@ class AmazonPagesTests(Base):
 
     def test_unreadable_order_is_retried_a_few_times(self):
         for _ in range(retail.MAX_ATTEMPTS):
-            self.assertEqual(retail._need(self.c, "amazon", [ORDER]) if _ else [ORDER], [ORDER])
+            self.assertEqual(store.need_details(self.c, "amazon", [ORDER]) if _ else [ORDER], [ORDER])
             self.assertEqual(retail.amazon_order(self.c, ORDER, "<html>nothing here</html>"), {"read": False})
-        self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [])   # given up on
+        self.assertEqual(store.need_details(self.c, "amazon", [ORDER]), [])   # given up on
 
     def test_sign_in_and_robot_pages_dont_use_up_tries(self):
         pages = {"signin": '<html><form name="signIn" method="post" action="https://www.amazon.com/ap/signin"></form></html>',
@@ -118,15 +120,25 @@ class AmazonPagesTests(Base):
                 self.assertEqual(e.exception.code, code)
             with self.assertRaises(retail.RetailError):
                 retail.amazon_transactions(self.c, html)
-        retail._save_order(self.c, "amazon", ORDER)
-        self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [ORDER])   # still to be read
+        store.save_order(self.c, "amazon", ORDER)
+        self.assertEqual(store.need_details(self.c, "amazon", [ORDER]), [ORDER])   # still to be read
         # An ordinary order page links to sign-in too: that isn't being signed out.
         self.assertEqual(retail.amazon_order(self.c, ORDER, fixture(f"order-details-{ORDER}.html"))["read"], True)
+
+    def test_a_changed_order_notes_when_in_utc(self):
+        oid = store.save_order(self.c, "amazon", ORDER)
+        self.c.execute(update(RetailOrder).where(RetailOrder.id == oid).values(updated=None))
+        store.save_order(self.c, "amazon", ORDER)   # nothing to change: not noted
+        self.assertIsNone(self.c.execute(select(RetailOrder.updated)).fetchone()[0])
+        store.save_order(self.c, "amazon", ORDER, total=12.5)
+        updated = self.c.execute(select(RetailOrder.updated)).fetchone()[0]
+        self.assertRegex(updated, r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$")   # as the column's own default writes it
+        self.assertLess(abs((datetime.fromisoformat(updated) - datetime.now(UTC).replace(tzinfo=None)).total_seconds()), 5)
 
     def test_only_the_last_try_in_an_import_counts(self):
         for _ in range(retail.MAX_ATTEMPTS + 2):
             retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=False)
-        self.assertEqual(retail._need(self.c, "amazon", [ORDER]), [ORDER])
+        self.assertEqual(store.need_details(self.c, "amazon", [ORDER]), [ORDER])
         retail.amazon_order(self.c, ORDER, "<html>nothing here</html>", final=True)
         self.assertEqual(self.c.execute(select(RetailOrder.attempts)).fetchone()[0], 1)
 
@@ -141,8 +153,8 @@ class AmazonPagesTests(Base):
             db.set_setting(self.c, "retail_last_amazon", (datetime.now() - timedelta(days=1)).isoformat())
             usual = retail.since(self.c, "amazon")
             old = (date.fromisoformat(usual) - timedelta(days=45)).isoformat()
-            oid = retail._save_order(self.c, "amazon", ORDER)   # from the transactions page: no placed date yet
-            retail._save_charge(self.c, f"amazon|{ORDER}|1", oid, old, -60.88, None)
+            oid = store.save_order(self.c, "amazon", ORDER)   # from the transactions page: no placed date yet
+            store.save_charge(self.c, f"amazon|{ORDER}|1", oid, old, -60.88, None)
             self.assertEqual(retail.since(self.c, "amazon"), old)
             self.c.execute(update(RetailOrder).values(attempts=retail.MAX_ATTEMPTS))
             self.assertEqual(retail.since(self.c, "amazon"), usual)
@@ -228,8 +240,8 @@ class SplitTests(Base):
         self.assertEqual(retail.apply(self.c, charge), "unmatched")
 
     def test_a_model_that_fails_leaves_items_to_their_departments(self):
-        oid = retail._save_order(self.c, "amazon", "113-0000000-0000000", details=1)
-        retail._save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0, "department": "Grocery & Gourmet Food"},
+        oid = store.save_order(self.c, "amazon", "113-0000000-0000000", details=1)
+        store.save_items(self.c, oid, [{"title": "Coffee", "amount": 30.0, "department": "Grocery & Gourmet Food"},
                                          {"title": "Mystery", "amount": 5.0}])
         db.set_setting(self.c, "openrouter_api_key", "k")
 
@@ -249,8 +261,8 @@ class SplitTests(Base):
         retail.set_item_category(self.c, item["id"], "Shopping")
         self.assertEqual(self.parts("t1"), [("Groceries", -42.44), ("Shopping", -18.44)])
         # The same book in another order gets Shopping without asking the model.
-        oid = retail._save_order(self.c, "amazon", "112-0000000-0000000", details=1)
-        retail._save_items(self.c, oid, [{"title": item["title"], "amount": 9.98}])
+        oid = store.save_order(self.c, "amazon", "112-0000000-0000000", details=1)
+        store.save_items(self.c, oid, [{"title": item["title"], "amount": 9.98}])
         retail.categorize_items(self.c, caller=fake_ai({}))
         self.assertEqual(tuple(self.c.execute(select(RetailItem.category, RetailItem.category_source)
                                               .where(RetailItem.order_id == oid)).fetchone()),
@@ -349,8 +361,8 @@ class SplitTests(Base):
     def test_two_orders_that_could_be_either_transaction_are_left_to_you(self):
         other = "111-0000000-0000001"
         self.amazon_order_with_charge(day="2024-09-09")
-        retail._save_order(self.c, "amazon", other)
-        retail._save_charge(self.c, f"amazon|{other}|x", retail.order_key("amazon", other), "2024-09-11", -60.88, None)
+        store.save_order(self.c, "amazon", other)
+        store.save_charge(self.c, f"amazon|{other}|x", retail.order_key("amazon", other), "2024-09-11", -60.88, None)
         self.tx("a", "2024-09-11", -60.88, "AMZN Mktp US")
         self.tx("b", "2024-09-12", -60.88, "AMZN Mktp US")
         self.assertEqual(retail.match(self.c), 0)
@@ -395,7 +407,7 @@ class TransactionCategoryTests(Base):
         oid = retail.order_key("amazon", ORDER)
         before_items, before_parts = self.items(), self.parts("t1")
         self.tx("back", "2024-09-20", 20.0, "AMZN Mktp US Refund", "Shopping", "rule")
-        retail._save_charge(self.c, f"amazon|{ORDER}|r", oid, "2024-09-20", 20.0, None)
+        store.save_charge(self.c, f"amazon|{ORDER}|r", oid, "2024-09-20", 20.0, None)
         self.c.execute(update(RetailCharge).where(RetailCharge.id == f"amazon|{ORDER}|r").values(tx_id="back"))
         api_tx.api_tx_category(self.c, None, {"category": "Refunds"}, "back")
         self.assertEqual(self.row("back")["category"], "Refunds")
@@ -452,7 +464,7 @@ class TransactionCategoryTests(Base):
         self.tx("t2", "2024-09-12", -10.0, "AMZN Mktp US", "Shopping", "rule")
         self.tx("t3", "2024-09-13", -10.0, "AMZN Mktp US", "Gifts & Donations", "manual")
         for cid, day, tid in (("y", "2024-09-12", "t2"), ("z", "2024-09-13", "t3")):
-            retail._save_charge(self.c, f"amazon|{ORDER}|{cid}", oid, day, -10.0, None)
+            store.save_charge(self.c, f"amazon|{ORDER}|{cid}", oid, day, -10.0, None)
             self.c.execute(update(RetailCharge).where(RetailCharge.id == f"amazon|{ORDER}|{cid}").values(tx_id=tid))
         retail.apply(self.c, f"amazon|{ORDER}|y")
         before_t2 = self.parts("t2")
@@ -483,8 +495,8 @@ class TransactionsListTests(Base):
         self.tx("buy", "2024-09-09", -12.99, "AMAZON MKTPL")
         self.tx("back", "2024-09-20", 12.99, "AMAZON REFUND")
         self.tx("other", "2024-09-10", -5.00, "COFFEE")
-        retail._save_charge(self.c, "c1", oid, "2024-09-09", -12.99, None)
-        retail._save_charge(self.c, "c2", oid, "2024-09-20", 12.99, None)
+        store.save_charge(self.c, "c1", oid, "2024-09-09", -12.99, None)
+        store.save_charge(self.c, "c2", oid, "2024-09-20", 12.99, None)
         self.c.execute(update(RetailCharge).where(RetailCharge.id == "c1").values(tx_id="buy"))
         self.c.execute(update(RetailCharge).where(RetailCharge.id == "c2").values(tx_id="back"))
         by = {t["id"]: t["retail"] for t in server.api_transactions(self.c, {}, None)["items"]}
@@ -505,7 +517,7 @@ class AppViewsTests(Base):
         self.tx("t3", "2024-09-20", -9.99, "AMZN Mktp US")
         self.tx("t4", "2024-09-25", 4.0, "AMZN refund")
         self.oid = retail.order_key("amazon", ORDER)
-        retail._save_charge(self.c, "ref", self.oid, "2024-09-24", 4.0, None)
+        store.save_charge(self.c, "ref", self.oid, "2024-09-24", 4.0, None)
         retail.target_history(self.c, {"orders": [{"order_number": "5555", "placed_date": "2024-09-05",
                                                    "summary": {"grand_total": 12.49}}]}, "STORE")
         db.set_setting(self.c, "openrouter_api_key", "k")
@@ -557,7 +569,7 @@ class AppViewsTests(Base):
             {"id": "target:5555", "retailer": "target", "order_number": "5555", "channel": "store", "placed": "2024-09-05",
              "total": 12.49, "details": 0, "items": 0, "charges": 1, "matched": 0}])
         recent = (date.today() - timedelta(days=20)).isoformat()
-        retail._save_charge(self.c, "target|7777", retail._save_order(self.c, "target", "7777"), recent, -5.0, None)
+        store.save_charge(self.c, "target|7777", store.save_order(self.c, "target", "7777"), recent, -5.0, None)
         self.assertEqual([retail.unmatched_count(self.c), retail.unmatched_count(self.c, "target"),
                           retail.unmatched_count(self.c, "amazon")], [1, 1, 0])
         self.assertEqual(retail.status(self.c)["recent"][0]["id"], "target:7777")   # no date yet: first
@@ -690,7 +702,7 @@ def old_allocate(amount: float, items: list[dict], fallback: str | None, order_t
     items = [i for i in items if (i.get("amount") or 0) > 0]
     if not items:
         return []
-    items = retail._shipment(items, amount, order_total)
+    items = retail_split._shipment(items, amount, order_total)
     by_cat: dict[str, dict] = {}
     for it in items:
         cat = it.get("category") or fallback
@@ -807,7 +819,7 @@ class TargetTests(Base):
         n = self.POST_ORDER["order_number"]
         retail.target_history(self.c, {"orders": [{"order_number": n, "placed_date": "2024-09-08",
                                                    "summary": {"grand_total": 4.65}}]}, "ONLINE")
-        self.assertEqual(retail._need(self.c, "target", [n]), [n])
+        self.assertEqual(store.need_details(self.c, "target", [n]), [n])
         self.assertEqual(retail.target_order(self.c, n, self.POST_ORDER), {"read": True})
         items = self.c.execute(select(RetailItem.title, RetailItem.quantity, RetailItem.amount, RetailItem.department)
                                .join(RetailOrder, RetailOrder.id == RetailItem.order_id)
@@ -824,7 +836,7 @@ class TargetTests(Base):
             db.set_setting(self.c, "retail_last_target", (datetime.now() - timedelta(days=1)).isoformat())
             usual = retail.since(self.c, "target")
             old = (date.fromisoformat(usual) - timedelta(days=60)).isoformat()
-            retail._save_order(self.c, "target", "912000000009", placed=old, total=5.0)   # listed, items never read
+            store.save_order(self.c, "target", "912000000009", placed=old, total=5.0)   # listed, items never read
             self.assertEqual(retail.since(self.c, "target"), old)
             self.c.execute(update(RetailOrder)
                            .where(RetailOrder.order_number == "912000000009").values(attempts=retail.MAX_ATTEMPTS))
@@ -836,9 +848,9 @@ class TargetTests(Base):
         retail.target_history(self.c, self.HISTORY, "ONLINE")
         n = "5555-0123-4567-8901"
         for _ in range(retail.MAX_ATTEMPTS):
-            self.assertEqual(retail._need(self.c, "target", [n]), [n])
+            self.assertEqual(store.need_details(self.c, "target", [n]), [n])
             self.assertEqual(retail.target_order(self.c, n, {}), {"read": False})
-        self.assertEqual(retail._need(self.c, "target", [n]), [])           # given up on
+        self.assertEqual(store.need_details(self.c, "target", [n]), [])           # given up on
         row = self.c.execute(select(RetailOrder.total, RetailOrder.raw).where(RetailOrder.order_number == n)).fetchone()
         self.assertEqual(row["total"], 12.49)                                # what the history said is kept
         self.assertIn("STORE", row["raw"])
@@ -849,7 +861,7 @@ class TargetTests(Base):
                                                    "summary": {"grand_total": 4.65}}]}, "ONLINE")
         for _ in range(retail.MAX_ATTEMPTS + 1):
             self.assertEqual(retail.target_order(self.c, n, {"nothing": 1}, final=False), {"read": False})
-        self.assertEqual(retail._need(self.c, "target", [n]), [n])
+        self.assertEqual(store.need_details(self.c, "target", [n]), [n])
         # Packages that name the order too: the reply itself is the order.
         reply = json.loads(json.dumps(self.POST_ORDER))
         for p in reply["packages"]:

@@ -177,6 +177,8 @@ def account_brands(conn) -> dict[str, dict]:
 # "Southwest"), a marketplace whose charges name the store ("DoorDash", "Instacart"), a payment app, or a brand
 # whose products are worth telling apart and that the bank doesn't say ("Google", "YouTube", "Max"). A sub-brand
 # with no name of its own here stops at its own entry ("Uber Pass" stays as it is, not "Uber").
+# Store orders are paired with their transactions by runway/retail/match.py's own, stricter MERCHANT patterns, not
+# these: a payment to the Costco Anywhere Visa card can show Costco's logo, but it's never a Costco order's charge.
 MERCHANT_PATTERNS: list[tuple[str, str, str | None]] = [
     (r"prime ?video", "primevideo.com", "Prime Video"),
     (r"\baudible\b", "audible.com", "Audible"),

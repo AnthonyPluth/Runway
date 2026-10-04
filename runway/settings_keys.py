@@ -138,7 +138,7 @@ LOGODEV_LAST_ERROR = "logodev_last_error"            # why the last lookup by we
 LOGODEV_LAST_ERROR_NAME = "logodev_last_error_name"  # ... and by name
 LOGODEV_THEME = "logodev_theme"     # the theme (merchants.THEME) the stored Logo.dev logos were fetched for
 
-# Retailer order import: the browser extension's key (runway/retail.py), who made it and when it was last used
+# Retailer order import: the browser extension's key (runway/retail/token.py), who made it and when it was last used
 RETAIL_TOKEN_HASH = "retail_token_hash"
 RETAIL_TOKEN_CREATED = "retail_token_created"
 RETAIL_TOKEN_OWNER = "retail_token_owner"       # JSON: {"sub", "email"} of the person who made it (nothing without sign-in)
