@@ -13,6 +13,7 @@
   import { api } from "$lib/api";
   import { catLook } from "$lib/categories.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
+  import BankBadge from "$lib/components/BankBadge.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import LineChart from "$lib/components/investments/LineChart.svelte";
   import Group from "$lib/components/ui/group/Group.svelte";
@@ -93,9 +94,13 @@
       {#snippet action()}<a href="#transactions" class="text-[13px] text-primary">See all</a>{/snippet}
       {#each latest.items as t (t.id)}
         <div class="cell">
-          {#if t.logo}
-            <Logo src={t.logo} />
-          {:else}<CatIcon name={t.category} size={32} />{/if}
+          <!-- The merchant's logo (or its category) with the account's bank on its corner, as on Transactions. -->
+          <span class="relative shrink-0">
+            {#if t.logo}
+              <Logo src={t.logo} />
+            {:else}<CatIcon name={t.category} size={32} />{/if}
+            <BankBadge accountId={t.account_id} name={t.account_name ?? ""} />
+          </span>
           <span class="min-w-0 flex-1">
             <span class="block truncate text-[15px]">{t.payee || t.description}</span>
             <span class="block text-[13px] text-muted-foreground">{fmtDate(t.posted)}{t.category ? ` · ${t.category}` : ""}</span>
