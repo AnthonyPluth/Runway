@@ -83,7 +83,8 @@ def owner_choices(conn) -> list[str]:
 def api_overview(conn, q, _b):
     horizon = int(q.get("days", [db.get_setting(conn, sk.HORIZON_DAYS, "90") or 90])[0])
     horizon = max(14, min(horizon, 365))
-    fc = forecast.build(conn, date.today(), horizon)
+    fc, moving = forecast.project(conn, date.today(), horizon)
+    forecast.move_old_keys(conn, moving)   # card payment edits saved under their due date's key, applied already
     fc["missed"] = recurring.missed(conn)
     # a recurring item wears its logo: the one you chose for it, else its last matched transaction's
     ids = sorted({e["recurring_id"] for e in fc["events"] + fc["charges"] if e.get("recurring_id")})

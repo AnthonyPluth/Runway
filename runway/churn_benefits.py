@@ -18,7 +18,8 @@ from typing import Any
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, insert, select
 
-from . import churning, db, validate
+from . import churning, dates, db, validate
+from .money import CENT
 from .models import ChurnBenefit, ChurnBenefitUse, ChurnCard
 
 KINDS = {"credit": "Credit", "access": "Access", "status": "Status", "other": "Other"}
@@ -102,9 +103,9 @@ def period(benefit: dict, opened_on: str, day: date) -> tuple[date, date | None]
     else:
         anchor = date(opened.year if months > 12 else day.year, 1, 1)
     k = max(0, ((day.year - anchor.year) * 12 + day.month - anchor.month) // months)
-    while k > 0 and churning.add_months(anchor, k * months) > day:
+    while k > 0 and dates.add_months(anchor, k * months) > day:
         k -= 1
-    return churning.add_months(anchor, k * months), churning.add_months(anchor, (k + 1) * months) - relativedelta(days=1)
+    return dates.add_months(anchor, k * months), dates.add_months(anchor, (k + 1) * months) - relativedelta(days=1)
 
 
 def lead_days(benefit: dict) -> int:
@@ -141,7 +142,7 @@ def summarize(benefit: dict, card: dict, uses: list[dict], today: date) -> dict:
         remaining = round(max(0.0, float(benefit["amount"]) - used), 2)
     lead = lead_days(benefit)
     days_left = (end - today).days if end else None
-    expiring = bool(benefit.get("active", 1) and remaining and remaining > churning.CENT and days_left is not None
+    expiring = bool(benefit.get("active", 1) and remaining and remaining > CENT and days_left is not None
                     and 0 <= days_left <= lead and (card.get("status") or "open") == "open")
     return {**{k: v for k, v in benefit.items() if k != "created_at"},
             "period_start": start.isoformat(), "period_end": end.isoformat() if end else None,
@@ -171,7 +172,7 @@ def for_card(card: dict, benefits: list[dict], uses: dict[int, list[dict]], toda
 
 
 def money(x: float) -> str:
-    return f"${x:,.0f}" if abs(x - round(x)) < churning.CENT else f"${x:,.2f}"
+    return f"${x:,.0f}" if abs(x - round(x)) < CENT else f"${x:,.2f}"
 
 
 def upcoming(cards: list[dict], today: date) -> list[dict]:
@@ -310,11 +311,11 @@ def use(conn, benefit_id: int, body: dict, today: date) -> int:
             ChurnBenefitUse.benefit_id == benefit_id, ChurnBenefitUse.period_start == start.isoformat())))
         left = 0.0 if any(u["amount_used"] is None for u in uses) else \
             round(float(b["amount"]) - sum(u["amount_used"] for u in uses), 2)
-        if left <= churning.CENT:
+        if left <= CENT:
             raise churning.ChurnError("It's all used this period already")
         if amount is None:
             amount = left
-        elif amount > left + churning.CENT:
+        elif amount > left + CENT:
             raise churning.ChurnError(f"Only {money(left)} is left this period")
     return int(conn.execute(insert(ChurnBenefitUse).values(benefit_id=benefit_id, period_start=start.isoformat(),
                                                            amount_used=amount, used_on=used_on)).lastrowid)

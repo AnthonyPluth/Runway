@@ -23,6 +23,7 @@ from sqlalchemy import and_, case, func, literal_column, or_, select
 
 from . import db, merchants, plaid, planner, prices, splits
 from . import settings_keys as sk
+from .dates import month_keys
 from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
                      ManualState, PlaidItem, Price, Security, Transaction)
 
@@ -250,7 +251,7 @@ def _is_income(t: dict) -> bool:
 
 def income(conn, today: date | None = None, months: int = 24) -> dict:
     today = today or date.today()
-    keys = _month_keys(today, months)
+    keys = month_keys(today, months)
     inc = {k: 0.0 for k in keys}
     fees = {k: 0.0 for k in keys}
     _add_plaid_income(conn, keys[0] + "-01", inc, fees)
@@ -263,17 +264,6 @@ def income(conn, today: date | None = None, months: int = 24) -> dict:
     last12 = keys[-12:]
     return {"months": keys, "income": [round(inc[k], 2) for k in keys], "fees": [round(fees[k], 2) for k in keys],
             "income_12m": round(sum(inc[k] for k in last12), 2), "fees_12m": round(sum(fees[k] for k in last12), 2)}
-
-
-def _month_keys(today: date, months: int) -> list[str]:
-    """The last `months` months ("2026-09"), oldest first, ending with this one."""
-    keys = []
-    y, m = today.year, today.month
-    for _ in range(months):
-        keys.append(f"{y:04d}-{m:02d}")
-        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
-    keys.reverse()
-    return keys
 
 
 def _add_plaid_income(conn, since: str, inc: dict[str, float], fees: dict[str, float]) -> None:
@@ -606,9 +596,6 @@ def monthly_spending(conn, today: date) -> float:
     return round(statistics.mean(months), 2) if months else 0.0
 
 
-SPENDING_ACCOUNTS = ["checking", "savings", "credit"]   # the cash accounts spending is counted on
-
-
 def history_months(conn, today: date) -> list[str]:
     """The full months ("2026-07") of the last 6 that Runway has history for: a transaction on a cash account (the
     accounts spending is counted on). The month history starts in is left out unless it starts on the 1st, as the
@@ -617,7 +604,7 @@ def history_months(conn, today: date) -> list[str]:
     end = date(today.year, today.month, 1)
     T = Transaction
     cash = (select(T.posted).join(Account, Account.id == T.account_id)
-            .where(Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS)).subquery())
+            .where(*db.SPENDING_ACCOUNTS).subquery())
     first = conn.execute(select(func.min(cash.c.posted))).scalar()
     if not first:
         return []
@@ -637,7 +624,7 @@ def _spending(today: date):
     spending = or_(and_(Category.is_transfer == 0, Category.is_income == 0), and_(Category.name.is_(None), t.c.amount < 0))
     return t, (select(t.c.amount).select_from(t)
                .join(Account, Account.id == t.c.account_id).outerjoin(Category, Category.name == t.c.category)
-               .where(spending, Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS),
+               .where(spending, *db.SPENDING_ACCOUNTS,
                       t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
 
 
@@ -650,7 +637,7 @@ def transfer_outflows(conn, today: date) -> list[dict]:
     rows = conn.execute(
         select(t.c.posted, t.c.amount, t.c.payee, t.c.description).select_from(t)
         .join(Account, Account.id == t.c.account_id).join(Category, Category.name == t.c.category)
-        .where(Category.is_transfer == 1, t.c.amount < 0, Account.hidden == 0, Account.kind.in_(SPENDING_ACCOUNTS),
+        .where(Category.is_transfer == 1, t.c.amount < 0, *db.SPENDING_ACCOUNTS,
                t.c.posted >= start.isoformat(), t.c.posted < end.isoformat()))
     return [{"month": r["posted"][:7], "amount": -r["amount"], "text": f"{r['payee'] or ''} {r['description'] or ''}".lower()}
             for r in rows]
