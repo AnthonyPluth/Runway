@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
   import BankBadge from "$lib/components/BankBadge.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
@@ -16,6 +17,7 @@
   import type { RecurringItem } from "$lib/components/recurring/types";
   import RecurringPicker from "./RecurringPicker.svelte";
   import LogoPicker from "./LogoPicker.svelte";
+  import { txLogo } from "./logo";
   import Logo from "$lib/components/Logo.svelte";
   import SplitEditor from "./SplitEditor.svelte";
   import type { Tx } from "./types";
@@ -78,7 +80,10 @@
     const d = (t.description ?? "").trim(), squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
     return d && squash(d) !== squash(name) ? d : "";
   });
-  const initial = $derived(((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
+  // A card's payment has no merchant: it wears its card's bank's logo, or that bank's letter (txLogo).
+  const shown = $derived(txLogo(t, app.state?.brands));
+  const logo = $derived(shown.src);
+  const initial = $derived(shown.bank?.initial || ((t.payee || t.description || "?").replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
   // Shown on hover (and always on touch screens, which can't hover, and while the row has focus).
   const onHover = "hoverable:opacity-0 hoverable:group-hover:opacity-100 hoverable:group-focus-within:opacity-100";
   // Shown on hover only: a touch screen leaves them out (fewer icons on a phone), and has them in the details instead.
@@ -121,8 +126,8 @@
     <LogoPicker name={t.payee || t.description || ""} {onchanged}>
       <!-- The logo as its brand draws it, with nothing behind it (Runway asks Logo.dev for its dark-background version,
            so a dark mark doesn't vanish on the dark page). -->
-      {#if t.logo}
-        <Logo src={t.logo} size={36} class="lg:size-5! lg:rounded" />
+      {#if logo}
+        <Logo src={logo} size={36} class="lg:size-5! lg:rounded" />
       {:else}
         <span class="flex size-9 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground lg:size-5 lg:rounded lg:text-[11px]" aria-hidden="true">{initial}</span>
       {/if}

@@ -27,6 +27,9 @@ export interface Tx {
   match?: { amount: number; categories: string[] } | null;
   retail?: (OrderSummary & { order_id: string }) | null;
   logo?: string | null;
+  /** A card's payment: the account whose institution's logo (or letter) it shows when it has no logo of its own (the
+   *  card it pays, else the account it was paid from). */
+  logo_account?: string | null;
   /** Your note on it. */
   notes?: string | null;
   /** The bank's date and amount when you changed yours (null: not changed). */
