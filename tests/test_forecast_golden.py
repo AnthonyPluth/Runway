@@ -1,7 +1,8 @@
 """A golden test for the forecast: a varied, made-up ledger (cards with and without statements, budgets with parts and
 rollover, annual fees, transfers, edits under old and new keys) built on several days and horizons, compared with what
 the forecast gave for it when the file was written (tests/fixtures/forecast_golden.json). It's there so a refactor of
-forecast.build can show it changes nothing; a change meant to change the forecast rewrites the file:
+forecast.build can show it changes nothing (exactly, on SQLite; Postgres's sums can differ in a float's last bits,
+so there it's to a millionth); a change meant to change the forecast rewrites the file:
 
     RUNWAY_WRITE_GOLDEN=1 python -m unittest tests.test_forecast_golden
 """
@@ -111,5 +112,22 @@ class GoldenForecastTests(LedgerCase):
             want = json.load(f)
         for run in want:
             with self.subTest(run=run):
-                self.assertEqual(got[run], want[run])
+                if db.using_postgres():   # its sums can differ from SQLite's in the last bits of a float
+                    self.assert_close(got[run], want[run], run)
+                else:
+                    self.assertEqual(got[run], want[run])
         self.assertEqual(sorted(got), sorted(want))
+
+    def assert_close(self, got, want, where):
+        if isinstance(want, float) and isinstance(got, (int, float)):
+            self.assertAlmostEqual(got, want, delta=1e-6, msg=where)
+        elif isinstance(want, dict):
+            self.assertEqual(sorted(got), sorted(want), where)
+            for k in want:
+                self.assert_close(got[k], want[k], f"{where}.{k}")
+        elif isinstance(want, list):
+            self.assertEqual(len(got), len(want), where)
+            for i, (g, w) in enumerate(zip(got, want, strict=True)):
+                self.assert_close(g, w, f"{where}[{i}]")
+        else:
+            self.assertEqual(got, want, where)
