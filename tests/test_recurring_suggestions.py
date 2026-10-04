@@ -2,7 +2,7 @@
 import json
 import unittest
 
-from sqlalchemy import select
+from sqlalchemy import insert, select, update
 
 from runway import db, forecast
 from runway import settings_keys as sk
@@ -62,6 +62,13 @@ class SuggestionDismissTests(LedgerCase):
             db.set_setting(self.conn, sk.RECURRING_SUGGESTIONS_DISMISSED, raw)
             want = {"acme payroll"} if "mortgage" in raw else {"mortgage co", "acme payroll"}
             self.assertEqual({s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)}, want, raw)
+
+    def test_a_one_time_item_doesnt_hide_a_payee_that_repeats(self):
+        self.conn.execute(insert(Recurring).values(name="Escrow", account_id="chk", amount=-2500, frequency="once",
+                                                   anchor_date="2026-06-01", match="mortgage co"))
+        self.assertIn("mortgage co", {s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)})
+        self.conn.execute(update(Recurring).values(frequency="monthly"))
+        self.assertNotIn("mortgage co", {s["match"] for s in forecast.suggest_recurring(self.conn, TODAY)})
 
     def test_rejects_a_missing_or_silly_key(self):
         for body in ({}, {"key": ""}, {"key": "  "}, {"key": 5}, {"key": "x" * 301}):

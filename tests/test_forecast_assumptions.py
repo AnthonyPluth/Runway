@@ -169,6 +169,25 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual(b["skipped"], [{"category": "Groceries", "reason": "its card isn't paid from a forecast account"}])
         self.assertEqual(b["monthly"], 0.0)
 
+    def test_a_budget_on_a_card_with_an_out_of_date_statement_isnt_spent(self):
+        self.acct("cc2", "credit", -300.0, pay_from="chk")
+        self.manual("cc2", 300.0, "2026-07-01", "2026-07-26")
+        self.conn.execute(insert(Budget).values(category="Travel", amount=310))
+        self.conn.execute(update(Category).where(Category.name == "Travel").values(pay_with="cc2"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual((fc["budget"]["used"], fc["budget"]["skipped"]),
+                         ([], [{"category": "Travel", "reason": "its card's statement is out of date"}]))
+        self.assertFalse([e for e in fc["events"] if e.get("card_id") == "cc2" and e["estimated"]])
+
+    def test_a_refund_comes_off_what_a_budget_has_spent(self):
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+
+        def spent():
+            return next(p["spent"] for p in forecast.budget_plan(self.conn, TODAY) if p["category"] == "Groceries")
+        self.assertEqual(spent(), 200.0)
+        self.tx("cc", "2026-09-21", 50.0, "GROCER REFUND", "Groceries")
+        self.assertEqual(spent(), 150.0)
+
     def no_statement_payments(self, card_id, today=TODAY, days=90):
         """The forecast's payments of a card with no statement, by date."""
         return {e["date"]: e["amount"] for e in forecast.build(self.conn, today, days)["events"] if e.get("card_id") == card_id}

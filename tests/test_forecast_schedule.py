@@ -42,6 +42,13 @@ class DateTests(unittest.TestCase):
         rent = {"frequency": "monthly", "anchor_date": "2026-01-31", "end_date": None, "amount": -1500}
         self.assertEqual(forecast.occurrences(rent, date(2026, 11, 1), date(2026, 11, 30)), [date(2026, 11, 2), date(2026, 11, 30)])
 
+    def test_a_date_just_outside_the_window_can_move_into_it(self):
+        pay = {"frequency": "monthly", "anchor_date": "2026-10-10", "end_date": None, "amount": 3000}
+        self.assertEqual(forecast.occurrences(pay, date(2026, 9, 30), date(2026, 10, 9)), [date(2026, 10, 9)])
+        bill = {"frequency": "monthly", "anchor_date": "2026-10-10", "end_date": None, "amount": -40}
+        self.assertEqual(forecast.occurrences(bill, date(2026, 10, 10), date(2026, 10, 31)), [date(2026, 10, 13)])
+        self.assertEqual(forecast.occurrences(bill, date(2026, 10, 1), date(2026, 10, 12)), [])
+
 
 class ForecastTests(LedgerCase):
     card_setup = fs.card_setup
@@ -214,6 +221,15 @@ class ForecastTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 60)
         self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 7}, {"Groceries"})
         self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 400 / 31, delta=0.01)
+
+    def test_a_match_text_with_a_wildcard_character_matches_only_itself(self):
+        self.conn.execute(insert(Recurring).values(id=8, name="Club", account_id="chk", amount=-30, frequency="monthly",
+                                                   anchor_date="2026-09-01", match="club_50"))
+        self.tx("chk", "2026-08-01", -30.0, "CLUB_50", "Entertainment")
+        for d in ("2026-07-02", "2026-08-02", "2026-09-02"):
+            self.tx("chk", d, -12.0, "CLUBX50 BAR", "Restaurants")
+        fc = forecast.build(self.conn, TODAY, 30)
+        self.assertEqual({e["category"] for e in fc["events"] if e.get("recurring_id") == 8}, {"Entertainment"})
 
     def test_statement_you_entered_wins(self):
         key = self.cycle("cc")["statement_key"]
