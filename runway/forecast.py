@@ -666,11 +666,12 @@ def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overri
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
-            like = "%" + next(iter(rec.match_texts(item)), "").replace("%", "").replace("_", "") + "%"
+            m = next(iter(rec.match_texts(item)), "")   # (lowercase; % and _ in it are themselves, not wildcards)
             cat_row = conn.execute(
-                select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None), func.length(like) > 4,
-                                         or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
-                .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
+                select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None),
+                                         or_(func.lower(T.payee).contains(m, autoescape=True),
+                                             func.lower(T.description).contains(m, autoescape=True)))
+                .group_by(T.category).order_by(*most_used).limit(1)).fetchone() if len(m) > 2 else None
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
         # One that's partly paid (a paycheck in two deposits, early or on time) leaves the rest expected the same way,

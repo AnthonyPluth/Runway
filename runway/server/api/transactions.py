@@ -122,11 +122,13 @@ def tx_where(conn, q) -> tuple[list, list[str]]:
     if q.get("scope", [""])[0] == "budget":   # the same accounts the Budget page counts
         where.append(T.account_id.in_(select(Account.id).where(*db.SPENDING_ACCOUNTS)))
     if text := q.get("q", [""])[0].strip():
-        like = f"%{text.lower()}%"
-        # The merchant, the bank's text, your note, the category (or a split's), or the amount typed as a number.
-        found = [func.lower(T.payee).like(like), func.lower(T.description).like(like), func.lower(T.notes).like(like),
-                 and_(func.coalesce(T.is_split, 0) == 0, func.lower(T.category).like(like)),
-                 select(TxSplit.id).where(TxSplit.tx_id == T.id, func.lower(TxSplit.category).like(like)).exists()]
+        # The merchant, the bank's text, your note, the category (or a split's), or the amount typed as a number. The
+        # text as typed: % and _ are themselves, not LIKE's wildcards; any letter matches its capital (db.py makes
+        # SQLite's lower() fold more than ASCII, as Postgres's does).
+        needle = text.lower()
+        has = lambda col: func.lower(col).contains(needle, autoescape=True)
+        found = [has(T.payee), has(T.description), has(T.notes), and_(func.coalesce(T.is_split, 0) == 0, has(T.category)),
+                 select(TxSplit.id).where(TxSplit.tx_id == T.id, has(TxSplit.category)).exists()]
         amount = _as_amount(text)
         if amount is not None:
             found.append(func.abs(T.amount).between(amount - 0.005, amount + 0.005))

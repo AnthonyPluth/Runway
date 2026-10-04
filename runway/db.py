@@ -126,7 +126,17 @@ def _sqlite_engine(url: str) -> Engine:
     def _setup(dbapi_conn, _record):
         dbapi_conn.execute("PRAGMA journal_mode=WAL")
         dbapi_conn.execute("PRAGMA foreign_keys=ON")
+        # SQLite's own lower() leaves anything past ASCII as it is ("É" stays "É"); Postgres's lowers every letter. So a
+        # search for "é" found "CAFÉ" on one and not the other: Python's lower() takes its place, on every connection.
+        dbapi_conn.create_function("lower", 1, _lower, deterministic=True)
     return eng
+
+
+def _lower(v):
+    """SQLite's lower(), for every letter: NULL stays NULL, a number becomes its text as SQLite's does."""
+    if v is None or isinstance(v, bytes):
+        return v
+    return str(v).lower()
 
 
 def _postgres_engine(url: str, path: str | None) -> Engine:
