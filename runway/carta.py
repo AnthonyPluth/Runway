@@ -300,8 +300,9 @@ def _latest_price(conn, pid: str, iid: str, issuer: dict, opener=None) -> tuple[
     return None, None
 
 
-def sync(conn, opener=None) -> dict:
+def sync(conn, opener=None, today: date | None = None) -> dict:
     """Read every portfolio's companies and securities, and save them (replacing what Carta sent last time)."""
+    today = today or date.today()
     out = {"companies": 0, "grants": 0}
     try:
         portfolios = _list(conn, "portfolios", opener)
@@ -317,7 +318,7 @@ def sync(conn, opener=None) -> dict:
                 name = _pick(issuer, "legalName", "name", "doingBusinessAsName", "displayName") or "Company"
                 price, when = _latest_price(conn, pid, iid, issuer, opener)
                 raw = json.dumps(issuer, separators=(",", ":"))[:MAX_RAW]
-                as_of = when or (date.today().isoformat() if price else None)
+                as_of = when or (today.isoformat() if price else None)
                 if conn.execute(select(EquityCompany.id).where(EquityCompany.id == cid)).fetchone():
                     # COALESCE(new, old), decided here: a value Carta didn't send leaves the stored one
                     conn.execute(update(EquityCompany).where(EquityCompany.id == cid).values(
@@ -331,9 +332,9 @@ def sync(conn, opener=None) -> dict:
                     for item in _list(conn, f"portfolios/{pid}/issuers/{iid}/{path}", opener):
                         g = _grant(item, hint)
                         if g:
-                            _save_grant(conn, cid, g, item)
+                            _save_grant(conn, cid, g, item, today)
                             out["grants"] += 1
-        db.set_setting(conn, sk.CARTA_LAST_SYNC, date.today().isoformat())
+        db.set_setting(conn, sk.CARTA_LAST_SYNC, today.isoformat())
         db.set_setting(conn, sk.CARTA_LAST_ERROR, None)
     except CartaError as e:
         conn.rollback()   # none of a half-read sync, but the error is kept (the caller's session rolls back too)
@@ -343,11 +344,11 @@ def sync(conn, opener=None) -> dict:
     return out
 
 
-def _save_grant(conn, cid: str, g: dict, item: dict) -> None:
+def _save_grant(conn, cid: str, g: dict, item: dict, today: date) -> None:
     raw = json.dumps(item, separators=(",", ":"))[:MAX_RAW]
     old = conn.execute(select(EquityGrant.vest_months, EquityGrant.cliff_months, EquityGrant.vest_every)
                        .where(EquityGrant.id == g["id"])).fetchone()
-    today = date.today().isoformat()
+    today_iso = today.isoformat()
     if old:
         # A schedule you filled in yourself stays when Carta doesn't say.
         for k in ("vest_months", "cliff_months"):
@@ -358,6 +359,6 @@ def _save_grant(conn, cid: str, g: dict, item: dict) -> None:
         # g's keys are the grant columns _grant() (or carta_web) fills in, never a request's
         sets = {k: v for k, v in g.items() if k != "id"}
         conn.execute(update(EquityGrant).where(EquityGrant.id == g["id"]).values(
-            **sets, company_id=cid, source="carta", raw=raw, vested_reported_on=today))
+            **sets, company_id=cid, source="carta", raw=raw, vested_reported_on=today_iso))
     else:
-        conn.execute(insert(EquityGrant).values(**g, company_id=cid, source="carta", raw=raw, vested_reported_on=today))
+        conn.execute(insert(EquityGrant).values(**g, company_id=cid, source="carta", raw=raw, vested_reported_on=today_iso))

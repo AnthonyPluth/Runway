@@ -37,7 +37,7 @@
       const s = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBytes(l.d.public_key) });
       await api("/api/push/subscribe", { method: "POST", body: { subscription: s.toJSON(), device: deviceName() } });
       toast.success("Notifications are on");
-      await api("/api/push/test", { method: "POST", body: { endpoint: s.endpoint } }).catch(() => {});
+      await api("/api/push/test", { method: "POST", body: { endpoint: s.endpoint } }).catch(() => { /* only a test notification: the subscription itself is saved */ });
     } catch (err) { toast.error(errMsg(err)); }
     busy = false;
     again();
@@ -55,7 +55,7 @@
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: ep } });
       // Runway has already forgotten the device; dropping this browser's own subscription is housekeeping, and a failure
       // leaves nothing that would send a notification.
-      if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => {});
+      if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => { /* housekeeping: see above */ });
       toast.success("Removed · notifications are off on that device");
     });
     again();

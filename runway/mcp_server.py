@@ -16,6 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import mcp_access
+from .money import CENT
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_TEXT = 200_000   # characters in one reply: enough for a big month, not enough to flood the assistant's context
@@ -96,7 +97,7 @@ def _perk(b: dict) -> bool:
 
 def _can_use(b: dict) -> bool:
     if b.get("kind") == "credit" and b.get("amount") is not None:
-        return (b.get("remaining") or 0) > 0.005
+        return (b.get("remaining") or 0) > CENT
     return not b.get("used_count")
 
 

@@ -65,8 +65,9 @@ def fetch(ticker: str, start: date, end: date) -> tuple[list[tuple[str, float, f
     return rows, sorted(splits), {"type": meta.get("instrumentType"), "name": meta.get("longName") or meta.get("shortName")}
 
 
-def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
-    """Fetch any tickers whose history is missing or stale. Commits between requests."""
+def refresh(conn, tickers: list[str], start: date, force: bool = False, today: date | None = None) -> dict:
+    """Fetch any tickers whose history is missing or stale, up to `today`. Commits between requests."""
+    today = today or date.today()
     done: list[str] = []
     failed: list[str] = []
     now = datetime.now()
@@ -79,7 +80,7 @@ def refresh(conn, tickers: list[str], start: date, force: bool = False) -> dict:
                 continue
         conn.commit()
         try:
-            rows, splits, info = fetch(t, start, date.today())
+            rows, splits, info = fetch(t, start, today)
             ok = 1 if rows else 0
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code >= 500:   # the service, not the ticker: try it again next time

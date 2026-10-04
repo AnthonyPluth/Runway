@@ -34,6 +34,19 @@ class ClampTests(unittest.TestCase):
         self.assertEqual(dates.month_end(date(2026, 1, 31)), date(2026, 1, 31))
 
 
+class MonthLengthAndGapTests(unittest.TestCase):
+    def test_days_in_month(self):
+        self.assertEqual([dates.days_in_month(date(2026, m, 1)) for m in range(1, 13)],
+                         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
+        self.assertEqual(dates.days_in_month(date(2028, 2, 10)), 29)
+
+    def test_months_between_counts_calendar_months_whatever_the_days(self):
+        self.assertEqual(dates.months_between(date(2026, 1, 31), date(2026, 3, 1)), 2)
+        self.assertEqual(dates.months_between(date(2025, 11, 15), date(2026, 2, 1)), 3)
+        self.assertEqual(dates.months_between(date(2026, 5, 1), date(2026, 5, 31)), 0)
+        self.assertEqual(dates.months_between(date(2026, 3, 1), date(2025, 12, 31)), -3)
+
+
 class AddMonthsTests(unittest.TestCase):
     def test_the_same_day_or_the_months_last(self):
         self.assertEqual(dates.add_months(date(2026, 1, 31), 1), date(2026, 2, 28))

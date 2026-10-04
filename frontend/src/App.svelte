@@ -35,7 +35,7 @@
   });
   // Start fetching the other pages once the first one is up, so moving around later is instant. A failed preload says nothing:
   // it only saves time, and opening that page tries again (and says so, above, if it fails then).
-  whenBooted(() => setTimeout(() => Object.values(LOADERS).forEach((load) => load().catch(() => {})), 1500));
+  whenBooted(() => setTimeout(() => Object.values(LOADERS).forEach((load) => load().catch(() => { /* a failed preload says nothing: see above */ })), 1500));
 </script>
 
 <!-- On a phone in the installed app the page runs under the status bar (viewport-fit=cover): a solid strip keeps what scrolls

@@ -284,8 +284,8 @@ def _scratch(conn) -> Iterator[SAConnection]:
         trans = sc.begin()
         try:
             name = f"runway_restore_{uuid.uuid4().hex[:12]}"
-            sc.exec_driver_sql(f'CREATE SCHEMA "{name}"')
-            sc.exec_driver_sql(f'SET LOCAL search_path TO "{name}"')
+            sc.exec_driver_sql(f'CREATE SCHEMA "{name}"')   # nosemgrep: runway-sql-from-string -- a name made here, which DDL can't bind
+            sc.exec_driver_sql(f'SET LOCAL search_path TO "{name}"')   # nosemgrep: runway-sql-from-string -- a name made here, which DDL can't bind
             yield sc
         finally:
             trans.rollback()
@@ -341,7 +341,7 @@ def _upgraded(conn, data: dict) -> Rows:
                 for c in target.get_columns(t.name):
                     if c["name"] in payload["columns"] and c["name"] not in there:
                         ddl = CreateColumn(Column(c["name"], c["type"])).compile(dialect=sc.dialect)
-                        sc.exec_driver_sql(f'ALTER TABLE "{t.name}" ADD COLUMN {ddl}')
+                        sc.exec_driver_sql(f'ALTER TABLE "{t.name}" ADD COLUMN {ddl}')   # nosemgrep: runway-sql-from-string -- the model's own table and column names, which DDL can't bind
                         there.add(c["name"])
             cols = [c for c in payload["columns"] if c in there]
             keep = [payload["columns"].index(c) for c in cols]

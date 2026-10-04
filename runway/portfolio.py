@@ -18,16 +18,17 @@ import statistics
 from collections import defaultdict
 from datetime import date, timedelta
 
-from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_, case, func, literal_column, or_, select
 
 from . import brands, db, merchants, planner, prices, splits
 from . import settings_keys as sk
-from .dates import month_keys
+from .dates import month_keys, month_start
 from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
                      ManualState, PlaidItem, Price, Security, Transaction)
+from .money import CENT
 
 HISTORY_DAYS = 730
+MAX_FEE_RATIO = 0.005   # nosemgrep: runway-half-cent-literal -- 0.5% of the portfolio a year, not half a cent
 # Cash moving in or out of the account from outside (not investment results).
 FLOW_SUBTYPES = {"deposit", "contribution", "withdrawal", "distribution", "transfer", "send", "request", "rollover"}
 CORPORATE_ACTIONS = {"split", "stock distribution", "spin off", "merger", "adjustment", "exercise", "assignment", "expire"}
@@ -187,7 +188,7 @@ def allocation(conn, hold: list[dict]) -> dict:
         g: dict[str, float] = defaultdict(float)
         for h in hold:
             g[key(h)] += h["value"]
-        return sorted(({"name": k, "value": round(v, 2), "share": v / total} for k, v in g.items() if abs(v) > 0.005),
+        return sorted(({"name": k, "value": round(v, 2), "share": v / total} for k, v in g.items() if abs(v) > CENT),
                       key=lambda x: -x["value"])
 
     by_account: dict[str, float] = defaultdict(float)
@@ -600,7 +601,7 @@ def history_months(conn, today: date) -> list[str]:
     """The full months ("2026-07") of the last 6 that Runway has history for: a transaction on a cash account (the
     accounts spending is counted on). The month history starts in is left out unless it starts on the 1st, as the
     month before the first sync is only partly there."""
-    start = date(today.year, today.month, 1) - relativedelta(months=6)
+    start = month_start(today, -6)
     end = date(today.year, today.month, 1)
     T = Transaction
     cash = (select(T.posted).join(Account, Account.id == T.account_id)
@@ -618,7 +619,7 @@ def history_months(conn, today: date) -> list[str]:
 
 def _spending(today: date):
     """The transactions monthly_spending counts (the last 6 full months), as (the parts subquery, a select of them)."""
-    start = date(today.year, today.month, 1) - relativedelta(months=6)
+    start = month_start(today, -6)
     end = date(today.year, today.month, 1)
     t = splits.parts()
     spending = or_(and_(Category.is_transfer == 0, Category.is_income == 0), and_(Category.name.is_(None), t.c.amount < 0))
@@ -631,7 +632,7 @@ def _spending(today: date):
 def transfer_outflows(conn, today: date) -> list[dict]:
     """Like spent_outflows, but the money out monthly_spending leaves out as a transfer (over the same months and
     accounts): a loan's payment found here was paid but not counted as spending."""
-    start = date(today.year, today.month, 1) - relativedelta(months=6)
+    start = month_start(today, -6)
     end = date(today.year, today.month, 1)
     t = splits.parts()
     rows = conn.execute(
@@ -669,9 +670,9 @@ def xray(conn, hold: list[dict], alloc: dict, inc: dict, today: date) -> list[di
         rules.append({"name": "Account concentration", "ok": biggest["share"] <= 0.8 or len(alloc["account"]) == 1,
                       "detail": f"{biggest['share']:.0%} is in {biggest['name']}"})
     fee_ratio = inc["fees_12m"] / total
-    rules.append({"name": "Fees paid", "ok": fee_ratio <= 0.005,
+    rules.append({"name": "Fees paid", "ok": fee_ratio <= MAX_FEE_RATIO,
                   "detail": f"${inc['fees_12m']:,.0f} in the last 12 months ({fee_ratio:.2%} of the portfolio)"
-                            + ("" if fee_ratio <= 0.005 else "; worth checking what they're for.")})
+                            + ("" if fee_ratio <= MAX_FEE_RATIO else "; worth checking what they're for.")})
     emergency = _emergency_fund_rule(conn, today)
     if emergency:
         rules.append(emergency)

@@ -62,7 +62,7 @@
   });
   // The browser saves the file itself, so there's no telling when it's done: look again once it likely is.
   // (Only the "last backup" line depends on it, and the next state check corrects it, so a failed look says nothing.)
-  function downloaded() { setTimeout(() => { refreshState().catch(() => {}); }, 3000); }
+  function downloaded() { setTimeout(() => { refreshState().catch(() => { /* stays quiet: see above */ }); }, 3000); }
 
   async function restore() {
     const f = file;

@@ -18,7 +18,7 @@ on:  # zizmor: ignore[dangerous-triggers]
   # Other apps' checks finishing (CodeQL, Semgrep, Trivy, zizmor, Codecov); GitHub doesn't send this for Actions' own.
   check_suite:
     types: [completed]
-  # By hand, to decide a pull request again.
+  # By hand, to decide a pull request again; agent-review.yml starts it this way once it has set its status.
   workflow_dispatch:
     inputs:
       pr:

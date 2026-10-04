@@ -12,6 +12,7 @@ from sqlalchemy.orm import aliased
 from ... import categories, categorize, db, forecast, merchants, retail, splits, validate
 from ... import settings_keys as sk
 from ...models import Account, AiLog, Category, Recurring, RetailCharge, Transaction, TxSplit
+from ...money import CENT
 from ..common import ApiError, _month_range, query_int, row_id, text
 
 # A manual transaction's id: its account's, then this and a random part (a bank's are "|<its id>" or "|pl:<its id>").
@@ -107,9 +108,9 @@ def tx_where(conn, q) -> tuple[list, list[str]]:
         where.append(T.posted < (date.fromisoformat(until) + timedelta(days=1)).isoformat())
     low, high = _number(q, "min"), _number(q, "max")   # the amount, money in or out
     if low is not None:
-        where.append(func.abs(T.amount) >= low - 0.005)
+        where.append(func.abs(T.amount) >= low - CENT)
     if high is not None:
-        where.append(func.abs(T.amount) <= high + 0.005)
+        where.append(func.abs(T.amount) <= high + CENT)
     kind = q.get("kind", [""])[0]
     if kind:
         if kind not in KINDS:
@@ -135,7 +136,7 @@ def tx_where(conn, q) -> tuple[list, list[str]]:
                  select(TxSplit.id).where(TxSplit.tx_id == T.id, has(TxSplit.category)).exists()]
         amount = _as_amount(text)
         if amount is not None:
-            found.append(func.abs(T.amount).between(amount - 0.005, amount + 0.005))
+            found.append(func.abs(T.amount).between(amount - CENT, amount + CENT))
         where.append(or_(*found))
     return where, family
 
@@ -462,9 +463,9 @@ def api_tx_update(conn, _q, body, tx_id):
             values["bank_posted"] = None if values["posted"] == bank else bank
     if "amount" in body:
         values["amount"] = _valid_amount(body["amount"])
-        if not manual and abs(values["amount"] - tx["amount"]) >= 0.005:
+        if not manual and abs(values["amount"] - tx["amount"]) >= CENT:
             bank = tx["bank_amount"] if tx["bank_amount"] is not None else tx["amount"]
-            values["bank_amount"] = None if abs(values["amount"] - bank) < 0.005 else bank
+            values["bank_amount"] = None if abs(values["amount"] - bank) < CENT else bank
     if "category" in body:
         if body["category"] is not None:
             raise ApiError("Set a category with /category")

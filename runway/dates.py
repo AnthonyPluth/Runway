@@ -44,6 +44,17 @@ def next_after(d: date, day: int) -> date:
     return this_month if this_month > d else add_months(this_month, 1, day)
 
 
+def days_in_month(d: date) -> int:
+    """How many days d's month has."""
+    return month_end(d).day
+
+
+def months_between(a: date, b: date) -> int:
+    """How many calendar months b's month is after a's (negative before it), whatever the days: 2026-01-31 to
+    2026-03-01 is 2."""
+    return (b.year - a.year) * 12 + b.month - a.month
+
+
 def month_key(d: date) -> str:
     """d's month as "YYYY-MM"."""
     return f"{d:%Y-%m}"
