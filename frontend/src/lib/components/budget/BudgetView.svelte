@@ -7,7 +7,7 @@
   import { api } from "$lib/api";
   import { loadCategories } from "$lib/categories.svelte";
   import BudgetRow from "$lib/components/budget/BudgetRow.svelte";
-  import type { BudgetCategory, BudgetMonth, Family } from "$lib/components/budget/types";
+  import type { BudgetCategory, BudgetMonth, BudgetSaved, Family } from "$lib/components/budget/types";
   import MonthPicker from "$lib/components/MonthPicker.svelte";
   import StatStrip from "$lib/components/StatStrip.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -40,9 +40,14 @@
     refresh();
   }
 
+  // A subcategory's budget can raise its parent's (the parent's covers its subcategories'): the toast says so.
   async function saveBudget(category: string, amount: string) {
-    try { await api("/api/budget", { method: "POST", body: { category, amount } }); toast.success(amount ? "Budget saved" : "Budget removed"); refresh(); }
-    catch (err) { toast.error((err as Error).message); }
+    let r: BudgetSaved;
+    try { r = await api<BudgetSaved>("/api/budget", { method: "POST", body: { category, amount } }); }
+    catch (err) { toast.error((err as Error).message); return; }
+    const raised = (r?.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)}`);
+    toast.success(amount ? ["Budget saved", ...raised].join(" · ") : "Budget removed");
+    refresh();
   }
   let newCat = $state("");
   function addBudget(e: Event & { currentTarget: HTMLInputElement }) {

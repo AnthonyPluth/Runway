@@ -86,10 +86,10 @@ def api_overview(conn, q, _b):
     fc = forecast.build(conn, date.today(), horizon)
     fc["missed"] = recurring.missed(conn)
     # a recurring item wears its logo: the one you chose for it, else its last matched transaction's
-    ids = sorted({e["recurring_id"] for e in fc["events"] if e.get("recurring_id")})
+    ids = sorted({e["recurring_id"] for e in fc["events"] + fc["charges"] if e.get("recurring_id")})
     if ids:
         logos = recurring_logos(conn, db.rows(conn.execute(select(Recurring.id, Recurring.name).where(Recurring.id.in_(ids)))))
-        for e in fc["events"]:
+        for e in fc["events"] + fc["charges"]:
             e["logo"] = logos.get(e.get("recurring_id"))
     name = func.coalesce(Account.display_name, Account.name).label("name")
     fc["all_accounts"] = db.rows(conn.execute(

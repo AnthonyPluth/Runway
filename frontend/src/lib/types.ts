@@ -204,6 +204,9 @@ export interface Overview {
   /** Churning cards' annual fees: charges on cards, listed with what's coming up but not in events or the balances
    *  (each is in its card's statement payment). */
   fees?: ForecastEvent[];
+  /** Recurring charges on cards (`account` the card's name): listed with what's coming up, but not in events or the
+   *  balances (each is in its card's statement payment). */
+  charges?: ForecastEvent[];
   cards: CardSummary[];
   unlinked_cards?: CardSummary[];
   warnings: string[];

@@ -380,6 +380,28 @@ describe("Transactions page", () => {
       expect(app.version).toBe(version);   // the page wasn't drawn afresh
     });
 
+    it("shows a budget's link what's still coming in it, recurring charges on cards included", async () => {
+      route.query = "category=Food&from=2026-03-01&to=2026-03-31&scope=budget";
+      const ev = (date: string, name: string, category: string, extra = {}) =>
+        ({ date, name, amount: -20, kind: "recurring", key: `k-${name}`, category, ...extra });
+      serve(rows(), 2, (path) => path === "/api/categories" ? [category("Food"), category("Groceries", { parent: "Food" }), category("Coffee")]
+        : path.startsWith("/api/overview") ? {
+          events: [ev("2026-03-20", "Farm box", "Groceries", { balance_after: 900, account_id: "a1", account: "Checking" }),
+            ev("2026-03-21", "Beans", "Coffee", { balance_after: 880, account_id: "a1", account: "Checking" })],
+          charges: [ev("2026-03-22", "Meal kit", "Food", { account_id: "c1", account: "Travel Card" }),
+            ev("2026-04-22", "Meal kit", "Food", { account_id: "c1", account: "Travel Card" })],   // next month's
+        } : undefined);
+      render(Transactions);
+      const group = (await screen.findByRole("heading", { name: "Upcoming · projected" })).closest("section") ?? document.body;
+      await within(group as HTMLElement).findByText("Farm box");   // a subcategory's
+      const kit = within(group as HTMLElement).getByText("Meal kit");
+      expect(within(group as HTMLElement).getAllByText("Meal kit")).toHaveLength(1);
+      expect(within(group as HTMLElement).queryByText("Beans")).not.toBeInTheDocument();
+      // the card is named on its row, and a charge to it doesn't move a projected balance
+      expect(kit.closest(".cell")).toHaveTextContent("Travel Card");
+      expect(within(group as HTMLElement).getAllByText(/projected balance/)).toHaveLength(1);
+    });
+
     it("leaves out projected items from other accounts when filtered to one", async () => {
       txFilters.transactions.account = "a1";
       serve(rows(), 2, (path) => (path.startsWith("/api/overview") ? { events: [{ date: "2026-03-20", name: "Other rent", amount: -5, kind: "recurring", key: "k", balance_after: 1, account_id: "zzz" }] } : undefined));

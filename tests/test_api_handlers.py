@@ -6,7 +6,7 @@ from unittest import mock
 
 from sqlalchemy import delete, func, insert, select, update
 
-from runway import categories, db, demo, splits
+from runway import categories, db, demo, forecast, splits
 from runway.server import sync
 from runway.server.api import accounts, budget, notifications, state, transactions
 from runway.server.common import ApiError
@@ -289,6 +289,67 @@ class HandlerTests(DbCase):
         self.assertEqual(paid(), "demo-checking")
         budget.api_budget_set(self.c, {}, {"category": "Travel", "pay_with": ""})
         self.assertIsNone(paid())
+
+    def test_budget_expects_whats_still_coming_this_month(self):
+        categories.add(self.c, "Streaming TV", parent="Subscriptions")
+        next_month = (TODAY.replace(day=28) + timedelta(days=4)).replace(day=1)
+        last_month = (TODAY.replace(day=1) - timedelta(days=1)).replace(day=1)
+        ev = lambda day, cat, amount, kind="recurring", acct="demo-checking": {
+            "date": day.isoformat(), "category": cat, "amount": amount, "kind": kind, "account_id": acct, "name": "x"}
+        fc = {"events": [ev(TODAY, "Subscriptions", -20.0),
+                         ev(next_month, "Subscriptions", -99.0),            # another month's
+                         ev(TODAY, "Subscriptions", 50.0),                  # money in isn't spending
+                         ev(TODAY, "Income", 3000.0),
+                         ev(TODAY, None, -500.0, kind="card")],             # a card's statement payment
+              # on a card: counted in its subcategory and in the parent above it
+              "charges": [ev(TODAY, "Streaming TV", -15.5, acct="demo-card"), ev(next_month, "Streaming TV", -15.5, acct="demo-card")]}
+
+        def coming(month):
+            return {c["name"]: c["expected"] for c in budget.api_budget(self.c, q(month=f"{month:%Y-%m}"), {})["categories"]}
+
+        with mock.patch.object(budget.forecast, "build", return_value=fc) as build:
+            now = coming(TODAY)
+            self.assertEqual((now["Subscriptions"], now["Streaming TV"], now["Groceries"]), (35.5, 15.5, 0.0))
+            # the forecast is asked for this month's rest: from today to its last day
+            self.assertEqual(build.call_args.args[1:], (TODAY, max(1, (next_month - timedelta(days=1) - TODAY).days)))
+            later = coming(next_month)
+            self.assertEqual((later["Subscriptions"], later["Streaming TV"]), (114.5, 15.5))
+            build.reset_mock()
+            self.assertEqual(set(coming(last_month).values()), {0.0})   # a month that's over expects nothing
+            build.assert_not_called()
+        # The rest stays as it was: what's left is still the budget less what's spent.
+        g = next(c for c in budget.api_budget(self.c, {}, {})["categories"] if c["name"] == "Groceries")
+        self.assertEqual(g["left"], round(600 - g["spent"], 2))
+
+    def test_budget_expects_the_forecasts_recurring_payments_and_card_charges(self):
+        fc = forecast.build(self.c, TODAY, max(1, ((TODAY.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1) - TODAY).days))
+        due = lambda cat: round(-sum(e["amount"] for e in fc["events"] + fc["charges"] if e.get("category") == cat and e["amount"] < 0
+                                     and e["date"][:7] == f"{TODAY:%Y-%m}"), 2)
+        b = {c["name"]: c["expected"] for c in budget.api_budget(self.c, {}, {})["categories"]}
+        self.assertEqual((b["Subscriptions"], b["Utilities"]), (due("Subscriptions"), due("Utilities")))
+
+    def test_saving_a_subcategorys_budget_raises_its_parents(self):
+        categories.add(self.c, "Medical Care")
+        for name, parent in (("Dental", "Medical Care"), ("Eye Care", "Medical Care"), ("Flights", "Travel")):
+            categories.add(self.c, name, parent=parent)
+        # a level deeper than the app makes (its walk up the tree doesn't stop at two)
+        self.c.execute(insert(Category).values(name="Braces", parent="Dental", is_transfer=0, is_income=0))
+        amount = lambda name: self.one(select(Budget.amount).where(Budget.category == name))[0]
+        save = lambda name, value: budget.api_budget_set(self.c, {}, {"category": name, "amount": value})
+        save("Medical Care", 300)
+        self.assertEqual(save("Eye Care", 200), {"ok": True, "raised": []})
+        self.assertEqual(save("Dental", "150.004"), {"ok": True, "raised": [{"category": "Medical Care", "amount": 350.0}]})
+        # lowering one never lowers the parent; the parent's still enough
+        self.assertEqual(save("Eye Care", 100)["raised"], [])
+        self.assertEqual(amount("Medical Care"), 350.0)
+        # two levels up, each to its own subcategories' total
+        self.assertEqual(save("Braces", 400)["raised"], [{"category": "Dental", "amount": 400.0}, {"category": "Medical Care", "amount": 500.0}])
+        # removing a budget leaves the parents alone
+        self.assertEqual(save("Braces", "0"), {"ok": True, "raised": []})
+        self.assertEqual((amount("Dental"), amount("Medical Care")), (400.0, 500.0))
+        # a parent without a budget isn't given one
+        self.assertEqual(save("Flights", 900)["raised"], [])
+        self.assertIsNone(self.one(select(Budget.amount).where(Budget.category == "Travel")))
 
     # ------------------------------------------------------------------------------------------ transactions
 

@@ -22,10 +22,17 @@ export interface BudgetCategory {
   available?: number | null;
   spent: number;
   own_spent: number;
+  /** What there is to spend less what's spent (below zero when it's over); what's still expected isn't taken off. */
   left: number | null;
+  /** Recurring payments still to come in the month (its subcategories' included), on its accounts and on cards: not in
+   *  `spent` yet. 0 for a month that's over. */
+  expected?: number;
 }
 
 export interface PayAccount { id: string; name: string; kind: string }
+
+/** POST /api/budget: a parent budget raised to cover its subcategories' (after a subcategory's was saved). */
+export interface BudgetSaved { ok: boolean; raised?: { category: string; amount: number }[] }
 
 /** GET /api/budget?month=YYYY-MM */
 export interface BudgetMonth {

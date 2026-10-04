@@ -30,7 +30,7 @@
   const uid = $props.id();
   // A day at a time, under its date, with no dividers inside a day. A bank settles a day's payments together, so the
   // projected balance shows once a day for each account, under the day's items: the balance after its last item that day
-  // (an annual fee is a card charge: it never moves one).
+  // (an annual fee or a recurring charge on a card is a card charge: it never moves one).
   const days = $derived.by(() => {
     type Ev = (typeof events)[number];
     const out: { date: string; rows: { e: Ev; i: number }[]; balances: { account?: string | null; amount: number }[] }[] = [];
@@ -40,7 +40,7 @@
     });
     for (const d of out) {
       const last = new Map<string, Ev>();
-      for (const { e } of d.rows) if (e.kind !== "fee") last.set(e.account_id ?? "", e);
+      for (const { e } of d.rows) if (e.kind !== "fee" && e.balance_after != null) last.set(e.account_id ?? "", e);
       d.balances = [...last.values()].map((e) => ({ account: e.account, amount: e.balance_after ?? 0 }));
     }
     return out;
