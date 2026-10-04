@@ -168,6 +168,18 @@ describe("CardsTable", () => {
     expect(screen.queryByText("Amex")).toBeNull();   // a credit comes through as $0 owed
   });
 
+  it("lists cards in the order they're due, the paid ones last", () => {
+    at("2026-03-10");
+    render(CardsTable, { onchanged: vi.fn(), cards: [
+      card({ id: "c1", name: "Sapphire", due_date: "2026-03-26" }),
+      card({ id: "c2", name: "Venture", due_date: "2026-03-09" }),              // overdue: first of all
+      card({ id: "c3", name: "Amex", owed_now: 300, remaining: 0 }),            // paid: last, whatever its date
+      card({ id: "c4", name: "Freedom", due_date: "2026-03-12" }),
+    ] });
+    const names = screen.getAllByText(/^(Sapphire|Venture|Amex|Freedom)$/).map((el) => el.textContent);
+    expect(names).toEqual(["Venture", "Freedom", "Sapphire", "Amex"]);
+  });
+
   it("says so when every card is at $0", () => {
     render(CardsTable, { onchanged: vi.fn(), cards: [card({ owed_now: 0, remaining: 0 })] });
     expect(screen.queryByText("Sapphire")).toBeNull();

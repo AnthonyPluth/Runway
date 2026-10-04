@@ -13,8 +13,10 @@
   // `onchanged` loads the forecast again after a statement is corrected, in place.
   let { cards, onchanged }: { cards: CardSummary[]; onchanged: () => void } = $props();
   // A card that owes nothing (owed_now is never below zero: a credit reads as $0), with nothing left to pay on its
-  // statement, has nothing to say here.
-  const shown = $derived(cards.filter((c) => c.owed_now >= 0.005 || c.remaining > 0));
+  // statement, has nothing to say here. The rest in the order they're due: the soonest (or overdue) first, then the
+  // ones already paid, by name.
+  const shown = $derived(cards.filter((c) => c.owed_now >= 0.005 || c.remaining > 0).toSorted((a, b) =>
+    (a.remaining > 0 ? 0 : 1) - (b.remaining > 0 ? 0 : 1) || (a.remaining > 0 ? a.due_date.localeCompare(b.due_date) : 0) || a.name.localeCompare(b.name)));
   const today = parseDate(isoDay());
 
   async function setStatement(c: CardSummary, value: number) {
