@@ -1,6 +1,6 @@
-# The checks to run before you push: `make check` runs ruff, mypy, Runway's own Semgrep rules, the Python tests (in parallel,
-# as CI does), the web app's type-check, ESLint, Vitest tests and build, and the docs site's build, each once. The other
-# targets run one part of it. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL)
+# The checks to run before you push: `make check` runs ruff, mypy, Runway's own Semgrep rules, the feature map's and the API
+# contract's checks, the Python tests (in parallel, as CI does), the web app's type-check, ESLint, Vitest tests and build,
+# and the docs site's build, each once. The other targets run one part of it. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL)
 # run only in CI, on the pull requests they can affect.
 # Python commands go through Poetry, as in docs/src/content/docs/contributing/development.md.
 
@@ -17,10 +17,11 @@ UNITTEST_PARALLEL ?= poetry run unittest-parallel -t . -s tests -j 4
 SEMGREP ?= pipx run semgrep==1.146.0
 
 .PHONY: check lint python-lint frontend-lint semgrep test test-parallel test-pg fix \
-	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build feature-map feature-map-check
+	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build feature-map feature-map-check \
+	api-contract api-contract-check
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
-check: lint feature-map-check test-parallel frontend-check docs-build
+check: lint feature-map-check api-contract-check test-parallel frontend-check docs-build
 
 # Ruff and mypy for Python, ESLint over the web app, the extension and runway/static (the same lint CI runs), and
 # Runway's own Semgrep rules.
@@ -91,3 +92,11 @@ feature-map:
 
 feature-map-check:
 	$(PYTHON) tools/feature_map.py --check
+
+# The API contract (docs/openapi.json and frontend/src/lib/api-types.ts), generated from the routes and the types their
+# handlers are annotated with (runway/server/contract.py). api-contract-check fails when either is out of date.
+api-contract:
+	$(PYTHON) tools/api_contract.py
+
+api-contract-check:
+	$(PYTHON) tools/api_contract.py --check
