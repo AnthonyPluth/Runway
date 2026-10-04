@@ -408,17 +408,15 @@ def fee_recurring(recurring: list[dict], account_id: str, day: date) -> bool:
     return False
 
 
-def annual_fees(conn, card: dict, today: date, end: date, closing_day: int | None, recurring: list[dict]) -> list[dict]:
+def annual_fees(conn, card: dict, today: date, end: date, recurring: list[dict]) -> list[dict]:
     """A churning card's (churn_cards row) annual fees from today through `end`: one, or two with a horizon over a year.
 
-    The fee posts in the account's anniversary month, the month the card was opened (for a product change, the month
-    the original card was: `_anniversary`, churning.anniversaries; whatever fee_month says), from the first
-    anniversary on. The day: the statement closing day in that month when
-    the card's account has a statement (`closing_day`; issuers charge it on the anniversary month's statement, so it's
-    on that one, paid the month after, which is also the earlier of the two statements it could land on), else the day
-    of the month it was opened (a shorter month's last day: Feb 29 -> Feb 28). An anniversary earlier this month whose
-    fee hasn't been charged yet is still coming: today, as late. That's only for a card linked to an account, where it
-    can be seen whether it was.
+    The fee posts on the account's anniversary, the day of the month it was opened (for a product change, the original
+    card's: `_anniversary`, churning.anniversaries; whatever fee_month says), from the first anniversary on (a shorter
+    month's last day: Feb 29 -> Feb 28). Issuers charge it on the anniversary, so it's on whichever statement that day
+    falls in: the one closing that month when the anniversary is on or before the closing day, else the next one (the
+    Churning page dates it the same way). An anniversary earlier this month whose fee hasn't been charged yet is still
+    coming: today, as late. That's only for a card linked to an account, where it can be seen whether it was.
 
     Nothing for a card that isn't open or has no fee, nor from the day it's closed (closed_on) or planned to be closed or
     changed (churning.plan_active: by its plan_date, else before the fee), nor for a fee already charged (fee_posted) or
@@ -433,7 +431,7 @@ def annual_fees(conn, card: dict, today: date, end: date, closing_day: int | Non
     for year in range(max(opened.year + 1, today.year), end.year + 1):
         if clamp_day(year, opened.month, 31) < today:
             continue   # this year's anniversary month is over
-        day = clamp_day(year, opened.month, closing_day or opened.day)
+        day = clamp_day(year, opened.month, opened.day)
         if day > end:
             break
         if card.get("closed_on") and card["closed_on"] <= day.isoformat():
@@ -561,12 +559,12 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     fee_category = FEE_CATEGORY if conn.execute(select(Category.name).where(Category.name == FEE_CATEGORY)).fetchone() else None
     fees: list[dict] = []
 
-    def card_fees(account: dict | None, closing_day: int | None) -> list[dict]:
+    def card_fees(account: dict | None) -> list[dict]:
         out = [{**f, "account_id": account["id"] if account else None,
                 "account": db.account_label(account) if account else None, "category": fee_category,
                 "paid_on": None, "paid_from": None}
                for c in fee_cards.pop(account["id"] if account else None, [])
-               for f in annual_fees(conn, c, today, end, closing_day, recurring)]
+               for f in annual_fees(conn, c, today, end, recurring)]
         fees.extend(out)
         return out
 
@@ -631,7 +629,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
     on_cards: dict[str, list[dict]] = {}
     for card in cards:
         bank = banks[card["id"]]
-        on_cards[card["id"]] = card_fees(card, card["closing_day"] if bank else None)
+        on_cards[card["id"]] = card_fees(card)
         if bank:
             # The day each fee is on the card's statements from: a fee charged on the day the latest one closed (today)
             # is on the next one.
@@ -853,7 +851,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
 
     # Churning cards not linked to a credit card account here (or to a hidden one): their fees are listed, on the
     # anniversary's day, but aren't in any balance, since there's no card whose statement they'd be on.
-    card_fees(None, None)
+    card_fees(None)
     for f in fees:
         f.pop("_on", None)
     fees.sort(key=lambda f: (f["date"], f["amount"]))
