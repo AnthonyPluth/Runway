@@ -12,7 +12,7 @@ MYPY ?= poetry run mypy
 UNITTEST_PARALLEL ?= poetry run unittest-parallel -t . -s tests -j 4
 
 .PHONY: check lint python-lint frontend-lint test test-parallel test-pg fix \
-	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build
+	frontend-check frontend-typecheck frontend-test frontend-build docs docs-build verify
 
 # frontend-lint is a prerequisite of both lint and frontend-check, and make runs it once.
 check: lint test-parallel frontend-check docs-build
@@ -71,3 +71,9 @@ docs: docs/node_modules
 # Builds the site into docs/dist and checks every link between its pages, as docs.yml does.
 docs-build: docs/node_modules
 	cd docs && $(NPM) run build
+
+# Runs the real app on made-up demo data and drives it with Playwright: each page at phone, tablet and desktop widths, plus
+# the scripted flows in frontend/verify/flows. Screenshots, console errors and failed requests go to artifacts/verify/; it
+# fails on a console error or a 5xx. `make verify PAGES="budget setup"` visits only those pages.
+verify: frontend/node_modules frontend-build
+	$(PYTHON) run.py verify $(PAGES)

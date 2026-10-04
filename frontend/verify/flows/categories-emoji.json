@@ -1,0 +1,10 @@
+{
+  "name": "categories-emoji",
+  "page": "setup",
+  "steps": [
+    { "goto": "#setup/categories" },
+    { "click": "button[aria-label^='Emoji for ']" },
+    { "wait_for": "[role=dialog]" },
+    { "screenshot": "picker-open" }
+  ]
+}
