@@ -122,7 +122,7 @@ def check_config() -> list[str]:
 
 def _get_json(url: str, headers: dict | None = None) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Runway/0.1", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=15, context=tls.ssl_context()) as r:
+    with tls.urlopen(req, timeout=15, allow_http=True) as r:   # your provider may be on your network, over http
         return json.loads(r.read().decode())
 
 
@@ -219,7 +219,7 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
             form["client_secret"] = c["client_secret"]
     req = urllib.request.Request(d["token_endpoint"], data=urllib.parse.urlencode(form).encode(), headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15, context=tls.ssl_context()) as r:
+        with tls.urlopen(req, timeout=15, allow_http=True) as r:
             tokens = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:200]

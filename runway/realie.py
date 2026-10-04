@@ -117,7 +117,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
     db.set_setting(conn, sk.realie_calls(today), str(used_this_month(conn, today) + 1))
     conn.commit()
     try:
-        with urllib.request.urlopen(req, timeout=30, context=tls.ssl_context()) as resp:
+        with tls.urlopen(req, timeout=30, allow_http="RUNWAY_REALIE_URL" in os.environ) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:

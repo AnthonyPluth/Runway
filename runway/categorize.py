@@ -355,7 +355,7 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
     # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
     with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0, **({"web_search": web} if web else {})) as span:
         try:
-            with urllib.request.urlopen(req, timeout=120, context=tls.ssl_context()) as resp:
+            with tls.urlopen(req, timeout=120, allow_http=True) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]

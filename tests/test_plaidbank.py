@@ -471,7 +471,7 @@ class PlaidBankTests(DbCase):
         with self.assertRaises(plaid.PlaidError):
             plaid.call(self.c, "/accounts/get", {})
         for exc in (TimeoutError("timed out"), ConnectionResetError()):
-            with mock.patch("urllib.request.urlopen", side_effect=exc), self.assertRaises(plaid.PlaidError):
+            with mock.patch("runway.tls.urlopen", side_effect=exc), self.assertRaises(plaid.PlaidError):
                 plaid.call(self.c, "/accounts/get", {})
 
     def test_a_link_is_never_lost_after_the_token_exchange(self):

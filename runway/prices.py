@@ -35,7 +35,7 @@ def fetch(ticker: str, start: date, end: date) -> tuple[list[tuple[str, float, f
     p2 = int(datetime(end.year, end.month, end.day, tzinfo=UTC).timestamp()) + 86400
     url = f"{base}/{urllib.parse.quote(ticker, safe='')}?period1={p1}&period2={p2}&interval=1d&events=split&includeAdjustedClose=true"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Runway/0.1", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30, context=tls.ssl_context()) as resp:
+    with tls.urlopen(req, timeout=30, allow_http="RUNWAY_PRICES_URL" in os.environ) as resp:
         data = json.loads(resp.read().decode())
     result = ((data.get("chart") or {}).get("result") or [None])[0]
     if not result:
@@ -156,7 +156,7 @@ def _quote(ticker: str) -> dict | None:
     base = os.environ.get("RUNWAY_PRICES_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
     url = f"{base}/{urllib.parse.quote(ticker, safe='')}?range=1d&interval=1d"   # safe='': a "/" in a name stays in the name
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Runway/0.1", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10, context=tls.ssl_context()) as resp:
+    with tls.urlopen(req, timeout=10, allow_http="RUNWAY_PRICES_URL" in os.environ) as resp:
         data = json.loads(resp.read().decode())
     result = ((data.get("chart") or {}).get("result") or [None])[0]
     if not result:

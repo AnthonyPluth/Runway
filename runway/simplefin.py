@@ -71,7 +71,8 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def _opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(_PublicHTTPSHandler(context=tls.ssl_context()), _NoPlainHTTP(), _NoRedirects())
+    """tls.opener(): nothing but https (file:, ftp: and data: have no handler), here to public addresses only."""
+    return tls.opener(_PublicHTTPSHandler(context=tls.ssl_context()), _NoPlainHTTP(), _NoRedirects())
 
 
 def _open(req: urllib.request.Request, timeout: float):

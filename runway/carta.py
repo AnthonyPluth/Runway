@@ -101,7 +101,7 @@ def _post_form(url: str, data: dict, client_id: str, secret: str, opener=None) -
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "Authorization": f"Basic {auth}"})
     try:
-        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=tls.ssl_context())
+        resp = opener(req) if opener else tls.urlopen(req, timeout=30)
         with resp:
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
@@ -155,7 +155,7 @@ def _get(conn, path: str, params: dict | None = None, opener=None):
     url = f"{base}/{VERSION}/{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {_token(conn, opener)}", "Accept": "application/json"})
     try:
-        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=tls.ssl_context())
+        resp = opener(req) if opener else tls.urlopen(req, timeout=30)
         with resp:
             return json.loads(resp.read().decode() or "null")
     except urllib.error.HTTPError as e:

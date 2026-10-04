@@ -146,8 +146,7 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
         if opener:
             resp = opener(req)
         else:
-            resp = urllib.request.build_opener(urllib.request.HTTPSHandler(context=tls.ssl_context()),
-                                               _SameRules()).open(req, timeout=8)
+            resp = tls.urlopen(req, timeout=8, handlers=(_SameRules(),))
         with resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             data = resp.read(MAX_LOGO + 1)
@@ -176,8 +175,7 @@ def search(conn, name: str, opener=None) -> list[dict] | None:
     req = urllib.request.Request(f"{SEARCH}?{urllib.parse.urlencode({'q': name})}", headers={
         "Authorization": f"Bearer {db.get_setting(conn, sk.LOGODEV_SECRET)}", "Accept": "application/json", "User-Agent": "Runway"})
     try:
-        resp = opener(req) if opener else urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=tls.ssl_context()), _NoRedirects()).open(req, timeout=8)
+        resp = opener(req) if opener else tls.urlopen(req, timeout=8, handlers=(_NoRedirects(),))
         with resp:
             data = json.loads(resp.read(512 * 1024))
     except urllib.error.HTTPError as e:

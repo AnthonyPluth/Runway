@@ -48,7 +48,7 @@ def call(conn, path: str, body: dict) -> dict:
         headers={"Content-Type": "application/json", "User-Agent": "Runway/0.1", "Plaid-Version": "2020-09-14"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=90, context=tls.ssl_context()) as resp:
+        with tls.urlopen(req, timeout=90, allow_http="RUNWAY_PLAID_URL" in os.environ) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:

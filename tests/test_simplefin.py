@@ -185,7 +185,8 @@ class SimpleFinStoreTests(LedgerCase):
     def test_simplefin_timeout_is_a_simplefin_error(self):
         from unittest import mock
         for exc in (TimeoutError("timed out"), ConnectionResetError()):
-            with mock.patch("urllib.request.urlopen", side_effect=exc), self.assertRaises(simplefin.SimpleFinError):
+            failing = mock.Mock(open=mock.Mock(side_effect=exc))
+            with mock.patch.object(simplefin, "_opener", return_value=failing), self.assertRaises(simplefin.SimpleFinError):
                 simplefin.fetch_accounts("https://u:p@h/simplefin", TODAY)
 
     def test_kind_guess(self):
