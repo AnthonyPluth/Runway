@@ -224,11 +224,18 @@ def tracing() -> bool:
     return _enabled
 
 
-def report(e: BaseException | None = None, **tags) -> None:
-    """Log an error that was caught (the current one, or `e`), and send it to Sentry when that's on."""
+def report(e: BaseException | None = None, *, values: bool = True, **tags) -> None:
+    """Log an error that was caught (the current one, or `e`), and send it to Sentry when that's on.
+
+    values=False: what each exception says is left out (only its type, and where it was raised, are kept), for an error
+    whose text may quote what was being read: a request's handler failing ("invalid literal for int(): 'Acme'", a
+    KeyError's key, a database driver's "Key (payee)=(Acme) already exists"). A database error keeps its SQL, which helps
+    and holds no values (they're bound to it)."""
     # Scrubbed like a Sentry report: a database error's text names the row it was writing, so the local log gets the
     # same treatment as the remote one.
-    text = "".join(traceback.format_exception(*sys.exc_info()) if e is None else traceback.format_exception(type(e), e, e.__traceback__))
+    if e is None:
+        e = sys.exc_info()[1]
+    text = "".join(traceback.format_exception(e) if values or e is None else _types_only(e))
     print(scrub(text), file=sys.stderr, end="", flush=True)
     if not _enabled:
         return
@@ -236,7 +243,47 @@ def report(e: BaseException | None = None, **tags) -> None:
     with sentry_sdk.new_scope() as scope:
         for k, v in tags.items():
             scope.set_tag(k, v)
+        if not values and e is not None:
+            said = {type(x).__name__: _what_it_said(x) for x in _chain(e)}
+            scope.add_event_processor(lambda event, _hint: _blank_values(event, said))
         sentry_sdk.capture_exception(e)
+
+
+def _chain(e: BaseException) -> list[BaseException]:
+    """e and the exceptions it was raised from or while handling, the first of them first (as a traceback shows them)."""
+    chain: list[BaseException] = []
+    cur: BaseException | None = e
+    while cur is not None and cur not in chain:
+        chain.append(cur)
+        cur = cur.__cause__ or (None if cur.__suppress_context__ else cur.__context__)
+    return chain[::-1]
+
+
+def _what_it_said(exc: BaseException) -> str:
+    """What report(values=False) keeps of an exception's text: a database error's SQL, else nothing."""
+    statement = getattr(exc, "statement", None)
+    if type(exc).__module__.startswith("sqlalchemy") and isinstance(statement, str):
+        return f"[SQL: {statement}]"
+    return "[Filtered]"
+
+
+def _types_only(e: BaseException) -> list[str]:
+    """e's traceback (and those of the exceptions it was raised from), each exception's text as _what_it_said."""
+    out: list[str] = []
+    for exc in _chain(e):
+        if out:
+            out.append("\nWhile handling the above, another exception was raised:\n\n")
+        if exc.__traceback__ is not None:
+            out += ["Traceback (most recent call last):\n", *traceback.format_tb(exc.__traceback__)]
+        out.append(f"{type(exc).__module__}.{type(exc).__qualname__}: {_what_it_said(exc)}\n")
+    return out
+
+
+def _blank_values(event, said: dict[str, str]):
+    """A Sentry event processor for report(values=False): each exception's text, as _what_it_said (by its type)."""
+    for exc in (event.get("exception") or {}).get("values") or []:
+        exc["value"] = said.get(exc.get("type") or "", "[Filtered]")
+    return event
 
 
 # ------------------------------------------------------------------------------------------------ logs and metrics

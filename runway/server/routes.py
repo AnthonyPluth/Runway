@@ -1,9 +1,14 @@
-"""The API's routes: which handler answers each method and path."""
+"""The API's routes: which handler answers each method and path (ROUTES), finding a request's (match) and answering it
+(dispatch), for the web app (server/handler.py) and the assistants (server/mcp_http.py) alike."""
 from __future__ import annotations
 
 import urllib.parse
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
+
+from .. import db
+from .common import ApiError, server_error
 
 from .api.accounts import (
     api_account_logo, api_account_logo_options, api_account_removal, api_account_remove, api_account_restore, api_account_update,
@@ -233,14 +238,71 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
 ]
 
 
-def _match(pattern: str, path: str):
-    p_parts, parts = pattern.strip("/").split("/"), path.strip("/").split("/")
-    if len(p_parts) != len(parts):
+@dataclass(frozen=True)
+class Route:
+    method: str
+    pattern: str
+    fn: Callable[..., Any]
+    parts: tuple[str | None, ...]   # the pattern's segments, None for an {id}
+
+
+@dataclass(frozen=True)
+class Match:
+    """A request's route, and the values of the {id}s in its address (unquoted)."""
+    route: Route
+    params: list[str]
+
+
+def _segments(path: str) -> list[str]:
+    return path.strip("/").split("/")
+
+
+class Table:
+    """ROUTES, split up once: each method's routes by how many segments their address has, in ROUTES' order (the
+    first that matches answers, as /api/transactions/bulk does before /api/transactions/{id})."""
+
+    def __init__(self, routes):
+        self.routes = [Route(m, pattern, fn, tuple(None if s == "{id}" else s for s in _segments(pattern)))
+                       for m, pattern, fn, *_ in routes]
+        self._by_shape: dict[tuple[str | None, int], list[Route]] = {}
+        for r in self.routes:
+            for method in (r.method, None):   # (None: any method, for naming a request)
+                self._by_shape.setdefault((method, len(r.parts)), []).append(r)
+
+    def match(self, method: str | None, path: str) -> Match | None:
+        """The route that answers `method path` (any method, for None), or None."""
+        parts = _segments(path)
+        for r in self._by_shape.get((method, len(parts)), ()):
+            params = []
+            for want, got in zip(r.parts, parts, strict=True):
+                if want is None:
+                    params.append(urllib.parse.unquote(got))
+                elif want != got:
+                    break
+            else:
+                return Match(r, params)
         return None
-    params = []
-    for a, b in zip(p_parts, parts, strict=True):
-        if a == "{id}":
-            params.append(urllib.parse.unquote(b))
-        elif a != b:
-            return None
-    return params
+
+
+TABLE = Table(ROUTES)
+match = TABLE.match
+
+BUSY = "Runway is busy saving a sync. Try again in a few seconds."
+
+
+def dispatch(found: Match, query: dict, body) -> Any:
+    """Answer a request that matched a route: its handler, with a database connection that's committed if it succeeds
+    and rolled back if not. Every way it can fail comes out as ApiError: the handler's own, saying what was wrong (a
+    4xx); 503 when the database was busy with something else (a sync); and anything else, which is a bug, 500 with only
+    a reference, logged and reported without what the error said (common.server_error). The web app's calls (/api/...)
+    and the assistants' (/mcp) both come through here."""
+    r = found.route
+    try:
+        with db.session() as conn:
+            return r.fn(conn, query, body, *found.params)
+    except ApiError:
+        raise
+    except Exception as e:
+        if db.is_busy(e):
+            raise ApiError(BUSY, 503) from None
+        raise server_error(e, r.method, r.pattern) from None

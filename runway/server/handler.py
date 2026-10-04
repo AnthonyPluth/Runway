@@ -25,12 +25,12 @@ import sqlalchemy.exc
 
 from .. import backup, carta, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, prices, retail, secretbox
 from .. import settings_keys as sk
-from . import mcp_http, sync
-from .common import ApiError, _current, host_allowed, request_ref
+from . import mcp_http, routes, sync
+from .common import ApiError, _current, host_allowed, server_error
 from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
 from .api.investments import live_tickers
 from .api.retail import EXT_ROUTES, MAX_EXT_BODY, _retail_categorize_lock, extension_zip
-from .routes import ROUTES, _match
+
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
@@ -90,10 +90,8 @@ def trace_name(path: str) -> str:
             return path
         if path.startswith("/api/merchants/") and path.endswith("/logo"):
             return "/api/merchants/{id}/logo"
-        for _m, pattern, _fn in ROUTES:
-            if _match(pattern, path) is not None:
-                return pattern
-        return "/api/*"   # nothing answers it (a 404)
+        found = routes.match(None, path)   # (by any method)
+        return found.route.pattern if found else "/api/*"   # nothing answers it (a 404)
     if path in AUTH_PATHS or path in OAUTH_PUBLIC or path in OAUTH_METADATA or path in ("/mcp", "/oauth/authorize", "/carta/callback"):
         return path
     if path.startswith(("/.well-known/", "/oauth/")):
@@ -180,12 +178,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _error(self, e: BaseException) -> None:
-        """An unexpected failure: log the details, show only a reference to them."""
-        ref = request_ref()
-        path = urllib.parse.urlsplit(self.path).path
-        monitoring.log(f"[error {ref}] {self.command} {path}", "error", remote=f"[error {ref}] {self.command} {trace_name(path)}", ref=ref)
-        monitoring.report(e, ref=ref)
-        self._json(500, {"error": f"Something went wrong on Runway's side (reference {ref}; the details are in its log)."})
+        """An unexpected failure: log the details, show only a reference to them (common.server_error)."""
+        err = server_error(e, self.command, trace_name(urllib.parse.urlsplit(self.path).path))
+        self._json(err.status, {"error": str(err)})
 
     def _body_length(self, limit: int) -> int | None:
         """The request's Content-Length, or None (after answering) if it's missing a number or too big."""
@@ -568,28 +563,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, run_sync())
             except ApiError as e:
                 return self._json(e.status, {"error": str(e)})
-        for m, pattern, fn in ROUTES:
-            if m != method:
-                continue
-            params = _match(pattern, url.path)
-            if params is None:
-                continue
-            try:
-                with db.session() as conn:
-                    result = fn(conn, q, body, *params)
-                return self._json(200, result)
-            except ApiError as e:
-                return self._json(e.status, {"error": str(e)})
-            except sqlalchemy.exc.OperationalError as e:
-                if db.is_busy(e):
-                    return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-                return self._error(e)
-            except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
-                ref = request_ref()
-                monitoring.log(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}", "warning",   # not the value itself
-                               remote=f"[bad request {ref}] {method} {pattern}: {type(e).__name__}", ref=ref)
-                return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
-        return self._json(404, {"error": "Not found"})
+        hit = routes.match(method, url.path)
+        if hit is None:
+            return self._json(404, {"error": "Not found"})
+        try:
+            result = routes.dispatch(hit, q, body)
+        except ApiError as e:
+            return self._json(e.status, {"error": str(e)})
+        return self._json(200, result)
 
     def _quote_stream(self) -> None:
         """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it

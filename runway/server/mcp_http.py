@@ -1,6 +1,7 @@
 """How the MCP server (POST /mcp) reaches Runway's pages, in this process: who the caller is (authorized), the
-allowlist lookup (route, kind_of) and the call itself. Every page goes through route(), which finds it in ROUTES only (so
-nothing outside /api/'s routes, like backups, sign-in or OAuth, can be reached), refuses mcp_access.BLOCKED, and allows
+allowlist lookup (kind_of) and the call itself. Every page is found by routes.match, in ROUTES only (so nothing outside
+/api/'s routes, like sign-in or OAuth, can be reached), and answered by routes.dispatch, as the web app's are; it refuses
+mcp_access.BLOCKED (backups and restores among them), and allows
 mcp_access.READABLE, the changes in mcp_access.CHANGES and, for "write", ANYTHING and mcp_access.WRITE_READABLE; the
 connection's scopes and each change's switch apply to every call. This is the gate: the tools are a convenience."""
 from __future__ import annotations
@@ -9,19 +10,17 @@ from collections import defaultdict
 from collections.abc import Callable
 from typing import Any
 
-import sqlalchemy.exc
-
 from .. import db, mcp_access
 from ..mcp_server import ToolError
+from . import routes
 from .common import ApiError, _current
-from .routes import ROUTES, _match
 
 # The ways to prove a caller may use the MCP server: each takes (conn, Authorization header, this server's resource)
 # and answers what the caller may do (mcp_access.Access), or None.
 CREDENTIAL_CHECKS: tuple[Callable[[Any, str | None, str | None], mcp_access.Access | None], ...] = (mcp_access.resolve_bearer,)
 
 # The changes "write" allows: (method, pattern), from ROUTES.
-ANYTHING = frozenset(mcp_access.writable_routes(ROUTES))
+ANYTHING = frozenset(mcp_access.writable_routes(routes.ROUTES))
 
 WRITES_OFF = "Changes are switched off. Turn on \"Let assistants change churning\" in Runway under Settings → Data."
 READ_ONLY = ("This connection can only read. To let the assistant change churning, reconnect Runway in the assistant and "
@@ -53,17 +52,6 @@ def authorized(conn, authorization: str | None, resource: str | None = None) -> 
     return None
 
 
-def route(method: str, path: str) -> tuple[str, Callable, list] | None:
-    """The route `method path` is, as the web server finds it (the first in ROUTES that matches): (pattern, handler,
-    path parameters). None for anything that isn't one."""
-    for m, pattern, fn in ROUTES:
-        if m == method:
-            params = _match(pattern, path)
-            if params is not None:
-                return pattern, fn, params
-    return None
-
-
 def kind_of(method: str, pattern: str) -> str | None:
     """What an assistant needs for a route: "read", or the scope a change (or a page only "write" opens) needs. None
     for anything an assistant may never use."""
@@ -80,17 +68,11 @@ def kind_of(method: str, pattern: str) -> str | None:
 def endpoints() -> dict[str, list[str]]:
     """What "write" can reach with call_endpoint, by area (the path after /api/), destructive changes marked."""
     out: dict[str, list[str]] = defaultdict(list)
-    for m, pattern, _fn in ROUTES:
+    for r in routes.TABLE.routes:
+        m, pattern = r.method, r.pattern
         if kind_of(m, pattern):
             out[pattern.split("/")[2]].append(f"{m} {pattern}" + (" (destructive)" if m != "GET" and mcp_access.destructive(m, pattern) else ""))
     return dict(out)
-
-
-def run(fn: Callable, query: dict, body: dict, params: list) -> Any:
-    """Call a resolved page as an assistant (no signed-in person). ApiError and the like are left for the caller."""
-    _current.user = None
-    with db.session() as conn:
-        return fn(conn, query, body, *params)
 
 
 def _why_not(access: mcp_access.Access, scope: str) -> str | None:
@@ -128,10 +110,10 @@ def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mc
         if why:
             raise ToolError(why)
         return endpoints()
-    hit = route(method, full)
-    if hit is None:
+    found = routes.match(method, full)
+    if found is None:
         raise ToolError("Not found")
-    pattern, fn, args = hit
+    pattern, args = found.route.pattern, found.params
     if mcp_access.blocked(pattern):
         raise ToolError(OUT_OF_REACH)
     kind = kind_of(method, pattern)
@@ -150,13 +132,8 @@ def local_fetch(path: str, params: dict[str, Any], body: dict | None, access: mc
             if mcp_access.is_split(conn, args[0]):
                 raise ToolError(mcp_access.SPLIT_REFUSED)
     query = {k: [str(v)] for k, v in params.items() if v not in (None, "")}
+    _current.user = None   # an assistant: no signed-in person
     try:
-        return run(fn, query, body or {}, args)
-    except ApiError as e:
+        return routes.dispatch(found, query, body or {})
+    except ApiError as e:   # what was wrong, busy, or a server error's reference: as the web app is told
         raise ToolError(str(e)) from None
-    except sqlalchemy.exc.OperationalError as e:
-        if db.is_busy(e):
-            raise ToolError("Runway is busy saving a sync. Try again in a few seconds.") from None
-        raise
-    except (ValueError, TypeError, KeyError):
-        raise ToolError("Runway couldn't read one of the values sent.") from None

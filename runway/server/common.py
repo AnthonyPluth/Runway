@@ -1,5 +1,6 @@
-"""The pieces every part of the server shares: the error a handler raises, reading what a request sends (ids, whole
-numbers, texts), the signed-in person for this request, request references, and which host names Runway answers to."""
+"""The pieces every part of the server shares: the error a handler raises and what a server error says, reading what a
+request sends (ids, whole numbers, texts), the signed-in person for this request, request references, and which host
+names Runway answers to."""
 from __future__ import annotations
 
 import ipaddress
@@ -12,15 +13,25 @@ from datetime import date
 
 from dateutil.relativedelta import relativedelta
 
-from .. import validate
+from .. import monitoring, validate
 
 
 class ApiError(Exception):
     """What a handler answers when it can't do what was asked: a message for the person, and the status (400 unless
-    said otherwise)."""
+    said otherwise). Anything else a handler raises is a bug: a 500 with a reference (server_error)."""
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
         self.status = status
+
+
+def server_error(e: BaseException, method: str, route: str) -> ApiError:
+    """A handler (or the server) failed in a way it didn't expect: log and report it, without what the error says (it
+    may quote what the request sent, or name a row), and answer only a reference to it. `route` is the route's pattern
+    (/api/rules/{id}), never the address itself."""
+    ref = request_ref()
+    monitoring.log(f"[error {ref}] {method} {route}", "error", ref=ref)
+    monitoring.report(e, values=False, ref=ref)
+    return ApiError(f"Something went wrong on Runway's side (reference {ref}; the details are in its log).", 500)
 
 
 # ------------------------------------------------------------------------------------------ reading a request
