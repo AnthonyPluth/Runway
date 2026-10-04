@@ -1,52 +1,36 @@
-"""The HTTP server: routing, sign-in, security headers, request limits, static files, streaming, and serve()."""
+"""The HTTP server: who may reach what (sign-in, the CSRF checks, the extension's and assistants' keys), security
+headers, request limits, reading a request's body, sending the answer, and serve(). The API's routes are answered by
+routes.dispatch, OAuth for /mcp by oauth_http.py, and the web app's files by static.py."""
 from __future__ import annotations
 
 import contextlib
-import gzip
-import hashlib
 import html
 from http.cookies import SimpleCookie
 import json
-import mimetypes
-mimetypes.add_type("image/svg+xml", ".svg")
-mimetypes.add_type("font/woff2", ".woff2")
-mimetypes.add_type("application/manifest+json", ".webmanifest")
 import os
-import secrets
 import socket
 import sys
 import threading
 import time
 import urllib.parse
-from datetime import date, datetime
+from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
-import sqlalchemy.exc
-
-from .. import backup, carta, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, prices, retail, secretbox
+from .. import carta, db, mcp_oauth, mcp_server, monitoring, oidc, retail, secretbox
 from .. import settings_keys as sk
-from . import mcp_http, sync
-from .common import ApiError, _current, host_allowed, request_ref
-from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
-from .api.investments import live_tickers
-from .api.retail import EXT_ROUTES, MAX_EXT_BODY, _retail_categorize_lock, extension_zip
-from .routes import ROUTES, _match
+from . import mcp_http, oauth_http, routes, static, sync
+from .common import NOT_READ, ApiError, BadJson, Response, _current, header_value, host_allowed, server_error
+from .oauth_http import OAUTH_METADATA, OAUTH_PUBLIC
+from .sync import background_sync
+from .api.retail import EXT_ROUTES, MAX_EXT_BODY
 
-STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 # Files anyone may fetch: the sign-in pages' look, and what a phone needs to install Runway (it fetches the manifest
 # without cookies). None of them hold any data.
 PUBLIC_FILES = {"/page.css", "/logo.svg", "/logo-180.png", "/fonts/Geist-Variable.woff2", "/manifest.webmanifest", "/sw.js",
                 "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png"}
 
-
-# OAuth for /mcp (runway/mcp_oauth.py) that works without a Runway session: an app calls these itself. The consent
-# page, /oauth/authorize, is the one OAuth path that needs you signed in.
-OAUTH_PUBLIC = {"/oauth/register", "/oauth/token", "/oauth/revoke"}
-OAUTH_METADATA = {"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp",
-                  "/.well-known/oauth-authorization-server"}
-
 MAX_JSON_BODY = 1024 * 1024          # API requests are small; anything bigger is refused before it's read
-MAX_RESTORE_BODY = 200 * 1024 * 1024
 REQUEST_TIMEOUT = 60                 # seconds a client may stall while sending or receiving (slow-client protection)
 HEADER_DEADLINE = 30                 # seconds to send the request line and headers in all, however it's trickled in
 MIN_BODY_RATE = 16 * 1024            # bytes a second a request body must average, on top of REQUEST_TIMEOUT
@@ -76,9 +60,6 @@ def content_security_policy(nonce: str | None = None) -> str:
             "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
-# The API's own paths that aren't in ROUTES (they're answered in _route itself), by name in traces and logs.
-SPECIAL_API_PATHS = {"/api/backup", "/api/carta/capture", "/api/retail/extension.zip", "/api/restore",
-                     "/api/investments/sync", "/api/investments/stream", "/api/sync/auto", "/api/sync"}
 AUTH_PATHS = {"/auth/login", "/auth/callback", "/auth/logout", "/auth/signed-out"}
 
 
@@ -86,14 +67,10 @@ def trace_name(path: str) -> str:
     """A request's name in Sentry: its route (/api/transactions/{id}/category), never the ids, names or searches in the
     address, so requests group together and nothing of yours is in the name."""
     if path.startswith("/api/"):
-        if path in SPECIAL_API_PATHS or path in EXT_ROUTES:
+        if path in EXT_ROUTES:
             return path
-        if path.startswith("/api/merchants/") and path.endswith("/logo"):
-            return "/api/merchants/{id}/logo"
-        for _m, pattern, _fn in ROUTES:
-            if _match(pattern, path) is not None:
-                return pattern
-        return "/api/*"   # nothing answers it (a 404)
+        found = routes.match(None, path)   # the route table's own pattern (by any method)
+        return found.route.pattern if found else "/api/*"   # nothing answers it (a 404)
     if path in AUTH_PATHS or path in OAUTH_PUBLIC or path in OAUTH_METADATA or path in ("/mcp", "/oauth/authorize", "/carta/callback"):
         return path
     if path.startswith(("/.well-known/", "/oauth/")):
@@ -180,12 +157,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _error(self, e: BaseException) -> None:
-        """An unexpected failure: log the details, show only a reference to them."""
-        ref = request_ref()
-        path = urllib.parse.urlsplit(self.path).path
-        monitoring.log(f"[error {ref}] {self.command} {path}", "error", remote=f"[error {ref}] {self.command} {trace_name(path)}", ref=ref)
-        monitoring.report(e, ref=ref)
-        self._json(500, {"error": f"Something went wrong on Runway's side (reference {ref}; the details are in its log)."})
+        """An unexpected failure: log the details, show only a reference to them (common.server_error)."""
+        err = server_error(e, self.command, trace_name(urllib.parse.urlsplit(self.path).path))
+        self._json(err.status, {"error": str(err)})
 
     def _body_length(self, limit: int) -> int | None:
         """The request's Content-Length, or None (after answering) if it's missing a number or too big."""
@@ -203,6 +177,71 @@ class Handler(BaseHTTPRequestHandler):
         # allow_nan=False: an inf (an overflowed sum) would go out as `Infinity`, which isn't JSON; a ValueError here
         # is a bug, answered as one (_error).
         self._send(status, json.dumps(obj, allow_nan=False).encode())
+
+    def _read_json(self, limit: int, empty: Any = BadJson) -> Any:
+        """The request's JSON body, of at most `limit` bytes; `empty` when it has none (a BadJson if it must have one).
+        NOT_READ once it has answered a body that's too large, or a Content-Length that isn't a number. Raises BadJson
+        for anything that isn't JSON, nesting deeper than Python reads included (a RecursionError)."""
+        n = self._body_length(limit)
+        if n is None:
+            return NOT_READ
+        if not n:
+            if empty is BadJson:
+                raise BadJson("There's no body")
+            return empty
+        try:
+            return json.loads(self._read_body(n).decode())
+        except (ValueError, RecursionError) as e:   # (JSONDecodeError and UnicodeDecodeError are ValueErrors)
+            raise BadJson(type(e).__name__) from None
+
+    def _respond(self, r: Response) -> None:
+        """A route's answer that isn't JSON (common.Response): a download, a logo, a stream."""
+        # Every header value a route chose, checked before anything is sent (common.header_value).
+        ctype, cache = header_value(r.content_type), header_value(r.cache)
+        etag = header_value(r.etag) if r.etag else None
+        csp = header_value(r.csp) if r.csp else None
+        headers = {header_value(k): header_value(v) for k, v in r.headers.items()}
+        if etag and self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self._security_headers()
+            self.end_headers()
+            return
+        self.send_response(r.status)
+        self.send_header("Content-Type", ctype)
+        for k, v in headers.items():
+            self.send_header(k, v)
+        if r.stream is None:
+            self.send_header("Content-Length", str(len(r.body)))
+        self.send_header("Cache-Control", cache)
+        if etag:
+            self.send_header("ETag", etag)
+        if r.stream is not None:
+            self.send_header("X-Accel-Buffering", "no")   # a reverse proxy (nginx) would otherwise hold the events back
+        self._security_headers()
+        if csp:
+            self.send_header("Content-Security-Policy", csp)   # on top of the usual one (a logo opened directly is inert)
+        self.end_headers()
+        if r.stream is not None:
+            return self._stream(r.stream)
+        if self.command != "HEAD":
+            self.wfile.write(r.body)
+            if r.sent:
+                r.sent()
+
+    def _stream(self, events: Generator[bytes]) -> None:
+        """Server-Sent Events, each piece sent as it comes, until the stream ends or the page is closed."""
+        self.close_connection = True
+        try:
+            if self.command == "HEAD":   # (the stream is never started)
+                return
+            for piece in events:
+                self.wfile.write(piece)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass   # the page was closed
+        finally:
+            events.close()
 
     def _host_ok(self) -> bool:
         # Refuse requests addressed to hostnames we don't know (DNS-rebinding protection).
@@ -389,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/mcp":   # MCP over HTTP, served here: an OAuth access token instead of a sign-in
             return self._mcp_rpc(method)
         if url.path.startswith(("/.well-known/", "/oauth/")) and url.path != "/oauth/authorize":
-            return self._oauth(method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
+            return oauth_http.app_calls(self, method, url)   # OAuth an app calls itself: no sign-in, no same-site checks (see OAUTH_PUBLIC)
         if method != "GET" and url.path != "/oauth/authorize" and not self._same_site():   # (the consent form checks its own)
             return self._json(403, {"error": NOT_SAME_SITE})
         if url.path.startswith("/auth/") and method == "GET" and self._auth_routes(url):
@@ -408,221 +447,44 @@ class Handler(BaseHTTPRequestHandler):
                 back = (url.path or "/") + ("?" + url.query if url.query else "")   # e.g. /plaid/oauth?oauth_state_id=…
                 return self._redirect("/auth/login?next=" + urllib.parse.quote(back, safe=""))
         if url.path == "/oauth/authorize":   # approving an assistant: you, signed in
-            return self._authorize(method, url)
+            return oauth_http.authorize(self, method, url)
         if url.path == "/carta/callback" and method == "GET":
             return self._carta_callback(url)
         if not url.path.startswith("/api/"):
             if method != "GET":
                 return self._send(405, b"", "text/plain")
-            return self._static(url.path)
+            return static.serve(self, url.path)
         # State-changing calls must carry a custom header, which a foreign web page can't add without CORS approval.
         if method != "GET" and self.headers.get("X-Runway") != "1":
             return self._json(403, {"error": NO_APP_HEADER})
-        if method == "GET" and url.path == "/api/backup":
-            with db.session() as conn:
-                data = backup.dump(conn)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/gzip")
-            self.send_header("Content-Disposition", f'attachment; filename="runway-backup-{date.today().isoformat()}.json.gz"')
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self._security_headers()
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(data)
-                with db.session() as conn:   # for "Last backup" in Settings → Data
-                    db.set_setting(conn, sk.LAST_BACKUP, datetime.now().isoformat(timespec="seconds"))
-            return
-        if method == "GET" and url.path.startswith("/api/merchants/") and url.path.endswith("/logo"):
-            mid = urllib.parse.unquote(url.path[len("/api/merchants/"):-len("/logo")])
-            with db.session() as conn:
-                found = merchants.logo(conn, mid)
-            if not found:
-                return self._send(404, b"", "text/plain")
-            data, ctype = found
-            if ctype not in merchants.TYPES:   # a backup can hold anything; only ever serve an image
-                return self._send(404, b"", "text/plain")
-            etag = '"' + hashlib.sha256(data).hexdigest()[:20] + '"'
-            if self.headers.get("If-None-Match") == etag:
-                self.send_response(304)
-                self.send_header("ETag", etag)
-                self._security_headers()
-                self.end_headers()
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "private, no-cache")   # kept, but checked each time (the ETag): gone at sign-out on a shared machine
-            self.send_header("ETag", etag)
-            self._security_headers()
-            self.send_header("Content-Security-Policy", "default-src 'none'; sandbox")   # opened directly, it's inert
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(data)
-            return
-        if method == "GET" and url.path == "/api/carta/capture":
-            # What the extension last read from Carta, to see why something wasn't picked up.
-            with db.session() as conn:
-                data = (db.get_setting(conn, sk.CARTA_WEB_CAPTURE) or "[]").encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Disposition", 'attachment; filename="runway-carta-read.json"')
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self._security_headers()
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(data)
-            return
-        if method == "GET" and url.path == "/api/retail/extension.zip":
-            zipped = extension_zip()
-            if zipped is None:
-                return self._json(404, {"error": "The extension isn't included with this copy of Runway."})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/zip")
-            self.send_header("Content-Disposition", 'attachment; filename="runway-orders-extension.zip"')
-            self.send_header("Content-Length", str(len(zipped)))
-            self.send_header("Cache-Control", "no-store")
-            self._security_headers()
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(zipped)
-            return
-        if method == "POST" and url.path == "/api/backup/inspect":
-            # What a backup file holds, and what's here now, shown before you restore it. The file goes up as for a restore.
-            n = self._body_length(MAX_RESTORE_BODY)
+        hit = routes.match(method, url.path)
+        body: Any = {}
+        if hit is not None and hit.route.upload:   # a file (a backup), as it is
+            n = self._body_length(hit.route.upload)
             if n is None:
                 return
-            if not n:
-                return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
+            body = self._read_body(n) if n else b""
+        elif method in ("POST", "DELETE"):
             try:
-                held_in = backup.preview(backup.load(self._read_body(n)))
-            except ValueError as e:
-                return self._json(400, {"error": str(e)})
-            with db.session() as conn:
-                here = backup.counts(conn)
-            return self._json(200, {**held_in, "current": here, "database": "postgres" if db.using_postgres() else "sqlite"})
-        if method == "POST" and url.path == "/api/restore":
-            n = self._body_length(MAX_RESTORE_BODY)
-            if n is None:
+                body = self._read_json(MAX_JSON_BODY, {})
+            except BadJson:
+                return self._json(400, {"error": "Bad JSON"})
+            if body is NOT_READ:
                 return
-            if not n:
-                return self._json(400, {"error": "Choose a backup file (up to 200 MB)."})
-            try:
-                restored = backup.load(self._read_body(n))
-            except ValueError as e:
-                return self._json(400, {"error": str(e)})
-            # Nothing in the background may write while the data is replaced (a sync, or categorizing an order
-            # import): its rows would be mixed into the restored ones. The locks are let go before answering, so a sync
-            # can start as soon as you have the answer.
-            try:
-                done = backup.restore_all(restored, locks=(_sync_lock, _inv_lock, _retail_categorize_lock))
-            except backup.Busy as e:
-                return self._json(409, {"error": str(e)})
-            except ValueError as e:
-                return self._json(400, {"error": str(e)})
-            except OSError as e:
-                return self._json(500, {"error": f"Couldn’t save a copy of what’s here first ({e.strerror or e}), so nothing was restored."})
-            except sqlalchemy.exc.OperationalError as e:
-                if "locked" in str(e):
-                    return self._json(503, {"error": "Runway is busy saving something else. Try the restore again in a few seconds."})
-                return self._error(e)
-            counts = done["counts"]
-            return self._json(200, {"ok": True, "created": restored.get("created"), "source": restored.get("source"),
-                                    "transactions": counts.get("transactions", 0), "accounts": counts.get("accounts", 0),
-                                    "safety_copy": done["safety_copy"], "unreadable_secrets": done["unreadable_secrets"],
-                                    "warning": done["warning"]})
-        body = {}
-        if method in ("POST", "DELETE"):
-            n = self._body_length(MAX_JSON_BODY)
-            if n is None:
-                return
-            if n:
-                try:
-                    body = json.loads(self._read_body(n).decode() or "{}")
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    return self._json(400, {"error": "Bad JSON"})
-                if not isinstance(body, dict):
-                    return self._json(400, {"error": "Bad JSON"})
+            if not isinstance(body, dict):
+                return self._json(400, {"error": "Bad JSON"})
+        if hit is None:
+            return self._json(404, {"error": "Not found"})
         q = urllib.parse.parse_qs(url.query)
         _current.user = getattr(self, "user", None)
         _current.host = self.headers.get("Host")
-        if method == "POST" and url.path == "/api/investments/sync":
-            try:
-                bank = None
-                with db.session() as conn:
-                    has_sf = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL))
-                if has_sf:  # positions from SimpleFIN arrive with the regular bank sync
-                    bank = run_sync()
-                out = run_investment_sync()
-                out["bank"] = bank
-                return self._json(200, out)
-            except ApiError as e:
-                return self._json(e.status, {"error": str(e)})
-        if method == "GET" and url.path == "/api/investments/stream":
-            return self._quote_stream()
-        if method == "POST" and url.path == "/api/sync/auto":
-            return self._json(200, sync_on_visit())
-        if method == "POST" and url.path == "/api/sync":
-            try:
-                return self._json(200, run_sync())
-            except ApiError as e:
-                return self._json(e.status, {"error": str(e)})
-        for m, pattern, fn in ROUTES:
-            if m != method:
-                continue
-            params = _match(pattern, url.path)
-            if params is None:
-                continue
-            try:
-                with db.session() as conn:
-                    result = fn(conn, q, body, *params)
-                return self._json(200, result)
-            except ApiError as e:
-                return self._json(e.status, {"error": str(e)})
-            except sqlalchemy.exc.OperationalError as e:
-                if "locked" in str(e):
-                    return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-                return self._error(e)
-            except (ValueError, TypeError, KeyError) as e:   # almost always a value in the request Runway can't read
-                ref = request_ref()
-                monitoring.log(f"[bad request {ref}] {method} {url.path}: {type(e).__name__}", "warning",   # not the value itself
-                               remote=f"[bad request {ref}] {method} {pattern}: {type(e).__name__}", ref=ref)
-                return self._json(400, {"error": f"Runway couldn't read one of the values sent (reference {ref})."})
-        return self._json(404, {"error": "Not found"})
-
-    def _quote_stream(self) -> None:
-        """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it
-        closed, one update and then the browser is told to come back in a few minutes."""
-        with db.session() as conn:
-            tickers = live_tickers(conn)
-            finnhub_key = db.get_setting(conn, sk.FINNHUB_API_KEY)   # with one, trades come from Finnhub's shared connection
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Accel-Buffering", "no")   # a reverse proxy (nginx) would otherwise hold the events back
-        self._security_headers()
-        self.end_headers()
-        self.close_connection = True
-        if self.command == "HEAD":
-            return
-        market = "closed"
-        stream = prices.quote_stream(tickers, live=finnhub.feed if finnhub_key else None, live_key=finnhub_key)
         try:
-            self.wfile.write(b"retry: 5000\n\n")
-            for update in stream:
-                if update is None:
-                    self.wfile.write(b": still here\n\n")
-                else:
-                    market = update["market"]
-                    self.wfile.write(b"event: quotes\ndata: " + json.dumps(update).encode() + b"\n\n")
-                self.wfile.flush()
-            if market != "open":
-                self.wfile.write(f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode())
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            pass   # the page was closed
-        finally:
-            stream.close()   # lets go of this page's symbols on the shared Finnhub connection at once
+            result = routes.dispatch(hit, q, body)
+        except ApiError as e:
+            return self._json(e.status, {"error": str(e)})
+        if isinstance(result, Response):
+            return self._respond(result)
+        return self._json(200, result)
 
     def _carta_callback(self, url) -> None:
         """Back from approving Runway at Carta: trade the code for a token, read your equity, and go to Net worth."""
@@ -658,13 +520,12 @@ class Handler(BaseHTTPRequestHandler):
         if refused:
             self.close_connection = True
             return self._json(401, {"error": retail.REFUSALS[refused]})
-        n = self._body_length(MAX_EXT_BODY)
-        if n is None:
-            return
         try:
-            body = json.loads(self._read_body(n).decode() or "{}") if n else {}
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+            body = self._read_json(MAX_EXT_BODY, {})
+        except BadJson:
             return self._json(400, {"error": "Bad JSON"})
+        if body is NOT_READ:
+            return
         if not isinstance(body, dict):
             return self._json(400, {"error": "Bad JSON"})
         try:
@@ -675,10 +536,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Bad JSON"})
         except retail.RetailError as e:
             return self._json(400, {"error": str(e), **({"code": e.code} if e.code else {})})
-        except sqlalchemy.exc.OperationalError as e:
-            if "locked" in str(e):
-                return self._json(503, {"error": "Runway is busy saving a sync. Try again in a few seconds."})
-            return self._error(e)
+        except Exception as e:
+            if db.is_busy(e):
+                return self._json(503, {"error": routes.BUSY})
+            raise
 
     def _mcp_rpc(self, method: str) -> None:
         """POST /mcp: MCP's Streamable HTTP transport, answered by runway/mcp_server.py's handle() in this process, for an
@@ -702,21 +563,17 @@ class Handler(BaseHTTPRequestHandler):
             why = ("Connect with OAuth: add this address to your assistant and approve it in Runway." if iss
                    else mcp_oauth.unavailable_reason())
             return self._send(401, json.dumps({"error": why}).encode(), extra={"WWW-Authenticate": challenge})
-        n = self._body_length(MAX_JSON_BODY)
-        if n is None:
-            return
         try:
-            msg = json.loads(self._read_body(n).decode() or "null")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+            msg = self._read_json(MAX_JSON_BODY, None)
+        except BadJson:
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+        if msg is NOT_READ:
+            return
         if not isinstance(msg, dict):   # a batch or something else: one message per POST
             return self._json(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Send one JSON-RPC message per request"}})
-        try:
-            with monitoring.mcp_call(msg) as span:
-                reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
-                monitoring.mcp_result(span, reply)
-        except sqlalchemy.exc.OperationalError as e:
-            return self._error(e)
+        with monitoring.mcp_call(msg) as span:
+            reply = mcp_server.handle(msg, mcp_http.fetch_for(access))
+            monitoring.mcp_result(span, reply)
         if reply is None:
             return self._send(202, b"")
         return self._json(200, reply)
@@ -727,266 +584,6 @@ class Handler(BaseHTTPRequestHandler):
         if not origin:
             return True
         return origin != "null" and urllib.parse.urlsplit(origin).netloc.lower() == (self.headers.get("Host") or "").strip().lower()
-
-    # ------------------------------------------------------------------------------------------------ OAuth for /mcp
-
-    def _oauth_json(self, status: int, obj: dict | mcp_oauth.OAuthError, www: str | None = None) -> None:
-        """An OAuth answer: never cached (RFC 6749 §5.1), errors as {"error", "error_description"}."""
-        if isinstance(obj, mcp_oauth.OAuthError):
-            status, obj = obj.status, obj.body()
-        extra = {"Pragma": "no-cache", **({"WWW-Authenticate": www} if status == 401 and www else {})}
-        self._send(status, json.dumps(obj).encode(), extra=extra)
-
-    def _oauth_body(self) -> bytes | None:
-        n = self._body_length(mcp_oauth.MAX_BODY)
-        return None if n is None else self._read_body(n) if n else b""
-
-    @staticmethod
-    def _form(raw: bytes) -> dict[str, str] | None:
-        """An application/x-www-form-urlencoded body, or None if it can't be read or names a parameter twice."""
-        try:
-            pairs = urllib.parse.parse_qsl(raw.decode(), keep_blank_values=True, strict_parsing=bool(raw), max_num_fields=50)
-        except (UnicodeDecodeError, ValueError):
-            return None
-        form = dict(pairs)
-        return form if len(form) == len(pairs) else None
-
-    def _oauth(self, method: str, url) -> None:
-        """The OAuth endpoints an app calls itself (metadata, registration, tokens, revocation). No session and no CORS:
-        an app isn't a web page."""
-        iss = mcp_oauth.issuer(self.headers.get("Host"))
-        if url.path in OAUTH_METADATA:
-            if method != "GET":
-                return self._send(405, b"", "text/plain", extra={"Allow": "GET"})
-            if iss is None:
-                return self._json(404, {"error": mcp_oauth.unavailable_reason()})
-            if url.path == "/.well-known/oauth-authorization-server":
-                return self._json(200, mcp_oauth.authorization_server_metadata(iss))
-            return self._json(200, mcp_oauth.protected_resource_metadata(iss))
-        if url.path not in OAUTH_PUBLIC:
-            return self._json(404, {"error": "Not found"})
-        if method != "POST":
-            return self._send(405, b"", "text/plain", extra={"Allow": "POST"})
-        if iss is None:
-            return self._json(404, {"error": mcp_oauth.unavailable_reason()})
-        ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        raw = self._oauth_body()
-        if raw is None:
-            return
-        result: dict | mcp_oauth.OAuthError
-        if url.path == "/oauth/register":
-            # JSON only: a form on another site can't send it without CORS approval, which Runway never gives.
-            try:
-                if ctype != "application/json":
-                    raise ValueError
-                meta = json.loads(raw.decode())
-            except ValueError:
-                return self._oauth_json(400, mcp_oauth.OAuthError("invalid_client_metadata", "Send the client metadata as JSON."))
-            with db.session() as conn:
-                try:
-                    result = mcp_oauth.register(conn, meta)
-                except mcp_oauth.OAuthError as e:
-                    result = e
-            return self._oauth_json(201, result)
-        form = self._form(raw) if ctype == "application/x-www-form-urlencoded" else None
-        if form is None:
-            return self._oauth_json(400, mcp_oauth.OAuthError(
-                "invalid_request", "Send the parameters as application/x-www-form-urlencoded, each once."))
-        authorization = self.headers.get("Authorization")
-        www = 'Basic realm="Runway"' if authorization else None
-        # Errors are caught inside the session, so what they wrote is kept (a replayed code or refresh token revokes its grant).
-        with db.session() as conn:
-            try:
-                client = mcp_oauth.authenticate_client(conn, form, authorization)
-                if url.path == "/oauth/token":
-                    result = mcp_oauth.token(conn, client, form, iss)
-                else:
-                    mcp_oauth.revoke(conn, client, form.get("token"))
-                    result = {}
-            except mcp_oauth.OAuthError as e:
-                result = e
-        return self._oauth_json(200, result, www)
-
-    def _authorize(self, method: str, url) -> None:
-        """/oauth/authorize: GET checks an app's request and asks you (the consent page); POST is your answer. Reached
-        only signed in (see _route). A request that can't be trusted to go back to the app is shown here instead."""
-        iss = mcp_oauth.issuer(self.headers.get("Host"))
-        if iss is None:
-            return self._page(404, "Assistants can't connect yet", mcp_oauth.unavailable_reason())
-        if method == "GET":
-            return self._consent_ask(url, iss)
-        if method == "POST":
-            return self._consent_answer(iss)
-        return self._send(405, b"", "text/plain", extra={"Allow": "GET, POST"})
-
-    def _consent_ask(self, url, iss: str) -> None:
-        user = getattr(self, "user", None) or {}
-        with db.session() as conn:
-            mcp_oauth.housekeeping(conn)
-            try:
-                req = mcp_oauth.check_authorize(conn, urllib.parse.parse_qs(url.query, keep_blank_values=True), iss)
-            except mcp_oauth.PageError as e:
-                return self._page(400, "Can't connect this app", str(e))
-            except mcp_oauth.RedirectError as e:
-                return self._redirect(mcp_oauth.with_params(e.redirect_uri, {
-                    "error": e.error, "error_description": e.description, "state": e.state, "iss": iss}))
-            writes_on = mcp_access.allow_writes(conn)
-            categorize_on = mcp_access.allow_categorize(conn)
-            all_on = mcp_access.allow_all(conn)
-            token = mcp_oauth.start_consent(conn, {**req.params(), "sub": user.get("sub")})
-        target = urllib.parse.urlsplit(req.redirect_uri)
-        who = user.get("email") or user.get("name") or user.get("sub")
-        signed_in = (f"You're signed in as <b>{html.escape(who)}</b>." if who else
-                     "This Runway has no sign-in of its own, so anyone who can open it can approve apps.")
-        asked = "churning:write" in req.scope
-        churning = ""
-        if asked:
-            state = ('name="churning" value="1" checked' if writes_on else "disabled")
-            note = ("Mark benefits used; add and update cards, benefits, to-dos and planned items; check off plans. Never deletes."
-                    if writes_on else "Turn on Let assistants change churning in Settings → Data first. Until then this "
-                                      "connection can only read.")
-            churning = (f'<label class="choice"><input type="checkbox" {state}><span><b>Change churning</b>'
-                        f'<span class="help">{html.escape(note)}</span></span></label>')
-        categorize = ""
-        if "categorize:write" in req.scope:
-            state = ('name="categorize" value="1" checked' if categorize_on else "disabled")
-            note = ("Set the category of a transaction or an order item, or accept the one Runway suggested. Never deletes, "
-                    "splits or renames anything." if categorize_on else
-                    "Turn on Let assistants categorize in Settings → Data first. Until then this connection can't categorize.")
-            categorize = (f'<label class="choice"><input type="checkbox" {state}><span><b>Categorize</b>'
-                          f'<span class="help">{html.escape(note)}</span></span></label>')
-        anything = ""
-        if "write" in req.scope:   # never ticked for you: changing anything is a choice made here, each time
-            label, note, off = mcp_oauth.CONSENT["write"]
-            state = 'name="write" value="1"' if all_on else "disabled"
-            anything = (f'<label class="choice"><input type="checkbox" {state}><span><b>{label}</b>'
-                        f'<span class="help">{html.escape(note if all_on else off)}</span></span></label>')
-        name = req.client_name or "An app"
-        inner = f"""<p class="help">{signed_in} Approving sends you back to <b>{html.escape(target.netloc)}</b>{
-            ' (this computer)' if target.scheme == 'http' else ''}.</p>
-<form method="post" action="/oauth/authorize">
-<input type="hidden" name="consent" value="{html.escape(token)}">
-<label class="choice"><input type="checkbox" checked disabled><span><b>Read your finances</b><span class="help">Accounts, transactions,
-budget, reports, net worth, orders and churning. Never your bank connections, settings or backups.</span></span></label>
-{churning}
-{categorize}
-{anything}
-<div class="actions"><button class="btn primary" type="submit" name="decision" value="allow">Allow</button>
-<button class="btn" type="submit" name="decision" value="deny">Deny</button></div>
-</form>"""
-        # The form's answer redirects to the app, so the page may submit to Runway and on to the app's address.
-        if target.scheme == "https":
-            back = f"https://{target.netloc}"
-        else:
-            back = f"http://{target.hostname}:*" if target.hostname != "::1" else "http:"
-        csp = ("default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; "
-               f"form-action 'self' {back}; base-uri 'none'; frame-ancestors 'none'")
-        cookie = self._cookie_header("runway_consent", token, mcp_oauth.CONSENT_TTL, "/oauth")
-        self._send(200, self._page_html(f"{name} wants to connect to Runway", inner, center=False), "text/html; charset=utf-8",
-                   extra={"Set-Cookie": cookie}, csp=csp)
-
-    def _consent_answer(self, iss: str) -> None:
-        clear = [self._cookie_header("runway_consent", "", 0, "/oauth")]
-        again = "Start connecting again from the app."
-        if not self._same_site(form=True):
-            return self._page(403, "Can't connect this app", "The approval didn't come from Runway's page. " + again, cookies=clear)
-        raw = self._oauth_body()
-        if raw is None:
-            return
-        form = self._form(raw) or {}
-        sent, cookie = form.get("consent") or "", self._cookie("runway_consent") or ""
-        if not sent or not cookie or not secrets.compare_digest(sent, cookie):
-            return self._page(403, "Can't connect this app", "The approval didn't come from this browser. " + again, cookies=clear)
-        user = getattr(self, "user", None) or {}
-        with db.session() as conn:
-            params = mcp_oauth.take_consent(conn, sent)
-            if params is None or params.get("sub") != user.get("sub"):
-                return self._page(403, "Can't connect this app", "That approval page has expired or was already answered. " + again,
-                                  cookies=clear)
-            client = mcp_oauth.get_client(conn, params["client_id"])
-            if client is None or not mcp_oauth.redirect_matches(json.loads(client["redirect_uris"]), params["redirect_uri"]):
-                return self._page(400, "Can't connect this app", mcp_oauth.UNKNOWN_APP, cookies=clear)
-            decision = form.get("decision")
-            if decision == "allow":
-                scope = {"read"}
-                if ("churning:write" in params["scope"].split() and form.get("churning") == "1"
-                        and mcp_access.allow_writes(conn)):
-                    scope.add("churning:write")
-                if ("categorize:write" in params["scope"].split() and form.get("categorize") == "1"
-                        and mcp_access.allow_categorize(conn)):
-                    scope.add("categorize:write")
-                if "write" in params["scope"].split() and form.get("write") == "1" and mcp_access.allow_all(conn):
-                    scope.add("write")
-                code = mcp_oauth.approve(conn, params, frozenset(scope), user.get("sub"), user.get("email"))
-                back = {"code": code}
-            elif decision == "deny":
-                back = {"error": "access_denied", "error_description": "The person using Runway said no."}
-            else:
-                return self._page(400, "Can't connect this app", "Choose Allow or Deny. " + again, cookies=clear)
-        self._redirect(mcp_oauth.with_params(params["redirect_uri"], {**back, "state": params.get("state"), "iss": iss}), clear)
-
-    def _static(self, path: str) -> None:
-        if path == "/next" or path.startswith("/next/"):   # where the web app lived while it was being rebuilt
-            return self._redirect("/")                      # (the browser keeps the #page on the way)
-        # The web app's built files (frontend/, built into static/app/), then Runway's own (icons, fonts, the service
-        # worker). Anything else is a route of the app itself (/plaid/oauth, ...), so it gets the app's page.
-        rel = path.lstrip("/")
-        full = None
-        for base in (APP_DIR, STATIC):
-            cand = os.path.realpath(os.path.join(base, rel))
-            if rel and cand.startswith(base + os.sep) and os.path.isfile(cand):
-                full = cand
-                break
-        if full is None or full == APP_INDEX:
-            full = APP_INDEX
-            if not os.path.isfile(full):
-                return self._page(404, "The web app isn't built", "Run npm run build in frontend/ (the Docker image does this for you).")
-        ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
-        gz_ok = "gzip" in (self.headers.get("Accept-Encoding") or "")
-        if full == APP_INDEX:
-            # A fresh nonce per page, so only this page's own <script> tags may run (see content_security_policy).
-            nonce = secrets.token_urlsafe(16)
-            with open(full, "rb") as f:
-                data = f.read().replace(b"<script ", f'<script nonce="{nonce}" '.encode())
-            if meta := monitoring.trace_meta():   # the page-load trace in the browser continues this one
-                data = data.replace(b"</head>", meta.encode() + b"</head>", 1)
-            # The browser's JS profiler only runs on a page that asks for it.
-            extra = {"Document-Policy": "js-profiling"} if monitoring.browser_profiling() else None
-            return self._send_file(data, ctype, "no-store", None, gz_ok, nonce, extra=extra)
-        entry = _static_entry(full)
-        if self.headers.get("If-None-Match") == entry["etag"]:
-            self.send_response(304)
-            self.send_header("ETag", entry["etag"])
-            self.send_header("Cache-Control", "no-cache")
-            self._security_headers()
-            self.end_headers()
-            return
-        # "no-cache" = keep a copy but check it's current each time (a cheap 304), so updates show up at once. The
-        # app's built files have their content's hash in their name, so they never change and can be kept for good.
-        cache = "public, max-age=31536000, immutable" if full.startswith(APP_DIR + os.sep + "assets" + os.sep) else "no-cache"
-        self._send_file(entry["data"], ctype, cache, entry["etag"], gz_ok, None, entry.get("gz"))
-
-    def _send_file(self, data: bytes, ctype: str, cache: str, etag: str | None, gz_ok: bool, nonce: str | None,
-                   gz: bytes | None = None, extra: dict[str, str] | None = None) -> None:
-        if gz_ok and _compressible(ctype) and len(data) > 1024:
-            data, encoded = gz or gzip.compress(data, 6), True
-        else:
-            encoded = False
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", cache)
-        self.send_header("Vary", "Accept-Encoding")
-        if etag:
-            self.send_header("ETag", etag)
-        if encoded:
-            self.send_header("Content-Encoding", "gzip")
-        for k, v in (extra or {}).items():
-            self.send_header(k, v)
-        self._security_headers(nonce)
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(data)
 
     def do_GET(self):
         self._dispatch("GET")
@@ -999,36 +596,6 @@ budget, reports, net worth, orders and churning. Never your bank connections, se
 
     def do_DELETE(self):
         self._dispatch("DELETE")
-
-
-STATIC = os.path.realpath(STATIC)
-APP_DIR = os.path.join(STATIC, "app")       # the web app, built from frontend/
-APP_INDEX = os.path.join(APP_DIR, "index.html")
-_static_files: dict[str, dict] = {}
-_static_lock = threading.Lock()
-
-
-def _compressible(ctype: str) -> bool:
-    return ctype.startswith("text/") or ctype in ("application/javascript", "application/json", "image/svg+xml",
-                                                  "application/manifest+json")
-
-
-def _static_entry(full: str) -> dict:
-    """A static file's bytes, ETag and gzip'd copy, kept in memory until the file changes."""
-    st = os.stat(full)
-    key = (st.st_mtime_ns, st.st_size)
-    with _static_lock:
-        entry = _static_files.get(full)
-        if entry and entry["key"] == key:
-            return entry
-    with open(full, "rb") as f:
-        data = f.read()
-    ctype = mimetypes.guess_type(full)[0] or ""
-    entry = {"key": key, "data": data, "etag": '"' + hashlib.sha256(data).hexdigest()[:20] + '"',
-             "gz": gzip.compress(data, 6) if _compressible(ctype) and len(data) > 1024 else None}
-    with _static_lock:
-        _static_files[full] = entry
-    return entry
 
 
 class Server(ThreadingHTTPServer):

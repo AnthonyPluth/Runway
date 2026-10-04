@@ -283,12 +283,21 @@ def payment_plan(conn, card_id: str, issuer_apr: float | None = None) -> dict:
     issuer's minimum payment) or "fixed" (pay_amount toward each statement), and the card's APR in percent: the one you
     entered, else the issuer's purchase APR (`issuer_apr`, through Plaid), else None. apr_source says which ("you",
     "issuer" or None)."""
-    mode = db.get_setting(conn, sk.card_pay_mode(card_id)) or "full"
-    yours = _amount(db.get_setting(conn, sk.card_apr(card_id)))
-    apr, source = (yours, "you") if yours is not None else (issuer_apr, "issuer") if issuer_apr is not None else (None, None)
-    return {"pay_mode": mode if mode in PAY_MODES else "full",
-            "pay_amount": _amount(db.get_setting(conn, sk.card_pay_amount(card_id))),
-            "apr": apr, "apr_source": source}
+    return payment_plans(conn, [card_id], {card_id: issuer_apr})[card_id]
+
+
+def payment_plans(conn, card_ids: list[str], issuer_aprs: dict[str, float | None] | None = None) -> dict[str, dict]:
+    """payment_plan() for each of these cards, from one read of their settings: {card id: its plan}."""
+    s = db.get_settings(conn, [k(c) for c in card_ids for k in (sk.card_pay_mode, sk.card_apr, sk.card_pay_amount)])
+    out = {}
+    for c in card_ids:
+        mode = s[sk.card_pay_mode(c)] or "full"
+        yours = _amount(s[sk.card_apr(c)])
+        issuer_apr = (issuer_aprs or {}).get(c)
+        apr, source = (yours, "you") if yours is not None else (issuer_apr, "issuer") if issuer_apr is not None else (None, None)
+        out[c] = {"pay_mode": mode if mode in PAY_MODES else "full", "pay_amount": _amount(s[sk.card_pay_amount(c)]),
+                  "apr": apr, "apr_source": source}
+    return out
 
 
 def statement_payment(plan: dict, statement: float, minimum: float | None = None, charged: float = 0.0) -> float:
@@ -657,11 +666,12 @@ def recurring_events(conn, recurring: list[dict], by_id: dict[str, dict], overri
             select(T.category).where(T.recurring_id == item["id"], T.category.is_not(None))
             .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
         if not cat_row:   # nothing linked to it yet: the category of what it matches on its account
-            like = "%" + next(iter(rec.match_texts(item)), "").replace("%", "").replace("_", "") + "%"
+            m = next(iter(rec.match_texts(item)), "")   # (lowercase; % and _ in it are themselves, not wildcards)
             cat_row = conn.execute(
-                select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None), func.length(like) > 4,
-                                         or_(func.lower(T.payee).like(like), func.lower(T.description).like(like)))
-                .group_by(T.category).order_by(*most_used).limit(1)).fetchone()
+                select(T.category).where(T.account_id == item["account_id"], T.category.is_not(None),
+                                         or_(func.lower(T.payee).contains(m, autoescape=True),
+                                             func.lower(T.description).contains(m, autoescape=True)))
+                .group_by(T.category).order_by(*most_used).limit(1)).fetchone() if len(m) > 2 else None
         # Anything due in the last matching window that hasn't shown up yet is still coming: it goes on today, as
         # late (older than the window, it's "missed" in Recurring instead). Due today counts as due, not late.
         # One that's partly paid (a paycheck in two deposits, early or on time) leaves the rest expected the same way,

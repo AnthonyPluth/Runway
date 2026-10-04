@@ -6,9 +6,10 @@ import urllib.parse
 
 from sqlalchemy import select
 
-from ... import carta, equity
+from ... import carta, db, equity
+from ... import settings_keys as sk
 from ...models import EquityGrant
-from ..common import ApiError, host_allowed
+from ..common import ApiError, Response, download, host_allowed, text
 
 
 def carta_redirect_uri(origin: str | None = None) -> str:
@@ -63,6 +64,8 @@ def api_equity_grant_remove(conn, _q, _b, gid):
 
 
 def api_carta_settings(conn, _q, body):
+    if any(body.get(k) is not None and not isinstance(body[k], str) for k in ("env", "client_id", "client_secret", "origin")):
+        raise ApiError("Send Carta's settings as text")
     try:
         carta.save_settings(conn, body)
     except carta.CartaError as e:
@@ -73,7 +76,7 @@ def api_carta_settings(conn, _q, body):
 def api_carta_connect(conn, _q, body):
     """Where to send you to approve Runway at Carta."""
     try:
-        return {"url": carta.authorize_url(conn, carta_redirect_uri(body.get("origin")))}
+        return {"url": carta.authorize_url(conn, carta_redirect_uri(text(body.get("origin"), "origin") or None))}
     except carta.CartaError as e:
         raise ApiError(str(e)) from e
 
@@ -88,3 +91,8 @@ def api_carta_sync(conn, _q, _b):
 def api_carta_disconnect(conn, _q, _b):
     carta.disconnect(conn)
     return {"ok": True}
+
+
+def api_carta_capture(conn, _q, _b) -> Response:
+    """What the extension last read from Carta, as a file, to see why something wasn't picked up."""
+    return download((db.get_setting(conn, sk.CARTA_WEB_CAPTURE) or "[]").encode(), "application/json", "runway-carta-read.json")

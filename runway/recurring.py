@@ -182,10 +182,31 @@ def create_from_transaction(conn, tx_id: str, frequency: str = "monthly") -> int
 
 
 def matched(conn, recurring_id: int, limit: int = 12) -> list[dict]:
+    """The item's last `limit` matched payments, newest first."""
+    return matched_by_item(conn, [recurring_id], limit)[recurring_id]
+
+
+def matched_by_item(conn, recurring_ids: list[int], limit: int = 12) -> dict[int, list[dict]]:
+    """matched() for each of these items, in one query: {item id: its last `limit` payments, newest first}."""
     t = Transaction
-    return db.rows(conn.execute(
-        select(t.id, t.posted, t.amount, t.description, t.pending, t.category)
-        .where(t.recurring_id == recurring_id).order_by(t.posted.desc()).limit(limit)))
+    n = func.row_number().over(partition_by=t.recurring_id, order_by=(t.posted.desc(), t.id)).label("n")
+    sub = (select(t.recurring_id, t.id, t.posted, t.amount, t.description, t.pending, t.category, n)
+           .where(t.recurring_id.in_(list(recurring_ids))).subquery())
+    out: dict[int, list[dict]] = {rid: [] for rid in recurring_ids}
+    for r in db.rows(conn.execute(select(sub).where(sub.c.n <= limit).order_by(sub.c.recurring_id, sub.c.n))):
+        rid = r.pop("recurring_id")
+        del r["n"]
+        out.setdefault(rid, []).append(r)
+    return out
+
+
+def first_posted(conn, account_ids) -> dict[str, str]:
+    """{account id: its first transaction's day}: where each account's synced history begins (none without any)."""
+    t = Transaction
+    ids = sorted({a for a in account_ids if a is not None})
+    if not ids:
+        return {}
+    return {a: p for a, p in conn.execute(select(t.account_id, func.min(t.posted)).where(t.account_id.in_(ids)).group_by(t.account_id))}
 
 
 def with_account_name():
@@ -332,15 +353,26 @@ def missed(conn, today: date | None = None, lookback: int = LOOKBACK_DAYS) -> li
     dismissed = set(conn.execute(select(RecurringDismissed.key)).scalars()) | skipped_keys(conn)
     out = []
     t = Transaction
-    for item in db.rows(conn.execute(with_account_name().where(Recurring.active == 1))):
-        window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
-        first_tx = conn.execute(select(func.min(t.posted)).where(t.account_id == item["account_id"])).scalar()
-        if not first_tx:
+    items = db.rows(conn.execute(with_account_name().where(Recurring.active == 1)))
+    firsts = first_posted(conn, [i["account_id"] for i in items])
+    starts = {}
+    for item in items:
+        first_tx = firsts.get(item["account_id"])
+        if first_tx:
+            starts[item["id"]] = max(today - timedelta(days=lookback), date.fromisoformat(item["anchor_date"]) - timedelta(days=1),
+                                     date.fromisoformat(first_tx) + timedelta(days=MATCH_WINDOW_DAYS.get(item["frequency"], 6)))
+    # Every item's matched payments since the earliest of their starts (less 40 days), in one query: each item looks at
+    # its own from its own start.
+    since = (min(starts.values()) - timedelta(days=40)).isoformat() if starts else ""
+    posted: dict[int, list[str]] = {}
+    for rid, p in conn.execute(select(t.recurring_id, t.posted).where(t.recurring_id.in_(list(starts)), t.posted >= since)):
+        posted.setdefault(rid, []).append(p)
+    for item in items:
+        if item["id"] not in starts:
             continue
-        start = max(today - timedelta(days=lookback), date.fromisoformat(item["anchor_date"]) - timedelta(days=1),
-                    date.fromisoformat(first_tx) + timedelta(days=window))
-        hist = conn.execute(select(t.posted).where(t.recurring_id == item["id"],
-                                                   t.posted >= (start - timedelta(days=40)).isoformat())).scalars()
+        window = MATCH_WINDOW_DAYS.get(item["frequency"], 6)
+        start = starts[item["id"]]
+        hist = [p for p in posted.get(item["id"], []) if p >= (start - timedelta(days=40)).isoformat()]
         for occ in forecast.occurrences(item, start, today - timedelta(days=window + 1)):
             key = f"rec:{item['id']}:{occ.isoformat()}"
             if key in dismissed:

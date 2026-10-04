@@ -9,10 +9,10 @@ import zipfile
 
 from sqlalchemy import select
 
-from ... import carta_web, categorize, db, monitoring, retail
+from ... import carta_web, categorize, db, monitoring, retail, validate
 from ... import settings_keys as sk
 from ...models import RetailCharge
-from ..common import ApiError, _current
+from ..common import ApiError, Response, _current, download, own_session, row_id, text
 from . import transactions
 
 
@@ -32,7 +32,7 @@ def api_retail_token_remove(conn, _q, _b):
 
 def api_retail_settings(conn, _q, body):
     if "ai" in body:
-        db.set_setting(conn, sk.RETAIL_AI, "1" if body.get("ai") else "0")
+        db.set_setting(conn, sk.RETAIL_AI, str(validate.flag(body.get("ai"))))
     return {"ok": True}
 
 
@@ -57,24 +57,24 @@ def api_retail_order(conn, _q, _b, oid):
 
 
 def _item_id(item_id) -> int:
-    try:
-        return int(item_id)
-    except ValueError:
-        raise ApiError("Item not found", 404) from None
+    return row_id(item_id, "Item not found")
 
 
 def api_retail_item(conn, _q, body, item_id):
     """Pick an item's category, or accept the AI's proposed new one (`new_category`: {name, parent}): it's created, then used.
     Sends back what Undo needs (`was`: the items and memory it changes, and the transactions it re-splits), which
     POST /api/retail/items/{id}/restore puts back."""
-    category, created = body.get("category") or "", False
+    category, created = text(body.get("category"), "category"), False
     iid = _item_id(item_id)
     state = retail.item_undo_state(conn, iid)
     was = {**state, "tx": transactions.snapshot(conn, retail.item_transactions(conn, [i["id"] for i in state["items"]]), orders=True)}
+    remember = "remember" not in body or validate.on(body["remember"])   # (on unless it's switched off)
     try:
         if body.get("new_category"):
+            if not isinstance(body["new_category"], dict):
+                raise ApiError("The suggested category has no name")
             category, created = categorize.create_proposed(conn, body["new_category"])
-        return {**retail.set_item_category(conn, iid, category, body.get("remember", True) is not False),
+        return {**retail.set_item_category(conn, iid, category, remember),
                 "category": category, "created": created, "was": was}
     except (retail.RetailError, ValueError) as e:
         raise ApiError(str(e)) from e
@@ -125,7 +125,7 @@ def api_retail_charge_restore(conn, _q, body, charge_id):
 
 def api_retail_link(conn, _q, body, charge_id):
     try:
-        return {"result": retail.link(conn, charge_id, body.get("tx_id") or "")}
+        return {"result": retail.link(conn, charge_id, text(body.get("tx_id"), "tx_id"))}
     except retail.RetailError as e:
         raise ApiError(str(e)) from e
 
@@ -306,3 +306,12 @@ def extension_zip() -> bytes | None:
                 full = os.path.join(root, f)
                 z.write(full, os.path.join("runway-orders", os.path.relpath(full, EXTENSION_DIR)))
     return buf.getvalue()
+
+
+@own_session
+def api_extension_zip(_conn, _q, _b) -> Response:
+    """The browser extension, to download and load unpacked."""
+    zipped = extension_zip()
+    if zipped is None:
+        raise ApiError("The extension isn't included with this copy of Runway.", 404)
+    return download(zipped, "application/zip", "runway-orders-extension.zip")

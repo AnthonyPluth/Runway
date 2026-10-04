@@ -507,7 +507,7 @@ def create_proposed(conn, new: dict, is_income: bool = False) -> tuple[str, bool
     existing = conn.execute(select(Category.name).where(func.lower(Category.name) == func.lower(name))).fetchone()
     if existing:
         return existing["name"], False
-    parent = new.get("parent") or None
+    parent = new.get("parent") if isinstance(new.get("parent"), str) else None
     if parent and not conn.execute(select(Category.name).where(Category.name == parent)).fetchone():
         parent = None
     try:

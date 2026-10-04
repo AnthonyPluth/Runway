@@ -1,14 +1,20 @@
-"""The API's routes: which handler answers each method and path."""
+"""The API's routes: which handler answers each method and path (ROUTES), finding a request's (match) and answering it
+(dispatch), for the web app (server/handler.py) and the assistants (server/mcp_http.py) alike."""
 from __future__ import annotations
 
 import urllib.parse
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
+
+from .. import db
+from .common import ApiError, server_error
 
 from .api.accounts import (
     api_account_logo, api_account_logo_options, api_account_removal, api_account_remove, api_account_restore, api_account_update,
     api_accounts, api_accounts_deleted, api_statement_add, api_statement_remove
 )
+from .api.backups import api_backup, api_backup_inspect, api_restore
 from .api.budget import api_budget, api_budget_set
 from .api.categories import (
     api_categories, api_category_add, api_category_look, api_category_move, api_category_pay_with, api_category_remove,
@@ -24,21 +30,22 @@ from .api.churning import (
     api_churn_wish_remove, api_churn_wish_update, api_churning, api_churning_best
 )
 from .api.connections import (
-    api_connect, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync,
+    api_connect, api_plaid_exchange, api_plaid_item_remove, api_plaid_item_sync, api_sync, api_sync_auto,
     api_plaid_link_token, api_plaid_match, api_plaid_oauth_resume, api_plaid_settings, api_plaid_status
 )
 from .api.equity import (
-    api_carta_connect, api_carta_disconnect, api_carta_settings, api_carta_sync, api_equity, api_equity_company_add,
+    api_carta_capture, api_carta_connect, api_carta_disconnect, api_carta_settings, api_carta_sync, api_equity, api_equity_company_add,
     api_equity_company_remove, api_equity_company_update, api_equity_grant_add, api_equity_grant_remove,
     api_equity_grant_update
 )
 from .api.investments import (
-    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_live_quotes, api_plan_save, api_tracked_get, api_tracked_save
+    api_cost_basis, api_finnhub_settings, api_finnhub_status, api_investments, api_investments_sync, api_live_quotes, api_plan_save,
+    api_quote_stream, api_tracked_get, api_tracked_save
 )
 from .api.mcp import api_mcp_all, api_mcp_categorize, api_mcp_revoke, api_mcp_settings, api_mcp_writes
 from .api.merchants import (
     api_holding_logo, api_holding_logo_options, api_logodev_fetch, api_logodev_settings, api_logodev_status, api_merchant_logo,
-    api_merchant_logo_options
+    api_merchant_logo_file, api_merchant_logo_options
 )
 from .api.networth import (
     api_asset_add, api_asset_refresh, api_asset_remove, api_asset_update, api_networth, api_realie_settings
@@ -55,7 +62,7 @@ from .api.reports import (
 )
 from .api.retail import (
     api_retail, api_retail_apply, api_retail_candidates, api_retail_charge_restore, api_retail_item, api_retail_item_restore,
-    api_retail_link, api_retail_match,
+    api_extension_zip, api_retail_link, api_retail_match,
     api_retail_order, api_retail_settings, api_retail_suggest, api_retail_token, api_retail_token_remove, api_retail_unlink
 )
 from .api.state import api_override_delete, api_override_set, api_overview, api_settings, api_state
@@ -65,8 +72,19 @@ from .api.transactions import (
 )
 
 
-# (method, path pattern, handler): each handler takes (conn, query, body, *path params) and returns the JSON reply.
+# (method, path pattern, handler): each handler takes (conn, query, body, *path params) and returns the JSON reply, or
+# a common.Response for anything else (a download, a logo, a stream). A HEAD is answered as its GET, without the body.
 ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
+    ("GET", "/api/backup", api_backup),
+    ("POST", "/api/backup/inspect", api_backup_inspect),
+    ("POST", "/api/restore", api_restore),
+    ("POST", "/api/sync", api_sync),
+    ("POST", "/api/sync/auto", api_sync_auto),
+    ("POST", "/api/investments/sync", api_investments_sync),
+    ("GET", "/api/investments/stream", api_quote_stream),
+    ("GET", "/api/merchants/{id}/logo", api_merchant_logo_file),
+    ("GET", "/api/carta/capture", api_carta_capture),
+    ("GET", "/api/retail/extension.zip", api_extension_zip),
     ("GET", "/api/state", api_state),
     ("GET", "/api/overview", api_overview),
     ("GET", "/api/accounts", api_accounts),
@@ -233,14 +251,77 @@ ROUTES: list[tuple[str, str, Callable[..., Any]]] = [
 ]
 
 
-def _match(pattern: str, path: str):
-    p_parts, parts = pattern.strip("/").split("/"), path.strip("/").split("/")
-    if len(p_parts) != len(parts):
+@dataclass(frozen=True)
+class Route:
+    method: str
+    pattern: str
+    fn: Callable[..., Any]
+    parts: tuple[str | None, ...]   # the pattern's segments, None for an {id}
+    upload: int | None = None       # the body is a file of up to this many bytes, as it is (common.upload); else JSON
+    own_session: bool = False       # the handler opens its own database sessions (common.own_session)
+
+
+@dataclass(frozen=True)
+class Match:
+    """A request's route, and the values of the {id}s in its address (unquoted)."""
+    route: Route
+    params: list[str]
+
+
+def _segments(path: str) -> list[str]:
+    return path.strip("/").split("/")
+
+
+class Table:
+    """ROUTES, split up once: each method's routes by how many segments their address has, in ROUTES' order (the
+    first that matches answers, as /api/transactions/bulk does before /api/transactions/{id})."""
+
+    def __init__(self, routes):
+        self.routes = [Route(m, pattern, fn, tuple(None if s == "{id}" else s for s in _segments(pattern)),
+                             getattr(fn, "upload", None), getattr(fn, "own_session", False))
+                       for m, pattern, fn in routes]
+        self._by_shape: dict[tuple[str | None, int], list[Route]] = {}
+        for r in self.routes:
+            for method in (r.method, None):   # (None: any method, for naming a request)
+                self._by_shape.setdefault((method, len(r.parts)), []).append(r)
+
+    def match(self, method: str | None, path: str) -> Match | None:
+        """The route that answers `method path` (any method, for None), or None."""
+        parts = _segments(path)
+        for r in self._by_shape.get((method, len(parts)), ()):
+            params = []
+            for want, got in zip(r.parts, parts, strict=True):
+                if want is None:
+                    params.append(urllib.parse.unquote(got))
+                elif want != got:
+                    break
+            else:
+                return Match(r, params)
         return None
-    params = []
-    for a, b in zip(p_parts, parts, strict=True):
-        if a == "{id}":
-            params.append(urllib.parse.unquote(b))
-        elif a != b:
-            return None
-    return params
+
+
+TABLE = Table(ROUTES)
+match = TABLE.match
+
+BUSY = "Runway is busy saving a sync. Try again in a few seconds."
+
+
+def dispatch(found: Match, query: dict, body) -> Any:
+    """Answer a request that matched a route: its handler's reply (what to send as JSON, or a common.Response), run with
+    a database connection that's committed if it succeeds and rolled back if not (or none, for a route with its own
+    sessions). `body` is the request's JSON object, or for an upload its bytes. Every way it can fail comes out as ApiError: the handler's own, saying what was wrong (a
+    4xx); 503 when the database was busy with something else (a sync); and anything else, which is a bug, 500 with only
+    a reference, logged and reported without what the error said (common.server_error). The web app's calls (/api/...)
+    and the assistants' (/mcp) both come through here."""
+    r = found.route
+    try:
+        if r.own_session:
+            return r.fn(None, query, body, *found.params)
+        with db.session() as conn:
+            return r.fn(conn, query, body, *found.params)
+    except ApiError:
+        raise
+    except Exception as e:
+        if db.is_busy(e):
+            raise ApiError(BUSY, 503) from None
+        raise server_error(e, r.method, r.pattern) from None

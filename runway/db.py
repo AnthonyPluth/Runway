@@ -13,6 +13,7 @@ import contextlib
 import math
 import os
 import re
+import sqlite3
 import threading
 from contextlib import contextmanager
 from urllib.parse import urlsplit
@@ -125,7 +126,17 @@ def _sqlite_engine(url: str) -> Engine:
     def _setup(dbapi_conn, _record):
         dbapi_conn.execute("PRAGMA journal_mode=WAL")
         dbapi_conn.execute("PRAGMA foreign_keys=ON")
+        # SQLite's own lower() leaves anything past ASCII as it is ("É" stays "É"); Postgres's lowers every letter. So a
+        # search for "é" found "CAFÉ" on one and not the other: Python's lower() takes its place, on every connection.
+        dbapi_conn.create_function("lower", 1, _lower, deterministic=True)
     return eng
+
+
+def _lower(v):
+    """SQLite's lower(), for every letter: NULL stays NULL, a number becomes its text as SQLite's does."""
+    if v is None or isinstance(v, bytes):
+        return v
+    return str(v).lower()
 
 
 def _postgres_engine(url: str, path: str | None) -> Engine:
@@ -289,6 +300,25 @@ class Connection:
             self._orm.close()
             self._orm = None
         self.sa.close()
+
+
+# Postgres's SQLSTATEs for "another transaction is in the way, try again": lock_not_available (a lock_timeout ran out),
+# deadlock_detected and serialization_failure (this transaction was the one rolled back).
+BUSY_SQLSTATES = frozenset({"55P03", "40P01", "40001"})
+
+
+def is_busy(e: BaseException) -> bool:
+    """Whether a database error means only that something else was writing at the time (a sync, say), so the same
+    request is worth trying again in a moment: SQLite's "database is locked" (SQLITE_BUSY, SQLITE_LOCKED), or one of
+    Postgres's BUSY_SQLSTATES. Takes SQLAlchemy's error or the driver's own."""
+    orig = getattr(e, "orig", None) or e
+    state = getattr(orig, "sqlstate", None)
+    if state is not None:   # psycopg's errors carry their SQLSTATE
+        return state in BUSY_SQLSTATES
+    if isinstance(orig, sqlite3.OperationalError):
+        name = getattr(orig, "sqlite_errorname", None) or ""   # (not on one made by hand, as in the tests)
+        return name.startswith(("SQLITE_BUSY", "SQLITE_LOCKED")) or str(orig).startswith(("database is locked", "database table is locked"))
+    return False
 
 
 def connect(path: str | None = None) -> Connection:
@@ -519,15 +549,25 @@ def number(value) -> float:
 
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
-    row = conn.execute(select(Setting.value).where(Setting.key == key)).fetchone()
-    value = row["value"] if row and row["value"] is not None else None
-    if value is not None and key in secretbox.SECRET_SETTINGS:
-        try:
-            value = secretbox.decrypt(value)
-        except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
-            monitoring.log(f"Warning: {key}: {e}", "warning")
-            value = None
+    value = get_settings(conn, [key])[key]
     return value if value is not None else default
+
+
+def get_settings(conn, keys) -> dict[str, str | None]:
+    """Several settings in one query: {key: get_setting's value for it (None when it isn't set)}."""
+    keys = list(dict.fromkeys(keys))
+    found = dict(conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(keys))).fetchall()) if keys else {}
+    out: dict[str, str | None] = {}
+    for key in keys:
+        value = found.get(key)
+        if value is not None and key in secretbox.SECRET_SETTINGS:
+            try:
+                value = secretbox.decrypt(value)
+            except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
+                monitoring.log(f"Warning: {key}: {e}", "warning")
+                value = None
+        out[key] = value
+    return out
 
 
 def set_setting(conn, key: str, value: str | None) -> None:

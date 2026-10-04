@@ -707,7 +707,7 @@ class ScopedFake(Fake):
 
 
 def mcp_access_match(pattern, path):
-    return server.routes._match(pattern, path) is not None
+    return server.routes.Table([("GET", pattern, None)]).match("GET", path) is not None
 
 
 def ask(method, params=None, fake=None, mid=1):

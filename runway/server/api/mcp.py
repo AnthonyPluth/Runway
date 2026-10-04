@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ... import mcp_access, mcp_oauth
-from ..common import ApiError, _current
+from ... import mcp_access, mcp_oauth, validate
+from ..common import ApiError, _current, row_id
 
 
 def _when(t: float | None) -> str | None:
@@ -23,28 +23,24 @@ def api_mcp_settings(conn, _q, _b):
 
 def api_mcp_writes(conn, _q, body):
     """Switch on or off letting assistants allowed churning:write make the changes in mcp_access.WRITABLE."""
-    mcp_access.set_allow_writes(conn, body.get("allow") in (True, 1, "1", "true", "on"))
+    mcp_access.set_allow_writes(conn, validate.on(body.get("allow")))
     return {"allow_writes": mcp_access.allow_writes(conn)}
 
 
 def api_mcp_categorize(conn, _q, body):
     """Switch on or off letting assistants allowed categorize:write make the changes in mcp_access.CATEGORIZABLE."""
-    mcp_access.set_allow_categorize(conn, body.get("allow") in (True, 1, "1", "true", "on"))
+    mcp_access.set_allow_categorize(conn, validate.on(body.get("allow")))
     return {"allow_categorize": mcp_access.allow_categorize(conn)}
 
 
 def api_mcp_all(conn, _q, body):
     """Switch on or off letting assistants allowed "write" make any change outside mcp_access.BLOCKED."""
-    mcp_access.set_allow_all(conn, body.get("allow") in (True, 1, "1", "true", "on"))
+    mcp_access.set_allow_all(conn, validate.on(body.get("allow")))
     return {"allow_all": mcp_access.allow_all(conn)}
 
 
 def api_mcp_revoke(conn, _q, _b, grant_id):
     """Disconnect an assistant: its grant, and every token under it, end at once."""
-    try:
-        gid = int(grant_id)
-    except ValueError:
-        raise ApiError("Not found", 404) from None
-    if not mcp_oauth.revoke_grant(conn, gid, "revoked_in_settings"):
+    if not mcp_oauth.revoke_grant(conn, row_id(grant_id), "revoked_in_settings"):
         raise ApiError("That connection isn't there any more.", 404)
     return {"ok": True}

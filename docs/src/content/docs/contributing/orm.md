@@ -139,7 +139,10 @@ Use the shared versions, never a copy:
 - Substring position: `db.instr(haystack, needle) > 0` (SQLite `instr`, Postgres `strpos`). Exact, case-sensitive,
   no wildcards; wrap both sides in `func.lower()` for a case-insensitive match.
 - `.like(value)` treats `%`/`_` in the value as wildcards. To match text literally, use
-  `.contains(text, autoescape=True)` / `.startswith(..., autoescape=True)`.
+  `.contains(text, autoescape=True)` / `.startswith(..., autoescape=True)`. A search box does: `func.lower(col).contains(text.lower(), autoescape=True)`.
+- `func.lower()` lowers every letter on both databases ("CAFÉ" is "café"): SQLite's own only lowers ASCII, so
+  `db.py` puts Python's `str.lower` in its place on every SQLite connection. It doesn't case-fold (ß stays ß, as on
+  Postgres).
 - Concatenation: `A.a + B.b` on text columns (or `func.coalesce(...) + " (" + A.owner + ")"`).
 - `case((c, x), else_=y)` for `CASE WHEN c THEN x ELSE y END`.
 - Dates are ISO text in this schema (`posted`, `date`, `as_of`): compare them as strings (`Transaction.posted >=

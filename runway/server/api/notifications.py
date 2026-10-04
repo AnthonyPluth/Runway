@@ -26,8 +26,11 @@ def api_push(conn, _q, _b):
 
 
 def api_push_subscribe(conn, _q, body):
+    sub = body.get("subscription") or {}
+    if not isinstance(sub, dict) or not isinstance(sub.get("keys") or {}, dict):
+        raise ApiError("That isn't a push subscription.")
     try:
-        notify.subscribe(conn, body.get("subscription") or {}, str(body.get("device") or ""), (getattr(_current, "user", None) or {}).get("sub"))
+        notify.subscribe(conn, sub, str(body.get("device") or ""), (getattr(_current, "user", None) or {}).get("sub"))
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}

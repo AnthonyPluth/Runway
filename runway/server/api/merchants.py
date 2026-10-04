@@ -1,16 +1,29 @@
-"""Merchant logos: choosing one, and the Logo.dev keys and background fetch."""
+"""Merchant logos: serving one, choosing one, and the Logo.dev keys and background fetch."""
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 from typing import Any
 
 from sqlalchemy import update
 
-from ... import db, merchants, monitoring
+from ... import db, merchants, monitoring, validate
 from ... import settings_keys as sk
 from ...models import Merchant
-from ..common import ApiError
+from ..common import ApiError, Response, text
+
+
+def api_merchant_logo_file(conn, _q, _b, mid) -> Response:
+    """A merchant's logo, as an image. Kept by the browser but checked each time (its ETag), so it's gone at sign-out on
+    a shared machine; opened by itself, it's inert (a sandbox)."""
+    found = merchants.logo(conn, mid)
+    if not found or found[1] not in merchants.TYPES:   # a backup can hold anything; only ever serve an image
+        return Response(b"", "text/plain", 404)
+    data = found[0]
+    ctype = next(t for t in sorted(merchants.TYPES) if t == found[1])   # Runway's own string for it, not the stored one
+    return Response(data, ctype, cache="private, no-cache", etag='"' + hashlib.sha256(data).hexdigest()[:20] + '"',
+                    csp="default-src 'none'; sandbox")
 
 
 def api_merchant_logo_options(conn, q, _b):
@@ -30,7 +43,7 @@ def api_merchant_logo_options(conn, q, _b):
 def api_merchant_logo(conn, _q, body):
     """Choose the logo for every transaction from a merchant: a website's, none, or (neither) Runway's own pick."""
     try:
-        merchants.choose(conn, body.get("name"), (body.get("website") or "").strip() or None, bool(body.get("hidden")))
+        merchants.choose(conn, text(body.get("name"), "name"), text(body.get("website"), "website").strip() or None, validate.on(body.get("hidden")))
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -58,7 +71,7 @@ def api_holding_logo_options(conn, q, _b):
 def api_holding_logo(conn, _q, body):
     """Choose a holding's logo: a website's, none (its letter), or (neither) Runway's own pick, by ticker or fund family."""
     try:
-        merchants.choose_holding(conn, body.get("group"), (body.get("website") or "").strip() or None, bool(body.get("hidden")))
+        merchants.choose_holding(conn, text(body.get("group"), "group"), text(body.get("website"), "website").strip() or None, validate.on(body.get("hidden")))
     except ValueError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -78,8 +91,8 @@ def api_logodev_fetch(conn, _q, _b):
 
 def api_logodev_settings(conn, _q, body):
     """The Logo.dev publishable key, for merchant logos Plaid doesn't have."""
-    secret = (body.get("secret") or "").strip()
-    if body.get("clear_secret"):
+    secret = text(body.get("secret"), "secret").strip()
+    if validate.on(body.get("clear_secret")):
         db.set_setting(conn, sk.LOGODEV_SECRET, None)
     elif secret:
         if not re.fullmatch(r"sk_[A-Za-z0-9_-]{8,200}", secret):
@@ -92,8 +105,8 @@ def api_logodev_settings(conn, _q, body):
         conn.commit()
         start_logo_backfill()
         return {"ok": True, "configured": merchants.configured(conn)}
-    key = (body.get("token") or "").strip()
-    if body.get("clear"):
+    key = text(body.get("token"), "token").strip()
+    if validate.on(body.get("clear")):
         db.set_setting(conn, sk.LOGODEV_TOKEN, None)
     elif key:
         if not re.fullmatch(r"pk_[A-Za-z0-9_-]{8,200}", key):

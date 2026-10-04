@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from ... import bank_bonuses, churn_benefits, churn_found, churn_wishlist, churning, db, notify
 from ...models import Category
-from ..common import ApiError, _current
+from ..common import ApiError, _current, row_id
 from .state import owner_choices
 
 
@@ -20,10 +20,7 @@ def _churn(fn, *args):
 
 
 def _id(value) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        raise ApiError("Not found", 404) from None
+    return row_id(value)
 
 
 def api_churning(conn, _q, _b):

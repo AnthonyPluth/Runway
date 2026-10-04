@@ -1,15 +1,16 @@
 """Investments: the portfolio, live prices, cost basis, accounts you track by hand, and the retirement plan."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy import delete, select
 
-from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked
+from ... import db, finnhub, planner, portfolio, prices, sfinvest, tracked, validate
 from ... import settings_keys as sk
 from ...models import CostOverride, Holding, ManualContribution, ManualState, Security
-from ..common import ApiError
-from ..sync import refresh_prices
+from ..common import ApiError, Response, own_session, text
+from ..sync import refresh_prices, run_investment_sync, run_sync
 
 
 def api_plan_save(conn, _q, body):
@@ -24,7 +25,7 @@ def api_plan_save(conn, _q, body):
 
 def api_cost_basis(conn, _q, body):
     """Set the price paid per share for a holding in one account (cost basis = that x shares held). Empty clears it."""
-    acct, sec = body.get("account_id") or "", body.get("security_id") or ""
+    acct, sec = text(body.get("account_id"), "account_id"), text(body.get("security_id"), "security_id")
     if not conn.execute(select(Holding.account_id).where(Holding.account_id == acct, Holding.security_id == sec)).fetchone():
         raise ApiError("That holding isn't in this account")
     v = body.get("per_share", body.get("cost_basis"))
@@ -68,7 +69,7 @@ def api_finnhub_status(conn, _q, _b):
 def api_finnhub_settings(conn, _q, body):
     """Save (after one quote proves it works) or remove the Finnhub key that makes live prices real-time trades."""
     key = str(body.get("api_key") or "").strip()
-    if body.get("clear"):
+    if validate.on(body.get("clear")):
         db.set_setting(conn, sk.FINNHUB_API_KEY, None)
     elif key:
         try:
@@ -106,3 +107,38 @@ def api_tracked_save(conn, _q, body, acct_id):
 def api_investments(conn, q, _b):
     period = q.get("period", ["1Y"])[0]
     return portfolio.overview(conn, period if period in ("1M", "3M", "YTD", "1Y", "2Y", "MAX") else "1Y")
+
+
+@own_session
+def api_investments_sync(_conn, _q, _b):
+    """Investments' Sync: positions from Plaid (and from SimpleFIN, which come with the bank sync), then prices."""
+    with db.session() as conn:
+        has_sf = bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL))
+    bank = run_sync() if has_sf else None   # positions from SimpleFIN arrive with the regular bank sync
+    out = run_investment_sync()
+    out["bank"] = bank
+    return out
+
+
+def api_quote_stream(conn, _q, _b) -> Response:
+    """Live prices as Server-Sent Events: an update whenever a held stock moves, while the market is open. With it
+    closed, one update and then the browser is told to come back in a few minutes."""
+    tickers = live_tickers(conn)
+    key = db.get_setting(conn, sk.FINNHUB_API_KEY)   # with one, trades come from Finnhub's shared connection
+
+    def events():
+        market = "closed"
+        stream = prices.quote_stream(tickers, live=finnhub.feed if key else None, live_key=key)
+        try:
+            yield b"retry: 5000\n\n"
+            for update in stream:
+                if update is None:
+                    yield b": still here\n\n"
+                else:
+                    market = update["market"]
+                    yield b"event: quotes\ndata: " + json.dumps(update).encode() + b"\n\n"
+            if market != "open":
+                yield f"retry: {prices.CLOSED_RETRY * 1000}\n\n".encode()
+        finally:
+            stream.close()   # lets go of this page's symbols on the shared Finnhub connection at once
+    return Response(b"", "text/event-stream", stream=events())

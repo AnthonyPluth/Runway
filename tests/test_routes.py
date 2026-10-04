@@ -76,7 +76,7 @@ class RouteTests(unittest.TestCase):
             return e.code, e.read()
 
     def test_no_route_fails_with_a_server_error(self):
-        for method, pattern, _ in server.ROUTES:
+        for method, pattern, *_ in server.ROUTES:
             if pattern in NETWORK:
                 continue
             for rid in ("1", "chk|0", "nope"):
@@ -95,6 +95,39 @@ class RouteTests(unittest.TestCase):
             with self.subTest(path=path):
                 status, body = self.req("GET", path)
                 self.assertNotEqual(status, 500, f"{path}: {body[:300]!r}")
+
+
+class TableTests(unittest.TestCase):
+    """routes.TABLE: ROUTES split up once, found as a scan of ROUTES in order would find them."""
+
+    @staticmethod
+    def scan(method, path):
+        """The first route in ROUTES whose method (any, for None) and pattern match: how the server used to look."""
+        parts = path.strip("/").split("/")
+        for m, pattern, *_ in server.ROUTES:
+            want = pattern.strip("/").split("/")
+            if (method is None or m == method) and len(want) == len(parts) \
+                    and all(w == "{id}" or w == p for w, p in zip(want, parts, strict=True)):
+                return pattern
+        return None
+
+    def test_every_route_is_found_as_a_scan_would(self):
+        for method, pattern, *_ in server.ROUTES:
+            for rid in ("7", "chk%7C0", "bulk", "deleted", "suggestions"):
+                path = pattern.replace("{id}", rid)
+                for m in (method, None):
+                    with self.subTest(method=m, path=path):
+                        found = server.routes.match(m, path)
+                        self.assertEqual(found.route.pattern if found else None, self.scan(m, path))
+
+    def test_ids_and_order(self):
+        found = server.routes.match("POST", "/api/accounts/chk%7C0/statements/2026-09-01/remove")
+        self.assertEqual((found.route.pattern, found.params), ("/api/accounts/{id}/statements/{id}/remove", ["chk|0", "2026-09-01"]))
+        self.assertEqual(server.routes.match("POST", "/api/transactions/bulk").route.pattern, "/api/transactions/bulk")
+        self.assertEqual(server.routes.match("GET", "/api/accounts/deleted").route.pattern, "/api/accounts/deleted")
+        self.assertEqual(server.routes.match("GET", "/api/accounts/").route.pattern, "/api/accounts")
+        self.assertIsNone(server.routes.match("DELETE", "/api/accounts"))
+        self.assertIsNone(server.routes.match("GET", "/api/nothing/here"))
 
 
 if __name__ == "__main__":

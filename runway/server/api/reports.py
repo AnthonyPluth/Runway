@@ -6,9 +6,9 @@ from typing import Any
 
 from dateutil.relativedelta import relativedelta
 
-from ... import categories, reports
+from ... import categories, reports, validate
 from ...budgets import month_totals
-from ..common import ApiError, _month_range
+from ..common import ApiError, _month_range, query_int
 
 
 def api_month_pace(conn, _q, _b):
@@ -68,18 +68,15 @@ def _ym(q, key="end") -> str:
     return v
 
 
+_v = validate.Validator(ApiError, not_date="Dates must look like 2026-09-01")
+
+
 def _day(q, key: str, default: date) -> str:
-    v = q.get(key, [""])[0]
-    if not v:
-        return default.isoformat()
-    try:
-        return date.fromisoformat(v).isoformat()
-    except ValueError:
-        raise ApiError("Dates must look like 2026-09-01") from None
+    return _v.day(q.get(key, [""])[0], key) or default.isoformat()
 
 
 def _months(q) -> int:
-    return max(2, min(int(q.get("months", ["12"])[0]), 36))
+    return query_int(q, "months", 12, 2, 36, "number of months")
 
 
 def _span(q) -> tuple[str, str]:

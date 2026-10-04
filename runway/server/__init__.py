@@ -1,10 +1,11 @@
 """Runway's web server: the JSON API, the web app's files, and the background sync. Standard library only.
 
-handler.py serves requests (routing, sign-in, security headers, limits, static files) and has serve(); routes.py maps
-each API path to its handler in api/, one module per area; sync.py keeps the data fresh; common.py holds what they
-share. The names below are re-exported so `from runway import server; server.serve()` and the tests keep working.
-They are references, not the state itself: to change or patch a module's setting (sync.AUTO_SYNC, handler.STATIC,
-...), do it on the module that owns it.
+handler.py serves requests (who may reach what, security headers, limits, reading bodies, sending answers) and has
+serve(); routes.py maps each API path to its handler in api/, one module per area, and answers it (dispatch), for the
+web app and /mcp (mcp_http.py) alike; oauth_http.py is OAuth for /mcp and its consent page; static.py sends the web
+app's files; sync.py keeps the data fresh; common.py holds what they share. The names below are re-exported so
+`from runway import server; server.serve()` and the tests keep working. They are references, not the state itself: to
+change or patch a module's setting (sync.AUTO_SYNC, static.STATIC, ...), do it on the module that owns it.
 """
 # ruff: noqa: F401
 from __future__ import annotations
@@ -16,11 +17,13 @@ from .sync import (
     run_investment_sync, run_sync, sync_on_visit
 )
 from .handler import (
-    APP_DIR, APP_INDEX, HEADER_DEADLINE, Handler, MAX_CONCURRENT_REQUESTS, MAX_JSON_BODY, MAX_RESTORE_BODY,
-    MIN_BODY_RATE, PLAID_API, PLAID_ORIGINS, PUBLIC_FILES, REQUEST_TIMEOUT, STATIC, Server, ThreadingHTTPServer,
+    HEADER_DEADLINE, Handler, MAX_CONCURRENT_REQUESTS, MAX_JSON_BODY,
+    MIN_BODY_RATE, PLAID_API, PLAID_ORIGINS, PUBLIC_FILES, REQUEST_TIMEOUT, Server, ThreadingHTTPServer,
     content_security_policy, serve
 )
 from .routes import ROUTES
+from .static import APP_DIR, APP_INDEX, STATIC
+from .api.backups import MAX_RESTORE_BODY
 from .api.accounts import ACCOUNT_FIELDS, KINDS, api_account_update, api_accounts
 from .api.budget import api_budget, api_budget_set, budget_carry
 from .api.categories import (

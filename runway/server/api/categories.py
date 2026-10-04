@@ -6,9 +6,9 @@ from datetime import date
 
 from sqlalchemy import delete, func, select
 
-from ... import categories, db, forecast, rules, splits
+from ... import categories, db, forecast, rules, splits, validate
 from ...models import Account, Budget, Category, RetailItem, Rule, Transaction
-from ..common import ApiError
+from ..common import ApiError, row_id, text
 
 
 def api_categories(conn, _q, _b):
@@ -40,8 +40,8 @@ def api_categories(conn, _q, _b):
 
 def api_category_add(conn, _q, body):
     try:
-        categories.add(conn, body.get("name") or "", body.get("parent") or None,
-                       bool(body.get("is_transfer")), bool(body.get("is_income")))
+        categories.add(conn, text(body.get("name"), "name"), text(body.get("parent"), "parent") or None,
+                       validate.on(body.get("is_transfer")), validate.on(body.get("is_income")))
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -49,7 +49,7 @@ def api_category_add(conn, _q, body):
 
 def api_category_rename(conn, _q, body):
     try:
-        categories.rename(conn, body.get("name") or "", body.get("new_name") or "")
+        categories.rename(conn, text(body.get("name"), "name"), text(body.get("new_name"), "new_name"))
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -57,7 +57,7 @@ def api_category_rename(conn, _q, body):
 
 def api_category_move(conn, _q, body):
     try:
-        categories.move(conn, body.get("name") or "", body.get("parent") or None)
+        categories.move(conn, text(body.get("name"), "name"), text(body.get("parent"), "parent") or None)
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -65,7 +65,7 @@ def api_category_move(conn, _q, body):
 
 def api_category_look(conn, _q, body):
     try:
-        categories.set_look(conn, body.get("name") or "", body.get("icon"), body.get("color"))
+        categories.set_look(conn, text(body.get("name"), "name"), text(body.get("icon"), "icon"), text(body.get("color"), "color"))
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -73,7 +73,7 @@ def api_category_look(conn, _q, body):
 
 def api_category_pay_with(conn, _q, body):
     try:
-        categories.set_pay_with(conn, body.get("name") or "", body.get("pay_with") or None)
+        categories.set_pay_with(conn, text(body.get("name"), "name"), text(body.get("pay_with"), "pay_with") or None)
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -81,7 +81,7 @@ def api_category_pay_with(conn, _q, body):
 
 def api_category_remove(conn, _q, body):
     try:
-        n = categories.remove(conn, body.get("name") or "", body.get("move_to") or None)
+        n = categories.remove(conn, text(body.get("name"), "name"), text(body.get("move_to"), "move_to") or None)
     except categories.CategoryError as e:
         raise ApiError(str(e)) from e
     return {"ok": True, "moved": n}
@@ -101,14 +101,14 @@ def api_rules(conn, _q, _b):
 def api_rule_add(conn, _q, body):
     try:
         rid = rules.save(conn, body)
-        return {"ok": True, "id": rid, "updated": rules.apply_rule(conn, rid) if body.get("apply") else 0}
+        return {"ok": True, "id": rid, "updated": rules.apply_rule(conn, rid) if validate.on(body.get("apply")) else 0}
     except rules.RuleError as e:
         raise ApiError(str(e)) from e
 
 
 def api_rule_update(conn, _q, body, rule_id):
     try:
-        rules.save(conn, body, int(rule_id))
+        rules.save(conn, body, row_id(rule_id, "Rule not found"))
     except rules.RuleError as e:
         raise ApiError(str(e)) from e
     return {"ok": True}
@@ -128,7 +128,7 @@ def api_rule_apply(conn, _q, _b, rule_id):
         return {r["id"]: tuple(r) for r in conn.execute(select(*cols))}
     before = state()
     try:
-        n = rules.apply_rule(conn, int(rule_id))
+        n = rules.apply_rule(conn, row_id(rule_id, "Rule not found"))
     except rules.RuleError as e:
         raise ApiError(str(e), 404) from e
     after = state()
@@ -138,5 +138,5 @@ def api_rule_apply(conn, _q, _b, rule_id):
 
 
 def api_rule_delete(conn, _q, _b, rule_id):
-    conn.execute(delete(Rule).where(Rule.id == int(rule_id)))
+    conn.execute(delete(Rule).where(Rule.id == row_id(rule_id, "Rule not found")))
     return {"ok": True}
