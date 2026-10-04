@@ -7,14 +7,14 @@ from datetime import date, timedelta
 
 from sqlalchemy import and_, false, func, insert, or_, select, true, update
 
-from . import bankdays, brands, db
+from . import bankdays, brands, dates, db
 from .models import Account, Override, Recurring, RecurringDismissed, Transaction
+from .money import CENT, is_zero
 
 # How far a real payment can land from its expected date and still count as that occurrence.
 MATCH_WINDOW_DAYS = {"weekly": 2, "biweekly": 4, "semimonthly": 4, "monthly": 6, "quarterly": 10,
                      "semiannual": 12, "yearly": 12, "dates": 12, "once": 5}
 AMOUNT_MODES = {"fixed", "last", "avg3"}
-CENT = 0.005
 # The "use $X" hint: a fixed amount's latest RECENT_PAYMENTS occurrences all came to more than DRIFT_SHARE of it, or
 # DRIFT_DOLLARS, whichever is more, away from it (the same way), and within STALE_TOLERANCE of each other.
 DRIFT_SHARE = 0.05
@@ -68,7 +68,7 @@ def _once_window(item: dict) -> tuple[str, str]:
     """A one-time item's matching window, first and last day: around the day its money moves (its date, moved off a
     weekend or holiday as the forecast moves it), so a payment the forecast still expects can match it."""
     window = timedelta(days=MATCH_WINDOW_DAYS["once"])
-    day = bankdays.settles(date.fromisoformat(item["anchor_date"][:10]), (item.get("amount") or 0) > 0)
+    day = bankdays.settles(dates.parse_day(item["anchor_date"]), (item.get("amount") or 0) > 0)
     return (day - window).isoformat(), (day + window).isoformat()
 
 
@@ -197,7 +197,7 @@ def with_account_name():
 def _same_way(item: dict, payments: list[dict]) -> list[dict]:
     """The payments that move money the item's way (money in for a paycheck, out for a bill); all of them for an item
     without an amount, which learns even its direction from them."""
-    if abs(item["amount"] or 0) < CENT:
+    if is_zero(item["amount"] or 0):
         return payments
     return [p for p in payments if (p["amount"] > 0) == (item["amount"] > 0)]
 
@@ -237,7 +237,7 @@ def still_due(item: dict, occurrence: date, paid: dict[date, float], today: date
     if today > occurrence + timedelta(days=window):
         return None
     got = paid.get(occurrence, 0.0)
-    if abs(got) < CENT:
+    if is_zero(got):
         return amount
     if edited:   # you said what this one comes to: whatever of that hasn't come yet is still expected, however small
         left = round(amount - got, 2)
@@ -290,7 +290,7 @@ def skipped_keys(conn) -> set[str]:
     """The occurrences you've skipped ("Skip the next one", "Skip this one"): a one-off edit to $0 of a recurring
     item's date (rec:<id>:<date>), which the forecast already reads as nothing coming that day."""
     return {k for k, a in conn.execute(select(Override.key, Override.amount).where(Override.key.like("rec:%")))
-            if abs(a or 0) < CENT}
+            if is_zero(a or 0)}
 
 
 CANDIDATES = 6
@@ -312,7 +312,7 @@ def candidates(conn, item: dict, day: date, amount: float) -> list[dict]:
         q = q.where(t.amount > 0 if amount > 0 else t.amount < 0, func.abs(t.amount) >= want * (1 - CANDIDATE_SHARE),
                     func.abs(t.amount) <= want * (1 + CANDIDATE_SHARE))
     rows = db.rows(conn.execute(q))
-    rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((date.fromisoformat(r["posted"][:10]) - day).days), r["id"]))
+    rows.sort(key=lambda r: (round(abs(abs(r["amount"]) - want), 2), abs((dates.parse_day(r["posted"]) - day).days), r["id"]))
     return rows[:CANDIDATES]
 
 

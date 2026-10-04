@@ -13,7 +13,6 @@ Carta (runway/carta.py) or are entered by hand.
 """
 from __future__ import annotations
 
-import calendar
 import secrets
 from datetime import date
 from typing import Any
@@ -21,6 +20,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 
 from . import db, validate
+from .dates import add_months, parse_day
 from .models import EquityCompany, EquityGrant
 
 KINDS = {"iso": "ISO options", "nso": "NSO options", "rsu": "RSUs", "rsa": "Restricted stock", "shares": "Shares"}
@@ -32,14 +32,8 @@ class EquityError(ValueError):
     pass
 
 
-MAX_MONTHS = 600          # the longest vesting (50 years): a longer one runs off the calendar (_add_months)
+MAX_MONTHS = 600          # the longest vesting (50 years): a longer one runs off the calendar (add_months)
 MIN_YEAR, MAX_YEAR = 1900, 2200   # dates a grant can carry, for the same reason
-
-
-def _add_months(d: date, months: int) -> date:
-    y, m = divmod(d.month - 1 + months, 12)
-    y, m = d.year + y, m + 1
-    return date(y, m, min(d.day, calendar.monthrange(y, m)[1]))
 
 
 def _months_between(a: date, b: date) -> int:
@@ -85,7 +79,7 @@ def vested_later(g: dict, on: date, today: date) -> float:
         return min(qty, max(vested_now(g, today), by_schedule))
     reported = min(qty, reported)
     try:
-        since = date.fromisoformat(str(g.get("vested_reported_on") or "")[:10])
+        since = parse_day(str(g.get("vested_reported_on") or ""))
     except ValueError:
         since = today
     at_report = vested_on(g, min(since, on))
@@ -99,7 +93,7 @@ def fully_vested_on(g: dict) -> str | None:
     start = g.get("vest_start") or g.get("granted_on")
     if not start or not g.get("vest_months"):
         return None
-    return _add_months(date.fromisoformat(start), g["vest_months"]).isoformat()
+    return add_months(date.fromisoformat(start), g["vest_months"]).isoformat()
 
 
 def value(g: dict, price: float | None, vested: float) -> dict:
@@ -129,7 +123,7 @@ def schedule(g: dict, until: date | None = None) -> list[tuple[str, float]]:
     every = max(1, g.get("vest_every") or 1)
     out = [(d0.isoformat(), 0.0)]
     for m in range(every, total + every, every):
-        d = _add_months(d0, min(m, total))
+        d = add_months(d0, min(m, total))
         if until and d > until:
             break
         v = vested_on(g, d)
@@ -185,7 +179,7 @@ def networth_items(conn, today: date | None = None) -> list[dict]:
 
 def _expired(g: dict, on: date) -> bool:
     try:
-        return bool(g.get("expires_on")) and date.fromisoformat(str(g["expires_on"])[:10]) <= on
+        return bool(g.get("expires_on")) and parse_day(str(g["expires_on"])) <= on
     except ValueError:
         return False
 
@@ -199,7 +193,7 @@ def value_by_year(c: dict, today: date, max_years: int = 100) -> list[float]:
     net of their exercise price, like shares held."""
     out: list[float] = []
     for k in range(max_years + 1):
-        on = _add_months(today, 12 * k)
+        on = add_months(today, 12 * k)
         total, done = 0.0, True
         for g in c["grants"]:
             vested = g["vested"]   # today's (Carta's, if it reported it)
@@ -207,7 +201,7 @@ def value_by_year(c: dict, today: date, max_years: int = 100) -> list[float]:
                 total += (c["share_price"] or 0.0) * min(g.get("exercised") or 0.0, vested)
                 continue   # expired already: nothing more to come from it
             # an option that expires by then was exercised before it did: what vested up to that day
-            at = date.fromisoformat(str(g["expires_on"])[:10]) if g["kind"] in OPTIONS and _expired(g, on) else on
+            at = parse_day(str(g["expires_on"])) if g["kind"] in OPTIONS and _expired(g, on) else on
             if k and not g.get("problem"):   # one whose schedule can't be worked out stays at today's
                 vested = max(vested, vested_later(g, at, today))
             done = done and (bool(g.get("problem")) or vested >= (g["quantity"] or 0.0) or at != on)   # expired: settled
@@ -231,7 +225,7 @@ def _day(v, name):
     if v in (None, ""):
         return None
     try:
-        d = date.fromisoformat(str(v)[:10])
+        d = parse_day(str(v))
     except ValueError:
         raise EquityError(f"The {name} must be a date like 2024-03-01") from None
     if not MIN_YEAR <= d.year <= MAX_YEAR:

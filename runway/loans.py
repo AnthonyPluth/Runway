@@ -19,16 +19,12 @@ from datetime import date
 from sqlalchemy import select
 
 from . import db, forecast
+from .dates import month_start, parse_day
 from .models import Account, LoanTerms, Transaction
 
 MAX_YEARS = 100          # as far as the planner reaches (a sale up to 100 years out)
 INFER_MONTHS = 6         # recent whole months of payments to infer a monthly payment from
 INFER_MIN_MONTHS = 2     # ... of which at least this many must have payments
-
-
-def _add_months(d: date, months: int) -> date:
-    y, m = divmod(d.month - 1 + months, 12)
-    return date(d.year + y, m + 1, 1)
 
 
 def _months_until(today: date, until: date) -> int:
@@ -94,7 +90,7 @@ def owed_on(account: dict, t: dict | None, on: date) -> float:
     if account.get("kind") != "loan" or not t or t["rate"] is None or not t["payment"] or not account.get("balance_date"):
         return round(owed, 2)
     try:
-        start = date.fromisoformat(str(account["balance_date"])[:10])
+        start = parse_day(str(account["balance_date"]))
     except ValueError:
         return round(owed, 2)
     return round(amortize(owed, t["rate"], t["payment"], months_between(start, on)), 2)
@@ -114,7 +110,7 @@ def payoff_year(owed_today: float, t: dict | None, today: date) -> int | None:
     for n in range(1, MAX_YEARS * 12 + 1):
         b = b * (1 + r) - payment
         if b < 0.005:   # nothing left to the cent
-            return _add_months(today, n).year
+            return month_start(today, n).year
     return None
 
 
@@ -123,7 +119,7 @@ def inferred_payments(conn, account_ids: list[str], today: date) -> dict[str, fl
     INFER_MONTHS whole months: the median of the months that had any. Accounts without enough history are left out."""
     if not account_ids:
         return {}
-    start, end = _add_months(today, -INFER_MONTHS), date(today.year, today.month, 1)
+    start, end = month_start(today, -INFER_MONTHS), month_start(today)
     by_month: dict[str, dict[str, float]] = {}
     for t in conn.execute(select(Transaction.account_id, Transaction.posted, Transaction.amount)
                           .where(Transaction.account_id.in_(account_ids), Transaction.amount > 0, Transaction.pending == 0,

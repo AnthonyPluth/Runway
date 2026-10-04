@@ -21,10 +21,10 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, select
 
 from . import db
+from .dates import add_months, parse_day
 from .models import Account, ManualStatement
 
 GRACE_DAYS = 5          # days after the next expected close before a statement you entered counts as stale
@@ -33,7 +33,7 @@ MAX_DUE_DAYS = 90       # a due date further than this after the close is surely
 
 def next_close(close: date) -> date:
     """When the statement after one that closed on `close` is expected to close: the same day, a month later."""
-    return close + relativedelta(months=1)
+    return add_months(close, 1)
 
 
 def is_stale(close: date, today: date) -> bool:
@@ -42,7 +42,7 @@ def is_stale(close: date, today: date) -> bool:
 
 def _day(value, what: str) -> date:
     try:
-        return date.fromisoformat(str(value or "")[:10])
+        return parse_day(str(value or ""))
     except ValueError:
         raise ValueError(f"Enter the {what} (YYYY-MM-DD).") from None
 
