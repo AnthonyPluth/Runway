@@ -22,12 +22,10 @@ from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import sqlalchemy.exc
-from sqlalchemy import func, select
 
-from .. import backup, carta, categories, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, plaid, prices, recurring, retail, secretbox, sfinvest
+from .. import backup, carta, db, finnhub, mcp_access, mcp_oauth, mcp_server, merchants, monitoring, oidc, prices, retail, secretbox
 from .. import settings_keys as sk
 from . import mcp_http, sync
-from ..models import PlaidItem
 from .common import ApiError, _current, host_allowed, request_ref
 from .sync import _inv_lock, _sync_lock, background_sync, run_investment_sync, run_sync, sync_on_visit
 from .api.investments import live_tickers
@@ -531,8 +529,6 @@ class Handler(BaseHTTPRequestHandler):
                     copy = backup.safety_copy(conn)   # what's here now, in the data directory, in case the backup was the wrong one
                     counts = backup.restore(conn, restored)
                     unreadable = backup.unreadable_secrets(conn)   # from a machine with another key: entered again
-                with db.session() as conn:
-                    sfinvest.repair_stored(conn)
             except (ValueError, OSError, sqlalchemy.exc.OperationalError) as e:
                 failed = e
             finally:
@@ -1123,15 +1119,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         raise SystemExit("Runway is set to accept connections from other devices, so it needs sign-in.\n"
                          "Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, RUNWAY_PUBLIC_URL and OIDC_ALLOWED_EMAILS\n"
                          "(or RUNWAY_ALLOW_NO_AUTH=1 if a proxy in front of Runway already handles sign-in).")
-    db.init()
-    with db.session() as conn:
-        recurring.auto_match(conn)  # pick up matches for items created before this version
-        sfinvest.repair_stored(conn)  # fix investment positions saved by earlier versions
-        categories.flatten(conn)      # subcategories are one level deep
-        for r in conn.execute(select(PlaidItem.item_id)
-                              .where(func.coalesce(PlaidItem.products, "investments").like("%investments%"))).fetchall():
-            plaid.update_investment_accounts(conn, r["item_id"])   # investment accounts from Plaid in your accounts
-        oidc.backfill_users(conn)        # people who signed in before owners existed
+    db.init()   # migrations included: repairs for data saved by earlier versions are among them (0038)
     sync.AUTO_SYNC = auto_sync   # sync_on_visit reads it there
     if auto_sync:
         threading.Thread(target=background_sync, daemon=True).start()

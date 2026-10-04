@@ -36,7 +36,7 @@ import urllib.parse
 import urllib.request
 
 import jwt
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, insert, select, update
 
 from . import db, secretbox
 from .models import AuthPending, AuthSession, User
@@ -274,15 +274,6 @@ def remember_user(conn, sub, email, name, given=None, when=None) -> None:
         return
     db.upsert(conn, User, {"sub": sub, "email": email, "name": name, "first_name": first_name(name, email, given),
                            "last_seen": when or time.time()}, key=["sub"])
-
-
-def backfill_users(conn) -> None:
-    """People signed in before the users list existed."""
-    s = AuthSession
-    for r in conn.execute(select(s.sub, s.email, s.name, func.max(s.created).label("t")).where(s.sub.is_not(None))
-                          .group_by(s.sub, s.email, s.name)).fetchall():
-        if not conn.execute(select(User.sub).where(User.sub == r["sub"])).fetchone():
-            remember_user(conn, r["sub"], r["email"], r["name"], None, r["t"])
 
 
 def authorize(info: dict) -> dict:

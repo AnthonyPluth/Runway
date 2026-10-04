@@ -1,8 +1,10 @@
+import json
 from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
 from runway import db, portfolio, prices, sfinvest, simplefin
+from runway import settings_keys as sk
 from runway.models import (Account, Holding, HoldingSnapshot, InvAccount, ManualContribution, ManualPosition,
                            ManualState, Price, PriceMeta, Security)
 from tests.shared import DbCase
@@ -175,11 +177,17 @@ class CostBasisTests(Base):
 
 
 class RepairTests(Base):
-    def test_startup_repair_of_old_data(self):
-        # what the previous version stored: junk name, day's change as value, zero cost basis, phantom cash
+    def test_old_data_is_repaired_once_by_migration_0038(self):
+        # what an earlier version stored: junk name, day's change as value, zero cost basis, phantom cash, no feed kept
+        from alembic import command
+        self.c.close()
+        with db.engine(self.path).begin() as sa_conn:
+            command.downgrade(db.alembic_config(sa_conn), "0037")
+        self.c = db.connect(self.path)
         self.c.execute(insert(Account).values(id="et", name="Individual Brokerage", kind="investment", balance=3044.21))
         self.c.execute(insert(InvAccount).values(id="sf:et", item_id="simplefin", name="Individual Brokerage",
                                                  balance=3044.21, source="simplefin", institution="E*Trade"))
+        self.c.execute(insert(InvAccount).values(id="sf:gone", item_id="simplefin", name="Closed", balance=10, source="simplefin"))
         self.c.execute(insert(Security), [{"id": "sf:PAYX", "ticker": "PAYX",
                                            "name": "keyboard_arrow_right PAYX info_outline Trade keyboard_arrow_down",
                                            "is_cash": 0},
@@ -189,14 +197,26 @@ class RepairTests(Base):
                                          {"account_id": "sf:et", "security_id": "sf:cash", "quantity": 3335.37,
                                           "price": 1, "value": 3335.37, "cost_basis": 0}])
         self.price("PAYX", RECENT, 104.49)
-        self.assertEqual(sfinvest.repair_stored(self.c, TODAY), 1)
+        self.c.commit()
+        with db.engine(self.path).begin() as sa_conn:
+            command.upgrade(db.alembic_config(sa_conn), "head")
+        self.assertIsNone(self.c.execute(select(Security.name).where(Security.id == "sf:PAYX")).fetchone()[0])
+        self.assertIsNone(db.get_setting(self.c, sk.sf_raw("gone")))           # no account of its own: nothing to rebuild
+        feed = json.loads(db.get_setting(self.c, sk.sf_raw("et")) or "{}")
+        self.assertEqual(feed, {"acct": {"name": "Individual Brokerage", "currency": "USD", "holdings": [
+            {"symbol": "PAYX", "description": "PAYX", "shares": 29.0, "market_value": -291.16, "cost_basis": 0.0}]},
+            "org": "E*Trade", "balance": 3044.21})
+        # The next sync's price check runs it through today's checks.
+        self.assertEqual(sfinvest.recapture_all(self.c, TODAY), 1)
         h = {r["security_id"]: dict(r) for r in self.c.execute(select(Holding))}
         self.assertAlmostEqual(h["sf:PAYX"]["value"], 3030.21, places=2)
         self.assertAlmostEqual(h["sf:cash"]["value"], 14.0, places=2)
         self.assertIsNone(h["sf:PAYX"]["cost_basis"])
-        self.assertIsNone(self.c.execute(select(Security.name).where(Security.id == "sf:PAYX")).fetchone()[0])
-        self.assertEqual(sfinvest.repair_stored(self.c, TODAY), 0)   # only once: the feed is kept from now on
-
+        self.c.commit()
+        with db.engine(self.path).begin() as sa_conn:   # only once: the feed is kept from now on
+            command.downgrade(db.alembic_config(sa_conn), "0037")
+            command.upgrade(db.alembic_config(sa_conn), "head")
+        self.assertEqual(json.loads(db.get_setting(self.c, sk.sf_raw("et")) or "{}"), feed)   # the kept feed, not rebuilt
 
 class SnapshotHistoryTests(Base):
     def snap(self, d, qty, cash):

@@ -488,6 +488,27 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
+    def test_0038_moves_categories_nested_too_deep_up(self):
+        # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.
+        from alembic import command
+        from runway import categories
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0037")
+            c.exec_driver_sql("INSERT INTO categories(name, parent) VALUES ('Food', NULL), ('Eating Out', 'Food'), "
+                              "('Burgers', 'Eating Out'), ('Sliders', 'Burgers'), ('Lost', 'Gone'), ('Lost Too', 'Lost'), "
+                              "('Under Lost', 'Lost Too'), ('Loop A', 'Loop B'), ('Loop B', 'Loop A')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        with db.session(self.path) as conn:
+            parents = dict(conn.execute(select(Category.name, Category.parent)).fetchall())
+            self.assertEqual({k: parents[k] for k in ("Food", "Eating Out", "Burgers", "Sliders", "Lost", "Lost Too", "Under Lost",
+                                                      "Loop A", "Loop B")},
+                             {"Food": None, "Eating Out": "Food", "Burgers": "Food", "Sliders": "Food",
+                              "Lost": "Gone", "Lost Too": "Lost", "Under Lost": "Lost",   # an orphan counts as top-level
+                              "Loop A": "Loop B", "Loop B": "Loop A"})                    # a loop is left alone
+            self.assertTrue(all(c["depth"] <= 1 for c in categories.all_categories(conn) if not c["name"].startswith("Loop")))
+
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):
         # Several copies of Runway (or parallel tests) starting on one empty Postgres database used to collide creating

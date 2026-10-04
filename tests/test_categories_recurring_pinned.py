@@ -146,14 +146,11 @@ class CategoryCascadeTests(Base):
         categories.set_look(self.c, "Pets", "", "")
         self.assertEqual(tuple(self.one(select(Category.icon, Category.color)
                                         .where(Category.name == "Pets"))), (None, None))
-        # an orphan (its parent removed by hand) shows at the top level; deeper nesting gets flattened
-        self.c.execute(insert(Category), [{"name": "Lost", "is_transfer": 0, "is_income": 0, "parent": "Gone"},
-                                          {"name": "Deep", "is_transfer": 0, "is_income": 0, "parent": "Vitamins"}])
+        # an orphan (its parent removed by hand) shows at the top level (deeper nesting: migration 0038, test_migrations.py)
+        self.c.execute(insert(Category), [{"name": "Lost", "is_transfer": 0, "is_income": 0, "parent": "Gone"}])
         categories.add(self.c, "Vitamins", "Pharmacy")
         lost = next(c for c in categories.all_categories(self.c) if c["name"] == "Lost")
         self.assertEqual((lost["parent"], lost["depth"], lost["top"]), (None, 0, "Lost"))
-        self.assertEqual(categories.flatten(self.c), 1)
-        self.assertEqual(self.col(select(Category.parent).where(Category.name == "Deep")), ["Pharmacy"])
 
     def test_category_list_counts_split_parts(self):
         cats = {c["name"]: c for c in api_categories.api_categories(self.c, None, None)}

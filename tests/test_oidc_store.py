@@ -8,7 +8,7 @@ from unittest import mock
 
 from sqlalchemy import insert, select, update
 
-from runway import oidc, secretbox
+from runway import db, oidc, secretbox
 from runway.models import AuthPending, AuthSession, User
 from tests.shared import DbCase
 
@@ -182,13 +182,23 @@ class OIDCStoreTests(DbCase):
         self.assertEqual(self.users(), [("u1", "new@example.com", "Tony E", "Ant", 200.0)])
 
     def test_backfill_users_from_sessions(self):
-        for token, sub, created in (("a", "u1", 10.0), ("b", "u1", 30.0), ("c", "u2", 20.0), ("d", None, 40.0)):
+        # People signed in before the users list existed: added once, by migration 0038.
+        from alembic import command
+        self.c.close()
+        with db.engine(self.path).begin() as sa_conn:
+            command.downgrade(db.alembic_config(sa_conn), "0037")
+        self.c = db.connect(self.path)
+        for token, sub, created in (("a", "u1", 10.0), ("b", "u1", 30.0), ("c", "u2", 20.0), ("d", None, 40.0),
+                                    ("e", "u3", 50.0)):
             self.c.execute(insert(AuthSession).values(token_hash=token, sub=sub, email=f"{sub}@example.com",
-                                                      name=f"Name {sub}", created=created, expires=9e9))
+                                                      name=f"Name {sub}" if sub != "u3" else None, created=created, expires=9e9))
         oidc.remember_user(self.c, "u2", "kept@example.com", "Kept", None, 5.0)    # already known: left alone
-        oidc.backfill_users(self.c)
+        self.c.commit()
+        with db.engine(self.path).begin() as sa_conn:
+            command.upgrade(db.alembic_config(sa_conn), "head")
         self.assertEqual(self.users(), [("u1", "u1@example.com", "Name u1", "Name", 30.0),
-                                        ("u2", "kept@example.com", "Kept", "Kept", 5.0)])
+                                        ("u2", "kept@example.com", "Kept", "Kept", 5.0),
+                                        ("u3", "u3@example.com", None, "U3", 50.0)])
 
 
 class OwnerTests(unittest.TestCase):

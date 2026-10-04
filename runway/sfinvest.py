@@ -196,24 +196,3 @@ def recapture_all(conn, today: date | None = None) -> int:
             n += 1
     return n
 
-
-def repair_stored(conn, today: date | None = None) -> int:
-    """Start-up repair for positions saved by earlier versions (before the raw feed was kept): rebuild each account's
-    feed from its stored holdings and run it through today's checks (market values, cost basis, names)."""
-    conn.execute(update(Security).where(Security.id.like("sf:%"), Security.name.like("%keyboard_arrow%")).values(name=None))
-    n = 0
-    for a in conn.execute(select(InvAccount).where(InvAccount.source == "simplefin")).fetchall():
-        acct_id = a["id"][3:]
-        if conn.execute(select(Setting.key).where(Setting.key == sk.sf_raw(acct_id))).fetchone():
-            continue
-        if not conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone():
-            continue
-        raw = [{"symbol": h["ticker"] or "", "description": h["name"] or h["ticker"] or "", "shares": h["quantity"],
-                "market_value": h["value"], "cost_basis": h["cost_basis"]}
-               for h in conn.execute(select(Holding, Security.ticker, Security.name)
-                                     .join(Security, Security.id == Holding.security_id)
-                                     .where(Holding.account_id == a["id"], Holding.security_id.not_in(["sf:cash", BALANCE_ONLY])))]
-        capture(conn, {"name": a["name"], "currency": a["currency"] or "USD", "holdings": raw}, acct_id, a["institution"],
-                a["balance"] or 0.0, today)
-        n += 1
-    return n
