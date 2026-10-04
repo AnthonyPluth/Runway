@@ -38,6 +38,22 @@ describe("estimate breakdown", () => {
     })).toEqual(["Insurance · $600.00", "Sapphire annual fee · $95.00", "= $695.00"]);
   });
 
+  it("an annual fee alongside what's charged and the budgets: its own line, and the parts add up to the statement", () => {
+    const est: StatementEstimate = {
+      ...base, charged_so_far: 300, budgets: [{ category: "Groceries", amount: 461.29 }], budgets_total: 461.29,
+      fees: [{ name: "Sapphire annual fee", amount: 95 }], fees_total: 95, statement: 856.29, total: 856.29,
+    };
+    const lines = estimateLines(est);
+    expect(text(est)).toEqual(["Charged so far · $300.00", "Budgets on this card to Nov 1 · $461.29 (Groceries)",
+      "Sapphire annual fee · $95.00", "= $856.29"]);
+    const cents = (v: string) => Math.round(Number(v.replace(/[^0-9.]/g, "")) * 100);
+    const parts = lines.filter((l) => !l.sum).reduce((sum, l) => sum + cents(l.value), 0);
+    expect(parts).toBe(cents(lines.at(-1)!.value));
+    // two fees on one statement: one line, each named under it
+    expect(text({ ...est, fees: [{ name: "Sapphire annual fee", amount: 95 }, { name: "Gold annual fee", amount: 250 }], fees_total: 345,
+      statement: 1106.29, total: 1106.29 })[2]).toBe("Annual fees · $345.00 (Sapphire annual fee $95.00, Gold annual fee $250.00)");
+  });
+
   it("a carried balance, its interest, and paying the minimum", () => {
     expect(text({ ...base, charged_so_far: 1000, carried: 550, interest: 20.5, apr: 24, statement: 1570.5, total: 36.21, pay_mode: "minimum" }))
       .toEqual(["Charged so far · $1,000.00", "Carried from the last statement · $550.00", "Interest · $20.50 (24% APR)", "= $1,570.50",

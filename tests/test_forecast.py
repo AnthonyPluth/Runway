@@ -852,6 +852,22 @@ class ForecastAssumptionTests(LedgerCase):
         self.assertEqual((used, fc["budget"]["monthly"]), ([("Medical", "chk", 300.0)], 300.0))
         self.assertEqual(fc["budget"]["skipped"], [{"category": "Dentist", "reason": "its card isn't paid from a forecast account"}])
 
+    def test_a_charge_on_a_subcategorys_card_is_in_its_budget_and_one_in_the_parents_isnt(self):
+        # Dentist's $100 is charged to cc3 and the other $300 of Medical's comes out of checking. A $30 monthly charge on
+        # cc3 (from Oct 15) in Dentist is in Dentist's budget already: nothing changes.
+        _fc, cards, _used = self.medical(dentist=100.0, dentist_pays="cc3")
+        self.conn.execute(insert(Recurring).values(name="Ortho", account_id="cc3", amount=-30, frequency="monthly",
+                                                   anchor_date="2026-10-15", match="ortho"))
+        self.tx("cc3", "2026-08-15", -30.0, "ORTHO", "Dentist")
+        payments = lambda fc: {e["date"]: -e["amount"] for e in fc["events"] if e.get("card_id") == "cc3"}
+        self.assertEqual(payments(forecast.build(self.conn, TODAY, 90)), cards)
+        # One in Medical isn't in a budget charged to cc3: it's on the card's October statement on top, and comes off
+        # Medical's October from checking ($400 - $30, less Dentist's $100).
+        self.conn.execute(update(Transaction).where(Transaction.description == "ORTHO").values(category="Medical"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertEqual(payments(fc), {**cards, "2026-11-25": cards["2026-11-25"] + 30})
+        self.assertAlmostEqual(self.drop(fc, "2026-10-15"), 270 / 31, delta=0.01)
+
     def test_a_parents_usual_account_leaves_out_subcategories_with_their_own(self):
         from runway import categories
         categories.add(self.conn, "Dentist", "Medical")
@@ -1204,10 +1220,14 @@ class PaymentModeTests(LedgerCase):
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         nov10 = self.EST2 + 500 / 31 * 21 + 500 / 30 * 10
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], nov10 + 600, delta=0.01)
-        # ... and one for Subscriptions (paid from checking) has it already, so it isn't added again
+        # ... and one for Subscriptions paid from checking doesn't take it off the card: it's charged to the card, so it's
+        # on the card's statement and comes off October's Subscriptions budget instead, which it uses up ($50 - $600)
         self.conn.execute(insert(Budget).values(category="Subscriptions", amount=50))
         self.conn.execute(update(Category).where(Category.name == "Subscriptions").values(pay_with="chk"))
-        self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"], nov10, delta=0.01)
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertAlmostEqual(self.payments(fc)["2026-12-07"], nov10 + 600, delta=0.01)
+        self.assertEqual(ForecastTests.drop(self, fc, "2026-10-20"), 0.0)                        # nothing from checking in October
+        self.assertAlmostEqual(ForecastTests.drop(self, fc, "2026-11-17"), 50 / 30, delta=0.01)   # November's is all there
         # nor when that budget is paid with the card: the budget's $50 a month is on it instead
         self.conn.execute(update(Category).where(Category.name == "Subscriptions").values(pay_with="cc"))
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-12-07"],
@@ -1419,6 +1439,122 @@ class AnnualFeeTests(LedgerCase):
     def payments(self, fc):
         return {e["date"]: e["amount"] for e in fc["events"] if e["kind"] == "card"}
 
+    def assert_paid_with_their_statements(self, fc):
+        """Each fee's paid_on is the payment of its card's statement whose estimate has it: each statement's fees are
+        the ones paid on its date, and every fee paid on a date is on a statement."""
+        statements = [e for e in fc["events"] if e["kind"] == "card" and e.get("estimate")]
+        for e in statements:
+            paid = [{"name": f["name"], "amount": -f["amount"]} for f in fc["fees"]
+                    if f["account_id"] == e["card_id"] and f["paid_on"] == e["date"]]
+            self.assertEqual(e["estimate"].get("fees", []), paid, e)
+        for f in fc["fees"]:
+            if f["paid_on"]:
+                self.assertIn((f["account_id"], f["paid_on"]), [(e["card_id"], e["date"]) for e in statements], f)
+
+    def fees_budget(self, amount=150, pay_with="chk"):
+        """A budget for Fees & Interest, paid from checking unless said otherwise, and Groceries ($500) on the card."""
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
+        self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=amount))
+        self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with=pay_with))
+
+    def test_a_fee_on_the_close_date_is_on_that_statement_with_a_fees_budget_paid_from_checking(self):
+        # The fee is charged Oct 10, the day the statement in progress closes; $150 a month of fees is budgeted from
+        # checking (none spent yet), and Groceries on the card.
+        self.fees_budget()
+        before = forecast.build(self.conn, TODAY, 90)
+        self.churn(account_id="cc")
+        fc = forecast.build(self.conn, TODAY, 90)
+        nov5 = next(e for e in fc["events"] if e["date"] == "2026-11-05" and e.get("card_id") == "cc")
+        est = nov5["estimate"]
+        # charged so far, Groceries (the $300 left of September's and 10 days of October's) and the fee
+        groceries = 300 + 500 / 31 * 10
+        self.assertEqual((est["close"], est["charged_so_far"], est["fees"]), ("2026-10-10", 300.0, [{"name": "Sapphire annual fee", "amount": 95.0}]))
+        self.assertEqual([b["category"] for b in est["budgets"]], ["Groceries"])
+        self.assertAlmostEqual(est["budgets_total"], groceries, delta=0.005)
+        self.assertEqual(est["total"], round(300 + groceries + 95, 2))
+        self.assertEqual(-nov5["amount"], est["total"])
+        self.assertEqual(EstimatePartsTests.estimates(self)["2026-11-05"], est)   # its parts add up to it, to the cent
+        # Checking pays it on the due date, on top of that day's fees budget (November's: $150 over 30 days)...
+        self.assertAlmostEqual(ForecastTests.drop(self, fc, "2026-11-05") - 150 / 30, est["total"], delta=0.011)
+        # ...and the fee comes off October's fees budget, so checking's drip is the $55 left of it over the month, and
+        # the fee isn't counted twice: the balance at the end is where it was without it.
+        self.assertAlmostEqual(ForecastTests.drop(self, before, "2026-10-20"), 150 / 31, delta=0.01)
+        self.assertAlmostEqual(ForecastTests.drop(self, fc, "2026-10-20"), 55 / 31, delta=0.01)
+        october = [v for d, v in fc["spend"].items() if d.startswith("2026-10")]   # each day's to the cent
+        self.assertAlmostEqual(sum(october), 55 * 30 / 31, delta=0.005 * len(october))   # Saturday Oct 31's goes out Nov 2
+        self.assertAlmostEqual(fc["total"][-1], before["total"][-1], delta=0.011)
+        self.assertEqual((fc["fees"][0]["paid_on"], fc["fees"][0]["paid_from"]), ("2026-11-05", "chk"))
+        self.assert_paid_with_their_statements(fc)
+
+    def test_a_fee_the_day_after_the_close_is_on_the_next_statement_with_nothing_else_on_it(self):
+        # A second card, paid from checking, whose last statement (closing Oct 10, $0) has nothing since and no budgets;
+        # its fee was due on that close, hasn't posted, and it's Oct 11: the fee's on the statement closing Nov 10.
+        self.fees_budget()
+        self.acct("cc2", "credit", 0.0, pay_from="chk")
+        self.stmt("cc2", 0.0, "2026-10-10", "2026-11-05")
+        today = date(2026, 10, 11)
+        before = forecast.build(self.conn, today, 90)
+        self.assertFalse(any(e.get("card_id") == "cc2" for e in before["events"]))
+        self.churn(opened="2024-10-15", account_id="cc2")
+        fc = forecast.build(self.conn, today, 90)
+        self.assertEqual([(f["date"], f["late_from"], f["paid_on"]) for f in fc["fees"]], [("2026-10-11", "2026-10-10", "2026-12-07")])
+        card = [e for e in fc["events"] if e.get("card_id") == "cc2"]
+        self.assertEqual([(e["date"], e["amount"], e["estimate"]["close"]) for e in card], [("2026-12-07", -95.0, "2026-11-10")])
+        self.assertEqual(card[0]["estimate"]["fees"], [{"name": "Sapphire annual fee", "amount": 95.0}])
+        self.assert_paid_with_their_statements(fc)
+        # on the close date itself (the statement before, from Sep 23), it's on the statement that closes that day
+        self.stmt("cc2", 0.0, "2026-09-10", "2026-10-05")
+        fc = forecast.build(self.conn, TODAY, 90)
+        card = [e for e in fc["events"] if e.get("card_id") == "cc2"]
+        self.assertEqual([(e["date"], e["amount"], e["estimate"]["close"]) for e in card], [("2026-11-05", -95.0, "2026-10-10")])
+        self.assert_paid_with_their_statements(fc)
+
+    def test_a_fee_that_posts_takes_the_place_of_the_projected_one(self):
+        # On Oct 10, the fee's day: projected, then charged (under a name that doesn't say "annual fee", in Fees &
+        # Interest, for the fee's amount). The statement and every balance come out the same.
+        self.fees_budget()
+        self.churn(account_id="cc")
+        today = date(2026, 10, 10)
+        before = forecast.build(self.conn, today, 60)
+        self.assertEqual([f["date"] for f in before["fees"]], ["2026-10-10"])
+        self.tx("cc", "2026-10-10", -95.0, "SAPPHIRE RENEWAL", "Fees & Interest")
+        after = forecast.build(self.conn, today, 60)
+        self.assertEqual(after["fees"], [])
+        was, now = (next(e for e in fc["events"] if e.get("key") == "cardclose:cc:2026-10-10") for fc in (before, after))
+        self.assertEqual((was["estimate"]["charged_so_far"], was["estimate"]["fees_total"]), (300.0, 95.0))
+        self.assertEqual(now["estimate"]["charged_so_far"], 395.0)
+        self.assertNotIn("fees", now["estimate"])
+        self.assertEqual((now["amount"], now["date"]), (was["amount"], was["date"]))
+        self.assertEqual((after["total"], after["spend"]), (before["total"], before["spend"]))
+
+    def test_a_fee_charged_under_another_name_counts_as_charged(self):
+        self.churn(account_id="cc")
+        listed = lambda: [f["name"] for f in forecast.build(self.conn, TODAY, 90)["fees"]]
+        self.tx("cc", "2026-09-14", -12.34, "INTEREST CHARGE", "Fees & Interest")   # a fee, but not this one
+        self.tx("cc", "2026-09-15", -95.0, "OUTDOOR STORE", "Shopping")             # the fee's amount, but a purchase
+        self.tx("cc", "2025-10-10", -95.0, "CARD RENEWAL", "Fees & Interest")       # last year's
+        self.tx("chk", "2026-09-16", -95.0, "CARD RENEWAL", "Fees & Interest")      # another account
+        self.assertEqual(listed(), ["Sapphire annual fee"])
+        self.assertFalse(forecast.fee_posted(self.conn, "cc", date(2026, 10, 10), 95.0))
+        self.tx("cc", "2026-09-17", -95.0, "CARD RENEWAL", "Fees & Interest", pending=1)   # the fee's amount, in fees
+        self.assertEqual(listed(), [])
+        self.assertTrue(forecast.fee_posted(self.conn, "cc", date(2026, 10, 10), 95.0))
+        self.assertFalse(forecast.fee_posted(self.conn, "cc", date(2026, 10, 10), 550.0))   # another card's fee
+        self.assertFalse(forecast.fee_posted(self.conn, "cc", date(2026, 10, 10)))          # by name only
+
+    def test_each_fee_is_paid_on_the_statement_that_has_it(self):
+        # Two cards, two years: each fee's paid_on is its own statement's payment, and only that one has it.
+        self.fees_budget()
+        self.acct("cc3", "credit", 0.0, pay_from="chk")    # no statement: assumed cycles
+        self.churn(account_id="cc")                        # Oct 10 2026 and 2027, paid Nov 5
+        self.churn(opened="2024-12-03", product="Gold", annual_fee=250.0, account_id="cc3")   # Dec 3, paid Jan 25
+        fc = forecast.build(self.conn, TODAY, 420)
+        self.assertEqual([(f["name"], f["date"], f["paid_on"]) for f in fc["fees"]],
+                         [("Sapphire annual fee", "2026-10-10", "2026-11-05"), ("Gold annual fee", "2026-12-03", "2027-01-25"),
+                          ("Sapphire annual fee", "2027-10-10", "2027-11-05")])
+        self.assert_paid_with_their_statements(fc)
+
     def test_fee_is_a_charge_on_the_card_paid_with_its_statement(self):
         before = forecast.build(self.conn, TODAY, 90)
         self.churn(account_id="cc")   # opened Oct 20: its fee is on October's statement, which closes Oct 10
@@ -1436,6 +1572,7 @@ class AnnualFeeTests(LedgerCase):
         self.assertEqual(fc["total"][i - 1], before["total"][i - 1])
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual(card["annual_fees"], [{"date": "2026-10-10", "amount": -95.0, "category": "Fees & Interest"}])
+        self.assert_paid_with_their_statements(fc)
 
     def test_a_product_change_keeps_the_accounts_anniversary(self):
         # Opened in October 2023, changed in July to a card with a fee: the fee is still October's, not July's.
@@ -1455,6 +1592,7 @@ class AnnualFeeTests(LedgerCase):
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual((fc["fees"][0]["date"], fc["fees"][0]["paid_on"]), ("2026-11-10", "2026-12-07"))
         self.assertEqual(self.payments(fc), {**before, "2026-12-07": -95.0})
+        self.assert_paid_with_their_statements(fc)
 
     def test_fee_past_the_horizon_of_its_payment_is_only_listed(self):
         # Dec 10's statement is paid Jan 5, past a 80-day horizon: the fee is listed, its payment isn't in the chart.
@@ -1546,13 +1684,13 @@ class AnnualFeeTests(LedgerCase):
         self.assertEqual(on(date(2026, 9, 23), date(2027, 11, 30)), ["2026-10-31", "2027-10-31"])
         self.assertEqual(on(date(2026, 11, 1), date(2027, 9, 30)), [])
 
-    def test_a_budget_for_fees_has_the_fee_already(self):
+    def test_a_budget_for_fees_has_the_fee_only_when_its_charged_to_the_card(self):
         self.conn.execute(insert(Budget).values(category="Groceries", amount=500))
         self.conn.execute(update(Category).where(Category.name == "Groceries").values(pay_with="cc"))
         before = self.payments(forecast.build(self.conn, TODAY, 90))
         self.churn(account_id="cc")
         self.assertAlmostEqual(self.payments(forecast.build(self.conn, TODAY, 90))["2026-11-05"] - before["2026-11-05"], -95.0, places=2)
-        # a budget for fees has it already
+        # a budget for fees charged to the card has it already
         self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=10))
         self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with="cc"))
         with_fees = self.payments(forecast.build(self.conn, TODAY, 90))
@@ -1560,6 +1698,15 @@ class AnnualFeeTests(LedgerCase):
         again = forecast.build(self.conn, TODAY, 90)
         self.assertEqual(len(again["fees"]), 2)   # listed all the same
         self.assertEqual(self.payments(again), with_fees)
+        est = next(e["estimate"] for e in again["events"] if e["date"] == "2026-11-05")
+        self.assertNotIn("fees", est)
+        # one paid from checking doesn't: both fees are on the card's statement, on top of Groceries, and October's $10
+        # of fees from checking is used up by them
+        self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with="chk"))
+        fc = forecast.build(self.conn, TODAY, 90)
+        self.assertAlmostEqual(self.payments(fc)["2026-11-05"], before["2026-11-05"] - 190.0, places=2)
+        self.assertEqual(ForecastTests.drop(self, fc, "2026-10-20"), 0.0)
+        self.assert_paid_with_their_statements(fc)
 
     def test_the_fee_of_a_card_with_no_statement_is_in_its_assumed_statement(self):
         # A new card with no statement yet, $310 a month budgeted on it and a $95 fee on Oct 20: the fee is on October's
@@ -1588,10 +1735,23 @@ class AnnualFeeTests(LedgerCase):
         card = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 90)["events"] if e.get("card_id") == "cc3"}
         self.assertEqual(card["2026-10-26"], -405.0)
 
-    def test_a_card_with_no_statement_and_no_budgets_has_no_payments(self):
-        # Nothing to estimate its statements from but the fee: it's listed, and left out of the forecast's payments.
+    def test_a_card_with_no_statement_and_only_a_fee_has_the_statement_that_pays_it(self):
+        # No budgets on it, nothing scheduled, $40 owed, and a $95 fee on Oct 20 in a category budgeted from checking:
+        # its assumed statements are what it owes now (September's, paid Oct 26) and the fee (October's, paid Nov 25).
         self.acct("cc3", "credit", -40.0, pay_from="chk")
+        self.conn.execute(insert(Budget).values(category="Fees & Interest", amount=150))
+        self.conn.execute(update(Category).where(Category.name == "Fees & Interest").values(pay_with="chk"))
         self.churn(account_id="cc3")
+        fc = forecast.build(self.conn, TODAY, 90)
+        card = {e["date"]: e for e in fc["events"] if e.get("card_id") == "cc3"}
+        self.assertEqual({d: e["amount"] for d, e in card.items()}, {"2026-10-26": -40.0, "2026-11-25": -95.0})
+        self.assertEqual((card["2026-11-25"]["estimate"]["fees"], card["2026-11-25"]["assumed_cycle"]),
+                         ([{"name": "Sapphire annual fee", "amount": 95.0}], True))
+        self.assertEqual([(f["account_id"], f["paid_on"], f["paid_from"]) for f in fc["fees"]], [("cc3", "2026-11-25", "chk")])
+        self.assert_paid_with_their_statements(fc)
+        self.assertAlmostEqual(ForecastTests.drop(self, fc, "2026-10-20"), (150 - 95) / 31, delta=0.01)   # off the drip
+        # a card that isn't paid from a forecast account: the fee is only listed
+        self.conn.execute(update(Account).where(Account.id == "cc3").values(pay_from=None))
         fc = forecast.build(self.conn, TODAY, 90)
         self.assertEqual([(f["account_id"], f["paid_on"]) for f in fc["fees"]], [("cc3", None)])
         self.assertFalse(any(e.get("card_id") == "cc3" for e in fc["events"]))

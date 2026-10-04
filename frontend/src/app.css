@@ -136,6 +136,11 @@
      keep their own picker). */
   input[type="date"]::-webkit-calendar-picker-indicator { display: none; }
 }
+/* iOS Safari draws a date field as a native control sized to its text, ignoring the width it's given, so it spills
+   over the field beside it (a transaction's Date into its Amount). Drawn as a plain box it takes the width like any
+   other input. Outside the layers so it beats the `flex` the Input primitive sets. */
+input[type="date"] { display: block; min-width: 0; -webkit-appearance: none; appearance: none; }
+input[type="date"]::-webkit-date-and-time-value { min-width: 0; min-height: 1.4em; text-align: inherit; }
 
 /* Runway's chart colors. Categorical series in this order (validated for colorblind
    separation and contrast on the dark card surface); "everything else" is always gray. */
