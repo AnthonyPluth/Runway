@@ -15,8 +15,8 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 
 Python goes through Poetry (Python 3.14).
 
-- `make check`: each tool once: ruff, mypy, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
-- `make lint`: ruff, mypy, and ESLint.
+- `make check`: each tool once: ruff, mypy, Runway's own Semgrep rules, the Python tests (SQLite), the web app's type-check, ESLint, Vitest and build, and the docs site's build. Run it before pushing. The security scans (Semgrep's registry packs, Trivy, zizmor, pip-audit, npm audit, CodeQL) run only in CI.
+- `make lint`: ruff, mypy, ESLint and Runway's own Semgrep rules (`.semgrep/runway.yml`, run through `pipx`).
 - `make test`: `poetry run python -m unittest discover tests`.
 - `make test-parallel`: the same tests across 4 processes, as CI runs them (`make check` uses it); `make test-pg` runs them against `$DATABASE_URL` (Postgres).
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
@@ -31,6 +31,7 @@ Python goes through Poetry (Python 3.14).
 ## Conventions
 
 - Match the surrounding code's style, comment density and naming. Ruff and mypy config live in `pyproject.toml`; don't silence a rule to get green.
+- One paved path; lint fails on the old way (`.semgrep/runway.yml`, `frontend/eslint.config.js`). Fix a finding with the helper, or justify it with an inline ignore and a reason; don't switch the rule off. Python: HTTP only through `tls.urlopen` (no `urllib.request.urlopen` or `build_opener` outside `runway/tls.py`); request bodies in `runway/server/api/` through `runway/validate.py` (no `bool(body…)`, `float(body…)`, `int(body[…])`); no SQL built from strings (`sa.text(f"…")`); the half cent is `money.CENT` (no `0.005` outside `runway/money.py`); sync and provider modules take the `today` they're given (no bare `date.today()`); no `datetime.utcnow()`; month arithmetic only in `runway/dates.py`. Web app: `errMsg(e)` from `lib/act.ts`, not `(e as Error).message`; `fetch(` only in `lib/api.ts`; `.catch(() => {})` carries a comment saying why; account kinds come from `lib/accounts.ts`, not a hand-written list.
 - Real typography (’ – −) in user-facing strings and comments is intentional; don't "fix" it to ASCII.
 - Schema changes need an Alembic migration in `runway/migrations/`.
 - A change users or contributors would notice updates its page in `docs/src/content/docs/` in the same PR. Link between pages with absolute paths (`/Runway/start/docker/`); a broken one fails the build.

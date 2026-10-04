@@ -10,6 +10,7 @@ import runwayClient from "../../../extension/runway.js?raw";
 import stores from "../../../extension/stores.js?raw";
 import target from "../../../extension/target.js?raw";
 import util from "../../../extension/util.js?raw";
+import { errMsg } from "../lib/act";
 
 const FILES: Record<string, string> = {
   "page.js": page, "util.js": util, "runway.js": runwayClient, "stores.js": stores, "frames.js": frames,
@@ -109,7 +110,7 @@ describe("storeUrl", () => {
   it("names the refused address, cut to 80 characters", () => {
     const long = "http://evil.example/" + "a".repeat(200);
     let message = "";
-    try { w.storeUrl(long); } catch (e) { message = (e as Error).message; }
+    try { w.storeUrl(long); } catch (e) { message = errMsg(e); }
     expect(message).toBe(`Runway won't read ${long.slice(0, 80)}: it isn't an Amazon, Target, Costco or Carta address.`);
   });
 

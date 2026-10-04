@@ -12,23 +12,19 @@ there.
 """
 from __future__ import annotations
 
-import calendar
 import statistics
 from datetime import date
 
 from sqlalchemy import select
 
-from . import db, forecast
-from .dates import month_start, parse_day
+from . import dates, db, forecast
+from .dates import days_in_month, month_start, parse_day
 from .models import Account, LoanTerms, Transaction
+from .money import CENT
 
 MAX_YEARS = 100          # as far as the planner reaches (a sale up to 100 years out)
 INFER_MONTHS = 6         # recent whole months of payments to infer a monthly payment from
 INFER_MIN_MONTHS = 2     # ... of which at least this many must have payments
-
-
-def _months_until(today: date, until: date) -> int:
-    return (until.year - today.year) * 12 + (until.month - today.month)
 
 
 def payment_to_pay_off(balance: float, annual_rate: float, months: int) -> float:
@@ -66,8 +62,8 @@ def project(balance: float, annual_rate: float, payment: float, years: int = MAX
 def months_between(start: date, end: date) -> int:
     """Monthly payments made after `start` up to `end` (one a month, on start's day of the month or the month's last
     day if it's shorter); 0 if end is earlier."""
-    due = min(start.day, calendar.monthrange(end.year, end.month)[1])
-    return max(0, (end.year - start.year) * 12 + end.month - start.month - (1 if end.day < due else 0))
+    due = min(start.day, days_in_month(end))
+    return max(0, dates.months_between(start, end) - (1 if end.day < due else 0))
 
 
 def amortize(balance: float, annual_rate: float, payment: float, months: int) -> float:
@@ -109,7 +105,7 @@ def payoff_year(owed_today: float, t: dict | None, today: date) -> int | None:
     b = owed_today
     for n in range(1, MAX_YEARS * 12 + 1):
         b = b * (1 + r) - payment
-        if b < 0.005:   # nothing left to the cent
+        if b < CENT:   # nothing left to the cent
             return month_start(today, n).year
     return None
 
@@ -155,7 +151,7 @@ def terms(conn, today: date, account_ids: list[str] | None = None) -> dict[str, 
         maturity = a["maturity_date"]
         if rate is not None and payment is None and maturity:
             try:
-                months = _months_until(today, date.fromisoformat(maturity))
+                months = dates.months_between(today, date.fromisoformat(maturity))
             except ValueError:
                 months = 0
             if months > 0:

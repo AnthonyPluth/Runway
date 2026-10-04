@@ -163,8 +163,8 @@ def _postgres_engine(url: str, path: str | None) -> Engine:
         for t in (str, int, float, bool):
             dbapi_conn.adapters.register_dumper(t, Untyped)
         if test_schema:
-            dbapi_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{test_schema}"')
-            dbapi_conn.execute(f'SET search_path TO "{test_schema}"')
+            dbapi_conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{test_schema}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
+            dbapi_conn.execute(f'SET search_path TO "{test_schema}"')   # nosemgrep: runway-sql-from-string -- a test schema's name, which DDL can't bind
             dbapi_conn.commit()
     return eng
 
@@ -451,7 +451,7 @@ def _upgrade_legacy(sa_conn) -> None:
         for name in (c.name for c in baseline[table.name].columns):
             if name not in cols:
                 ddl = CreateColumn(as_then(table, name)).compile(dialect=sa_conn.dialect)
-                sa_conn.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {ddl}")
+                sa_conn.exec_driver_sql(f"ALTER TABLE {table.name} ADD COLUMN {ddl}")   # nosemgrep: runway-sql-from-string -- the model's own table and column names, which DDL can't bind
     for table in schema.metadata.sorted_tables:
         if table.name in baseline:
             for index in table.indexes:
@@ -479,9 +479,9 @@ def migrate(path: str | None = None) -> None:
         with sa_conn.begin():
             if not sqlite:   # the lock is released when this transaction ends
                 if path is None:
-                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({MIGRATE_LOCK})")
+                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({MIGRATE_LOCK})")   # nosemgrep: runway-sql-from-string -- an integer constant
                 else:
-                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK}, hashtext(current_schema()))")
+                    sa_conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK}, hashtext(current_schema()))")   # nosemgrep: runway-sql-from-string -- integer constants
             tables = set(inspect(sa_conn).get_table_names())
             cfg = alembic_config(sa_conn)
             if tables and "alembic_version" not in tables:

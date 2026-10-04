@@ -4,10 +4,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from dateutil.relativedelta import relativedelta
-
-from ... import categories, reports, validate
+from ... import categories, dates, reports, validate
 from ...budgets import month_totals
+from ...money import CENT
 from ..common import ApiError, _month_range, query_int
 
 
@@ -43,16 +42,16 @@ def api_cashflow(conn, q, _b):
             node["children"][sub] = node["children"].get(sub, 0.0) + (-total)
     spend_list = []
     for name, node in spending.items():
-        if node["value"] <= 0.005:
+        if node["value"] <= CENT:
             continue
-        kids = [{"name": k, "value": round(v, 2)} for k, v in node["children"].items() if v > 0.005]
+        kids = [{"name": k, "value": round(v, 2)} for k, v in node["children"].items() if v > CENT]
         kid_total = sum(k["value"] for k in kids)
         if kids and node["value"] - kid_total > 0.5:
             kids.append({"name": f"{name} (general)", "value": round(node["value"] - kid_total, 2)})
         kids.sort(key=lambda k: -k["value"])
         spend_list.append({"name": name, "value": round(node["value"], 2), "children": kids})
     spend_list.sort(key=lambda n: -n["value"])
-    inc_list: list[dict[str, Any]] = sorted(({"name": k, "value": round(v, 2)} for k, v in income.items() if v > 0.005), key=lambda n: -n["value"])
+    inc_list: list[dict[str, Any]] = sorted(({"name": k, "value": round(v, 2)} for k, v in income.items() if v > CENT), key=lambda n: -n["value"])
     total_in = round(sum(n["value"] for n in inc_list), 2)
     total_out = round(sum(n["value"] for n in spend_list), 2)
     return {"month": f"{start:%Y-%m}", "income": inc_list, "spending": spend_list,
@@ -82,7 +81,7 @@ def _months(q) -> int:
 def _span(q) -> tuple[str, str]:
     """start (inclusive) and end (exclusive) days; this month by default."""
     first = date.today().replace(day=1)
-    return _day(q, "start", first), _day(q, "end", first + relativedelta(months=1))
+    return _day(q, "start", first), _day(q, "end", dates.add_months(first, 1))
 
 
 def api_report_spending(conn, q, _b):

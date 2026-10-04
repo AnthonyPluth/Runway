@@ -32,7 +32,27 @@ docker stop runway-test-pg
 
 To run one CI shard of the Postgres tests (CI splits them across three runners, each with its own Postgres), add its modules: `... unittest-parallel -t . -s tests -j 4 $(python tests/shard.py 2/3)`.
 
-`make check` runs the checks to run before you push, each tool once: ruff and mypy, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+`make check` runs the checks to run before you push, each tool once: ruff and mypy, Runway's own Semgrep rules, the Python tests (on SQLite, in parallel as CI runs them), and the web app's type-check, ESLint, Vitest tests and build, and the docs site's build. `make lint`, `make test` (serial, for a clearer failure), `make test-parallel` and `make frontend-check` run one part. The security scans run only in CI, each on the pull requests it can affect (see `.github/workflows/security.yml`): Semgrep, Trivy, zizmor, pip-audit, npm audit and CodeQL. So do the Postgres tests (see above to run them yourself). For the quick checks on every commit (ruff, trailing whitespace, YAML/TOML syntax, merge-conflict markers, large files), install [pre-commit](https://pre-commit.com) and run `pre-commit install` once.
+
+## One paved path
+
+Earlier clean-ups left one way to do most things, and `make lint` (so `make check`, and CI) fails on a copy of the old way. Use the helper instead; where a use is right for a reason, say why on the line (`# nosemgrep: <rule id> -- why` in Python, `// eslint-disable-next-line no-restricted-syntax -- why` in the web app) rather than switching the rule off.
+
+| Don't | Use |
+| --- | --- |
+| `urllib.request.urlopen` or `build_opener` outside `runway/tls.py` | `tls.urlopen` |
+| `bool(body…)`, `float(body…)` or `int(body[…])` in `runway/server/api/` | `runway/validate.py` |
+| `sa.text(f"…")`, or SQL built with `+`, `%` or `.format` | SQLAlchemy expressions, or `sa.text(":name")` with bound parameters |
+| a `0.005` literal outside `runway/money.py` | `money.CENT`, `money.is_zero`, `money.same_amount` |
+| `date.today()` in the sync and provider modules | the `today` the caller passes (`today or date.today()` as its default is fine) |
+| `datetime.utcnow()` | the local time, or `datetime.now(timezone.utc)` for another system |
+| month arithmetic (`relativedelta(months=…)`, `calendar.monthrange`, `year * 12 + month`) outside `runway/dates.py` | `dates.add_months`, `month_start`, `days_in_month`, `months_between` |
+| `(e as Error).message` in the web app | `errMsg(e)` from `lib/act.ts` |
+| `fetch(` outside `lib/api.ts` | `api()` |
+| `.catch(() => {})` with nothing in the braces | a comment saying why the failure doesn't matter |
+| a hand-written list of account kinds (`["checking", "savings"]`) | `lib/accounts.ts` |
+
+The Python rules are in `.semgrep/runway.yml`, with a failing and a passing example each in `.semgrep/examples/` (`make semgrep` runs the examples, then the code; CI's Semgrep job does too). It runs through `pipx`, at the version `.github/workflows/security.yml` pins. The web app's rules are in `frontend/eslint.config.js`, with their examples in `frontend/src/lint-rules.test.ts`.
 
 ## The web app
 

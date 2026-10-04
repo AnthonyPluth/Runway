@@ -21,6 +21,7 @@ from sqlalchemy import delete, func, insert, or_, select, update
 from . import banks, churning, dates, db, forecast, oidc, recurring, validate, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
+from .money import CENT
 
 DEFAULTS = {
     "card_due": True, "card_due_days": 3,           # a card payment is due within N days
@@ -230,7 +231,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
     if p["card_due"]:
         for c in fc["cards"]:
             days = (date.fromisoformat(c["due_date"]) - today).days
-            if c["payment"] > 0.005 and 0 <= days <= p["card_due_days"]:   # what the forecast pays (all that's left, paid in full)
+            if c["payment"] > CENT and 0 <= days <= p["card_due_days"]:   # what the forecast pays (all that's left, paid in full)
                 pay = next((e for e in fc["events"] if e.get("kind") == "card" and e.get("key") == f"cardclose:{c['id']}:{c['last_close']}"
                             and e["name"].startswith(c["name"])), None)
                 out.append({"key": f"card:{c['id']}:{c['due_date']}", "title": f"{c['name']} payment due {_when(c['due_date'], today)}",

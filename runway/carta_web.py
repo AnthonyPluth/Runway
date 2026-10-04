@@ -219,17 +219,18 @@ def read(capture: list) -> dict:
             "gone": sorted(gone - set(grants))}
 
 
-def finish(conn) -> dict:
+def finish(conn, today: date | None = None) -> dict:
     """Save what was read: Carta's companies and grants replace the ones Carta sent before."""
     found = read(_capture(conn))
     if not found["grants"]:
         db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, "Runway didn't find any grants in what it read from Carta. Download what "
                                                       "it read (Settings -> Connections -> Browser extension -> Carta) so the reading can be fixed.")
         return {"companies": 0, "grants": 0, "pages": len(_capture(conn))}
-    today = date.today().isoformat()
+    today = today or date.today()
+    today_iso = today.isoformat()
     for c in found["companies"]:
         row = conn.execute(select(EquityCompany.id).where(EquityCompany.id == c["id"])).fetchone()
-        when = c["price_date"] or (today if c["price"] else None)
+        when = c["price_date"] or (today_iso if c["price"] else None)
         if row:   # a company Carta gave no name for this time keeps the one it has
             ec = EquityCompany   # the CASE and COALESCEs, decided here: what Carta didn't send leaves the stored value
             conn.execute(update(ec).where(ec.id == c["id"]).values(
@@ -240,9 +241,9 @@ def finish(conn) -> dict:
             conn.execute(insert(EquityCompany).values(id=c["id"], name=c["name"], share_price=c["price"], price_as_of=when,
                                                       source="carta"))
     for cid, g, raw in found["grants"]:
-        carta._save_grant(conn, cid, g, raw)
+        carta._save_grant(conn, cid, g, raw, today)
     for gid in found["gone"]:   # canceled or expired since the last import
         conn.execute(delete(EquityGrant).where(EquityGrant.id == gid, EquityGrant.source == "carta"))
-    db.set_setting(conn, sk.CARTA_WEB_LAST, today)
+    db.set_setting(conn, sk.CARTA_WEB_LAST, today_iso)
     db.set_setting(conn, sk.CARTA_WEB_LAST_ERROR, None)
     return {"companies": len(found["companies"]), "grants": len(found["grants"]), "pages": len(_capture(conn))}

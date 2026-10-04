@@ -8,6 +8,7 @@ from sqlalchemy import and_, delete, func, insert, not_, or_, select, update
 
 from ... import dates, db, forecast, merchants, recurring, validate
 from ...models import Account, Override, Recurring, Transaction
+from ...money import CENT
 from ..common import ApiError, row_id, text
 from .transactions import tx_logos
 
@@ -146,7 +147,7 @@ def _range_for_new_amount(old, vals: dict) -> dict:
     """When the amount changes (say "use $2,100" on a $5,000 paycheck) and its range, left as it was, no longer holds the
     new amount, the range moves with it, keeping its proportions; otherwise the new payments would never match."""
     lo, hi, was = vals["amount_min"], vals["amount_max"], abs(old["amount"] or 0)
-    if (lo, hi) != (old["amount_min"], old["amount_max"]) or (lo is None and hi is None) or was < 0.005:
+    if (lo, hi) != (old["amount_min"], old["amount_max"]) or (lo is None and hi is None) or was < CENT:
         return {}
     now = abs(vals["amount"])
     if (lo is None or lo <= now) and (hi is None or now <= hi):
@@ -162,7 +163,7 @@ def api_recurring_update(conn, _q, body, rid):
         raise ApiError(NOT_FOUND, 404)
     vals = dict(zip(COLUMNS, _recurring_values(conn, body), strict=True))
     typed = (vals["amount_min"], vals["amount_max"])   # the range as you left it, before any move with the amount
-    if abs(vals["amount"] - old["amount"]) >= 0.005:
+    if abs(vals["amount"] - old["amount"]) >= CENT:
         vals["amount_since"] = date.today().isoformat()   # the "use $X" hint looks at payments from here on
         vals.update(_range_for_new_amount(old, vals))
     conn.execute(update(Recurring).where(Recurring.id == rid).values(vals))
@@ -215,7 +216,7 @@ def set_amount(conn, rid: int, amount: float) -> dict:
     if not old:
         raise ApiError(NOT_FOUND, 404)
     vals = {"amount": round(amount, 2), "amount_mode": "fixed", "amount_min": old["amount_min"], "amount_max": old["amount_max"]}
-    if abs(vals["amount"] - (old["amount"] or 0)) >= 0.005:
+    if abs(vals["amount"] - (old["amount"] or 0)) >= CENT:
         vals["amount_since"] = date.today().isoformat()
         vals.update(_range_for_new_amount(old, vals))
     conn.execute(update(Recurring).where(Recurring.id == rid).values(vals))

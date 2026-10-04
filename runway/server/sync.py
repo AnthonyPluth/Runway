@@ -141,14 +141,15 @@ def run_investment_sync() -> dict:
         _inv_lock.release()
 
 
-def refresh_prices(conn) -> dict:
+def refresh_prices(conn, today: date | None = None) -> dict:
+    today = today or date.today()
     s = Security
     tickers = [r["ticker"] for r in conn.execute(
         select(s.ticker).distinct().where(s.is_cash == 0, s.ticker.is_not(None),
                                           or_(s.id.in_(select(Holding.security_id)), s.id.in_(select(InvTransaction.security_id)),
                                               s.id.in_(select(ManualPosition.security_id)))))]
     tickers.append(prices.BENCHMARK)
-    out = prices.refresh(conn, tickers, date.today() - timedelta(days=portfolio.HISTORY_DAYS + 10))
+    out = prices.refresh(conn, tickers, today - timedelta(days=portfolio.HISTORY_DAYS + 10), today=today)
     sfinvest.recapture_all(conn)   # re-check reported position values against the fresh prices
     prices.fill_security_types(conn)
     return out

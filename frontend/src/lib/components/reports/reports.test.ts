@@ -65,7 +65,7 @@ describe("Report", () => {
     expect(r.loading).toBe(false);
     r.load();
     calls[2].reject(new Error("nope"));
-    await calls[2].p.catch(() => {});
+    await calls[2].p.catch(() => { /* the rejection is expected: the test checks what the report does after it */ });
     expect(r.loading).toBe(false);
     expect(r.data).toBe("new");
   });
@@ -97,7 +97,7 @@ describe("Report", () => {
     let n = 0;
     const r = new Report(() => answers[n++].p);
     bad.reject(new Error("nope"));
-    await bad.p.catch(() => {});
+    await bad.p.catch(() => { /* the rejection is expected: the test checks what the report does after it */ });
     expect(r.error?.message).toBe("nope");
     r.load();
     good.resolve("ok");

@@ -22,6 +22,7 @@ from sqlalchemy import delete, insert, select
 # churning imports this module too; its helpers are read when called, so either can be imported first.
 from . import categories, churning, dates, db, validate
 from .models import Account, ChurnBankBonus, Transaction
+from .money import CENT
 
 TYPES = ("checking", "savings", "business")
 STATUSES = ("open", "pending", "received", "closed")
@@ -82,12 +83,12 @@ def progress(b: dict, rows: list[dict], cats: dict[str, dict], balance: float | 
         balance = None
     checks: list[bool] = []
     if b.get("dd_total"):
-        checks.append(dd_sum >= b["dd_total"] - 0.005)
+        checks.append(dd_sum >= b["dd_total"] - CENT)
     if b.get("dd_count") and dd_n is not None:
         checks.append(dd_n >= b["dd_count"])
     if b.get("debit_count"):
         checks.append(debits >= b["debit_count"])
-    balance_ok = None if not b.get("min_balance") or balance is None else balance >= b["min_balance"] - 0.005
+    balance_ok = None if not b.get("min_balance") or balance is None else balance >= b["min_balance"] - CENT
     if balance_ok is not None:
         checks.append(balance_ok)
     return {"dd_total": dd_sum, "dd_count": dd_n, "debits": debits, "balance": balance, "balance_ok": balance_ok,

@@ -102,7 +102,7 @@ def period(benefit: dict, opened_on: str, day: date) -> tuple[date, date | None]
         anchor = opened
     else:
         anchor = date(opened.year if months > 12 else day.year, 1, 1)
-    k = max(0, ((day.year - anchor.year) * 12 + day.month - anchor.month) // months)
+    k = max(0, dates.months_between(anchor, day) // months)
     while k > 0 and dates.add_months(anchor, k * months) > day:
         k -= 1
     return dates.add_months(anchor, k * months), dates.add_months(anchor, (k + 1) * months) - relativedelta(days=1)
