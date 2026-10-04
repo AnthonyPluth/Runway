@@ -102,7 +102,7 @@ describe("Overview", () => {
     serve(() => fc({ events: [{ date: "2026-10-01", account_id: "chk", name: "Rent", amount: -200, kind: "recurring", key: "r", balance_after: 800 }],
       budget: { monthly: 500, used: [{ category: "Groceries", amount: 500, account_id: "chk", account: "Checking", chosen: true }], skipped: [] } }));
     render(Overview);
-    expect(await screen.findByText(/Spends your budgets, \$500 a month/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recurring bills and income, plus \$500 a month of budgeted spending/)).toBeInTheDocument();
     expect(screen.queryByText("If you stick to your budget")).not.toBeInTheDocument();
     expect(screen.queryByText(/on budget/)).not.toBeInTheDocument();
     expect(screen.queryByText("Day by day")).not.toBeInTheDocument();
