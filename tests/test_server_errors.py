@@ -19,7 +19,6 @@ from runway.server.common import ApiError
 from tests.test_mcp import READ, RunwayServer
 from tests.test_monitoring import DSN, Capture
 
-# What a failing handler's error says: a merchant and an amount, as an exception's text can quote what it was reading.
 PRIVATE = "Acme Coffee 12.34"
 FAILURES = (KeyError(PRIVATE), TypeError(f"unsupported operand type(s) for +: 'NoneType' and '{PRIVATE}'"),
             ValueError(f"invalid literal for int() with base 10: '{PRIVATE}'"), AttributeError(PRIVATE))
@@ -29,7 +28,7 @@ DEADLOCK = OperationalError("UPDATE transactions SET category=?", {}, psycopg.er
 class ErrorTests(RunwayServer):
     def setUp(self):
         super().setUp()
-        self.stderr = io.StringIO()   # what's logged (monitoring.report writes the traceback there)
+        self.stderr = io.StringIO()
         redirect = contextlib.redirect_stderr(self.stderr)
         redirect.__enter__()
         self.addCleanup(redirect.__exit__, None, None, None)
@@ -53,9 +52,9 @@ class ErrorTests(RunwayServer):
 
     def assertReported(self, ref: str, kind: str):
         logged = self.stderr.getvalue()
-        self.assertIn(f"{kind}: [Filtered]", logged)        # the error's type and where it was raised...
+        self.assertIn(f"{kind}: [Filtered]", logged)
         self.assertIn("api_categories", logged)
-        for private in ("Acme", "12.34"):                   # ... never what it said
+        for private in ("Acme", "12.34"):
             self.assertNotIn(private, logged)
 
     def test_a_value_that_cant_be_read_is_a_400_saying_which(self):
@@ -71,7 +70,7 @@ class ErrorTests(RunwayServer):
                 self.assertEqual(status, 500)
                 ref = reply["error"].split("reference ")[1].split(";")[0]
                 self.assertEqual(reply["error"], f"Something went wrong on Runway's side (reference {ref}; the details are in its log).")
-                log.assert_any_call(f"[error {ref}] GET /api/categories", "error", ref=ref)   # the route, not the address
+                log.assert_any_call(f"[error {ref}] GET /api/categories", "error", ref=ref)
                 self.assertReported(ref, type(e).__name__)
 
     def test_a_bug_in_a_handler_is_a_500_and_reported_on_mcp(self):
@@ -80,7 +79,7 @@ class ErrorTests(RunwayServer):
             with self.subTest(error=type(e).__name__), mock.patch.object(categories, "all_categories", side_effect=e):
                 with self.assertRaisesRegex(mcp_server.ToolError, r"^Something went wrong on Runway's side \(reference \w+;"):
                     mcp_http.local_fetch("categories", {}, None, READ)
-                result = self.mcp_tool(key, "list_categories")   # and through POST /mcp, as an assistant sees it
+                result = self.mcp_tool(key, "list_categories")
                 self.assertTrue(result["isError"])
                 self.assertIn("Something went wrong on Runway's side (reference ", result["content"][0]["text"])
                 self.assertNotIn("Acme", result["content"][0]["text"])
@@ -91,7 +90,7 @@ class ErrorTests(RunwayServer):
             self.assertEqual(self.api("/api/categories"), (503, {"error": routes.BUSY}))
             with self.assertRaisesRegex(mcp_server.ToolError, f"^{routes.BUSY}$"):
                 mcp_http.local_fetch("categories", {}, None, READ)
-        self.assertEqual(self.stderr.getvalue(), "")   # not a bug: nothing reported
+        self.assertEqual(self.stderr.getvalue(), "")
 
     def test_a_handlers_own_refusal_is_its_status_and_message(self):
         with mock.patch.object(categories, "all_categories", side_effect=ApiError("Not today", 409)):
@@ -127,12 +126,11 @@ class ErrorTests(RunwayServer):
 
 class DatabaseErrorTests(RunwayServer):
     def test_a_database_error_keeps_its_sql_and_loses_its_values(self):
-        # A database error's text names the row it was writing; reported, its SQL stays (it helps) and the values go.
         orig = psycopg.errors.UndefinedColumn(f'column "payee" does not exist: {PRIVATE}')
         err = OperationalError("UPDATE transactions SET payee=? WHERE id=?", {"payee": PRIVATE, "id": "tx-1"}, orig)
 
         def fails(_conn):
-            raise err from orig   # as SQLAlchemy raises the driver's error
+            raise err from orig
         out = io.StringIO()
         with contextlib.redirect_stderr(out), mock.patch.object(categories, "all_categories", side_effect=fails), \
                 self.assertRaises(ApiError) as cm:
@@ -140,6 +138,6 @@ class DatabaseErrorTests(RunwayServer):
         self.assertEqual(cm.exception.status, 500)
         logged = out.getvalue()
         self.assertIn("[SQL: UPDATE transactions SET payee=? WHERE id=?]", logged)
-        self.assertIn("psycopg.errors.UndefinedColumn: [Filtered]", logged)   # the driver's own text, which can quote values
+        self.assertIn("psycopg.errors.UndefinedColumn: [Filtered]", logged)
         self.assertNotIn("Acme", logged)
         self.assertNotIn("tx-1", logged)

@@ -11,12 +11,18 @@ describe("ConfirmDialog", () => {
     const user = userEvent.setup();
     const trigger = screen.getByRole("button", { name: "Delete it" });
     await user.click(trigger);
-    const dialog = await screen.findByRole("dialog", { name: "Delete the thing?" });
+    const dialog = await screen.findByRole("dialog", {
+      name: "Delete the thing?",
+    });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleDescription("It goes for good.");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());   // the safe choice first
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus(),
+    );
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(onconfirm).not.toHaveBeenCalled();
   });
@@ -24,8 +30,12 @@ describe("ConfirmDialog", () => {
   it("closes from Cancel without confirming", async () => {
     const onconfirm = vi.fn();
     render(ConfirmHarness, { onconfirm, open: true });
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Cancel" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     expect(onconfirm).not.toHaveBeenCalled();
   });
 
@@ -39,7 +49,7 @@ describe("ConfirmDialog", () => {
     const box = screen.getByLabelText(/Type RESTORE to confirm/);
     await waitFor(() => expect(box).toHaveFocus());
     await user.type(box, "restore");
-    expect(go).toBeDisabled();                                         // exactly the word
+    expect(go).toBeDisabled();
     await user.clear(box);
     await user.type(box, "RESTORE");
     expect(go).toBeEnabled();
@@ -47,10 +57,12 @@ describe("ConfirmDialog", () => {
     expect(onconfirm).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    await user.keyboard("{Escape}");                                   // not while it's working
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     finish();
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("confirms with Enter, and stays open when onconfirm returns false", async () => {
@@ -60,7 +72,9 @@ describe("ConfirmDialog", () => {
     const box = await screen.findByLabelText(/Type RESTORE to confirm/);
     await user.type(box, "RESTORE{Enter}");
     expect(onconfirm).toHaveBeenCalledOnce();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled(),
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

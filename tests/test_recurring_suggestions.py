@@ -43,7 +43,7 @@ class SuggestionDismissTests(LedgerCase):
 
     def test_a_dismissal_is_kept_in_settings_and_survives_a_new_connection(self):
         api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "chk|mortgage co|monthly"})
-        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "chk|mortgage co|monthly"})   # again: no duplicate
+        api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "chk|mortgage co|monthly"})
         api_recurring.api_recurring_suggestion_dismiss(self.conn, None, {"key": "chk|acme payroll|biweekly"})
         self.assertEqual(json.loads(db.get_setting(self.conn, sk.RECURRING_SUGGESTIONS_DISMISSED)),
                          ["chk|acme payroll|biweekly", "chk|mortgage co|monthly"])

@@ -34,12 +34,12 @@ class ChurningApiTests(DbCase):
         api.api_churn_rate(self.c, {}, {"category": "Groceries", "multiplier": 4}, str(gold))
         api.api_churn_task_add(self.c, {}, {"card_id": gold, "due_on": TODAY.isoformat(), "action": "Downgrade"})
         out = api.api_churning(self.c, {}, {})
-        self.assertEqual(out["people"], ["Alex", "Sam"])   # the signed-in person, then the partner from the cards
+        self.assertEqual(out["people"], ["Alex", "Sam"])
         self.assertEqual([c["product"] for c in out["cards"]], ["Gold", "Freedom Unlimited"])
         g = out["cards"][0]
-        self.assertGreater(g["spent"], 0)   # the sample card's purchases since it was opened
+        self.assertGreater(g["spent"], 0)
         self.assertEqual((g["bonus_state"], g["rates"]), ("active", [{"category": "Groceries", "multiplier": 4.0, "portal_only": False}]))
-        self.assertEqual(out["five24"]["Sam"]["count"], 0)   # an authorized user card doesn't count
+        self.assertEqual(out["five24"]["Sam"]["count"], 0)
         self.assertEqual(out["five24"]["Alex"]["count"], 1)
         self.assertEqual(out["upcoming"][0]["kind"], "task")
         self.assertIn("demo-card", [a["id"] for a in out["accounts"]])
@@ -58,7 +58,6 @@ class ChurningApiTests(DbCase):
         self.assertIn(("Travel credit", 300.0), [(b["name"], b["amount"]) for b in card["benefits"]])
 
     def test_a_refused_benefit_refuses_the_whole_card(self):
-        # The handler wraps each request in one transaction that rolls back on an error; here a savepoint stands in.
         before = len(api.api_churning(self.c, {}, {})["cards"])
         with self.assertRaisesRegex(ApiError, "name"), self.c.sa.begin_nested():
             self.add(product="Gone", benefits=[{"name": "Fine"}, {"name": " "}])
@@ -66,7 +65,7 @@ class ChurningApiTests(DbCase):
 
     def test_fee_month_follows_the_opening_month(self):
         opened = date(TODAY.year - 2, 3, 10).isoformat()
-        cid = self.add(product="Old", opened_on=opened, annual_fee=95, fee_month=11)   # a month sent by an older client
+        cid = self.add(product="Old", opened_on=opened, annual_fee=95, fee_month=11)
         api.api_churn_card_update(self.c, {}, {"fee_month": 12}, str(cid))
         fees = [u for u in api.api_churning(self.c, {}, {})["upcoming"] if u["kind"] == "fee"]
         self.assertTrue(fees)
@@ -82,7 +81,7 @@ class ChurningApiTests(DbCase):
         self.assertEqual(out["cards"][0]["value"], 1.8)
         sam = api.api_churning_best(self.c, q(category="Restaurants", owner="Sam"), {})["cards"]
         self.assertEqual([c["id"] for c in sam], [cid])
-        self.assertEqual(len(api.api_churning_best(self.c, {}, {})["cards"]), 3)   # no category: base rates
+        self.assertEqual(len(api.api_churning_best(self.c, {}, {})["cards"]), 3)
         for bad in (q(category="Nope"), q(category="Groceries", amount="lots"), q(amount=-5)):
             with self.subTest(bad=bad), self.assertRaises(ApiError):
                 api.api_churning_best(self.c, bad, {})
@@ -195,7 +194,7 @@ class ChurningApiTests(DbCase):
     def test_bank_bonuses(self):
         opened = (TODAY - timedelta(days=10)).isoformat()
         bid = api.api_bank_bonus_add(self.c, {}, {"owner": "Sam", "bank": "Chase", "opened_on": opened, "bonus": 300,
-                                                  "account_id": "demo-checking", "dd_total": 1_000_000})["id"]   # never met by the demo payroll
+                                                  "account_id": "demo-checking", "dd_total": 1_000_000})["id"]
         out = api.api_churning(self.c, {}, {})
         self.assertEqual(out["people"], ["Alex", "Sam"])
         b = out["bank"][0]

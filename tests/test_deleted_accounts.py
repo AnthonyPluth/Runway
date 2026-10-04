@@ -71,17 +71,17 @@ class DeleteAccountTests(LedgerCase):
         self.assertEqual(self.count(Transaction, Transaction.account_id == "cc"), 0)
         self.assertEqual([r[0] for r in c.execute(select(TxSplit.tx_id))], ["chk|2"])
         charge = c.execute(select(RetailCharge)).fetchone()
-        self.assertEqual((charge["tx_id"], charge["match_source"], charge["applied"]), (None, None, None))   # kept, unmatched
+        self.assertEqual((charge["tx_id"], charge["match_source"], charge["applied"]), (None, None, None))
         self.assertEqual([r[0] for r in c.execute(select(Recurring.id))], [42])
         self.assertEqual(sorted(r[0] for r in c.execute(select(Override.key))), ["card:cc2:2026-10-05", "rec:42:2026-10-01"])
         self.assertEqual([r[0] for r in c.execute(select(RecurringDismissed.key))], ["rec:42:2026-08-01"])
-        self.assertEqual([r[0] for r in c.execute(select(Rule.account_id))], [None])      # not widened to every account
+        self.assertEqual([r[0] for r in c.execute(select(Rule.account_id))], [None])
         self.assertEqual([r[0] for r in c.execute(select(ManualStatement.account_id))], ["cc2"])
         self.assertEqual(self.count(CardStatement), 0)
         self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)
-        self.assertEqual(self.count(Category, Category.pay_with.is_not(None)), 0)   # budgeted or not
+        self.assertEqual(self.count(Category, Category.pay_with.is_not(None)), 0)
         self.assertIsNone(c.execute(select(ChurnCard.account_id)).scalar())
-        self.assertEqual(c.execute(select(Account.pay_from).where(Account.id == "cc2")).scalar(), "chk")   # untouched
+        self.assertEqual(c.execute(select(Account.pay_from).where(Account.id == "cc2")).scalar(), "chk")
         self.assertEqual(self.count(Transaction), 2)
         self.assertEqual(api.api_accounts_deleted(c, {}, {})[0]["id"], "cc")
         tomb = c.execute(select(DeletedAccount)).fetchone()
@@ -92,9 +92,9 @@ class DeleteAccountTests(LedgerCase):
 
     def test_its_plaid_account_linked_to_another_account_leaves_it_deleted(self):
         api.api_account_remove(self.conn, {}, {}, "cc")
-        plaidbank.match(self.conn, "p-cc", "cc2", TODAY)   # you chose to use the Plaid card for another account
+        plaidbank.match(self.conn, "p-cc", "cc2", TODAY)
         tomb = self.conn.execute(select(DeletedAccount.id, DeletedAccount.plaid_account_id)).fetchone()
-        self.assertEqual(tuple(tomb), ("cc", None))         # still deleted, but its statements aren't held back
+        self.assertEqual(tuple(tomb), ("cc", None))
         card = {"account_id": "p-cc", "last_statement_balance": 120.0, "last_statement_issue_date": "2026-09-10"}
         self.assertEqual(plaidbank.store_statements(self.conn, {"item_id": "item"}, {"liabilities": {"credit": [card]}}), 1)
         self.assertEqual(self.conn.execute(select(PlaidAccount.ignored)).scalar(), 0)
@@ -137,9 +137,6 @@ class DeleteAccountTests(LedgerCase):
         self.assertEqual(deleted_accounts.inv_ids(c), {"sf:brk", "w1"})
 
     def test_nothing_is_left_referring_to_it(self):
-        # Every column that refers to an account, and every setting named by one: a row for each, pointing at the
-        # account, and none left once it's deleted. A new column or settings key that refers to an account and isn't
-        # covered (a foreign key to accounts.id, or a key in settings_keys.PER_ACCOUNT) fails the first checks.
         named = {name for name, fn in vars(sk).items() if inspect.isfunction(fn) and fn.__module__ == sk.__name__
                  and set(inspect.signature(fn).parameters) & {"acct_id", "account_id", "card_id"}}
         self.assertEqual(named, {fn.__name__ for fn in sk.PER_ACCOUNT})
@@ -148,16 +145,16 @@ class DeleteAccountTests(LedgerCase):
                       if c.name in ("account_id", "pay_from", "pay_with") or c.name.endswith("_account_id")}
         not_accounts = {(t, "account_id") for t in ("holdings", "inv_transactions", "inv_snapshots", "holding_snapshots",
                                                     "manual_positions", "manual_contributions", "manual_state", "cost_overrides",
-                                                    "inv_accounts")}   # investment accounts' ids (or 'ignore'): removed by hand
+                                                    "inv_accounts")}
         not_accounts |= {(t, "plaid_account_id") for t in ("accounts", "deleted_accounts", "card_statements", "plaid_accounts",
-                                                            "loan_terms")}   # Plaid's ids
+                                                            "loan_terms")}
         self.assertEqual(looks_like - not_accounts, {(t.name, col.name) for t, col in refs})
         c = self.conn
         self.acct("gone", "credit", -10.0)
         for t, col in refs:
             row = {col.name: "gone"}
             for other in t.columns:
-                if other.primary_key and other.autoincrement is True:   # its own id: past the ones setUp gave
+                if other.primary_key and other.autoincrement is True:
                     row[other.name] = 9001
                 elif other.name not in row and not other.nullable and other.server_default is None:
                     row[other.name] = {"TEXT": f"x-{t.name}-{other.name}", "FLOAT": 1.0, "INTEGER": 1}[str(other.type)]
@@ -194,7 +191,7 @@ class StaysDeletedTests(LedgerCase):
         self.assertEqual(simplefin.store_payload(c, self.simplefin_payload(), TODAY), [])
         self.assertEqual((self.count(Account), self.count(Transaction)), (0, 0))
         self.assertEqual(api.api_account_restore(c, {}, {}, "A1"), {"ok": True, "name": "Sapphire Reserve"})
-        self.assertEqual(json.loads(db.get_setting(c, sk.SIMPLEFIN_BACKFILL)), {"seen": ["A1"], "done": []})   # its history again
+        self.assertEqual(json.loads(db.get_setting(c, sk.SIMPLEFIN_BACKFILL)), {"seen": ["A1"], "done": []})
         self.assertEqual(simplefin.store_payload(c, self.simplefin_payload(), TODAY), ["A1|t1"])
         self.assertEqual(self.count(Account), 1)
         self.assertEqual(api.api_accounts_deleted(c, {}, {}), [])
@@ -234,7 +231,7 @@ class StaysDeletedTests(LedgerCase):
         self.assertEqual((self.count(Account), self.count(Transaction), self.count(CardStatement)), (0, 0, 0))
         self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)
         api.api_account_restore(c, {}, {}, "pl:p-cc")
-        self.assertEqual(c.execute(select(Account.id)).scalar(), "pl:p-cc")   # back now; its history with the next sync
+        self.assertEqual(c.execute(select(Account.id)).scalar(), "pl:p-cc")
         self.assertIsNone(c.execute(select(PlaidItem.cursor)).scalar())
         self.plaid_sync()
         self.assertEqual((self.count(Account), self.count(Transaction), self.count(CardStatement)), (1, 1, 1))
@@ -249,12 +246,12 @@ class StaysDeletedTests(LedgerCase):
         self.assertEqual(forecast.build(c, TODAY, 30)["cards"][0]["statement_source"], "plaid")
         api.api_account_remove(c, {}, {}, "A1")
         api.api_account_restore(c, {}, {}, "A1")
-        self.assertEqual(api.api_accounts_deleted(c, {}, {}), [])                  # not listed as deleted any more
-        self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)      # but nothing waiting in New from Plaid
+        self.assertEqual(api.api_accounts_deleted(c, {}, {}), [])
+        self.assertEqual(c.execute(select(PlaidAccount.ignored)).scalar(), 1)
         self.assertEqual(plaid.undecided_count(c), 0)
-        self.plaid_sync()                                                           # Plaid first: still held back
+        self.plaid_sync()
         self.assertEqual((self.count(Account), self.count(CardStatement)), (0, 0))
-        simplefin.store_payload(c, self.simplefin_payload(), TODAY)                # SimpleFIN brings it back: linked again
+        simplefin.store_payload(c, self.simplefin_payload(), TODAY)
         acct = c.execute(select(Account.id, Account.plaid_account_id)).fetchone()
         self.assertEqual(tuple(acct), ("A1", "p-cc"))
         self.assertEqual((c.execute(select(PlaidAccount.ignored)).scalar(), self.count(DeletedAccount)), (0, 0))
@@ -262,7 +259,7 @@ class StaysDeletedTests(LedgerCase):
         card = forecast.build(c, TODAY, 30)["cards"][0]
         self.assertEqual((card["id"], card["statement_source"], card["statement_balance"]), ("A1", "plaid", 40.0))
         self.assertEqual(plaid.undecided_count(c), 0)
-        self.assertEqual([r[0] for r in c.execute(select(Account.id))], ["A1"])   # no second, Plaid-only card
+        self.assertEqual([r[0] for r in c.execute(select(Account.id))], ["A1"])
 
     def test_choosing_a_deleted_plaid_account_again_restores_it(self):
         c = self.conn
@@ -270,7 +267,7 @@ class StaysDeletedTests(LedgerCase):
         self.plaid_sync()
         plaidbank.match(c, "p-cc", "new", TODAY)
         api.api_account_remove(c, {}, {}, "pl:p-cc")
-        plaidbank.match(c, "p-cc", "new", TODAY)   # from the ignored accounts, under “New from Plaid”
+        plaidbank.match(c, "p-cc", "new", TODAY)
         self.assertEqual(api.api_accounts_deleted(c, {}, {}), [])
 
     def test_plaid_investment_account(self):

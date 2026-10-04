@@ -18,14 +18,13 @@ class ShardTests(unittest.TestCase):
         import os
         size = {m: os.path.getsize(os.path.join(shard.HERE, m + ".py")) for m in shard.modules()}
         totals = [sum(size[m] for m in p) for p in shard.shards(3)]
-        # Greedy placement leaves shards at most one module apart.
         self.assertLessEqual(max(totals) - min(totals), max(size.values()))
 
     def test_arguments(self):
         args = shard.main("1/1").split()
         self.assertEqual(args[0::2], ["-k"] * (len(args) // 2))
         self.assertEqual(sorted(a.removeprefix("tests.").rstrip(".") for a in args[1::2]), shard.modules())
-        self.assertTrue(all(a.endswith(".") for a in args[1::2]))   # tests.test_mcp. isn't tests.test_mcp_oauth
+        self.assertTrue(all(a.endswith(".") for a in args[1::2]))
         for bad in ("", "x", "0/3", "4/3", "1/", "/3", "-1/3"):
             with self.subTest(arg=bad), self.assertRaises(SystemExit):
                 shard.main(bad)

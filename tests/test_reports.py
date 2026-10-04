@@ -23,13 +23,13 @@ class ReportTests(DbCase):
             ("chk", "2026-09-01", 3100, "PAYROLL", "Income"),
             ("cc", "2026-07-05", -100, "Whole Foods", "Groceries"),
             ("cc", "2026-08-05", -150, "Whole Foods", "Groceries"),
-            ("cc", "2026-08-06", 20, "Whole Foods", "Groceries"),        # a refund lowers spending
+            ("cc", "2026-08-06", 20, "Whole Foods", "Groceries"),
             ("cc", "2026-09-05", -120, "Whole Foods", "Groceries"),
             ("cc", "2026-09-07", -12, "Shake Shack", "Fast food"),
             ("cc", "2026-09-08", -40, "Nice Place", "Restaurants"),
-            ("chk", "2026-09-10", -500, "CARD PAYMENT", "Credit Card Payment"),   # not spending
-            ("cc", "2026-09-11", -30, "Mystery", None),                           # uncategorized money out is
-            ("old", "2026-09-12", -999, "Hidden account", "Shopping"),             # not counted: hidden account
+            ("chk", "2026-09-10", -500, "CARD PAYMENT", "Credit Card Payment"),
+            ("cc", "2026-09-11", -30, "Mystery", None),
+            ("old", "2026-09-12", -999, "Hidden account", "Shopping"),
         ]
         for acct, day, amt, payee, cat in rows:
             self.tx(acct, day, amt, payee, cat)
@@ -47,18 +47,16 @@ class ReportTests(DbCase):
         from datetime import date
         p = reports.month_pace(self.c, date(2026, 9, 10))
         self.assertEqual((p["month"], p["prev_month"], len(p["this"]), len(p["last"])), ("2026-09", "2026-08", 10, 31))
-        # Sep 1-10: groceries 120, fast food 12, restaurants 40 (the card payment and the hidden account don't count)
         self.assertEqual(p["spent"], 172)
         self.assertEqual((p["this"][4], p["this"][6]), (120, 132))
-        # August: 150 on the 5th, then a 20 refund on the 6th
         self.assertEqual((p["last"][4], p["last_same_point"], p["last_total"]), (150, 130, 130))
 
     def test_spending_over_time(self):
         d = reports.spending_over_time(self.c, "2026-09", 3)
         self.assertEqual(d["months"], ["2026-07", "2026-08", "2026-09"])
         by = {s["name"]: s["values"] for s in d["series"]}
-        self.assertEqual(by["Groceries"], [100.0, 130.0, 180.0])      # 120 + the split's 60
-        self.assertEqual(by["Restaurants"], [0.0, 0.0, 52.0])          # a subcategory counts toward its top
+        self.assertEqual(by["Groceries"], [100.0, 130.0, 180.0])
+        self.assertEqual(by["Restaurants"], [0.0, 0.0, 52.0])
         self.assertEqual(by["Shopping"], [0.0, 0.0, 40.0])
         self.assertEqual(by["Uncategorized"], [0.0, 0.0, 30.0])
         self.assertNotIn("Credit Card Payment", by)
@@ -78,16 +76,14 @@ class ReportTests(DbCase):
 
     def test_a_month_under_way_compares_with_the_same_point_of_last_month(self):
         from datetime import date
-        # On September 6th: August up to the 6th had Whole Foods' 150 less the 20 refund, not all of August
         d = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 9, 6))
         self.assertEqual(d["through"], "2026-09-06")
         g = next(s for s in d["series"] if s["name"] == "Groceries")
-        self.assertEqual(g["same_point"], {"prev": 130.0, "year_ago": None})   # a year ago isn't among the months
-        self.tx("cc", "2026-08-20", -70, "Whole Foods", "Groceries")           # after the 6th: not counted
+        self.assertEqual(g["same_point"], {"prev": 130.0, "year_ago": None})
+        self.tx("cc", "2026-08-20", -70, "Whole Foods", "Groceries")
         d = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 9, 6))
         self.assertEqual(next(s for s in d["series"] if s["name"] == "Groceries")["same_point"]["prev"], 130.0)
         self.assertEqual(next(s for s in d["series"] if s["name"] == "Shopping")["same_point"]["prev"], 0.0)
-        # A month that's over has nothing to compare by day
         done = reports.spending_over_time(self.c, "2026-09", 3, today=date(2026, 10, 2))
         self.assertIsNone(done["through"])
         self.assertNotIn("same_point", done["series"][0])
@@ -125,32 +121,26 @@ class ReportTests(DbCase):
         self.assertEqual((sept["income"], sept["spending"], sept["net"]), (3100.0, 302.0, 2798.0))
         self.assertAlmostEqual(sept["rate"], 2798 / 3100, places=4)
         self.assertEqual((d["year"]["income"], d["year"]["spending"]), (9100.0, 532.0))
-        # Fewer months on the chart don't shorten the year
         two = reports.income_vs_spending(self.c, "2026-09", 2)
         self.assertEqual([m["month"] for m in two["months"]], ["2026-08", "2026-09"])
         self.assertEqual(two["year"], d["year"])
 
     def test_months_before_the_first_transaction_are_left_out(self):
-        # History starts in July: a 12-month view is July to September, and the year counts three months, not nine
         d = reports.income_vs_spending(self.c, "2026-09", 12)
         self.assertEqual([m["month"] for m in d["months"]], ["2026-07", "2026-08", "2026-09"])
         self.assertEqual((d["year"]["months"], d["year"]["income"]), (3, 9100.0))
         s = reports.spending_over_time(self.c, "2026-09", 12)
         self.assertEqual(s["months"], ["2026-07", "2026-08", "2026-09"])
         self.assertEqual(s["totals"], [100.0, 130.0, 302.0])
-        # A hidden account's older transactions don't stretch the history back
         self.tx("old", "2026-01-03", -5, "Old shop", "Shopping")
         self.assertEqual(reports.income_vs_spending(self.c, "2026-09", 12)["year"]["months"], 3)
-        # A gap after the first transaction is a real $0 month, so it stays
         self.assertEqual(len(reports.income_vs_spending(self.c, "2026-11", 12)["months"]), 5)
 
     def test_history_starting_mid_month_leaves_that_part_month_out(self):
-        # The first transaction on June 17th: June is a part month, so the reports start in July as before
         self.tx("chk", "2026-06-17", -40, "Corner store", "Groceries")
         d = reports.income_vs_spending(self.c, "2026-09", 12)
         self.assertEqual([m["month"] for m in d["months"]], ["2026-07", "2026-08", "2026-09"])
         self.assertEqual(reports.spending_over_time(self.c, "2026-09", 12)["months"], ["2026-07", "2026-08", "2026-09"])
-        # Unless it's the only month before this one: then it stays, part month and all
         self.assertEqual([m["month"] for m in reports.income_vs_spending(self.c, "2026-07", 12)["months"]], ["2026-06", "2026-07"])
 
     def test_no_transactions_yet_shows_just_this_month(self):
@@ -165,7 +155,7 @@ class ReportTests(DbCase):
         top = d["merchants"][0]
         self.assertEqual((top["name"], top["total"], top["count"], top["category"]), ("Whole Foods", 350.0, 4, "Groceries"))
         target = next(m for m in d["merchants"] if m["name"] == "Target")
-        self.assertEqual((target["total"], target["count"], target["category"]), (100.0, 1, "Groceries"))   # one visit, split
+        self.assertEqual((target["total"], target["count"], target["category"]), (100.0, 1, "Groceries"))
         one = reports.merchant(self.c, "whole foods", "2026-09", 3)
         self.assertEqual(one["values"], [100.0, 130.0, 120.0])
         self.assertEqual(len(one["transactions"]), 4)
@@ -185,7 +175,7 @@ class ReportTests(DbCase):
         rest = next(c for c in tree["children"] if c["name"] == "Restaurants")
         self.assertEqual([(c["name"], c["value"]) for c in rest["children"]], [("Restaurants (general)", 40.0), ("Fast food", 12.0)])
         groc = next(c for c in tree["children"] if c["name"] == "Groceries")
-        self.assertEqual([c["name"] for c in groc["children"]], ["Whole Foods", "Target"])   # no subcategories: straight to merchants
+        self.assertEqual([c["name"] for c in groc["children"]], ["Whole Foods", "Target"])
         txs = reports.transactions(self.c, "2026-09-01", "2026-10-01", "Groceries", "Target")
         self.assertEqual([(t["amount"], t["part"]) for t in txs], [(-60.0, False)])
 

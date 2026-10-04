@@ -29,7 +29,7 @@ class TlsTests(unittest.TestCase):
                 for req in (url, urllib.request.Request(url) if ":" in url else url):
                     with self.subTest(url=url), self.assertRaises(urllib.error.URLError):
                         tls.urlopen(req, timeout=1)
-            for url in ("file:///etc/passwd", "ftp://example.com/x", "data:text/plain,hi"):   # http allowed, these never
+            for url in ("file:///etc/passwd", "ftp://example.com/x", "data:text/plain,hi"):
                 with self.subTest(url=url, allow_http=True), self.assertRaises(urllib.error.URLError):
                     tls.urlopen(url, timeout=1, allow_http=True)
         opened.assert_not_called()
@@ -43,10 +43,9 @@ class TlsTests(unittest.TestCase):
             self.assertEqual(urllib.request.HTTPHandler in kinds, allow_http)
             https = next(h for h in o.handlers if isinstance(h, urllib.request.HTTPSHandler))
             self.assertIs(https._context, tls.ssl_context())
-            with self.assertRaises(urllib.error.URLError):   # a redirect to ftp: isn't followed
+            with self.assertRaises(urllib.error.URLError):
                 next(h for h in o.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)).redirect_request(
                     urllib.request.Request("https://example.com/"), None, 302, "Found", {}, "ftp://example.com/x")
-        # A handler of one's own replaces the default of its kind; there's still nothing for file: or ftp:.
         o = tls.opener(merchants._NoRedirects())
         self.assertEqual([type(h) for h in o.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)], [merchants._NoRedirects])
         with self.assertRaises(urllib.error.URLError):
@@ -62,7 +61,7 @@ class TlsTests(unittest.TestCase):
         with mock.patch.object(urllib.request.OpenerDirector, "open", open_):
             carta._post_form("https://carta.invalid/token", {}, "id", "secret")
             oidc._get_json("https://idp.invalid/.well-known/openid-configuration")
-            oidc._get_json("http://idp.lan/.well-known/openid-configuration")   # a provider on your network
+            oidc._get_json("http://idp.lan/.well-known/openid-configuration")
             tls.urlopen("https://example.com/", timeout=1)
         self.assertEqual([u for u, _ in seen], ["https://carta.invalid/token", "https://idp.invalid/.well-known/openid-configuration",
                                                 "http://idp.lan/.well-known/openid-configuration", "https://example.com/"])

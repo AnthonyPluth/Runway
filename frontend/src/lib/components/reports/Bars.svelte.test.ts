@@ -5,43 +5,71 @@ import { describe, expect, it, vi } from "vitest";
 import { monthLabel } from "$lib/format";
 import Bars from "./Bars.svelte";
 
-const MONTHS = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"];
-// As the Over time report draws it: the readout's title is the month in full, from the report's months.
+const MONTHS = [
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+];
 const props = (labels: string[]) => ({
-  labels, series: [{ name: "Groceries", color: "red", values: labels.map((_, i) => 100 + i) }], label: "Spending by month",
-  tipTitle: (i: number) => monthLabel(labels.map((_, k) => `2026-${String(k + 1).padStart(2, "0")}`)[i]),
+  labels,
+  series: [
+    { name: "Groceries", color: "red", values: labels.map((_, i) => 100 + i) },
+  ],
+  label: "Spending by month",
+  tipTitle: (i: number) =>
+    monthLabel(
+      labels.map((_, k) => `2026-${String(k + 1).padStart(2, "0")}`)[i],
+    ),
 });
-// The middle of each column, from its path's left and right edges.
-const columns = (svg: Element) => [...svg.querySelectorAll("path")].map((p) => {
-  const xs = [...p.getAttribute("d")!.matchAll(/([MQ ])(-?[\d.]+),|H(-?[\d.]+)/g)].map((m) => Number(m[2] ?? m[3]));
-  return (Math.min(...xs) + Math.max(...xs)) / 2;
-});
-const labelled = (svg: Element) => [...svg.querySelectorAll("text[text-anchor=middle]")].map((t) => [t.textContent, Number(t.getAttribute("x"))] as const);
+const columns = (svg: Element) =>
+  [...svg.querySelectorAll("path")].map((p) => {
+    const xs = [
+      ...p.getAttribute("d")!.matchAll(/([MQ ])(-?[\d.]+),|H(-?[\d.]+)/g),
+    ].map((m) => Number(m[2] ?? m[3]));
+    return (Math.min(...xs) + Math.max(...xs)) / 2;
+  });
+const labelled = (svg: Element) =>
+  [...svg.querySelectorAll("text[text-anchor=middle]")].map(
+    (t) => [t.textContent, Number(t.getAttribute("x"))] as const,
+  );
 
 describe("Bars", () => {
   it("puts each month's column under its label", () => {
     render(Bars, props(MONTHS));
-    const svg = screen.getByRole("img", { name: "Spending by month" }), cols = columns(svg);
+    const svg = screen.getByRole("img", { name: "Spending by month" }),
+      cols = columns(svg);
     expect(cols).toHaveLength(12);
-    for (const [text, x] of labelled(svg)) expect(cols[MONTHS.indexOf(text!)]).toBeCloseTo(x);
+    for (const [text, x] of labelled(svg))
+      expect(cols[MONTHS.indexOf(text!)]).toBeCloseTo(x);
   });
 
-  // On a phone the readout stays after the finger lifts. Going from 12 months to 6 with it on the last month used to
-  // throw while redrawing, which left the new labels over the old columns (bunched into the right half).
   it("keeps columns and labels together when a readout is showing and the months change", async () => {
     const { rerender } = render(Bars, props(MONTHS));
     const svg = screen.getByRole("img", { name: "Spending by month" });
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
-    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, { clientX: 310 });
-    expect(screen.getByText("December 2026")).toBeInTheDocument();   // the readout, on the last month
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
+    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, {
+      clientX: 310,
+    });
+    expect(screen.getByText("December 2026")).toBeInTheDocument();
 
     const six = MONTHS.slice(6);
     await rerender(props(six));
     const cols = columns(svg);
     expect(cols).toHaveLength(6);
-    for (const [text, x] of labelled(svg)) expect(cols[six.indexOf(text!)]).toBeCloseTo(x);
+    for (const [text, x] of labelled(svg))
+      expect(cols[six.indexOf(text!)]).toBeCloseTo(x);
     expect(labelled(svg).map(([t]) => t)).toContain("Oct");
-    expect(document.querySelector(".bg-popover")).toBeNull();   // no readout for a month that's gone
+    expect(document.querySelector(".bg-popover")).toBeNull();
   });
 
   it("draws a month under way faint and labels it so far", () => {
@@ -49,16 +77,20 @@ describe("Bars", () => {
     const svg = screen.getByRole("img", { name: "Spending by month" });
     expect(svg.querySelectorAll("path[data-partial]")).toHaveLength(1);
     expect(svg.querySelectorAll("path:not([data-partial])")).toHaveLength(2);
-    expect(labelled(svg).map(([t]) => t)).toEqual(["Aug", "Sep", "Oct (so far)"]);
+    expect(labelled(svg).map(([t]) => t)).toEqual([
+      "Aug",
+      "Sep",
+      "Oct (so far)",
+    ]);
   });
 
   it("leaves out the last label when it would run into the one before", () => {
-    // 320 wide, 13 months: a label every other month, so Dec next to Jan's place would overlap
     const thirteen = [...MONTHS, "Nov"];
     render(Bars, { ...props(thirteen), partial: true });
     const svg = screen.getByRole("img", { name: "Spending by month" });
     const xs = labelled(svg).map(([, x]) => x);
-    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThan(30);
+    for (let i = 1; i < xs.length; i++)
+      expect(xs[i] - xs[i - 1]).toBeGreaterThan(30);
     expect(labelled(svg).map(([t]) => t)).not.toContain("Nov (so far)");
   });
 
@@ -72,7 +104,7 @@ describe("Bars", () => {
     render(Bars, { ...props(MONTHS), onpick });
     const chart = screen.getByRole("slider", { name: "Spending by month" });
     await fireEvent.focus(chart);
-    expect(screen.getByText("December 2026")).toBeInTheDocument();   // the last month first
+    expect(screen.getByText("December 2026")).toBeInTheDocument();
     await fireEvent.keyDown(chart, { key: "ArrowLeft" });
     await fireEvent.keyDown(chart, { key: "ArrowLeft" });
     expect(screen.getByText("October 2026")).toBeInTheDocument();
@@ -86,12 +118,21 @@ describe("Bars", () => {
 
   it("opens the segment clicked, and on a touch screen only on a second tap", async () => {
     const onpick = vi.fn();
-    const series = [{ name: "Rent", color: "blue", values: [100, 100] }, { name: "Food", color: "green", values: [100, 100] }];
-    render(Bars, { labels: ["Sep", "Oct"], series, label: "Spending", tipTitle: (i: number) => ["Sep", "Oct"][i], onpick });
+    const series = [
+      { name: "Rent", color: "blue", values: [100, 100] },
+      { name: "Food", color: "green", values: [100, 100] },
+    ];
+    render(Bars, {
+      labels: ["Sep", "Oct"],
+      series,
+      label: "Spending",
+      tipTitle: (i: number) => ["Sep", "Oct"][i],
+      onpick,
+    });
     const svg = screen.getByRole("img", { name: "Spending" });
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
     const overlay = svg.querySelector("rect[data-overlay]")!;
-    // the right column (x 260), near its top: Food is stacked on Rent
     await fireEvent.pointerDown(overlay, { pointerType: "mouse" });
     await fireEvent.click(overlay, { clientX: 260, clientY: 40 });
     expect(onpick).toHaveBeenLastCalledWith(1, "Food");
@@ -102,7 +143,7 @@ describe("Bars", () => {
     await fireEvent.pointerDown(overlay, { pointerType: "touch" });
     await fireEvent.click(overlay, { clientX: 100, clientY: 220 });
     expect(onpick).not.toHaveBeenCalled();
-    expect(document.querySelector(".bg-popover")).toHaveTextContent("Sep");   // the first tap shows the readout
+    expect(document.querySelector(".bg-popover")).toHaveTextContent("Sep");
     await fireEvent.pointerDown(overlay, { pointerType: "touch" });
     await fireEvent.click(overlay, { clientX: 100, clientY: 220 });
     expect(onpick).toHaveBeenCalledWith(0, "Rent");
@@ -111,18 +152,29 @@ describe("Bars", () => {
   it("puts the readout away on a tap outside the chart", async () => {
     render(Bars, props(MONTHS));
     const svg = screen.getByRole("img", { name: "Spending by month" });
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
-    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, { clientX: 310 });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
+    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, {
+      clientX: 310,
+    });
     expect(document.querySelector(".bg-popover")).not.toBeNull();
     await fireEvent.pointerDown(document.body);
     expect(document.querySelector(".bg-popover")).toBeNull();
   });
 
   it("shows amounts in whole dollars", async () => {
-    render(Bars, { labels: ["Sep"], series: [{ name: "Rent", color: "blue", values: [1234.56] }], label: "Spending", tipTitle: () => "September" });
+    render(Bars, {
+      labels: ["Sep"],
+      series: [{ name: "Rent", color: "blue", values: [1234.56] }],
+      label: "Spending",
+      tipTitle: () => "September",
+    });
     const svg = screen.getByRole("img", { name: "Spending" });
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
-    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, { clientX: 200 });
+    svg.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 320, height: 260 }) as DOMRect;
+    await fireEvent.mouseMove(svg.querySelector("rect[data-overlay]")!, {
+      clientX: 200,
+    });
     expect(screen.getByText("$1,235")).toBeInTheDocument();
   });
 });

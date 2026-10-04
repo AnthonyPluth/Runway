@@ -18,11 +18,11 @@ class ParseTests(unittest.TestCase):
 class ClampTests(unittest.TestCase):
     def test_a_day_the_month_doesnt_have_is_its_last(self):
         self.assertEqual(dates.clamp_day(2026, 2, 31), date(2026, 2, 28))
-        self.assertEqual(dates.clamp_day(2028, 2, 31), date(2028, 2, 29))   # a leap year
+        self.assertEqual(dates.clamp_day(2028, 2, 31), date(2028, 2, 29))
         self.assertEqual(dates.clamp_day(2028, 2, 29), date(2028, 2, 29))
         self.assertEqual(dates.clamp_day(2027, 2, 29), date(2027, 2, 28))
-        self.assertEqual(dates.clamp_day(2100, 2, 29), date(2100, 2, 28))   # a century that isn't a leap year
-        self.assertEqual(dates.clamp_day(2000, 2, 29), date(2000, 2, 29))   # one that is
+        self.assertEqual(dates.clamp_day(2100, 2, 29), date(2100, 2, 28))
+        self.assertEqual(dates.clamp_day(2000, 2, 29), date(2000, 2, 29))
         self.assertEqual(dates.clamp_day(2026, 4, 31), date(2026, 4, 30))
         self.assertEqual(dates.clamp_day(2026, 12, 31), date(2026, 12, 31))
         self.assertEqual(dates.clamp_day(2026, 6, 1), date(2026, 6, 1))
@@ -38,7 +38,7 @@ class AddMonthsTests(unittest.TestCase):
     def test_the_same_day_or_the_months_last(self):
         self.assertEqual(dates.add_months(date(2026, 1, 31), 1), date(2026, 2, 28))
         self.assertEqual(dates.add_months(date(2028, 1, 31), 1), date(2028, 2, 29))
-        self.assertEqual(dates.add_months(date(2026, 1, 31), 2), date(2026, 3, 31))   # not Feb 28's day carried on
+        self.assertEqual(dates.add_months(date(2026, 1, 31), 2), date(2026, 3, 31))
         self.assertEqual(dates.add_months(date(2026, 3, 31), 1), date(2026, 4, 30))
         self.assertEqual(dates.add_months(date(2028, 2, 29), 12), date(2029, 2, 28))
         self.assertEqual(dates.add_months(date(2028, 2, 29), 48), date(2032, 2, 29))
@@ -84,7 +84,7 @@ class MonthStartTests(unittest.TestCase):
 class NextAfterTests(unittest.TestCase):
     def test_strictly_after(self):
         self.assertEqual(dates.next_after(date(2026, 9, 5), 2), date(2026, 10, 2))
-        self.assertEqual(dates.next_after(date(2026, 9, 5), 5), date(2026, 10, 5))   # not the day itself
+        self.assertEqual(dates.next_after(date(2026, 9, 5), 5), date(2026, 10, 5))
         self.assertEqual(dates.next_after(date(2026, 9, 5), 30), date(2026, 9, 30))
         self.assertEqual(dates.next_after(date(2026, 1, 31), 31), date(2026, 2, 28))
         self.assertEqual(dates.next_after(date(2026, 2, 28), 31), date(2026, 3, 31))
@@ -109,7 +109,6 @@ class MonthKeyTests(unittest.TestCase):
         self.assertEqual(keys, sorted(set(keys)))
 
     def test_as_the_reports_and_portfolio_counted_them(self):
-        # reports.month_list and portfolio's months (which this replaces) gave the same months
         from runway import reports
         self.assertEqual(reports.month_list("2026-01", 3), ["2025-11", "2025-12", "2026-01"])
         self.assertEqual(reports.month_list("2026-12", 13)[0], "2025-12")

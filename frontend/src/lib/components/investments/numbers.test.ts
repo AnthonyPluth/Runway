@@ -35,7 +35,7 @@ describe("signed", () => {
     expect(signed(1234)).toBe("+$1,234.00");
     expect(signed(-12)).toBe("−$12.00");
     expect(signed(0)).toBe("$0.00");
-    expect(signed(-0.001)).toBe("$0.00");   // what rounds to nothing isn't a loss
+    expect(signed(-0.001)).toBe("$0.00");
     expect(signed(null)).toBe("—");
   });
 });

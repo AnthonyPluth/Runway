@@ -16,7 +16,6 @@ from runway import db, oidc, server
 from runway.models import AuthPending, AuthSession
 from tests.shared import own_database
 
-# A throwaway 2048-bit RSA key used only by these tests to sign fake ID tokens.
 N = 0xf0e468c25263ab5b85ed863374cc64adae8284623519e21e7cbf01e2554656a58f8f69140ff8e701322655b598044841a7839a25b81c3737ee8141ee25ba7e6a46706540e49f61b7a321ad1e53d9bf44770558691d32aafb0edb49104ad0e9cc29074e856c22d864d285dbad96d228fb509f00b7d065ba0188d8c511efaee63001347fbe9939df1497b5efaf2e0d54626c6d1b3152397d3737b0e35141e1e58da75badd4f9897236e4d4c9b35ec9a0037c19152f1f7dc2cea916100588f76fd5ad4668da24e037339e9d34ab75ba37b91037a62ba7800df275f48651e231f021d7eb1c48006b016c1daff8d6d40a7446a8209b9666a85e5c04b999c38b3003a1
 D = 0xcea925b6903831aa331bb32631eda7f1d8e4dfede0e073bcf40869f5627315a2b3a6b4df2154c7d99ecc847b660f466e0ce83a3661dcd30288fb1b34d3e94acaa1e38afa4128fb0c304793dd90d21de4feb6f742366a618541199f74faba7fd946d99de39901cbe3b338635e6925a342f7c7713640f304c08c466bcb177554c3f024ea80a55aa110bd895aff210a164ecf7844e674ba9120f510f4b148d42e67136c701859afeb76c4526520b920afb22c594cee4c49098a9f5c150fffc6b709f9e4f14a4983fe079214de100fc0952b6a4dc0454c8fd6dec1f4748d59590a0aa048842308f7c31b07e53900cf55ebb68350d0e26cc69cbf83b88fb55f88b69
 E = 65537
@@ -38,7 +37,7 @@ def sign(claims: dict, kid="k1", key_d=D) -> str:
 
 class Provider(BaseHTTPRequestHandler):
     """A tiny OIDC provider: discovery, keys, and a token endpoint that hands out whatever the test queued."""
-    issued = {}      # code -> dict(nonce=..., email=..., tamper=...)
+    issued = {}
     last_token_request = {}
 
     def log_message(self, *a):
@@ -67,7 +66,6 @@ class Provider(BaseHTTPRequestHandler):
         grant = Provider.issued.pop(form.get("code"), None)
         if not grant:
             return self.reply({"error": "invalid_grant"}, 400)
-        # PKCE: the verifier must match the challenge sent at the start
         if b64(hashlib.sha256(form["code_verifier"].encode()).digest()) != grant["challenge"]:
             return self.reply({"error": "invalid_grant", "error_description": "PKCE"}, 400)
         now = int(time.time())
@@ -91,7 +89,6 @@ class OIDCTests(unittest.TestCase):
     def setUpClass(cls):
         cls.idp = HTTPServer(("127.0.0.1", 0), Provider)
         threading.Thread(target=cls.idp.serve_forever, daemon=True).start()
-        # A database of its own (and the environment, undone after tearDownClass): tests here expire and end every session.
         own_database(cls, OIDC_ISSUER=f"http://127.0.0.1:{cls.idp.server_port}", OIDC_CLIENT_ID="runway",
                      OIDC_CLIENT_SECRET="s3cret", OIDC_ALLOWED_EMAILS="me@example.com", OIDC_ALLOWED_GROUPS="finance")
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -136,24 +133,23 @@ class OIDCTests(unittest.TestCase):
         status, _, _, body = self.req("/api/state")
         self.assertEqual(status, 401)
         self.assertEqual(json.loads(body)["login"], "/auth/login")
-        status, loc, _, _ = self.req("/plaid/oauth?oauth_state_id=abc-123")   # back from a bank: keep where you were
+        status, loc, _, _ = self.req("/plaid/oauth?oauth_state_id=abc-123")
         self.assertEqual((status, loc), (302, "/auth/login?next=%2Fplaid%2Foauth%3Foauth_state_id%3Dabc-123"))
-        self.assertEqual(self.req("/page.css")[0], 200)         # the sign-in pages can still be styled
+        self.assertEqual(self.req("/page.css")[0], 200)
         self.assertEqual(self.req("/healthz")[0], 200)
 
     def test_full_sign_in_and_sign_out(self):
         status, loc, ck, _ = self.sign_in()
         self.assertEqual((status, loc), (302, "/#budget"))
-        self.assertTrue(Provider.last_token_request["auth"].startswith("Basic "))   # client secret sent
+        self.assertTrue(Provider.last_token_request["auth"].startswith("Basic "))
         session = {"runway_session": ck["runway_session"]}
         status, _, _, body = self.req("/api/state", session)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["user"]["email"], "me@example.com")
-        self.assertIn("Alex", json.loads(body)["owners"])          # the provider's name becomes an account-owner choice
-        with db.session() as conn:   # only a hash of the token is stored
+        self.assertIn("Alex", json.loads(body)["owners"])
+        with db.session() as conn:
             self.assertIsNone(conn.execute(select(AuthSession.token_hash)
                                            .where(AuthSession.token_hash == ck["runway_session"])).fetchone())
-        # Signing out takes a POST from Runway's own page: a link, or a POST without the app's header, does nothing.
         self.assertEqual(self.req("/auth/logout", session)[0], 405)
         self.assertEqual(self.req("/auth/logout", session, "POST")[0], 403)
         self.assertEqual(self.req("/auth/logout", session, "POST", {"X-Runway": "1", "Origin": "https://evil.example"})[0], 403)
@@ -186,14 +182,14 @@ class OIDCTests(unittest.TestCase):
         page = body.decode()
         self.assertIn("Not authorized", page)
         self.assertIn("stranger@example.com isn’t allowed to use this Runway. Ask whoever runs it to add you", page)
-        self.assertNotIn("OIDC_", page)                               # the fix is for the operator: it's in the log
-        self.assertIn('href="/auth/login?prompt=select_account"', page)   # not "Try again", which signs the same account back in
+        self.assertNotIn("OIDC_", page)
+        self.assertIn('href="/auth/login?prompt=select_account"', page)
         self.assertIn("Sign out of 127.0.0.1", page)
         self.assertIn(f"http://127.0.0.1:{self.idp.server_port}/logout?client_id=runway", page)
         status, loc, _, _ = self.req("/auth/login?prompt=select_account")
         self.assertEqual(status, 302)
         self.assertEqual(dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query))["prompt"], "select_account")
-        _, loc, _, _ = self.req("/auth/login?prompt=none")                # only that one prompt is passed on
+        _, loc, _, _ = self.req("/auth/login?prompt=none")
         self.assertNotIn("prompt", dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(loc).query)))
 
     def test_refused_changes_say_why(self):
@@ -213,7 +209,7 @@ class OIDCTests(unittest.TestCase):
         _, _, ck, _ = self.sign_in()
         token = ck["runway_session"]
         session = {"runway_session": token}
-        self.assertNotIn("runway_session", self.req("/api/state", session)[2])   # just signed in: nothing to renew
+        self.assertNotIn("runway_session", self.req("/api/state", session)[2])
         with db.session() as conn:
             conn.execute(update(AuthSession).where(AuthSession.token_hash == oidc._hash(token))
                          .values(expires=time.time() + 86400))
@@ -226,8 +222,8 @@ class OIDCTests(unittest.TestCase):
         max_age = int(next(a for a in attrs if a.startswith("Max-Age="))[len("Max-Age="):])
         self.assertAlmostEqual(max_age, 14 * 86400, delta=10)
         self.assertEqual([a for a in attrs if not a.startswith("Max-Age=")], ["Path=/", "HttpOnly", "SameSite=Lax"])
-        self.assertNotIn("runway_session", self.req("/api/state", session)[2])   # once a day at most
-        self.assertNotIn("runway_session", self.req("/", session)[2])            # and never on a page that may be cached
+        self.assertNotIn("runway_session", self.req("/api/state", session)[2])
+        self.assertNotIn("runway_session", self.req("/", session)[2])
 
     def test_login_state_cannot_be_replayed(self):
         _status, loc, ck, _ = self.req("/auth/login")
@@ -289,7 +285,6 @@ class TokenChecks(unittest.TestCase):
         unsigned = self.jwt.encode({"sub": "u1"}, None, algorithm="none")
         with self.assertRaises(oidc.OIDCError):
             oidc.verify_id_token(unsigned, "n1", self.d)
-        # a key the provider doesn't publish
         from cryptography.hazmat.primitives.asymmetric import ec
         other = self.jwt.encode({"iss": "https://id.example.com", "aud": "runway", "sub": "u1", "nonce": "n1", "iat": now, "exp": now + 300},
                                 ec.generate_private_key(ec.SECP256R1()), algorithm="ES256", headers={"kid": "ec1"})
@@ -314,7 +309,7 @@ class ConfigTests(unittest.TestCase):
             server.serve(host="0.0.0.0", port=0, auto_sync=False)
         os.environ["OIDC_ISSUER"] = "https://auth.example.com"
         try:
-            with self.assertRaises(SystemExit) as cm:     # issuer alone isn't enough
+            with self.assertRaises(SystemExit) as cm:
                 server.serve(host="0.0.0.0", port=0, auto_sync=False)
             self.assertIn("OIDC_ALLOWED_EMAILS", str(cm.exception))
         finally:

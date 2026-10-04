@@ -11,7 +11,7 @@ PY = {"TEXT": str, "FLOAT": float, "INTEGER": int}
 
 class ModelTests(unittest.TestCase):
     def test_every_table_has_one_model(self):
-        configure_mappers()   # also checks every relationship's join
+        configure_mappers()
         mapped = [m.class_.__table__ for m in models.Base.registry.mappers]
         self.assertEqual(sorted(t.name for t in mapped), sorted(schema.metadata.tables))
         for t in mapped:

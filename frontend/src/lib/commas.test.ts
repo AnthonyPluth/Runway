@@ -2,7 +2,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { commas, withCommas, withoutCommas } from "./commas";
 
-const shown = (el: HTMLInputElement) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.get!.call(el);
+const shown = (el: HTMLInputElement) =>
+  Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )!.get!.call(el);
 
 let input: HTMLInputElement;
 beforeEach(() => {
@@ -35,7 +39,7 @@ describe("commas", () => {
     input.focus();
     expect(input.type).toBe("number");
     expect(shown(input)).toBe("450000");
-    input.value = "1250000";   // typing
+    input.value = "1250000";
     document.querySelector("button")!.focus();
     expect(input.type).toBe("text");
     expect(shown(input)).toBe("1,250,000");

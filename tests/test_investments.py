@@ -43,7 +43,6 @@ class Base(DbCase):
 class HistoryTests(Base):
     def setUp(self):
         super().setUp()
-        # Deposit $3,000, buy 10 VTI at $250, get a $20 dividend. Today: 10 VTI worth $3,000 + $520 cash.
         self.tx("t1", "2026-06-01", "cash", "deposit", -3000)
         self.tx("t2", "2026-06-02", "buy", "buy", 2500, "VTI", 10, 250)
         self.tx("t3", "2026-08-15", "cash", "dividend", -20, "VTI")
@@ -64,22 +63,20 @@ class HistoryTests(Base):
         h = portfolio.history(self.c, TODAY)
         self.assertEqual(h["dates"][0], "2026-05-31")
         self.assertEqual(self.at(h, "2026-05-31"), 0.0)
-        self.assertEqual(self.at(h, "2026-06-01"), 3000.0)            # cash only
-        self.assertEqual(self.at(h, "2026-06-02"), 3000.0)            # 10 x 250 + 500 cash
-        self.assertEqual(self.at(h, "2026-07-15"), 3250.0)            # 10 x 275 + 500
+        self.assertEqual(self.at(h, "2026-06-01"), 3000.0)
+        self.assertEqual(self.at(h, "2026-06-02"), 3000.0)
+        self.assertEqual(self.at(h, "2026-07-15"), 3250.0)
         self.assertEqual(self.at(h, "2026-08-14"), 3500.0)
-        self.assertEqual(self.at(h, "2026-08-15"), 3520.0)            # dividend lands in cash
+        self.assertEqual(self.at(h, "2026-08-15"), 3520.0)
         self.assertEqual(h["value"][-1], 3520.0)
         self.assertEqual(h["flows"][h["dates"].index("2026-06-01")], 3000.0)
         self.assertEqual(h["invested"][-1], 3000.0)
-        # Time-weighted: the deposit isn't a gain. 3000 -> 3520 with no other flows.
         self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)
 
     def test_cash_rows_with_a_share_count_dont_change_shares(self):
-        # Some institutions tag a small cash deposit with a security and a share count; it mustn't move shares.
         self.tx("t4", "2026-09-10", "cash", "deposit", -2, "VTI", -8.4)
         h = portfolio.history(self.c, TODAY)
-        self.assertEqual(self.at(h, "2026-09-09"), 3520.0 - 2)       # the $2 deposit came in after; shares unchanged
+        self.assertEqual(self.at(h, "2026-09-09"), 3520.0 - 2)
 
     def test_performance_and_benchmark(self):
         ov = portfolio.overview(self.c, "2Y", TODAY)
@@ -101,10 +98,9 @@ class HistoryTests(Base):
         h = portfolio.history(self.c, TODAY)
         self.assertEqual(self.at(h, "2026-08-31"), 3520.0)
         self.assertEqual(self.at(h, "2026-09-01"), 3120.0)
-        self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)  # unchanged by taking money out
+        self.assertAlmostEqual(h["twr"][-1], 3520 / 3000 - 1, places=6)
 
     def test_accounts_hidden_in_settings_are_excluded_everywhere(self):
-        # Settings -> Accounts is the only way to leave an account out of Investments
         self.assertEqual(portfolio.overview(self.c, "1Y", TODAY)["total"], 3520.0)
         self.c.execute(insert(Account).values(id="pl:A", name="Brokerage", kind="investment", balance=3520, hidden=1))
         self.c.execute(update(InvAccount).where(InvAccount.id == "A").values(account_id="pl:A"))
@@ -127,12 +123,12 @@ class TransferHistoryTests(Base):
         self.c.execute(insert(InvAccount).values(id="B", item_id="it1", name="Old 401k", type="investment",
                                                  subtype="401k", balance=2500))
         self.tx("d1", "2026-08-01", "cash", "deposit", -1000)
-        self.tx("x1", "2026-08-05", "transfer", "transfer", 0, "XYZ", 5)            # in-kind: 5 XYZ, priced from history
-        self.tx("n1", "2026-08-10", "buy", "buy", 400, "NOPX", 4, 100)             # no price history: valued at trades
+        self.tx("x1", "2026-08-05", "transfer", "transfer", 0, "XYZ", 5)
+        self.tx("n1", "2026-08-10", "buy", "buy", 400, "NOPX", 4, 100)
         self.tx("n2", "2026-09-01", "sell", "sell", -220, "NOPX", -2, 110)
-        self.tx("w1", "2026-09-05", "transfer", "transfer", 150)                    # cash sent out
-        self.tx("s1", "2026-09-10", "transfer", "spin off", 0, "XYZ", 1)            # corporate action: shares, no flow
-        self.tx("f1", "2026-09-30", "cash", "deposit", -50)                         # after today: ignored
+        self.tx("w1", "2026-09-05", "transfer", "transfer", 150)
+        self.tx("s1", "2026-09-10", "transfer", "spin off", 0, "XYZ", 1)
+        self.tx("f1", "2026-09-30", "cash", "deposit", -50)
         self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=6, price=50, value=300))
         self.c.execute(insert(Holding).values(account_id="A", security_id="NOPX", quantity=2, price=110, value=220))
         self.c.execute(insert(Holding).values(account_id="A", security_id="SPAXX", quantity=670, price=1, value=670))
@@ -141,9 +137,9 @@ class TransferHistoryTests(Base):
         self.price("XYZ", "2026-09-22", 50)
         h = portfolio.history(self.c, TODAY, days=60)
         got = {d: (h["value"][i], h["flows"][i], h["invested"][i], h["twr"][i]) for i, d in enumerate(h["dates"])}
-        self.assertEqual(got["2026-07-31"], (2500.0, 0.0, 2500.0, 0.0))            # the 401k's balance, held flat
+        self.assertEqual(got["2026-07-31"], (2500.0, 0.0, 2500.0, 0.0))
         self.assertEqual(got["2026-08-01"], (3500.0, 1000.0, 3500.0, 0.0))
-        self.assertEqual(got["2026-08-05"], (3700.0, 200.0, 3700.0, 0.0))          # 5 x $40 moved in counts as added
+        self.assertEqual(got["2026-08-05"], (3700.0, 200.0, 3700.0, 0.0))
         self.assertEqual(got["2026-08-10"], (3700.0, 0.0, 3700.0, 0.0))
         self.assertEqual(got["2026-09-01"], (3765.0, 0.0, 3700.0, 0.017568))
         self.assertEqual(got["2026-09-05"], (3615.0, -150.0, 3550.0, 0.017568))
@@ -154,7 +150,6 @@ class TransferHistoryTests(Base):
 
 class SplitTests(Base):
     def test_split_does_not_jump(self):
-        # 10 XYZ at $200, 2-for-1 split on Jul 1, now 20 at $100. Yahoo's closes are split-adjusted (100 throughout).
         self.tx("s0", "2026-06-10", "buy", "buy", 2000, "XYZ", 10, 200)
         self.tx("s1", "2026-07-01", "transfer", "split", 0, "XYZ", 10)
         self.c.execute(insert(Holding).values(account_id="A", security_id="XYZ", quantity=20, price=100, value=2000,
@@ -181,9 +176,9 @@ class XrayTests(Base):
         self.tx("f1", "2026-09-01", "fee", "management fee", 80)
         ov = portfolio.overview(self.c, "1Y", TODAY)
         rules = {r["name"]: r for r in ov["xray"]}
-        self.assertFalse(rules["Largest single holding"]["ok"])   # 60% in one stock
-        self.assertFalse(rules["Uninvested cash"]["ok"])          # 40% cash
-        self.assertFalse(rules["Fees paid"]["ok"])                # 0.8%
+        self.assertFalse(rules["Largest single holding"]["ok"])
+        self.assertFalse(rules["Uninvested cash"]["ok"])
+        self.assertFalse(rules["Fees paid"]["ok"])
         self.assertEqual(ov["income"]["fees_12m"], 80.0)
 
 
@@ -199,7 +194,7 @@ class FireTests(Base):
         return portfolio.overview(self.c, "1Y", TODAY)["plan"]
 
     def test_plan_starts_from_runways_figures(self):
-        db.set_setting(self.c, "fire_annual_spending", "62000")   # changed on the old financial-independence card
+        db.set_setting(self.c, "fire_annual_spending", "62000")
         p = self.plan()
         self.assertTrue(p["is_default"])
         self.assertEqual(p["plan"]["spending"], 62000.0)
@@ -225,7 +220,7 @@ class FireTests(Base):
         good = self.plan()["plan"]
         for bad in ({**good, "people": []}, {**good, "people": good["people"] * 3}, {**good, "volatility": 3},
                     {**good, "spending": "lots"}, {**good, "plan_to_age": 500},
-                    {**good, "income": [{"name": "SS", "amount": 1, "person": 1, "start_age": 67}]},   # no second person
+                    {**good, "income": [{"name": "SS", "amount": 1, "person": 1, "start_age": 67}]},
                     {**good, "events": [{"name": "x", "year": 1990, "amount": 5}]},
                     {**good, "assets": [{"key": "account:chk", "sell_year": TODAY.year + 1}]},
                     {**good, "events": [{}] * (planner.MAX_ROWS + 1)}):
@@ -240,8 +235,7 @@ class FireTests(Base):
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["value"], house["owed"], house["yearly_change"]), (450000.0, 200000.0, 0.03))
         self.assertEqual(house["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "mtg",
-                                         "payment_counted": None, "payoff_year": None})   # no terms: kept as it is
-        # with its terms set, what's owed is paid down to today (as on Net worth), projected on from there
+                                         "payment_counted": None, "payoff_year": None})
         self.c.execute(update(Account).where(Account.id == "mtg").values(balance_date="2026-07-23", interest_rate=6, monthly_payment=1500))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         owed = 200000.0
@@ -251,8 +245,7 @@ class FireTests(Base):
         self.assertEqual(house["owed_by_year"][0], house["owed"])
         self.assertEqual({k: house["loan"][k] for k in ("rate", "payment", "source", "note", "account_id")},
                          {"rate": 6, "payment": 1500, "source": "manual", "note": None, "account_id": "mtg"})
-        self.assertEqual(house["loan"]["payoff_year"], 2044)   # 219 more payments from October 2026: the last in December 2044
-        # a payment and no rate: nothing is guessed (loans.py), so neither paid down nor projected
+        self.assertEqual(house["loan"]["payoff_year"], 2044)
         self.c.execute(update(Account).where(Account.id == "mtg").values(interest_rate=None))
         house = next(a for a in self.plan()["assets"] if a["name"] == "House")
         self.assertEqual((house["owed"], house["loan"]["note"], house["loan"]["payoff_year"]), (200000.0, "no_rate", None))
@@ -266,57 +259,52 @@ class FireTests(Base):
         counted = lambda: next(a for a in self.plan()["assets"] if a["name"] == "House")["loan"]["payment_counted"]
         pay = lambda id, posted, amount, category, desc=None: self.c.execute(insert(Transaction).values(
             id=id, account_id="chk", posted=posted, amount=amount, category=category, description=desc))
-        for m in range(3, 9):   # a steady move to savings about the payment's size: not taken for the payment
+        for m in range(3, 9):
             pay(f"s{m}", f"2026-{m:02}-20", -2000, "Transfer", "TO SAVINGS")
         self.assertIsNone(counted())
-        for m in range(3, 9):   # paid every month, but as a transfer naming it: not in spending
+        for m in range(3, 9):
             pay(f"t{m}", f"2026-{m:02}-01", -1850, "Transfer", "MORTGAGE PMT")
-        pay("p2", "2026-06-01", -1500, "Mortgage")   # spending, but not the payment
-        pay("p3", "2026-09-01", -1850, "Mortgage")   # this month: outside the 6 full months spending counts
-        pay("p4", "2026-07-15", -1900, "Groceries")  # within 10% of it once: a one-off, not a payment
+        pay("p2", "2026-06-01", -1500, "Mortgage")
+        pay("p3", "2026-09-01", -1850, "Mortgage")
+        pay("p4", "2026-07-15", -1900, "Groceries")
         self.assertFalse(counted())
-        for m in (3, 4, 5):   # with July, four months of it: a payment that repeats
+        for m in (3, 4, 5):
             pay(f"m{m}", f"2026-{m:02}-02", -1850, "Mortgage")
         self.assertTrue(counted())
-        self.c.execute(update(Transaction).where(Transaction.id == "p3").values(category=None))   # this month's still doesn't
-        self.c.execute(update(Transaction).where(Transaction.id == "m5").values(category=None))   # uncategorized counts too
+        self.c.execute(update(Transaction).where(Transaction.id == "p3").values(category=None))
+        self.c.execute(update(Transaction).where(Transaction.id == "m5").values(category=None))
         self.assertTrue(counted())
-        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))   # three months left
+        self.c.execute(update(Transaction).where(Transaction.id == "p4").values(category="Transfer"))
         self.assertFalse(counted())
-        # found in neither: Runway can't tell, so it's left as it is (None), not added
-        self.c.execute(update(Transaction).where(Transaction.id.like("t%")).values(amount=-925, category="Gifts & Donations"))   # in halves
+        self.c.execute(update(Transaction).where(Transaction.id.like("t%")).values(amount=-925, category="Gifts & Donations"))
         self.assertIsNone(counted())
-        self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))   # no payment: nothing to match
+        self.c.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))
         self.assertIsNone(counted())
 
     def test_a_payment_that_names_the_lender_wins_over_lookalikes(self):
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
         lookalikes = [out(m, 352, "whole foods") for m in (3, 4, 5, 6)]
-        self.assertTrue(planner.payment_counted(lookalikes, 350, ["Ally", "Car loan"]))   # nothing names it: amounts alone
+        self.assertTrue(planner.payment_counted(lookalikes, 350, ["Ally", "Car loan"]))
         named = [out(m, 350, "ally auto payment") for m in (3, 4)]
-        self.assertFalse(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))   # only two months of it
+        self.assertFalse(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
         named += [out(m, 350, "ally auto payment") for m in (5, 6)]
         self.assertTrue(planner.payment_counted(lookalikes + named, 350, ["Ally", "Car loan"]))
-        self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))   # four in one month is still one month
+        self.assertFalse(planner.payment_counted([out(3, 350, "ally")] * 4, 350, []))
 
     def test_a_transfer_is_the_loans_payment_only_by_name_size_and_not_a_cards(self):
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
         months = (3, 4, 5, 6)
-        # a Chase card's autopay names the auto loan's lender, at the card bill's size: not the loan's payment
         card = [out(m, 520, "chase credit crd autopay") for m in months]
         self.assertFalse(planner.payment_counted(card, 500, ["Chase", "Auto loan"], named_only=True))
-        # past 10% of it (an escrow allowance is for spending only)
         self.assertFalse(planner.payment_counted([out(m, 600, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
         self.assertTrue(planner.payment_counted([out(m, 500, "chase auto loan pmt") for m in months], 500, ["Chase"], named_only=True))
-        # a loan from a card issuer, paid by transfer, is still the loan's payment
         self.assertTrue(planner.payment_counted([out(m, 500, "capital one auto pmt") for m in months], 500, ["Capital One"], named_only=True))
 
     def test_a_mortgage_paid_with_its_escrow_is_still_its_payment(self):
-        # The lender reports $1,850 of principal and interest; the bank shows $2,450 going out, taxes and insurance in
         out = lambda month, amount, text: {"month": f"2026-{month:02}", "amount": amount, "text": text}
         escrowed = [out(m, 2450, "rocket mortgage payment") for m in (3, 4, 5, 6)]
         self.assertTrue(planner.payment_counted(escrowed, 1850, ["Rocket Mortgage", "Home loan"]))
-        self.assertFalse(planner.payment_counted(escrowed, 1850, ["Other Bank"]))   # not named: the amount alone is too far off
+        self.assertFalse(planner.payment_counted(escrowed, 1850, ["Other Bank"]))
         self.assertFalse(planner.payment_counted([out(m, 2900, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
         self.assertFalse(planner.payment_counted([out(m, 1500, "rocket mortgage") for m in (3, 4, 5, 6)], 1850, ["Rocket Mortgage"]))
 
@@ -336,8 +324,8 @@ class FireTests(Base):
         raw = json.dumps({**planner.clean(self.plan()["plan"], date(2024, 1, 1)), "assets": [{"key": "asset:7", "sell_year": 2025}]})
         db.set_setting(self.c, "retirement_plan", raw)
         self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026, "was": 2025}])
-        self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)   # shown, not written back
-        planner.save(self.c, self.plan()["plan"], TODAY)   # the next change keeps this year (and drops `was`)
+        self.assertEqual(db.get_setting(self.c, "retirement_plan"), raw)
+        planner.save(self.c, self.plan()["plan"], TODAY)
         self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:7", "sell_year": 2026}])
 
     def test_vehicles_are_listed_for_their_loan_but_never_sold_into_the_plan(self):
@@ -349,27 +337,24 @@ class FireTests(Base):
                                         "yearly_change": None, "loan_account_id": None}])
         assets = {a["name"]: a for a in self.plan()["assets"]}
         self.assertEqual((assets["Car"]["kind"], assets["Car"]["loan"]["payment"]), ("vehicle", 600))
-        self.assertIsNone(assets["Cabin"]["yearly_change"])   # not set: the page keeps it level with inflation
+        self.assertIsNone(assets["Cabin"]["yearly_change"])
         good = self.plan()["plan"]
         with self.assertRaisesRegex(planner.PlanError, "Vehicles aren’t sold into the plan"):
             planner.save(self.c, {**good, "assets": [{"key": "asset:8", "sell_year": 2030}]}, TODAY)
-        # one kept from before vehicles were left out isn't counted
         db.set_setting(self.c, "retirement_plan", json.dumps({**planner.clean(good, TODAY), "assets": [
             {"key": "asset:8", "sell_year": 2030}, {"key": "asset:9", "sell_year": 2031}]}))
         self.assertEqual(self.plan()["plan"]["assets"], [{"key": "asset:9", "sell_year": 2031}])
 
     def test_the_plan_knows_whether_spending_is_runways_figure_or_yours(self):
         p = self.plan()
-        self.assertFalse(p["plan"]["spending_own"])   # the default: Runway's figure
+        self.assertFalse(p["plan"]["spending_own"])
         planner.save(self.c, {**p["plan"], "spending": 48000, "spending_own": True}, TODAY)
         self.assertTrue(self.plan()["plan"]["spending_own"])
         planner.save(self.c, {**p["plan"], "spending_own": "0"}, TODAY)
         self.assertFalse(self.plan()["plan"]["spending_own"])
-        self.assertFalse(planner.clean({**p["plan"], "spending_own": None}, TODAY)["spending_own"])   # left out: Runway's
+        self.assertFalse(planner.clean({**p["plan"], "spending_own": None}, TODAY)["spending_own"])
 
     def test_a_plan_kept_before_the_flag_is_runways_figure(self):
-        # Saved whole on every change, its spending can't tell a typed figure from Runway's: taken as Runway's,
-        # however far it is from today's figure, and nothing is written back on reading it
         computed = self.plan()["computed"]
         old = {k: v for k, v in planner.clean(self.plan()["plan"], TODAY).items() if k != "spending_own"}
         for spending in (computed["annual_spending"], computed["annual_spending"] + 2400):
@@ -380,11 +365,11 @@ class FireTests(Base):
 
     def test_yearly_savings_says_what_it_is(self):
         p = self.plan()["computed"]
-        self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))   # a year of history: the last 12 months
+        self.assertEqual((p["savings_measured"], p["savings_since"]), (True, None))
         self.tx("dep", "2026-06-01", "cash", "deposit", -3000)
         p = self.plan()["computed"]
-        self.assertEqual((p["yearly_savings"], p["savings_since"]), (3000.0, "2026-05-31"))   # history starts then
-        db.set_setting(self.c, "fire_yearly_savings", "20000")   # typed on the old card: not a measurement
+        self.assertEqual((p["yearly_savings"], p["savings_since"]), (3000.0, "2026-05-31"))
+        db.set_setting(self.c, "fire_yearly_savings", "20000")
         p = self.plan()["computed"]
         self.assertEqual((p["yearly_savings"], p["savings_measured"], p["savings_since"]), (20000.0, False, None))
 
@@ -395,11 +380,11 @@ class MonthlySpendingTests(DbCase):
     def test_uncategorized_counts_and_a_month_of_money_back_is_zero(self):
         self.c.execute(insert(Account), [{"id": "chk", "name": "Checking", "kind": "checking", "balance": 0},
                                          {"id": "brk", "name": "Brokerage", "kind": "investment", "balance": 0}])
-        rows = [("2026-03-05", -1000, "Groceries"), ("2026-03-06", -500, None),   # uncategorized money out is spending
+        rows = [("2026-03-05", -1000, "Groceries"), ("2026-03-06", -500, None),
                 ("2026-03-07", -2000, "Transfer"), ("2026-03-08", 5000, "Income"), ("2026-03-09", 300, None),
-                ("2026-04-05", -400, "Groceries"), ("2026-04-06", -100, "No such category"),   # unknown: uncategorized
-                ("2026-05-05", -200, "Shopping"), ("2026-05-06", 700, "Shopping"),   # more back than out: a month of none
-                ("2026-02-27", -9999, "Groceries"), ("2026-09-01", -9999, "Groceries")]   # outside the 6 full months
+                ("2026-04-05", -400, "Groceries"), ("2026-04-06", -100, "No such category"),
+                ("2026-05-05", -200, "Shopping"), ("2026-05-06", 700, "Shopping"),
+                ("2026-02-27", -9999, "Groceries"), ("2026-09-01", -9999, "Groceries")]
         self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "chk", "posted": d, "amount": a, "category": c}
                                              for i, (d, a, c) in enumerate(rows)])
         self.c.execute(insert(Transaction).values(id="inv", account_id="brk", posted="2026-03-10", amount=-750))
@@ -407,8 +392,6 @@ class MonthlySpendingTests(DbCase):
 
 
     def test_a_short_history_is_averaged_over_the_months_there_are(self):
-        # A bank linked in early July: three full months of the six (July counts, as it starts on the 1st), not six
-        # with three empty, so the figure isn't halved
         self.c.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=0))
         rows = [("2026-07-01", -3000), ("2026-08-03", -2400), ("2026-09-02", -3600), ("2026-10-01", -9999)]
         self.c.execute(insert(Transaction), [{"id": f"t{i}", "account_id": "chk", "posted": d, "amount": a, "category": "Groceries"}
@@ -416,15 +399,12 @@ class MonthlySpendingTests(DbCase):
         october = date(2026, 10, 1)
         self.assertEqual(portfolio.history_months(self.c, october), ["2026-07", "2026-08", "2026-09"])
         self.assertEqual(portfolio.monthly_spending(self.c, october), 3000.0)
-        # history from July 20: July is only partly there, so it's left out of the average
         self.c.execute(update(Transaction).where(Transaction.id == "t0").values(posted="2026-07-20"))
         self.assertEqual(portfolio.history_months(self.c, october), ["2026-08", "2026-09"])
         self.assertEqual(portfolio.monthly_spending(self.c, october), 3000.0)
-        # a month with transactions but no spending in it is a month of none
         self.c.execute(insert(Transaction).values(id="pay", account_id="chk", posted="2026-06-01", amount=5000, category="Income"))
         self.assertEqual(portfolio.history_months(self.c, october), ["2026-06", "2026-07", "2026-08", "2026-09"])
         self.assertEqual(portfolio.monthly_spending(self.c, october), 2250.0)
-        # nothing yet but the month history starts in: that month's spending, as there's nothing else
         self.c.execute(Transaction.__table__.delete())
         self.c.execute(insert(Transaction).values(id="x", account_id="chk", posted="2026-09-12", amount=-800, category="Groceries"))
         self.assertEqual((portfolio.history_months(self.c, october), portfolio.monthly_spending(self.c, october)), ([], 800.0))
@@ -445,7 +425,7 @@ class ShortHistoryLoanPaymentTests(DbCase):
         self.c.execute(insert(Asset).values(name="House", kind="home", value=400000, as_of=self.OCT.isoformat(),
                                             loan_account_id="mtg"))
         self.n = 0
-        self.spend("2026-07-01", -80, "Groceries", "KROGER")   # history starts July 1st: July is a full month
+        self.spend("2026-07-01", -80, "Groceries", "KROGER")
         for d in ("2026-07-05", "2026-08-04", "2026-09-02"):
             self.spend(d, -1450.00, "Mortgage", "DIRECT DEBIT NORTHWIND MORTG OLB MTGPMT (Cash)", "Northwind Mortgage")
 
@@ -458,15 +438,14 @@ class ShortHistoryLoanPaymentTests(DbCase):
         return next(a for a in planner.sellable(self.c, self.OCT) if a["name"] == "House")["loan"]["payment_counted"]
 
     def test_paid_in_every_month_there_is(self):
-        self.assertTrue(self.counted())   # three months of three, naming the lender
+        self.assertTrue(self.counted())
 
     def test_a_month_without_it_is_not_enough(self):
         self.c.execute(Transaction.__table__.delete().where(Transaction.posted == "2026-08-04"))
-        self.spend("2026-08-10", -45, "Dining", "CAFE")   # August is there, but the payment isn't
+        self.spend("2026-08-10", -45, "Dining", "CAFE")
         self.assertIsNone(self.counted())
 
     def test_a_partial_first_month_isnt_required(self):
-        # history from July 9th: the payment on the 5th was before it, and only August and September are full
         self.c.execute(Transaction.__table__.delete().where(Transaction.posted <= "2026-07-05"))
         self.spend("2026-07-09", -80, "Groceries", "KROGER")
         self.assertEqual(portfolio.history_months(self.c, self.OCT), ["2026-08", "2026-09"])
@@ -474,10 +453,10 @@ class ShortHistoryLoanPaymentTests(DbCase):
 
     def test_one_month_counts_only_when_it_names_the_lender(self):
         self.c.execute(Transaction.__table__.delete().where(Transaction.posted < "2026-09-01"))
-        self.spend("2026-08-20", -80, "Groceries", "KROGER")   # history from August 20th: September alone is full
+        self.spend("2026-08-20", -80, "Groceries", "KROGER")
         self.assertTrue(self.counted())
         self.c.execute(update(Transaction).where(Transaction.posted == "2026-09-02").values(description="ACH DEBIT", payee=None))
-        self.assertIsNone(self.counted())   # one month of an amount that matches is too little to go on
+        self.assertIsNone(self.counted())
 
     def test_paid_as_a_transfer_in_every_month_there_is(self):
         self.c.execute(update(Transaction).where(Transaction.category == "Mortgage").values(category="Transfer"))
@@ -486,17 +465,15 @@ class ShortHistoryLoanPaymentTests(DbCase):
     def test_the_rule_by_itself(self):
         out = lambda m, amount, text: {"month": f"2026-{m:02}", "amount": amount, "text": text}
         two = [out(m, 350, "whole foods") for m in (8, 9)]
-        # a lookalike amount in every month of a short history isn't the payment (a grocery run the size of it)
         self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-08", "2026-09"]))
         named = [out(m, 350, "ally auto") for m in (8, 9)]
-        self.assertTrue(planner.payment_counted(two + named, 350, ["Ally"], history=["2026-08", "2026-09"]))   # named: two months
-        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-07", "2026-08", "2026-09"]))   # July missing
-        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-09"]))   # one month, not named
+        self.assertTrue(planner.payment_counted(two + named, 350, ["Ally"], history=["2026-08", "2026-09"]))
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-07", "2026-08", "2026-09"]))
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-09"]))
         self.assertTrue(planner.payment_counted([out(9, 350, "ally auto")], 350, ["Ally"], history=["2026-09"]))
-        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=[]))   # no full month yet
+        self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=[]))
         self.assertFalse(planner.payment_counted(two, 350, ["Ally"], history=["2026-04", "2026-05", "2026-06", "2026-07", "2026-08"]))
 
-# ---------------------------------------------------------------------------------------------- mock servers
 
 class MockPlaid(BaseHTTPRequestHandler):
     calls: list = []
@@ -538,7 +515,7 @@ class MockPlaid(BaseHTTPRequestHandler):
                        "name": "BUY VTI", "type": "buy", "subtype": "buy", "quantity": 1, "amount": 250, "price": 250, "fees": 0}
                       for i in range(7)]
             off, cnt = req["options"]["offset"], req["options"]["count"]
-            page = all_tx[off:off + min(cnt, 3)]  # serve small pages to exercise pagination
+            page = all_tx[off:off + min(cnt, 3)]
             return self.reply(200, {"investment_transactions": page, "total_investment_transactions": len(all_tx), "securities": secs})
         self.reply(404, {"error_code": "NOT_FOUND"})
 
@@ -578,7 +555,7 @@ class SyncTests(DbCase):
 
     def test_link_exchange_sync_remove(self):
         with self.assertRaises(plaid.PlaidError):
-            plaid.link_token(self.c)  # no keys yet
+            plaid.link_token(self.c)
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         self.assertEqual(plaid.link_token(self.c), "link-sandbox-123")
         self.assertEqual(MockPlaid.calls[-1][1]["products"], ["investments"])
@@ -591,15 +568,12 @@ class SyncTests(DbCase):
         self.assertEqual(tx_calls[0]["start_date"], (TODAY - timedelta(days=plaid.HISTORY_DAYS)).isoformat())
         cash = self.c.execute(select(Security.is_cash).where(Security.id == "s-cash")).fetchone()[0]
         self.assertEqual(cash, 1)
-        # second sync only re-reads a recent window
         plaid.sync_item(self.c, item, TODAY)
         self.assertEqual([c for p, c in MockPlaid.calls if p == "/investments/transactions/get"][-1]["start_date"],
                          (TODAY - timedelta(days=plaid.REFRESH_DAYS)).isoformat())
-        # update mode link token for reconnecting
         plaid.link_token(self.c, item)
         self.assertEqual(MockPlaid.calls[-1][1]["access_token"], "access-1")
         self.assertNotIn("products", MockPlaid.calls[-1][1])
-        # expired login is recorded, not fatal for other items
         MockPlaid.login_required = True
         out = plaid.sync_all(self.c)
         self.assertEqual(out["items"], 0)
@@ -614,9 +588,8 @@ class SyncTests(DbCase):
         self.assertEqual(res, {"fetched": ["VTI"], "failed": []})
         real, adj, splits = prices.history(self.c, "VTI", date(2026, 1, 1))
         self.assertEqual(splits, [("2026-03-02", 4.0)])
-        self.assertEqual(real["2026-09-22"], 101.0)       # after the split: unchanged
+        self.assertEqual(real["2026-09-22"], 101.0)
         self.assertEqual(adj["2026-09-22"], 100.0)
-        # a second refresh within the day is skipped
         self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1)), {"fetched": [], "failed": []})
 
     def test_a_rate_limit_doesnt_mark_tickers_bad(self):
@@ -630,12 +603,12 @@ class SyncTests(DbCase):
             raise urllib.error.HTTPError("https://prices", 429, "Too Many Requests", {}, io.BytesIO(b""))
         with mock.patch.object(prices, "fetch", side_effect=limited):
             res = prices.refresh(self.c, ["VTI", "VXUS", "BND"], date(2026, 1, 1))
-        self.assertEqual((asked, res["failed"]), (["BND"], ["BND"]))   # stops at the first refusal
-        self.assertEqual(self.c.execute(select(func.count()).select_from(PriceMeta)).fetchone()[0], 0)   # nothing held against them
+        self.assertEqual((asked, res["failed"]), (["BND"], ["BND"]))
+        self.assertEqual(self.c.execute(select(func.count()).select_from(PriceMeta)).fetchone()[0], 0)
         with mock.patch.object(prices, "fetch", side_effect=TimeoutError("timed out")):
             prices.refresh(self.c, ["VTI"], date(2026, 1, 1))
         self.assertEqual(self.c.execute(select(func.count()).select_from(PriceMeta)).fetchone()[0], 0)
-        self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1))["fetched"], ["VTI"])   # tried again next time
+        self.assertEqual(prices.refresh(self.c, ["VTI"], date(2026, 1, 1))["fetched"], ["VTI"])
 
     def test_a_ticker_that_stops_answering_keeps_what_was_known(self):
         from unittest import mock
@@ -643,13 +616,13 @@ class SyncTests(DbCase):
         with mock.patch.object(prices, "fetch", return_value=good):
             prices.refresh(self.c, ["ABC"], date(2026, 1, 1))
         again = ([("2026-09-22", 12.0, 11.5)], [("2026-03-02", 2.0)], {"type": None, "name": None})
-        with mock.patch.object(prices, "fetch", return_value=again):   # new closes replace old ones; no name this time
+        with mock.patch.object(prices, "fetch", return_value=again):
             prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)
         meta = dict(self.c.execute(select(PriceMeta.ok, PriceMeta.splits, PriceMeta.instrument_type,
                                           PriceMeta.long_name)
                                    .where(PriceMeta.ticker == "ABC")).fetchone())
         self.assertEqual(meta, {"ok": 1, "splits": "[[\"2026-03-02\", 2.0]]", "instrument_type": "ETF", "long_name": ""})
-        with mock.patch.object(prices, "fetch", return_value=([], [], {})):   # nothing back: splits and type are kept
+        with mock.patch.object(prices, "fetch", return_value=([], [], {})):
             self.assertEqual(prices.refresh(self.c, ["ABC"], date(2026, 1, 1), force=True)["failed"], ["ABC"])
         meta = dict(self.c.execute(select(PriceMeta.ok, PriceMeta.splits, PriceMeta.instrument_type,
                                           PriceMeta.long_name)
@@ -677,14 +650,14 @@ class QuoteStreamTests(unittest.TestCase):
     def test_sends_everything_then_only_what_moved(self):
         out = self.run_stream([
             {"SPY": q(500), "VTI": q(250), "AAPL": q(200)},
-            {"SPY": q(500), "VTI": q(250), "AAPL": q(200)},          # nothing moved: a keep-alive
+            {"SPY": q(500), "VTI": q(250), "AAPL": q(200)},
             {"SPY": q(500), "VTI": q(251, 1005), "AAPL": q(200)},
         ] + [{"SPY": q(500)}] * 20, lifetime=10)
         self.assertEqual(set(out[0]["quotes"]), {"SPY", "VTI", "AAPL"})
         self.assertEqual(out[0]["market"], "open")
         self.assertIsNone(out[1])
         self.assertEqual(out[2]["quotes"], {"VTI": q(251, 1005)})
-        self.assertEqual(len(out), 3)                                 # stops after `lifetime` seconds
+        self.assertEqual(len(out), 3)
 
     def test_closed_market_sends_one_update_and_ends(self):
         out = self.run_stream([{"SPY": q(500, open_=False), "VTI": q(250, open_=False)}])
@@ -714,7 +687,7 @@ class QuoteStreamEndpointTests(unittest.TestCase):
             finally:
                 httpd.shutdown(); httpd.server_close()
         self.assertIn("event: quotes\ndata: " + json.dumps(update) + "\n\n", body)
-        self.assertTrue(body.rstrip().endswith(f"retry: {prices.CLOSED_RETRY * 1000}"))   # closed: come back later
+        self.assertTrue(body.rstrip().endswith(f"retry: {prices.CLOSED_RETRY * 1000}"))
 
 
 if __name__ == "__main__":
@@ -734,10 +707,10 @@ class DuplicateConnectionTests(DbCase):
         kids = [("Roth IRA", "3639"), ("Oliver's 529 Account", "6624")]
         self.add("a", kids)
         self.add("b", kids)
-        self.add("c", [("Individual", "1111")])            # a different Wealthfront login: fine
+        self.add("c", [("Individual", "1111")])
         self.assertEqual(plaid.duplicates(self.c, "a"), [{"item_id": "b", "shared": 2, "adds_nothing": True}])
         self.assertEqual(plaid.duplicates(self.c, "c"), [])
-        self.add("d", [*kids, ("Joint", "2222")])           # overlaps, but brings a new account too
+        self.add("d", [*kids, ("Joint", "2222")])
         self.assertEqual([d["adds_nothing"] for d in plaid.duplicates(self.c, "d")], [False, False])
 
     def test_linking_the_same_login_again_is_undone(self):
@@ -801,9 +774,9 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
                              .where(Account.id == "pl:a1")).fetchone()
         self.assertEqual((row["name"], row["kind"], row["balance"]), ("Individual ••1234", "investment", 5000))
         from runway import networth
-        self.assertAlmostEqual(networth.summary(self.c)["assets"], 6000)      # counted in net worth (with E*Trade's 1000)
+        self.assertAlmostEqual(networth.summary(self.c)["assets"], 6000)
         self.c.execute(update(InvAccount).where(InvAccount.id == "a1").values(balance=5100))
-        plaid.update_investment_accounts(self.c, "wf")                       # balances follow each sync
+        plaid.update_investment_accounts(self.c, "wf")
         self.assertEqual(self.c.execute(select(Account.balance).where(Account.id == "pl:a1")).fetchone()[0], 5100)
 
     def test_hiding_its_account_in_settings_hides_it_on_investments(self):
@@ -820,8 +793,8 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.inv("529", "Madeleine's 529 Account", 12000)
         self.inv("new", "Joint", 700)
         plaid.update_investment_accounts(self.c, "wf")
-        self.assertEqual(self.acct("roth"), "sf-roth")                       # counted once
-        self.assertIsNone(self.acct("529"))                                  # not clear: waits for you
+        self.assertEqual(self.acct("roth"), "sf-roth")
+        self.assertIsNone(self.acct("529"))
         self.assertIsNone(self.acct("new"))
         self.assertEqual(plaid.undecided_count(self.c), 2)
         self.assertEqual([c["id"] for c in plaid.investment_candidates(self.c, "wf")], ["sf-529", "sf-roth"])
@@ -829,7 +802,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         plaid.match_investment(self.c, "new", "new")
         self.assertEqual(plaid.undecided_count(self.c), 0)
         self.assertTrue(self.c.execute(select(Account.id).where(Account.id == "pl:new")).fetchone())
-        plaid.match_investment(self.c, "new", "ignore")                      # changing your mind removes its entry
+        plaid.match_investment(self.c, "new", "ignore")
         self.assertIsNone(self.c.execute(select(Account.id).where(Account.id == "pl:new")).fetchone())
         with self.assertRaises(ValueError):
             plaid.match_investment(self.c, "529", "not-an-account")
@@ -840,12 +813,11 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
                                                  source="simplefin"))
         self.inv("roth", "Roth IRA", 4943.43)
         ids = lambda: {a["id"] for a in portfolio.overview(self.c, "1Y", date.today())["accounts"] if not a["hidden"]}
-        self.assertEqual(ids(), {"sf:sf-roth", "roth"})                     # not matched yet: both
+        self.assertEqual(ids(), {"sf:sf-roth", "roth"})
         plaid.match_investment(self.c, "roth", "sf-roth")
         self.assertEqual(ids(), {"roth"})
 
     def test_the_same_account_from_simplefin_and_plaid_is_listed_once(self):
-        # E*TRADE sends ••6702 through Plaid and "Individual Brokerage (6702)" through SimpleFIN, and neither was matched
         self.c.execute(insert(PlaidItem).values(item_id="et", access_token="t",
                                                 institution_name="E*TRADE from Morgan Stanley", products="investments"))
         self.c.execute(insert(InvAccount).values(id="et-6702", item_id="et", name="Individual Brokerage -6702",
@@ -855,17 +827,16 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         for id_, name in (("sf:et1", "Individual Brokerage (6702)"), ("sf:et2", "Rollover IRA (2222)")):
             self.c.execute(insert(InvAccount).values(id=id_, item_id="sf", name=name, balance=1, source="simplefin",
                                                      institution="E*Trade"))
-        # "(6702)" at another firm is a different account
         self.c.execute(insert(InvAccount).values(id="sf:rh", item_id="sf", name="Individual (6702)", balance=1,
                                                  source="simplefin", institution="Robinhood"))
         listed = {a["id"]: a for a in portfolio.overview(self.c, "1Y", date.today())["accounts"]}
-        self.assertNotIn("sf:et1", listed)                                   # the SimpleFIN copy isn't listed...
-        self.assertTrue(listed["et-6702"]["also_simplefin"])                 # ...the Plaid one says so
+        self.assertNotIn("sf:et1", listed)
+        self.assertTrue(listed["et-6702"]["also_simplefin"])
         self.assertFalse(listed["et-1111"]["also_simplefin"])
-        self.assertIn("sf:et2", listed)                                      # no Plaid account with 2222
+        self.assertIn("sf:et2", listed)
         self.assertIn("sf:rh", listed)
         dup = next(a for a in portfolio._accounts(self.c) if a["id"] == "sf:et1")
-        self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-6702", 1))   # ...and never counted
+        self.assertEqual((dup["duplicate_of"], dup["hidden"]), ("et-6702", 1))
         self.assertIn("et-6702", portfolio._visible_ids(self.c))
         self.assertNotIn("sf:et1", portfolio._visible_ids(self.c))
 
@@ -873,7 +844,7 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.c.execute(insert(PlaidItem).values(item_id="fid", access_token="t", institution_name="Fidelity Investments",
                                                 products="investments"))
         self.c.execute(insert(InvAccount).values(id="fid-1", item_id="fid", name="Brokerage", mask="1234", balance=50000))
-        self.c.execute(insert(InvAccount).values(id="sf:k", item_id="sf", name="Fidelity 401(k)", balance=80000, hidden=1,   # the old column decides nothing
+        self.c.execute(insert(InvAccount).values(id="sf:k", item_id="sf", name="Fidelity 401(k)", balance=80000, hidden=1,
                                                  source="simplefin", institution="Fidelity"))
         by_id = {a["id"]: a for a in portfolio._accounts(self.c)}
         self.assertEqual((by_id["sf:k"]["duplicate_of"], by_id["sf:k"]["hidden"]), (None, 0))
@@ -885,12 +856,12 @@ class InvestmentAccountsInYourAccountsTests(DbCase):
         self.inv("roth2", "Roth IRA", 4943.43)
         plaid.match_investment(self.c, "roth", "sf-roth")
         cands = {c["id"]: c["linked_to"] for c in plaid.investment_candidates(self.c, "wf")}
-        self.assertEqual(cands, {"sf-roth": "roth"})                         # the page offers it only to "roth"
+        self.assertEqual(cands, {"sf-roth": "roth"})
         with self.assertRaises(ValueError):
             plaid.match_investment(self.c, "roth2", "sf-roth")
         self.assertIsNone(self.acct("roth2"))
-        plaid.match_investment(self.c, "roth", "sf-roth")                    # choosing it again for the same one is fine
-        plaid.match_investment(self.c, "roth", "")                           # unlinked: free for another
+        plaid.match_investment(self.c, "roth", "sf-roth")
+        plaid.match_investment(self.c, "roth", "")
         plaid.match_investment(self.c, "roth2", "sf-roth")
         self.assertEqual(self.acct("roth2"), "sf-roth")
 

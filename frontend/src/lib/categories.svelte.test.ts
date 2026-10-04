@@ -3,16 +3,40 @@ import type { Category } from "./types";
 
 vi.mock("./api", () => ({ api: vi.fn() }));
 import { api } from "./api";
-import { CAT_COLORS, catColor, catLabel, catLook, catParentOf, catPath, categories, categoryGroups, lastEmoji, loadCategories } from "./categories.svelte";
+import {
+  CAT_COLORS,
+  catColor,
+  catLabel,
+  catLook,
+  catParentOf,
+  catPath,
+  categories,
+  categoryGroups,
+  lastEmoji,
+  loadCategories,
+} from "./categories.svelte";
 
-const cat = (name: string, extra: Partial<Category> = {}): Category => ({ name, path: [name], depth: 0, top: name, ...extra });
+const cat = (name: string, extra: Partial<Category> = {}): Category => ({
+  name,
+  path: [name],
+  depth: 0,
+  top: name,
+  ...extra,
+});
 const tree: Category[] = [
   cat("Food", { icon: "🍽️", color: "#111111" }),
-  cat("Groceries", { parent: "Food", path: ["Food", "Groceries"], depth: 1, top: "Food" }),
+  cat("Groceries", {
+    parent: "Food",
+    path: ["Food", "Groceries"],
+    depth: 1,
+    top: "Food",
+  }),
   cat("Salary", { is_income: true }),
   cat("Transfer", { is_transfer: 1 }),
 ];
-beforeEach(() => { categories.list = tree; });
+beforeEach(() => {
+  categories.list = tree;
+});
 
 describe("loadCategories", () => {
   it("stores what the server sends", async () => {
@@ -23,16 +47,23 @@ describe("loadCategories", () => {
 
   it("fills in path, depth and top from the parent links when an older server omits them", async () => {
     vi.mocked(api).mockResolvedValue([
-      { name: "Travel" }, { name: "Flights", parent: "Travel" }, { name: "Budget air", parent: "Flights" },
+      { name: "Travel" },
+      { name: "Flights", parent: "Travel" },
+      { name: "Budget air", parent: "Flights" },
     ]);
     const list = await loadCategories();
     expect(list.map((c) => [c.path, c.depth, c.top])).toEqual([
-      [["Travel"], 0, "Travel"], [["Travel", "Flights"], 1, "Travel"], [["Travel", "Flights", "Budget air"], 2, "Travel"],
+      [["Travel"], 0, "Travel"],
+      [["Travel", "Flights"], 1, "Travel"],
+      [["Travel", "Flights", "Budget air"], 2, "Travel"],
     ]);
   });
 
   it("doesn't loop forever on parents that point at each other", async () => {
-    vi.mocked(api).mockResolvedValue([{ name: "A", parent: "B" }, { name: "B", parent: "A" }]);
+    vi.mocked(api).mockResolvedValue([
+      { name: "A", parent: "B" },
+      { name: "B", parent: "A" },
+    ]);
     const [a] = await loadCategories();
     expect(a.path).toEqual(["B", "A"]);
   });
@@ -73,29 +104,56 @@ describe("category helpers", () => {
 
 describe("categoryGroups", () => {
   it("splits categories into Spending, Money in and Not spending, dropping empty groups", () => {
-    expect(categoryGroups().map((g) => [g.label, g.items.map((c) => c.name)])).toEqual([
-      ["Spending", ["Food", "Groceries"]], ["Money in", ["Salary"]], ["Not spending", ["Transfer"]],
+    expect(
+      categoryGroups().map((g) => [g.label, g.items.map((c) => c.name)]),
+    ).toEqual([
+      ["Spending", ["Food", "Groceries"]],
+      ["Money in", ["Salary"]],
+      ["Not spending", ["Transfer"]],
     ]);
     categories.list = [tree[0]];
     expect(categoryGroups().map((g) => g.label)).toEqual(["Spending"]);
   });
 
   it("offers only categories that can still hold a child when picking a parent", () => {
-    expect(categoryGroups({ canHoldChildren: true })[0].items.map((c) => c.name)).toEqual(["Food"]);
+    expect(
+      categoryGroups({ canHoldChildren: true })[0].items.map((c) => c.name),
+    ).toEqual(["Food"]);
   });
 
   it("applies an exclusion", () => {
-    expect(categoryGroups({ exclude: (c) => c.name === "Food" })[0].items.map((c) => c.name)).toEqual(["Groceries"]);
+    expect(
+      categoryGroups({ exclude: (c) => c.name === "Food" })[0].items.map(
+        (c) => c.name,
+      ),
+    ).toEqual(["Groceries"]);
   });
 });
 
 describe("lastEmoji", () => {
   it("finds one whole emoji in what was typed or pasted", () => {
-    for (const e of ["🌮", "🍽️", "👍🏽", "🇯🇵", "1️⃣", "#️⃣", "👩‍💻", "👨‍👩‍👧‍👦", "❤️", "▶️", "ℹ️", "‼️", "〰️", "↔️"]) expect(lastEmoji(e)).toBe(e);
+    for (const e of [
+      "🌮",
+      "🍽️",
+      "👍🏽",
+      "🇯🇵",
+      "1️⃣",
+      "#️⃣",
+      "👩‍💻",
+      "👨‍👩‍👧‍👦",
+      "❤️",
+      "▶️",
+      "ℹ️",
+      "‼️",
+      "〰️",
+      "↔️",
+    ])
+      expect(lastEmoji(e)).toBe(e);
     expect(lastEmoji("taco 🌮")).toBe("🌮");
-    expect(lastEmoji("🌮🍕")).toBe("🍕");                              // the latest one
+    expect(lastEmoji("🌮🍕")).toBe("🍕");
   });
   it("finds nothing in letters, digits or punctuation", () => {
-    for (const t of ["", "taco", "1", "#", "!?", "  ", "é", "!\ufe0f"]) expect(lastEmoji(t)).toBeNull();
+    for (const t of ["", "taco", "1", "#", "!?", "  ", "é", "!\ufe0f"])
+      expect(lastEmoji(t)).toBeNull();
   });
 });

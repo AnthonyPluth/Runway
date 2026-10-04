@@ -49,7 +49,7 @@ class FeeAnniversaryTests(unittest.TestCase):
                          [date(2025, 2, 28), date(2026, 2, 28), date(2027, 2, 28), date(2028, 2, 29), date(2029, 2, 28)])
         self.assertEqual(next(churning.fee_anniversaries(date(2024, 10, 10), date(2026, 10, 10))), date(2026, 10, 10))
         self.assertEqual(next(churning.fee_anniversaries(date(2024, 10, 10), date(2026, 10, 11))), date(2027, 10, 10))
-        self.assertEqual(next(churning.fee_anniversaries(date(2026, 10, 10), date(2026, 1, 1))), date(2027, 10, 10))  # not the day it opened
+        self.assertEqual(next(churning.fee_anniversaries(date(2026, 10, 10), date(2026, 1, 1))), date(2027, 10, 10))
         self.assertEqual(list(churning.fee_anniversaries(date(9997, 5, 1), date(9998, 6, 1))), [date(9999, 5, 1)])
 
     def test_the_churning_pages_next_fee_is_as_it_was(self):

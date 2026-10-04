@@ -18,15 +18,31 @@ describe("PlannerChart", () => {
 
   it("draws the likely band, the median line and a retirement marker", () => {
     const { container } = setup2();
-    expect(container.querySelectorAll("svg path").length).toBeGreaterThanOrEqual(4);   // band, high, low, median
+    expect(
+      container.querySelectorAll("svg path").length,
+    ).toBeGreaterThanOrEqual(4);
     expect(screen.getByText("retirement")).toBeInTheDocument();
-    expect(screen.getByRole("img")).toHaveAttribute("aria-label", expect.stringMatching(/median \$[\d,]+ at the end/));
+    expect(screen.getByRole("img")).toHaveAttribute(
+      "aria-label",
+      expect.stringMatching(/median \$[\d,]+ at the end/),
+    );
   });
 
   it("gives an all-zero plan a $0 to $1k axis, with no repeated labels", () => {
-    const zero = project(plan({ people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 0 }], spending: 0 }), 0, 2026, [], 20);
+    const zero = project(
+      plan({
+        people: [{ name: "Ann", birth_year: 1986, retire_age: 65, savings: 0 }],
+        spending: 0,
+      }),
+      0,
+      2026,
+      [],
+      20,
+    );
     const { container } = render(PlannerChart, { p: zero, names: ["You"] });
-    const labels = [...container.querySelectorAll("svg text")].map((t) => t.textContent).filter((t) => t?.startsWith("$"));
+    const labels = [...container.querySelectorAll("svg text")]
+      .map((t) => t.textContent)
+      .filter((t) => t?.startsWith("$"));
     expect(labels.length).toBeGreaterThan(1);
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels).toContain("$0");
@@ -40,7 +56,9 @@ describe("PlannerChart", () => {
 
   it("puts the calendar year under each age, and marks today where the plan starts", () => {
     const { container } = setup2();
-    const years = [...container.querySelectorAll("text[data-year]")].map((t) => Number(t.textContent));
+    const years = [...container.querySelectorAll("text[data-year]")].map((t) =>
+      Number(t.textContent),
+    );
     expect(years.length).toBeGreaterThan(2);
     expect(years.every((y) => y >= 2026)).toBe(true);
     expect(screen.getByTestId("today-mark")).toHaveTextContent("today");
@@ -62,13 +80,33 @@ describe("PlannerChart", () => {
   it("shows a readout for the year under the pointer", async () => {
     const { container } = setup2();
     const svg = container.querySelector("svg")!;
-    svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: 320, bottom: 260, width: 320, height: 260, x: 0, y: 0, toJSON() {} });
+    svg.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      right: 320,
+      bottom: 260,
+      width: 320,
+      height: 260,
+      x: 0,
+      y: 0,
+      toJSON() {},
+    });
     await userEvent.hover(container.querySelector("rect")!);
     const rect = container.querySelector("rect")!;
-    rect.dispatchEvent(new MouseEvent("mousemove", { clientX: 100, bubbles: true }));
-    expect(await screen.findByText("Typical", { selector: "span" })).toBeInTheDocument();
-    expect(screen.getByText("Good markets", { selector: "div span" })).toBeInTheDocument();
+    rect.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: 100, bubbles: true }),
+    );
+    expect(
+      await screen.findByText("Typical", { selector: "span" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Good markets", { selector: "div span" }),
+    ).toBeInTheDocument();
     rect.dispatchEvent(new MouseEvent("mouseleave"));
-    await waitFor(() => expect(screen.queryByText("Typical", { selector: "span" })).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Typical", { selector: "span" }),
+      ).not.toBeInTheDocument(),
+    );
   });
 });

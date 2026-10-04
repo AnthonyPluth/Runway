@@ -59,8 +59,7 @@ class BudgetCarryTests(LedgerCase):
             with self.subTest(month=month):
                 got = budgets.budget_carry(self.conn, cats, rows, date.fromisoformat(month))
                 self.assertEqual(got, carry_month_by_month(self.conn, cats, rows, date.fromisoformat(month)))
-                self.assertEqual(set(got), {"Restaurants", "Groceries", "Travel"})   # not income, nor one without rollover
-        # e.g. Restaurants into December: $300 - $120.40 in November
+                self.assertEqual(set(got), {"Restaurants", "Groceries", "Travel"})
         self.assertEqual(budgets.budget_carry(self.conn, cats, rows, date(2025, 12, 1))["Restaurants"], 179.6)
 
     def test_one_query(self):
@@ -74,6 +73,6 @@ class BudgetCarryTests(LedgerCase):
         cats, rows = self.inputs()
         self.assertEqual(budgets.budget_carry(self.conn, cats, {"Shopping": rows["Shopping"]}, date(2026, 10, 1)), {})
         self.assertEqual(budgets.budget_carry(self.conn, cats, rows, date(2025, 11, 1)),
-                         {"Restaurants": 0.0, "Groceries": 0.0, "Travel": 0.0})   # nothing before the first month
+                         {"Restaurants": 0.0, "Groceries": 0.0, "Travel": 0.0})
         bad = {**rows, "Shopping": {**rows["Shopping"], "rollover_from": "soon"}}
         self.assertNotIn("Shopping", budgets.budget_carry(self.conn, cats, bad, date(2026, 10, 1)))

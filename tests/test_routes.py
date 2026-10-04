@@ -18,22 +18,21 @@ from runway import db, server
 from runway.models import Account, NetworthSnapshot, Setting, Transaction
 from tests.shared import hold_mcp_switch
 
-# Routes that would reach out to another service even with an empty request; they're covered by their own tests.
 NETWORK = {"/api/push/test", "/api/investments/live", "/api/assets/{id}/refresh", "/api/carta/sync"}
 
 
 class RouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        hold_mcp_switch(cls)   # it posts to the assistants' switch, and removes the settings rows it added (tests/shared.py)
+        hold_mcp_switch(cls)
         cls.tmp = tempfile.TemporaryDirectory()
         os.environ["RUNWAY_DATA"] = cls.tmp.name
         db.init()
         today = date.today()
-        with db.session() as conn:   # on Postgres the database is shared with later tests, so note what's there already
+        with db.session() as conn:
             cls.had_settings = {r["key"] for r in conn.execute(select(Setting.key)).fetchall()}
             cls.had_snapshots = {r["date"] for r in conn.execute(select(NetworthSnapshot.date)).fetchall()}
-        with db.session() as conn:   # a little data, so the pages have something to add up
+        with db.session() as conn:
             conn.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=2500.0,
                                                 balance_date=today.isoformat()))
             conn.execute(insert(Account).values(id="card", name="Card", kind="credit", balance=-300.0,
@@ -54,7 +53,7 @@ class RouteTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
-        with db.session() as conn:   # leave the database as it was found
+        with db.session() as conn:
             conn.execute(delete(Transaction).where(Transaction.account_id.in_(["chk", "card"])))
             conn.execute(delete(Account).where(Account.id.in_(["chk", "card"])))
             for r in conn.execute(select(Setting.key)).fetchall():

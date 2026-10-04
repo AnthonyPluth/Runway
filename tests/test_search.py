@@ -37,7 +37,6 @@ class SearchTests(DbCase):
         self.assertEqual(self.found("ötzi"), ["Ötzi Outdoor"])
 
     def test_sharp_s_is_its_own_letter(self):
-        # Lowercasing keeps ß (it's "ss" only when case-folded), on both databases alike.
         self.assertEqual(self.found("straße"), ["Straße Laden"])
         self.assertEqual(self.found("STRASSE"), ["STRASSE SHOP"])
 

@@ -43,32 +43,30 @@ class MatchingTests(Base):
         categorize.categorize(self.c, use_ai=False)
         self.assertEqual((self.row(rent)["category"], self.row(rent)["payee"]), ("Mortgage", "Venmo"))
         self.assertEqual((self.row(lunch)["category"], self.row(lunch)["payee"]), ("Transfer", "Venmo"))
-        self.assertEqual(self.row(refund)["category"], "Transfer")          # money in: not the rent rule
+        self.assertEqual(self.row(refund)["category"], "Transfer")
 
     def test_account_and_text_modes(self):
         self.rule(match="interest", match_mode="starts", account_id="chk", category="Income")
         self.rule(match="apple.com/bill", match_mode="exact", category="Subscriptions")
         a = self.tx(1.25, "INTEREST PAYMENT")
-        b = self.tx(-5, "INTEREST PAYMENT", acct="cc")          # other account
-        c = self.tx(3, "MONTHLY INTEREST")                       # doesn't start with it
+        b = self.tx(-5, "INTEREST PAYMENT", acct="cc")
+        c = self.tx(3, "MONTHLY INTEREST")
         d = self.tx(-2.99, "APPLE.COM/BILL")
-        e = self.tx(-2.99, "APPLE.COM/BILL ITUNES")             # not exactly
+        e = self.tx(-2.99, "APPLE.COM/BILL ITUNES")
         categorize.categorize(self.c, use_ai=False)
         self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e)], ["Income", None, None, "Subscriptions", None])
 
     def test_a_rule_made_from_a_long_payee_matches_its_shorter_name(self):
-        # Made ("remember for this merchant") when the payee was "Target Cach Tran Cash"; payees are shorter now, and
-        # the bank's text ("...TARGET DEBIT CACH TRAN (Cash)") doesn't have that long name in it either.
         self.rule(match="target cach tran cash", category="Shopping")
         self.rule(match="lakeside bank baweb pay cash", match_mode="exact", category="Loans")
         a = self.tx(-35.91, "DIRECT DEBIT TARGET DEBIT CACH TRAN (Cash)")
         b = self.tx(-47.02, "DIRECT DEBIT TARGET DEBIT CPURCHASE (Cash)")
         c = self.tx(-512.40, "LAKESIDE BANK BAWEB PAY CASH 20251001")
-        d = self.tx(-12, "TARGETED ADS LLC")                      # not Target
-        e = self.tx(-20, "LAKESIDE BANK MORTGAGE")                  # Lakeside Bank, but not the merchant the rule was for
+        d = self.tx(-12, "TARGETED ADS LLC")
+        e = self.tx(-20, "LAKESIDE BANK MORTGAGE")
         self.rule(match="paypal ach transfer", category="Transfer")
-        f = self.tx(-100, "PAYPAL ACH TRANSFER 20251001")         # a trace number after the bank's words
-        g = self.tx(-25, "PAYPAL")                                # a purchase, not the transfers the rule is for
+        f = self.tx(-100, "PAYPAL ACH TRANSFER 20251001")
+        g = self.tx(-25, "PAYPAL")
         self.assertEqual((self.row(a)["payee"], self.row(g)["payee"]), ("Target", "Paypal"))
         categorize.categorize(self.c, use_ai=False)
         self.assertEqual([self.row(t)["category"] for t in (a, b, c, d, e, f, g)],
@@ -96,7 +94,6 @@ class MatchingTests(Base):
     def test_a_split_a_cent_over_100_percent_still_adds_up(self):
         with self.assertRaisesRegex(rules.RuleError, "100%"):
             self.rule(match="costco", split=[{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}])
-        # a rule saved before that check: its parts are shares of its own total, so they add up to the charge
         parts = rules.split_parts(-250.0, [{"category": "Groceries", "percent": 60.01}, {"category": "Shopping", "percent": 40}])
         self.assertEqual(round(sum(p["amount"] for p in parts), 2), -250.0)
         import json
@@ -118,7 +115,6 @@ class EditingTests(Base):
                          ({"match": "shop", "split": [{"category": "Groceries", "percent": 50}, {"category": "Shopping", "percent": 40}]}, "100%")]:
             with self.assertRaisesRegex(rules.RuleError, msg):
                 rules.clean(self.c, bad)
-        # An amount alone is enough of a condition.
         self.assertEqual(rules.clean(self.c, {"amount_min": 5000, "review": True})["review"], 1)
 
     def test_every_check_and_what_a_clean_rule_looks_like(self):
@@ -142,7 +138,6 @@ class EditingTests(Base):
             "account_id": "chk", "category": "Shopping", "rename": "  Landlord   Co  ", "review": "yes"}), {
             "match": "venmo rent", "match_mode": "starts", "amount_min": 1000.5, "amount_max": None, "direction": "out",
             "account_id": "chk", "category": "Shopping", "rename": "Landlord Co", "review": 1, "split": None})
-        # A split decides the categories, so a category given alongside it is dropped.
         split = rules.clean(self.c, {"match": "costco", "category": "Groceries",
                                      "split": [{"category": "Groceries", "percent": "60"}, {"category": "Shopping", "percent": 40}]})
         self.assertEqual((split["category"], split["split"]),
@@ -156,7 +151,7 @@ class EditingTests(Base):
         self.tx(-9, "PANERA")
         body = {"match": "chipotle", "category": "Restaurants", "rename": "Chipotle Mexican Grill"}
         p = rules.preview(self.c, body)
-        self.assertEqual((p["matches"], p["changes"]), (2, 2))    # both get renamed; only one recategorized
+        self.assertEqual((p["matches"], p["changes"]), (2, 2))
         rid = self.rule(**body)
         self.assertEqual(rules.apply_rule(self.c, rid), 2)
         self.assertEqual((self.row(mine)["category"], self.row(mine)["payee"]), ("Groceries", "Chipotle Mexican Grill"))
@@ -182,7 +177,6 @@ class EditingTests(Base):
         self.assertEqual([p["category"] for p in split], ["Food", "Shopping"])
         categories.remove(self.c, "Food")
         left = {r["match"]: (r["category"], r["rename"], r["split"]) for r in rules.load(self.c)}
-        # the split and the category-only rule had nothing left to do; the rename stays
         self.assertEqual(left, {"kroger": (None, "Kroger", None)})
 
     def test_offer_to_remember(self):
@@ -190,26 +184,26 @@ class EditingTests(Base):
         offer = categorize.rule_offer(self.c, tid, "Coffee & Snacks")
         self.assertEqual((offer["merchant"], offer["match"], offer["replaces"]), ("Blue Bottle", "blue bottle", None))
         rules.remember(self.c, "blue bottle", "Coffee & Snacks")
-        self.assertIsNone(categorize.rule_offer(self.c, tid, "Coffee & Snacks"))          # the rule already says so
+        self.assertIsNone(categorize.rule_offer(self.c, tid, "Coffee & Snacks"))
         self.assertEqual(categorize.rule_offer(self.c, tid, "Restaurants")["replaces"], "Coffee & Snacks")
-        self.assertIsNone(categorize.rule_offer(self.c, self.tx(-5, "BP"), "Auto & Gas"))  # too short to make a rule
+        self.assertIsNone(categorize.rule_offer(self.c, self.tx(-5, "BP"), "Auto & Gas"))
 
     def test_applying_an_ai_suggestion_asks_instead_of_making_a_rule(self):
         from runway import server
         ids = [self.tx(-5, "SQ *BLUE BOTTLE 123"), self.tx(-6, "SQ *BLUE BOTTLE 456")]
         r = server.api_ai_apply(self.c, None, {"tx_ids": ids, "category": "Coffee & Snacks"})
         self.assertEqual(r["updated"], 2)
-        self.assertEqual(rules.load(self.c), [])                    # nothing written behind your back
-        self.assertEqual(r["offer_rule"]["match"], "blue bottle")   # it's offered instead
+        self.assertEqual(rules.load(self.c), [])
+        self.assertEqual(r["offer_rule"]["match"], "blue bottle")
         self.assertEqual(self.row(ids[1])["category"], "Coffee & Snacks")
 
     def test_the_offer_says_how_many_more_it_would_categorize(self):
         tid = self.tx(-5, "SQ *BLUE BOTTLE 123")
-        self.tx(-6, "SQ *BLUE BOTTLE 456")                                     # uncategorized: a rule would take it
-        self.tx(-7, "SQ *BLUE BOTTLE 789", category="Restaurants", source="manual")   # yours: left alone
-        reviewed = self.tx(-8, "SQ *BLUE BOTTLE 000", category="Restaurants", source="rule")   # Runway's guess: a rule corrects it
+        self.tx(-6, "SQ *BLUE BOTTLE 456")
+        self.tx(-7, "SQ *BLUE BOTTLE 789", category="Restaurants", source="manual")
+        reviewed = self.tx(-8, "SQ *BLUE BOTTLE 000", category="Restaurants", source="rule")
         self.c.execute(update(Transaction).where(Transaction.id == reviewed).values(needs_review=0))
-        same = self.tx(-9, "SQ *BLUE BOTTLE 111", category="Coffee & Snacks", source="ai")   # already right: nothing to change
+        same = self.tx(-9, "SQ *BLUE BOTTLE 111", category="Coffee & Snacks", source="ai")
         self.c.execute(update(Transaction).where(Transaction.id == same).values(needs_review=0))
         self.assertEqual(categorize.rule_offer(self.c, tid, "Coffee & Snacks")["also_updated"], 2)
 
@@ -218,13 +212,13 @@ class EditingTests(Base):
         ids = [self.tx(-5, "SQ *BLUE BOTTLE 123"), self.tx(-6, "SQ *BLUE BOTTLE 456")]
         other = self.tx(-7, "SQ *BLUE BOTTLE 789")
         r = server.api_tx_bulk(self.c, None, {"ids": ids, "category": "Coffee & Snacks"})
-        self.assertEqual((r["offer_rule"]["match"], r["offer_rule"]["also_updated"]), ("blue bottle", 1))   # `other`
-        self.assertEqual(rules.load(self.c), [])                                       # only offered
+        self.assertEqual((r["offer_rule"]["match"], r["offer_rule"]["also_updated"]), ("blue bottle", 1))
+        self.assertEqual(rules.load(self.c), [])
         self.assertIsNone(self.row(other)["category"])
         mixed = server.api_tx_bulk(self.c, None, {"ids": [ids[0], self.tx(-9, "KROGER #12")], "category": "Groceries"})
-        self.assertIsNone(mixed["offer_rule"])                                         # two merchants: no offer
+        self.assertIsNone(mixed["offer_rule"])
         renamed = server.api_tx_bulk(self.c, None, {"ids": ids, "payee": "Blue Bottle Coffee"})
-        self.assertIsNone(renamed["offer_rule"])                                       # no category, nothing to offer
+        self.assertIsNone(renamed["offer_rule"])
 
     def test_setting_every_match_of_a_filter_offers_a_rule_too(self):
         from runway import server
@@ -266,7 +260,7 @@ class UpgradeTests(unittest.TestCase):
         from alembic import command
         path = os.path.join(tempfile.mkdtemp(), "old.db")
         with db.engine(path).begin() as sa_conn:
-            command.upgrade(db.alembic_config(sa_conn), "0006")   # before richer rules: one rule per text
+            command.upgrade(db.alembic_config(sa_conn), "0006")
             sa_conn.exec_driver_sql("INSERT INTO rules(match, category) VALUES ('venmo', 'Transfer')")
         db.init(path)
         with db.session(path) as c:

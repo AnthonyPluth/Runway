@@ -3,8 +3,13 @@ import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("$lib/api", async (orig) => ({ ...(await orig()), api: vi.fn().mockResolvedValue({}) }));
-vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock("$lib/api", async (orig) => ({
+  ...(await orig()),
+  api: vi.fn().mockResolvedValue({}),
+}));
+vi.mock("svelte-sonner", () => ({
+  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
+}));
 
 import { api } from "$lib/api";
 import { app } from "$lib/app.svelte";
@@ -16,21 +21,43 @@ import { forecastSheet } from "./forecastSheet.svelte";
 import SetupChecklist from "./SetupChecklist.svelte";
 import ThisMonth from "./ThisMonth.svelte";
 
-beforeEach(() => { vi.mocked(api).mockClear(); vi.mocked(toast.error).mockClear(); });
-afterEach(() => { app.state = null; forecastSheet.open = false; vi.useRealTimers(); });
+beforeEach(() => {
+  vi.mocked(api).mockClear();
+  vi.mocked(toast.error).mockClear();
+});
+afterEach(() => {
+  app.state = null;
+  forecastSheet.open = false;
+  vi.useRealTimers();
+});
 
 describe("SetupChecklist", () => {
   const setup = (s: Partial<NonNullable<typeof app.state>["setup"]> = {}) => {
-    app.state = { connected: false, setup: { bank: false, primary: false, recurring: false, budgets: false, dismissed: false, ...s } };
+    app.state = {
+      connected: false,
+      setup: {
+        bank: false,
+        primary: false,
+        recurring: false,
+        budgets: false,
+        dismissed: false,
+        ...s,
+      },
+    };
   };
 
   it("lists four steps with the first one to do highlighted", () => {
     setup();
     render(SetupChecklist);
     expect(screen.getAllByRole("listitem")).toHaveLength(4);
-    expect(screen.getByRole("progressbar", { name: "Setup progress" })).toHaveAttribute("aria-valuenow", "0");
+    expect(
+      screen.getByRole("progressbar", { name: "Setup progress" }),
+    ).toHaveAttribute("aria-valuenow", "0");
     expect(screen.getByText("0 of 4 done")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute("href", "#setup/connections");
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "#setup/connections",
+    );
   });
 
   it("ticks off finished steps and stops describing them", () => {
@@ -38,15 +65,25 @@ describe("SetupChecklist", () => {
     render(SetupChecklist);
     expect(screen.getByText("2 of 4 done")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Done")).toHaveLength(2);
-    expect(screen.queryByRole("link", { name: "Connect" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute("href", "#recurring");
-    expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "#budget");
+    expect(
+      screen.queryByRole("link", { name: "Connect" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add" })).toHaveAttribute(
+      "href",
+      "#recurring",
+    );
+    expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute(
+      "href",
+      "#budget",
+    );
   });
 
   it("chooses the forecast account in the forecast settings, right there on Overview", async () => {
     setup({ bank: true });
     render(SetupChecklist);
-    expect(screen.queryByRole("link", { name: "Choose" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Choose" }),
+    ).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Choose" }));
     expect(forecastSheet.open).toBe(true);
   });
@@ -54,7 +91,10 @@ describe("SetupChecklist", () => {
   it("greys out every step after the first until a bank is connected, on the welcome screen", () => {
     setup();
     render(SetupChecklist, { welcome: true });
-    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute("href", "#setup/connections");
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "#setup/connections",
+    );
     for (const name of ["Choose", "Add", "Budget"]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeDisabled();
@@ -68,32 +108,70 @@ describe("SetupChecklist", () => {
   it("says what each step means on a short line under it, until it's done", () => {
     setup({ bank: true });
     render(SetupChecklist);
-    expect(screen.getByText("Choose your forecast account").nextElementSibling).toHaveTextContent("Where your pay lands and bills come out");
+    expect(
+      screen.getByText("Choose your forecast account").nextElementSibling,
+    ).toHaveTextContent("Where your pay lands and bills come out");
     expect(screen.getByText("Connect a bank").nextElementSibling).toBeNull();
     expect(screen.getByText("Connect a bank")).not.toHaveAttribute("title");
   });
 
   it("points at Settings → Accounts while accounts from Plaid wait for a decision", () => {
-    app.state = { connected: true, plaid_undecided: 2, setup: { bank: true, primary: false, recurring: false, budgets: false, dismissed: false } };
+    app.state = {
+      connected: true,
+      plaid_undecided: 2,
+      setup: {
+        bank: true,
+        primary: false,
+        recurring: false,
+        budgets: false,
+        dismissed: false,
+      },
+    };
     render(SetupChecklist);
-    expect(screen.getByText("Choose your forecast account").nextElementSibling).toHaveTextContent("First add the 2 new accounts from Plaid in Settings → Accounts");
-    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "#setup/accounts");
+    expect(
+      screen.getByText("Choose your forecast account").nextElementSibling,
+    ).toHaveTextContent(
+      "First add the 2 new accounts from Plaid in Settings → Accounts",
+    );
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "#setup/accounts",
+    );
     expect(screen.queryByRole("button", { name: "Choose" })).toBeNull();
   });
 
   it("points the first step at them too when Plaid is connected but nothing is added yet", () => {
-    app.state = { connected: true, plaid_undecided: 1, setup: { bank: false, primary: false, recurring: false, budgets: false, dismissed: false } };
+    app.state = {
+      connected: true,
+      plaid_undecided: 1,
+      setup: {
+        bank: false,
+        primary: false,
+        recurring: false,
+        budgets: false,
+        dismissed: false,
+      },
+    };
     render(SetupChecklist);
-    expect(screen.getByText("Connect a bank").nextElementSibling).toHaveTextContent("Add the 1 account Plaid found in Settings → Accounts");
-    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute("href", "#setup/accounts");
-    expect(screen.getByRole("button", { name: "Add" })).toHaveAccessibleDescription("after you add an account");
+    expect(
+      screen.getByText("Connect a bank").nextElementSibling,
+    ).toHaveTextContent("Add the 1 account Plaid found in Settings → Accounts");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "#setup/accounts",
+    );
+    expect(
+      screen.getByRole("button", { name: "Add" }),
+    ).toHaveAccessibleDescription("after you add an account");
   });
 
   it("welcomes a new user on its own, without a Dismiss button", () => {
     setup();
     render(SetupChecklist, { welcome: true });
     expect(screen.getByText("Welcome to Runway")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Dismiss" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Dismiss" }),
+    ).not.toBeInTheDocument();
   });
 
   it("can be put away, remembering that on the server, with Undo", async () => {
@@ -102,13 +180,22 @@ describe("SetupChecklist", () => {
     vi.mocked(toast).mockClear();
     render(SetupChecklist);
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: true } });
+    expect(api).toHaveBeenCalledWith("/api/settings", {
+      method: "POST",
+      body: { setup_dismissed: true },
+    });
     expect(api).toHaveBeenCalledWith("/api/state", { keep: true });
-    const [message, opts] = vi.mocked(toast).mock.calls.at(-1) as [string, { action: { label: string; onClick: () => Promise<void> } }];
+    const [message, opts] = vi.mocked(toast).mock.calls.at(-1) as [
+      string,
+      { action: { label: string; onClick: () => Promise<void> } },
+    ];
     expect(message).toBe("Setup checklist dismissed");
     expect(opts.action.label).toBe("Undo");
     await opts.action.onClick();
-    expect(api).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { setup_dismissed: false } });
+    expect(api).toHaveBeenCalledWith("/api/settings", {
+      method: "POST",
+      body: { setup_dismissed: false },
+    });
   });
 
   it("shows the error when dismissing fails", async () => {
@@ -118,24 +205,60 @@ describe("SetupChecklist", () => {
     vi.mocked(toast).mockClear();
     await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(toast.error).toHaveBeenCalledWith("Nope");
-    expect(toast).not.toHaveBeenCalled();   // no Undo for what didn't happen
+    expect(toast).not.toHaveBeenCalled();
   });
 });
 
 describe("ThisMonth", () => {
   it("leaves ignored transactions out of Recent", () => {
-    for (let i = 0; i < 3; i++) vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));   // stays loading: only the request matters
+    for (let i = 0; i < 3; i++)
+      vi.mocked(api).mockReturnValueOnce(new Promise(() => {}));
     render(ThisMonth);
     expect(api).toHaveBeenCalledWith("/api/transactions?limit=5&ignored=0");
   });
 
   it("signs Recent's amounts, and shows a dash, not 0%, for a budget with nothing spent", async () => {
-    const cat = (name: string, budget: number, spent: number) => ({ name, parent: null, path: [name], depth: 0, top: name, has_children: false,
-      budget, pay_with: null, usual_account: null, available: budget, spent, own_spent: spent, left: budget - spent });
+    const cat = (name: string, budget: number, spent: number) => ({
+      name,
+      parent: null,
+      path: [name],
+      depth: 0,
+      top: name,
+      has_children: false,
+      budget,
+      pay_with: null,
+      usual_account: null,
+      available: budget,
+      spent,
+      own_spent: spent,
+      left: budget - spent,
+    });
     vi.mocked(api)
-      .mockResolvedValueOnce({ month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 10, last_same_point: 12, last_total: 300 })
-      .mockResolvedValueOnce({ month: "2026-03", days_in_month: 31, day: 10, categories: [cat("Dining", 200, 50), cat("Travel", 500, 0)], income: 0, uncategorized: 0, pay_accounts: [] })
-      .mockResolvedValueOnce({ items: [tx({ id: "a", amount: -12.5 }), tx({ id: "b", payee: "Payroll", amount: 2000 })], total: 2 });
+      .mockResolvedValueOnce({
+        month: "2026-03",
+        prev_month: "2026-02",
+        this: [10],
+        last: [12],
+        spent: 10,
+        last_same_point: 12,
+        last_total: 300,
+      })
+      .mockResolvedValueOnce({
+        month: "2026-03",
+        days_in_month: 31,
+        day: 10,
+        categories: [cat("Dining", 200, 50), cat("Travel", 500, 0)],
+        income: 0,
+        uncategorized: 0,
+        pay_accounts: [],
+      })
+      .mockResolvedValueOnce({
+        items: [
+          tx({ id: "a", amount: -12.5 }),
+          tx({ id: "b", payee: "Payroll", amount: 2000 }),
+        ],
+        total: 2,
+      });
     render(ThisMonth);
     expect(await screen.findByText("−$12.50")).toBeInTheDocument();
     expect(screen.getByText("+$2,000.00")).toHaveClass("text-good");
@@ -146,68 +269,141 @@ describe("ThisMonth", () => {
 
   it("puts each Recent transaction's bank on its logo, as Transactions does", async () => {
     const was = app.state;
-    app.state = { ...(was ?? {}), brands: { a1: { institution: "Chase", initial: "C" } } } as typeof app.state;
+    app.state = {
+      ...(was ?? {}),
+      brands: { a1: { institution: "Chase", initial: "C" } },
+    } as typeof app.state;
     try {
       vi.mocked(api)
-        .mockResolvedValueOnce({ month: "2026-03", prev_month: "2026-02", this: [10], last: [12], spent: 10, last_same_point: 12, last_total: 300 })
-        .mockResolvedValueOnce({ month: "2026-03", days_in_month: 31, day: 10, categories: [], income: 0, uncategorized: 0, pay_accounts: [] })
-        .mockResolvedValueOnce({ items: [tx({ id: "a", account_id: "a1", account_name: "Sapphire", amount: -12.5 })], total: 1 });
+        .mockResolvedValueOnce({
+          month: "2026-03",
+          prev_month: "2026-02",
+          this: [10],
+          last: [12],
+          spent: 10,
+          last_same_point: 12,
+          last_total: 300,
+        })
+        .mockResolvedValueOnce({
+          month: "2026-03",
+          days_in_month: 31,
+          day: 10,
+          categories: [],
+          income: 0,
+          uncategorized: 0,
+          pay_accounts: [],
+        })
+        .mockResolvedValueOnce({
+          items: [
+            tx({
+              id: "a",
+              account_id: "a1",
+              account_name: "Sapphire",
+              amount: -12.5,
+            }),
+          ],
+          total: 1,
+        });
       const { container } = render(ThisMonth);
       await screen.findByText("−$12.50");
       const badge = container.querySelector("[data-account-badge]");
       expect(badge).toHaveAttribute("title", "Sapphire");
       expect(badge).toHaveTextContent("C");
-    } finally { app.state = was; }
+    } finally {
+      app.state = was;
+    }
   });
 });
 
 describe("CardsTable", () => {
   const card = (extra: Partial<CardSummary> = {}): CardSummary => ({
-    id: "c1", name: "Sapphire", owed_now: 800, statement_key: "stmt-c1", statement_balance: 600, last_close: "2026-03-01", remaining: 600,
-    due_date: "2026-03-26", minimum_payment: 35, ...extra,
+    id: "c1",
+    name: "Sapphire",
+    owed_now: 800,
+    statement_key: "stmt-c1",
+    statement_balance: 600,
+    last_close: "2026-03-01",
+    remaining: 600,
+    due_date: "2026-03-26",
+    minimum_payment: 35,
+    ...extra,
   });
-  const at = (iso: string) => vi.useFakeTimers({ toFake: ["Date"], now: new Date(`${iso}T12:00:00`) });
+  const at = (iso: string) =>
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(`${iso}T12:00:00`) });
 
   it("explains how to enter cards' statements when there are none", () => {
     render(CardsTable, { onchanged: vi.fn(), cards: [] });
-    expect(screen.getByText(/Enter each card’s latest statement/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings → Accounts" })).toHaveAttribute("href", "#setup/accounts");
+    expect(
+      screen.getByText(/Enter each card’s latest statement/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Settings → Accounts" }),
+    ).toHaveAttribute("href", "#setup/accounts");
   });
 
   it("leaves out cards with a $0 balance and nothing left to pay", () => {
     at("2026-03-10");
-    render(CardsTable, { onchanged: vi.fn(), cards: [card(), card({ id: "c2", name: "Freedom", owed_now: 0, statement_balance: 0, remaining: 0 }),
-      card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }), card({ id: "c4", name: "Amex", owed_now: 0, remaining: 0, credit: 20 })] });
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [
+        card(),
+        card({
+          id: "c2",
+          name: "Freedom",
+          owed_now: 0,
+          statement_balance: 0,
+          remaining: 0,
+        }),
+        card({ id: "c3", name: "Venture", owed_now: 0, remaining: 50 }),
+        card({ id: "c4", name: "Amex", owed_now: 0, remaining: 0, credit: 20 }),
+      ],
+    });
     expect(screen.getByText("Sapphire")).toBeInTheDocument();
     expect(screen.queryByText("Freedom")).toBeNull();
     expect(screen.getByText("Venture")).toBeInTheDocument();
-    expect(screen.queryByText("Amex")).toBeNull();   // a credit comes through as $0 owed
+    expect(screen.queryByText("Amex")).toBeNull();
   });
 
   it("lists cards in the order they're due, the paid ones last", () => {
     at("2026-03-10");
-    render(CardsTable, { onchanged: vi.fn(), cards: [
-      card({ id: "c1", name: "Sapphire", due_date: "2026-03-26" }),
-      card({ id: "c2", name: "Venture", due_date: "2026-03-09" }),              // overdue: first of all
-      card({ id: "c3", name: "Amex", owed_now: 300, remaining: 0 }),            // paid: last, whatever its date
-      card({ id: "c4", name: "Freedom", due_date: "2026-03-12" }),
-    ] });
-    const names = screen.getAllByText(/^(Sapphire|Venture|Amex|Freedom)$/).map((el) => el.textContent);
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [
+        card({ id: "c1", name: "Sapphire", due_date: "2026-03-26" }),
+        card({ id: "c2", name: "Venture", due_date: "2026-03-09" }),
+        card({ id: "c3", name: "Amex", owed_now: 300, remaining: 0 }),
+        card({ id: "c4", name: "Freedom", due_date: "2026-03-12" }),
+      ],
+    });
+    const names = screen
+      .getAllByText(/^(Sapphire|Venture|Amex|Freedom)$/)
+      .map((el) => el.textContent);
     expect(names).toEqual(["Venture", "Freedom", "Sapphire", "Amex"]);
   });
 
   it("says so when every card is at $0", () => {
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ owed_now: 0, remaining: 0 })] });
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ owed_now: 0, remaining: 0 })],
+    });
     expect(screen.queryByText("Sapphire")).toBeNull();
-    expect(screen.getByText("None of your cards owe anything right now.")).toBeInTheDocument();
+    expect(
+      screen.getByText("None of your cards owe anything right now."),
+    ).toBeInTheDocument();
   });
 
   it("says quietly when a statement was entered by hand", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card()] });
+    const { unmount } = render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card()],
+    });
     expect(screen.queryByText("entered by hand")).toBeNull();
     unmount();
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ statement_source: "manual" })],
+    });
     expect(screen.getByText("entered by hand")).toBeInTheDocument();
   });
 
@@ -228,31 +424,55 @@ describe("CardsTable", () => {
 
   it("says Paid once nothing remains, and what's left after a part payment", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 0 })] });
+    const { unmount } = render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ remaining: 0 })],
+    });
     expect(screen.getByText("Paid ✓")).toBeInTheDocument();
     unmount();
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ remaining: 250 })] });
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ remaining: 250 })],
+    });
     expect(screen.getByText(/\$250\.00 left/)).toBeInTheDocument();
   });
 
   it("says how much of the statement a card that isn't paid in full pays, and what carries over", () => {
     at("2026-03-10");
-    const { unmount } = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })] });
-    expect(screen.getByText(/pays \$35\.00 of \$600\.00/)).toHaveAttribute("title", "The rest, $565.00, carries into the next statement");
+    const { unmount } = render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ pay_mode: "minimum", payment: 35, carried: 565 })],
+    });
+    expect(screen.getByText(/pays \$35\.00 of \$600\.00/)).toHaveAttribute(
+      "title",
+      "The rest, $565.00, carries into the next statement",
+    );
     unmount();
-    // more than the statement: the extra comes off the next one
-    const over = render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })] });
-    expect(screen.getByText(/pays \$1,000\.00 of \$600\.00/)).toHaveAttribute("title", "The extra $400.00 comes off the next statement");
+    const over = render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ pay_mode: "minimum", payment: 1000, carried: -400 })],
+    });
+    expect(screen.getByText(/pays \$1,000\.00 of \$600\.00/)).toHaveAttribute(
+      "title",
+      "The extra $400.00 comes off the next statement",
+    );
     over.unmount();
-    // paid in full: no "pays", as before
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ pay_mode: "full", payment: 600, carried: 0 })] });
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ pay_mode: "full", payment: 600, carried: 0 })],
+    });
     expect(screen.queryByText(/pays/)).toBeNull();
   });
 
   it("separates the notes with dots and spaces", () => {
     at("2026-03-10");
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_source: "manual" })] });
-    const line = screen.getByText(/balance \$800\.00/).textContent!.replace(/\s+/g, " ");
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ statement_source: "manual" })],
+    });
+    const line = screen
+      .getByText(/balance \$800\.00/)
+      .textContent!.replace(/\s+/g, " ");
     expect(line).toBe("balance $800.00 · entered by hand");
   });
 
@@ -264,14 +484,26 @@ describe("CardsTable", () => {
 
   it("lets you correct the statement balance, and undo that", async () => {
     at("2026-03-10");
-    render(CardsTable, { onchanged: vi.fn(), cards: [card({ statement_set: true, statement_reported: 590 })] });
-    expect(screen.getByText("set")).toHaveAttribute("title", "Entered by you · the bank reported $590.00");
+    render(CardsTable, {
+      onchanged: vi.fn(),
+      cards: [card({ statement_set: true, statement_reported: 590 })],
+    });
+    expect(screen.getByText("set")).toHaveAttribute(
+      "title",
+      "Entered by you · the bank reported $590.00",
+    );
     await userEvent.click(screen.getByRole("button", { name: "$600.00" }));
     const box = screen.getByRole("spinbutton", { name: "Statement balance" });
     await userEvent.clear(box);
     await userEvent.type(box, "610{Enter}");
-    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "POST", body: { key: "stmt-c1", amount: 610 } });
+    expect(api).toHaveBeenCalledWith("/api/overrides", {
+      method: "POST",
+      body: { key: "stmt-c1", amount: 610 },
+    });
     await userEvent.click(screen.getByRole("button", { name: "reset" }));
-    expect(api).toHaveBeenCalledWith("/api/overrides", { method: "DELETE", body: { key: "stmt-c1" } });
+    expect(api).toHaveBeenCalledWith("/api/overrides", {
+      method: "DELETE",
+      body: { key: "stmt-c1" },
+    });
   });
 });
