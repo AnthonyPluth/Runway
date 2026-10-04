@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import { catLook } from "$lib/categories.svelte";
+  import BankBadge from "$lib/components/BankBadge.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import { showTransactions } from "$lib/filters.svelte";
   import { barWidth, fmt, fmt0, monthShort } from "$lib/format";
@@ -14,7 +15,8 @@
   // One line per category: its name, spent "of" its budget (edited in place), then the bar underneath (a top-level
   // category's only: a subcategory's figures turn red when it's over). `budgets` is true in the Budgets card, where the
   // budget box is always shown. `account` is the card or account its spending goes on (its own, else its parent's,
-  // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji.
+  // else the one used most; chosen in Settings → Categories): its bank's logo sits on the category's emoji. What's still
+  // expected this month (recurring payments that haven't come yet, `expected`) is the bar's lighter part after what's spent.
   let { c, month, sub = false, budgets = false, pace, payAccounts, account = null, onsave, onchanged }: {
     c: BudgetCategory; month: string; sub?: boolean; budgets?: boolean; pace: number; payAccounts: PayAccount[];
     account?: string | null; onsave: (category: string, amount: string) => void; onchanged: () => void;
@@ -25,13 +27,21 @@
   const avail = $derived(c.available ?? c.budget);
   const pct = $derived(avail != null && avail > 0 ? Math.max(0, c.spent / avail) : c.spent > 0 ? 1 : 0);
   const over = $derived(avail != null && c.spent > avail);
+  const expected = $derived(c.expected ?? 0);
+  const coming = $derived(expected > 0.005);
+  // Over once what's still expected comes (and not over already).
+  const overSoon = $derived(!over && coming && avail != null && c.spent + expected > avail + 0.005);
+  const expShare = $derived(avail != null && avail > 0 ? expected / avail : coming ? 1 : 0);
   const carried = $derived(c.carried ?? 0);
   const showPace = $derived(pace > 0 && pace < 1);
   const color = $derived(catLook(c.name).color);
   // Whole dollars, like the rest of the page; cents only when rounding would make a small amount read as $0.
   const money = (v: number | null) => (v != null && Math.abs(v) >= 0.005 && Math.abs(v) < 0.5 ? fmt(v) : fmt0(v));
+  // A subcategory has no bar: its figure turns red when it's over (bold), or will be with what's still coming.
+  const subNote = $derived(!sub ? "" : over ? `${money(c.spent - avail!)} over` : overSoon ? `${money(c.spent + expected - avail!)} over with what’s coming` : "");
 
-  // The category name opens Transactions showing exactly what adds up to its spent amount.
+  // The category name and its spent amount open Transactions showing exactly what adds up to it (and what's still
+  // expected, in its Upcoming).
   function open(e: MouseEvent) {
     e.preventDefault();
     showTransactions({ category: c.name, month, scope: "budget" });
@@ -52,11 +62,8 @@
     <span class="relative shrink-0">
       <CatIcon name={c.name} size={sub ? 20 : 28} />
       <!-- The account as a small badge on the emoji, as Transactions puts it on a merchant's logo. -->
-      {#if brand}<span class={cn("absolute z-[1] rounded-md", sub ? "-right-1 -bottom-1" : "-right-1.5 -bottom-1.5")} title={accountName} data-account-badge>
-        {#if brand.src}<img class={cn("shrink-0 rounded object-contain", sub ? "size-3" : "size-4")} src={brand.src} alt={accountName ?? ""} width="16" height="16" loading="lazy" />
-        {:else}<span class={cn("flex shrink-0 items-center justify-center rounded bg-muted font-semibold text-muted-foreground", sub ? "size-3 text-[7px]" : "size-4 text-[9px]")}
-          role="img" aria-label={accountName}>{brand.initial}</span>{/if}
-      </span>{/if}
+      {#if account}<BankBadge accountId={account} name={accountName ?? ""} size={sub ? "size-3 rounded text-[7px]" : "size-4 rounded-md text-[9px]"}
+        class={cn("pointer-events-auto", sub ? "-right-1 -bottom-1" : "lg:-right-1.5 lg:-bottom-1.5")} />{/if}
     </span>
     <a href="#transactions" onclick={open}
       class={cn("max-w-full min-w-0 truncate hover:underline", sub ? "text-muted-foreground" : "font-semibold")}>{c.name}</a>
@@ -70,8 +77,8 @@
       </button>
     {/if}
     <span class="ml-auto inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap tabular-nums">
-      <span class={cn(sub && over && "font-semibold text-destructive")} title={sub && over ? `${money(c.spent - avail!)} over` : undefined}
-        >{money(c.spent)}{#if sub && over}<span class="sr-only">{` (${money(c.spent - avail!)} over)`}</span>{/if}</span>
+      <a href="#transactions" onclick={open} class={cn("hover:underline", sub && over && "font-semibold text-destructive", sub && overSoon && "text-destructive")}
+        title={subNote || undefined}>{money(c.spent)}{#if subNote}<span class="sr-only">{` (${subNote})`}</span>{/if}</a>
       {#if c.budget != null || budgets}<span class="text-muted-foreground">of</span>{/if}
       <!-- The "$" sits just before the number, so it reads "$60" like the spent figure beside it. -->
       <span class="group/money relative inline-flex items-center">
@@ -85,17 +92,25 @@
   </div>
   {#if c.budget != null && !sub}
     <div class="flex items-center gap-3 sm:pl-[38px]">
-      <div class="relative h-2 min-w-28 flex-1 rounded-full bg-muted" role="img" aria-label={`${Math.round(pct * 100)}% of budget used`}>
-        <div class={cn("h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
+      <div class="relative h-2 min-w-28 flex-1 rounded-full bg-muted" role="img"
+        aria-label={`${Math.round(pct * 100)}% of budget used${coming ? `, ${Math.round(expShare * 100)}% more coming` : ""}`}>
+        <!-- What's still coming: drawn from the start, under what's spent, so the lighter part shows after it. -->
+        {#if coming && !over}
+          <div class={cn("absolute inset-y-0 left-0 rounded-full opacity-45", overSoon && "bg-destructive")} style:background={overSoon ? undefined : color}
+            style:width={barWidth(pct + expShare)} data-expected></div>
+        {/if}
+        <div class={cn("relative h-full rounded-full", over && "bg-destructive")} style:background={over ? undefined : color}
           style:width={barWidth(pct)}></div>
         {#if showPace}
           <div class="absolute -top-[3px] -bottom-[3px] w-0.5 rounded-sm bg-muted-foreground" style:left={`${(pace * 100).toFixed(1)}%`}
             title="Where you'd be at an even pace today"></div>
         {/if}
       </div>
-      <!-- Fixed width so the bars end at the same x whether the text says "left", "over" or "ahead of pace". -->
-      <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:w-48">
+      <!-- Fixed width (the longest, "▲ $1,234 over with what’s coming", fits) so the bars end at the same x whatever it says. -->
+      <span class="shrink-0 text-right text-xs whitespace-nowrap tabular-nums sm:w-52">
         {#if over}<span class="font-semibold text-destructive">▲ {money(c.spent - avail!)} over</span>
+        {:else if overSoon}<span class="text-destructive">▲ {money(c.spent + expected - avail!)} over with what’s coming</span>
+        {:else if coming}<span class="text-muted-foreground">{money(Math.max(0, avail! - c.spent - expected))} left · {money(expected)} coming</span>
         {:else if showPace && c.spent > avail! * pace * 1.1}<span class="text-muted-foreground">{money(c.left)} left · ahead of pace</span>
         {:else if Math.abs(c.spent) > 0.005}<span class="text-muted-foreground">{money(c.left)} left</span>{/if}
       </span>

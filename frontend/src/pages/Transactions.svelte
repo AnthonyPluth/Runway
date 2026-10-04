@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "$lib/api";
   import { app, refreshState, route, setQuery } from "$lib/app.svelte";
-  import { catLabel, catParentOf, categories, loadCategories } from "$lib/categories.svelte";
+  import { catLabel, catPath, categories, loadCategories } from "$lib/categories.svelte";
   import SubTabs from "$lib/components/SubTabs.svelte";
   import AiLog from "$lib/components/transactions/AiLog.svelte";
   import AiSuggest from "$lib/components/transactions/AiSuggest.svelte";
@@ -63,12 +63,12 @@
   // What the page needs before the list: categories, accounts (for the filter) and recurring items (for ↻).
   const loadSetup = () => Promise.all([loadCategories(), api<Account[]>("/api/accounts"), api<RecurringItem[]>("/api/recurring")]);
   let setup = $state(loadSetup());
-  // Upcoming (projected) items for the forecast account, on All only.
+  // Upcoming (projected) items for the forecast account, and recurring charges on cards, on All only.
   // Loaded again in place after an amount is changed there; the old ones stay on screen until the new ones arrive.
   let upcoming = $state<UpcomingEvent[]>([]);
   function loadUpcoming() {
     if (review) return;
-    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc) as UpcomingEvent[]; }, () => {});
+    api<Overview>(`/api/overview?days=${app.state?.horizon_days || 90}`).then((fc) => { upcoming = comingUp(fc, { charges: true }) as UpcomingEvent[]; }, () => {});
   }
   loadUpcoming();
 
@@ -160,7 +160,7 @@
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = applied, q = a.q.trim().toLowerCase();
     return events.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!a.account || e.account_id === a.account) &&
-      (!a.category || (a.category === "__none__" ? !e.category : e.category === a.category || catParentOf(e.category) === a.category)) &&
+      (!a.category || (a.category === "__none__" ? !e.category : catPath(e.category).includes(a.category))) &&
       (!a.from || e.date >= a.from) && (!a.to || e.date <= a.to) && (!a.min || Math.abs(e.amount) >= Number(a.min) - 0.005) &&
       (!a.max || Math.abs(e.amount) <= Number(a.max) + 0.005) && (a.kind !== "transfer") &&
       (!a.kind || (a.kind === "in" ? e.amount > 0 : e.amount < 0)));

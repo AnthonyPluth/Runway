@@ -159,6 +159,20 @@ describe("Budget page", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Budget saved"));
   });
 
+  it("says when saving a subcategory's budget raised its parent's, in the same toast", async () => {
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(api).mockImplementation(async (path: string, opts?: { method?: string }) => {
+      if (opts?.method === "POST") return { ok: true, raised: [{ category: "Groceries", amount: 550 }] } as never;
+      return (path.startsWith("/api/budget?") ? month() : []) as never;
+    });
+    render(Budget);
+    await screen.findByText("Budgeted");
+    await userEvent.type(screen.getByLabelText("Budget for Produce"), "350");
+    await userEvent.tab();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Budget saved · Groceries raised to $550"));
+    expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
   it("removes a budget when its box is emptied", async () => {
     serve(month());
     render(Budget);

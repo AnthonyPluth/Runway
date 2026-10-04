@@ -32,9 +32,8 @@ beforeEach(() => { categories.list = [category("Groceries")]; vi.mocked(api).moc
 describe("BudgetRow", () => {
   it("shows what's spent of the budget and what's left", () => {
     setup();
-    expect(screen.getByText("$200")).toBeInTheDocument();
-    // only the name opens Transactions; the amount is plain text
-    expect(screen.getAllByRole("link")).toHaveLength(1);
+    // the name and the amount both open Transactions
+    expect(screen.getAllByRole("link").map((a) => a.textContent)).toEqual(["Groceries", "$200"]);
     expect(screen.getByLabelText("Budget for Groceries")).toHaveValue("500");
     expect(screen.getByText("$300 left")).toBeInTheDocument();
     expect(bar()).toHaveAttribute("aria-label", "40% of budget used");
@@ -66,18 +65,20 @@ describe("BudgetRow", () => {
     afterEach(() => { app.state = null; });
     const badge = (container: HTMLElement) => container.querySelector("[data-account-badge]");
 
-    it("sits on the emoji as its bank's logo, named in its title", () => {
+    it("sits on the emoji as its bank's logo (the shared badge, sized to the emoji), named in its title", () => {
       const { container } = render(BudgetRow, { c: cat(), month: "2026-03", pace: 0.5, payAccounts: pay, account: "c1", onsave: vi.fn(), onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Visa");
+      expect(badge(container)).toHaveClass("pointer-events-auto");   // so its title shows on hover
       expect(badge(container)!.querySelector("img")).toHaveAttribute("src", "/logo/c1.png");
-      expect(badge(container)).not.toHaveClass("ring-2");
+      expect(badge(container)!.querySelector("img")!.parentElement).toHaveClass("size-4");
     });
 
-    it("is the bank's letter without a logo, on a subcategory or a row without a budget too", () => {
+    it("is the bank's letter without a logo, smaller on a subcategory, and on a row without a budget too", () => {
       const { container } = render(BudgetRow, { c: cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, budget: null, left: null }),
         sub: true, month: "2026-03", pace: 0.5, payAccounts: pay, account: "b1", onsave: vi.fn(), onchanged: vi.fn() });
       expect(badge(container)).toHaveAttribute("title", "Checking");
-      expect(screen.getByRole("img", { name: "Checking" })).toHaveTextContent("C");
+      expect(badge(container)).toHaveTextContent("C");
+      expect(badge(container)!.firstElementChild).toHaveClass("size-3");
     });
 
     it("isn't there when no account applies", () => {
@@ -144,12 +145,63 @@ describe("BudgetRow", () => {
     expect(onsave).toHaveBeenCalledWith("Groceries", "650");
   });
 
-  it("opens the transactions that add up to the spending", async () => {
+  it.each(["Groceries", "$200"])("opens the transactions that add up to the spending from %s", async (name) => {
     setup();
     location.hash = "";
-    await userEvent.click(screen.getByRole("link", { name: "Groceries" }));
+    await userEvent.click(screen.getByRole("link", { name }));
     expect(txFilters.transactions).toMatchObject({ category: "Groceries", from: "2026-03-01", to: "2026-03-31", scope: "budget" });
     expect(location.hash).toBe("#transactions?category=Groceries&from=2026-03-01&to=2026-03-31&scope=budget");
+  });
+
+  describe("what's still coming this month", () => {
+    const expectedBar = () => bar().querySelector<HTMLElement>("[data-expected]");
+
+    it("is the lighter part of the bar after what's spent, and what's left after it", () => {
+      setup(cat({ expected: 100 }));
+      expect(screen.getByText("$200 left · $100 coming")).toBeInTheDocument();   // 500 − 200 − 100
+      expect(expectedBar()).toHaveClass("opacity-45");
+      expect(expectedBar()).not.toHaveClass("bg-destructive");
+      expect(expectedBar()).toHaveStyle({ width: "60%" });   // drawn from the start, under the 40% spent
+      expect(bar()).toHaveAttribute("aria-label", "40% of budget used, 20% more coming");
+    });
+
+    it("warns, without shouting, when it would take the budget over", () => {
+      setup(cat({ spent: 450, left: 50, expected: 80 }));
+      const note = screen.getByText("▲ $30 over with what’s coming");
+      expect(note).toHaveClass("text-destructive");
+      expect(note).not.toHaveClass("font-semibold");
+      expect(expectedBar()).toHaveClass("bg-destructive", "opacity-45");
+      expect(expectedBar()).toHaveStyle({ width: "100%" });   // stops at the bar's end
+      const spentBar = bar().querySelector(":scope > div:not([data-expected])");
+      expect(spentBar).toHaveStyle({ width: "90%" });
+      expect(spentBar).not.toHaveClass("bg-destructive");   // what's spent isn't over yet
+    });
+
+    it("leaves nothing left rather than a negative amount when it fills the budget exactly", () => {
+      setup(cat({ spent: 400, left: 100, expected: 100 }));
+      expect(screen.getByText("$0 left · $100 coming")).toBeInTheDocument();
+    });
+
+    it("isn't drawn once the spending alone is over", () => {
+      setup(cat({ spent: 620, left: -120, expected: 50 }));
+      expect(screen.getByText("▲ $120 over")).toHaveClass("font-semibold");
+      expect(expectedBar()).toBeNull();
+    });
+
+    it("isn't there without anything coming", () => {
+      setup();
+      expect(expectedBar()).toBeNull();
+      expect(screen.queryByText(/coming/)).not.toBeInTheDocument();
+    });
+
+    it("marks a subcategory that would go over, more quietly than one that is", () => {
+      setup(cat({ name: "Produce", parent: "Groceries", path: ["Groceries", "Produce"], depth: 1, budget: 100, spent: 70, left: 30, expected: 45 }),
+        { sub: true, budgets: true });
+      const spent = screen.getByTitle("$15 over with what’s coming");
+      expect(spent).toHaveClass("text-destructive");
+      expect(spent).not.toHaveClass("font-semibold");
+      expect(spent).toHaveTextContent("$70 ($15 over with what’s coming)");
+    });
   });
 
   describe("in the Budgets card", () => {

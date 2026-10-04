@@ -899,6 +899,11 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                 by[d] += v
         return {d: round(by[d], 2) for d in dates if by.get(d, 0.0) > 0.005}
 
+    # Recurring charges on cards: their statements pay them, so they're not in `events` or the balances, but they're
+    # listed with what's coming up (Transactions) and counted in what a budget still expects this month.
+    card_charges = sorted(({**e, "account": db.account_label(by_id[e["account_id"]])} for e in events
+                           if e["kind"] == "recurring" and by_id[e["account_id"]]["kind"] == "credit"),
+                          key=lambda e: (e["date"], e["amount"]))
     events = sorted((e for e in events if e["account_id"] in cash_ids), key=lambda e: (e["date"], e["amount"]))
     # Balance of the item's account right after it lands (same-day items apply in the order listed, after that day's
     # budgeted spending).
@@ -931,6 +936,7 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         # What the budgets paid from the forecast's accounts take out each day (positive), in the balances already.
         "spend": budgeted_out([a["id"] for a in cash]),
         "events": events,
+        "charges": card_charges,
         # Churning cards' annual fees, for the lists of what's coming up: charges on cards, not on the forecast's
         # accounts, so not in `events` or the balances. Each is in its card's statement payment on paid_on (paid from
         # paid_from), when that's in the forecast.

@@ -48,6 +48,12 @@ export const CAT_EMOJI = ["🛒", "🍽️", "☕", "🍔", "🍷", "🛍️", "
   "🩺", "💊", "🏋️", "🔨", "🏠", "🏡", "🏦", "🧾", "🎬", "🎮", "🎨", "🎁", "💸", "📦", "💰", "↩️", "💳", "🔄", "🚫", "🐾",
   "🧸", "📚", "🛡️", "💅", "💼", "📈", "🎓", "⚽", "🎵", "🌱", "🧹", "🍼", "🏷️"];
 export const catParentOf = (name: string | null | undefined) => categories.list.find((c) => c.name === name)?.parent || null;
+/** A category and everything above it, nearest first (stops on a loop); [] for none. */
+export function catPath(name: string | null | undefined): string[] {
+  const out: string[] = [];
+  for (let n = name || null; n && !out.includes(n); n = catParentOf(n)) out.push(n);
+  return out;
+}
 
 /** The categories as the pickers group them: Spending, Money in, Not spending. */
 export function categoryGroups(opts: { canHoldChildren?: boolean; exclude?: (c: Category) => boolean } = {}) {

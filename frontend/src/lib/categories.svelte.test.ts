@@ -3,7 +3,7 @@ import type { Category } from "./types";
 
 vi.mock("./api", () => ({ api: vi.fn() }));
 import { api } from "./api";
-import { CAT_COLORS, catColor, catLabel, catLook, catParentOf, categories, categoryGroups, lastEmoji, loadCategories } from "./categories.svelte";
+import { CAT_COLORS, catColor, catLabel, catLook, catParentOf, catPath, categories, categoryGroups, lastEmoji, loadCategories } from "./categories.svelte";
 
 const cat = (name: string, extra: Partial<Category> = {}): Category => ({ name, path: [name], depth: 0, top: name, ...extra });
 const tree: Category[] = [
@@ -54,6 +54,13 @@ describe("category helpers", () => {
     expect(catParentOf("Groceries")).toBe("Food");
     expect(catParentOf("Food")).toBeNull();
     expect(catParentOf(undefined)).toBeNull();
+  });
+
+  it("walks up from a category to the top, stopping on a loop", () => {
+    expect(catPath("Groceries")).toEqual(["Groceries", "Food"]);
+    expect(catPath(null)).toEqual([]);
+    categories.list = [cat("A", { parent: "B" }), cat("B", { parent: "A" })];
+    expect(catPath("A")).toEqual(["A", "B"]);
   });
 
   it("uses fixed chart colors, then gray for the rest and for 'everything else'", () => {

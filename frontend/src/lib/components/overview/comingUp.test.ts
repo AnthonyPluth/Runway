@@ -11,6 +11,16 @@ describe("comingUp", () => {
     expect(comingUp({ events, fees }).map((e) => e.name)).toEqual(["Rent", "Gold annual fee", "Sapphire annual fee", "Pay"]);
   });
 
+  it("adds the recurring charges on cards when asked (Transactions), not otherwise (Overview)", () => {
+    const events = [ev("2026-10-01", "Rent", -1500)];
+    const charges = [{ ...ev("2026-10-01", "Streaming", -15), account_id: "card", account: "Travel Card" }, ev("2026-09-30", "Music", -11)];
+    expect(comingUp({ events, charges }).map((e) => e.name)).toEqual(["Rent"]);
+    const all = comingUp({ events, charges }, { charges: true });
+    expect(all.map((e) => e.name)).toEqual(["Music", "Rent", "Streaming"]);
+    expect(all[2]).toMatchObject({ account_id: "card", account: "Travel Card" });
+    expect(comingUp({ events }, { charges: true }).map((e) => e.name)).toEqual(["Rent"]);   // an older server
+  });
+
   it("works without fees (an older server)", () => {
     expect(comingUp({ events: [ev("2026-10-01", "Rent", -1500)] }).map((e) => e.name)).toEqual(["Rent"]);
   });

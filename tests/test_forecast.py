@@ -501,6 +501,20 @@ class ForecastEdgeTests(LedgerCase):
             Transaction.id == select(func.max(Transaction.id)).where(Transaction.account_id == "cc").scalar_subquery()))
         self.assertEqual(self.cycle("cc")["paid_since_close"], 200.0)
 
+    def test_recurring_charges_on_cards_are_listed_apart(self):
+        self.conn.execute(update(Account).where(Account.id == "cc").values(display_name="Travel Card"))
+        before = forecast.build(self.conn, TODAY, 60)["events"]
+        self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
+                                                   anchor_date="2026-09-30"))
+        fc = forecast.build(self.conn, TODAY, 60)
+        # on the card, with its name: in what's coming up, but not among the forecast account's events
+        self.assertEqual([(e["date"], e["name"], e["amount"], e["kind"], e["account_id"], e["account"]) for e in fc["charges"]],
+                         [("2026-09-30", "Streaming", -15.0, "recurring", "cc", "Travel Card"),
+                          ("2026-10-30", "Streaming", -15.0, "recurring", "cc", "Travel Card")])
+        self.assertNotIn("Streaming", [e["name"] for e in fc["events"]])
+        self.assertEqual([(e["date"], e["name"]) for e in fc["events"]], [(e["date"], e["name"]) for e in before])
+        self.assertEqual(forecast.build(self.conn, TODAY, 5)["charges"], [])   # only what's within the horizon
+
     def test_recurring_card_charges_count_on_a_new_card(self):
         before = {e["date"]: e["amount"] for e in forecast.build(self.conn, TODAY, 60)["events"] if e["estimated"]}
         self.conn.execute(insert(Recurring).values(name="Streaming", account_id="cc", amount=-15, frequency="monthly",
