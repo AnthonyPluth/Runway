@@ -7,11 +7,10 @@ from __future__ import annotations
 import http.client
 import json
 import os
-import ssl
 import urllib.error
 import urllib.request
 
-from . import db, secretbox
+from . import db, secretbox, tls
 from . import settings_keys as sk
 
 HOSTS = {"sandbox": "https://sandbox.plaid.com", "production": "https://production.plaid.com"}
@@ -21,17 +20,6 @@ class PlaidError(Exception):
     def __init__(self, message: str, code: str | None = None):
         super().__init__(message)
         self.code = code
-
-
-def _ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
-    return ctx
 
 
 def configured(conn) -> bool:
@@ -60,7 +48,7 @@ def call(conn, path: str, body: dict) -> dict:
         headers={"Content-Type": "application/json", "User-Agent": "Runway/0.1", "Plaid-Version": "2020-09-14"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=90, context=_ctx()) as resp:
+        with urllib.request.urlopen(req, timeout=90, context=tls.ssl_context()) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:

@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import brands, db, payees, splits
+from . import brands, db, payees, splits, validate
 from .models import Account, Category, Rule, Transaction
 
 MODES = ("contains", "exact", "starts")
@@ -30,6 +30,9 @@ CENT = 0.005
 
 class RuleError(ValueError):
     pass
+
+
+_check = validate.Validator(RuleError, drop="", not_number="Amounts must be numbers")
 
 
 def _specificity(r: dict) -> tuple:
@@ -190,12 +193,8 @@ def _known_category(conn, name: str) -> bool:
 
 def _clean_amount(v) -> float | None:
     """A dollar limit, whichever way the money goes; None when it's left empty."""
-    if v in (None, ""):
-        return None
-    try:
-        return round(abs(db.number(v)), 2)
-    except (TypeError, ValueError):
-        raise RuleError("Amounts must be numbers") from None
+    n = _check.number(v, "amount")
+    return None if n is None else round(abs(n), 2)
 
 
 def _clean_conditions(conn, body: dict) -> dict:

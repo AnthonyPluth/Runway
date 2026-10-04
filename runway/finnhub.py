@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import prices
+from . import tls
 
 WS_URL = "wss://ws.finnhub.io"
 REST_URL = "https://finnhub.io/api/v1"
@@ -53,7 +53,7 @@ def rest_quote(key: str, symbol: str, opener=urllib.request.urlopen) -> dict:
     req = urllib.request.Request(f"{REST_URL}/quote?symbol={urllib.parse.quote(symbol)}",
                                  headers={"X-Finnhub-Token": key, "Accept": "application/json"})
     try:
-        with opener(req, timeout=10, context=prices._ctx()) as resp:
+        with opener(req, timeout=10, context=tls.ssl_context()) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         if e.code in (401, 403):
@@ -77,7 +77,7 @@ def check_key(key: str, opener=urllib.request.urlopen) -> None:
 
 def _connect(key: str):
     import websocket   # imported here: only installs with a Finnhub key need it
-    return websocket.create_connection(f"{WS_URL}?token={key}", timeout=10, sslopt={"context": prices._ctx()})
+    return websocket.create_connection(f"{WS_URL}?token={key}", timeout=10, sslopt={"context": tls.ssl_context()})
 
 
 class Feed:

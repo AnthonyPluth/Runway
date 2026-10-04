@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, or_, select, update
 
-from . import banks, churning, db, forecast, oidc, recurring, webpush
+from . import banks, churning, db, forecast, oidc, recurring, validate, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
@@ -49,18 +49,19 @@ def prefs(conn, user_sub: str | None = None) -> dict:
     return {**DEFAULTS, **{k: v for k, v in saved.items() if k in DEFAULTS}}
 
 
+_check = validate.Validator(ValueError, drop="", missing="Enter a number", not_number="Enter a number")
+
+
 def save_prefs(conn, body: dict, user_sub: str | None = None) -> dict:
     p = prefs(conn, user_sub)
     for k, v in body.items():
         if k not in DEFAULTS:
             continue
         if isinstance(DEFAULTS[k], bool):
-            p[k] = bool(v)
+            p[k] = bool(validate.flag(v))   # a switch: "false" is off
         else:
-            try:
-                p[k] = max(0, db.number(v)) if k != "card_due_days" else max(0, min(14, int(v)))
-            except (TypeError, ValueError):
-                raise ValueError("Enter a number") from None
+            n = _check.number(v, k, required=True)
+            p[k] = max(0, n) if k != "card_due_days" else max(0, min(14, int(n)))
     db.set_setting(conn, sk.notify_prefs(user_sub) if user_sub else sk.NOTIFY_PREFS, json.dumps(p))
     return p
 

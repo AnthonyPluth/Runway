@@ -19,7 +19,6 @@ import base64
 import difflib
 import json
 import re
-import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,7 +27,7 @@ from typing import Any
 
 from sqlalchemy import ColumnElement, delete, func, insert, or_, select, update
 
-from . import brands, db
+from . import brands, db, tls
 from . import settings_keys as sk
 from .models import Category, Holding, Merchant, MerchantLogo, Security, Transaction
 
@@ -147,7 +146,7 @@ def _download(url: str, opener=None) -> tuple[bytes, str] | None:
         if opener:
             resp = opener(req)
         else:
-            resp = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+            resp = urllib.request.build_opener(urllib.request.HTTPSHandler(context=tls.ssl_context()),
                                                _SameRules()).open(req, timeout=8)
         with resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -178,7 +177,7 @@ def search(conn, name: str, opener=None) -> list[dict] | None:
         "Authorization": f"Bearer {db.get_setting(conn, sk.LOGODEV_SECRET)}", "Accept": "application/json", "User-Agent": "Runway"})
     try:
         resp = opener(req) if opener else urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=ssl.create_default_context()), _NoRedirects()).open(req, timeout=8)
+            urllib.request.HTTPSHandler(context=tls.ssl_context()), _NoRedirects()).open(req, timeout=8)
         with resp:
             data = json.loads(resp.read(512 * 1024))
     except urllib.error.HTTPError as e:

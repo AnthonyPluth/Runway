@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,7 +20,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import or_, select, update
 
-from . import db, networth
+from . import db, networth, tls
 from . import settings_keys as sk
 from .models import Asset
 
@@ -37,17 +36,6 @@ def monthly_limit() -> int:
 
 class RealieError(Exception):
     pass
-
-
-def _ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
-    return ctx
 
 
 def configured(conn) -> bool:
@@ -129,7 +117,7 @@ def value_estimate(conn, address: str, today: date | None = None) -> dict:
     db.set_setting(conn, sk.realie_calls(today), str(used_this_month(conn, today) + 1))
     conn.commit()
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_ctx()) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=tls.ssl_context()) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         try:

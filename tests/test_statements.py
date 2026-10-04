@@ -191,7 +191,9 @@ class StatementApiTests(LedgerCase):
         self.assertIn("more than 90 days", self.refused(due_date=(self.today + timedelta(days=100)).isoformat()))
         self.assertIn("negative", self.refused(balance=-1))
         self.assertIn("statement balance", self.refused(balance=""))
-        self.assertIn("number", self.refused(balance="nan"))
+        for bad in ("nan", "inf", "1e13", "lots"):
+            self.assertEqual(self.refused(balance=bad), "The statement balance must be a number.")
+        self.assertEqual(self.refused(balance="-0.5"), "The statement balance can't be negative.")
         self.assertIn("minimum payment", self.refused(minimum_payment=-5))
         self.assertIn("credit cards only", self.refused(acct="chk"))
         with self.assertRaises(ApiError) as e:

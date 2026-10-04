@@ -1,4 +1,5 @@
-"""Checking what someone typed or sent: numbers, whole numbers, short texts, days and on/off flags.
+"""Checking what someone typed or sent: numbers, whole numbers, short texts, days and on/off flags; and numbers in
+other systems' replies (parse_external).
 
 Each module that takes input keeps its own error class and wording, so a Validator is made with both; the checks
 themselves are shared. Nothing is rounded or normalised on the way in: a number is db.number's (which refuses nan, inf
@@ -25,6 +26,18 @@ def parse_number(v, drop: str = ",$") -> float:
     for c in drop:
         s = s.replace(c, "")
     return db.number(s.strip())
+
+
+def parse_external(v, drop: str = "") -> float | None:
+    """A number in another system's reply (a bank's, a broker's, a store's), or None when it isn't one: left out,
+    empty, not a number, or one db.number refuses ("nan", "inf", past MAX_NUMBER), so a bad value is dropped instead of
+    saved into amounts and balances. A true or false isn't a number either. drop as in parse_number."""
+    if v is None or v == "" or isinstance(v, bool):
+        return None
+    try:
+        return parse_number(v, drop)
+    except (TypeError, ValueError, OverflowError):   # OverflowError: a whole number too big for a float
+        return None
 
 
 def flag(v) -> int:

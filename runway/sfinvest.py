@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, select, update
 
-from . import db, tracked
+from . import db, tracked, validate
 from . import settings_keys as sk
 from .models import Account, Holding, HoldingSnapshot, InvAccount, InvSnapshot, InvTransaction, Price, Security, Setting
 
@@ -47,12 +47,7 @@ def market_value(conn, symbol: str, shares: float | None, reported: float | None
 
 
 def _num(v) -> float | None:
-    if v is None or v == "":
-        return None
-    try:
-        return float(str(v).replace(",", "").replace("$", ""))
-    except ValueError:
-        return None
+    return validate.parse_external(v, drop=",$")
 
 
 def _is_cash(symbol: str, name: str) -> bool:

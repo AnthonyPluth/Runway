@@ -24,7 +24,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import delete, select
 
-from . import db
+from . import db, validate
 from .models import Account, ManualStatement
 
 GRACE_DAYS = 5          # days after the next expected close before a statement you entered counts as stale
@@ -47,18 +47,13 @@ def _day(value, what: str) -> date:
         raise ValueError(f"Enter the {what} (YYYY-MM-DD).") from None
 
 
+_check = validate.Validator(ValueError, drop="", missing="Enter the {label}.", not_number="The {label} must be a number.",
+                            out_of_range="The {label} can't be negative.")
+
+
 def _amount(value, what: str, required: bool) -> float | None:
-    if value in (None, ""):
-        if required:
-            raise ValueError(f"Enter the {what}.")
-        return None
-    try:
-        n = db.number(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"The {what} must be a number.") from None
-    if n < 0:
-        raise ValueError(f"The {what} can't be negative.")
-    return round(n, 2)
+    n = _check.number(value, what, 0, required=required)
+    return None if n is None else round(n, 2)
 
 
 def add(conn, account_id: str, body: dict, today: date | None = None) -> dict:

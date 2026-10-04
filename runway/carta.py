@@ -16,7 +16,6 @@ import base64
 import json
 import re
 import secrets
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -26,7 +25,7 @@ from typing import Any
 
 from sqlalchemy import insert, select, update
 
-from . import db, equity, monitoring
+from . import db, equity, monitoring, tls, validate
 from . import settings_keys as sk
 from .models import EquityCompany, EquityGrant
 
@@ -102,7 +101,7 @@ def _post_form(url: str, data: dict, client_id: str, secret: str, opener=None) -
     req = urllib.request.Request(url, data=body, method="POST", headers={
         "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "Authorization": f"Basic {auth}"})
     try:
-        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context())
+        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=tls.ssl_context())
         with resp:
             return json.loads(resp.read().decode() or "{}")
     except urllib.error.HTTPError as e:
@@ -156,7 +155,7 @@ def _get(conn, path: str, params: dict | None = None, opener=None):
     url = f"{base}/{VERSION}/{path}" + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {_token(conn, opener)}", "Accept": "application/json"})
     try:
-        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=ssl.create_default_context())
+        resp = opener(req) if opener else urllib.request.urlopen(req, timeout=30, context=tls.ssl_context())
         with resp:
             return json.loads(resp.read().decode() or "null")
     except urllib.error.HTTPError as e:
@@ -218,14 +217,14 @@ def _num(v) -> float | None:
     if v is None or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        return validate.parse_external(v)
     if isinstance(v, dict):
         for k in ("amount", "value", "quantity", "decimal"):
             if k in v:
                 return _num(v[k])
         return None
     m = re.search(r"-?\d[\d,]*(?:\.\d+)?", str(v))
-    return float(m.group(0).replace(",", "")) if m else None
+    return validate.parse_external(m.group(0), drop=",") if m else None
 
 
 def _day(v) -> str | None:

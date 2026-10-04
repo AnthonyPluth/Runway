@@ -124,6 +124,9 @@ class EditingTests(Base):
     def test_every_check_and_what_a_clean_rule_looks_like(self):
         for bad, msg in [({"match": "shop", "match_mode": "regex", "category": "Shopping"}, "Pick how the text should match"),
                          ({"match": "shop", "amount_min": "lots", "category": "Shopping"}, "Amounts must be numbers"),
+                         ({"match": "shop", "amount_min": "nan", "category": "Shopping"}, "Amounts must be numbers"),
+                         ({"match": "shop", "amount_max": "inf", "category": "Shopping"}, "Amounts must be numbers"),
+                         ({"match": "shop", "amount_max": "1e13", "category": "Shopping"}, "Amounts must be numbers"),
                          ({"match": "shop", "direction": "sideways", "category": "Shopping"}, "Direction is money out or money in"),
                          ({"match": "shop", "account_id": "nope", "category": "Shopping"}, "Unknown account"),
                          ({"match": "shop", "split": [{"category": "Groceries", "percent": 100}]}, "at least two parts"),

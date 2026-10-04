@@ -35,6 +35,36 @@ class ParseNumberTests(unittest.TestCase):
         self.assertEqual(validate.parse_number(2.5, drop=""), 2.5)
 
 
+class ParseExternalTests(unittest.TestCase):
+    def test_a_number_in_another_systems_reply(self):
+        self.assertEqual(validate.parse_external("-12.34"), -12.34)
+        self.assertEqual(validate.parse_external(5), 5.0)
+        self.assertEqual(validate.parse_external(" 7.5 "), 7.5)
+        self.assertEqual(validate.parse_external("$1,234.50", drop=",$"), 1234.5)
+
+    def test_anything_else_is_none(self):
+        for bad in (None, "", "nan", "NaN", "inf", "-Infinity", float("nan"), float("inf"), "1e13", 1e300, 10 ** 400,
+                    "abc", "1,000", True, False, {"amount": 1}, [1]):
+            with self.subTest(v=bad):
+                self.assertIsNone(validate.parse_external(bad))
+
+
+class ProviderNumbersTests(unittest.TestCase):
+    """Each provider's reader goes through parse_external: what isn't a real number is left out."""
+
+    def test_providers(self):
+        from runway import carta, retail, sfinvest
+        readers = {"sfinvest": sfinvest._num, "carta": carta._num, "retail": retail._money}   # SimpleFIN's: test_simplefin
+        for name, read in readers.items():
+            for bad in (float("nan"), float("inf"), 1e15, "99,999,999,999,999"):
+                with self.subTest(name=name, v=bad):
+                    self.assertIsNone(read(bad))
+        for bad in ("nan", "inf", "1e300"):
+            self.assertIsNone(sfinvest._num(bad))
+        self.assertEqual((sfinvest._num("$1,234.50"), carta._num({"amount": "1,234.50"}), retail._money("$1,234.56")),
+                         (1234.5, 1234.5, 1234.56))
+
+
 class NumberTests(unittest.TestCase):
     v = validate.Validator(Oops)
 

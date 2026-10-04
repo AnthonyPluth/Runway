@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import ssl
 import time
 import urllib.error
 import urllib.request
@@ -14,7 +13,7 @@ from sqlalchemy import Integer, case, delete, func, insert, or_, select, type_co
 
 from . import categories as catmod
 from . import settings_keys as sk
-from . import brands, db, monitoring, payees, rules as rulesmod, splits
+from . import brands, db, monitoring, payees, rules as rulesmod, splits, tls
 from .models import Account, AiLog, Category, Rule, Transaction
 
 REVIEW_THRESHOLD = 0.85
@@ -353,17 +352,10 @@ def chat(api_key: str, model: str, prompt: str, web: str | None = None, private:
             "X-Title": "Runway",
         },
     )
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
     # A chat span in Sentry's Agent Tracing: the model, timings and tokens (the prompt only if you ask; monitoring.py).
     with monitoring.ai_call(model, prompt, max_tokens=4096, temperature=0, **({"web_search": web} if web else {})) as span:
         try:
-            with urllib.request.urlopen(req, timeout=120, context=ctx) as resp:
+            with urllib.request.urlopen(req, timeout=120, context=tls.ssl_context()) as resp:
                 data = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:300]
