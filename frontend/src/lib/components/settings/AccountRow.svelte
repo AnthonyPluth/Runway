@@ -15,17 +15,15 @@
 </script>
 
 <script lang="ts">
-  import { commas } from "$lib/commas";
   import { api } from "$lib/api";
-  import { ACCOUNT_KINDS, isBankKind, isCash, isPlaidStub } from "$lib/accounts";
+  import { ACCOUNT_KINDS, isCash } from "$lib/accounts";
   import { app, refreshState, reload } from "$lib/app.svelte";
   import { autosave } from "$lib/autosave";
   import OwnerSelect from "$lib/components/OwnerSelect.svelte";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
-  import { fmt, fmtDate, fmtDateTime, nb, plural } from "$lib/format";
-  import { accountName } from "$lib/types";
+  import { fmt, fmtDate, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { fromAction } from "svelte/attachments";
   import { tick } from "svelte";
@@ -35,11 +33,12 @@
   import BankIcon from "./BankIcon.svelte";
   import CardStatement from "./CardStatement.svelte";
   import { accountFocus } from "./accountFocus.svelte";
-  import { linkable, linkableInvestments, plaidFor, plaidLabel } from "./plaidAccounts";
-  import { connectPlaid, matchPlaidAccount } from "./plaid.svelte";
-  import PlaidChoice from "./PlaidChoice.svelte";
+  import { sourceInfo } from "./plaidAccounts";
+  import CardTerms from "./CardTerms.svelte";
+  import LoanTerms from "./LoanTerms.svelte";
+  import PlaidLink from "./PlaidLink.svelte";
   import type { AccountRemoval, PlaidStatus, SettingsAccount } from "./types";
-  import { checkCls, fieldCls, inputCls, linkCls, rowCls, selectCls, warnText } from "./ui";
+  import { checkCls, fieldCls, inputCls, linkCls, selectCls, warnText } from "./ui";
 
   // One account: a compact line (name, where it syncs from, what's notable, balance) that opens into its settings, each
   // saved as you go, under a row of actions (use it for the forecast, rename, hide). Hiding one tells the list
@@ -63,49 +62,22 @@
   let hidden = $state(!!init.hidden);
   let counted = $state(!init.networth_hidden);
   let sign = $state(!!init.owed_positive);
-  let rate = $state<number | null>(init.loan?.set_rate ?? null);
-  let payment = $state<number | null>(init.loan?.set_payment ?? null);
   let changingType = $state(false);
   let open = $state(openAccounts.has(init.id));
 
   const owes = $derived(a.kind === "credit" || a.kind === "loan");
   // A loan's terms, for the retirement planner: the lender's through Plaid when it shares them, else yours.
   const loan = $derived(a.kind === "loan" ? a.loan : undefined);
-  // What an empty payment means: the one that pays the loan off by Plaid's payoff date, else what recent payments suggest.
-  const byPayoff = $derived(!!loan && loan.source === "plaid" && !loan.plaid_payment && loan.payment != null && loan.set_payment == null);
-  const dollars = (n: number) => Math.round(n).toLocaleString("en-US");
-  const hint = $derived(byPayoff ? `${dollars(loan!.payment!)} to pay it off by ${fmtDate(loan!.maturity!, { month: "short", day: "numeric", year: "numeric" })}`
-    : loan?.inferred_payment ? `${dollars(loan.inferred_payment)} from recent payments` : "");
-  const hintTitle = $derived(byPayoff ? "Left empty, it’s the payment that pays the loan off by the date the lender gives, through Plaid"
-    : "Left empty, it’s worked out from the payments into this account lately");
   const bank = $derived(`${a.org && !a.name.toLowerCase().includes(a.org.toLowerCase()) ? a.org + " " : ""}${a.name}`);
   // Owners: first names of the people who have signed in, plus "Joint".
   const owners = $derived(app.state?.owners ?? []);
   // With one person there is nobody to choose between; an owner already set to someone else still shows.
   const showOwner = $derived(owners.length > 1 || (!!owner && !owners.includes(owner)));
-  const link = $derived(a.plaid_link);
-  // Where balances and transactions come from: a choice once the account is matched to a Plaid account.
-  const canSwitch = $derived(!isPlaidStub(a.id) && !!link?.transactions);
-  const where = $derived(`${link?.institution || "Plaid"}${link?.mask ? ` ••${link.mask}` : ""}`);
-  const own = $derived(isPlaidStub(a.id));
-  // The Plaid account behind this one (its connection says when it last synced), and the ones it could be linked to.
-  const behind = $derived(plaidFor(plaid, a.id));
-  const options = $derived(linkable(plaid));
-  const linkKind = $derived(isBankKind(a.kind));
-  // An investment account has no plaid_link: a Plaid account is tied to it by that account's own choice (among its connection's candidates).
-  const invKind = $derived(a.kind === "investment");
-  const invOptions = $derived(linkableInvestments(plaid, a.id));
-  const invLinked = $derived(invKind && !own ? behind : undefined);
-  // Shown once Plaid is set up, or this account already uses it.
-  const showSource = $derived(!!link || own || !!invLinked || ((linkKind || invKind) && !!plaid && (plaid.configured || plaid.items.length > 0)));
-  const mask = $derived(link?.mask ? ` ••${link.mask}` : behind?.p.mask && (own || invLinked) ? ` ••${behind.p.mask}` : "");
-  const source = $derived(own ? `Plaid${mask}` : link || invLinked ? `SimpleFIN + Plaid${mask}` : "SimpleFIN");
-  const plaidSynced = $derived.by(() => {
-    const t = behind?.it.last_sync;
-    if (!t) return "";
-    const d = new Date(t.replace(" ", "T") + "Z");
-    return isNaN(d.getTime()) ? t : fmtDateTime(d);
-  });
+  // Where its balances and transactions come from (the row's summary says so; the Data source section is PlaidLink).
+  const info = $derived(sourceInfo(a, plaid));
+  const link = $derived(info.link);
+  const own = $derived(info.own);
+  const source = $derived(info.source);
 
   // The line under the name: "Forecast · Alex · paid from Checking · via Plaid", with what needs a look in orange.
   // "Forecast" marks the forecast account; another checking or savings account offers "Use for the forecast" among its
@@ -179,23 +151,6 @@
     } catch (err) { if (rerender) toast.error(errMsg(err)); else throw err; }
   }
 
-  // A loan's interest rate and monthly payment, the ones Plaid doesn't supply (an empty payment is worked out from
-  // recent payments).
-  async function saveLoan() {
-    const body: Record<string, unknown> = {};
-    if (!loan?.plaid) body.interest_rate = rate ?? "";
-    if (!loan?.plaid_payment) body.monthly_payment = payment ?? "";
-    await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body });
-  }
-
-  async function setProvider(e: Event) {
-    const v = (e.currentTarget as HTMLSelectElement).value;
-    try {
-      await api(`/api/accounts/${encodeURIComponent(a.id)}`, { method: "POST", body: { provider: v } });
-      toast.success(v === "plaid" ? "This account now comes from Plaid; its transactions arrive with the next sync" : "Back to SimpleFIN");
-      if (v === "plaid") api("/api/sync", { method: "POST" }).then(() => reload(), () => {});
-    } catch (err) { toast.error(errMsg(err)); reload(); }
-  }
   let kindSelect = $state<HTMLSelectElement | null>(null);
 
   // "Enter…" on the line, or a link to #setup/accounts?account=<id> (Overview's "Enter Visa's latest statement"), opens
@@ -235,19 +190,6 @@
       openAccounts.delete(a.id);
       reload();
     }))) return false;
-  }
-  // Money and rates look alike everywhere here: "$" before the figure, "%" after, commas while you're elsewhere.
-  const prefix = "pointer-events-none absolute top-[1.125rem] left-3 -translate-y-1/2 text-sm text-muted-foreground";
-  const suffix = "pointer-events-none absolute top-[1.125rem] right-3 -translate-y-1/2 text-sm text-muted-foreground";
-  let linking = $state("");
-  async function linkTo(e: Event) {
-    const el = e.currentTarget as HTMLSelectElement;
-    const v = el.value;
-    if (!v) return;
-    linking = v;
-    if (v === "__connect") await connectPlaid(invKind ? "investments" : "bank");
-    else await matchPlaidAccount(v, a.id, !invKind);
-    linking = ""; el.value = "";
   }
 </script>
 
@@ -291,119 +233,17 @@
       </label>
     {/if}
     {#if a.kind === "credit"}
-      <label class={fieldCls}>Paid from
-        <select class={selectCls} bind:value={payFrom} use:autosave={() => save(true)}>
-          <option value="">—</option>
-          {#each cash as c (c.id)}<option value={c.id}>{accountName(c)}</option>{/each}
-        </select>
-      </label>
-      <label class={fieldCls} title="How much of each statement the forecast pays; what isn't paid carries into the next one">Pay
-        <select class={selectCls} bind:value={payMode} use:autosave={() => save(true)}>
-          <option value="full">full statement</option>
-          <option value="minimum">minimum</option>
-          <option value="fixed">a fixed amount</option>
-        </select>
-      </label>
-      {#if payMode === "fixed"}
-        <label class={fieldCls}>Amount each statement
-          <span class="relative">
-            <span class={prefix} aria-hidden="true">$</span>
-            <input type="number" inputmode="decimal" min="0" step="0.01" class={`${inputCls} w-full pl-6`} bind:value={payAmount} {@attach commas}
-              use:autosave={() => save(true)} />
-          </span>
-        </label>
-      {/if}
-      {#if payMode !== "full"}
-        <!-- Yours wins; without one, the issuer's purchase APR (through Plaid) is used, and shown as the placeholder. -->
-        <div class={fieldCls} title="For the interest on what carries over; without one, the forecast leaves interest out">
-          <label for={`apr-${a.id}`}>APR</label>
-          <span class="relative">
-            <input id={`apr-${a.id}`} type="number" inputmode="decimal" min="0" max="100" step="0.01" class={`${inputCls} w-full pr-7`} bind:value={apr}
-              placeholder={a.issuer_apr != null ? String(a.issuer_apr) : undefined} use:autosave={() => save(false)} />
-            <span class={suffix} aria-hidden="true">%</span>
-          </span>
-          {#if apr == null && a.issuer_apr != null}<span class="text-xs">{a.issuer_apr}% from the issuer</span>{/if}
-        </div>
-      {/if}
+      <CardTerms {a} {cash} bind:payFrom bind:payMode bind:payAmount bind:apr save={save} />
     {/if}
     {#if loan}
-      <!-- Each figure Plaid supplies is the lender's and shown as is; what it leaves out (a new loan's payment, say) can be set. -->
-      {#if loan.plaid}
-        <div class={fieldCls}>Interest rate
-          <span class="flex h-9 items-center gap-2 text-foreground">{+(loan.rate ?? 0).toFixed(3)}%<span class="text-xs text-muted-foreground">from Plaid</span></span>
-        </div>
-      {:else}
-        <label class={fieldCls} title="The loan’s annual interest rate. With it, Net worth pays the loan down between balances and the retirement planner works out what’s still owed when you sell.">Interest rate
-          <span class="relative">
-            <input type="number" inputmode="decimal" min="0" max="30" step="0.001" class={`${inputCls} w-full pr-7`} bind:value={rate}
-              placeholder="6.25" use:autosave={saveLoan} />
-            <span class={suffix} aria-hidden="true">%</span>
-          </span>
-        </label>
-      {/if}
-      {#if loan.plaid_payment}
-        <div class={fieldCls}>Monthly payment
-          <span class="flex h-9 items-center gap-2 text-foreground">{fmt(loan.payment)}<span class="text-xs text-muted-foreground">from Plaid</span></span>
-        </div>
-      {:else}
-        <label class={fieldCls} title={hintTitle}>Monthly payment
-          <span class="relative">
-            <span class={prefix} aria-hidden="true">$</span>
-            <input type="number" inputmode="decimal" min="0" step="0.01" class={`${inputCls} w-full pl-6`} bind:value={payment} {@attach commas}
-              placeholder={hint} use:autosave={saveLoan} />
-          </span>
-        </label>
-      {/if}
+      <LoanTerms {a} {loan} />
     {/if}
     {#if a.kind === "credit"}
       <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Statement" bind:this={statementBox}>
         <CardStatement {a} note={link && !a.statement ? statementNote(link.statement_note) : ""} />
       </section>
     {/if}
-    {#if showSource}
-      <section class="flex flex-col gap-3 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Data source">
-        <h4 class="text-sm font-medium">Data source</h4>
-        <p class="text-sm text-muted-foreground">{nb(source)}{#if plaidSynced}{" · "}{nb(`Plaid synced ${plaidSynced}`)}{/if}</p>
-        <div class={rowCls}>
-          {#if canSwitch}
-            <label class={fieldCls} title="Where balances and transactions come from. Switching keeps your history; transactions both have are matched up.">
-              Transactions from
-              <select class={selectCls} value={a.provider === "plaid" ? "plaid" : "simplefin"} onchange={setProvider}>
-                <option value="simplefin">SimpleFIN</option>
-                <option value="plaid">Plaid ({where})</option>
-              </select>
-            </label>
-          {/if}
-          {#if own && behind}
-            <label class={fieldCls}>Which of your accounts this is
-              <PlaidChoice p={behind.p} it={behind.it} {mine} />
-            </label>
-          {:else if invLinked}
-            <span class="flex items-center gap-2 text-sm">Linked to {plaidLabel(invLinked)}
-              <Button variant="outline" size="sm" onclick={() => matchPlaidAccount(invLinked.p.id, "", false)}>Unlink</Button></span>
-          {:else if link && a.plaid_account_id}
-            <span class="flex items-center gap-2 text-sm">Linked to {where}
-              <Button variant="outline" size="sm" onclick={() => matchPlaidAccount(a.plaid_account_id!, "")}>Unlink</Button></span>
-          {:else if invKind}
-            <label class={fieldCls}>Link to a Plaid account
-              <select class={`${selectCls} w-full sm:w-72`} disabled={!!linking} onchange={linkTo}>
-                <option value="">Choose…</option>
-                {#each invOptions as o (o.p.id)}<option value={o.p.id}>{plaidLabel(o)} · {fmt(o.p.balance)}</option>{/each}
-                {#if plaid?.configured}<option value="__connect">Connect an investment account through Plaid…</option>{/if}
-              </select>
-            </label>
-          {:else if !link && linkKind}
-            <label class={fieldCls}>Link to a Plaid account
-              <select class={`${selectCls} w-full sm:w-72`} disabled={!!linking} onchange={linkTo}>
-                <option value="">Choose…</option>
-                {#each options as o (o.p.id)}<option value={o.p.id}>{plaidLabel(o)} · {fmt(o.p.balance)}</option>{/each}
-                {#if plaid?.configured}<option value="__connect">Connect a new bank through Plaid…</option>{/if}
-              </select>
-            </label>
-          {/if}
-        </div>
-      </section>
-    {/if}
+    <PlaidLink {a} {plaid} {mine} {info} />
     <section class="flex flex-col gap-2.5 rounded-lg border p-3 sm:col-span-2 lg:col-span-3" aria-label="Options">
       <h4 class="text-sm font-medium">Options</h4>
       {#if owes}

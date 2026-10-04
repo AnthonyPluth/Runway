@@ -10,25 +10,11 @@ vi.mock("$lib/app.svelte", () => ({ app: { state: { owners: [], primary_account:
 import { api } from "$lib/api";
 import { app, refreshState, reload } from "$lib/app.svelte";
 import { toast } from "svelte-sonner";
-import AccountRow from "./AccountRow.svelte";
 import type { SettingsAccount } from "./types";
+import { acct, resetRow, show, undoOf } from "../../../test/accountRow";
+import AccountRow from "./AccountRow.svelte";
 
-const acct = (over: Partial<SettingsAccount> = {}): SettingsAccount => ({ id: "sav", name: "Savings", kind: "savings", balance: 1000, networth_hidden: 0, ...over });
-const show = (a: SettingsAccount) => render(AccountRow, { a, cash: [a], byName: {} });
-
-// What a field shows (the commas helper's `value` leaves its commas out).
-const shown = (el: HTMLElement) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.get!.call(el);
-// The Undo of the last toast that offered one.
-const undoOf = () => {
-  const call = vi.mocked(toast).mock.calls.findLast(([, o]) => (o as { action?: unknown })?.action);
-  return (call![1] as unknown as { action: { onClick: () => Promise<void> } }).action.onClick;
-};
-
-beforeEach(() => {
-  vi.mocked(toast).mockClear(); vi.mocked(toast.success).mockClear(); vi.mocked(toast.error).mockClear(); vi.mocked(reload).mockClear();
-  vi.mocked(api).mockReset(); vi.mocked(api).mockResolvedValue({ ok: true } as never);
-  app.state = { connected: true, owners: [], primary_account: null };
-});
+beforeEach(resetRow);
 
 describe("leaving an account out of net worth, from Settings", () => {
   it("tags an excluded account and shows its box unchecked", () => {
@@ -74,76 +60,6 @@ describe("choosing the forecast's account, from Settings", () => {
   it("isn't offered on a card", () => {
     show(acct({ id: "cc", kind: "credit" }));
     expect(screen.queryByRole("button", { name: "Use for the forecast" })).toBeNull();
-  });
-});
-
-describe("how a card is paid, from Settings", () => {
-  const card = (over: Partial<SettingsAccount> = {}) => acct({ id: "cc", name: "Visa", kind: "credit", pay_from: "chk", ...over });
-  const lastBody = () => (vi.mocked(api).mock.calls.at(-1) as [string, { body: Record<string, unknown> }])[1].body;
-
-  it("pays in full by default, with no amount or APR to fill in", () => {
-    show(card());
-    expect(screen.getByRole("combobox", { name: "Pay" })).toHaveValue("full");
-    expect(screen.queryByLabelText("Amount each statement")).toBeNull();
-    expect(screen.queryByRole("spinbutton", { name: "APR" })).toBeNull();
-    expect(screen.queryByText(/pays/)).toBeNull();
-  });
-
-  it("saves the minimum, then asks for the APR and saves it", async () => {
-    show(card());
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Pay" }), "minimum");
-    await waitFor(() => expect(api).toHaveBeenCalled());
-    expect(lastBody()).toMatchObject({ pay_mode: "minimum", pay_amount: "", apr: "" });
-    expect(screen.queryByLabelText("Amount each statement")).toBeNull();
-    const apr = screen.getByRole("spinbutton", { name: "APR" });
-    await userEvent.type(apr, "24.99");
-    await userEvent.tab();
-    await waitFor(() => expect(lastBody()).toMatchObject({ pay_mode: "minimum", apr: 24.99 }));
-  });
-
-  it("asks for the fixed amount and saves it, and shows it on the account's line", async () => {
-    show(card({ pay_mode: "fixed", pay_amount: 300, apr: 19.5 }));
-    expect(screen.getByText("pays $300.00 a statement")).toBeInTheDocument();
-    const amount = screen.getByLabelText(/Amount each statement/);
-    expect(amount).toHaveValue("300");
-    expect(amount.parentElement).toHaveTextContent("$");
-    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(19.5);
-    await userEvent.clear(amount);
-    await userEvent.type(amount, "450");
-    await userEvent.tab();
-    await waitFor(() => expect(lastBody()).toMatchObject({ pay_mode: "fixed", pay_amount: 450, apr: 19.5 }));
-  });
-
-  it("shows a fixed amount with its commas, and saves it without them", async () => {
-    show(card({ pay_mode: "fixed", pay_amount: 1850 }));
-    const amount = screen.getByLabelText(/Amount each statement/);
-    expect(shown(amount)).toBe("1,850");
-    await userEvent.clear(amount);
-    await userEvent.type(amount, "2100");
-    await userEvent.tab();
-    await waitFor(() => expect(lastBody()).toMatchObject({ pay_amount: 2100 }));
-    expect(shown(amount)).toBe("2,100");
-  });
-
-  it("shows the issuer's APR when you haven't entered one, and yours when you have", () => {
-    const { unmount } = show(card({ pay_mode: "minimum", issuer_apr: 24.99 }));
-    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveAttribute("placeholder", "24.99");
-    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(null);
-    expect(screen.getByText("24.99% from the issuer")).toBeInTheDocument();
-    unmount();
-    show(card({ pay_mode: "minimum", apr: 18, issuer_apr: 24.99 }));
-    expect(screen.getByRole("spinbutton", { name: "APR" })).toHaveValue(18);
-    expect(screen.queryByText(/from the issuer/)).toBeNull();
-  });
-
-  it("flags a fixed payment with no amount", () => {
-    show(card({ pay_mode: "fixed", pay_amount: null }));
-    expect(screen.getByText("no fixed amount")).toHaveAttribute("title", "Paid in full until you enter one");
-  });
-
-  it("isn't offered on other accounts", () => {
-    show(acct());
-    expect(screen.queryByRole("combobox", { name: "Pay" })).toBeNull();
   });
 });
 
@@ -333,59 +249,6 @@ describe("the account's line on a phone", () => {
     expect(within(summary).getByText("Rewards Visa")).toHaveClass("line-clamp-2");
     expect(summary.innerHTML).not.toContain("overflow-wrap:anywhere");
     expect(within(summary).getByText("$1,000.00")).toHaveClass("whitespace-nowrap");
-  });
-});
-
-describe("a loan's terms, for the retirement planner", () => {
-  const terms = { rate: null, payment: null, source: null, plaid: false, plaid_payment: false, set_rate: null, set_payment: null, inferred_payment: null };
-  const loan = (over: Partial<NonNullable<SettingsAccount["loan"]>> = {}) =>
-    acct({ id: "mtg", name: "Mortgage", kind: "loan", balance: -250000, loan: { ...terms, ...over } });
-
-  it("lets you set the interest rate and payment, suggesting the payment from recent ones", async () => {
-    show(loan({ set_rate: 6.25, inferred_payment: 1840 }));
-    const rate = screen.getByRole("spinbutton", { name: /Interest rate/ });
-    const payment = screen.getByLabelText(/Monthly payment/);
-    expect(rate).toHaveValue(6.25);
-    expect(rate.parentElement).toHaveTextContent("%");
-    expect(payment).toHaveValue("");
-    expect(payment.parentElement).toHaveTextContent("$");
-    expect(payment).toHaveAttribute("placeholder", "1,840 from recent payments");
-    await userEvent.type(payment, "1900{Enter}");
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg",
-      { method: "POST", body: { interest_rate: 6.25, monthly_payment: 1900 } }));
-    expect(shown(payment)).toBe("1,900");
-    expect(screen.queryByText("from Plaid")).toBeNull();
-  });
-
-  it("shows the lender's terms from Plaid instead, without fields to change them", () => {
-    show(loan({ plaid: true, plaid_payment: true, rate: 6.125, payment: 2140.5, source: "plaid" }));
-    expect(screen.queryByLabelText(/Interest rate/)).toBeNull();
-    expect(screen.queryByLabelText(/Monthly payment/)).toBeNull();
-    expect(screen.getByText("6.125%")).toBeInTheDocument();
-    expect(screen.getByText("$2,140.50")).toBeInTheDocument();
-    expect(screen.getAllByText("from Plaid")).toHaveLength(2);
-  });
-
-  it("lets you set the payment when Plaid gives the rate but no payment, and saves only that", async () => {
-    show(loan({ plaid: true, rate: 4, payment: 310, source: "inferred", inferred_payment: 310 }));
-    expect(screen.queryByLabelText(/Interest rate/)).toBeNull();
-    expect(screen.getByText("4%")).toBeInTheDocument();
-    const payment = screen.getByLabelText(/Monthly payment/);
-    expect(payment).toHaveAttribute("placeholder", "310 from recent payments");
-    await userEvent.type(payment, "325{Enter}");
-    await waitFor(() => expect(api).toHaveBeenCalledWith("/api/accounts/mtg", { method: "POST", body: { monthly_payment: 325 } }));
-  });
-
-  it("says an empty payment pays the loan off by Plaid's payoff date, when that's what's used", () => {
-    show(loan({ plaid: true, rate: 6, payment: 2775.5, source: "plaid", maturity: "2036-09-01", inferred_payment: 1850 }));
-    const payment = screen.getByLabelText(/Monthly payment/);
-    expect(payment.getAttribute("placeholder")).toMatch(/^2,776 to pay it off by Sep\s1,\s2036$/);
-    expect(payment.closest("label")).toHaveAttribute("title", expect.stringContaining("pays the loan off by the date the lender gives"));
-  });
-
-  it("isn't asked of other accounts", () => {
-    show(acct({ id: "cc", kind: "credit" }));
-    expect(screen.queryByText(/Interest rate/)).toBeNull();
   });
 });
 
