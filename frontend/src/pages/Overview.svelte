@@ -155,7 +155,7 @@
         <ForecastChart {fc} />
         <!-- What the line spends besides scheduled items: your budgets, and nothing else. -->
         <p class="mt-1 text-xs text-muted-foreground" title={fc.budget ? budgetSkipped(fc.budget.skipped).trim() || undefined : undefined}>
-          {#if fc.budget?.used.length}Spends your budgets, {fmt0(fc.budget.monthly)} a month, along with your recurring bills and income.
+          {#if fc.budget?.used.length}Recurring bills and income, plus {fmt0(fc.budget.monthly)} a month of budgeted spending.
           {:else}Recurring bills and income only: <a class="font-medium text-foreground underline underline-offset-4" href="#budget">set budgets</a> to include everyday spending.{/if}
         </p>
       </div>
