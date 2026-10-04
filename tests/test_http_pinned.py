@@ -23,10 +23,10 @@ from unittest import mock
 
 from sqlalchemy import delete, insert
 
-from runway import backup, db, mcp_oauth, oidc, prices, server
+from runway import backup, db, mcp_access, mcp_oauth, oidc, prices, server
 from runway import settings_keys as sk
 from runway.models import Merchant
-from runway.server import common, sync
+from runway.server import common, mcp_http, sync
 from runway.server.api import retail
 from tests.shared import forget_oauth, own_database
 from tests.test_web_app import built_app, serving
@@ -261,6 +261,20 @@ class Pinned(unittest.TestCase):
         self.assertJson(self.api("POST", "/api/settings", b"\xff\xfe"), 400, {"error": "Bad JSON"})
         self.assertJson(self.api("POST", "/api/settings", headers={"Content-Length": str(server.MAX_JSON_BODY + 1)}),
                         413, {"error": "That request is too large."})
+
+    def test_json_nested_deeper_than_python_reads_is_a_400(self):
+        deep = b"[" * 200_000 + b"]" * 200_000
+        nested = b'{"a": ' + deep + b"}"
+        self.assertJson(self.api("POST", "/api/settings", nested), 400, {"error": "Bad JSON"})
+        with mock.patch.object(mcp_http, "authorized", return_value=mcp_access.Access(frozenset({"read"}), None, None)):
+            code, _h, data = self.send("POST", "/mcp", deep, {"Content-Type": "application/json"})
+        self.assertEqual((code, json.loads(data)["error"]["code"]), (400, -32700))
+        with mock.patch("runway.retail.token_check", return_value=None):
+            code, _h, data = self.send("POST", "/api/ext/start", nested)
+        self.assertEqual((code, json.loads(data)), (400, {"error": "Bad JSON"}))
+        # (Registration takes 8 KB at most, too little to nest that deep: as deep as it goes, it's still a 400.)
+        code, _h, data = self.send("POST", "/oauth/register", b"[" * 4000 + b"]" * 4000, {"Content-Type": "application/json"})
+        self.assertEqual((code, json.loads(data)["error"]), (400, "invalid_client_metadata"))
 
     def test_the_extension_and_assistants_without_their_keys(self):
         code, heads, data = self.send("POST", "/api/ext/start", b"{}")
