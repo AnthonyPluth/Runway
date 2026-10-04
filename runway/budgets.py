@@ -38,7 +38,10 @@ def budget_carry(conn, cats: list[dict], budget_rows: dict, month: date) -> dict
     """For each budget that rolls over: what's carried into `month`, the unspent part of every month since it started
     rolling over (overspending isn't carried; a month that goes over just uses up what was carried)."""
     starts = {}
+    names = {c["name"] for c in cats}   # spending budgets only: income doesn't roll over
     for name, r in budget_rows.items():
+        if name not in names:
+            continue
         try:
             if r.get("rollover_from"):
                 starts[name] = date.fromisoformat(r["rollover_from"] + "-01")

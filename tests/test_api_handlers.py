@@ -267,7 +267,7 @@ class HandlerTests(DbCase):
 
     def test_budget_set(self):
         with self.assertRaises(ApiError):
-            budget.api_budget_set(self.c, {}, {"category": "Income", "amount": 5})
+            budget.api_budget_set(self.c, {}, {"category": "Transfer", "amount": 5})
         with self.assertRaises(ApiError):   # no budget to roll over yet
             budget.api_budget_set(self.c, {}, {"category": "Travel", "rollover": True})
         with self.assertRaises(ApiError):
@@ -302,7 +302,8 @@ class HandlerTests(DbCase):
                          ev(TODAY, "Income", 3000.0),
                          ev(TODAY, None, -500.0, kind="card")],             # a card's statement payment
               # on a card: counted in its subcategory and in the parent above it
-              "charges": [ev(TODAY, "Streaming TV", -15.5, acct="demo-card"), ev(next_month, "Streaming TV", -15.5, acct="demo-card")]}
+              "charges": [ev(TODAY, "Streaming TV", -15.5, acct="demo-card"), ev(next_month, "Streaming TV", -15.5, acct="demo-card"),
+                          ev(TODAY, "Income", 40.0, acct="demo-card")]}   # a card doesn't receive income
 
         def coming(month):
             return {c["name"]: c["expected"] for c in budget.api_budget(self.c, q(month=f"{month:%Y-%m}"), {})["categories"]}
@@ -310,6 +311,9 @@ class HandlerTests(DbCase):
         with mock.patch.object(budget.forecast, "build", return_value=fc) as build:
             now = coming(TODAY)
             self.assertEqual((now["Subscriptions"], now["Streaming TV"], now["Groceries"]), (35.5, 15.5, 0.0))
+            # the paycheck still to come is income's, and nothing else counts there
+            income = {c["name"]: c["expected"] for c in budget.api_budget(self.c, {}, {})["income_rows"]}
+            self.assertEqual(income, {"Income": 3000.0})
             # the forecast is asked for this month's rest: from today to its last day
             self.assertEqual(build.call_args.args[1:], (TODAY, max(1, (next_month - timedelta(days=1) - TODAY).days)))
             later = coming(next_month)
@@ -327,6 +331,35 @@ class HandlerTests(DbCase):
                                      and e["date"][:7] == f"{TODAY:%Y-%m}"), 2)
         b = {c["name"]: c["expected"] for c in budget.api_budget(self.c, {}, {})["categories"]}
         self.assertEqual((b["Subscriptions"], b["Utilities"]), (due("Subscriptions"), due("Utilities")))
+
+    def test_income_budget(self):
+        categories.add(self.c, "Bonus", parent="Income")
+        start = TODAY.replace(day=1)
+        self.c.execute(insert(Transaction), [
+            {"id": "bonus-1", "account_id": "demo-checking", "posted": start.isoformat(), "amount": 250.0, "category": "Bonus"},
+            {"id": "refund-1", "account_id": "demo-card", "posted": start.isoformat(), "amount": 30.0, "category": "Refunds"}])
+        paid = sum(r[0] for r in self.c.execute(select(Transaction.amount).where(
+            Transaction.category == "Income", Transaction.posted >= start.isoformat())))
+        save = lambda name, **kw: budget.api_budget_set(self.c, {}, {"category": name, **kw})
+        self.assertEqual(save("Bonus", amount=300), {"ok": True, "raised": []})   # its parent has no budget
+        self.assertEqual(save("Income", amount=6000)["raised"], [])
+        # a subcategory's raises its parent's, as for spending
+        self.assertEqual(save("Bonus", amount=6500)["raised"], [{"category": "Income", "amount": 6500.0}])
+        with self.assertRaises(ApiError) as e:
+            save("Income", rollover=True)
+        self.assertEqual(str(e.exception), "Income doesn’t roll over")
+        self.assertEqual(save("Income", pay_with="demo-card"), {"ok": True})   # no card for income: ignored
+        self.assertIsNone(self.one(select(Category.pay_with).where(Category.name == "Income"))[0])
+        with mock.patch.object(budget.forecast, "build", return_value={"events": [], "charges": []}):
+            b = budget.api_budget(self.c, {}, {})
+        rows = {c["name"]: c for c in b["income_rows"]}
+        self.assertEqual(list(rows), ["Income", "Bonus"])   # Refunds come off spending: not income
+        inc = rows["Income"]
+        self.assertEqual((inc["budget"], inc["spent"], inc["own_spent"], inc["left"], inc["carried"], inc["pay_with"]),
+                         (6500.0, round(paid + 250, 2), round(paid, 2), round(6500 - paid - 250, 2), 0.0, None))
+        self.assertEqual((rows["Bonus"]["spent"], rows["Bonus"]["left"]), (250.0, 6250.0))
+        self.assertEqual(b["income"], round(paid + 250, 2))   # the total as before
+        self.assertNotIn("Income", [c["name"] for c in b["categories"]])
 
     def test_saving_a_subcategorys_budget_raises_its_parents(self):
         categories.add(self.c, "Medical Care")

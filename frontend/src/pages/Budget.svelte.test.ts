@@ -173,6 +173,44 @@ describe("Budget page", () => {
     expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
+  describe("income", () => {
+    const withIncome = (budget: number | null) => month({
+      income: 3150,
+      income_rows: [cat("Income", { budget, spent: 3150, own_spent: 3150, left: budget == null ? null : budget - 3150, expected: 3150 }),
+        cat("Side gigs", { spent: 0 })],
+    });
+
+    it("has its own group above the budgets, and the strip says what's come in of what's expected", async () => {
+      serve(withIncome(6300));
+      render(Budget);
+      const group = await screen.findByRole("heading", { name: "Income" });
+      expect(group.compareDocumentPosition(screen.getByRole("heading", { name: "Budgets" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByText("$3,150 to come · $3,150 scheduled")).toBeInTheDocument();
+      expect(screen.getByText("of $6,300 expected")).toBeInTheDocument();
+      // the spending totals leave it out
+      expect(screen.getByText("$600")).toBeInTheDocument();
+      expect(screen.getByText("$300 left · ▲ $60 over in 1 budget")).toBeInTheDocument();
+      // an income category without a budget can be given one from the list at the bottom
+      const income = within(screen.getByLabelText("Category to budget")).getByRole("group", { name: "Income" });
+      expect(within(income).getAllByRole("option").map((o) => o.textContent)).toEqual(["Side gigs"]);
+    });
+
+    it("keeps the strip's money in as it was without an income budget", async () => {
+      serve(withIncome(null));
+      render(Budget);
+      await screen.findByRole("heading", { name: "Income" });   // money came in: its row offers a box for what's expected
+      expect(screen.getByLabelText("Budget for Income")).toHaveAttribute("placeholder", "Expected");
+      expect(screen.queryByText(/expected$/)).not.toBeInTheDocument();
+    });
+
+    it("isn't there with no income budget and nothing come in", async () => {
+      serve(month({ income: 0, income_rows: [cat("Income")] }));
+      render(Budget);
+      await screen.findByText("Budgeted");
+      expect(screen.queryByRole("heading", { name: "Income" })).not.toBeInTheDocument();
+    });
+  });
+
   it("removes a budget when its box is emptied", async () => {
     serve(month());
     render(Budget);

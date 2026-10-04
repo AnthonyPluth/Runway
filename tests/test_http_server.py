@@ -128,7 +128,7 @@ class ServerTests(unittest.TestCase):
                                              "amount": 900, "description": "PAYMENT", "payee": "Payment",
                                              "category": "Credit Card Payment"}])
         self.assertEqual(self.req("POST", "/api/budget", {"category": "Groceries", "amount": 500})[0], 200)
-        self.assertEqual(self.req("POST", "/api/budget", {"category": "Income", "amount": 5})[0], 400)
+        self.assertEqual(self.req("POST", "/api/budget", {"category": "Transfer", "amount": 5})[0], 400)
         _, b = self.req("GET", "/api/budget")
         g = next(c for c in b["categories"] if c["name"] == "Groceries")
         self.assertEqual((g["budget"], g["spent"], g["left"]), (500.0, 80.0, 420.0))
