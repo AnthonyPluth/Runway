@@ -891,8 +891,19 @@ class ExtensionApiTests(unittest.TestCase):
         self.assertEqual(self.req("POST", "/api/ext/ping", {}, ext)[0], 401)
         with urllib.request.urlopen(self.base + "/api/retail/extension.zip") as resp:   # to install it from Settings
             import io
+            import re
             import zipfile
-            self.assertIn("runway-orders/manifest.json", zipfile.ZipFile(io.BytesIO(resp.read())).namelist())
+            z = zipfile.ZipFile(io.BytesIO(resp.read()))
+        names = z.namelist()
+        self.assertIn("runway-orders/manifest.json", names)
+        # Every script the extension loads ships too: background.js is split into several files, which Chrome's worker
+        # imports and Firefox loads from the manifest.
+        background = json.loads(z.read("runway-orders/manifest.json"))["background"]
+        imports = re.search(r"importScripts\(([^)]*)\)", z.read("runway-orders/background.js").decode())
+        scripts = {background["service_worker"], *background["scripts"], *re.findall(r'"([^"]+\.js)"', imports.group(1))}
+        self.assertGreater(len(scripts), 9)
+        for script in scripts:
+            self.assertIn(f"runway-orders/{script}", names)
         code, st = self.req("GET", "/api/retail")
         self.assertEqual((code, st["token"], st["stores"]["target"]["orders"]), (200, False, 0))
 

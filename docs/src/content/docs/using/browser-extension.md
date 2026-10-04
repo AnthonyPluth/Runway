@@ -75,20 +75,19 @@ connections.
 
 Runway reads the pages with the [amazon-orders](https://github.com/alexdlaird/amazon-orders) library's parsers for
 Amazon, and loosely (by field names) for Target, whose order API is undocumented. Runway tells the extension which
-address to read Target's history from (`TARGET_HISTORY` in `runway/server/api/retail.py`: the newer one, 100 orders
-a page, then the older one if that isn't answered); Target says "too many requests" now and then, which the extension
+address to read Target's history from (the newer one, 100 orders a page, then the older one if that isn't
+answered); Target says "too many requests" now and then, which the extension
 waits out once (and goes slower after) before it gives up until the next import. Target's replies are kept with each
 order, so if items are missing you can look at what Target sent (it's in the `retail_orders.raw` column) and Runway
 can be taught to read it. When the addresses Runway knows for a Target order's items don't answer, the extension
 loads that order's own page on target.com, reads the addresses the page called for it, and remembers them for the
 next orders. An order whose page can't be read is tried again on the next few imports, then left alone.
 
-For Costco, Runway holds the query and the list of headers to send (`COSTCO_GRAPHQL_CONFIG` in
-`runway/server/api/retail.py`) and reads the replies loosely (by field names); each receipt is kept with its order
-(`retail_orders.raw`). If the extension says it couldn't find how costco.com signs its requests, open
-Account → Orders & Purchases in that browser once and import again; if it still can't, the address of the account
-page (`page` in that config) or the names of the values the page keeps in storage (`storage_headers`) need updating,
-which is a change in Runway only.
+For Costco, Runway holds the query to send, the headers to send it with and the address of the account page, and
+reads the replies loosely (by field names); each receipt is kept with its order (`retail_orders.raw`). If the
+extension says it couldn't find how costco.com signs its requests, open Account → Orders & Purchases in that browser
+once and import again; if it still can't, the account page's address or the names of the values the page keeps in
+storage need updating, which is a change in Runway only.
 
 For Carta, whose web app isn't documented either, Runway keeps what the extension read: Settings -> Connections -> Browser extension ->
 Carta -> **Download what the extension read** shows why a grant was missed.

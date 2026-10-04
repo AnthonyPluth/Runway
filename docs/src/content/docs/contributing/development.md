@@ -41,7 +41,7 @@ cd frontend && npm ci                 # its packages, into frontend/node_modules
 npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
 npm run lint                          # ESLint over it, the browser extension and the service worker (CI runs this)
-npm test                              # unit tests for its pure logic, with Vitest (CI runs these too)
+npm test                              # unit tests for its pure logic and the extension's helpers, with Vitest (CI runs these too)
 npm run coverage                      # the same, measuring how much of the web app they run (the frontend badge)
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
@@ -88,7 +88,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up |
 | `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components (`components/settings/` holds Settings' tabs) |
-| `extension/` | The browser extension (Amazon, Target, Costco and Carta) |
+| `extension/` | The browser extension (Amazon, Target, Costco and Carta): `background.js` runs the imports, with one file each for Runway's API, the store address allow-list, hidden frames and tabs, and each store. Plain scripts with no build step; their pure helpers are tested by `frontend/src/extension/` |
 | `runway/static/` | Files Runway serves beside the app: the service worker (`sw.js`), manifest, fonts, icons, and `page.css` for the sign-in pages; the web app builds into `runway/static/app/` |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |
