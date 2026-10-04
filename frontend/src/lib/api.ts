@@ -13,8 +13,10 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-/** `background`: a call Runway makes on its own (the state poll, the sync on opening), not one you asked for. */
-type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean; background?: boolean };
+/** `background`: a call Runway makes on its own (the state poll, the sync on opening), not one you asked for.
+ * `body`: sent as JSON, except a file (Blob), which goes up as it is (a backup). `failed`: what to call a refusal that
+ * says nothing ("Restore failed (500)"), instead of "Request failed (500)". */
+type Options = { method?: "GET" | "POST" | "DELETE"; body?: unknown; keep?: boolean; background?: boolean; failed?: string };
 
 // When the session has expired, sending you to sign in throws away the page, and whatever you're typing on it. So
 // this event goes out first, and the app (lib/app.svelte.ts) cancels it while you're editing, and always for a
@@ -35,7 +37,8 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   const init: RequestInit = { method: opts.method ?? "GET", headers: {} };
   const headers = init.headers as Record<string, string>;
   if (init.method !== "GET") headers["X-Runway"] = "1";   // Runway refuses state changes without it (CSRF)
-  if (opts.body !== undefined) { headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
+  if (opts.body instanceof Blob) { headers["Content-Type"] = "application/octet-stream"; init.body = opts.body; }
+  else if (opts.body !== undefined) { headers["Content-Type"] = "application/json"; init.body = JSON.stringify(opts.body); }
   const page = init.method === "GET" && !opts.keep ? pageLoads : null;
   if (page) init.signal = page.signal;
   let res: Response;
@@ -54,7 +57,8 @@ export async function api<T = unknown>(path: string, opts: Options = {}): Promis
   const data = await res.json().catch(() => ({}));
   if (page?.signal.aborted) return new Promise(() => {});
   if (!res.ok) {
-    throw new ApiError(data.error || ([502, 503, 504].includes(res.status) ? UNREACHABLE : `Request failed (${res.status})`), res.status);
+    const said = opts.failed ? `${opts.failed} (${res.status})` : [502, 503, 504].includes(res.status) ? UNREACHABLE : `Request failed (${res.status})`;
+    throw new ApiError(data.error || said, res.status);
   }
   return data as T;
 }

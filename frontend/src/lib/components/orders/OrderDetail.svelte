@@ -37,9 +37,9 @@
   load();
   function changed() { onchange?.(); picking = {}; load(); }
 
-  async function post(path: string, body: unknown, msg: string | ((r: any) => string)) {   // eslint-disable-line @typescript-eslint/no-explicit-any
+  async function post<T = unknown>(path: string, body: unknown, msg: string | ((r: T) => string)) {
     await act(async () => {
-      const r = await api(path, { method: "POST", body });
+      const r = await api<T>(path, { method: "POST", body });
       toast.success(typeof msg === "string" ? msg : msg(r));
       changed();
     });

@@ -45,6 +45,22 @@ describe("api", () => {
     await expect(api("/api/x")).rejects.toMatchObject({ message: "Plaid is down", status: 502 });
   });
 
+  it("sends a file as it is, not as JSON, with the CSRF header", async () => {
+    fetchMock.mockReturnValue(reply({ ok: true }));
+    const file = new File([new Uint8Array([0x1f, 0x8b])], "backup.gz");
+    await api("/api/restore", { method: "POST", body: file });
+    const init = fetchMock.mock.calls[0][1];
+    expect(init.headers).toEqual({ "X-Runway": "1", "Content-Type": "application/octet-stream" });
+    expect(init.body).toBe(file);
+  });
+
+  it("names a refusal that says nothing with `failed`, and still shows the server's own words", async () => {
+    fetchMock.mockReturnValue(Promise.resolve(new Response("<html>Oops</html>", { status: 500 })));
+    await expect(api("/api/restore", { method: "POST", body: {}, failed: "Restore failed" })).rejects.toMatchObject({ message: "Restore failed (500)", status: 500 });
+    fetchMock.mockReturnValue(reply({ error: "That file isn't a Runway backup." }, 400));
+    await expect(api("/api/restore", { method: "POST", body: {}, failed: "Restore failed" })).rejects.toMatchObject({ message: "That file isn't a Runway backup." });
+  });
+
   it("sends you to sign in again, and back here, when the session has expired", async () => {
     fetchMock.mockReturnValue(reply({}, 401));
     const fake = { href: "", pathname: "/", hash: "#budget" };   // jsdom can't navigate, so watch the assignment
