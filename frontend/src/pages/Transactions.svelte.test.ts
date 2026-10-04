@@ -382,6 +382,7 @@ describe("Transactions page", () => {
 
     it("shows a budget's link what's still coming in it, recurring charges on cards included", async () => {
       route.query = "category=Food&from=2026-03-01&to=2026-03-31&scope=budget";
+      app.state = { connected: true, review_count: 3, brands: { c1: { institution: "Travel Bank", initial: "T" } } };
       const ev = (date: string, name: string, category: string, extra = {}) =>
         ({ date, name, amount: -20, kind: "recurring", key: `k-${name}`, category, ...extra });
       serve(rows(), 2, (path) => path === "/api/categories" ? [category("Food"), category("Groceries", { parent: "Food" }), category("Coffee")]
@@ -397,8 +398,9 @@ describe("Transactions page", () => {
       const kit = within(group as HTMLElement).getByText("Meal kit");
       expect(within(group as HTMLElement).getAllByText("Meal kit")).toHaveLength(1);
       expect(within(group as HTMLElement).queryByText("Beans")).not.toBeInTheDocument();
-      // the card is named on its row, and a charge to it doesn't move a projected balance
-      expect(kit.closest(".cell")).toHaveTextContent("Travel Card");
+      // the card is its bank's badge on the row's logo (named in its tooltip), and a charge to it doesn't move a projected balance
+      expect(kit.closest(".cell")!.querySelector("[data-account-badge]")).toHaveAttribute("title", "Travel Card");
+      expect(kit.closest(".cell")).not.toHaveTextContent("Travel Card");
       expect(within(group as HTMLElement).getAllByText(/projected balance/)).toHaveLength(1);
     });
 
