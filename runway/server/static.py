@@ -5,20 +5,33 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import mimetypes
 import os
 import secrets
 import threading
 from typing import TYPE_CHECKING
 
 from .. import monitoring
+from .common import header_value
 
 if TYPE_CHECKING:
     from .handler import Handler
 
-mimetypes.add_type("image/svg+xml", ".svg")
-mimetypes.add_type("font/woff2", ".woff2")
-mimetypes.add_type("application/manifest+json", ".webmanifest")
+# A file's Content-Type, by its extension: the kinds Runway ships (static/ and the built web app), as Python's mimetypes
+# named them. Fixed here, so nothing from the address a file was asked for ever reaches a header; anything else is
+# DEFAULT_TYPE.
+CONTENT_TYPES = {
+    ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
+    ".webmanifest": "application/manifest+json", ".txt": "text/plain", ".xml": "application/xml",
+    ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+    ".webp": "image/webp", ".ico": "image/vnd.microsoft.icon",
+    ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".wasm": "application/wasm",
+}
+DEFAULT_TYPE = "application/octet-stream"
+
+
+def content_type(path: str) -> str:
+    """The Content-Type a file is sent with (CONTENT_TYPES)."""
+    return CONTENT_TYPES.get(os.path.splitext(path)[1].lower(), DEFAULT_TYPE)
 
 STATIC = os.path.realpath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static"))
 APP_DIR = os.path.join(STATIC, "app")       # the web app, built from frontend/
@@ -44,7 +57,7 @@ def serve(h: Handler, path: str) -> None:
         full = APP_INDEX
         if not os.path.isfile(full):
             return h._page(404, "The web app isn't built", "Run npm run build in frontend/ (the Docker image does this for you).")
-    ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+    ctype = content_type(full)
     gz_ok = "gzip" in (h.headers.get("Accept-Encoding") or "")
     if full == APP_INDEX:
         # A fresh nonce per page, so only this page's own <script> tags may run (see content_security_policy).
@@ -76,6 +89,11 @@ def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None,
         data, encoded = gz or gzip.compress(data, 6), True
     else:
         encoded = False
+    # Each is one of CONTENT_TYPES, a constant or a hash, never the address asked for; checked all the same, before
+    # anything is sent.
+    ctype, cache = header_value(ctype), header_value(cache)
+    etag = header_value(etag) if etag else None
+    extra = {header_value(k): header_value(v) for k, v in (extra or {}).items()}
     h.send_response(200)
     h.send_header("Content-Type", ctype)
     h.send_header("Content-Length", str(len(data)))
@@ -85,7 +103,7 @@ def send_file(h: Handler, data: bytes, ctype: str, cache: str, etag: str | None,
         h.send_header("ETag", etag)
     if encoded:
         h.send_header("Content-Encoding", "gzip")
-    for k, v in (extra or {}).items():
+    for k, v in extra.items():
         h.send_header(k, v)
     h._security_headers(nonce)
     h.end_headers()
@@ -108,7 +126,7 @@ def _static_entry(full: str) -> dict:
             return entry
     with open(full, "rb") as f:
         data = f.read()
-    ctype = mimetypes.guess_type(full)[0] or ""
+    ctype = content_type(full)
     entry = {"key": key, "data": data, "etag": '"' + hashlib.sha256(data).hexdigest()[:20] + '"',
              "gz": gzip.compress(data, 6) if _compressible(ctype) and len(data) > 1024 else None}
     with _static_lock:

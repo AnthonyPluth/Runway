@@ -1,5 +1,6 @@
 """The web app (frontend/, built into runway/static/app/) is Runway's page at /: signed in, under the content security
 policy, with a fresh script nonce on its page; its routes and the old /next/ address lead to it."""
+import mimetypes
 import os
 import tempfile
 import threading
@@ -97,6 +98,40 @@ class WebAppTests(unittest.TestCase):
             status, _, body = self.get("/", static=empty)
         self.assertEqual(status, 404)
         self.assertIn(b"npm run build", body)
+
+
+class ContentTypeTests(unittest.TestCase):
+    """A file's Content-Type comes from static.CONTENT_TYPES (nothing from the address reaches a header), and is what
+    Python's mimetypes gave for it before, for every file Runway ships."""
+
+    @staticmethod
+    def guessed(path: str) -> str:
+        """What the server sent before: mimetypes' guess, with the three types it added, else octet-stream."""
+        for t, ext in (("image/svg+xml", ".svg"), ("font/woff2", ".woff2"), ("application/manifest+json", ".webmanifest")):
+            mimetypes.add_type(t, ext)   # (as the server did, on the same module-wide table)
+        return mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+    def test_every_shipped_file(self):
+        shipped = [os.path.join(d, f) for d, _dirs, files in os.walk(server.static.STATIC) for f in files]
+        self.assertTrue(any(f.endswith(".woff2") for f in shipped))
+        built = ["index.html", "assets/index-abc.js", "assets/index-abc.css", "assets/logo-abc.svg", "assets/a.png", "favicon.ico",
+                 "assets/x.json", "assets/x.js.map", "robots.txt", "assets/font.woff", "assets/m.mjs", "assets/w.wasm",
+                 "assets/p.jpg", "assets/p.webp", "assets/p.gif", "assets/f.ttf", "sitemap.xml"]   # what a build can hold
+        for path in shipped + built:
+            with self.subTest(path=path):
+                self.assertEqual(server.static.content_type(path), self.guessed(path))
+
+    def test_anything_else_is_octet_stream(self):
+        for path in ("/x.exe", "/x", "/x.unknown", "/evil.html\r\nSet-Cookie: a=b"):
+            self.assertEqual(server.static.content_type(path), "application/octet-stream")
+        self.assertEqual(server.static.content_type("/LOGO.SVG"), "image/svg+xml")
+
+    def test_a_header_value_never_holds_a_line_break(self):
+        from runway.server.common import header_value
+        self.assertEqual(header_value("text/html"), "text/html")
+        for bad in ("a\r\nSet-Cookie: x=1", "a\nb", "a\rb"):
+            with self.subTest(v=bad), self.assertRaises(ValueError):
+                header_value(bad)
 
 
 if __name__ == "__main__":

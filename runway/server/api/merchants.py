@@ -20,7 +20,8 @@ def api_merchant_logo_file(conn, _q, _b, mid) -> Response:
     found = merchants.logo(conn, mid)
     if not found or found[1] not in merchants.TYPES:   # a backup can hold anything; only ever serve an image
         return Response(b"", "text/plain", 404)
-    data, ctype = found
+    data = found[0]
+    ctype = next(t for t in sorted(merchants.TYPES) if t == found[1])   # Runway's own string for it, not the stored one
     return Response(data, ctype, cache="private, no-cache", etag='"' + hashlib.sha256(data).hexdigest()[:20] + '"',
                     csp="default-src 'none'; sandbox")
 

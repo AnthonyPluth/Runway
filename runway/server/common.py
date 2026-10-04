@@ -52,6 +52,14 @@ class Response:
     stream: Generator[bytes] | None = None   # Server-Sent Events: written and flushed a piece at a time, not `body`
 
 
+def header_value(v: str) -> str:
+    """v, checked to be safe in a response header: a line break would end the header and start another of someone
+    else's choosing (response splitting). Handler.send_header refuses one too; this says so where a value is chosen."""
+    if "\r" in v or "\n" in v:
+        raise ValueError("A response header can't contain a line break")
+    return v
+
+
 def download(data: bytes, content_type: str, filename: str, sent: Callable[[], None] | None = None) -> Response:
     """A file the browser saves (as `filename`) rather than shows."""
     return Response(data, content_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'}, sent=sent)

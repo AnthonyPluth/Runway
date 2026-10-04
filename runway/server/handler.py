@@ -20,7 +20,7 @@ from typing import Any
 from .. import carta, db, mcp_oauth, mcp_server, monitoring, oidc, retail, secretbox
 from .. import settings_keys as sk
 from . import mcp_http, oauth_http, routes, static, sync
-from .common import NOT_READ, ApiError, BadJson, Response, _current, host_allowed, server_error
+from .common import NOT_READ, ApiError, BadJson, Response, _current, header_value, host_allowed, server_error
 from .oauth_http import OAUTH_METADATA, OAUTH_PUBLIC
 from .sync import background_sync
 from .api.retail import EXT_ROUTES, MAX_EXT_BODY
@@ -196,26 +196,31 @@ class Handler(BaseHTTPRequestHandler):
 
     def _respond(self, r: Response) -> None:
         """A route's answer that isn't JSON (common.Response): a download, a logo, a stream."""
-        if r.etag and self.headers.get("If-None-Match") == r.etag:
+        # Every header value a route chose, checked before anything is sent (common.header_value).
+        ctype, cache = header_value(r.content_type), header_value(r.cache)
+        etag = header_value(r.etag) if r.etag else None
+        csp = header_value(r.csp) if r.csp else None
+        headers = {header_value(k): header_value(v) for k, v in r.headers.items()}
+        if etag and self.headers.get("If-None-Match") == etag:
             self.send_response(304)
-            self.send_header("ETag", r.etag)
+            self.send_header("ETag", etag)
             self._security_headers()
             self.end_headers()
             return
         self.send_response(r.status)
-        self.send_header("Content-Type", r.content_type)
-        for k, v in r.headers.items():
+        self.send_header("Content-Type", ctype)
+        for k, v in headers.items():
             self.send_header(k, v)
         if r.stream is None:
             self.send_header("Content-Length", str(len(r.body)))
-        self.send_header("Cache-Control", r.cache)
-        if r.etag:
-            self.send_header("ETag", r.etag)
+        self.send_header("Cache-Control", cache)
+        if etag:
+            self.send_header("ETag", etag)
         if r.stream is not None:
             self.send_header("X-Accel-Buffering", "no")   # a reverse proxy (nginx) would otherwise hold the events back
         self._security_headers()
-        if r.csp:
-            self.send_header("Content-Security-Policy", r.csp)   # on top of the usual one (a logo opened directly is inert)
+        if csp:
+            self.send_header("Content-Security-Policy", csp)   # on top of the usual one (a logo opened directly is inert)
         self.end_headers()
         if r.stream is not None:
             return self._stream(r.stream)
