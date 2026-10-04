@@ -10,55 +10,30 @@ import { tx } from "../../../test/fixtures";
 import { TxListing } from "./txList.svelte";
 import type { Tx, TxList } from "./types";
 
-const none = () => ({
-  q: "",
-  account: "",
-  category: "",
-  from: "",
-  to: "",
-  min: "",
-  max: "",
-  kind: "" as const,
-  scope: "",
-});
-const page = (items: Tx[], total = items.length): TxList =>
-  ({ items, total, sum: 0 }) as TxList;
-const paths = () =>
-  vi
-    .mocked(api)
-    .mock.calls.map((c) => c[0] as string)
-    .filter((p) => !p.includes("ignored=only"));
+const none = () => ({ q: "", account: "", category: "", from: "", to: "", min: "", max: "", kind: "" as const, scope: "" });
+const page = (items: Tx[], total = items.length): TxList => ({ items, total, sum: 0 }) as TxList;
+const paths = () => vi.mocked(api).mock.calls.map((c) => c[0] as string).filter((p) => !p.includes("ignored=only"));
 const flush = () => vi.advanceTimersByTimeAsync(0);
 let cleanup = () => {};
 const make = (review = false) => {
   let listing!: TxListing;
-  cleanup = $effect.root(() => {
-    listing = new TxListing(review);
-  });
+  cleanup = $effect.root(() => { listing = new TxListing(review); });
   return listing;
 };
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(api).mockReset();
-  Object.assign(txFilters.transactions, none());
-  Object.assign(txFilters.review, none());
+  Object.assign(txFilters.transactions, none()); Object.assign(txFilters.review, none());
   txShow.ignored = false;
-  route.query = "";
-  route.page = "transactions";
+  route.query = ""; route.page = "transactions";
   history.replaceState(null, "", "/#transactions");
 });
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-});
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe("TxListing", () => {
   it("loads the first page on creation, keeping what All hides out of it, and counts what's ignored", async () => {
-    vi.mocked(api).mockImplementation((async (p: string) =>
-      p.includes("ignored=only")
-        ? page([], 4)
-        : page([tx({ id: "a" }), tx({ id: "b" })], 2)) as never);
+    vi.mocked(api).mockImplementation((async (p: string) => (p.includes("ignored=only") ? page([], 4) : page([tx({ id: "a" }), tx({ id: "b" })], 2))) as never);
     const l = make();
     await flush();
     expect(paths()[0]).toBe("/api/transactions?ignored=0&limit=100&offset=0");
@@ -94,12 +69,7 @@ describe("TxListing", () => {
 
   it("never lets a slow old answer replace a newer one", async () => {
     let slow!: (v: TxList) => void;
-    vi.mocked(api).mockImplementationOnce(
-      (() =>
-        new Promise<TxList>((r) => {
-          slow = r;
-        })) as never,
-    );
+    vi.mocked(api).mockImplementationOnce((() => new Promise<TxList>((r) => { slow = r; })) as never);
     const l = make();
     vi.mocked(api).mockResolvedValue(page([tx({ id: "new" })]) as never);
     await l.load();
@@ -113,9 +83,7 @@ describe("TxListing", () => {
     vi.mocked(api).mockResolvedValue(page(rows, 150) as never);
     const l = make();
     await flush();
-    vi.mocked(api).mockResolvedValue(
-      page([...rows, tx({ id: "extra" })], 151) as never,
-    );
+    vi.mocked(api).mockResolvedValue(page([...rows, tx({ id: "extra" })], 151) as never);
     await l.more();
     expect(l.list?.items).toHaveLength(101);
     await l.load();
@@ -128,14 +96,10 @@ describe("TxListing", () => {
   });
 
   it("adds the next page without repeating a row that moved up meanwhile", async () => {
-    vi.mocked(api).mockResolvedValue(
-      page([tx({ id: "a" }), tx({ id: "b" })], 4) as never,
-    );
+    vi.mocked(api).mockResolvedValue(page([tx({ id: "a" }), tx({ id: "b" })], 4) as never);
     const l = make();
     await flush();
-    vi.mocked(api).mockResolvedValue(
-      page([tx({ id: "b" }), tx({ id: "c" })], 4) as never,
-    );
+    vi.mocked(api).mockResolvedValue(page([tx({ id: "b" }), tx({ id: "c" })], 4) as never);
     await l.more();
     expect(paths().at(-1)).toContain("offset=2");
     expect(l.list?.items.map((t) => t.id)).toEqual(["a", "b", "c"]);
@@ -146,9 +110,7 @@ describe("TxListing", () => {
     const l = make();
     await flush();
     const before = paths().length;
-    l.search("r");
-    l.search("re");
-    l.search("rent");
+    l.search("r"); l.search("re"); l.search("rent");
     await vi.advanceTimersByTimeAsync(249);
     expect(paths()).toHaveLength(before);
     await vi.advanceTimersByTimeAsync(1);
@@ -172,9 +134,7 @@ describe("TxListing", () => {
   });
 
   it("takes rows out of the list and the counts without loading again", async () => {
-    vi.mocked(api).mockResolvedValue(
-      page([tx({ id: "a" }), tx({ id: "b" }), tx({ id: "c" })]) as never,
-    );
+    vi.mocked(api).mockResolvedValue(page([tx({ id: "a" }), tx({ id: "b" }), tx({ id: "c" })]) as never);
     const l = make(true);
     await flush();
     const calls = vi.mocked(api).mock.calls.length;

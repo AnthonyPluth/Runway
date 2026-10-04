@@ -1,34 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  barWidth,
-  fmt,
-  fmt0,
-  fmt0Down,
-  fmtSigned,
-  fmtSigned0,
-  fmtDate,
-  fmtDateTime,
-  fmtDow,
-  isoDay,
-  monthLabel,
-  monthShort,
-  nb,
-  parseDate,
-  pct,
-  pctSigned,
-  plural,
-  relDay,
-  relTime,
-  serverTime,
-  shortMoney,
-  thisMonth,
-} from "./format";
+import { barWidth, fmt, fmt0, fmt0Down, fmtSigned, fmtSigned0, fmtDate, fmtDateTime, fmtDow, isoDay, monthLabel, monthShort, nb, parseDate, pct, pctSigned, plural, relDay, relTime, serverTime, shortMoney, thisMonth } from "./format";
 
 const NBSP = " ";
 
-afterEach(() => {
-  vi.useRealTimers();
-});
+afterEach(() => { vi.useRealTimers(); });
 
 describe("money", () => {
   it("formats dollars and cents", () => {
@@ -74,9 +49,7 @@ describe("money", () => {
 describe("dates", () => {
   it("reads a day as local midnight, ignoring any time", () => {
     const d = parseDate("2026-09-28T23:30:00Z");
-    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()]).toEqual([
-      2026, 8, 28, 0,
-    ]);
+    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()]).toEqual([2026, 8, 28, 0]);
   });
   it("writes a local day back out", () => {
     expect(isoDay(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
@@ -85,13 +58,7 @@ describe("dates", () => {
   it("keeps dates on one line", () => {
     expect(fmtDate("2026-10-30")).toBe(`Oct${NBSP}30`);
     expect(fmtDow("2026-10-30")).toBe(`Fri,${NBSP}Oct${NBSP}30`);
-    expect(
-      fmtDate("2026-10-30", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }),
-    ).toBe(`Oct${NBSP}30,${NBSP}2026`);
+    expect(fmtDate("2026-10-30", { month: "short", day: "numeric", year: "numeric" })).toBe(`Oct${NBSP}30,${NBSP}2026`);
     expect(nb("in 3 days")).toBe(`in${NBSP}3${NBSP}days`);
   });
   it("says how far off a day is", () => {
@@ -124,18 +91,10 @@ describe("months", () => {
 
 describe("serverTime", () => {
   it("reads an offset, a local ISO time, and the log's UTC form", () => {
-    expect(serverTime("2026-09-30T12:02:00+00:00").toISOString()).toBe(
-      "2026-09-30T12:02:00.000Z",
-    );
-    expect(serverTime("2026-09-30T07:02:00-05:00").toISOString()).toBe(
-      "2026-09-30T12:02:00.000Z",
-    );
-    expect(serverTime("2026-09-30 12:02:00").toISOString()).toBe(
-      "2026-09-30T12:02:00.000Z",
-    );
-    expect(serverTime("2026-09-30T08:02:00").toISOString()).toBe(
-      "2026-09-30T12:02:00.000Z",
-    );
+    expect(serverTime("2026-09-30T12:02:00+00:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30T07:02:00-05:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30 12:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
+    expect(serverTime("2026-09-30T08:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
   });
 });
 
@@ -208,8 +167,6 @@ describe("barWidth", () => {
 
 describe("fmtDateTime", () => {
   it("shows the day and time in the local zone", () => {
-    expect(fmtDateTime(new Date("2026-09-28T21:54:00Z"))).toBe(
-      "Sep 28, 5:54 PM",
-    );
+    expect(fmtDateTime(new Date("2026-09-28T21:54:00Z"))).toBe("Sep 28, 5:54 PM");
   });
 });

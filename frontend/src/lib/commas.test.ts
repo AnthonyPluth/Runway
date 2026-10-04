@@ -2,11 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { commas, withCommas, withoutCommas } from "./commas";
 
-const shown = (el: HTMLInputElement) =>
-  Object.getOwnPropertyDescriptor(
-    HTMLInputElement.prototype,
-    "value",
-  )!.get!.call(el);
+const shown = (el: HTMLInputElement) => Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.get!.call(el);
 
 let input: HTMLInputElement;
 beforeEach(() => {

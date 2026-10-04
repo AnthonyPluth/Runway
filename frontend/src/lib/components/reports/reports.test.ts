@@ -1,16 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Report, monthTick } from "./chart.svelte";
-import {
-  catFilter,
-  channels,
-  contrast,
-  dayBefore,
-  drill,
-  INK_DARK,
-  INK_LIGHT,
-  textOn,
-} from "./look";
+import { catFilter, channels, contrast, dayBefore, drill, INK_DARK, INK_LIGHT, textOn } from "./look";
 import { monthsOptions, rangeDates, rangeOptions } from "./state.svelte";
 
 describe("monthTick", () => {
@@ -21,59 +12,29 @@ describe("monthTick", () => {
 });
 
 describe("report ranges", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-05-17T12:00:00"));
-  });
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-05-17T12:00:00")); });
   afterEach(() => vi.useRealTimers());
 
   it("ends at the start of next month and reaches back the right number of months", () => {
-    expect(rangeDates("1m")).toEqual({
-      start: "2026-05-01",
-      end: "2026-06-01",
-    });
-    expect(rangeDates("3m")).toEqual({
-      start: "2026-03-01",
-      end: "2026-06-01",
-    });
-    expect(rangeDates("12m")).toEqual({
-      start: "2025-06-01",
-      end: "2026-06-01",
-    });
-    expect(rangeDates("ytd")).toEqual({
-      start: "2026-01-01",
-      end: "2026-06-01",
-    });
+    expect(rangeDates("1m")).toEqual({ start: "2026-05-01", end: "2026-06-01" });
+    expect(rangeDates("3m")).toEqual({ start: "2026-03-01", end: "2026-06-01" });
+    expect(rangeDates("12m")).toEqual({ start: "2025-06-01", end: "2026-06-01" });
+    expect(rangeDates("ytd")).toEqual({ start: "2026-01-01", end: "2026-06-01" });
   });
 
   it("rolls into the next year in December", () => {
     vi.setSystemTime(new Date("2026-12-31T20:00:00"));
-    expect(rangeDates("1m")).toEqual({
-      start: "2026-12-01",
-      end: "2027-01-01",
-    });
+    expect(rangeDates("1m")).toEqual({ start: "2026-12-01", end: "2027-01-01" });
   });
 
   it("offers each range and month count as select options", () => {
-    expect(rangeOptions.map((o) => o.value)).toEqual([
-      "1m",
-      "3m",
-      "12m",
-      "ytd",
-    ]);
+    expect(rangeOptions.map((o) => o.value)).toEqual(["1m", "3m", "12m", "ytd"]);
     expect(monthsOptions).toContainEqual({ value: "12", label: "12 months" });
   });
 });
 
 describe("Report", () => {
-  const deferred = <T>() => {
-    let resolve!: (v: T) => void, reject!: (e: Error) => void;
-    const p = new Promise<T>((a, b) => {
-      resolve = a;
-      reject = b;
-    });
-    return { p, resolve, reject };
-  };
+  const deferred = <T>() => { let resolve!: (v: T) => void, reject!: (e: Error) => void; const p = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { p, resolve, reject }; };
 
   it("loads on creation and keeps the last answer on screen while the next loads", async () => {
     const calls = [deferred<string>(), deferred<string>()];
@@ -111,11 +72,8 @@ describe("Report", () => {
 
   it("records a fetcher that throws before it answers as a failure", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const r = new Report<string>(() => {
-      throw new Error("bad url");
-    });
-    await Promise.resolve();
-    await Promise.resolve();
+    const r = new Report<string>(() => { throw new Error("bad url"); });
+    await Promise.resolve(); await Promise.resolve();
     expect(r.error?.message).toBe("bad url");
     expect(r.loading).toBe(false);
   });
@@ -134,8 +92,7 @@ describe("Report", () => {
 
   it("records a failure and clears it when a later load works", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const bad = deferred<string>(),
-      good = deferred<string>();
+    const bad = deferred<string>(), good = deferred<string>();
     const answers = [bad, good];
     let n = 0;
     const r = new Report(() => answers[n++].p);
@@ -164,19 +121,7 @@ describe("report colors and links", () => {
     expect(textOn("#6b6a66")).toBe(INK_LIGHT);
     expect(textOn("#c98500")).toBe(INK_DARK);
     expect(textOn("#3987e5")).toBe(INK_DARK);
-    for (const c of [
-      "#3987e5",
-      "#d95926",
-      "#199e70",
-      "#c98500",
-      "#d55181",
-      "#008300",
-      "#9085e9",
-      "#e66767",
-      "#1c9aa8",
-      "#8a8a86",
-      "#6b6a66",
-    ]) {
+    for (const c of ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767", "#1c9aa8", "#8a8a86", "#6b6a66"]) {
       const ink = channels(textOn(c))!;
       expect(contrast(channels(c)!, ink)).toBeGreaterThanOrEqual(4.5);
     }
@@ -190,11 +135,7 @@ describe("report colors and links", () => {
   });
 
   it("asks Transactions for the accounts the reports count, and for no category as Uncategorized", () => {
-    expect(drill({ month: "2026-09", kind: "out" })).toEqual({
-      scope: "budget",
-      month: "2026-09",
-      kind: "out",
-    });
+    expect(drill({ month: "2026-09", kind: "out" })).toEqual({ scope: "budget", month: "2026-09", kind: "out" });
     expect(catFilter("Uncategorized")).toBe("__none__");
     expect(catFilter("Groceries")).toBe("Groceries");
   });

@@ -1,23 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("svelte-sonner", () => ({
-  toast: Object.assign(vi.fn(), { error: vi.fn() }),
-}));
+vi.mock("svelte-sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn() }) }));
 
 import { toast } from "svelte-sonner";
 import { UNDO_MS, undoable } from "./undo";
 
-type Opts = {
-  description?: string;
-  duration: number;
-  action: { label: string; onClick: () => Promise<void> };
-};
+type Opts = { description?: string; duration: number; action: { label: string; onClick: () => Promise<void> } };
 const shown = () => vi.mocked(toast).mock.calls[0] as [string, Opts];
 
-beforeEach(() => {
-  vi.mocked(toast).mockClear();
-  vi.mocked(toast.error).mockClear();
-});
+beforeEach(() => { vi.mocked(toast).mockClear(); vi.mocked(toast.error).mockClear(); });
 
 describe("undoable", () => {
   it("shows the message with an Undo that stays longer than a plain toast", () => {
@@ -47,37 +38,26 @@ describe("undoable", () => {
   it("shows what the undo reports as the description of 'Undone'", async () => {
     undoable("Done", async () => "Venture X is open again");
     await shown()[1].action.onClick();
-    expect(toast).toHaveBeenLastCalledWith("Undone", {
-      description: "Venture X is open again",
-    });
+    expect(toast).toHaveBeenLastCalledWith("Undone", { description: "Venture X is open again" });
   });
 
   it("shows the error, not 'Undone', when the undo fails", async () => {
-    undoable("Done", async () => {
-      throw new Error("Already gone");
-    });
+    undoable("Done", async () => { throw new Error("Already gone"); });
     await shown()[1].action.onClick();
     expect(toast.error).toHaveBeenCalledWith("Already gone");
     expect(toast).toHaveBeenCalledTimes(1);
   });
 
   it("has words for a failure that has none", async () => {
-    undoable("Done", async () => {
-      throw new Error("");
-    });
+    undoable("Done", async () => { throw new Error(""); });
     await shown()[1].action.onClick();
     expect(toast.error).toHaveBeenCalledWith("Couldn’t undo that");
   });
 
   it("can offer another button beside Undo, which becomes the cancel-style one", async () => {
-    const undo = vi.fn(async () => {}),
-      run = vi.fn(async () => {});
-    undoable("Changed for Oct 13 only", undo, {
-      also: { label: "From now on", run },
-    });
-    const opts = shown()[1] as Opts & {
-      cancel: { label: string; onClick: () => Promise<void> };
-    };
+    const undo = vi.fn(async () => {}), run = vi.fn(async () => {});
+    undoable("Changed for Oct 13 only", undo, { also: { label: "From now on", run } });
+    const opts = shown()[1] as Opts & { cancel: { label: string; onClick: () => Promise<void> } };
     expect(opts.action.label).toBe("From now on");
     expect(opts.cancel.label).toBe("Undo");
     await opts.action.onClick();
@@ -88,14 +68,7 @@ describe("undoable", () => {
   });
 
   it("shows the error when the other button fails", async () => {
-    undoable("Done", async () => {}, {
-      also: {
-        label: "More",
-        run: async () => {
-          throw new Error("Nope");
-        },
-      },
-    });
+    undoable("Done", async () => {}, { also: { label: "More", run: async () => { throw new Error("Nope"); } } });
     await shown()[1].action.onClick();
     expect(toast.error).toHaveBeenCalledWith("Nope");
   });

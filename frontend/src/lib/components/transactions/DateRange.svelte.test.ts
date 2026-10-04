@@ -10,30 +10,16 @@ const open = async (props: { from?: string; to?: string } = {}) => {
   const user = userEvent.setup();
   render(DateRange, { props: { from: "", to: "", ...props, onchange } });
   await user.click(screen.getByRole("button", { name: /^Dates:/ }));
-  return {
-    user,
-    onchange,
-    from: screen.getByLabelText(/^From/) as HTMLInputElement,
-    to: screen.getByLabelText(/^To/) as HTMLInputElement,
-  };
+  return { user, onchange, from: screen.getByLabelText(/^From/) as HTMLInputElement, to: screen.getByLabelText(/^To/) as HTMLInputElement };
 };
 const inPopover = { hidden: true };
-const inside = (text: string) =>
-  screen.getByText(text, { selector: "[data-popover-content] button" });
+const inside = (text: string) => screen.getByText(text, { selector: "[data-popover-content] button" });
 const apply = () => inside("Apply");
 
 describe("DateRange", () => {
   it("offers the coming months as well as the past", async () => {
     await open();
-    for (const name of [
-      "This month",
-      "Last month",
-      "Next month",
-      "Next 3 months",
-      "This year",
-      "All time",
-    ])
-      expect(inside(name)).toBeInTheDocument();
+    for (const name of ["This month", "Last month", "Next month", "Next 3 months", "This year", "All time"]) expect(inside(name)).toBeInTheDocument();
   });
 
   it("says what an empty date field is, and drops the hint once it has a date", async () => {
@@ -83,9 +69,7 @@ describe("DateRange", () => {
     const { user, onchange, from, to } = await open();
     await user.type(from, "2026-12-01");
     await user.type(to, "2026-11-01");
-    expect(screen.getByRole("alert", inPopover)).toHaveTextContent(
-      "The end is before the start.",
-    );
+    expect(screen.getByRole("alert", inPopover)).toHaveTextContent("The end is before the start.");
     expect(apply()).toBeDisabled();
     expect(onchange).not.toHaveBeenCalled();
   });

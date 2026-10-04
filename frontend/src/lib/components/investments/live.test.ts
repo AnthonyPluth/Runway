@@ -6,63 +6,23 @@ const NOW = 1_790_000_000;
 
 function holding(over: Partial<Holding>): Holding {
   return {
-    security_id: "s",
-    group: "g",
-    ticker: null,
-    name: null,
-    type: null,
-    asset_class: "equity",
-    sector: null,
-    is_cash: false,
-    quantity: 0,
-    value: 0,
-    cost_basis: 0,
-    cost_known: true,
-    cost_manual: false,
-    accounts: [],
-    price: null,
-    lots: [],
-    allocation: 0,
-    gain: null,
-    gain_pct: null,
-    day_change: null,
-    day_change_pct: null,
-    ...over,
+    security_id: "s", group: "g", ticker: null, name: null, type: null, asset_class: "equity", sector: null, is_cash: false,
+    quantity: 0, value: 0, cost_basis: 0, cost_known: true, cost_manual: false, accounts: [], price: null, lots: [],
+    allocation: 0, gain: null, gain_pct: null, day_change: null, day_change_pct: null, ...over,
   };
 }
 const page = (holdings: Holding[]) =>
-  ({
-    holdings,
-    total: 0,
-    unrealized_gain: null,
-    cost_basis: null,
-    day_change: null,
-    day_change_pct: null,
-  }) as unknown as Investments;
-const quote = (over: Partial<Quote>): Quote => ({
-  price: 0,
-  prev_close: null,
-  time: NOW - 60,
-  type: "EQUITY",
-  ...over,
-});
+  ({ holdings, total: 0, unrealized_gain: null, cost_basis: null, day_change: null, day_change_pct: null }) as unknown as Investments;
+const quote = (over: Partial<Quote>): Quote => ({ price: 0, prev_close: null, time: NOW - 60, type: "EQUITY", ...over });
 
-afterEach(() => {
-  vi.useRealTimers();
-});
+afterEach(() => { vi.useRealTimers(); });
 
 describe("applyLiveQuotes", () => {
   it("re-prices holdings and recomputes the page's totals", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW * 1000);
     const d = page([
-      holding({
-        ticker: "AAA",
-        quantity: 10,
-        value: 1000,
-        cost_basis: 800,
-        gain: 200,
-      }),
+      holding({ ticker: "AAA", quantity: 10, value: 1000, cost_basis: 800, gain: 200 }),
       holding({ ticker: null, is_cash: true, quantity: 500, value: 500 }),
     ]);
     applyLiveQuotes(d, { AAA: quote({ price: 110, prev_close: 100 }) }, "open");

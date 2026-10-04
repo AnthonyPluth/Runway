@@ -13,15 +13,9 @@ beforeEach(() => {
   label = document.querySelector("label")!;
   input = document.querySelector("input")!;
 });
-afterEach(() => {
-  vi.useRealTimers();
-  vi.clearAllMocks();
-});
+afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
-const edit = async (f: HTMLInputElement, v: string) => {
-  f.value = v;
-  await fireEvent.change(f);
-};
+const edit = async (f: HTMLInputElement, v: string) => { f.value = v; await fireEvent.change(f); };
 
 describe("autosave", () => {
   it("saves when the value changed and flashes 'Saved' on the label around it", async () => {
@@ -53,10 +47,7 @@ describe("autosave", () => {
   });
 
   it("marks the field and keeps a Not saved line with Retry under it until a save goes through", async () => {
-    const save = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Too long"))
-      .mockResolvedValue(undefined);
+    const save = vi.fn().mockRejectedValueOnce(new Error("Too long")).mockResolvedValue(undefined);
     autosave(input, save);
     await edit(input, "b");
     expect(input).toHaveAttribute("aria-invalid", "true");
@@ -77,10 +68,7 @@ describe("autosave", () => {
     document.body.innerHTML = `<div><label><input type="checkbox"> Count it</label><label><input type="checkbox"> Next</label></div>`;
     const [first] = document.querySelectorAll("label");
     const box = first.querySelector("input")!;
-    const save = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Nope"))
-      .mockResolvedValue(undefined);
+    const save = vi.fn().mockRejectedValueOnce(new Error("Nope")).mockResolvedValue(undefined);
     autosave(box, save);
     box.checked = true;
     await fireEvent.change(box);
@@ -96,10 +84,7 @@ describe("autosave", () => {
   });
 
   it("shows the error and keeps the typed value when saving fails, then retries next time", async () => {
-    const save = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Too long"))
-      .mockResolvedValue(undefined);
+    const save = vi.fn().mockRejectedValueOnce(new Error("Too long")).mockResolvedValue(undefined);
     autosave(input, save);
     await edit(input, "b");
     expect(toast.error).toHaveBeenCalledWith("Too long");
@@ -128,8 +113,7 @@ describe("autosave", () => {
   });
 
   it("uses the newest save function after update() and stops after destroy()", async () => {
-    const first = vi.fn().mockResolvedValue(undefined),
-      second = vi.fn().mockResolvedValue(undefined);
+    const first = vi.fn().mockResolvedValue(undefined), second = vi.fn().mockResolvedValue(undefined);
     const action = autosave(input, first);
     action.update(second);
     await edit(input, "b");

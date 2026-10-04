@@ -2,48 +2,14 @@
 import { describe, expect, it } from "vitest";
 import { reviewAction } from "./reviewKeys";
 
-const press = (
-  key: string,
-  target: Element = document.body,
-  extra: Partial<KeyboardEvent> = {},
-) => ({
-  key,
-  target,
-  ctrlKey: false,
-  metaKey: false,
-  altKey: false,
-  defaultPrevented: false,
-  ...extra,
-});
+const press = (key: string, target: Element = document.body, extra: Partial<KeyboardEvent> = {}) =>
+  ({ key, target, ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, ...extra });
 
 describe("reviewAction", () => {
   it("maps the keys", () => {
     const row = document.createElement("div");
-    expect(
-      [
-        "j",
-        "ArrowDown",
-        "k",
-        "ArrowUp",
-        "Enter",
-        "c",
-        "i",
-        "t",
-        "s",
-        "Escape",
-      ].map((k) => reviewAction(press(k, row), true)),
-    ).toEqual([
-      "next",
-      "next",
-      "prev",
-      "prev",
-      "enter",
-      "pick",
-      "ignore",
-      "transfer",
-      "split",
-      "clear",
-    ]);
+    expect(["j", "ArrowDown", "k", "ArrowUp", "Enter", "c", "i", "t", "s", "Escape"].map((k) => reviewAction(press(k, row), true)))
+      .toEqual(["next", "next", "prev", "prev", "enter", "pick", "ignore", "transfer", "split", "clear"]);
     expect(reviewAction(press("J", row), true)).toBe("next");
     expect(reviewAction(press("x", row), true)).toBeNull();
   });
@@ -55,10 +21,7 @@ describe("reviewAction", () => {
   });
 
   it("leaves typing alone", () => {
-    for (const tag of ["input", "textarea", "select"])
-      expect(
-        reviewAction(press("j", document.createElement(tag)), true),
-      ).toBeNull();
+    for (const tag of ["input", "textarea", "select"]) expect(reviewAction(press("j", document.createElement(tag)), true)).toBeNull();
     const editable = document.createElement("div");
     editable.contentEditable = "true";
     Object.defineProperty(editable, "isContentEditable", { value: true });
@@ -82,14 +45,8 @@ describe("reviewAction", () => {
   });
 
   it("ignores keys with a modifier, or already handled", () => {
-    expect(
-      reviewAction(press("c", document.body, { metaKey: true }), true),
-    ).toBeNull();
-    expect(
-      reviewAction(press("j", document.body, { ctrlKey: true }), true),
-    ).toBeNull();
-    expect(
-      reviewAction(press("j", document.body, { defaultPrevented: true }), true),
-    ).toBeNull();
+    expect(reviewAction(press("c", document.body, { metaKey: true }), true)).toBeNull();
+    expect(reviewAction(press("j", document.body, { ctrlKey: true }), true)).toBeNull();
+    expect(reviewAction(press("j", document.body, { defaultPrevented: true }), true)).toBeNull();
   });
 });
