@@ -1,0 +1,2494 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/backup",
+      "handler": "runway/server/api/backups.py:api_backup",
+      "web": [],
+      "tests": [
+        "tests/test_backup.py",
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/backup/inspect",
+      "handler": "runway/server/api/backups.py:api_backup_inspect",
+      "web": [
+        "frontend/src/lib/components/settings/BackupSection.svelte"
+      ],
+      "tests": [
+        "tests/test_backup.py",
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/restore",
+      "handler": "runway/server/api/backups.py:api_restore",
+      "web": [
+        "frontend/src/lib/components/settings/BackupSection.svelte"
+      ],
+      "tests": [
+        "tests/test_backup.py",
+        "tests/test_hardening.py",
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "start/deployment"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/sync",
+      "handler": "runway/server/api/connections.py:api_sync",
+      "web": [
+        "frontend/src/lib/app.svelte.ts",
+        "frontend/src/lib/components/settings/PlaidLink.svelte",
+        "frontend/src/lib/components/settings/SimpleFinSetup.svelte"
+      ],
+      "tests": [
+        "tests/test_http_pinned.py",
+        "tests/test_monitoring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/sync/auto",
+      "handler": "runway/server/api/connections.py:api_sync_auto",
+      "web": [
+        "frontend/src/lib/app.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_http_pinned.py",
+        "tests/test_http_server.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/investments/sync",
+      "handler": "runway/server/api/investments.py:api_investments_sync",
+      "web": [],
+      "tests": [
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/investments/stream",
+      "handler": "runway/server/api/investments.py:api_quote_stream",
+      "web": [
+        "frontend/src/lib/components/investments/live.ts"
+      ],
+      "tests": [
+        "tests/test_http_pinned.py",
+        "tests/test_investments.py",
+        "tests/test_monitoring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/merchants/{id}/logo",
+      "handler": "runway/server/api/merchants.py:api_merchant_logo_file",
+      "web": [],
+      "tests": [
+        "tests/test_brands.py",
+        "tests/test_categorize.py",
+        "tests/test_hardening.py",
+        "tests/test_http_pinned.py",
+        "tests/test_merchants.py",
+        "tests/test_monitoring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/carta/capture",
+      "handler": "runway/server/api/equity.py:api_carta_capture",
+      "web": [],
+      "tests": [
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/retail/extension.zip",
+      "handler": "runway/server/api/retail.py:api_extension_zip",
+      "web": [],
+      "tests": [
+        "tests/test_http_pinned.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/state",
+      "handler": "runway/server/api/state.py:api_state",
+      "web": [
+        "frontend/src/lib/app.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_queries.py",
+        "tests/test_backup.py",
+        "tests/test_categorize.py",
+        "tests/test_churn_found.py",
+        "tests/test_finnhub.py",
+        "tests/test_http_server.py",
+        "tests/test_mcp.py",
+        "tests/test_monitoring.py",
+        "tests/test_security.py",
+        "tests/test_server.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/overview",
+      "handler": "runway/server/api/state.py:api_overview",
+      "web": [
+        "frontend/src/pages/Overview.svelte",
+        "frontend/src/pages/Transactions.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_categorize.py",
+        "tests/test_forecast_cycles.py",
+        "tests/test_http_server.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/accounts",
+      "handler": "runway/server/api/accounts.py:api_accounts",
+      "web": [],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_queries.py",
+        "tests/test_http_pinned.py",
+        "tests/test_routes.py",
+        "tests/test_statements.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}",
+      "handler": "runway/server/api/accounts.py:api_account_update",
+      "web": [
+        "frontend/src/lib/components/settings/AccountRow.svelte",
+        "frontend/src/lib/components/settings/LoanTerms.svelte",
+        "frontend/src/lib/components/settings/PlaidLink.svelte",
+        "frontend/src/pages/NetWorth.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py",
+        "tests/test_networth.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/accounts/{id}/logo-options",
+      "handler": "runway/server/api/accounts.py:api_account_logo_options",
+      "web": [],
+      "tests": [
+        "tests/test_brands.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}/logo",
+      "handler": "runway/server/api/accounts.py:api_account_logo",
+      "web": [],
+      "tests": [
+        "tests/test_brands.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}/statements",
+      "handler": "runway/server/api/accounts.py:api_statement_add",
+      "web": [
+        "frontend/src/lib/components/settings/CardStatement.svelte"
+      ],
+      "tests": [
+        "tests/test_statements.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}/statements/{id}/remove",
+      "handler": "runway/server/api/accounts.py:api_statement_remove",
+      "web": [
+        "frontend/src/lib/components/settings/CardStatement.svelte"
+      ],
+      "tests": [
+        "tests/test_routes.py",
+        "tests/test_statements.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/accounts/{id}/removal",
+      "handler": "runway/server/api/accounts.py:api_account_removal",
+      "web": [
+        "frontend/src/lib/components/settings/AccountRow.svelte"
+      ],
+      "tests": [
+        "tests/test_deleted_accounts.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}/remove",
+      "handler": "runway/server/api/accounts.py:api_account_remove",
+      "web": [
+        "frontend/src/lib/components/settings/AccountRow.svelte"
+      ],
+      "tests": [
+        "tests/test_deleted_accounts.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/accounts/deleted",
+      "handler": "runway/server/api/accounts.py:api_accounts_deleted",
+      "web": [
+        "frontend/src/lib/components/settings/AccountsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_deleted_accounts.py",
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/accounts/{id}/restore",
+      "handler": "runway/server/api/accounts.py:api_account_restore",
+      "web": [
+        "frontend/src/lib/components/settings/AccountsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_deleted_accounts.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/transactions",
+      "handler": "runway/server/api/transactions.py:api_transactions",
+      "web": [
+        "frontend/src/lib/components/overview/ThisMonth.svelte",
+        "frontend/src/lib/components/recurring/RecurringItem.svelte",
+        "frontend/src/lib/components/transactions/txList.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_categorize.py",
+        "tests/test_merchants.py",
+        "tests/test_retail.py",
+        "tests/test_routes.py",
+        "tests/test_search.py",
+        "tests/test_security.py",
+        "tests/test_server_errors.py",
+        "tests/test_splits.py",
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "start/docker"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions",
+      "handler": "runway/server/api/transactions.py:api_tx_create",
+      "web": [
+        "frontend/src/lib/components/transactions/TxAdd.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py",
+        "tests/test_routes.py",
+        "tests/test_server_errors.py",
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "start/docker"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/bulk",
+      "handler": "runway/server/api/transactions.py:api_tx_bulk",
+      "web": [
+        "frontend/src/lib/components/transactions/ReviewGroups.svelte",
+        "frontend/src/lib/components/transactions/TxTable.svelte",
+        "frontend/src/lib/components/transactions/restore.ts",
+        "frontend/src/lib/components/transactions/review.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_bulk.py",
+        "tests/test_categorize.py",
+        "tests/test_mcp.py",
+        "tests/test_retail.py",
+        "tests/test_routes.py",
+        "tests/test_rules.py",
+        "tests/test_splits.py",
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/import",
+      "handler": "runway/server/api/transactions.py:api_tx_import",
+      "web": [],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}/category",
+      "handler": "runway/server/api/transactions.py:api_tx_category",
+      "web": [
+        "frontend/src/lib/components/transactions/remember.svelte.ts",
+        "frontend/src/pages/Transactions.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_bulk.py",
+        "tests/test_monitoring.py",
+        "tests/test_retail.py",
+        "tests/test_splits.py"
+      ],
+      "docs": [
+        "start/docker"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}/accept",
+      "handler": "runway/server/api/transactions.py:api_tx_accept",
+      "web": [
+        "frontend/src/pages/Transactions.svelte"
+      ],
+      "tests": [
+        "tests/test_rules.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}/split",
+      "handler": "runway/server/api/transactions.py:api_tx_split",
+      "web": [
+        "frontend/src/lib/components/transactions/SplitEditor.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}/name",
+      "handler": "runway/server/api/transactions.py:api_tx_brand_name",
+      "web": [
+        "frontend/src/lib/components/transactions/TxDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_categorize.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}/recurring",
+      "handler": "runway/server/api/recurring.py:api_tx_recurring",
+      "web": [
+        "frontend/src/lib/components/recurring/LinkPicker.svelte",
+        "frontend/src/lib/components/transactions/RecurringPicker.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/transactions/{id}",
+      "handler": "runway/server/api/transactions.py:api_tx_update",
+      "web": [
+        "frontend/src/lib/components/transactions/TxDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "start/docker"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/transactions/{id}",
+      "handler": "runway/server/api/transactions.py:api_tx_delete",
+      "web": [
+        "frontend/src/lib/components/transactions/TxAdd.svelte",
+        "frontend/src/lib/components/transactions/TxDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_tx_edits.py"
+      ],
+      "docs": [
+        "start/docker"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/overrides",
+      "handler": "runway/server/api/state.py:api_override_set",
+      "web": [
+        "frontend/src/lib/components/MissedAlert.svelte",
+        "frontend/src/lib/components/overview/CardsTable.svelte",
+        "frontend/src/lib/components/overview/EventsList.svelte",
+        "frontend/src/lib/components/recurring/RecurringItem.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/overrides",
+      "handler": "runway/server/api/state.py:api_override_delete",
+      "web": [
+        "frontend/src/lib/components/MissedAlert.svelte",
+        "frontend/src/lib/components/overview/CardsTable.svelte",
+        "frontend/src/lib/components/overview/EventsList.svelte",
+        "frontend/src/lib/components/recurring/RecurringItem.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_mcp.py",
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/push",
+      "handler": "runway/server/api/notifications.py:api_push",
+      "web": [
+        "frontend/src/lib/components/settings/NotificationsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_mcp.py",
+        "tests/test_notify.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/subscribe",
+      "handler": "runway/server/api/notifications.py:api_push_subscribe",
+      "web": [
+        "frontend/src/lib/components/settings/NotificationsSection.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/unsubscribe",
+      "handler": "runway/server/api/notifications.py:api_push_unsubscribe",
+      "web": [
+        "frontend/src/lib/components/settings/NotificationsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_notify.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/prefs",
+      "handler": "runway/server/api/notifications.py:api_push_prefs",
+      "web": [
+        "frontend/src/lib/components/settings/NotificationsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_notify.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/push/test",
+      "handler": "runway/server/api/notifications.py:api_push_test",
+      "web": [
+        "frontend/src/lib/components/settings/NotificationsSection.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_notify.py",
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/budget",
+      "handler": "runway/server/api/budget.py:api_budget",
+      "web": [
+        "frontend/src/lib/components/budget/BudgetView.svelte",
+        "frontend/src/lib/components/overview/ThisMonth.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_categorize.py",
+        "tests/test_http_server.py",
+        "tests/test_routes.py",
+        "tests/test_splits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/budget",
+      "handler": "runway/server/api/budget.py:api_budget_set",
+      "web": [
+        "frontend/src/lib/components/budget/BudgetRow.svelte",
+        "frontend/src/lib/components/budget/BudgetView.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_categorize.py",
+        "tests/test_http_server.py",
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/suggest",
+      "handler": "runway/server/api/transactions.py:api_ai_suggest",
+      "web": [
+        "frontend/src/lib/components/transactions/AiSuggest.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/apply",
+      "handler": "runway/server/api/transactions.py:api_ai_apply",
+      "web": [
+        "frontend/src/lib/components/transactions/AiSuggest.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_bulk.py",
+        "tests/test_mcp.py",
+        "tests/test_networth.py",
+        "tests/test_rules.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/log",
+      "handler": "runway/server/api/transactions.py:api_ai_log",
+      "web": [
+        "frontend/src/lib/components/transactions/AiLog.svelte",
+        "frontend/src/lib/components/transactions/AiLogTable.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/categories",
+      "handler": "runway/server/api/categories.py:api_categories",
+      "web": [
+        "frontend/src/lib/categories.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_bulk.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_security.py",
+        "tests/test_server.py",
+        "tests/test_server_errors.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories",
+      "handler": "runway/server/api/categories.py:api_category_add",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte",
+        "frontend/src/lib/components/settings/categories.ts"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_http_server.py",
+        "tests/test_server.py",
+        "tests/test_server_errors.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories/rename",
+      "handler": "runway/server/api/categories.py:api_category_rename",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories/remove",
+      "handler": "runway/server/api/categories.py:api_category_remove",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_http_server.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories/move",
+      "handler": "runway/server/api/categories.py:api_category_move",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories/look",
+      "handler": "runway/server/api/categories.py:api_category_look",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte",
+        "frontend/src/lib/components/settings/LookPicker.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp_protocol.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/categories/pay-with",
+      "handler": "runway/server/api/categories.py:api_category_pay_with",
+      "web": [
+        "frontend/src/lib/components/settings/CategoryRow.svelte"
+      ],
+      "tests": [
+        "tests/test_categories_recurring_pinned.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/cashflow",
+      "handler": "runway/server/api/reports.py:api_cashflow",
+      "web": [
+        "frontend/src/lib/components/reports/Cashflow.svelte"
+      ],
+      "tests": [
+        "tests/test_categorize.py",
+        "tests/test_http_server.py",
+        "tests/test_routes.py",
+        "tests/test_splits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/month_pace",
+      "handler": "runway/server/api/reports.py:api_month_pace",
+      "web": [
+        "frontend/src/lib/components/overview/ThisMonth.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/spending",
+      "handler": "runway/server/api/reports.py:api_report_spending",
+      "web": [
+        "frontend/src/lib/components/reports/Trends.svelte"
+      ],
+      "tests": [
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/income",
+      "handler": "runway/server/api/reports.py:api_report_income",
+      "web": [
+        "frontend/src/lib/components/reports/Income.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/merchants",
+      "handler": "runway/server/api/reports.py:api_report_merchants",
+      "web": [
+        "frontend/src/lib/components/reports/Merchants.svelte"
+      ],
+      "tests": [
+        "tests/test_reports.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/merchant",
+      "handler": "runway/server/api/reports.py:api_report_merchant",
+      "web": [
+        "frontend/src/lib/components/reports/MerchantDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/breakdown",
+      "handler": "runway/server/api/reports.py:api_report_breakdown",
+      "web": [
+        "frontend/src/lib/components/reports/Breakdown.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/transactions",
+      "handler": "runway/server/api/reports.py:api_report_transactions",
+      "web": [
+        "frontend/src/lib/components/reports/Breakdown.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/rules",
+      "handler": "runway/server/api/categories.py:api_rules",
+      "web": [
+        "frontend/src/pages/Settings.svelte"
+      ],
+      "tests": [
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_http_server.py",
+        "tests/test_mcp_protocol.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules",
+      "handler": "runway/server/api/categories.py:api_rule_add",
+      "web": [
+        "frontend/src/lib/components/settings/RuleEditor.svelte",
+        "frontend/src/lib/components/settings/RulesSection.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_http_server.py",
+        "tests/test_splits.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules/preview",
+      "handler": "runway/server/api/categories.py:api_rule_preview",
+      "web": [
+        "frontend/src/lib/components/settings/RuleEditor.svelte",
+        "frontend/src/lib/components/settings/ruleApply.svelte.ts"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/rules/{id}",
+      "handler": "runway/server/api/categories.py:api_rule_delete",
+      "web": [
+        "frontend/src/lib/components/settings/RulesSection.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules/{id}",
+      "handler": "runway/server/api/categories.py:api_rule_update",
+      "web": [
+        "frontend/src/lib/components/settings/RuleEditor.svelte"
+      ],
+      "tests": [
+        "tests/test_http_server.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/rules/{id}/apply",
+      "handler": "runway/server/api/categories.py:api_rule_apply",
+      "web": [
+        "frontend/src/lib/components/settings/ruleApply.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_bulk.py",
+        "tests/test_http_server.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/recurring",
+      "handler": "runway/server/api/recurring.py:api_recurring",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringItem.svelte",
+        "frontend/src/lib/components/recurring/RecurringView.svelte",
+        "frontend/src/pages/Transactions.svelte"
+      ],
+      "tests": [
+        "tests/test_api_queries.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_categorize.py",
+        "tests/test_recurring.py",
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring",
+      "handler": "runway/server/api/recurring.py:api_recurring_add",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_forecast_schedule.py",
+        "tests/test_http_server.py",
+        "tests/test_recurring.py",
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/recurring/suggestions",
+      "handler": "runway/server/api/recurring.py:api_recurring_suggestions",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/suggestions/dismiss",
+      "handler": "runway/server/api/recurring.py:api_recurring_suggestion_dismiss",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/recurring/suggestions/dismissed",
+      "handler": "runway/server/api/recurring.py:api_recurring_suggestions_dismissed",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/suggestions/restore",
+      "handler": "runway/server/api/recurring.py:api_recurring_suggestion_restore",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring_suggestions.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/recurring/missed",
+      "handler": "runway/server/api/recurring.py:api_recurring_missed",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/dismiss",
+      "handler": "runway/server/api/recurring.py:api_recurring_dismiss",
+      "web": [
+        "frontend/src/lib/components/recurring/LinkPicker.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/{id}/match",
+      "handler": "runway/server/api/recurring.py:api_recurring_add_text",
+      "web": [
+        "frontend/src/lib/components/recurring/LinkPicker.svelte",
+        "frontend/src/lib/components/transactions/remember.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/recurring/{id}/candidates",
+      "handler": "runway/server/api/recurring.py:api_recurring_candidates",
+      "web": [
+        "frontend/src/lib/components/recurring/LinkPicker.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/{id}/amount",
+      "handler": "runway/server/api/recurring.py:api_recurring_amount",
+      "web": [
+        "frontend/src/lib/components/overview/EventsList.svelte"
+      ],
+      "tests": [
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recurring/{id}",
+      "handler": "runway/server/api/recurring.py:api_recurring_update",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringItem.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py",
+        "tests/test_recurring.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/recurring/{id}",
+      "handler": "runway/server/api/recurring.py:api_recurring_delete",
+      "web": [
+        "frontend/src/lib/components/recurring/RecurringItem.svelte",
+        "frontend/src/lib/components/recurring/RecurringView.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_categories_recurring_pinned.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/connect",
+      "handler": "runway/server/api/connections.py:api_connect",
+      "web": [
+        "frontend/src/lib/components/settings/SimpleFinSetup.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/plaid/status",
+      "handler": "runway/server/api/connections.py:api_plaid_status",
+      "web": [
+        "frontend/src/lib/components/investments/InvestmentsView.svelte",
+        "frontend/src/lib/components/settings/AccountsSection.svelte",
+        "frontend/src/lib/components/settings/PlaidCard.svelte"
+      ],
+      "tests": [
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/settings",
+      "handler": "runway/server/api/connections.py:api_plaid_settings",
+      "web": [
+        "frontend/src/lib/components/settings/PlaidKeys.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/link_token",
+      "handler": "runway/server/api/connections.py:api_plaid_link_token",
+      "web": [
+        "frontend/src/lib/components/settings/plaid.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/exchange",
+      "handler": "runway/server/api/connections.py:api_plaid_exchange",
+      "web": [
+        "frontend/src/lib/components/settings/plaid.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_investments.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/items/{id}/sync",
+      "handler": "runway/server/api/connections.py:api_plaid_item_sync",
+      "web": [
+        "frontend/src/lib/components/settings/PlaidItemRow.svelte",
+        "frontend/src/lib/components/settings/plaid.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/items/{id}/remove",
+      "handler": "runway/server/api/connections.py:api_plaid_item_remove",
+      "web": [
+        "frontend/src/lib/components/settings/PlaidItemRow.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/plaid/match",
+      "handler": "runway/server/api/connections.py:api_plaid_match",
+      "web": [
+        "frontend/src/lib/components/settings/plaid.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/plaid/oauth_resume",
+      "handler": "runway/server/api/connections.py:api_plaid_oauth_resume",
+      "web": [
+        "frontend/src/lib/components/settings/plaid.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_plaidbank.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/investments",
+      "handler": "runway/server/api/investments.py:api_investments",
+      "web": [
+        "frontend/src/lib/components/investments/InvestmentsView.svelte",
+        "frontend/src/lib/components/networth/RetirementView.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/networth",
+      "handler": "runway/server/api/networth.py:api_networth",
+      "web": [
+        "frontend/src/pages/NetWorth.svelte"
+      ],
+      "tests": [
+        "tests/test_networth.py"
+      ],
+      "docs": [
+        "contributing/orm"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/assets",
+      "handler": "runway/server/api/networth.py:api_asset_add",
+      "web": [
+        "frontend/src/lib/components/networth/AssetForm.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/assets/{id}",
+      "handler": "runway/server/api/networth.py:api_asset_update",
+      "web": [
+        "frontend/src/lib/components/networth/AssetCard.svelte",
+        "frontend/src/lib/components/networth/AssetForm.svelte"
+      ],
+      "tests": [
+        "tests/test_networth.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/assets/{id}/remove",
+      "handler": "runway/server/api/networth.py:api_asset_remove",
+      "web": [
+        "frontend/src/lib/components/networth/AssetCard.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/assets/{id}/refresh",
+      "handler": "runway/server/api/networth.py:api_asset_refresh",
+      "web": [
+        "frontend/src/lib/components/networth/AssetCard.svelte"
+      ],
+      "tests": [
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/realie/settings",
+      "handler": "runway/server/api/networth.py:api_realie_settings",
+      "web": [
+        "frontend/src/lib/components/settings/HomeValuesCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/finnhub/settings",
+      "handler": "runway/server/api/investments.py:api_finnhub_settings",
+      "web": [
+        "frontend/src/lib/components/settings/FinnhubCard.svelte"
+      ],
+      "tests": [
+        "tests/test_finnhub.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/finnhub/status",
+      "handler": "runway/server/api/investments.py:api_finnhub_status",
+      "web": [
+        "frontend/src/lib/components/settings/FinnhubCard.svelte"
+      ],
+      "tests": [
+        "tests/test_finnhub.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/logodev/settings",
+      "handler": "runway/server/api/merchants.py:api_logodev_settings",
+      "web": [
+        "frontend/src/lib/components/settings/LogoDevCard.svelte"
+      ],
+      "tests": [
+        "tests/test_merchants.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/logodev/status",
+      "handler": "runway/server/api/merchants.py:api_logodev_status",
+      "web": [
+        "frontend/src/lib/components/settings/LogoDevCard.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/merchants/logo-options",
+      "handler": "runway/server/api/merchants.py:api_merchant_logo_options",
+      "web": [],
+      "tests": [
+        "tests/test_api_validation.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/merchants/logo",
+      "handler": "runway/server/api/merchants.py:api_merchant_logo",
+      "web": [],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/investments/logo-options",
+      "handler": "runway/server/api/merchants.py:api_holding_logo_options",
+      "web": [],
+      "tests": [
+        "tests/test_merchants.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/investments/logo",
+      "handler": "runway/server/api/merchants.py:api_holding_logo",
+      "web": [],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_merchants.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/logodev/fetch",
+      "handler": "runway/server/api/merchants.py:api_logodev_fetch",
+      "web": [
+        "frontend/src/lib/components/settings/LogoDevCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/investments/live",
+      "handler": "runway/server/api/investments.py:api_live_quotes",
+      "web": [
+        "frontend/src/lib/components/investments/live.ts"
+      ],
+      "tests": [
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/investments/plan",
+      "handler": "runway/server/api/investments.py:api_plan_save",
+      "web": [
+        "frontend/src/lib/components/investments/RetirementPlanner.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/tracked/{id}",
+      "handler": "runway/server/api/investments.py:api_tracked_get",
+      "web": [
+        "frontend/src/lib/components/investments/TrackedEditor.svelte"
+      ],
+      "tests": [
+        "tests/test_simplefin_invest.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/tracked/{id}",
+      "handler": "runway/server/api/investments.py:api_tracked_save",
+      "web": [
+        "frontend/src/lib/components/investments/TrackedEditor.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/investments/cost",
+      "handler": "runway/server/api/investments.py:api_cost_basis",
+      "web": [
+        "frontend/src/lib/components/investments/HoldingsTable.svelte"
+      ],
+      "tests": [
+        "tests/test_simplefin_invest.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/settings",
+      "handler": "runway/server/api/state.py:api_settings",
+      "web": [
+        "frontend/src/lib/components/overview/ForecastSettings.svelte",
+        "frontend/src/lib/components/overview/SetupChecklist.svelte",
+        "frontend/src/lib/components/settings/AccountRow.svelte",
+        "frontend/src/lib/components/settings/AiCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_api_validation.py",
+        "tests/test_categorize.py",
+        "tests/test_churn_found.py",
+        "tests/test_http_pinned.py",
+        "tests/test_http_server.py",
+        "tests/test_mcp.py",
+        "tests/test_security.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/equity",
+      "handler": "runway/server/api/equity.py:api_equity",
+      "web": [
+        "frontend/src/lib/components/networth/EquityView.svelte",
+        "frontend/src/lib/components/settings/CartaCard.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/companies",
+      "handler": "runway/server/api/equity.py:api_equity_company_add",
+      "web": [
+        "frontend/src/lib/components/networth/EquityView.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/companies/{id}",
+      "handler": "runway/server/api/equity.py:api_equity_company_update",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/companies/{id}/remove",
+      "handler": "runway/server/api/equity.py:api_equity_company_remove",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/companies/{id}/grants",
+      "handler": "runway/server/api/equity.py:api_equity_grant_add",
+      "web": [
+        "frontend/src/lib/components/networth/EquityView.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/grants/{id}",
+      "handler": "runway/server/api/equity.py:api_equity_grant_update",
+      "web": [
+        "frontend/src/lib/components/networth/EquityView.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/equity/grants/{id}/remove",
+      "handler": "runway/server/api/equity.py:api_equity_grant_remove",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/churning",
+      "handler": "runway/server/api/churning.py:api_churning",
+      "web": [
+        "frontend/src/pages/Churning.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/churning/best",
+      "handler": "runway/server/api/churning.py:api_churning_best",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/churning/found",
+      "handler": "runway/server/api/churning.py:api_churning_found",
+      "web": [
+        "frontend/src/pages/Churning.svelte"
+      ],
+      "tests": [
+        "tests/test_churn_found.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/found/{id}/dismiss",
+      "handler": "runway/server/api/churning.py:api_churn_found_dismiss",
+      "web": [],
+      "tests": [
+        "tests/test_churn_found.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/found/{id}/undismiss",
+      "handler": "runway/server/api/churning.py:api_churn_found_undismiss",
+      "web": [],
+      "tests": [
+        "tests/test_churn_found.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/suggest",
+      "handler": "runway/server/api/churning.py:api_churn_suggest",
+      "web": [
+        "frontend/src/lib/components/churning/cardSuggest.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_churn_found.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards",
+      "handler": "runway/server/api/churning.py:api_churn_card_add",
+      "web": [
+        "frontend/src/lib/components/churning/CardForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}",
+      "handler": "runway/server/api/churning.py:api_churn_card_update",
+      "web": [
+        "frontend/src/lib/components/churning/CardForm.svelte",
+        "frontend/src/lib/components/churning/cardSuggest.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_churn_card_remove",
+      "web": [
+        "frontend/src/lib/components/churning/CardForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}/rates",
+      "handler": "runway/server/api/churning.py:api_churn_rate",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}/plan/done",
+      "handler": "runway/server/api/churning.py:api_churn_plan_done",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}/plan/undo",
+      "handler": "runway/server/api/churning.py:api_churn_plan_undo",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/cards/{id}/benefits",
+      "handler": "runway/server/api/churning.py:api_churn_benefit_add",
+      "web": [
+        "frontend/src/lib/components/churning/BenefitForm.svelte",
+        "frontend/src/lib/components/churning/CardBenefits.svelte",
+        "frontend/src/lib/components/churning/cardSuggest.svelte.ts"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/benefits/{id}",
+      "handler": "runway/server/api/churning.py:api_churn_benefit_update",
+      "web": [
+        "frontend/src/lib/components/churning/BenefitForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/benefits/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_churn_benefit_remove",
+      "web": [
+        "frontend/src/lib/components/churning/BenefitForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/benefits/{id}/use",
+      "handler": "runway/server/api/churning.py:api_churn_benefit_use",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/benefits/{id}/unuse",
+      "handler": "runway/server/api/churning.py:api_churn_benefit_unuse",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/currencies",
+      "handler": "runway/server/api/churning.py:api_churn_currency",
+      "web": [
+        "frontend/src/lib/components/churning/Rewards.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/currencies/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_churn_currency_remove",
+      "web": [
+        "frontend/src/lib/components/churning/Rewards.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/balances",
+      "handler": "runway/server/api/churning.py:api_churn_balance",
+      "web": [
+        "frontend/src/lib/components/churning/Rewards.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/tasks",
+      "handler": "runway/server/api/churning.py:api_churn_task_add",
+      "web": [
+        "frontend/src/lib/components/churning/Upcoming.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/tasks/{id}",
+      "handler": "runway/server/api/churning.py:api_churn_task_update",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/tasks/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_churn_task_remove",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/tasks/{id}/snooze",
+      "handler": "runway/server/api/churning.py:api_churn_task_snooze",
+      "web": [],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/wishlist",
+      "handler": "runway/server/api/churning.py:api_churn_wish_add",
+      "web": [
+        "frontend/src/lib/components/churning/WishForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/wishlist/{id}",
+      "handler": "runway/server/api/churning.py:api_churn_wish_update",
+      "web": [
+        "frontend/src/lib/components/churning/Planned.svelte",
+        "frontend/src/lib/components/churning/WishForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/wishlist/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_churn_wish_remove",
+      "web": [
+        "frontend/src/lib/components/churning/Planned.svelte",
+        "frontend/src/lib/components/churning/WishForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/wishlist/{id}/applied",
+      "handler": "runway/server/api/churning.py:api_churn_wish_applied",
+      "web": [
+        "frontend/src/lib/components/churning/Planned.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/scores",
+      "handler": "runway/server/api/churning.py:api_churn_score",
+      "web": [
+        "frontend/src/lib/components/churning/Planned.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/bank",
+      "handler": "runway/server/api/churning.py:api_bank_bonus_add",
+      "web": [
+        "frontend/src/lib/components/churning/BankForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/bank/{id}",
+      "handler": "runway/server/api/churning.py:api_bank_bonus_update",
+      "web": [
+        "frontend/src/lib/components/churning/BankForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/churning/bank/{id}/remove",
+      "handler": "runway/server/api/churning.py:api_bank_bonus_remove",
+      "web": [
+        "frontend/src/lib/components/churning/BankForm.svelte"
+      ],
+      "tests": [
+        "tests/test_churning_api.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/carta/settings",
+      "handler": "runway/server/api/equity.py:api_carta_settings",
+      "web": [
+        "frontend/src/lib/components/settings/CartaCard.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/carta/connect",
+      "handler": "runway/server/api/equity.py:api_carta_connect",
+      "web": [
+        "frontend/src/lib/components/settings/CartaCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/carta/sync",
+      "handler": "runway/server/api/equity.py:api_carta_sync",
+      "web": [
+        "frontend/src/lib/components/networth/EquityView.svelte",
+        "frontend/src/lib/components/settings/CartaCard.svelte"
+      ],
+      "tests": [
+        "tests/test_routes.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/carta/disconnect",
+      "handler": "runway/server/api/equity.py:api_carta_disconnect",
+      "web": [
+        "frontend/src/lib/components/settings/CartaCard.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/features"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/retail",
+      "handler": "runway/server/api/retail.py:api_retail",
+      "web": [
+        "frontend/src/lib/components/settings/RetailCard.svelte"
+      ],
+      "tests": [
+        "tests/test_retail.py",
+        "tests/test_retail_tokens.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp-settings",
+      "handler": "runway/server/api/mcp.py:api_mcp_settings",
+      "web": [
+        "frontend/src/lib/components/settings/McpCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/mcp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-settings/writes",
+      "handler": "runway/server/api/mcp.py:api_mcp_writes",
+      "web": [
+        "frontend/src/lib/components/settings/McpCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/mcp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-settings/categorize",
+      "handler": "runway/server/api/mcp.py:api_mcp_categorize",
+      "web": [
+        "frontend/src/lib/components/settings/McpCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/mcp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-settings/all",
+      "handler": "runway/server/api/mcp.py:api_mcp_all",
+      "web": [
+        "frontend/src/lib/components/settings/McpCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py",
+        "tests/test_mcp_protocol.py"
+      ],
+      "docs": [
+        "using/mcp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp-settings/connections/{id}/revoke",
+      "handler": "runway/server/api/mcp.py:api_mcp_revoke",
+      "web": [
+        "frontend/src/lib/components/settings/McpCard.svelte"
+      ],
+      "tests": [
+        "tests/test_api_validation.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/mcp"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/token",
+      "handler": "runway/server/api/retail.py:api_retail_token",
+      "web": [
+        "frontend/src/lib/components/settings/RetailCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_retail_tokens.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/token/remove",
+      "handler": "runway/server/api/retail.py:api_retail_token_remove",
+      "web": [
+        "frontend/src/lib/components/settings/RetailCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_retail_tokens.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/settings",
+      "handler": "runway/server/api/retail.py:api_retail_settings",
+      "web": [
+        "frontend/src/lib/components/settings/RetailCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/match",
+      "handler": "runway/server/api/retail.py:api_retail_match",
+      "web": [
+        "frontend/src/lib/components/settings/RetailCard.svelte"
+      ],
+      "tests": [
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/retail/orders/{id}",
+      "handler": "runway/server/api/retail.py:api_retail_order",
+      "web": [
+        "frontend/src/lib/components/orders/OrderDetail.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/items/{id}",
+      "handler": "runway/server/api/retail.py:api_retail_item",
+      "web": [
+        "frontend/src/lib/components/orders/OrderDetail.svelte"
+      ],
+      "tests": [
+        "tests/test_retail.py",
+        "tests/test_retail_stores.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/items/{id}/restore",
+      "handler": "runway/server/api/retail.py:api_retail_item_restore",
+      "web": [],
+      "tests": [
+        "tests/test_mcp.py",
+        "tests/test_retail.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/orders/{id}/suggest",
+      "handler": "runway/server/api/retail.py:api_retail_suggest",
+      "web": [
+        "frontend/src/lib/components/orders/OrderDetail.svelte"
+      ],
+      "tests": [],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/charges/{id}/unlink",
+      "handler": "runway/server/api/retail.py:api_retail_unlink",
+      "web": [],
+      "tests": [
+        "tests/test_retail.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/charges/{id}/link",
+      "handler": "runway/server/api/retail.py:api_retail_link",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/charges/{id}/apply",
+      "handler": "runway/server/api/retail.py:api_retail_apply",
+      "web": [],
+      "tests": [
+        "tests/test_retail.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/retail/charges/{id}/restore",
+      "handler": "runway/server/api/retail.py:api_retail_charge_restore",
+      "web": [],
+      "tests": [
+        "tests/test_retail.py"
+      ],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/retail/charges/{id}/candidates",
+      "handler": "runway/server/api/retail.py:api_retail_candidates",
+      "web": [],
+      "tests": [],
+      "docs": [
+        "using/browser-extension"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/recategorize",
+      "handler": "runway/server/api/transactions.py:api_recategorize",
+      "web": [],
+      "tests": [
+        "tests/test_api_handlers.py",
+        "tests/test_mcp.py"
+      ],
+      "docs": [
+        "using/features"
+      ]
+    }
+  ]
+}

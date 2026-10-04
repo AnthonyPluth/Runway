@@ -8,6 +8,7 @@ Instructions for AI coding agents working in Runway, a self-hosted personal fina
 - `frontend/`: the web app (Svelte, Vite, Vitest, ESLint).
 - `extension/`: the browser extension.
 - `tests/`: backend tests, run with `unittest`.
+- `tools/`: scripts for the repo itself; `feature_map.py` generates the feature map.
 - `docs/`: the documentation site (Starlight), published to GitHub Pages. Pages are Markdown in `docs/src/content/docs/`; screenshots are in `docs/src/assets/screenshots/`.
 
 ## Commands
@@ -20,7 +21,12 @@ Python goes through Poetry (Python 3.14).
 - `make test-parallel`: the same tests across 4 processes, as CI runs them (`make check` uses it); `make test-pg` runs them against `$DATABASE_URL` (Postgres).
 - `make frontend-check`: type-check, lint, Vitest and build for `frontend/`.
 - `make fix`: apply ruff's safe fixes; review the diff afterward.
+- `make feature-map`: regenerate the feature map; `make feature-map-check` checks it is current and every route has a test (part of `make check`).
 - `make docs`: the documentation site with live reload; `make docs-build` builds it and checks the links between pages.
+
+## Start from the feature map
+
+[`docs/feature-map.json`](docs/feature-map.json) (readable as the [Feature map](docs/src/content/docs/contributing/feature-map.md) page) lists every API route with its handler, the web app files that call it, the tests that exercise it and the docs page that describes it. Start there to find where a feature lives. It is generated: after changing routes, `api(` calls, tests or docs, run `make feature-map` and commit the result (`make check` and CI fail when it is stale). A new route needs a test; `tools/feature_map_allowlist.txt` holds the routes that had none, and only shrinks.
 
 ## Conventions
 
