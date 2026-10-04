@@ -3,7 +3,7 @@
 Model, per cash account (checking/savings marked "in forecast"):
   start balance (the bank's posted balance plus what's pending)
   + recurring items (paychecks, mortgage, bills) on their dates
-  - the budgets paid from the account, spent day by day
+  - the budgets paid from the account, spent day by day on banking days (a weekend's or holiday's on the next one)
   - each credit card's payment on its due date, sized to the statement balance
 
 Nothing is taken out for spending that isn't scheduled or budgeted: there's no average of past spending.
@@ -620,8 +620,9 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
                            **({"original_amount": usual_left if usual_left is not None else 0.0, "overridden": True} if edited is not None else {})})
 
     # Budgets: each one is spent day by day (budget_days) on the account or card it's paid with. One paid from a
-    # forecast account comes out of it day by day; one paid with a card is charged to it, so it's in the card's
-    # statements, paid on their due dates.
+    # forecast account comes out of it on banking days: a weekend's or a bank holiday's share goes out on the next
+    # business day (one past the chart's last day isn't on it). One paid with a card is charged to it any day, so it's
+    # in the card's statements, paid on their due dates.
     plan = budget_plan(conn, today) if cash else []
     budgeted = {n for p in plan for n in p["names"]}
     cash_ids = {a["id"] for a in cash}
@@ -648,8 +649,8 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             if a["kind"] == "credit" and a["pay_from"] not in cash_ids:
                 skipped.append({"category": q["category"], "reason": "its card isn't paid from a forecast account"})
                 continue
-            for d, v in way["days"].items():
-                spend[acct][d] += v
+            for day, v in way["days"].items():
+                spend[acct][bankdays.next_business_day(_d(day)).isoformat() if acct in cash_ids else day] += v
             spend_of[acct][q["category"]] = way["days"]   # each share's days, for the statement's estimate breakdown
             used.append({"category": q["category"], "amount": round(monthly, 2), "account_id": acct,
                          "account": db.account_label(a), "chosen": bool(q["pay_with"])})
@@ -890,6 +891,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
         i = min(range(len(series)), key=lambda k: series[k])
         return {"date": dates[i], "balance": series[i]}
 
+    def budgeted_out(ids: list[str]) -> dict[str, float]:
+        """What the budgets take out of these accounts each day on the chart (for its readout: they aren't events)."""
+        by: dict[str, float] = defaultdict(float)
+        for acct in ids:
+            for d, v in spend.get(acct, {}).items():
+                by[d] += v
+        return {d: round(by[d], 2) for d in dates if by.get(d, 0.0) > 0.005}
+
     # Recurring charges on cards: their statements pay them, so they're not in `events` or the balances, but they're
     # listed with what's coming up (Transactions) and counted in what a budget still expects this month.
     card_charges = sorted(({**e, "account": db.account_label(by_id[e["account_id"]])} for e in events
@@ -918,11 +927,14 @@ def build(conn, today: date | None = None, horizon_days: int = 90) -> dict:
             {"id": a["id"], "name": db.account_label(a), "kind": a["kind"], "balance": round(a["balance"], 2),
              "pending": pending[a["id"]],   # in the balance already: the bank's posted balance plus this
              "series": series_by_acct[a["id"]],
-             "low": low(series_by_acct[a["id"]])}
+             "low": low(series_by_acct[a["id"]]),
+             "spend": budgeted_out([a["id"]])}
             for a in cash
         ],
         "total": total,
         "low": low(total),
+        # What the budgets paid from the forecast's accounts take out each day (positive), in the balances already.
+        "spend": budgeted_out([a["id"] for a in cash]),
         "events": events,
         "charges": card_charges,
         # Churning cards' annual fees, for the lists of what's coming up: charges on cards, not on the forecast's

@@ -649,8 +649,9 @@ def _known_category(conn, name: str) -> bool:
 
 
 def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int:
-    """Manually set a category. With remember=True, add a rule and apply it to matching unreviewed items.
-    Returns how many other transactions the new rule updated."""
+    """Manually set a category. With remember=True, add a rule for the merchant and apply it to the merchant's other
+    transactions: the ones in another category (or none) that you didn't categorize yourself and that aren't split, as
+    applying a saved rule does. Returns how many other transactions the new rule updated."""
     if not _known_category(conn, category):
         raise ValueError(f"Unknown category: {category}")
     t = Transaction
@@ -668,7 +669,7 @@ def set_category(conn, tx_id: str, category: str, remember: bool = False) -> int
     rulesmod.remember(conn, key, category)
     cur = conn.execute(
         update(t).where(t.id != tx_id, func.coalesce(t.category_source, "") != "manual", func.coalesce(t.is_split, 0) == 0,
-                        or_(t.needs_review == 1, t.category.is_(None)),
+                        func.coalesce(t.category, "") != category,
                         or_(db.instr(func.lower(t.payee), key) > 0, db.instr(func.lower(t.description), key) > 0))
         .values(category=category, category_source="rule", confidence=1, needs_review=0))
     return cur.rowcount
@@ -687,16 +688,16 @@ def rule_offer(conn, tx_id: str, category: str) -> dict | None:
     if have and have["category"] == category:
         return None
     return {"merchant": tx["payee"] or tx["description"], "match": key, "replaces": have["category"] if have else None,
-            "also_updated": len(_rule_would_update(conn, key, [tx_id]))}
+            "also_updated": len(_rule_would_update(conn, key, category, [tx_id]))}
 
 
-def _rule_would_update(conn, key: str, besides: list[str]):
+def _rule_would_update(conn, key: str, category: str, besides: list[str]):
     """What a rule for `key` made now would also categorize (set_category with remember=True): the other transactions
-    with that text still waiting for review or a category, not chosen by you nor split."""
+    with that text in another category (or none), not chosen by you nor split."""
     t = Transaction
     return list(conn.execute(select(t.id).where(
         t.id.not_in(besides), func.coalesce(t.category_source, "") != "manual", func.coalesce(t.is_split, 0) == 0,
-        or_(t.needs_review == 1, t.category.is_(None)),
+        func.coalesce(t.category, "") != category,
         or_(db.instr(func.lower(t.payee), key) > 0, db.instr(func.lower(t.description), key) > 0))).scalars())
 
 
@@ -707,7 +708,7 @@ def bulk_rule_offer(conn, tx_ids: list[str], category: str) -> dict | None:
         return None
     offer = rule_offer(conn, tx_ids[0], category)
     if offer:
-        offer["also_updated"] = len(_rule_would_update(conn, offer["match"], tx_ids))
+        offer["also_updated"] = len(_rule_would_update(conn, offer["match"], category, tx_ids))
     return offer
 
 

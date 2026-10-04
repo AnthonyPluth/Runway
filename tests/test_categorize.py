@@ -383,12 +383,20 @@ class CategorizeTests(LedgerCase):
         self.tx("cc", "2026-09-03", -12.0, "SQ *BLUE BOTTLE 123")
         self.tx("cc", "2026-09-10", -9.0, "SQ *BLUE BOTTLE 456")
         self.conn.execute(update(Transaction).values(needs_review=1))
+        # Last month's, already categorized by Runway (reviewed, not by hand): "always" corrects it too. One you
+        # categorized yourself stays yours.
+        self.tx("cc", "2026-08-03", -12.0, "SQ *BLUE BOTTLE 123", "Restaurants")
+        self.tx("cc", "2026-07-03", -12.0, "SQ *BLUE BOTTLE 123", "Restaurants")
+        self.conn.execute(update(Transaction).where(Transaction.id == "cc|2").values(category_source="ai", needs_review=0))
+        self.conn.execute(update(Transaction).where(Transaction.id == "cc|3").values(category_source="manual", needs_review=0))
         n = categorize.set_category(self.conn, "cc|0", "Coffee & Snacks", remember=True)
-        self.assertEqual(n, 1)
+        self.assertEqual(n, 2)
         self.assertEqual(self.conn.execute(select(Rule.match)).fetchone()[0], "blue bottle")
         self.assertEqual(self.conn.execute(select(func.count())
                                            .select_from(Transaction)
                                            .where(Transaction.needs_review == 1)).fetchone()[0], 0)
+        got = dict(self.conn.execute(select(Transaction.id, Transaction.category)).fetchall())
+        self.assertEqual((got["cc|2"], got["cc|3"]), ("Coffee & Snacks", "Restaurants"))
         with self.assertRaises(ValueError):
             categorize.set_category(self.conn, "cc|0", "Nope")
 

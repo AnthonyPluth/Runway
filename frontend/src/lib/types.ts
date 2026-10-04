@@ -197,9 +197,14 @@ export interface Overview {
   total: number[];
   low: { date: string; balance: number };
   /** balance: the bank's posted balance plus what's pending on the account (pending, money out negative). */
+  /** `spend`: what the budgets paid from the account take out each day it's on the chart (date → amount, positive), on
+   *  banking days. It's in the balances, but not an event. */
   accounts: {
     id: string; name: string; kind: string; balance: number; pending?: number; balance_date?: string | null;
+    spend?: Record<string, number>;
   }[];
+  /** The accounts' `spend` together: what the budgets take out of the forecast's balance each day. */
+  spend?: Record<string, number>;
   events: ForecastEvent[];
   /** Churning cards' annual fees: charges on cards, listed with what's coming up but not in events or the balances
    *  (each is in its card's statement payment). */

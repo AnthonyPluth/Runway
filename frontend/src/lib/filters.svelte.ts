@@ -80,13 +80,16 @@ export const sameFilters = (a: TxFilters, b: TxFilters): boolean => KEYS.every((
 
 export interface Preset { id: string; label: string; from: string; to: string }
 
-/** The date ranges offered with one tap. "All time" is no range at all. */
+/** The date ranges offered with one tap, the coming months too (a future range is as good as a past one). "All time" is
+ *  no range at all. */
 export function presets(today: Date = new Date()): Preset[] {
   const y = today.getFullYear(), m = today.getMonth();
   return [
     { id: "this-month", label: "This month", from: isoDay(new Date(y, m, 1)), to: isoDay(new Date(y, m + 1, 0)) },
     { id: "last-month", label: "Last month", from: isoDay(new Date(y, m - 1, 1)), to: isoDay(new Date(y, m, 0)) },
     { id: "last-3", label: "Last 3 months", from: isoDay(new Date(y, m - 2, 1)), to: isoDay(new Date(y, m + 1, 0)) },
+    { id: "next-month", label: "Next month", from: isoDay(new Date(y, m + 1, 1)), to: isoDay(new Date(y, m + 2, 0)) },
+    { id: "next-3", label: "Next 3 months", from: isoDay(new Date(y, m + 1, 1)), to: isoDay(new Date(y, m + 4, 0)) },
     { id: "this-year", label: "This year", from: isoDay(new Date(y, 0, 1)), to: isoDay(new Date(y, 11, 31)) },
     { id: "all", label: "All time", from: "", to: "" },
   ];

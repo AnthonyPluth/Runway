@@ -26,7 +26,7 @@
   // open a small form under the row. Remove asks first when anything uses the category, saying what happens to it;
   // when nothing does, it's removed straight away with an Undo.
   // A spending category also has the card or account its spending goes on (the budget forecast spends its budget
-  // there): a quiet select after its name, showing the one chosen, or "Automatic" with the one that means.
+  // there): a quiet select after its name, showing the one chosen, or the one that "(automatic)" means.
   let { c, payAccounts = [] }: { c: Category; payAccounts?: PayAccount[] } = $props();
   const name = $derived(c.name);
   const builtIn = $derived(!!c.protected);
@@ -97,12 +97,15 @@
   const spending = $derived(!c.is_transfer && !c.is_income);
   const acctName = (id: string | null | undefined) => (id ? payAccounts.find((x) => x.id === id)?.name : undefined);
   const inherited = $derived(c.path.slice(0, -1).reverse().map((p) => categories.list.find((x) => x.name === p)).find((x) => x?.pay_with));
+  // The automatic option reads like an explicit one, account first ("Visa (automatic)"), so it fits a phone; why it's
+  // that account goes in the select's tooltip.
   const automatic = $derived.by(() => {
     const via = acctName(inherited?.pay_with);
-    if (via) return `Automatic (${via}, as ${inherited!.name})`;
+    if (via) return { label: `${via} (automatic)`, why: `Automatic: the card set on ${inherited!.name}` };
     const usual = acctName(c.usual_account);
-    return usual ? `Automatic (usually ${usual})` : "Automatic";
+    return usual ? { label: `${usual} (automatic)`, why: "Automatic: the account used most for it" } : { label: "Automatic", why: "Automatic: the account used most for it, once it has spending" };
   });
+  const payTitle = $derived(c.pay_with ? "Which card or account this spending goes on; the forecast uses it" : `${automatic.why}; the forecast uses it`);
   async function savePayWith(f: HTMLSelectElement) {
     await api("/api/categories/pay-with", { method: "POST", body: { name, pay_with: f.value } });
     await loadCategories();   // its subcategories' "Automatic" follows it
@@ -115,9 +118,9 @@
 
 {#snippet payWith(cls: string)}
   <select class={cn(selectCls, "h-8 w-72 max-w-full truncate text-sm md:text-xs hover:border-input dark:bg-transparent phone:h-11 phone:w-full", !c.pay_with && "text-muted-foreground", cls)}
-    value={c.pay_with ?? ""} aria-label={`Account ${name} is paid with`} title="Which card or account this spending goes on; the forecast uses it"
+    value={c.pay_with ?? ""} aria-label={`Account ${name} is paid with`} title={payTitle}
     use:autosave={(f) => savePayWith(f as HTMLSelectElement)}>
-    <option value="">{automatic}</option>
+    <option value="">{automatic.label}</option>
     <optgroup label="Cards">
       {#each payAccounts.filter((x) => x.kind === "credit") as x (x.id)}<option value={x.id}>{x.name}</option>{/each}
     </optgroup>

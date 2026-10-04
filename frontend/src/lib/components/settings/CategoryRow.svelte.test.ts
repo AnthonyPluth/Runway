@@ -89,8 +89,9 @@ describe("the account a category is paid with", () => {
   it("is picked on a nested category with no budget, saved at once, and the list reloads", async () => {
     vi.mocked(api).mockImplementation(async (path: string) => (path === "/api/categories" ? categories.list : { ok: true }) as never);
     render(CategoryRow, { c: { ...categories.list[1], budgeted: false, usual_account: "b1" }, payAccounts: pay });
-    expect(select("Pharmacy")).toHaveDisplayValue("Automatic (usually Checking)");
+    expect(select("Pharmacy")).toHaveDisplayValue("Checking (automatic)");
     expect(select("Pharmacy")).toHaveClass("text-muted-foreground");
+    expect(select("Pharmacy")).toHaveAttribute("title", expect.stringContaining("the account used most"));
     expect(within(select("Pharmacy")).getByRole("group", { name: "Cards" })).toHaveTextContent("Visa");
     await userEvent.selectOptions(select("Pharmacy"), "c1");
     await waitFor(() => expect(calls("/api/categories/pay-with")).toEqual([{ name: "Pharmacy", pay_with: "c1" }]));
@@ -105,7 +106,26 @@ describe("the account a category is paid with", () => {
     expect(select("Medical")).not.toHaveClass("text-muted-foreground");
     unmount();
     render(CategoryRow, { c: categories.list[1], payAccounts: pay });
-    expect(select("Pharmacy")).toHaveDisplayValue("Automatic (Visa, as Medical)");
+    expect(select("Pharmacy")).toHaveDisplayValue("Visa (automatic)");
+    expect(select("Pharmacy")).toHaveClass("text-muted-foreground");
+    expect(select("Pharmacy")).toHaveAttribute("title", expect.stringContaining("the card set on Medical"));
+  });
+
+  it("follows its parent's choice as soon as the categories reload", async () => {
+    render(CategoryRow, { c: categories.list[1], payAccounts: pay });
+    expect(select("Pharmacy")).toHaveDisplayValue("Automatic");
+    categories.list = categories.list.map((x) => (x.name === "Medical" ? { ...x, pay_with: "b1" } : x));
+    await waitFor(() => expect(select("Pharmacy")).toHaveDisplayValue("Checking (automatic)"));
+  });
+
+  it("says plain Automatic when there is no account to name, and an explicit choice has no suffix", () => {
+    const { unmount } = render(CategoryRow, { c: categories.list[1], payAccounts: pay });
+    expect(select("Pharmacy")).toHaveDisplayValue("Automatic");
+    expect(select("Pharmacy")).toHaveAttribute("title", expect.stringContaining("Automatic"));
+    unmount();
+    render(CategoryRow, { c: { ...categories.list[1], pay_with: "c1" }, payAccounts: pay });
+    expect(select("Pharmacy")).toHaveDisplayValue("Visa");
+    expect(select("Pharmacy")).toHaveAttribute("title", "Which card or account this spending goes on; the forecast uses it");
   });
 
   it("says why it wasn't saved, and keeps your choice to try again", async () => {

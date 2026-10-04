@@ -14,7 +14,7 @@
   {#each lines as l, i (i)}
     <div class="flex items-baseline justify-between gap-3">
       <span class="min-w-0">{l.label}</span>
-      <span class={["shrink-0", l.sum && !l.label && "font-medium text-foreground"]}>{l.value}</span>
+      <span class={["shrink-0 whitespace-nowrap", l.sum && !l.label && "font-medium text-foreground"]}>{l.value}</span>
     </div>
     {#if l.detail}<div class="pr-20 text-muted-foreground/70">{l.detail}</div>{/if}
   {/each}

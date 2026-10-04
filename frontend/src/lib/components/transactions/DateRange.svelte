@@ -28,6 +28,19 @@
   }
 </script>
 
+<!-- iOS draws an empty date input with nothing in it, so the hint stands in for it until there's a date (or you're typing one).
+     Elsewhere the browser's own "mm/dd/yyyy" is hidden while the hint shows, so the two don't overprint. No max: the dates
+     can be ahead of today. The calendar button stays hidden (app.css). -->
+{#snippet field(name: string, hint: string, value: string, set: (v: string) => void, invalid = false)}
+  <span class="relative flex">
+    <Input type="date" {name} {value} oninput={(e) => set(e.currentTarget.value)} aria-invalid={invalid || undefined}
+      class={cn("min-w-0 appearance-none border-border text-foreground", !value && "peer not-focus:text-transparent")} />
+    {#if !value}
+      <span aria-hidden="true" class="pointer-events-none absolute inset-y-0 left-3 flex items-center text-base text-muted-foreground peer-focus:hidden md:text-sm">{hint}</span>
+    {/if}
+  </span>
+{/snippet}
+
 <span class={cn("inline-flex h-10 min-w-0 items-center rounded-lg text-sm phone:min-h-11 max-sm:flex-[1_1_40%]", set ? "bg-primary/15 text-primary" : "dark:bg-input")}>
   <Popover.Root bind:open>
     <Popover.Trigger class={cn("inline-flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg pl-3 max-sm:justify-center outline-none focus-visible:ring-3 focus-visible:ring-ring/50", set ? "pr-1.5" : "pr-3")}
@@ -46,12 +59,12 @@
         {/each}
       </div>
       <form class="mt-2 flex flex-col gap-2 border-t pt-3" onsubmit={apply}>
-        <div class="grid grid-cols-2 gap-2">
-          <label class="flex flex-col gap-1 text-xs text-muted-foreground">From<Input type="date" bind:value={mine.from} class="text-foreground" /></label>
-          <label class="flex flex-col gap-1 text-xs text-muted-foreground">To<Input type="date" bind:value={mine.to} class="text-foreground" aria-invalid={bad || undefined} /></label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">From{@render field("start", "Start", mine.from, (v) => (mine.from = v))}</label>
+          <label class="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">To{@render field("end", "End", mine.to, (v) => (mine.to = v), bad)}</label>
         </div>
         {#if bad}<p class="text-xs text-destructive" role="alert">The end is before the start.</p>{/if}
-        <Button type="submit" size="sm" variant="outline" disabled={bad || (mine.from === from && mine.to === to)}>Apply</Button>
+        <Button type="submit" size="sm" disabled={bad || (mine.from === from && mine.to === to)}>Apply</Button>
       </form>
     </Popover.Content>
   </Popover.Root>
