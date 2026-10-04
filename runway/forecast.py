@@ -980,10 +980,9 @@ def budget_plan(conn, today: date) -> list[dict]:
     pay_with = dict(conn.execute(select(Category.name, Category.pay_with)).fetchall())
     budgets = {r["category"]: r for r in db.rows(conn.execute(select(Budget)))}
     p = splits.parts()
-    base = (Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))
     spent_by: dict[str | None, float] = dict(conn.execute(   # this month, by category (refunds come off)
         select(p.c.category, -func.sum(p.c.amount)).select_from(p).join(Account, Account.id == p.c.account_id)
-        .where(*base, p.c.posted >= today.replace(day=1).isoformat(), p.c.posted <= today.isoformat())
+        .where(*db.SPENDING_ACCOUNTS, p.c.posted >= today.replace(day=1).isoformat(), p.c.posted <= today.isoformat())
         .group_by(p.c.category)).fetchall())
     used = account_use(conn, today)
 
@@ -1016,8 +1015,7 @@ def account_use(conn, today: date) -> dict[str | None, dict[str, float]]:
     out: dict[str | None, dict[str, float]] = defaultdict(dict)
     for cat, acct, amount in conn.execute(
             select(p.c.category, p.c.account_id, func.sum(-p.c.amount)).join(Account, Account.id == p.c.account_id)
-            .where(Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]),
-                   p.c.posted > (today - timedelta(days=90)).isoformat(), p.c.amount < 0)
+            .where(*db.SPENDING_ACCOUNTS, p.c.posted > (today - timedelta(days=90)).isoformat(), p.c.amount < 0)
             .group_by(p.c.category, p.c.account_id)).fetchall():
         out[cat][acct] = amount
     return out

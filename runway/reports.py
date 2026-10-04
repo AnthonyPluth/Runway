@@ -18,7 +18,6 @@ from . import categories, dates, db, splits
 from .models import Account, Transaction
 
 TOP = 7                      # series shown by name; the rest are "Everything else"
-SCOPE = (Account.hidden == 0, Account.kind.in_(["checking", "savings", "credit"]))   # conditions on the joined Account
 GROUPS = ("category", "merchant", "account")
 
 
@@ -37,7 +36,7 @@ def _with_data(conn, ms: list[str]) -> list[str]:
     which would pull the averages down, so the months start the month after, unless that would leave only the last
     month. The last month always stays, so a new install still shows this month."""
     first = conn.execute(select(func.min(Transaction.posted)).select_from(Transaction)
-                         .join(Account, Account.id == Transaction.account_id).where(*SCOPE)).scalar()
+                         .join(Account, Account.id == Transaction.account_id).where(*db.SPENDING_ACCOUNTS)).scalar()
     start = (first or "")[:7] or ms[-1]
     if first and first[8:10] != "01":
         after = dates.next_month_key(start)
@@ -52,7 +51,7 @@ def _rows(conn, start: str, end: str) -> list[dict]:
         select(t.c.id, func.substr(t.c.posted, 1, 7).label("month"), t.c.posted, t.c.amount, t.c.payee, t.c.description,
                t.c.category, t.c.account_id, db.account_label_expr().label("account_name"))
         .select_from(t).join(Account, Account.id == t.c.account_id)
-        .where(t.c.posted >= start, t.c.posted < end, *SCOPE)))
+        .where(t.c.posted >= start, t.c.posted < end, *db.SPENDING_ACCOUNTS)))
 
 
 class _Kinds:

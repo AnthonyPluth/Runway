@@ -7,7 +7,7 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import func, select
 
-from . import splits
+from . import db, splits
 from .models import Account
 
 
@@ -17,8 +17,7 @@ def month_totals(conn, start: date, end: date) -> dict:
     rows_ = conn.execute(
         select(t.c.category.label("category"), func.sum(t.c.amount).label("total"))
         .join(Account, Account.id == t.c.account_id)
-        .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), Account.hidden == 0,
-               Account.kind.in_(["checking", "savings", "credit"]))
+        .where(t.c.posted >= start.isoformat(), t.c.posted < end.isoformat(), *db.SPENDING_ACCOUNTS)
         .group_by(t.c.category)
     ).fetchall()
     return {r["category"]: r["total"] or 0.0 for r in rows_}

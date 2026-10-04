@@ -259,7 +259,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
                 select(T.id, T.amount, func.coalesce(T.payee, T.description).label("who"), db.account_label_expr().label("acct"))
                 .join(Account, Account.id == T.account_id).outerjoin(Category, Category.name == T.category)
                 .where(T.posted >= since, T.amount <= -float(p["big_charge_over"]),
-                       Account.kind.in_(["checking", "savings", "credit"]), Account.hidden == 0,
+                       *db.SPENDING_ACCOUNTS,
                        func.coalesce(Category.is_transfer, 0) == 0)).fetchall():
             out.append({"key": f"big:{t['id']}", "title": f"{_fmt(t['amount'])} at {t['who']}",
                         "body": f"On {t['acct']}.", "url": "/#transactions"})
