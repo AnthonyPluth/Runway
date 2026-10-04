@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           persist-credentials: false
-      - uses: $/.github/actions/setup-node-app
+      - uses: ./.github/actions/setup-node-app   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
         with:
           directory: frontend
           install: "false"      # npm audit reads the lockfile
@@ -187,7 +187,7 @@ jobs:
         with:
           persist-credentials: false
       # zizmor at the version poetry.lock pins (pyproject.toml's dev group), the same as `poetry install` gives you.
-      - uses: $/.github/actions/setup-python-poetry
+      - uses: ./.github/actions/setup-python-poetry   # zizmor: ignore[self-repository] -- GitHub's documented form for a local action
         with:
           cache-name: dev
           install-args: --only dev
