@@ -125,4 +125,18 @@ describe("Settings → Data: restore", () => {
     expect(await screen.findByText("That file isn't a Runway backup.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restore…" })).toBeDisabled();
   });
+
+  it("says Runway can't be reached, as everywhere else, when the file can't be sent", async () => {
+    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(BackupSection);
+    await choose();
+    expect(await screen.findByText("Can’t reach Runway. Check your connection and try again.")).toBeInTheDocument();
+  });
+
+  it("names a refusal that came with no words after the step it was on", async () => {
+    fetchMock.mockResolvedValue(({ ok: false, status: 500, json: async () => { throw new Error("not json"); } }) as unknown as Response);
+    render(BackupSection);
+    await choose();
+    expect(await screen.findByText("Couldn’t read that backup (500)")).toBeInTheDocument();
+  });
 });

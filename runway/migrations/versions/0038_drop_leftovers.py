@@ -2,14 +2,14 @@
 churn_cards.fee_month (a card's annual fee posts on its anniversary), and on Postgres the instr() SQL function the
 baseline made (queries compile db.instr to Postgres's own strpos).
 
-Revision ID: 0037
-Revises: 0036
+Revision ID: 0038
+Revises: 0037
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0037'
-down_revision = '0036'
+revision = '0038'
+down_revision = '0037'
 branch_labels = None
 depends_on = None
 

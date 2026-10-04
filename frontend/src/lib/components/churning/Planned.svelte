@@ -20,6 +20,7 @@
   import Popover from "./Popover.svelte";
   import type { Churning, Wish } from "./types";
   import WishForm from "./WishForm.svelte";
+  import { act } from "$lib/act";
 
   // Cards and bank bonuses you mean to get, everyone's in one list in the order you'd go: what each is expected to cost and pay,
   // what's in the way of applying now (5/24, the bank's bonus rules, an account still open, a credit score, a day you
@@ -53,30 +54,28 @@
   }
 
   async function move(w: Wish, dir: -1 | 1) {
-    try {
+    await act(async () => {
       await Promise.all(reorder(everyone, w.id, dir, parts.open).map((c) => api(`/api/churning/wishlist/${c.id}`, { method: "POST", body: { priority: c.priority } })));
       onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // Dropping can be undone from its toast; "Want again" is the way back from the list.
   async function wantAgain(w: Wish) {
-    try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status: "wanted" } }); toast(`${wishName(w)} is wanted again`); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { status: "wanted" } }); toast(`${wishName(w)} is wanted again`); onchanged(); });
   }
   // Applied or dropped: deleted for good (what applying made, the card or bonus, stays), so it asks first.
   let deleting = $state<Wish | null>(null);
   let asking = $state(false);
   const askDelete = (w: Wish) => { deleting = w; asking = true; };
   async function remove(w: Wish): Promise<boolean> {
-    try { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/wishlist/${w.id}/remove`, { method: "POST", body: {} }); toast(`Deleted ${wishName(w)}`); onchanged(); });
   }
   async function applied(w: Wish) {
-    try {
+    await act(async () => {
       const r = await api<{ kind: Wish["kind"]; id: number }>(`/api/churning/wishlist/${w.id}/applied`, { method: "POST", body: {} });
       toast(`${wishName(w)} added. Set its details.`);
       onapplied(r.kind, r.id);
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   // A credit score you looked up.
@@ -88,10 +87,10 @@
     scoring = p; score = ""; scoreDay = d.today; scoreSource = d.scores[p]?.source ?? "";
   }
   async function saveScore() {
-    try {
+    await act(async () => {
       await api("/api/churning/scores", { method: "POST", body: { owner: scoring, score, as_of: scoreDay, source: scoreSource } });
       scoring = null; onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 </script>
 

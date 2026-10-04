@@ -7,6 +7,7 @@
   import { fmt, fmtDate, isoDay, nb, parseDate } from "$lib/format";
   import type { CardSummary } from "$lib/types";
   import { toast } from "svelte-sonner";
+  import { act } from "$lib/act";
 
   // Each card's latest statement (click it to correct the bank's figure), when it's due, and, for
   // a card that isn't paid in full, how much of it the forecast pays.
@@ -20,12 +21,10 @@
   const today = parseDate(isoDay());
 
   async function setStatement(c: CardSummary, value: number) {
-    try { await api("/api/overrides", { method: "POST", body: { key: c.statement_key, amount: value } }); toast.success("Statement balance saved"); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/overrides", { method: "POST", body: { key: c.statement_key, amount: value } }); toast.success("Statement balance saved"); onchanged(); });
   }
   async function reset(c: CardSummary) {
-    try { await api("/api/overrides", { method: "DELETE", body: { key: c.statement_key } }); toast.success("Back to the calculated amount"); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/overrides", { method: "DELETE", body: { key: c.statement_key } }); toast.success("Back to the calculated amount"); onchanged(); });
   }
 </script>
 

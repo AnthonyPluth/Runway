@@ -7,6 +7,7 @@ import { plural } from "$lib/format";
 import { undoable } from "$lib/undo";
 import { toast } from "svelte-sonner";
 import type { Rule, RulePreview } from "./types";
+import { act, errMsg } from "$lib/act";
 
 /** What the preview needs of a rule (saved, or as the editor has it). */
 export type RuleBody = Pick<Rule, "match" | "match_mode" | "amount_min" | "amount_max" | "direction" | "account_id" | "category" | "rename" | "review" | "split">;
@@ -31,7 +32,7 @@ export async function countChanges(body: RuleBody): Promise<RulePreview | null> 
     const p = await api<RulePreview>("/api/rules/preview", { method: "POST", body: previewBody(body) });
     if (p.error) { toast.error(p.error); return null; }
     return p;
-  } catch (err) { toast.error((err as Error).message); return null; }
+  } catch (err) { toast.error(errMsg(err)); return null; }
 }
 
 /** Why there's nothing to ask about. */
@@ -42,14 +43,13 @@ export const nothingToChange = (p: RulePreview) => p.matches
 /** Run saved rule `id` over past transactions, and say how many changed, with Undo when the server kept what they were.
  *  `said` goes before the count ("Rule added · "). False (with the error shown) when it failed. */
 export async function applyRule(id: number, said = ""): Promise<boolean> {
-  try {
+  return act(async () => {
     const res = await api<{ updated: number; changed: RuleWas[]; undoable: boolean }>(`/api/rules/${id}/apply`, { method: "POST" });
     const msg = `${said}${plural(res.updated, "transaction")} updated`;
     if (res.undoable && res.changed.length) undoable(msg, async () => { await restoreTx(res.changed.map(fromRule)); });
     else toast.success(msg, res.updated ? { description: "That’s too many to undo from here." } : undefined);
     refreshState();
-    return true;
-  } catch (err) { toast.error((err as Error).message); return false; }
+  });
 }
 
 /** The question the dialog asks: how many it changes, what to (`what`), and what saying yes does. */

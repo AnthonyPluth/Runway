@@ -13,6 +13,8 @@
   import { RuleApplyAsk, applyRule, countChanges, nothingToChange, ruleActions } from "./ruleApply.svelte";
   import type { Rule, RulePreview, SettingsAccount } from "./types";
   import { checkCls, fieldCls, inputCls, rowCls, selectCls } from "./ui";
+  import { errMsg } from "$lib/act";
+  import { debounced, latestOnly } from "$lib/debounce";
 
   // Add or edit a rule: conditions on the left, what it does on the right, and a live count of what it would match.
   // Save waits until the rule makes sense (a condition, something to do, a split adding up to 100%), saying what's
@@ -79,16 +81,18 @@
 
   // What it would match, a moment after you stop typing (only the latest answer counts).
   let preview = $state<RulePreview | null>(null);
-  let seq = 0;
+  const latest = latestOnly();
+  const ask = debounced(async (b: string) => {
+    const current = latest.begin();
+    const p = await api<RulePreview>("/api/rules/preview", { method: "POST", body: JSON.parse(b) })
+      .catch((e) => ({ error: errMsg(e), matches: 0, changes: 0 }));
+    if (current()) preview = p;
+  }, 250);
   $effect(() => {
     const b = JSON.stringify(body());
-    const mine = ++seq;
-    const timer = setTimeout(async () => {
-      const p = await api<RulePreview>("/api/rules/preview", { method: "POST", body: JSON.parse(b) })
-        .catch((e) => ({ error: (e as Error).message, matches: 0, changes: 0 }));
-      if (mine === seq) preview = p;
-    }, 250);
-    return () => clearTimeout(timer);
+    latest.cancel();   // typing again overtakes an answer that's still on its way
+    ask.call(b);
+    return ask.cancel;
   });
 
   // Save the rule (without running it over the past); its id, or null with the error shown.
@@ -96,7 +100,7 @@
     try {
       if (r.id) { await api(`/api/rules/${r.id}`, { method: "POST", body: body() }); return r.id; }
       return (await api<{ id: number }>("/api/rules", { method: "POST", body: { ...body(), apply: false } })).id;
-    } catch (err) { toast.error((err as Error).message); return null; }
+    } catch (err) { toast.error(errMsg(err)); return null; }
   }
   const said = $derived(r.id ? "Rule saved" : "Rule added");
   const done = () => { refreshState(); reload(); };

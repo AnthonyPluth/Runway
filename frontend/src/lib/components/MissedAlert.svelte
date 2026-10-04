@@ -6,8 +6,8 @@
   import { fmtDate, fmtSigned, isoDay } from "$lib/format";
   import type { Missed } from "$lib/types";
   import { undoable } from "$lib/undo";
-  import { toast } from "svelte-sonner";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { act } from "$lib/act";
 
   // A recurring payment that hasn't shown up (a row of a Needs attention list, on Overview and Recurring): how late it
   // is, "Link a transaction" to say which payment it was (LinkPicker, right here), or "Skip this one", a one-off $0 for
@@ -17,14 +17,14 @@
   let picking = $state(false);
 
   async function skip() {
-    try {
+    await act(async () => {
       await api("/api/overrides", { method: "POST", body: { key: m.key, amount: 0 } });
       gone = true; ondone?.(m.key);
       undoable(`Skipped ${m.name} on ${fmtDate(m.date)}`, async () => {
         await api("/api/overrides", { method: "DELETE", body: { key: m.key } });
         gone = false; picking = false; onundone?.(m.key);
       });
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   function linked() { gone = true; ondone?.(m.key); }
 </script>

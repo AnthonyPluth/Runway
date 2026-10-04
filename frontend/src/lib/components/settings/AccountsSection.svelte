@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isBankKind, isCash, isPlaidStub, KIND_GROUPS } from "$lib/accounts";
   import { api } from "$lib/api";
   import { reload } from "$lib/app.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -12,6 +13,7 @@
   import { ignoredAccounts, undecidedAccounts } from "./plaidAccounts";
   import type { DeletedAccount, PlaidStatus, SettingsAccount } from "./types";
   import { linkCls } from "./ui";
+  import { act } from "$lib/act";
 
   // Settings → Accounts: every account grouped by type. The forecast account can be chosen here or on Overview (its
   // forecast settings, which also hold its length). Hiding or showing an account moves its row here, without loading
@@ -19,13 +21,12 @@
   let { accounts }: { accounts: SettingsAccount[] } = $props();
   let hiddenNow = $state<Record<string, boolean>>({});
   const moved = (id: string, on: boolean) => { hiddenNow = { ...hiddenNow, [id]: on }; };
-  const list = $derived(accounts.map((a) => (a.id in hiddenNow ? { ...a, hidden: hiddenNow[a.id] ? 1 : 0 } : a)));
+  const list = $derived(accounts.map((a) => (a.id in hiddenNow ? { ...a, hidden: hiddenNow[a.id] } : a)));
 
-  const cash = $derived(list.filter((a) => a.kind === "checking" || a.kind === "savings"));
+  const cash = $derived(list.filter((a) => isCash(a.kind)));
   const byName = $derived(Object.fromEntries(accounts.map((a) => [a.id, accountName(a)])));
 
-  const KIND_GROUPS: [string, string[]][] = [["Cash", ["checking", "savings"]], ["Credit cards", ["credit"]], ["Loans", ["loan"]], ["Investments", ["investment"]]];
-  const groups = $derived(KIND_GROUPS.map(([title, kinds]) => ({ title, list: list.filter((a) => !a.hidden && kinds.includes(a.kind)) })).filter((g) => g.list.length));
+  const groups = $derived(KIND_GROUPS.map(([title, kinds]) => ({ title, list: list.filter((a) => !a.hidden && (kinds as readonly string[]).includes(a.kind)) })).filter((g) => g.list.length));
   // Hidden accounts are tucked into a collapsed line, like the deleted ones below; a link to one of them opens it.
   const hiddenList = $derived(list.filter((a) => a.hidden));
   let showHidden = $state(false);
@@ -35,7 +36,7 @@
   let plaid = $state<PlaidStatus | null>(null);
   api<PlaidStatus>("/api/plaid/status").then((r) => (plaid = r), () => {});
   const waiting = $derived(undecidedAccounts(plaid));
-  const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:") && ["checking", "savings", "credit", "loan"].includes(a.kind)));
+  const mine = $derived(accounts.filter((a) => !isPlaidStub(a.id) && isBankKind(a.kind)));
 
   // Accounts you deleted, which syncs leave out until you restore one (runway/deleted_accounts.py).
   let deleted = $state<DeletedAccount[]>([]);
@@ -43,13 +44,11 @@
   let showDeleted = $state(false);
   let restoring = $state("");
   async function restore(d: DeletedAccount) {
-    restoring = d.id;
-    try {
+    await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(d.id)}/restore`, { method: "POST" });
       toast.success(`${d.name || "The account"} comes back with the next sync`);
       reload();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { restoring = ""; }
+    }, { busy: (on) => (restoring = on ? d.id : "") });
   }
 </script>
 

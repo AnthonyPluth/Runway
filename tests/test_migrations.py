@@ -73,7 +73,7 @@ class MigrationTests(unittest.TestCase):
             c.exec_driver_sql("INSERT INTO accounts(id, name, daily_spend) VALUES ('a1', 'Checking', 1)")
             c.exec_driver_sql("INSERT INTO settings(key, value) VALUES ('migrated_daily_spend_off', '1')")
         from alembic import command
-        with db.engine(self.path).begin() as c:   # what db.migrate does, as far as 0036 (0037 drops the column)
+        with db.engine(self.path).begin() as c:   # what db.migrate does, as far as 0036 (0038 drops the column)
             db._upgrade_legacy(c)
             command.stamp(db.alembic_config(c), db.BASELINE)
             command.upgrade(db.alembic_config(c), "0036")
@@ -108,7 +108,7 @@ class MigrationTests(unittest.TestCase):
                     self.assertIsNone(c.exec_driver_sql("SELECT key FROM settings WHERE key='migrated_daily_spend_off'").scalar())
                     command.downgrade(db.alembic_config(c), "0025")
         with db.engine(self.path).begin() as c:
-            command.upgrade(db.alembic_config(c), "head")   # and on to 0037, which drops the column
+            command.upgrade(db.alembic_config(c), "head")   # and on to 0038, which drops the column
             self.assertNotIn("daily_spend", {col["name"] for col in sa.inspect(c).get_columns("accounts")})
             self.assertEqual(c.exec_driver_sql("SELECT name FROM accounts WHERE id='a1'").scalar(), "Checking")
         db.init(self.path)
@@ -468,12 +468,12 @@ class MigrationTests(unittest.TestCase):
                              {"Crafts": "cc", "Pottery": "chk", "Aquarium": "chk", "Gone": None})
             self.assertNotIn("pay_with", {x["name"] for x in sa.inspect(c).get_columns("categories")})
 
-    def test_0037_drops_what_nothing_reads(self):
+    def test_0038_drops_what_nothing_reads(self):
         from alembic import command
         db.init(self.path)
         instr = "SELECT count(*) FROM pg_proc WHERE proname = 'instr' AND pronamespace = current_schema()::regnamespace"
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0036")
+            command.downgrade(db.alembic_config(c), "0037")
         with db.engine(self.path).begin() as c:
             if c.dialect.name == "postgresql":
                 self.assertEqual(c.exec_driver_sql(instr).scalar(), 1)
@@ -492,13 +492,13 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(c.execute(select(db.instr("hello", "ll"))).scalar(), 3)   # what queries use instead
         self.assertEqual(drift(self.path), [])
 
-    def test_0038_moves_categories_nested_too_deep_up(self):
+    def test_0039_moves_categories_nested_too_deep_up(self):
         # Deeper nesting was briefly allowed: Runway flattened it at every start; now this migration does, once.
         from alembic import command
         from runway import categories
         db.init(self.path)
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0037")
+            command.downgrade(db.alembic_config(c), "0038")
             c.exec_driver_sql("INSERT INTO categories(name, parent) VALUES ('Food', NULL), ('Eating Out', 'Food'), "
                               "('Burgers', 'Eating Out'), ('Sliders', 'Burgers'), ('Lost', 'Gone'), ('Lost Too', 'Lost'), "
                               "('Under Lost', 'Lost Too'), ('Loop A', 'Loop B'), ('Loop B', 'Loop A')")
@@ -513,7 +513,7 @@ class MigrationTests(unittest.TestCase):
                               "Loop A": "Loop B", "Loop B": "Loop A"})                    # a loop is left alone
             self.assertTrue(all(c["depth"] <= 1 for c in categories.all_categories(conn) if not c["name"].startswith("Loop")))
 
-    def test_0039_keeps_a_copy_then_removes_what_refers_to_nothing(self):
+    def test_0040_keeps_a_copy_then_removes_what_refers_to_nothing(self):
         import contextlib
         import io
         import stat
@@ -523,7 +523,7 @@ class MigrationTests(unittest.TestCase):
         data = tempfile.mkdtemp()   # where a Postgres database's copy goes (RUNWAY_DATA); a SQLite one's is beside it
         db.init(self.path)
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0038")
+            command.downgrade(db.alembic_config(c), "0039")
         with db.engine(self.path).begin() as c:
             for sql in (
                 "INSERT INTO accounts(id, name, kind, pay_from) VALUES ('chk', 'Checking', 'checking', NULL), "
@@ -570,12 +570,12 @@ class MigrationTests(unittest.TestCase):
         self.assertNotRegex(log, r"gone|9\.99|Streaming|amazon|cafe")
         # A copy of everything first, private, that restores what was there.
         where = data if db.using_postgres() else os.path.dirname(self.path)
-        copies = [f for f in os.listdir(where) if f.startswith("runway-before-migration-0039-")]
+        copies = [f for f in os.listdir(where) if f.startswith("runway-before-migration-0040-")]
         self.assertEqual(len(copies), 1)
         self.assertEqual(stat.S_IMODE(os.stat(os.path.join(where, copies[0])).st_mode), 0o600)
         with open(os.path.join(where, copies[0]), "rb") as f:
             kept = backup.load(f.read())
-        self.assertEqual(kept["revision"], "0038")
+        self.assertEqual(kept["revision"], "0039")
         self.assertEqual(len(kept["tables"]["transactions"]["rows"]), 3)
         with db.engine(self.path).begin() as c:
             # raw SQL: what the migration left, on the raw connection (text() so Postgres takes LIKE's %)
@@ -610,16 +610,16 @@ class MigrationTests(unittest.TestCase):
             self.assertIsNone(conn.execute(select(Category.pay_with).where(Category.name == "Pottery")).scalar())   # SET NULL
             self.assertIsNone(conn.execute(select(ChurnCard.account_id).where(ChurnCard.id == 2)).scalar())
         with db.engine(self.path).begin() as c:   # and back down: the keys go
-            command.downgrade(db.alembic_config(c), "0038")
+            command.downgrade(db.alembic_config(c), "0039")
             self.assertEqual([fk for t in ("transactions", "churn_cards") for fk in sa.inspect(c).get_foreign_keys(t)], [])
 
-    def test_0039_saves_no_copy_when_nothing_refers_to_nothing(self):
+    def test_0040_saves_no_copy_when_nothing_refers_to_nothing(self):
         from unittest import mock
         from alembic import command
         data = tempfile.mkdtemp()
         db.init(self.path)
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0038")
+            command.downgrade(db.alembic_config(c), "0039")
             c.exec_driver_sql("INSERT INTO accounts(id, name) VALUES ('chk', 'Checking')")
             c.exec_driver_sql("INSERT INTO transactions(id, account_id, posted, amount) VALUES ('chk|1', 'chk', '2026-09-01', -5)")
         with mock.patch.dict(os.environ, {"RUNWAY_DATA": data}), db.engine(self.path).begin() as c:
@@ -639,11 +639,42 @@ class MigrationTests(unittest.TestCase):
             conn.execute(insert(Account).values(id="chk", name="Checking"))
             conn.execute(insert(Transaction).values(id="chk|1", account_id="chk", posted="2026-09-01", amount=-5))
         with db.engine(self.path).begin() as c:
-            command.downgrade(db.alembic_config(c), "0036")   # 0037's way back remakes accounts
+            command.downgrade(db.alembic_config(c), "0036")   # 0038's way back remakes accounts
         db.migrate(self.path)
         with db.session(self.path) as conn:
             self.assertEqual(conn.execute(select(Transaction.id)).scalars(), ["chk|1"])
             self.assertEqual(conn.sa.exec_driver_sql("PRAGMA foreign_keys").scalar(), 1)   # and on again for everything else
+
+    def test_0037_gives_each_side_of_a_plaid_connection_its_own_error_and_time(self):
+        from alembic import command
+        db.init(self.path)
+        with db.engine(self.path).begin() as c:
+            command.downgrade(db.alembic_config(c), "0036")
+        with db.engine(self.path).begin() as c:
+            self.assertNotIn("inv_error", {x["name"] for x in sa.inspect(c).get_columns("plaid_items")})
+            c.exec_driver_sql("INSERT INTO plaid_items(item_id, access_token, products, last_sync, error) VALUES "
+                              "('inv', 't', 'investments', '2026-09-01 10:00:00', 'ITEM_LOGIN_REQUIRED'), "
+                              "('old', 't', NULL, '2026-09-02 10:00:00', NULL), "
+                              "('bank', 't', 'liabilities,transactions', '2026-09-03 10:00:00', 'X'), "
+                              "('cards', 't', 'liabilities', NULL, 'Y'), "
+                              "('mix', 't', 'investments,transactions', '2026-09-04 10:00:00', 'Z')")
+        with db.engine(self.path).begin() as c:
+            command.upgrade(db.alembic_config(c), "head")
+        self.assertEqual(drift(self.path), [])
+        cols = "item_id, last_sync, error, inv_last_sync, inv_error"
+        with db.engine(self.path).begin() as c:
+            got = {r[0]: tuple(r[1:]) for r in c.exec_driver_sql(f"SELECT {cols} FROM plaid_items")}
+        self.assertEqual(got, {"inv": (None, None, "2026-09-01 10:00:00", "ITEM_LOGIN_REQUIRED"),
+                               "old": (None, None, "2026-09-02 10:00:00", None),
+                               "bank": ("2026-09-03 10:00:00", "X", None, None),
+                               "cards": (None, "Y", None, None),
+                               "mix": ("2026-09-04 10:00:00", "Z", None, None)})   # only ever synced as a bank one
+        with db.engine(self.path).begin() as c:   # and back down: each gets the side it was synced as
+            c.exec_driver_sql("UPDATE plaid_items SET inv_error = 'W', inv_last_sync = '2026-09-05 10:00:00' WHERE item_id = 'mix'")
+            command.downgrade(db.alembic_config(c), "0036")
+            got = {r[0]: tuple(r[1:]) for r in c.exec_driver_sql("SELECT item_id, last_sync, error FROM plaid_items")}
+        self.assertEqual(got, {"inv": ("2026-09-01 10:00:00", "ITEM_LOGIN_REQUIRED"), "old": ("2026-09-02 10:00:00", None),
+                               "bank": ("2026-09-03 10:00:00", "X"), "cards": (None, "Y"), "mix": ("2026-09-04 10:00:00", "Z")})
 
     @unittest.skipUnless(db.using_postgres(), "Postgres only: SQLite has one writer at a time anyway")
     def test_processes_starting_together_take_turns_migrating(self):

@@ -7,7 +7,6 @@ from __future__ import annotations
 import http.client
 import json
 import os
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -18,22 +17,11 @@ from typing import TypeGuard
 
 from sqlalchemy import case, func, or_, select, update
 
-from . import db
+from . import db, tls
 from .models import Price, PriceMeta, Security
 
 BENCHMARK = "SPY"   # S&P 500
 STALE_HOURS = 20
-
-
-def _ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
-    return ctx
 
 
 def usable_ticker(t: str | None) -> TypeGuard[str]:
@@ -47,7 +35,7 @@ def fetch(ticker: str, start: date, end: date) -> tuple[list[tuple[str, float, f
     p2 = int(datetime(end.year, end.month, end.day, tzinfo=UTC).timestamp()) + 86400
     url = f"{base}/{urllib.parse.quote(ticker, safe='')}?period1={p1}&period2={p2}&interval=1d&events=split&includeAdjustedClose=true"
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Runway/0.1", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30, context=_ctx()) as resp:
+    with tls.urlopen(req, timeout=30, allow_http="RUNWAY_PRICES_URL" in os.environ) as resp:
         data = json.loads(resp.read().decode())
     result = ((data.get("chart") or {}).get("result") or [None])[0]
     if not result:
@@ -168,7 +156,7 @@ def _quote(ticker: str) -> dict | None:
     base = os.environ.get("RUNWAY_PRICES_URL", "https://query1.finance.yahoo.com/v8/finance/chart")
     url = f"{base}/{urllib.parse.quote(ticker, safe='')}?range=1d&interval=1d"   # safe='': a "/" in a name stays in the name
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh) Runway/0.1", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10, context=_ctx()) as resp:
+    with tls.urlopen(req, timeout=10, allow_http="RUNWAY_PRICES_URL" in os.environ) as resp:
         data = json.loads(resp.read().decode())
     result = ((data.get("chart") or {}).get("result") or [None])[0]
     if not result:

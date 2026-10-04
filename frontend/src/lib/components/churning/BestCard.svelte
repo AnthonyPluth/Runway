@@ -11,6 +11,7 @@
   import Chip from "./Chip.svelte";
   import { fullDate, isTravel } from "./churning";
   import type { BestCard } from "./types";
+  import { debounced, latestOnly } from "$lib/debounce";
 
   // Which card to use for a purchase: pick a category (and an amount, if you like) and the open cards are ranked by
   // what they return. A card still short of its sign-up bonus says so: spending there may be worth more.
@@ -28,19 +29,21 @@
   // Typing an amount (or picking another category) asks once you pause for DEBOUNCE_MS, and a slow answer to an old
   // question never replaces the answer to the newer one. The first ask, a reload of the page's data and Try again go at once.
   const DEBOUNCE_MS = 300;
-  let seq = 0, started = false, seenVersion = -1, seenTries = 0;
+  const latest = latestOnly();
+  let started = false, seenVersion = -1, seenTries = 0;
   async function ask(path: string) {
-    const n = ++seq;
+    const current = latest.begin();
     try {
       const r = await api<{ cards: BestCard[] }>(path);
-      if (n !== seq) return;
+      if (!current()) return;
       ranked = r.cards; failed = false;
     } catch {
-      if (n !== seq) return;
+      if (!current()) return;
       failed = true;
     }
     loading = false;
   }
+  const later = debounced(ask, DEBOUNCE_MS);
   $effect(() => {
     const params = new URLSearchParams({ category, owner: person, amount: amount && Number(amount) > 0 ? amount : "" });
     if (portal && travel) params.set("portal", "1");
@@ -49,8 +52,8 @@
     started = true; seenVersion = version; seenTries = tries;
     loading = true;
     if (now) { ask(path); return; }
-    const timer = setTimeout(() => ask(path), DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    later.call(path);
+    return later.cancel;
   });
   const push = $derived(ranked?.filter((c) => c.bonus) ?? []);
 </script>

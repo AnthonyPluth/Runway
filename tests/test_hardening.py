@@ -278,10 +278,10 @@ class OutboundTests(unittest.TestCase):
             with self.assertRaises(simplefin.SimpleFinError, msg=url):
                 simplefin.check_address(url)
         token = base64.b64encode(b"https://192.168.1.10/claim/abc").decode()
-        with mock.patch.object(simplefin.urllib.request, "urlopen") as urlopen:
+        with mock.patch.object(simplefin, "_opener") as opener:
             with self.assertRaises(simplefin.SimpleFinError):
                 simplefin.claim_setup_token(token)
-            urlopen.assert_not_called()
+            opener.assert_not_called()
         with mock.patch.object(socket, "getaddrinfo",
                                return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.215.14", 443))]):
             simplefin.check_address("https://beta-bridge.simplefin.org/simplefin")   # a public address is fine

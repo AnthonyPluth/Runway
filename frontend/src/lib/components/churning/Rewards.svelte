@@ -15,6 +15,7 @@
   import CurrencySelect from "./CurrencySelect.svelte";
   import Section from "./Section.svelte";
   import type { Churning, Currency } from "./types";
+  import { act } from "$lib/act";
 
   // Points, in two views. Balances: what you have now (the balances you enter, each as of a day, worth what you set per point,
   // with an estimate of the balance today: yours plus what the cards earned since its day). Earned this year: what each
@@ -55,22 +56,20 @@
     onchanged();
   };
   async function reset(k: string) {
-    try { await api(`/api/churning/currencies/${encodeURIComponent(k)}/remove`, { method: "POST" }); onchanged(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api(`/api/churning/currencies/${encodeURIComponent(k)}/remove`, { method: "POST" }); onchanged(); });
   }
   // A currency of your own goes with its balances, which can't be brought back, so it asks first.
   let deleting = $state<Currency | null>(null);
   let asking = $state(false);
   const askDelete = (c: Currency) => { deleting = c; asking = true; };
   async function deleteCurrency(c: Currency): Promise<boolean> {
-    try { await api(`/api/churning/currencies/${encodeURIComponent(c.key)}/remove`, { method: "POST" }); toast(`Deleted ${c.name}`); onchanged(); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/currencies/${encodeURIComponent(c.key)}/remove`, { method: "POST" }); toast(`Deleted ${c.name}`); onchanged(); });
   }
   async function addCurrency() {
-    try {
+    await act(async () => {
       await api("/api/churning/currencies", { method: "POST", body: { name: newName, cents: newCents } });
       newName = ""; newCents = ""; onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // A balance can be entered for any currency, even one no card of theirs earns yet.
   let addFor = $state<Record<string, string>>({});

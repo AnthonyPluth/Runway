@@ -17,6 +17,7 @@
   import { ruleOffer } from "./remember.svelte";
   import { restoreTx, type Was } from "./restore";
   import type { AiGroup, RuleOffer } from "./types";
+  import { errMsg } from "$lib/act";
 
   // The AI's suggestions for what's in Review, one line per merchant, the biggest first (SHOWN of them, then "Show N
   // more"). Nothing changes until you apply one; a suggested new category is created when you apply it. Applying to
@@ -55,7 +56,7 @@
     tick = setInterval(() => (seconds = Math.round((Date.now() - began) / 1000)), 1000);
     let groups: AiGroup[];
     try { groups = await api<AiGroup[]>("/api/ai/suggest", { method: "POST", body: { skip: skipped } }); }
-    catch (err) { clearInterval(tick); error = (err as Error).message; status = "idle"; onasked(true); return; }
+    catch (err) { clearInterval(tick); error = errMsg(err); status = "idle"; onasked(true); return; }
     clearInterval(tick);
     onasked(false);
     status = "asked";
@@ -93,7 +94,7 @@
       undoBatched(`${l.merchant}: ${r.category}${r.created ? " (new category)" : ""} applied to ${r.updated}`,
         async () => { await restoreTx(r.was); onchanged(); }, offer ? { description: offer.description || undefined, also: offer.also } : {});
       return true;
-    } catch (err) { toast.error((err as Error).message); l.busy = false; return false; }
+    } catch (err) { toast.error(errMsg(err)); l.busy = false; return false; }
   }
 
   const answered = $derived(lines ? lines.filter(suggested).length : 0);

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isPayingKind } from "$lib/accounts";
   import { categories } from "$lib/categories.svelte";
   import CategorySelect from "$lib/components/CategorySelect.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -12,7 +13,7 @@
   // listed by kind, as the category pickers group them (a subcategory is always its parent's kind). A spending
   // category also picks the card or account its spending goes on, from the cards and bank accounts you can see.
   let { accounts = [] }: { accounts?: Account[] } = $props();
-  const payAccounts = $derived(accounts.filter((a) => !a.hidden && ["credit", "checking", "savings"].includes(a.kind))
+  const payAccounts = $derived(accounts.filter((a) => !a.hidden && isPayingKind(a.kind))
     .map((a) => ({ id: a.id, name: accountName(a), kind: a.kind }))
     .sort((a, b) => Number(b.kind === "credit") - Number(a.kind === "credit") || a.name.localeCompare(b.name)));
   let adding = $state(false);

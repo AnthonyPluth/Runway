@@ -182,11 +182,11 @@ class OIDCStoreTests(DbCase):
         self.assertEqual(self.users(), [("u1", "new@example.com", "Tony E", "Ant", 200.0)])
 
     def test_backfill_users_from_sessions(self):
-        # People signed in before the users list existed: added once, by migration 0038.
+        # People signed in before the users list existed: added once, by migration 0039.
         from alembic import command
         self.c.close()
         with db.engine(self.path).begin() as sa_conn:
-            command.downgrade(db.alembic_config(sa_conn), "0037")
+            command.downgrade(db.alembic_config(sa_conn), "0038")
         self.c = db.connect(self.path)
         for token, sub, created in (("a", "u1", 10.0), ("b", "u1", 30.0), ("c", "u2", 20.0), ("d", None, 40.0),
                                     ("e", "u3", 50.0)):

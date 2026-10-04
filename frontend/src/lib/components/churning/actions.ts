@@ -8,9 +8,10 @@ import { undoable } from "$lib/undo";
 import { toast } from "svelte-sonner";
 import { fullDate } from "./churning";
 import type { PlanResult } from "./types";
+import { errMsg } from "$lib/act";
 
 const post = <T>(path: string, body: unknown = {}) => api<T>(`/api/churning/${path}`, { method: "POST", body });
-const fail = (err: unknown) => toast.error((err as Error).message);
+const fail = (err: unknown) => toast.error(errMsg(err));
 
 /** Check a card's plan off; the toast lists what changed (the card closed or changed, a new card added) and can undo it. */
 export async function planDone(cardId: number, onchanged: () => void): Promise<void> {

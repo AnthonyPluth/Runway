@@ -7,21 +7,21 @@ a churning card or bank bonus linked to it), as deleting an account in Settings 
 Rows that already refer to something that's gone (left by a version that didn't clean up after itself, or by hand)
 can't stay: they're removed, or let go, the same way, with what deleting the account would have taken along with them
 (a transaction's splits, a recurring item's changed dates, a card's payment settings). Before anything is removed, a
-backup of the whole database is saved in the data directory (runway-before-migration-0039-<time>.json.gz); the log
+backup of the whole database is saved in the data directory (runway-before-migration-0040-<time>.json.gz); the log
 says how many rows went from each table, and nothing more.
 
 On SQLite each table is made again with its keys (batch mode), with foreign keys off while migrating (db.migrate).
 
-Revision ID: 0039
-Revises: 0038
+Revision ID: 0040
+Revises: 0039
 """
 import os
 
 import sqlalchemy as sa
 from alembic import context, op
 
-revision = '0039'
-down_revision = '0038'
+revision = '0040'
+down_revision = '0039'
 branch_labels = None
 depends_on = None
 
@@ -100,9 +100,9 @@ def _save_copy(bind) -> None:
     # Runway's own backup, as a migration that removes data needs one; it reads whatever tables there are now.
     from runway import backup, db, monitoring
     where = os.path.dirname(bind.engine.url.database or "") if bind.dialect.name == "sqlite" else None
-    path = backup.save_copy(db.Connection(bind), "runway-before-migration-0039", where or None)
-    monitoring.log(f"Migration 0039: saved a backup of the database first, to {path}", "warning",
-                   remote="Migration 0039: saved a backup of the database first")
+    path = backup.save_copy(db.Connection(bind), "runway-before-migration-0040", where or None)
+    monitoring.log(f"Migration 0040: saved a backup of the database first, to {path}", "warning",
+                   remote="Migration 0040: saved a backup of the database first")
 
 
 def _remove_orphans(bind) -> dict[tuple[str, str], int]:
@@ -148,8 +148,8 @@ def upgrade() -> None:
             from runway import monitoring
             for (t, how), n in sorted(done.items()):   # counts only: never ids or values
                 rows = f"{n} row{'s' if n != 1 else ''}"
-                monitoring.log(f"Migration 0039: removed {rows} from {t} that referred to something no longer there." if how == "removed"
-                               else f"Migration 0039: cleared what {rows} in {t} referred to: it's no longer there.", "warning")
+                monitoring.log(f"Migration 0040: removed {rows} from {t} that referred to something no longer there." if how == "removed"
+                               else f"Migration 0040: cleared what {rows} in {t} referred to: it's no longer there.", "warning")
     for t in dict.fromkeys(k[0] for k in KEYS):   # on SQLite, each table made again once, with all its keys
         with op.batch_alter_table(t) as batch:
             for _, col, parent, pcol, ondelete in (k for k in KEYS if k[0] == t):

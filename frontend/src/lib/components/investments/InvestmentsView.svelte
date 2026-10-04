@@ -24,6 +24,7 @@
   import Info from "@lucide/svelte/icons/info";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { tick } from "svelte";
+  import { errMsg } from "$lib/act";
 
   // The page's data. A redraw (another period, a saved edit) keeps the old numbers on screen until the new ones come;
   // if it fails they stay, under a "Couldn't refresh" line. The period is only kept once its numbers have come, so
@@ -42,7 +43,7 @@
       const data = s.inv_accounts ? await api<Investments>(`/api/investments?period=${period}`) : null;
       status = s; d = data; error = null; live = null;
       inv.period = period;
-    } catch (err) { error = (err as Error).message; }
+    } catch (err) { error = errMsg(err); }
     shownPeriod = inv.period;
     busy = false;
   }

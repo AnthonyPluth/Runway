@@ -14,6 +14,7 @@
   import ServiceRow from "./ServiceRow.svelte";
   import type { RecentOrder, RetailStatus } from "./types";
   import { checkCls, helpCls, inputCls, linkCls, warnText } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // The Runway browser extension: how to set it up (with the key it needs), what it has imported from each store
   // (`children` adds Carta's row to that list), and the recent orders, each opening to its items and charges. Its row
@@ -27,7 +28,7 @@
   let matching = $state(false);
 
   async function load() {
-    try { data = await api<RetailStatus>("/api/retail"); error = ""; } catch (err) { error = (err as Error).message; }
+    try { data = await api<RetailStatus>("/api/retail"); error = ""; } catch (err) { error = errMsg(err); }
   }
   load();
   // Anything you change here but the counts closes the open orders, as the classic card did when it redrew.
@@ -36,28 +37,26 @@
   async function recount() { try { data = await api<RetailStatus>("/api/retail", { keep: true }); } catch { /* keep what's shown */ } }
 
   async function newKey() {
-    try {
+    await act(async () => {
       const { token } = await api<{ token: string }>("/api/retail/token", { method: "POST" });
       await again();
       shownKey = token;
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   async function removeKey() {
-    try { await api("/api/retail/token/remove", { method: "POST" }); toast.success("Key removed"); shownKey = ""; again(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/retail/token/remove", { method: "POST" }); toast.success("Key removed"); shownKey = ""; again(); });
   }
   const copy = (input: HTMLInputElement | null) => copyText(shownKey, input);
   async function setAi(e: Event) {
-    try { await api("/api/retail/settings", { method: "POST", body: { ai: (e.currentTarget as HTMLInputElement).checked } }); toast.success("Saved"); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/retail/settings", { method: "POST", body: { ai: (e.currentTarget as HTMLInputElement).checked } }); toast.success("Saved"); });
   }
   async function matchAgain() {
     matching = true;
-    try {
+    await act(async () => {
       const out = await api<{ matched: number; split: number; category: number }>("/api/retail/match", { method: "POST" });
       toast.success(`${out.matched} newly matched · ${out.split} split · ${out.category} categorized`);
       refreshState(); await again();
-    } catch (err) { toast.error((err as Error).message); }
+    });
     matching = false;
   }
   function toggle(id: string) {

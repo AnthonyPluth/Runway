@@ -20,6 +20,24 @@ class BrandTests(unittest.TestCase):
         for name, want in cases.items():
             self.assertEqual(brands.brand(name), want, name)
 
+    def test_same_institution_by_brand_then_by_name(self):
+        cases = [("E*TRADE from Morgan Stanley", "E*Trade", True),     # by brand, and by name
+                 ("Wealthfront Inc", "Wealthfront", True),               # no brand: by name
+                 ("Merrill", "Bank of America", True),                   # the same brand; the names alone didn't say so
+                 ("Bank of America", "BofA Securities", True),           # by brand: "bofasecurities" doesn't hold "ofamerica"
+                 ("Chase", "Citibank", False), ("Ally", "Wealthfront", False), (None, "Chase", False)]
+        for a, b, want in cases:
+            self.assertEqual(brands.same_institution(a, b), want, (a, b))
+            self.assertEqual(brands.same_institution(b, a), want, (b, a))
+        # Matching a bank account: a known brand on each side decides, either way; else the institution names, if they
+        # agree; else it can't tell.
+        self.assertIs(brands.institution_match(("Chase", None, "Card"), ("JPMorgan Chase", None, "Freedom")), True)
+        self.assertIs(brands.institution_match((None, None, "Sapphire Reserve"), ("Citibank", None, "Card")), False)
+        self.assertIs(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings")), True)
+        self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Ally", None, "Online Savings"), by_name=False))
+        self.assertIs(brands.institution_match(("Chase", None, "Card"), ("Citibank", None, "Card"), by_name=False), False)
+        self.assertIsNone(brands.institution_match(("Ally Bank", None, "Savings"), ("Wealthfront", None, "Cash")))
+
     def test_accounts_get_logo_dev_s_logo_by_institution(self):
         from unittest import mock
 

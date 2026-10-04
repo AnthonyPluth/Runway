@@ -8,6 +8,7 @@
   import { toast } from "svelte-sonner";
   import type { SettingsAccount } from "./types";
   import { fieldCls, inputCls, rowCls, warnText } from "./ui";
+  import { act } from "$lib/act";
 
   // A card's statement, in its row in Settings → Accounts: Plaid's, read only, when the bank sends it; otherwise the
   // latest one you entered and a form to enter the next (closing date, balance, due date, minimum), with the earlier ones.
@@ -31,23 +32,21 @@
 
   async function save(e: SubmitEvent) {
     e.preventDefault();
-    saving = true;
-    try {
+    await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(a.id)}/statements`, { method: "POST",
         body: { statement_date: close, balance, due_date: due, minimum_payment: minimum } });
       toast.success("Statement saved");
       reload();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { saving = false; }
+    }, { busy: (on) => (saving = on) });
   }
   // Deleting one offers Undo, which enters it again just as it was.
   async function remove(date: string) {
     const was = entered.find((s) => s.statement_date === date);
     const id = a.id;
-    try {
+    if (!(await act(async () => {
       await api(`/api/accounts/${encodeURIComponent(id)}/statements/${encodeURIComponent(date)}/remove`, { method: "POST" });
       reload();
-    } catch (err) { toast.error((err as Error).message); return; }
+    }))) return;
     if (!was) { toast.success("Statement deleted"); return; }
     undoable("Statement deleted", async () => {
       await api(`/api/accounts/${encodeURIComponent(id)}/statements`, { method: "POST", body: { statement_date: was.statement_date,

@@ -67,8 +67,15 @@ class NotifyTests(DbCase):
         notify.save_prefs(self.c, {"card_due": False, "big_charge_over": 1000, "low_balance": False})
         notify.run(self.c, TODAY)
         self.assertEqual(self.titles(), [])
-        with self.assertRaises(ValueError):
-            notify.save_prefs(self.c, {"big_charge_over": "lots"})
+        for bad in ("lots", "nan", "inf", "1e13", None, ""):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "^Enter a number$"):
+                notify.save_prefs(self.c, {"big_charge_over": bad})
+        # A switch sent as text: "false" is off (bool("false") would be on).
+        p = notify.save_prefs(self.c, {"review": "true", "missed": "false", "sync_failed": "0", "churn_fee": 1,
+                                       "card_due_days": "30", "low_balance_below": "-5"})
+        self.assertEqual({k: p[k] for k in ("review", "missed", "sync_failed", "churn_fee", "card_due_days", "low_balance_below")},
+                         {"review": True, "missed": False, "sync_failed": False, "churn_fee": True, "card_due_days": 14,
+                          "low_balance_below": 0})
 
     def test_nothing_sent_or_remembered_without_devices(self):
         self.c.execute(delete(PushSubscription))

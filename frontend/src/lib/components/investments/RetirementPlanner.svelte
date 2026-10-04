@@ -11,11 +11,14 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
+  import { debounced } from "$lib/debounce";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
-  import { addedPayments, counted, type Dollars, endingPayments, inDollars, loanProjected, paymentEnds, project,
-    projectionIn, sale as saleAt, saleProceeds, saleYear } from "./planner";
-  import type { PlanAsset, PlanData, RetirementPlan } from "./types";
+  import { addedPayments, agesFit, assumptionsLine, bornOk, copyPlan, counted, type Dollars, endingPayments, inDollars, newPartner, num, paymentLine,
+    pctIn, personNames, planToError, planUsable, project, projectable, projectionIn, retireError, saleProceeds, saleTitle, saleYear, startingPlan,
+    verdict, VERDICT_TIP, vestsTo } from "./planner";
+  import type { PlanData, RetirementPlan } from "./types";
+  import { errMsg } from "$lib/act";
 
   // The retirement planner: your household's plan from now to the end, projected a thousand ways (planner.ts).
   // The plan and its projection are in today's dollars; the figures can be shown in future dollars instead.
@@ -24,8 +27,7 @@
   let { data, accounts = 0 }: { data: PlanData; accounts?: number } = $props();
   const uid = $props.id();
 
-  const copy = (p: RetirementPlan): RetirementPlan => JSON.parse(JSON.stringify(p));
-  const initialPlan = () => copy(data.plan);
+  const initialPlan = () => copyPlan(data.plan);
   let plan = $state<RetirementPlan>(initialPlan());
   const wasDefault = () => data.is_default;
   let isDefault = $state(wasDefault());
@@ -34,61 +36,35 @@
 
   // Keep the plan (a moment after the last change, or as you leave, so a quick tab switch doesn't drop it). A plan the
   // server refuses stays on screen with the reason; one it takes shows "Saved ✓" for a moment.
-  let timer: ReturnType<typeof setTimeout>, savedTimer: ReturnType<typeof setTimeout>;
-  let dirty = false, saved = $state(false);
+  let saved = $state(false);
+  const unflash = debounced(() => (saved = false), 1600);
   async function save() {
-    clearTimeout(timer); dirty = false;
+    later.cancel();
     try {
       await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
       problem = null; isDefault = false; saved = true;
-      clearTimeout(savedTimer); savedTimer = setTimeout(() => (saved = false), 1600);
-    } catch (err) { problem = (err as Error).message; }
+      unflash.call();
+    } catch (err) { problem = errMsg(err); }
   }
-  function keep() {
-    dirty = true; clearTimeout(timer);
-    timer = setTimeout(save, 700);
-  }
-  onDestroy(() => { clearTimeout(savedTimer); if (dirty) save(); });
+  const later = debounced(save, 700);
+  const keep = () => later.call();
+  onDestroy(() => { unflash.cancel(); later.flush(); });
   async function startOver() {
-    clearTimeout(timer); dirty = false;
+    later.cancel();
     try { await api("/api/investments/plan", { method: "POST", body: { plan: null } }); }
-    catch (err) { problem = (err as Error).message; return; }
-    plan = copy({ ...data.plan, ...defaults() });
+    catch (err) { problem = errMsg(err); return; }
+    plan = copyPlan({ ...data.plan, ...startingPlan(data.computed, year) });
     isDefault = true; problem = null; assumptionsOpen = true;
   }
-  // Runway's own starting figures (what planner.default() gives).
-  const defaults = (): Partial<RetirementPlan> => ({
-    people: [{ name: "You", birth_year: year - 40, retire_age: 65, savings: data.computed.yearly_savings }],
-    plan_to_age: 95, spending: data.computed.annual_spending, spending_own: false, return_before: data.computed.expected_return,
-    return_after: 0.04, volatility: 0.12, inflation: 0.025, income: [], events: [], assets: [],
-  });
-
-  // Numbers as typed: an empty or half-typed box counts as nothing rather than breaking the projection.
-  const num = (v: unknown) => (typeof v === "number" && isFinite(v) ? v : 0);
-  const pctIn = (v: number) => String(+(v * 100).toFixed(2));
   const setPct = (k: "return_before" | "return_after" | "volatility" | "inflation", s: string) => { plan[k] = (Number(s) || 0) / 100; keep(); };
 
-  // Ages that can't be: retiring before the age you are now, or planning to an age before retirement. Each says so
-  // under its field, and there's no projection until they're fixed.
-  const ageNow = (p: RetirementPlan["people"][number]) => year - num(p.birth_year);
-  const retireErr = (p: RetirementPlan["people"][number]) =>
-    num(p.birth_year) > 1900 && num(p.retire_age) > 0 && num(p.retire_age) < ageNow(p) ? `At least ${ageNow(p)}, your age now` : null;
-  // How long to plan for is in the first person's age, like the chart's.
-  const retireAt = $derived(num(plan.people[0].retire_age));
-  const planToErr = $derived(num(plan.plan_to_age) > 0 && retireAt > 0 && num(plan.plan_to_age) <= retireAt ? `Past the retirement age (${retireAt})` : null);
-  const agesOk = $derived(plan.people.every((p) => !retireErr(p)) && !planToErr);
-  const usable = $derived(plan.people.every((p) => num(p.birth_year) > 1900 && num(p.retire_age) > 0) && num(plan.plan_to_age) > 0 && agesOk);
-  const proj = $derived.by(() => {
-    if (!usable) return null;
-    const p = $state.snapshot(plan) as RetirementPlan;
-    p.people = p.people.map((x) => ({ ...x, savings: num(x.savings) }));
-    p.spending = num(p.spending);
-    p.income = p.income.filter((i) => i.person < p.people.length).map((i) => ({ ...i, amount: num(i.amount), start_age: num(i.start_age),
-      end_age: typeof i.end_age === "number" && isFinite(i.end_age) ? i.end_age : null }));
-    p.events = p.events.map((e) => ({ ...e, amount: num(e.amount), year: num(e.year) }));
-    return project(p, data.current, year, data.assets);
-  });
-  const names = $derived(plan.people.map((p, i) => p.name || (i ? "Partner" : "You")));
+  // Ages that can't be each say so under their field, and there's no projection until they're fixed (planner.ts).
+  const retireErr = (p: RetirementPlan["people"][number]) => retireError(p, year);
+  const planToErr = $derived(planToError(plan));
+  const agesOk = $derived(agesFit(plan, year));
+  const usable = $derived(planUsable(plan, year));
+  const proj = $derived.by(() => (usable ? project(projectable($state.snapshot(plan) as RetirementPlan), data.current, year, data.assets) : null));
+  const names = $derived(personNames(plan));
 
   // Today's or future dollars: a way of looking at the plan rather than part of it, so each browser remembers its own
   // choice (the plan is the household's, and switching shouldn't save it). Without storage it starts in today's dollars.
@@ -107,33 +83,22 @@
   // Where the saving figure comes from, when its history is shorter than a year.
   const savingsNote = $derived(data.computed.savings_measured !== false && data.computed.savings_since
     ? `Your investment history only goes back to ${fmtDate(data.computed.savings_since, { month: "short", day: "numeric", year: "numeric" })}.` : undefined);
-  const inflationPct = $derived(`${pctIn(num(plan.inflation))}%`);
   // Nothing invested and no plan of your own yet: nothing to project from. With investments but still Runway's guesses,
   // the results are a sample, so they're shown muted rather than as a verdict.
   const empty = $derived(data.current <= 0 && isDefault);
   const sample = $derived(isDefault && data.current > 0);
   const successCls = (s: number) => (sample ? "text-muted-foreground" : s >= 0.85 ? "text-[var(--good)]" : s >= 0.7 ? "text-[var(--warning)]" : "text-[var(--low)]");
-  // The odds in a word, by the same thresholds as their color; the thresholds are in its tooltip.
-  const verdict = (s: number) => (s >= 0.85 ? "Likely" : s >= 0.7 ? "Uncertain" : "Unlikely");
-  const VERDICT_TIP = "Likely at 85% or more, uncertain from 70%, unlikely below 70%";
-
   // Set-once figures (birth years, how long to plan for, income in retirement, returns and inflation) sit under
   // Assumptions: open while something's still missing (Runway's sample plan, or a birth year that isn't one), folded
   // to a one-line summary once they're in. It stays as you leave it while you type.
-  const bornOk = (y: unknown) => num(y) >= year - 100 && num(y) <= year - 14;
-  const assumptionsMissing = () => isDefault || !plan.people.every((p) => bornOk(p.birth_year));
+  const assumptionsMissing = () => isDefault || !plan.people.every((p) => bornOk(p.birth_year, year));
   let assumptionsOpen = $state(assumptionsMissing());
   // An age to fix that's folded away under Assumptions opens them.
   $effect(() => { if (planToErr) assumptionsOpen = true; });
-  const assumptionsSummary = $derived.by(() => {
-    const born = plan.people.length > 1 ? plan.people.map((p, i) => `${names[i]} born ${p.birth_year}`).join(", ") : `Born ${plan.people[0].birth_year}`;
-    const income = plan.income.map((inc) => `${inc.name || "Income"} ${fmt0(num(inc.amount))} a year at ${inc.start_age}`);
-    const returns = `${pctIn(num(plan.return_before))}% returns (${pctIn(num(plan.return_after))}% retired), ${inflationPct} inflation`;
-    return [born, `to age ${plan.plan_to_age}`, ...(income.length ? income : ["no retirement income yet"]), returns].join(" · ");
-  });
+  const assumptionsSummary = $derived(assumptionsLine(plan));
 
   function addPartner() {
-    plan.people.push({ name: "Partner", birth_year: plan.people[0].birth_year, retire_age: plan.people[0].retire_age, savings: 0 });
+    plan.people.push(newPartner(plan));
     assumptionsOpen = true;   // where the partner's birth year goes
     keep();
   }
@@ -157,60 +122,16 @@
     keep();
   }
   const pastYear = (s: RetirementPlan["assets"][number]) => num(s.sell_year) < year;
-  // Equity still vesting: what it comes to once it's all vested, at today's share price (value_by_year's last entry).
-  const vestsTo = (a: PlanAsset) => (a.kind === "equity" && (a.value_by_year?.length ?? 0) > 1 ? a.value_by_year![a.value_by_year!.length - 1] : null);
   // What the plan counts, and what it lists only for a loan's payment (loans against nothing). Vehicles aren't listed:
   // the plan neither counts nor sells them, though a loan against one is still paid from spending until it's paid off.
   const plannable = $derived(data.assets.filter(counted));
   const listed = $derived(data.assets.filter((a) => a.kind === "loan"));
-  // What a sale's estimate assumes, for its tooltip: "Home worth $X in 2057, less $Y still owed on the loan at 6.25%".
-  const PAYMENT_FROM = { plaid: "from Plaid", manual: "as you set it", inferred: "from recent payments" } as const;
-  // In future dollars each figure is the sale year's: the home's value grown at its own rate, the loan's balance then.
-  function saleTitle(a: PlanAsset, sellYear: number): string {
-    const real = saleAt(a, sellYear, year, plan.inflation);
-    const value = shownIn(real.value, sellYear), owed = shownIn(real.owed, sellYear);
-    const worth = a.kind === "equity" ? `${a.name}: ${fmt0(value)} vested by ${sellYear}, at today’s share price${dollars === "future" ? " grown with inflation" : ""}`
-      : `${a.name} worth ${fmt0(value)} in ${sellYear}`;
-    const l = a.loan;
-    let loan = "";
-    if (l && loanProjected(a)) {
-      const terms = `${+(l.rate ?? 0).toFixed(3)}% and ${fmt0(l.payment ?? 0)} a month ${PAYMENT_FROM[l.source ?? "manual"]}`;
-      loan = owed > 0 ? `, less ${fmt0(owed)} still owed on the loan at ${terms}` : `; the loan (${terms}) is paid off by then`;
-    } else if (a.owed) {   // held at today's balance in today's dollars, so it grows with inflation in future ones
-      loan = dollars === "future" ? `, less the ${fmt0(a.owed)} owed on the loan today (${fmt0(owed)} in ${sellYear} dollars)`
-        : `, less ${fmt0(owed)} owed on the loan today`;
-    }
-    const unit = dollars === "future" ? `In ${sellYear} dollars, at ${inflationPct} a year inflation.` : "In today’s dollars.";
-    return `${worth}${loan}. ${unit}`;
-  }
   // Loan payments and Runway's spending figure (planner.ts flows): one that's in the figure comes off it once the loan
   // is paid off or its asset sold; one that isn't (a payment categorized as a transfer) is added to it while it's
   // still paid. A figure you typed is taken as it is.
   const ending = $derived(endingPayments($state.snapshot(plan) as RetirementPlan, data.assets, year));
   const added = $derived(addedPayments($state.snapshot(plan) as RetirementPlan, data.assets, year));
   function useRunwaySpending() { plan.spending = data.computed.annual_spending; plan.spending_own = false; keep(); }
-
-  // What happens to a loan's monthly payment in the plan, in plain words: whether it's already in the spending figure
-  // and when it stops.
-  function paymentLine(a: PlanAsset, sellYear: number | null): string {
-    const l = a.loan!;
-    const pay = `${fmt0(l.payment ?? 0)}/month`;
-    const ends = paymentEnds(a, sellYear);
-    const when = ends == null ? null : l.payoff_year == null || ends <= l.payoff_year ? `until it’s sold in ${ends}` : `until it’s paid off in ${l.payoff_year}`;
-    const why = l.note === "payment_below_interest" ? " It doesn’t cover the interest, so it never pays the loan down."
-      : l.note === "no_rate" ? " Add the loan’s interest rate in Settings → Accounts to see when it ends." : "";
-    if (plan.spending_own) {
-      return `Its ${pay} loan payment goes on ${when ?? "past the end of the plan"}.${why}`;
-    }
-    if (l.payment_counted) {
-      return when ? `Its ${pay} loan payment is already in your spending, ${when}; from ${ends} the plan takes it off.${why}`
-        : `Its ${pay} loan payment is already in your spending, and stays in it.${why}`;
-    }
-    if (l.payment_counted == null) {
-      return `Runway couldn’t tell whether its ${pay} loan payment is in your spending, so the plan leaves your spending as it is.${why}`;
-    }
-    return `Its ${pay} loan payment was paid as a transfer, so it isn’t in your spending and the plan adds it to your spending in retirement ${when ?? "for as long as the plan runs"}.${why}`;
-  }
 
   // An event is typed as money in or out plus a positive amount; it's kept signed.
   const setEventSign = (i: number, out: boolean) => { plan.events[i].amount = (out ? -1 : 1) * Math.abs(num(plan.events[i].amount)); keep(); };
@@ -358,7 +279,7 @@
               <Input type="number" step="1" min={year} max={year + 100} class="w-24" value={s.sell_year} aria-invalid={pastYear(s)}
                 oninput={(e) => setSellYear(s, e.currentTarget.value)} /></label>
             <!-- A fixed width, right-aligned, so each row's Sell in lines up whatever the amount -->
-            <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, at)}>≈ {fmt0(shownIn(saleProceeds(a, at, year, plan.inflation), at))}</span>
+            <span class="min-w-28 text-right text-sm text-muted-foreground tabular-nums" title={saleTitle(a, at, year, plan, dollars)}>≈ {fmt0(shownIn(saleProceeds(a, at, year, plan.inflation), at))}</span>
             {#if s.was != null}
               <p class="basis-full pl-6 text-xs text-[var(--warning)]">Was {s.was}, now past: counted as sold in {year}.</p>
             {:else if pastYear(s)}
@@ -366,14 +287,14 @@
             {/if}
           {/if}
           {#if a.loan?.payment}
-            <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? saleYear(num(s.sell_year), year) : null)}</p>
+            <p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, s ? saleYear(num(s.sell_year), year) : null, !!plan.spending_own)}</p>
           {/if}
         </li>
       {/each}
       {#each listed as a (a.key)}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span class="flex min-w-40 flex-1 items-center gap-2 pl-6">{a.name} <span class="text-sm text-muted-foreground">Loan · {fmt0(a.owed)} owed</span></span>
-          {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null)}</p>{/if}
+          {#if a.loan?.payment}<p class="basis-full pl-6 text-sm text-muted-foreground">{paymentLine(a, null, !!plan.spending_own)}</p>{/if}
         </li>
       {/each}
     </ul>

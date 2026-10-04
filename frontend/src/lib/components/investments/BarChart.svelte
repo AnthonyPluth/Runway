@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { fmt, shortMoney } from "$lib/format";
-  import { niceTicks } from "./numbers";
+  import { fmt } from "$lib/format";
+  import { niceTicks, yScale } from "$lib/chart";
+  import YAxis from "../YAxis.svelte";
 
   // A single-series column chart (dividends and interest by month), with the month's amount on hover or tap.
   let { labels, values, fmtTip = fmt, height = 200, label = "Monthly dividends and interest" }: {
@@ -13,9 +14,9 @@
   const iw = $derived(W - m.left - m.right), ih = $derived(H - m.top - m.bottom);
   const hi = $derived(Math.max(...values, 0));
   const ticks = $derived(niceTicks(0, hi || 1, 3));
-  const y1 = $derived(ticks[ticks.length - 1]);
+  const scale = $derived(yScale(ticks, m.top, ih));
   const bw = $derived(iw / Math.max(1, values.length)), w = $derived(Math.min(24, bw - 2));
-  const y = (v: number) => m.top + (1 - v / y1) * ih;
+  const y = (v: number) => scale.y(v);
   const every = $derived(Math.ceil(values.length / 8));
   // A column with rounded top corners.
   function bar(i: number, v: number): string {
@@ -37,10 +38,7 @@
     <p class="py-6 text-center text-sm text-muted-foreground">No dividends or interest recorded yet.</p>
   {:else}
     <svg viewBox={`0 0 ${W} ${H}`} class="block w-full select-none text-xs" role="img" aria-label={label}>
-      {#each ticks as t (t)}
-        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
-        <text x={m.left - 6} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
-      {/each}
+      <YAxis {ticks} {y} left={m.left} right={W - m.right} gap={6} />
       {#each values as v, i (i)}
         {#if hover === i}<rect x={m.left + bw * i} y={m.top} width={bw} height={ih} fill="var(--foreground)" opacity="0.04" />{/if}
         {#if v > 0}<path d={bar(i, v)} fill="var(--nw-1)" />{/if}

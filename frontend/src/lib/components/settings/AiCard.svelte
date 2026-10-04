@@ -9,6 +9,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { checkCls, fieldCls, helpCls, inputCls, linkCls, rowCls } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // AI categorization through OpenRouter: the key, the two models, and whether new merchants get categorized during
   // syncs. What's sent is said here, since it's your data leaving Runway (categorize.ask_model builds it). The model
@@ -28,8 +29,7 @@
     await api("/api/settings", { method: "POST", body: { [key]: f.value.trim() || null } }); await refreshState();
   }
   async function clearKey() {
-    try { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/settings", { method: "POST", body: { openrouter_api_key: "" } }); await refreshState(); });
   }
   // A switch that didn't save goes back to how it was.
   async function setFlag(key: "auto_ai_on_sync" | "churn_ai_web", e: Event) {
@@ -38,7 +38,7 @@
     try {
       await api("/api/settings", { method: "POST", body: { [key]: on } });
       toast.success("Saved"); refreshState();
-    } catch (err) { box.checked = !on; toast.error((err as Error).message); }
+    } catch (err) { box.checked = !on; toast.error(errMsg(err)); }
   }
 </script>
 

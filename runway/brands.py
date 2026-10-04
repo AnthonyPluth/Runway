@@ -56,6 +56,30 @@ def brand(*names: str | None) -> str | None:
     return None
 
 
+def _compact(name: str | None) -> str:
+    """"E*TRADE from Morgan Stanley" and "E*Trade" → comparable keys ("etradefrommorganstanley", "etrade")."""
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (name or "").lower()))
+
+
+def institution_match(ours: tuple[str | None, ...], theirs: tuple[str | None, ...], by_name: bool = True) -> bool | None:
+    """Whether two accounts are at the same institution, each given as its names (the institution's first, then the
+    account's own, as brand() takes them). By brand when both have a known one: True or False. Otherwise (unless not
+    by_name) by the institution names, when one is in the other ("E*Trade" in "E*TRADE from Morgan Stanley"): True; else
+    None, can't tell (a name that isn't in the other doesn't make it another institution)."""
+    a, b = brand(*ours), brand(*theirs)
+    if a and b:
+        return a == b
+    if not by_name:
+        return None
+    x, y = _compact(ours[0] if ours else None), _compact(theirs[0] if theirs else None)
+    return True if len(x) >= 4 and len(y) >= 4 and (x in y or y in x) else None
+
+
+def same_institution(a: str | None, b: str | None) -> bool:
+    """Whether two institution names are the same institution (institution_match), "can't tell" counting as no."""
+    return institution_match((a,), (b,)) is True
+
+
 # Each institution's website, for its logo: Logo.dev has a bank's logo by website for sure, where a lookup by name
 # ("Chase Bank Sam", "Citibank Online") may find nothing, or not clearly that bank.
 SITES = {

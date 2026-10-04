@@ -6,16 +6,16 @@
   positions (sf_raw:<account id>), so the next sync's price check (sfinvest.recapture_all) runs them through today's
   checks; and names a brokerage's scraped page text got into ("keyboard_arrow_right ...") are cleared.
 
-Revision ID: 0038
-Revises: 0037
+Revision ID: 0039
+Revises: 0038
 """
 import json
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0038'
-down_revision = '0037'
+revision = '0039'
+down_revision = '0038'
 branch_labels = None
 depends_on = None
 

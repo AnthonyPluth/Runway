@@ -177,12 +177,12 @@ class CostBasisTests(Base):
 
 
 class RepairTests(Base):
-    def test_old_data_is_repaired_once_by_migration_0038(self):
+    def test_old_data_is_repaired_once_by_migration_0039(self):
         # what an earlier version stored: junk name, day's change as value, zero cost basis, phantom cash, no feed kept
         from alembic import command
         self.c.close()
         with db.engine(self.path).begin() as sa_conn:
-            command.downgrade(db.alembic_config(sa_conn), "0037")
+            command.downgrade(db.alembic_config(sa_conn), "0038")
         self.c = db.connect(self.path)
         self.c.execute(insert(Account).values(id="et", name="Individual Brokerage", kind="investment", balance=3044.21))
         self.c.execute(insert(InvAccount).values(id="sf:et", item_id="simplefin", name="Individual Brokerage",
@@ -214,7 +214,7 @@ class RepairTests(Base):
         self.assertIsNone(h["sf:PAYX"]["cost_basis"])
         self.c.commit()
         with db.engine(self.path).begin() as sa_conn:   # only once: the feed is kept from now on
-            command.downgrade(db.alembic_config(sa_conn), "0037")
+            command.downgrade(db.alembic_config(sa_conn), "0038")
             command.upgrade(db.alembic_config(sa_conn), "head")
         self.assertEqual(json.loads(db.get_setting(self.c, sk.sf_raw("et")) or "{}"), feed)   # the kept feed, not rebuilt
 

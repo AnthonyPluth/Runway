@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { KIND_LABEL } from "$lib/accounts";
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AcctLabel from "$lib/components/AcctLabel.svelte";
@@ -23,6 +24,7 @@
   import { cn } from "$lib/utils";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import { toast } from "svelte-sonner";
+  import { act, errMsg } from "$lib/act";
 
   let { sub = "" }: { sub?: string } = $props();
 
@@ -32,7 +34,7 @@
   let error = $state<string | null>(null);
   async function load() {
     try { d = await api<NetWorth>("/api/networth"); error = null; }
-    catch (err) { error = (err as Error).message; }
+    catch (err) { error = errMsg(err); }
   }
   load();
 
@@ -79,8 +81,7 @@
   // Each kind of asset keeps its color (in the bar, its key and before its heading) whatever else there is.
   const GROUP_COLOR: Record<string, number> = { cash: 1, investments: 2, equity: 3, home: 4, vehicle: 5, other: 6 };
   const colorOf = (key: string) => `var(--nw-${GROUP_COLOR[key] ?? 6})`;
-  const KIND: Record<string, string> = { checking: "Checking", savings: "Savings", credit: "Credit card", loan: "Loan", investment: "Investment" };
-  const kindLabel = (k: string) => KIND[k] ?? (k ? k[0].toUpperCase() + k.slice(1) : "Account");
+  const kindLabel = (k: string) => (KIND_LABEL as Record<string, string>)[k] ?? (k ? k[0].toUpperCase() + k.slice(1) : "Account");
 
   async function setLeftOut(id: string, out: boolean) {
     await api(`/api/accounts/${encodeURIComponent(id)}`, { method: "POST", body: { networth_hidden: out ? 1 : 0 } });
@@ -89,11 +90,11 @@
   // Leave an account out of net worth (or bring it back). It stays everywhere else; only these totals and the history from
   // today on change.
   async function leaveOut(id: string, name: string, out: boolean) {
-    try {
+    await act(async () => {
       await setLeftOut(id, out);
       if (out) undoable(`${name} is left out of net worth`, async () => { await setLeftOut(id, false); });
       else toast(`${name} is counted again`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   // The "Not counted" footnote under the breakdown: a total when there are many, and a list to bring them back.

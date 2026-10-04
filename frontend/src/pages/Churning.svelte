@@ -45,7 +45,8 @@
   const refresh = () => Promise.all([load(), loadFound()]);
   load();
   loadFound();
-  loadCategories().catch(() => {});
+  // Categories are already loaded when Runway opens; this only refreshes them, so a failure keeps what's there (and is logged).
+  loadCategories().catch((err) => console.error(err));
 
   // Whose cards to show: one person, or everyone (the default when there's more than one).
   let person = $state(BOTH);
