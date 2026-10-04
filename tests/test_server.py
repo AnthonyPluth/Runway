@@ -2,7 +2,6 @@ import base64
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import time
 import unittest
@@ -15,6 +14,7 @@ from sqlalchemy import select, update
 
 from runway import db, oidc, server
 from runway.models import AuthPending, AuthSession
+from tests.shared import own_database
 
 # A throwaway 2048-bit RSA key used only by these tests to sign fake ID tokens.
 N = 0xf0e468c25263ab5b85ed863374cc64adae8284623519e21e7cbf01e2554656a58f8f69140ff8e701322655b598044841a7839a25b81c3737ee8141ee25ba7e6a46706540e49f61b7a321ad1e53d9bf44770558691d32aafb0edb49104ad0e9cc29074e856c22d864d285dbad96d228fb509f00b7d065ba0188d8c511efaee63001347fbe9939df1497b5efaf2e0d54626c6d1b3152397d3737b0e35141e1e58da75badd4f9897236e4d4c9b35ec9a0037c19152f1f7dc2cea916100588f76fd5ad4668da24e037339e9d34ab75ba37b91037a62ba7800df275f48651e231f021d7eb1c48006b016c1daff8d6d40a7446a8209b9666a85e5c04b999c38b3003a1
@@ -91,12 +91,9 @@ class OIDCTests(unittest.TestCase):
     def setUpClass(cls):
         cls.idp = HTTPServer(("127.0.0.1", 0), Provider)
         threading.Thread(target=cls.idp.serve_forever, daemon=True).start()
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.env = {"RUNWAY_DATA": cls.tmp.name, "OIDC_ISSUER": f"http://127.0.0.1:{cls.idp.server_port}",
-                   "OIDC_CLIENT_ID": "runway", "OIDC_CLIENT_SECRET": "s3cret", "OIDC_ALLOWED_EMAILS": "me@example.com",
-                   "OIDC_ALLOWED_GROUPS": "finance"}
-        os.environ.update(cls.env)
-        db.init()
+        # A database of its own (and the environment, undone after tearDownClass): tests here expire and end every session.
+        own_database(cls, OIDC_ISSUER=f"http://127.0.0.1:{cls.idp.server_port}", OIDC_CLIENT_ID="runway",
+                     OIDC_CLIENT_SECRET="s3cret", OIDC_ALLOWED_EMAILS="me@example.com", OIDC_ALLOWED_GROUPS="finance")
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -106,9 +103,6 @@ class OIDCTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.httpd.shutdown(); cls.idp.shutdown()
-        for k in [*cls.env, "RUNWAY_PUBLIC_URL"]:
-            os.environ.pop(k, None)
-        cls.tmp.cleanup()
 
     def req(self, path, cookies=None, method="GET", headers=None):
         r = urllib.request.Request(self.base + path, method=method, headers=headers or {})
