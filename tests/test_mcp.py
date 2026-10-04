@@ -5,7 +5,6 @@ import base64
 import hashlib
 import json
 import os
-import tempfile
 import threading
 import unittest
 import urllib.error
@@ -17,7 +16,7 @@ from runway import db, mcp_access, mcp_oauth, mcp_server, server
 from runway.server import mcp_http
 from runway.models import (Account, Category, ChurnBenefit, ChurnBenefitUse, ChurnCard, ChurnTask, ChurnWish, OAuthGrant, RetailItem,
                            RetailItemMemory, RetailOrder, Rule, Transaction, TxSplit)
-from tests.shared import forget_oauth, hold_mcp_switch, tag
+from tests.shared import forget_oauth, own_database, tag
 
 VERIFIER = "v" * 50
 CALLBACK = "http://127.0.0.1:1/cb"
@@ -59,14 +58,13 @@ ALLOWED = [
 
 
 class RunwayServer(unittest.TestCase):
-    """A real Runway on a temporary database, and OAuth tokens for it. On Postgres the database is shared with test
-    modules running alongside (tests/shared.py): each test removes only what it made, and holds the churning switch."""
+    """A real Runway on a database of its own (tests/shared.py's own_database, for the whole class; on Postgres its own
+    schema), and OAuth tokens for it. Nothing else writes to it, so the churning switch needn't be held; each test still
+    removes what it made and turns the switches off, so the tests don't depend on each other's order."""
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        os.environ["RUNWAY_DATA"] = cls.tmp.name
+        own_database(cls)       # undone after tearDownClass has stopped the server
         os.environ.pop("RUNWAY_PUBLIC_URL", None)
-        db.init()
         cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.httpd.server_port}"
@@ -75,11 +73,8 @@ class RunwayServer(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.httpd.server_close()
-        cls.tmp.cleanup()
-        os.environ.pop("RUNWAY_DATA", None)
 
     def setUp(self):
-        hold_mcp_switch(self)
         self.tag = tag()
         self.owner = "Alex " + self.tag                                           # the churning cards this test makes
         self.clients: list[str] = []

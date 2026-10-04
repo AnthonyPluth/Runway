@@ -29,23 +29,10 @@ ENV = ("OIDC_ALLOWED_EMAILS", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOW_ANY_USER", "OID
 
 class SignInTests(unittest.TestCase):
     def setUp(self):
-        self.saved = {k: os.environ.get(k) for k in (*ENV, "RUNWAY_DATA")}
+        own_database(self)   # its sessions are its own, and the environment is put back afterwards
         for k in ENV:
             os.environ.pop(k, None)
         os.environ["OIDC_ALLOWED_EMAILS"] = "me@example.com"
-        self.tmp = tempfile.TemporaryDirectory()
-        os.environ["RUNWAY_DATA"] = self.tmp.name
-        db.init()
-
-    def tearDown(self):
-        with db.session() as c:
-            c.execute(delete(AuthSession))
-        for k, v in self.saved.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        self.tmp.cleanup()
 
     def test_email_must_be_verified(self):
         ok = {"sub": "u1", "email": "me@example.com"}

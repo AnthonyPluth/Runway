@@ -7,6 +7,7 @@ from sqlalchemy import func, insert, select, update
 
 from . import db
 from . import settings_keys as sk
+from .forecast import NO_STATEMENT_DUE_DAYS
 from .models import Account, Asset, Budget, Category, ManualStatement, Recurring, SyncLog, Transaction
 
 ACCOUNTS = [
@@ -90,12 +91,13 @@ def seed(conn, today: date | None = None) -> int:
     conn.execute(insert(Transaction), [{**dict(zip(cols, t, strict=True)), "category_source": "rule"} for t in txs])
     conn.execute(insert(Budget), [{"category": c, "amount": a} for c, a in BUDGETS])
     conn.execute(update(Category).where(Category.name.in_([c for c, _ in BUDGETS])).values(pay_with="demo-card"))
-    # The card's latest statement, entered by hand (a card without Plaid): it closes on the 28th, due 25 days later.
+    # The card's latest statement, entered by hand (a card without Plaid): it closes on the 28th, due NO_STATEMENT_DUE_DAYS
+    # later (as the forecast takes a statement with no due date to be).
     close = today.replace(day=28) if today.day >= 28 else (today.replace(day=1) - timedelta(days=1)).replace(day=28)
     prev = (close.replace(day=1) - timedelta(days=1)).replace(day=28)
     owed = -sum(t[3] for t in txs if t[1] == "demo-card" and prev.isoformat() < t[2] <= close.isoformat() and t[6] != "Credit Card Payment")
     conn.execute(insert(ManualStatement).values(account_id="demo-card", statement_date=close.isoformat(), balance=round(owed, 2),
-                                                due_date=(close + timedelta(days=25)).isoformat()))
+                                                due_date=(close + timedelta(days=NO_STATEMENT_DUE_DAYS)).isoformat()))
     conn.execute(insert(Asset).values(name="Sample House", kind="home", value=415000, as_of=today.isoformat(), yearly_change=3,
                                       loan_account_id="demo-mortgage"))
     # The app shows its "connect your bank" screen until a bank is set up. This address never resolves (.invalid), so

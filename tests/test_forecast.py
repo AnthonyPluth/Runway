@@ -924,10 +924,14 @@ class ForecastAssumptionTests(LedgerCase):
     def test_an_amount_set_under_the_old_due_date_key_still_applies(self):
         self.conn.execute(insert(Override).values(key="card:cc:2026-11-05", amount=-77.0))
         self.conn.execute(insert(Override).values(key="card:cc:2026-10-05", amount=-66.0))
-        fc = forecast.build(self.conn, TODAY, 60)
+        fc, moving = forecast.project(self.conn, TODAY, 60)
         self.assertEqual({e["key"]: e["amount"] for e in fc["events"] if e["kind"] == "card"},
                          {"cardclose:cc:2026-09-10": -66.0, "cardclose:cc:2026-10-10": -77.0})
+        self.assertEqual(fc, forecast.build(self.conn, TODAY, 60))   # which only reads: the old keys are still there
+        self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.like("card%"))).scalars()),
+                         ["card:cc:2026-10-05", "card:cc:2026-11-05"])
         # moved to the new keys (the old ones are gone), so putting one back (removing the event's key) works
+        forecast.move_old_keys(self.conn, moving)
         self.assertEqual(sorted(self.conn.execute(select(Override.key).where(Override.key.like("card%"))).scalars()),
                          ["cardclose:cc:2026-09-10", "cardclose:cc:2026-10-10"])
         self.conn.execute(delete(Override).where(Override.key == "cardclose:cc:2026-10-10"))
@@ -963,11 +967,13 @@ class ForecastAssumptionTests(LedgerCase):
     def test_an_old_key_still_applies_when_it_cant_be_moved_yet(self):
         self.conn.execute(insert(Override).values(key="card:cc:2026-11-05", amount=-77.0))
         patch = self.no_writes(OperationalError("UPDATE override", {}, Exception("database is locked")))
-        e = next(e for e in forecast.build(self.conn, TODAY, 60)["events"] if e["key"] == "cardclose:cc:2026-10-10")
+        fc, moving = forecast.project(self.conn, TODAY, 60)
+        forecast.move_old_keys(self.conn, moving)
+        e = next(e for e in fc["events"] if e["key"] == "cardclose:cc:2026-10-10")
         self.assertEqual((e["amount"], e["overridden"]), (-77.0, True))
         self.assertEqual(self.conn.execute(select(Override.key)).scalars(), ["card:cc:2026-11-05"])   # not yet
         patch.stop()   # the lock's free: it moves the next time
-        forecast.build(self.conn, TODAY, 60)
+        forecast.move_old_keys(self.conn, forecast.project(self.conn, TODAY, 60)[1])
         self.assertEqual(self.conn.execute(select(Override.key)).scalars(), ["cardclose:cc:2026-10-10"])
 
     def test_an_old_key_on_a_due_date_that_is_another_closing_date_stays_put(self):

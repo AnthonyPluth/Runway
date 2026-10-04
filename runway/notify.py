@@ -18,7 +18,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import delete, func, insert, or_, select, update
 
-from . import banks, churning, db, forecast, oidc, recurring, webpush
+from . import banks, churning, dates, db, forecast, oidc, recurring, webpush
 from . import settings_keys as sk
 from .models import Account, Category, NotifyLog, PushSubscription, SyncLog, Transaction, User
 
@@ -259,7 +259,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
                 select(T.id, T.amount, func.coalesce(T.payee, T.description).label("who"), db.account_label_expr().label("acct"))
                 .join(Account, Account.id == T.account_id).outerjoin(Category, Category.name == T.category)
                 .where(T.posted >= since, T.amount <= -float(p["big_charge_over"]),
-                       Account.kind.in_(["checking", "savings", "credit"]), Account.hidden == 0,
+                       *db.SPENDING_ACCOUNTS,
                        func.coalesce(Category.is_transfer, 0) == 0)).fetchall():
             out.append({"key": f"big:{t['id']}", "title": f"{_fmt(t['amount'])} at {t['who']}",
                         "body": f"On {t['acct']}.", "url": "/#transactions"})
@@ -272,7 +272,7 @@ def alerts(conn, today: date, p: dict) -> list[dict]:
     if p["sync_failed"]:
         last_ok = db.get_setting(conn, sk.LAST_SYNC_OK)
         log = conn.execute(select(SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
-        stale = not last_ok or (date.today() - date.fromisoformat(last_ok[:10])).days >= 1
+        stale = not last_ok or (date.today() - dates.parse_day(last_ok)).days >= 1
         if log and not log["ok"] and stale and banks.bank_configured(conn):   # SimpleFIN or Plaid
             # Not what the bank said: a notification shows on a lock screen, and goes through a push service.
             out.append({"key": f"syncfail:{today.isoformat()}", "title": "Runway can't sync with your bank",

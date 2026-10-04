@@ -41,7 +41,7 @@ cd frontend && npm ci                 # its packages, into frontend/node_modules
 npm run dev                           # http://localhost:5173/ (reloads as you edit; start Runway on 8765 too)
 npm run check                         # type-check it (CI runs this)
 npm run lint                          # ESLint over it, the browser extension and the service worker (CI runs this)
-npm test                              # unit tests for its pure logic, with Vitest (CI runs these too)
+npm test                              # unit tests for its pure logic and the extension's helpers, with Vitest (CI runs these too)
 npm run coverage                      # the same, measuring how much of the web app they run (the frontend badge)
 npm run build                         # into runway/static/app/, which Runway serves at / (the Docker image does this)
 ```
@@ -81,6 +81,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/tracked.py` | Hand-tracked holdings |
 | `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
+| `runway/dates.py`, `money.py` | Month arithmetic (a day a month doesn't have is its last) and month keys; amounts to the cent, and splitting a total into whole cents |
 | `runway/portfolio.py`, `prices.py` | Investment performance and price data |
 | `runway/networth.py`, `realie.py` | Net worth and home values |
 | `runway/oidc.py` | OpenID Connect sign-in |
@@ -90,7 +91,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0039) |
 | `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components (`components/settings/` holds Settings' tabs) |
-| `extension/` | The browser extension (Amazon, Target, Costco and Carta) |
+| `extension/` | The browser extension (Amazon, Target, Costco and Carta): `background.js` runs the imports, with one file each for Runway's API, the store address allow-list, hidden frames and tabs, and each store. Plain scripts with no build step; their pure helpers are tested by `frontend/src/extension/` |
 | `runway/static/` | Files Runway serves beside the app: the service worker (`sw.js`), manifest, fonts, icons, and `page.css` for the sign-in pages; the web app builds into `runway/static/app/` |
 | `tests/` | Unit and end-to-end tests, including a mock OIDC provider |
 | `pyproject.toml`, `poetry.lock` | Dependencies (Poetry) |

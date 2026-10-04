@@ -492,6 +492,13 @@ def not_investment(account_id=None):
     return col.not_in(select(Account.id).where(Account.kind == "investment"))
 
 
+SPENDING_KINDS = ("checking", "savings", "credit")
+# The accounts spending is counted on, everywhere it's counted (Budget, Reports, the forecast's budgets, notifications,
+# the planner's monthly spending): checking, savings and cards that aren't hidden. Conditions on a joined Account,
+# `.where(*db.SPENDING_ACCOUNTS)`.
+SPENDING_ACCOUNTS = (Account.hidden == 0, Account.kind.in_(SPENDING_KINDS))
+
+
 # Categories the app itself relies on; they can't be renamed or removed.
 PROTECTED_CATEGORIES = {"Credit Card Payment", "Transfer", "Ignore", "Income", "Refunds"}
 
