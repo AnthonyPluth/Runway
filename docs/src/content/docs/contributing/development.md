@@ -59,6 +59,17 @@ make docs-build    # builds it into docs/dist and fails on a broken link between
 
 Link to another page by its address, base included: `[Configuration](/Runway/reference/configuration/)`, or `/Runway/start/docker/#error-reports-optional` for a heading. Link to files in the repository with their GitHub address.
 
+## Verifying a change in the real app
+
+Unit tests don't show a layout or a picker working, so a change to the web app is also run in a browser. `make verify` (or `python run.py verify [page…]`) makes a temporary database, fills it with the demo data (the made-up data `python run.py demo` adds, never yours), starts Runway on a free port, and drives it with Playwright: each page (`overview`, `transactions`, `budget`, `recurring`, `networth`, `reports`, `churning`, `setup`) at phone (390 px), tablet (768 px) and desktop (1280 px) widths. Screenshots and `report.json` (console errors, failed requests) go to `artifacts/verify/`, which is not committed. It exits non-zero on a console error, an uncaught error in the page, a 5xx response or a failed scripted step, and says which page, width and request.
+
+```bash
+make verify                          # every page, and the scripted flows
+make verify PAGES="budget setup"     # only these pages (and the flows that start on them)
+```
+
+It uses the Chromium that is already installed under `PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` by default); without one, run `npx playwright install chromium` in `frontend/` once. A scripted flow is a small JSON file in `frontend/verify/flows/`: a list of steps such as opening Settings → Categories and tapping a category's emoji. A pull request that changes the UI adds or edits a flow for it; the format is in `frontend/verify/flows/README.md`. Pull requests that change the UI attach the `make verify` output.
+
 ## Changing the database
 
 Edit `runway/schema.py`, then generate a migration and check it over:
