@@ -1,12 +1,17 @@
 """What an AI assistant connected to Runway's MCP endpoint (/mcp) may reach, and the switches for whether it may change
-churning or categorize.
+churning, categorize, or change anything.
 
 An assistant connects with OAuth (runway/mcp_oauth.py) and gets a token for the scopes you approved: "read" opens the
 pages in READABLE and nothing else (no settings, connections, bank credentials or backups); "churning:write" also
 allows the churning changes in WRITABLE (nothing else, and no deletes), but only while "Let assistants change
 churning" is switched on (allow_writes); "categorize:write" allows picking the categories in CATEGORIZABLE, only while
-"Let assistants categorize" is on (allow_categorize). Both switches are off unless you turn them on, and are read on
-every change, so turning one off takes effect at once for every connection, without revoking any.
+"Let assistants categorize" is on (allow_categorize); "write" allows every change the web app makes outside BLOCKED
+(writable_routes, deletes included) and the pages in WRITE_READABLE, only while "Let assistants change anything" is on
+(allow_all), and implies the other two scopes. The switches are off unless you turn them on, and are read on every
+change, so turning one off takes effect at once for every connection, without revoking any.
+
+BLOCKED is the boundary: bank connections, credentials and API keys, notifications and these settings themselves are
+never reachable from /mcp, whatever the scope or switch.
 """
 from __future__ import annotations
 
@@ -48,14 +53,61 @@ SPLIT_REFUSED = ("That transaction is split across categories, and one category 
 # Each changing scope: the changes it allows, and the switch (a settings key, "1" for on) they also need.
 CHANGES = {"churning:write": (WRITABLE, sk.MCP_ALLOW_WRITES), "categorize:write": (CATEGORIZABLE, sk.MCP_ALLOW_CATEGORIZE)}
 
+# "write": any change the web app makes (every POST and DELETE route, writable_routes) except what's BLOCKED, while
+# "Let assistants change anything" is on. It implies churning:write and categorize:write.
+ANYTHING = "write"
+SWITCHES = {**{scope: key for scope, (_paths, key) in CHANGES.items()}, ANYTHING: sk.MCP_ALLOW_ALL}
+
+# Never reachable from /mcp, whatever the scope or switch: each blocks its own path and everything under it. The
+# assistant settings (an assistant must never widen its own access or end a connection), API keys and other settings,
+# bank connections and third-party credentials or tokens, notifications and devices, and logos (they fetch from
+# Logo.dev with its key).
+BLOCKED = (
+    "/api/mcp-settings", "/api/settings", "/api/state", "/api/connect", "/api/plaid", "/api/carta", "/api/finnhub",
+    "/api/logodev", "/api/realie", "/api/retail/token", "/api/retail/settings", "/api/push",
+    "/api/accounts/{id}/logo", "/api/accounts/{id}/logo-options", "/api/merchants/logo", "/api/merchants/logo-options",
+    "/api/investments/logo", "/api/investments/logo-options",
+)
+# Fields of an allowed change that are still refused: which bank connection an account's transactions come from.
+REFUSED_FIELDS = {("POST", "/api/accounts/{id}"): ("provider",)}
+FIELD_REFUSED = "Which bank connection an account comes from is changed in Runway itself (Settings → Accounts)."
+
+# GET pages "write" also opens: what its changes need to find what to change. None holds a secret.
+WRITE_READABLE = (
+    "/api/rules", "/api/recurring/suggestions", "/api/recurring/missed", "/api/recurring/{id}/candidates", "/api/accounts/deleted",
+    "/api/accounts/{id}/removal", "/api/churning/found", "/api/retail/charges/{id}/candidates", "/api/ai/log", "/api/tracked/{id}",
+)
+# Changes that touch many records at once (or drop an alert for good): destructive, like a delete or a remove.
+MANY = frozenset({"/api/recategorize", "/api/transactions/bulk", "/api/rules/{id}/apply", "/api/ai/apply", "/api/recurring/dismiss"})
+
+
+def blocked(template: str) -> bool:
+    """Whether a route (its pattern, as in server/routes.py) is out of every assistant's reach."""
+    return any(template == b or template.startswith(b + "/") for b in BLOCKED)
+
+
+def destructive(method: str, template: str) -> bool:
+    """Whether a change removes or deletes something, or changes many records at once."""
+    return method == "DELETE" or "remove" in template.split("/") or template in MANY
+
+
+def writable_routes(routes) -> list[tuple[str, str]]:
+    """The changes "write" allows, as (method, pattern), from server/routes.py's ROUTES: every POST and DELETE that
+    isn't BLOCKED. A new route is allowed unless it's added to BLOCKED (tests/test_mcp.py keeps a list to review)."""
+    return [(m, p) for m, p, *_fn in routes if m in ("POST", "DELETE") and not blocked(p)]
+
 
 @dataclass(frozen=True)
 class Access:
-    """What one caller of /mcp may do: its scopes ("read", "churning:write", "categorize:write"), the grant it came from
-    and who approved it. A change also needs its scope's switch on at that moment (switched_on)."""
+    """What one caller of /mcp may do: its scopes ("read", "churning:write", "categorize:write", "write"), the grant it
+    came from and who approved it. A change also needs its scope's switch on at that moment (switched_on)."""
     scopes: frozenset[str]
     grant_id: int | None
     who: str | None
+
+    def has(self, scope: str) -> bool:
+        """Whether the connection was allowed `scope` ("write" brings churning:write and categorize:write with it)."""
+        return scope in self.scopes or (scope in CHANGES and ANYTHING in self.scopes)
 
 
 def resolve_bearer(conn, authorization: str | None, resource: str | None) -> Access | None:
@@ -88,6 +140,15 @@ def set_allow_categorize(conn, on: bool) -> None:
     db.set_setting(conn, sk.MCP_ALLOW_CATEGORIZE, "1" if on else "0")
 
 
+def allow_all(conn) -> bool:
+    """Whether any change "write" allows is switched on (it's off until you turn it on)."""
+    return db.get_setting(conn, sk.MCP_ALLOW_ALL) == "1"
+
+
+def set_allow_all(conn, on: bool) -> None:
+    db.set_setting(conn, sk.MCP_ALLOW_ALL, "1" if on else "0")
+
+
 def is_split(conn, tx_id: str) -> bool:
     row = conn.execute(select(Transaction.is_split).where(Transaction.id == tx_id)).fetchone()
     return bool(row and row["is_split"])
@@ -95,5 +156,5 @@ def is_split(conn, tx_id: str) -> bool:
 
 def switched_on(conn, scope: str) -> bool:
     """Whether the changes `scope` allows are switched on right now. False for a scope that allows none."""
-    return scope in CHANGES and db.get_setting(conn, CHANGES[scope][1]) == "1"
+    return scope in SWITCHES and db.get_setting(conn, SWITCHES[scope]) == "1"
 

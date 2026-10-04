@@ -19,7 +19,7 @@ const serve = (fail: string[] = [], hold: string[] = []) => vi.mocked(api).mockI
   if (path === "/api/accounts") return [{ id: "chk", name: "Checking", kind: "checking", balance: 100 }];
   if (path === "/api/rules" || path === "/api/accounts/deleted") return [];
   if (path === "/api/plaid/status") return { configured: false, env: "production", client_id: "", items: [] };
-  if (path === "/api/mcp-settings") return { connections: [], keys: [], allow_writes: false, allow_categorize: false };
+  if (path === "/api/mcp-settings") return { connections: [], keys: [], allow_writes: false, allow_categorize: false, allow_all: false };
   if (path === "/api/retail") throw new Error("not in this test");
   return {};
 }) as never);
