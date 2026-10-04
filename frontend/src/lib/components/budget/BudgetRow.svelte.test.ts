@@ -204,6 +204,49 @@ describe("BudgetRow", () => {
     });
   });
 
+  describe("an income category", () => {
+    const pay = (extra: Partial<BudgetCategory> = {}) => cat({ name: "Paycheck", path: ["Paycheck"], top: "Paycheck", budget: 6000, spent: 3000, left: 3000, ...extra });
+    const incomeBar = () => screen.getByRole("img", { name: /of expected income received/ });
+
+    it("fills a green bar with what's come in, and says what's still to come and how much is scheduled", () => {
+      setup(pay({ expected: 3000 }), { income: true, budgets: true });
+      expect(screen.getByText("$3,000 to come · $3,000 scheduled")).toBeInTheDocument();
+      const spent = incomeBar().querySelector<HTMLElement>(":scope > div:not([data-expected])")!;
+      expect(spent.style.background).toBe("var(--good)");
+      const coming = incomeBar().querySelector<HTMLElement>("[data-expected]")!;
+      expect(coming.style.background).toBe("var(--good)");
+      expect(coming).toHaveClass("opacity-45");
+      expect(incomeBar()).toHaveAttribute("aria-label", "50% of expected income received, 50% more scheduled");
+      expect(screen.getByTitle("Where you'd be at an even pace today")).toBeInTheDocument();
+      // no rollover for income
+      expect(screen.queryByRole("button", { name: /Roll over/ })).not.toBeInTheDocument();
+    });
+
+    it("says what's to come without anything scheduled, and nothing received yet", () => {
+      setup(pay({ spent: 0, left: 6000 }), { income: true });
+      expect(screen.getByText("$6,000 to come")).toBeInTheDocument();
+    });
+
+    it("is good news, not a warning, when more comes in than expected", () => {
+      setup(pay({ spent: 6500, left: -500, expected: 100 }), { income: true });
+      const over = screen.getByText("▲ $500 over");
+      expect(over).toHaveClass("text-good");
+      expect(over).not.toHaveClass("text-destructive");
+      expect(incomeBar().querySelector(".bg-destructive")).toBeNull();
+    });
+
+    it("never turns red as a subcategory, even when what's scheduled would take it past", () => {
+      setup(pay({ name: "Bonus", parent: "Paycheck", path: ["Paycheck", "Bonus"], depth: 1, budget: 100, spent: 90, left: 10, expected: 50 }),
+        { income: true, sub: true, budgets: true });
+      expect(screen.getByRole("link", { name: "$90" })).not.toHaveClass("text-destructive");
+    });
+
+    it("asks for what's expected rather than a budget", () => {
+      setup(pay({ budget: null, left: null }), { income: true, budgets: true });
+      expect(screen.getByLabelText("Budget for Paycheck")).toHaveAttribute("placeholder", "Expected");
+    });
+  });
+
   describe("in the Budgets card", () => {
     it("offers to roll over what's left, and says so once it does", async () => {
       const { onchanged } = setup(cat(), { budgets: true });

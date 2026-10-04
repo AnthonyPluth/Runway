@@ -61,17 +61,26 @@
     return c.pay_with || c.path.slice(0, -1).reverse().map(chosen).find(Boolean) || c.usual_account || null;
   }
 
-  const view = $derived.by(() => {
-    if (!b) return null;
-    // Group into families: a top-level category plus everything under it. A category's "spent" already includes its subcategories.
+  // Families: a top-level category plus everything under it. A category's "spent" already includes its subcategories.
+  function familiesOf(list: BudgetCategory[]): Family[] {
     const families: Family[] = [];
-    for (const c of b.categories) {
+    for (const c of list) {
       if (!c.depth) families.push({ top: c, kids: [] });
       else families.find((f) => f.top.name === c.top)?.kids.push(c);
     }
-    const budgeted = new Set(b.categories.filter((c) => c.budget != null).map((c) => c.name));
-    // Count a budget only when nothing above it has one, so nested budgets aren't counted twice.
-    const countsToward = (c: BudgetCategory) => c.budget != null && !c.path.slice(0, -1).some((a) => budgeted.has(a));
+    return families;
+  }
+  // The budgets that count toward a total: one only when nothing above it has one, so nested budgets aren't counted twice.
+  function counting(list: BudgetCategory[]): BudgetCategory[] {
+    const budgeted = new Set(list.filter((c) => c.budget != null).map((c) => c.name));
+    return list.filter((c) => c.budget != null && !c.path.slice(0, -1).some((a) => budgeted.has(a)));
+  }
+
+  const view = $derived.by(() => {
+    if (!b) return null;
+    const families = familiesOf(b.categories);
+    const counted = new Set(counting(b.categories));
+    const countsToward = (c: BudgetCategory) => counted.has(c);
     const isBudgeted = (f: Family) => f.top.budget != null || f.kids.some((k) => k.budget != null);
     const inBudget = families.filter(isBudgeted);
     const notBudget = families.filter((f) => !isBudgeted(f) && f.top.spent > 0.005);
@@ -87,17 +96,23 @@
       if (c.spent - avail > 0.005) { totOver += c.spent - avail; overCount++; }
     }
     const allSpent = families.reduce((s, f) => s + Math.max(0, f.top.spent), 0);
+    // Income: what's expected to come in (its budgets) against what has. It never counts toward the spending totals.
+    const incomeRows = b.income_rows ?? [];
+    const income = familiesOf(incomeRows).filter((f) => [f.top, ...f.kids].some((c) => c.budget != null || c.spent > 0.005));
+    const incomeExpected = counting(incomeRows).reduce((s, c) => s + c.budget!, 0);
+    const incomeUnbudgeted = incomeRows.filter((c) => c.budget == null);
     return { inBudget, notBudget, unusedTops, totBudget, totCarried, totSpent, totLeft, totOver, overCount, otherSpent: allSpent - totSpent,
+      income, incomeExpected, incomeUnbudgeted,
       // pace: the share of the month gone, counting today as half gone (at the end of today the marker would sit a
       // day ahead of the date all day long)
       pace: b.month !== thisMonth() ? (b.day >= b.days_in_month ? 1 : 0) : Math.max(0, b.day - 0.5) / b.days_in_month };
   });
 </script>
 
-{#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number)}
+{#snippet family(f: Family, budgets: boolean, bm: BudgetMonth, pace: number, income = false)}
   <div class="group/family px-4 py-1">
     {#each [f.top, ...f.kids.filter((k) => budgets || k.spent > 0.005)] as c (c.name)}
-      <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} {pace} payAccounts={bm.pay_accounts} account={accountOf(c, bm)}
+      <BudgetRow {c} month={bm.month} sub={c !== f.top} {budgets} {income} {pace} payAccounts={bm.pay_accounts} account={income ? null : accountOf(c, bm)}
         onsave={saveBudget} onchanged={refresh} />
     {/each}
   </div>
@@ -131,9 +146,16 @@
       { label: "Budgeted", value: fmt0(v.totBudget), sub: v.totCarried > 0.005 ? `each month · plus ${fmt0(v.totCarried)} rolled over` : "each month" },
       { label: "Other spending", value: fmt0(v.otherSpent + b.uncategorized),
         sub: b.uncategorized > 0 ? `incl. ${fmt0(b.uncategorized)} uncategorized` : "in categories without a budget" },
-      ...(b.income ? [{ label: "Money in", value: fmt0(b.income) }] : []),
+      ...(b.income || v.incomeExpected > 0.005 ? [{ label: "Money in", value: fmt0(b.income),
+        sub: v.incomeExpected > 0.005 ? `of ${fmt0(v.incomeExpected)} expected` : undefined }] : []),
     ]} />
   </section>
+
+  {#if v.income.length}
+    <Group title="Income" inset="3.4rem" class="mb-8">
+      {#each v.income as f (f.top.name)}{@render family(f, true, b, v.pace, true)}{/each}
+    </Group>
+  {/if}
 
   <Group title="Budgets" inset="3.4rem" class="mb-8">
       {#if v.inBudget.length}
@@ -145,14 +167,18 @@
 
   <Group title="Not budgeted" inset="3.4rem" class="mb-4">
       {#each v.notBudget as f (f.top.name)}{@render family(f, false, b, v.pace)}{/each}
-      {#if v.unusedTops.length}
+      {#if v.unusedTops.length || v.incomeUnbudgeted.length}
         <div class="flex min-h-12 items-center gap-2.5 px-2 py-2">
           <select bind:value={newCat} aria-label="Category to budget"
             class="h-10 min-w-0 cursor-pointer sm:h-9 rounded-lg border border-transparent bg-transparent text-primary py-1 pr-8 pl-2.5 text-sm outline-none hover:border-input focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 [&_option]:bg-popover">
             <option value="">Another category…</option>
-            {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}
+            {#snippet choice(c: BudgetCategory)}
               <option value={c.name}>{c.icon ? `${c.icon}  ` : ""}{c.parent ? `${c.parent} > ${c.name}` : c.name}</option>
-            {/each}
+            {/snippet}
+            {#each v.unusedTops.flatMap((f) => [f.top, ...f.kids]) as c (c.name)}{@render choice(c)}{/each}
+            {#if v.incomeUnbudgeted.length}
+              <optgroup label="Income">{#each v.incomeUnbudgeted as c (c.name)}{@render choice(c)}{/each}</optgroup>
+            {/if}
           </select>
           <span class="group/money relative ml-auto inline-flex items-center">
             <span aria-hidden="true" class="pointer-events-none absolute left-2 hidden text-sm text-muted-foreground group-focus-within/money:inline">$</span>

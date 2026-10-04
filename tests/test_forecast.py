@@ -123,6 +123,18 @@ class ForecastTests(LedgerCase):
         # and the spending itself isn't listed: only the card's payments are
         self.assertEqual({e["kind"] for e in fc["events"]}, {"card"})
 
+    def test_an_income_budget_changes_nothing(self):
+        self.conn.execute(insert(Recurring).values(name="Paycheck", account_id="chk", amount=3000, frequency="biweekly",
+                                                   anchor_date="2026-09-18"))
+        self.conn.execute(insert(Budget).values(category="Groceries", amount=600))
+        before = forecast.build(self.conn, TODAY, 60)
+        self.conn.execute(insert(Budget).values(category="Income", amount=6500))
+        after = forecast.build(self.conn, TODAY, 60)
+        self.assertEqual([p["category"] for p in forecast.budget_plan(self.conn, TODAY)], ["Groceries"])
+        for k in ("events", "total", "budget", "spend"):
+            self.assertEqual(after.get(k), before.get(k), k)
+        self.assertEqual(after["accounts"][0]["series"], before["accounts"][0]["series"])
+
     def test_a_budget_paid_from_checking_comes_out_day_by_day(self):
         # $310/month on Groceries from checking; $200 spent in September, so $110 over Sep 24-30 ($15.71 a day)
         self.conn.execute(insert(Budget).values(category="Groceries", amount=310))
