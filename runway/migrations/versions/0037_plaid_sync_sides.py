@@ -7,13 +7,13 @@ What's there moves to the side that wrote it: an investment-only connection's to
 with both kinds was only ever synced as a bank one, so its investments have never been read: inv_last_sync stays empty,
 and their first sync reads the whole history).
 
-Revision ID: 0037_plaid_sync_sides
+Revision ID: 0037
 Revises: 0036
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0037_plaid_sync_sides'
+revision = '0037'
 down_revision = '0036'
 branch_labels = None
 depends_on = None
