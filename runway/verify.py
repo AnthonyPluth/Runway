@@ -14,7 +14,8 @@ import sys
 import tempfile
 import time
 import urllib.error
-import urllib.request
+
+from . import tls
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "artifacts", "verify")
@@ -42,7 +43,7 @@ def wait_ready(url: str, server: subprocess.Popen, timeout: float = 60) -> None:
         if server.poll() is not None:
             raise RuntimeError(f"the server exited with code {server.returncode} before it was ready")
         try:
-            with urllib.request.urlopen(url, timeout=2):
+            with tls.urlopen(url, 2, allow_http=True):
                 return
         except (urllib.error.URLError, OSError):
             time.sleep(0.2)
