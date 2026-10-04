@@ -41,7 +41,11 @@ export interface BudgetMonth {
   /** Today's day of the month; 0 for a month still to come, the last day for one that's over. */
   day: number;
   categories: BudgetCategory[];   // tree order: each category followed by its subcategories
+  /** Money in this month across the income categories (not Refunds). */
   income: number;
+  /** The income categories (not Refunds), in tree order and the same shape: `budget` is what's expected to come in,
+   *  `spent` what has (above zero), `left` what's still to come, `expected` the forecast's paychecks still due this month. */
+  income_rows?: BudgetCategory[];
   uncategorized: number;
   pay_accounts: PayAccount[];
 }

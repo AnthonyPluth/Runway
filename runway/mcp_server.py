@@ -145,7 +145,7 @@ TOOLS: list[dict[str, Any]] = [
                              "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "How many (default 50)."},
                              "offset": {"type": "integer", "minimum": 0}}),
      "run": _transactions},
-    {"name": "get_budget", "description": "A month's budget: what's budgeted and spent in each category.", "inputSchema": _schema({"month": _MONTH}),
+    {"name": "get_budget", "description": "A month's budget: what's budgeted and spent in each category, and the income expected and received (income_rows).", "inputSchema": _schema({"month": _MONTH}),
      "run": _pass("budget", "month")},
     {"name": "list_categories", "description": "Spending and income categories.", "inputSchema": _schema(), "run": _pass("categories")},
     {"name": "get_cashflow", "description": "Where money came from and went in a month.", "inputSchema": _schema({"month": _MONTH}),
