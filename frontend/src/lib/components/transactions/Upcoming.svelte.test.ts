@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/svelte";
+import { app } from "$lib/app.svelte";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/api", () => ({ api: vi.fn().mockResolvedValue({}), newPage: vi.fn() }));
@@ -32,13 +33,17 @@ describe("Upcoming", () => {
     expect(screen.getByRole("button", { name: /Show all 6/ })).toBeInTheDocument();
   });
 
-  it("names each item's account, unless the list is filtered to one", () => {
+  it("marks each item with its account's bank, unless the list is filtered to one", () => {
     width(false);
-    const { unmount } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
-    expect(screen.getAllByText(/^Checking/).length).toBe(2);   // on the item, and on its projected balance
+    app.state = { connected: true, brands: { a1: { institution: "Chase", initial: "C" } } } as typeof app.state;
+    const { unmount, container } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
+    expect(container.querySelector("[data-account-badge]")).toHaveAttribute("title", "Checking");   // on the item's logo
+    expect(screen.getAllByText(/^Checking/).length).toBe(1);                                          // and named on its projected balance only
     unmount();
-    render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
+    const one = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
+    expect(one.container.querySelector("[data-account-badge]")).toBeNull();
     expect(screen.queryByText(/Checking/)).not.toBeInTheDocument();
     expect(screen.getByText("projected balance $100.00")).toBeInTheDocument();
+    app.state = null;
   });
 });

@@ -163,10 +163,11 @@
       {/if}
     </div>
   </div>
-  <!-- Account (and the bank's own text): under the merchant on a tablet, its own column from lg up (where the bank's text
-       is in the details instead). They share the line: the account shrinks (to its logo and an ellipsis), and the bank's
-       text only shows once the cell is 24rem wide, so it never lands on the account. -->
-  <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-md:hidden lg:contents">
+  <!-- Account (and the bank's own text): its own column from lg up (where the bank's text is in the details instead).
+       Below lg the account is the bank's badge on the logo and the rest is in the details, so the row stays one line
+       tall whether the list shows one account or all of them. They share the line: the account shrinks (to its logo
+       and an ellipsis), and the bank's text only shows once the cell is 24rem wide, so it never lands on the account. -->
+  <div class="@container/acct col-start-3 row-start-2 flex min-w-0 items-center gap-1.5 pr-3 text-xs text-muted-foreground max-lg:hidden lg:contents">
     {#if !oneAccount}<span class="min-w-0 shrink-[4] lg:col-start-5 lg:row-start-1 lg:pr-3" title={t.account_name || undefined}><span class="sr-only">Account: </span><AcctLabel id={t.account_id} name={t.account_name ?? ""} iconClass="hidden" labelClass="max-lg:[@media(max-height:500px)]:hidden" /></span>{/if}
     {#if detail}{#if !oneAccount}<span aria-hidden="true" class="hidden shrink-0 @sm/acct:inline lg:hidden! max-lg:[@media(max-height:500px)]:hidden!">·</span>{/if}<span class="hidden min-w-0 flex-1 truncate @sm/acct:block lg:hidden! max-lg:[@media(max-height:500px)]:hidden!" title={detail}>{detail}</span>{/if}
   </div>

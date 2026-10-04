@@ -2,6 +2,7 @@
   import { api } from "$lib/api";
   import { app } from "$lib/app.svelte";
   import AmountEdit from "$lib/components/AmountEdit.svelte";
+  import BankBadge from "$lib/components/BankBadge.svelte";
   import CatIcon from "$lib/components/CatIcon.svelte";
   import Logo from "$lib/components/Logo.svelte";
   import { Badge } from "$lib/components/ui/badge";
@@ -105,14 +106,18 @@
     {@const open = !!(e.estimate && !e.overridden && explained[rid])}
     <!-- An estimate's breakdown, opened, takes a line of its own under the name (the icon and amount stay with the name). -->
     <div class={["cell min-h-12 flex-wrap py-2", open && "items-start"]}>
-      <!-- Logos as they are, with nothing behind them, as in Transactions. -->
-      {#if e.logo}
-        <Logo src={e.logo} />
-      {:else if bank?.src}
-        <img class="size-8 shrink-0 rounded-lg object-contain" src={bank.src} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
-      {:else}
-        <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} />
-      {/if}
+      <!-- Logos as they are, with nothing behind them, as in Transactions; with several accounts' items together, the
+           item's account is its bank on the logo's corner, as there, not a line of its own. -->
+      <span class="relative shrink-0">
+        {#if e.logo}
+          <Logo src={e.logo} />
+        {:else if bank?.src}
+          <img class="size-8 shrink-0 rounded-lg object-contain" src={bank.src} alt="" title={bank.institution ?? ""} loading="lazy" width="32" height="32" />
+        {:else}
+          <CatIcon name={e.kind === "card" ? "Credit Card Payment" : e.category} size={32} />
+        {/if}
+        {#if accounts && e.account_id}<BankBadge accountId={e.account_id} name={e.account ?? ""} />{/if}
+      </span>
       <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-1.5 text-[15px]">
           {#if e.recurring_id}
@@ -132,8 +137,6 @@
             {:else if e.paid_on}on {e.account}, paid with its {fmtDate(e.paid_on)} payment
             {:else}on {e.account}; its payment isn’t in the forecast{/if}
           </div>
-        {:else if accounts && e.account}
-          <div class="truncate text-[13px] text-muted-foreground">{e.account}</div>
         {/if}
       </div>
       <div class={["flex shrink-0 flex-col items-end text-[15px] tabular-nums", e.amount > 0 && "text-good"]}>
