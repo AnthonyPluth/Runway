@@ -37,6 +37,7 @@
   import Search from "@lucide/svelte/icons/search";
   import X from "@lucide/svelte/icons/x";
   import { act, errMsg } from "$lib/act";
+  import { debounced } from "$lib/debounce";
 
   // Transactions (#transactions) and its To review tab (#review) share one list: same filters, same columns.
   // Changing a category saves immediately; in Review the transaction then leaves the list.
@@ -57,7 +58,7 @@
       if (review || route.page !== "transactions" || q === toQuery(f)) return;
       const next = fromQuery(q);
       if (sameFilters(next, f)) return;
-      clearTimeout(timer); Object.assign(f, next); load();
+      searching.cancel(); Object.assign(f, next); load();
     });
   });
 
@@ -152,11 +153,11 @@
 
   const filtered = $derived(isFiltered(applied));
 
-  let timer: ReturnType<typeof setTimeout>;
-  function search(v: string) { f.q = v; clearTimeout(timer); timer = setTimeout(load, 250); }
-  function setDates(from: string, to: string) { clearTimeout(timer); f.from = from; f.to = to; if (!from && !to) f.scope = ""; load(); }
-  function setMore(next: Partial<TxFilters>) { clearTimeout(timer); Object.assign(f, next); load(); }
-  function clearFilters() { clearTimeout(timer); clearAll(f); load(); }
+  const searching = debounced(load, 250);
+  function search(v: string) { f.q = v; searching.call(); }
+  function setDates(from: string, to: string) { searching.cancel(); f.from = from; f.to = to; if (!from && !to) f.scope = ""; load(); }
+  function setMore(next: Partial<TxFilters>) { searching.cancel(); Object.assign(f, next); load(); }
+  function clearFilters() { searching.cancel(); clearAll(f); load(); }
 
   const shownEvents = (events: UpcomingEvent[]) => {
     const a = applied, q = a.q.trim().toLowerCase();

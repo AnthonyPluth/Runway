@@ -11,6 +11,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Plus from "@lucide/svelte/icons/plus";
   import X from "@lucide/svelte/icons/x";
+  import { debounced } from "$lib/debounce";
   import { onDestroy } from "svelte";
   import PlannerChart from "./PlannerChart.svelte";
   import { addedPayments, counted, type Dollars, endingPayments, inDollars, loanProjected, paymentEnds, project,
@@ -35,23 +36,21 @@
 
   // Keep the plan (a moment after the last change, or as you leave, so a quick tab switch doesn't drop it). A plan the
   // server refuses stays on screen with the reason; one it takes shows "Saved ✓" for a moment.
-  let timer: ReturnType<typeof setTimeout>, savedTimer: ReturnType<typeof setTimeout>;
-  let dirty = false, saved = $state(false);
+  let saved = $state(false);
+  const unflash = debounced(() => (saved = false), 1600);
   async function save() {
-    clearTimeout(timer); dirty = false;
+    later.cancel();
     try {
       await api("/api/investments/plan", { method: "POST", body: { plan: $state.snapshot(plan) } });
       problem = null; isDefault = false; saved = true;
-      clearTimeout(savedTimer); savedTimer = setTimeout(() => (saved = false), 1600);
+      unflash.call();
     } catch (err) { problem = errMsg(err); }
   }
-  function keep() {
-    dirty = true; clearTimeout(timer);
-    timer = setTimeout(save, 700);
-  }
-  onDestroy(() => { clearTimeout(savedTimer); if (dirty) save(); });
+  const later = debounced(save, 700);
+  const keep = () => later.call();
+  onDestroy(() => { unflash.cancel(); later.flush(); });
   async function startOver() {
-    clearTimeout(timer); dirty = false;
+    later.cancel();
     try { await api("/api/investments/plan", { method: "POST", body: { plan: null } }); }
     catch (err) { problem = errMsg(err); return; }
     plan = copy({ ...data.plan, ...defaults() });

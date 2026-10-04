@@ -7,6 +7,7 @@
   import { onMount, tick } from "svelte";
   import type { Tracked } from "./types";
   import { errMsg } from "$lib/act";
+  import { debounced } from "$lib/debounce";
 
   // Holdings you enter for an account that only reports a balance (a 401(k) through SimpleFIN, say). Every change
   // saves (after checking the rows add up); Done closes it and redraws the page if anything was saved.
@@ -18,7 +19,7 @@
   let t = $state<Tracked | null>(null), err = $state("");
   let rows = $state<Row[]>([]);
   let status = $state(""), bad = $state(false);
-  let changed = false, timer: ReturnType<typeof setTimeout>;
+  let changed = false;
   let box = $state<HTMLDivElement | null>(null);
 
   onMount(async () => {
@@ -46,7 +47,8 @@
     try { await api(`/api/tracked/${encodeURIComponent(acctId)}`, { method: "POST", body: { rows: out } }); changed = true; say("Saved ✓ · prices updated"); }
     catch (e) { say(errMsg(e), true); }
   }
-  const soon = () => { clearTimeout(timer); timer = setTimeout(save, 150); };
+  const later = debounced(save, 150);
+  const soon = () => later.call();
   async function add() {
     rows.push(blank());
     await tick();

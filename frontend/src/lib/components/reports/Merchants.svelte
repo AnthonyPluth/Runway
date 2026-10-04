@@ -13,6 +13,7 @@
   import { rangeDates, rangeOptions, reportState as st, type RangeKey } from "./state.svelte";
   import Status from "./Status.svelte";
   import type { MerchantsReport } from "./types";
+  import { debounced } from "$lib/debounce";
 
   // Merchants: where the money went, biggest first. Open one for its months and transactions. The search runs on the
   // server, so it finds a merchant past the top 100 too. The search and what's open stay when you come back to the tab.
@@ -23,14 +24,13 @@
     return api<MerchantsReport>(`/api/reports/merchants?${qs}`);
   });
   let q = $state(st.merchantQ);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = debounced(() => { st.merchantQ = q; report.load(); }, 250);
   function search(v: string) {
     q = v;
-    clearTimeout(timer);
-    timer = setTimeout(() => { st.merchantQ = q; report.load(); }, 250);
+    run.call();
   }
-  function clearSearch() { clearTimeout(timer); q = ""; st.merchantQ = ""; report.load(); }
-  $effect(() => () => clearTimeout(timer));
+  function clearSearch() { run.cancel(); q = ""; st.merchantQ = ""; report.load(); }
+  $effect(() => run.cancel);
   const open = $derived(new Set(st.merchantsOpen));
   const toggle = (name: string) => {
     st.merchantsOpen = open.has(name) ? st.merchantsOpen.filter((n) => n !== name) : [...st.merchantsOpen, name];
