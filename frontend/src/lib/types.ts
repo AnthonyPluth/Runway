@@ -144,10 +144,10 @@ export interface StatementEstimate {
   /** The budgets paid with the card, each one's spending to the close. */
   budgets?: { category: string; amount: number }[];
   budgets_total?: number;
-  /** The card's recurring charges in the cycle that no budget has. */
+  /** The card's recurring charges in the cycle that no budget charged to the card has. */
   recurring?: { name: string; amount: number }[];
   recurring_total?: number;
-  /** Annual fees charged in the cycle. */
+  /** Annual fees charged in the cycle that no budget charged to the card has. */
   fees?: { name: string; amount: number }[];
   fees_total?: number;
   /** What the statement before leaves unpaid (below zero: a credit on the card), and a month's interest at `apr`. */
