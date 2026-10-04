@@ -89,17 +89,34 @@ def remove(conn, account_id: str, statement_date: str) -> bool:
 
 def history(conn, account_id: str) -> list[dict]:
     """The statements you entered for a card, newest first."""
+    return history_of(by_account(conn, [account_id])[account_id])
+
+
+def by_account(conn, account_ids: list[str]) -> dict[str, list[dict]]:
+    """Every statement you entered for each of these cards, newest first, in one query (for history_of and latest_of)."""
     m = ManualStatement
-    return db.rows(conn.execute(select(m.statement_date, m.balance, m.due_date, m.minimum_payment, m.entered_at)
-                                .where(m.account_id == account_id).order_by(m.statement_date.desc())))
+    out: dict[str, list[dict]] = {a: [] for a in account_ids}
+    if account_ids:
+        for r in db.rows(conn.execute(select(m).where(m.account_id.in_(account_ids))
+                                      .order_by(m.account_id, m.statement_date.desc()))):
+            out.setdefault(r["account_id"], []).append(r)
+    return out
+
+
+def history_of(rows: list[dict]) -> list[dict]:
+    """history(), from a card's by_account() rows."""
+    return [{k: r[k] for k in ("statement_date", "balance", "due_date", "minimum_payment", "entered_at")} for r in rows]
 
 
 def latest(conn, account_id: str, today: date) -> dict | None:
     """The latest statement you entered for a card, in the shape of Plaid's (plaidbank.statement), with source "manual",
     whether it's stale, and when the next one is expected to close."""
-    m = ManualStatement
-    r = conn.execute(select(m).where(m.account_id == account_id, m.statement_date <= today.isoformat())
-                     .order_by(m.statement_date.desc()).limit(1)).fetchone()
+    return latest_of(by_account(conn, [account_id])[account_id], today)
+
+
+def latest_of(rows: list[dict], today: date) -> dict | None:
+    """latest(), from a card's by_account() rows."""
+    r = next((r for r in rows if r["statement_date"] <= today.isoformat()), None)
     if not r:
         return None
     close = date.fromisoformat(r["statement_date"])

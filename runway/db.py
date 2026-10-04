@@ -539,15 +539,38 @@ def number(value) -> float:
 
 
 def get_setting(conn, key: str, default: str | None = None) -> str | None:
-    row = conn.execute(select(Setting.value).where(Setting.key == key)).fetchone()
-    value = row["value"] if row and row["value"] is not None else None
-    if value is not None and key in secretbox.SECRET_SETTINGS:
-        try:
-            value = secretbox.decrypt(value)
-        except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
-            monitoring.log(f"Warning: {key}: {e}", "warning")
-            value = None
+    value = get_settings(conn, [key])[key]
     return value if value is not None else default
+
+
+def get_settings(conn, keys) -> dict[str, str | None]:
+    """Several settings in one query: {key: get_setting's value for it (None when it isn't set)}."""
+    keys = list(dict.fromkeys(keys))
+    found = dict(conn.execute(select(Setting.key, Setting.value).where(Setting.key.in_(keys))).fetchall()) if keys else {}
+    out: dict[str, str | None] = {}
+    for key in keys:
+        value = found.get(key)
+        if value is not None and key in secretbox.SECRET_SETTINGS:
+            try:
+                value = secretbox.decrypt(value)
+            except secretbox.SecretError as e:   # the key changed: behave as if it was never entered, and say why
+                monitoring.log(f"Warning: {key}: {e}", "warning")
+                value = None
+        out[key] = value
+    return out
+
+
+def has_setting(conn, key: str) -> bool:
+    """Whether a setting has a value, without reading it: a secret (an API key, a bank's access) isn't decrypted just to
+    say it's there. One saved under a key Runway no longer has counts as there (using it says why it can't be read)."""
+    return key in settings_present(conn, [key])
+
+
+def settings_present(conn, keys) -> set[str]:
+    """Which of these settings have a value (has_setting for each), in one query."""
+    keys = list(keys)
+    return set(conn.execute(select(Setting.key).where(Setting.key.in_(keys), Setting.value.is_not(None), Setting.value != "")
+                            ).scalars()) if keys else set()
 
 
 def set_setting(conn, key: str, value: str | None) -> None:

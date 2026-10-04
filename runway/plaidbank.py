@@ -486,11 +486,20 @@ def store_loan_terms(conn, item, res: dict) -> int:
 
 def statement(conn, card_id: str, today: date):
     """The issuer's latest statement for a card, through Plaid."""
-    r = conn.execute(select(CardStatement).join(Account, Account.plaid_account_id == CardStatement.plaid_account_id)
-                     .where(Account.id == card_id)).fetchone()
-    if not r or not r["last_statement_date"] or date.fromisoformat(r["last_statement_date"]) > today:
-        return None
-    return r
+    return statements(conn, [card_id], today).get(card_id)
+
+
+def statements(conn, card_ids: list[str], today: date) -> dict:
+    """statement() for each of these cards, in one query: {card id: its statement}, for the ones that have one."""
+    if not card_ids:
+        return {}
+    out: dict[str, Any] = {}
+    for r in conn.execute(select(Account.id.label("card_id"), CardStatement)
+                          .join(Account, Account.plaid_account_id == CardStatement.plaid_account_id)
+                          .where(Account.id.in_(card_ids))).fetchall():
+        if r["last_statement_date"] and date.fromisoformat(r["last_statement_date"]) <= today:
+            out.setdefault(r["card_id"], r)
+    return out
 
 
 def sync_all(conn, today: date | None = None) -> dict:

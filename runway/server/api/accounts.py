@@ -33,17 +33,25 @@ def api_accounts(conn, _q, _b):
         select(p.plaid_account_id, p.mask, p.item_id, PlaidItem.products, PlaidItem.institution_name, s.last_statement_date,
                s.next_due_date, s.purchase_apr)
         .join(PlaidItem, PlaidItem.item_id == p.item_id).outerjoin(s, s.plaid_account_id == p.plaid_account_id)))}
+    # Each card's statements and payment plan, and each connection's statement note: asked once for all of them.
+    today = date.today()
+    cards = [a["id"] for a in accts if a["kind"] == "credit"]
+    plaid_statements = plaidbank.statements(conn, cards, today)
+    entered = statements.by_account(conn, cards)
+    plans = forecast.payment_plans(conn, cards)
+    notes = db.get_settings(conn, [sk.plaid_stmt_note(it["item_id"]) for it in items.values()])
     for a in accts:   # which providers this account can use, and (cards) its latest statement dates
         it = items.get(a.get("plaid_account_id") or "")
         a["plaid_link"] = ({"institution": it["institution_name"], "mask": it["mask"],
                             "transactions": "transactions" in (it["products"] or ""),
                             "closed": it["last_statement_date"], "due": it["next_due_date"],
-                            "statement_note": db.get_setting(conn, sk.plaid_stmt_note(it['item_id']))} if it else None)
+                            "statement_note": notes[sk.plaid_stmt_note(it['item_id'])]} if it else None)
         if a["kind"] == "credit":
-            a["statement"] = card_statement(conn, a, it["institution_name"] if it else None)
-            a["statements"] = statements.history(conn, a["id"])   # the ones you entered, newest first
+            a["statement"] = _statement(plaid_statements.get(a["id"]) if a.get("plaid_account_id") else None,
+                                        statements.latest_of(entered[a["id"]], today), it["institution_name"] if it else None)
+            a["statements"] = statements.history_of(entered[a["id"]])   # the ones you entered, newest first
             # How it's paid, as you set it, and the issuer's APR (used when you haven't set one).
-            plan = forecast.payment_plan(conn, a["id"])
+            plan = plans[a["id"]]
             a.update(pay_mode=plan["pay_mode"], pay_amount=plan["pay_amount"], apr=plan["apr"],
                      issuer_apr=it["purchase_apr"] if it else None)
     terms = loans.terms(conn, date.today())
@@ -58,10 +66,14 @@ def card_statement(conn, card: dict, institution: str | None, today: date | None
     latest one you entered; see statements.py)."""
     today = today or date.today()
     st = plaidbank.statement(conn, card["id"], today) if card.get("plaid_account_id") else None
+    return _statement(st, None if st else statements.latest(conn, card["id"], today), institution)
+
+
+def _statement(st, m: dict | None, institution: str | None) -> dict | None:
+    """card_statement, from the card's Plaid statement (plaidbank.statement) and the latest one you entered."""
     if st:
         return {"source": "plaid", "institution": institution, "closed": st["last_statement_date"], "due": st["next_due_date"],
                 "balance": st["last_statement_balance"], "minimum": st["minimum_payment"]}
-    m = statements.latest(conn, card["id"], today)
     if not m:
         return None
     return {"source": "manual", "closed": m["last_statement_date"], "due": m["next_due_date"], "balance": m["last_statement_balance"],

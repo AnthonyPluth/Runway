@@ -283,12 +283,21 @@ def payment_plan(conn, card_id: str, issuer_apr: float | None = None) -> dict:
     issuer's minimum payment) or "fixed" (pay_amount toward each statement), and the card's APR in percent: the one you
     entered, else the issuer's purchase APR (`issuer_apr`, through Plaid), else None. apr_source says which ("you",
     "issuer" or None)."""
-    mode = db.get_setting(conn, sk.card_pay_mode(card_id)) or "full"
-    yours = _amount(db.get_setting(conn, sk.card_apr(card_id)))
-    apr, source = (yours, "you") if yours is not None else (issuer_apr, "issuer") if issuer_apr is not None else (None, None)
-    return {"pay_mode": mode if mode in PAY_MODES else "full",
-            "pay_amount": _amount(db.get_setting(conn, sk.card_pay_amount(card_id))),
-            "apr": apr, "apr_source": source}
+    return payment_plans(conn, [card_id], {card_id: issuer_apr})[card_id]
+
+
+def payment_plans(conn, card_ids: list[str], issuer_aprs: dict[str, float | None] | None = None) -> dict[str, dict]:
+    """payment_plan() for each of these cards, from one read of their settings: {card id: its plan}."""
+    s = db.get_settings(conn, [k(c) for c in card_ids for k in (sk.card_pay_mode, sk.card_apr, sk.card_pay_amount)])
+    out = {}
+    for c in card_ids:
+        mode = s[sk.card_pay_mode(c)] or "full"
+        yours = _amount(s[sk.card_apr(c)])
+        issuer_apr = (issuer_aprs or {}).get(c)
+        apr, source = (yours, "you") if yours is not None else (issuer_apr, "issuer") if issuer_apr is not None else (None, None)
+        out[c] = {"pay_mode": mode if mode in PAY_MODES else "full", "pay_amount": _amount(s[sk.card_pay_amount(c)]),
+                  "apr": apr, "apr_source": source}
+    return out
 
 
 def statement_payment(plan: dict, statement: float, minimum: float | None = None, charged: float = 0.0) -> float:

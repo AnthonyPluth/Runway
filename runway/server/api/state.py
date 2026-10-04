@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy import delete, func, select
 
-from ... import brands, categorize, db, forecast, merchants, monitoring, plaid, realie, recurring, validate
+from ... import brands, categorize, db, forecast, monitoring, plaid, recurring, validate
 from ... import settings_keys as sk
 from ...models import Account, Budget, Override, Recurring, SyncLog, Transaction, User
 from ..common import ApiError, _current, clamped_int, query_int, text
@@ -22,38 +22,42 @@ from .recurring import one_time_item, recurring_logos, set_amount
 
 def api_state(conn, _q, _b):
     last_log = conn.execute(select(SyncLog.at, SyncLog.ok, SyncLog.message).order_by(SyncLog.id.desc()).limit(1)).fetchone()
+    s = db.get_settings(conn, STATE_SETTINGS)   # (one query; the keys below are only checked for being there)
+    present = db.settings_present(conn, (sk.SIMPLEFIN_ACCESS_URL, sk.OPENROUTER_API_KEY, sk.REALIE_API_KEY, sk.FINNHUB_API_KEY,
+                                          sk.LOGODEV_TOKEN))
+    connected = bank_configured(conn)
     return {
-        "connected": bank_configured(conn),
+        "connected": connected,
         "brands": brands.account_brands(conn),   # each account's institution logo (or letter)
         "connection_logos": brands.connection_logos(conn),   # each bank connection's, by its institution's name
-        "simplefin": bool(db.get_setting(conn, sk.SIMPLEFIN_ACCESS_URL)),
-        "has_api_key": bool(db.get_setting(conn, sk.OPENROUTER_API_KEY)),
-        "llm_model": categorize.llm_model(conn),
-        "card_ai_model": categorize.card_ai_model(conn),
+        "simplefin": sk.SIMPLEFIN_ACCESS_URL in present,
+        "has_api_key": sk.OPENROUTER_API_KEY in present,
+        "llm_model": s[sk.LLM_MODEL] or categorize.DEFAULT_MODEL,             # (categorize.llm_model)
+        "card_ai_model": s[sk.CARD_AI_MODEL] or categorize.DEFAULT_CARD_MODEL,   # (categorize.card_ai_model)
         # what an empty model field means, for Settings to show as its placeholder
         "llm_model_default": categorize.DEFAULT_MODEL, "card_ai_model_default": categorize.DEFAULT_CARD_MODEL,
-        "last_sync_ok": with_offset(db.get_setting(conn, sk.LAST_SYNC_OK)),
+        "last_sync_ok": with_offset(s[sk.LAST_SYNC_OK]),
         "last_log": {**dict(last_log), "at": with_offset(last_log["at"], utc=True)} if last_log else None,
-        "sync_warnings": json.loads(db.get_setting(conn, sk.LAST_SYNC_WARNINGS) or "[]"),   # what banks said on that sync
-        "last_llm_error": db.get_setting(conn, sk.LAST_LLM_ERROR),
-        "last_backup": with_offset(db.get_setting(conn, sk.LAST_BACKUP)),   # the last backup downloaded from Settings
+        "sync_warnings": json.loads(s[sk.LAST_SYNC_WARNINGS] or "[]"),   # what banks said on that sync
+        "last_llm_error": s[sk.LAST_LLM_ERROR],
+        "last_backup": with_offset(s[sk.LAST_BACKUP]),   # the last backup downloaded from Settings
         "review_count": conn.execute(select(func.count()).select_from(Transaction)
                                      .where(Transaction.needs_review == 1, db.not_investment())).fetchone()[0],
         "plaid_undecided": plaid.undecided_count(conn),   # accounts from Plaid waiting for you to say what they are
-        "horizon_days": int(db.get_setting(conn, sk.HORIZON_DAYS, "90") or 90),
+        "horizon_days": int(s[sk.HORIZON_DAYS] or 90),
         "syncing": _sync_lock.locked() or _inv_lock.locked(),
-        "primary_account": db.get_setting(conn, sk.PRIMARY_ACCOUNT),
-        "auto_ai_on_sync": (db.get_setting(conn, sk.AUTO_AI_ON_SYNC, "1") or "1") == "1",
-        "churn_ai_web": (db.get_setting(conn, sk.CHURN_AI_WEB, "1") or "1") == "1",   # card suggestions search the web
-        "realie_configured": realie.configured(conn),
-        "finnhub_configured": bool(db.get_setting(conn, sk.FINNHUB_API_KEY)),
-        "logodev_configured": merchants.configured(conn),
+        "primary_account": s[sk.PRIMARY_ACCOUNT],
+        "auto_ai_on_sync": (s[sk.AUTO_AI_ON_SYNC] or "1") == "1",
+        "churn_ai_web": (s[sk.CHURN_AI_WEB] or "1") == "1",   # card suggestions search the web
+        "realie_configured": sk.REALIE_API_KEY in present,        # (realie.configured)
+        "finnhub_configured": sk.FINNHUB_API_KEY in present,
+        "logodev_configured": sk.LOGODEV_TOKEN in present,        # (merchants.configured)
         "database": "postgres" if db.using_postgres() else "sqlite",
         "version": os.environ.get("RUNWAY_VERSION") or "dev",
         "sentry": monitoring.browser_config(getattr(_current, "user", None)),   # the web app's error reports (runway/monitoring.py), or None
         "owners": owner_choices(conn),
         "user": getattr(_current, "user", None),
-        "setup": setup_steps(conn),
+        "setup": setup_steps(conn, s, connected),
     }
 
 
@@ -126,16 +130,24 @@ def api_override_delete(conn, _q, body):
     return {"ok": True}
 
 
-def setup_steps(conn) -> dict:
-    """The getting-started checklist on the Overview: which steps are done, and whether it's been put away."""
+# The settings api_state reads, in one go.
+STATE_SETTINGS = (sk.LLM_MODEL, sk.CARD_AI_MODEL, sk.LAST_SYNC_OK, sk.LAST_SYNC_WARNINGS, sk.LAST_LLM_ERROR, sk.LAST_BACKUP,
+                  sk.HORIZON_DAYS, sk.PRIMARY_ACCOUNT, sk.AUTO_AI_ON_SYNC, sk.CHURN_AI_WEB, sk.SETUP_DISMISSED)
+
+
+def setup_steps(conn, settings: dict | None = None, connected: bool | None = None) -> dict:
+    """The getting-started checklist on the Overview: which steps are done, and whether it's been put away. `settings`
+    (with PRIMARY_ACCOUNT and SETUP_DISMISSED) and `connected` (bank_configured), when they're already at hand."""
+    s = settings if settings is not None else db.get_settings(conn, (sk.PRIMARY_ACCOUNT, sk.SETUP_DISMISSED))
+    connected = bank_configured(conn) if connected is None else connected
     checking = conn.execute(select(func.count()).select_from(Account)
                             .where(Account.hidden == 0, Account.kind == "checking")).fetchone()[0]
     return {
-        "bank": bank_configured(conn) and bool(conn.execute(select(Account.id).limit(1)).fetchone()),
-        "primary": bool(db.get_setting(conn, sk.PRIMARY_ACCOUNT)) or checking == 1,
+        "bank": connected and bool(conn.execute(select(Account.id).limit(1)).fetchone()),
+        "primary": bool(s[sk.PRIMARY_ACCOUNT]) or checking == 1,
         "recurring": bool(conn.execute(select(Recurring.id).limit(1)).fetchone()),
         "budgets": bool(conn.execute(select(Budget.category).where(Budget.amount > 0).limit(1)).fetchone()),
-        "dismissed": db.get_setting(conn, sk.SETUP_DISMISSED) == "1",
+        "dismissed": s[sk.SETUP_DISMISSED] == "1",
     }
 
 

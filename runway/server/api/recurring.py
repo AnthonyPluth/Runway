@@ -58,13 +58,12 @@ def recurring_logos(conn, items: list[dict]) -> dict[int, str | None]:
     return out
 
 
-def _due(conn, it: dict, hist: list[dict], today: date, skipped: set[str]) -> dict:
+def _due(it: dict, hist: list[dict], today: date, skipped: set[str], first_tx: str | None) -> dict:
     """When the item is next due, as the forecast has it: next_date, the first date from today on that's still expected;
     late_date, an earlier one still expected while its matching window is open (it's late; the forecast has it today);
-    skipped, the dates from today on you've skipped. Late ones count from when the account's history allows, as in the
-    forecast (forecast.build)."""
+    skipped, the dates from today on you've skipped. Late ones count from when the account's history allows (first_tx,
+    its first transaction's day), as in the forecast (forecast.build)."""
     window = recurring.MATCH_WINDOW_DAYS.get(it["frequency"], 6)
-    first_tx = conn.execute(select(func.min(Transaction.posted)).where(Transaction.account_id == it["account_id"])).scalar()
     since = max(today - timedelta(days=window + 1), dates.parse_day(first_tx) + timedelta(days=window) if first_tx else today)
     paid = recurring.paid_by_occurrence(it, hist)
     due, skips = [], []
@@ -83,14 +82,19 @@ def api_recurring(conn, _q, _b):
     items = db.rows(conn.execute(recurring.with_account_name().order_by(Recurring.active.desc(), Recurring.name)))
     today = date.today()
     skipped = recurring.skipped_keys(conn)
+    # Each item's last payments, how many it has, and where its account's history begins: asked once for all of them.
+    ids = [it["id"] for it in items]
+    history = recurring.matched_by_item(conn, ids, 12)
+    counts = dict(conn.execute(select(Transaction.recurring_id, func.count()).where(Transaction.recurring_id.in_(ids))
+                               .group_by(Transaction.recurring_id)).fetchall()) if ids else {}
+    firsts = recurring.first_posted(conn, [it["account_id"] for it in items])
     for it in items:
-        hist = recurring.matched(conn, it["id"], 12)
-        it["matched_count"] = conn.execute(
-            select(func.count()).select_from(Transaction).where(Transaction.recurring_id == it["id"])).scalar()
+        hist = history[it["id"]]
+        it["matched_count"] = counts.get(it["id"], 0)
         it["last_matched"] = hist[0] if hist else None
         it["expected_amount"] = recurring.expected_amount(it, hist)
         it["suggested_amount"] = recurring.stale_amount(it, hist, today)   # its last payments all came to something else
-        it.update(_due(conn, it, hist, today, skipped))
+        it.update(_due(it, hist, today, skipped, firsts.get(it["account_id"])))
     logos = recurring_logos(conn, items)
     missed = recurring.missed(conn, today)
     for it in items:
