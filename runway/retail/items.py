@@ -148,7 +148,8 @@ def _items_with_ai(conn, left: list[dict], caller, api_key: str, spend: set[str]
             categorize.log_call(conn, "orders", model, len(batch), answered, 0, True, time.time() - began,
                             f"Categorized {answered} of {len(batch)} items from {names} orders", reply)
         except Exception as e:   # recorded in the AI log; these fall back to departments
-            categorize.log_call(conn, "orders", model, len(batch), 0, 0, False, time.time() - began, str(e)[:500], reply)
+            said = monitoring.public_text(str(e))   # its text quotes the provider's answer: kept scrubbed, as categorize does
+            categorize.log_call(conn, "orders", model, len(batch), 0, 0, False, time.time() - began, said[:500], reply)
             conn.commit()
             break
         for i, it in enumerate(batch):
@@ -191,10 +192,11 @@ def suggest_for_order(conn, order_id: str, caller=None) -> list[dict]:
         with monitoring.ai_agent("Order item categorizer", "orders"):
             reply = caller(api_key, model, item_prompt(names, cats, subs, examples, payload, allow_new=True))
         answers = categorize.parse_ai_reply(reply, cats, allow_new=True)
-    except Exception as e:
-        categorize.log_call(conn, "orders", model, len(payload), 0, 0, False, time.time() - began, str(e)[:500], reply)
+    except Exception as e:   # network or API error (its text quotes the provider's answer: kept scrubbed)
+        said = monitoring.public_text(str(e))
+        categorize.log_call(conn, "orders", model, len(payload), 0, 0, False, time.time() - began, said[:500], reply)
         conn.commit()
-        raise RetailError(f"The AI request failed: {e}") from e
+        raise RetailError(f"The AI request failed: {said[:300]}") from e
     out = [{"item_id": it["id"], "category": ans[0], "new_category": ans[2], "confidence": round(ans[1], 2)}
            for n, it in enumerate(items[:AI_BATCH]) if (ans := answers.get(n)) and (ans[0] or ans[2])]
     new_cats = len({a["new_category"]["name"].lower() for a in out if a["new_category"]})
