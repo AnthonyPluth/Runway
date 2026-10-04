@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 import psycopg.errors
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 from runway import db
@@ -13,6 +14,11 @@ from runway import db
 def wrapped(orig: BaseException) -> OperationalError:
     """The driver's error as SQLAlchemy raises it."""
     return OperationalError("UPDATE account SET balance=?", {}, orig)
+
+
+def write_lock(dbapi_conn) -> None:
+    """Take SQLite's write lock on a plain sqlite3 connection, as a sync's write does."""
+    dbapi_conn.execute("BEGIN IMMEDIATE")
 
 
 class BusyTests(unittest.TestCase):
@@ -32,11 +38,9 @@ class BusyTests(unittest.TestCase):
             path = os.path.join(tmp, "x.db")
             a, b = sqlite3.connect(path, timeout=0), sqlite3.connect(path, timeout=0)
             try:
-                a.execute("CREATE TABLE t (x)")
-                a.commit()
-                a.execute("BEGIN IMMEDIATE")
+                write_lock(a)
                 with self.assertRaises(sqlite3.OperationalError) as caught:
-                    b.execute("BEGIN IMMEDIATE")
+                    write_lock(b)
                 self.assertTrue(db.is_busy(caught.exception))
             finally:
                 a.close()
@@ -57,10 +61,10 @@ class BusyTests(unittest.TestCase):
     def test_a_real_postgres_lock_timeout(self):
         key = 0x7E57B05   # an advisory lock only this test takes
         with db.engine().connect() as a, db.engine().connect() as b:
-            a.exec_driver_sql(f"SELECT pg_advisory_xact_lock({key})")
-            b.exec_driver_sql("SET lock_timeout = '50ms'")
+            a.execute(select(func.pg_advisory_xact_lock(key)))
+            b.execute(select(func.set_config("lock_timeout", "50ms", False)))
             with self.assertRaises(OperationalError) as caught:
-                b.exec_driver_sql(f"SELECT pg_advisory_xact_lock({key})")
+                b.execute(select(func.pg_advisory_xact_lock(key)))
             self.assertTrue(db.is_busy(caught.exception))
             a.rollback()
 
