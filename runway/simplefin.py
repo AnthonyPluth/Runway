@@ -7,7 +7,6 @@ import ipaddress
 import json
 import re
 import socket
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -16,7 +15,7 @@ from datetime import date, datetime, timedelta, UTC
 
 from sqlalchemy import delete, insert, select, update
 
-from . import db, deleted_accounts, payees, plaidbank, sfinvest, splits
+from . import banktx, db, deleted_accounts, sfinvest, splits, tls, validate
 from . import settings_keys as sk
 from .categorize import bank_payee, clean_payee, kept_bank_names
 from .models import Account, Transaction
@@ -25,21 +24,13 @@ CHUNK_DAYS = 85          # bridge limit is 90 days per request
 BACKFILL_DAYS = 180      # history pulled on the first sync
 REFRESH_DAYS = 14        # window re-read on routine syncs (catches pending -> posted)
 STALE_PENDING_DAYS = 30  # a hold this much older than a routine sync's window that still hasn't posted is gone
+# Back from Plaid: what a routine sync re-reads (its whole window, from this long before the switch) may be Plaid's
+# already, so it's matched up with Plaid's. The other way round is banktx.SINCE_SIMPLEFIN_DAYS.
+SINCE_PLAID_DAYS = REFRESH_DAYS
 
 
 class SimpleFinError(Exception):
     pass
-
-
-def _ssl_context() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:  # python.org builds on macOS ship without system certs; use certifi when present
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
-    return ctx
 
 
 USER_AGENT = "Runway/0.1 (personal cash-flow app; +https://www.simplefin.org)"
@@ -80,7 +71,7 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def _opener() -> urllib.request.OpenerDirector:
-    return urllib.request.build_opener(_PublicHTTPSHandler(context=_ssl_context()), _NoPlainHTTP(), _NoRedirects())
+    return urllib.request.build_opener(_PublicHTTPSHandler(context=tls.ssl_context()), _NoPlainHTTP(), _NoRedirects())
 
 
 def _open(req: urllib.request.Request, timeout: float):
@@ -193,15 +184,6 @@ def fetch_accounts(access_url: str, start: date, end: date | None = None) -> dic
     return payload
 
 
-def _to_float(v) -> float | None:
-    if v is None or v == "":
-        return None
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
-
-
 def _ts_to_date(ts) -> str | None:
     try:
         ts = int(ts)
@@ -234,8 +216,9 @@ def guess_kind(name: str) -> str:
     return "checking"
 
 
-def store_payload(conn, payload: dict, window_start: date) -> list[str]:
+def store_payload(conn, payload: dict, window_start: date, today: date | None = None) -> list[str]:
     """Upsert accounts and transactions. Returns ids of newly inserted transactions."""
+    today = today or date.today()
     new_ids: list[str] = []
     claimed: set = set()
     deleted = deleted_accounts.ids(conn)
@@ -248,13 +231,13 @@ def store_payload(conn, payload: dict, window_start: date) -> list[str]:
         if setup and setup["provider"] == "plaid":
             continue   # this account's balance and transactions come from Plaid
         since = _plaid_overlap_since(conn, acct_id, setup)
-        org, balance, existing = _upsert_account(conn, acct, acct_id)
+        org, balance, existing = _upsert_account(conn, acct, acct_id, today)
         if not existing:
             deleted_accounts.relink(conn, acct_id)   # one you restored: linked to its Plaid account again
-        sfinvest.capture(conn, acct, acct_id, org, balance, is_new=not existing)
+        sfinvest.capture(conn, acct, acct_id, org, balance, today, is_new=not existing)
         carried = _clear_pending(conn, acct_id, window_start)
         for tx in acct.get("transactions", []) or []:
-            key = _store_transaction(conn, acct_id, tx, carried, since, claimed, keep_bank)
+            key = _store_transaction(conn, acct_id, tx, carried, since, claimed, today, keep_bank)
             if key:
                 new_ids.append(key)
     splits.prune(conn)
@@ -265,17 +248,17 @@ def _plaid_overlap_since(conn, acct_id: str, setup) -> str | None:
     """Just switched back from Plaid: the last few days may already be here from Plaid. The day from which new
     transactions are checked against Plaid's, or None when there's nothing to check."""
     overlap = (setup and setup["provider_since"] and conn.execute(
-        select(Transaction.id).where(Transaction.account_id == acct_id, Transaction.id.like("%|pl:%")).limit(1)).fetchone())
-    return (date.fromisoformat(setup["provider_since"]) - timedelta(days=REFRESH_DAYS)).isoformat() if overlap else None
+        select(Transaction.id).where(Transaction.account_id == acct_id, Transaction.id.like(banktx.PLAID_IDS)).limit(1)).fetchone())
+    return (date.fromisoformat(setup["provider_since"]) - timedelta(days=SINCE_PLAID_DAYS)).isoformat() if overlap else None
 
 
-def _upsert_account(conn, acct: dict, acct_id: str) -> tuple[str | None, float, bool]:
+def _upsert_account(conn, acct: dict, acct_id: str, today: date) -> tuple[str | None, float, bool]:
     """Save the account's name and balance. Returns its institution, its balance, and whether it was already here."""
     name = acct.get("name") or acct_id
     org = (acct.get("org") or {}).get("name") or (acct.get("org") or {}).get("domain")
-    balance = _to_float(acct.get("balance")) or 0.0
-    available = _to_float(acct.get("available-balance"))
-    bal_date = _ts_to_date(acct.get("balance-date")) or date.today().isoformat()
+    balance = validate.parse_external(acct.get("balance")) or 0.0
+    available = validate.parse_external(acct.get("available-balance"))
+    bal_date = _ts_to_date(acct.get("balance-date")) or today.isoformat()
     existing = conn.execute(select(Account.id).where(Account.id == acct_id)).fetchone()
     if existing:
         conn.execute(update(Account).where(Account.id == acct_id).values(
@@ -290,16 +273,11 @@ def _upsert_account(conn, acct: dict, acct_id: str) -> tuple[str | None, float, 
 
 def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
     """Pending items often come back with new ids once they post. Replace this window's pending items wholesale,
-    but remember their categories and names (by description and amount) so the replacements don't go back through
-    review, or lose a name you gave them."""
+    but remember what you did with them (by description and amount: SimpleFIN doesn't say which posted one replaces
+    which), so the replacements keep it (banktx.store)."""
     carried: dict[tuple, list] = {}
     in_window = (Transaction.account_id == acct_id, Transaction.pending == 1, Transaction.posted >= window_start.isoformat())
-    for old in conn.execute(
-        select(Transaction.id, Transaction.description, Transaction.payee, Transaction.amount, Transaction.category,
-               Transaction.category_source, Transaction.confidence, Transaction.needs_review, Transaction.is_split,
-               Transaction.notes)
-        .where(*in_window)
-    ).fetchall():
+    for old in conn.execute(select(*banktx.PENDING).where(*in_window)).fetchall():
         carried.setdefault((old["description"], round(old["amount"], 2)), []).append(dict(old))
     conn.execute(delete(Transaction).where(*in_window))
     # Older than any window re-read: a hold that dropped off without posting would otherwise stay forever.
@@ -310,13 +288,13 @@ def _clear_pending(conn, acct_id: str, window_start: date) -> dict[tuple, list]:
 
 
 def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list], since: str | None, claimed: set,
-                       keep_bank: set[str] | frozenset[str] = frozenset()) -> str | None:
+                       today: date, keep_bank: set[str] | frozenset[str] = frozenset()) -> str | None:
     """Save one transaction. Returns its id if it's new and needs categorizing; None if it was already here, is a
     copy of one Plaid brought in, or took over a pending item's category. A big merchant gets the brand's name, unless
     it's one of `keep_bank` (categorize.clean_payee)."""
     pending = 1 if tx.get("pending") else 0
-    posted = _ts_to_date(tx.get("posted")) or _ts_to_date(tx.get("transacted_at")) or date.today().isoformat()
-    amount = _to_float(tx.get("amount")) or 0.0
+    posted = _ts_to_date(tx.get("posted")) or _ts_to_date(tx.get("transacted_at")) or today.isoformat()
+    amount = validate.parse_external(tx.get("amount")) or 0.0
     desc = (tx.get("description") or tx.get("payee") or tx.get("memo") or "").strip()
     raw = tx.get("payee") or desc
     # The brand's name only for a payee the bank's text gives (as rules' and the details' brand checks work it out):
@@ -328,32 +306,16 @@ def _store_transaction(conn, acct_id: str, tx: dict, carried: dict[tuple, list],
                               Transaction.bank_amount).where(Transaction.id == key)).fetchone()
     if row:
         conn.execute(update(Transaction).where(Transaction.id == key).values(
-            description=desc, pending=pending, **plaidbank.bank_values(row, posted, amount)))
+            description=desc, pending=pending, **banktx.bank_values(row, posted, amount)))
         if row["is_split"] and row["bank_amount"] is None:
             splits.follow_amount(conn, key, amount)
         return None
-    if since and posted >= since and plaidbank.duplicate(conn, acct_id, posted, amount, False, claimed):
+    if since and posted >= since and banktx.duplicate(conn, acct_id, posted, amount, False, claimed):
         return None
     prior = carried.get((desc, round(amount, 2)))
-    if prior:
-        p = prior.pop(0)
-        if not (p["category"] or p["is_split"]):   # categorized like a new one, keeping a name you gave it
-            mine = p["payee"] and not payees.from_bank(p["payee"], p["description"])
-            conn.execute(insert(Transaction).values(
-                id=key, account_id=acct_id, posted=posted, amount=amount, description=desc, payee=p["payee"] if mine else payee,
-                pending=pending, notes=p["notes"]))
-            return key
-        conn.execute(insert(Transaction).values(
-            id=key, account_id=acct_id, posted=posted, amount=amount, description=desc,
-            payee=p["payee"] or payee, pending=pending,   # a rule may have renamed it
-            category=p["category"], category_source=p["category_source"], confidence=p["confidence"],
-            needs_review=p["needs_review"], notes=p["notes"]))
-        if p["is_split"]:
-            splits.carry_over(conn, p["id"], key, amount)
-        return None
-    conn.execute(insert(Transaction).values(
-        id=key, account_id=acct_id, posted=posted, amount=amount, description=desc, payee=payee, pending=pending))
-    return key
+    row = {"id": key, "account_id": acct_id, "posted": posted, "amount": amount, "description": desc, "payee": payee,
+           "pending": pending}
+    return key if banktx.store(conn, row, prior.pop(0) if prior else None) else None
 
 
 def _backfill_state(conn) -> tuple[set, set]:
@@ -382,7 +344,7 @@ def sync(conn, access_url: str, today: date | None = None, fetch=fetch_accounts)
         chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS - 1), today)
         payload = fetch(access_url, chunk_start, chunk_end)
         errors.extend(str(e) for e in payload.get("errors", []) or [])
-        new_ids.extend(store_payload(conn, payload, chunk_start))
+        new_ids.extend(store_payload(conn, payload, chunk_start, today))
         got |= {str(a["id"]) for a in payload.get("accounts", []) or []}
         seen |= got
         _save_backfill_state(conn, seen, done)

@@ -76,6 +76,8 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/server/` | Web server: `handler.py` (requests, sign-in, security headers, static files, `serve()`), `routes.py` and `api/` (the API, one module per area), `sync.py` (background sync) |
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
 | `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
+| `runway/banktx.py` | What storing a bank transaction works the same way for with either provider: a posted one taking over its pending version, and matching up the history when an account switches |
+| `runway/tls.py`, `validate.py` | The TLS context for every outbound https request; checking numbers and other input, including numbers in a provider's reply |
 | `runway/tracked.py` | Hand-tracked holdings |
 | `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |

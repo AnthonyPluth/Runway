@@ -21,7 +21,7 @@ from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_, case, func, literal_column, or_, select
 
-from . import db, merchants, plaid, planner, prices, splits
+from . import brands, db, merchants, planner, prices, splits
 from . import settings_keys as sk
 from .models import (Account, Category, CostOverride, Holding, HoldingSnapshot, InvAccount, InvTransaction, ManualPosition,
                      ManualState, PlaidItem, Price, Security, Transaction)
@@ -71,7 +71,7 @@ def _accounts(conn) -> list[dict]:
         if matched:
             return matched[0]
         same = [p for p in from_plaid if p["mask"] and re.search(r"(?<!\d)" + re.escape(p["mask"]) + r"(?!\d)", sf["name"] or "")
-                and plaid._same_institution(sf["institution_name"], p["institution_name"])]
+                and brands.same_institution(sf["institution_name"], p["institution_name"])]
         return same[0] if len(same) == 1 else None
 
     also = set()

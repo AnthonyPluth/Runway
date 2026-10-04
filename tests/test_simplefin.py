@@ -78,6 +78,49 @@ class SimpleFinStoreTests(LedgerCase):
         self.assertEqual(self.conn.execute(select(Transaction.is_split)
                                            .where(Transaction.id == "A1|t1")).fetchone()[0], 1)
 
+    def test_a_pending_charge_keeps_its_recurring_link_when_it_posts(self):
+        """Linked to a recurring item by you, marked as not one (recurring_id 0), or linked on its own: the posted
+        charge, under a new id, keeps it, whether you'd categorized it or not."""
+        def pending(tid, desc, amount):
+            return {"id": tid, "posted": 0, "transacted_at": ts(date(2026, 9, 22)), "amount": amount, "description": desc, "pending": True}
+        simplefin.store_payload(self.conn, self.payload([pending("p1", "STREAMCO", "-15.49"), pending("p2", "GYMCO", "-40.00"),
+                                                         pending("p3", "PHONECO", "-60.00"), pending("p4", "SQ *CAFE", "-4.00")]),
+                                date(2026, 9, 1), TODAY)
+        marks = {"A1|p1": (7, "you", "Subscriptions"), "A1|p2": (0, "you", None), "A1|p3": (3, "auto", "Phone"),
+                 "A1|p4": (5, "you", None)}
+        for tid, (rid, by, cat) in marks.items():
+            self.conn.execute(update(Transaction).where(Transaction.id == tid)
+                              .values(recurring_id=rid, recurring_linked_by=by, category=cat, notes=f"note {rid}"))
+
+        def posted(tid, desc, amount):
+            return {"id": tid, "posted": ts(date(2026, 9, 23)), "amount": amount, "description": desc}
+        new = simplefin.store_payload(self.conn, self.payload([posted("t1", "STREAMCO", "-15.49"), posted("t2", "GYMCO", "-40.00"),
+                                                               posted("t3", "PHONECO", "-60.00"), posted("t4", "SQ *CAFE", "-4.00")]),
+                                      date(2026, 9, 1), TODAY)
+        self.assertEqual(sorted(new), ["A1|t2", "A1|t4"])   # the uncategorized ones still go to review
+        got = {r["id"]: (r["recurring_id"], r["recurring_linked_by"], r["category"], r["notes"]) for r in self.conn.execute(
+            select(Transaction.id, Transaction.recurring_id, Transaction.recurring_linked_by, Transaction.category, Transaction.notes))}
+        self.assertEqual(got, {"A1|t1": (7, "you", "Subscriptions", "note 7"), "A1|t2": (0, "you", None, "note 0"),
+                               "A1|t3": (3, "auto", "Phone", "note 3"), "A1|t4": (5, "you", None, "note 5")})
+
+    def test_a_missing_date_is_the_syncs_today(self):
+        acct = self.payload([{"id": "t1", "posted": 0, "amount": "-1.00", "description": "X"}])
+        acct["accounts"][0].pop("balance-date")
+        simplefin.store_payload(self.conn, acct, date(2026, 9, 1), date(2026, 9, 10))
+        self.assertEqual(self.conn.execute(select(Account.balance_date)).scalar(), "2026-09-10")
+        self.assertEqual(self.conn.execute(select(Transaction.posted)).scalar(), "2026-09-10")
+
+    def test_amounts_and_balances_that_arent_numbers_arent_saved(self):
+        """"nan", "inf" or a number too big to be real is left out (no balance: 0; no amount: 0), never saved as is."""
+        for bad in ("nan", "inf", "-Infinity", "1e300", "lots"):
+            with self.subTest(bad=bad):
+                self.conn.execute(Transaction.__table__.delete())
+                simplefin.store_payload(self.conn, self.payload([{"id": "t1", "posted": ts(date(2026, 9, 20)), "amount": bad,
+                                                                  "description": "X"}], balance=bad), date(2026, 9, 1), TODAY)
+                a = self.conn.execute(select(Account.balance, Account.available)).fetchone()
+                self.assertEqual((a["balance"], a["available"]), (0.0, 0.0))
+                self.assertEqual(self.conn.execute(select(Transaction.amount)).scalar(), 0.0)
+
     def test_a_hold_that_never_posts_is_cleared(self):
         old = self.payload([{"id": "h1", "posted": 0, "transacted_at": ts(date(2026, 8, 10)), "amount": "-300.00",
                              "description": "HOTEL HOLD", "pending": True}])

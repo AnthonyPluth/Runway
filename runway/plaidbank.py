@@ -17,16 +17,16 @@ import re
 from datetime import date, datetime, timedelta, UTC
 from typing import Any
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, select, update
 
-from . import brands, db, merchants, payees, splits
+from . import banktx, brands, db, merchants, splits, validate
 from . import settings_keys as sk
 from .categorize import bank_payee, clean_payee, kept_bank_names
 from .models import Account, CardStatement, DeletedAccount, LoanTerms, PlaidAccount, PlaidItem, Transaction
+from .banktx import PLAID_IDS as PLAID_IDS   # re-exported: what reads transactions tells Plaid's apart by it
 from .plaidapi import PlaidError, call   # not plaid.py, which builds on this module
 
 HISTORY_DAYS = 730     # transaction history to ask for when linking (Plaid's maximum)
-OVERLAP_DAYS = 3       # the same transaction can post a few days apart at two providers
 KINDS = {"checking": "checking", "savings": "savings", "money market": "savings", "cd": "savings",
          "credit card": "credit", "paypal": "checking", "cash management": "checking"}
 
@@ -35,12 +35,23 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
+BANK_PRODUCTS = frozenset({"transactions", "liabilities"})   # read by the bank sync (here); "investments" by plaid.py's
+
+
 def products(item) -> set[str]:
     return {p.strip() for p in (item["products"] or "investments").split(",") if p.strip()}
 
 
+def syncs(item) -> set[str]:
+    """Which syncs read a connection: "bank" (its transactions, balances and card statements, with the bank sync) and
+    "investments" (its holdings and activity, with the investment sync). Each of its products is read by one of them
+    only, so a connection with both kinds gets both, each once."""
+    prods = products(item)
+    return ({"bank"} if prods & BANK_PRODUCTS else set()) | ({"investments"} if "investments" in prods else set())
+
+
 def is_bank_item(item) -> bool:
-    return bool(products(item) & {"transactions", "liabilities"})
+    return "bank" in syncs(item)
 
 
 def runway_kind(pa) -> str | None:
@@ -87,10 +98,10 @@ def _score(pa: dict, acct: dict, institution: str | None) -> int:
     if pa.get("current") is not None:
         diff = abs(abs(acct["balance"] or 0) - abs(pa["current"]))
         score += 40 if diff < 0.01 else 15 if diff <= max(25.0, 0.05 * abs(pa["current"])) else 0
-    theirs_brand = brands.brand(acct.get("org"), acct.get("display_name"), acct["name"])
-    ours_brand = brands.brand(institution, pa.get("official_name"), pa.get("name"))
-    if theirs_brand and ours_brand:
-        score = score + 20 if theirs_brand == ours_brand else -1000   # never a Chase card for a Citi one
+    same = brands.institution_match((acct.get("org"), acct.get("display_name"), acct["name"]),
+                                    (institution, pa.get("official_name"), pa.get("name")))
+    if same is not None:
+        score = score + 20 if same else -1000   # never a Chase card for a Citi one
     return score
 
 
@@ -171,7 +182,7 @@ def match(conn, plaid_account_id: str, target: str, today: date | None = None) -
                                   "owed_positive": 1 if kind in ("credit", "loan") else 0, "provider": "plaid",
                                   "plaid_account_id": plaid_account_id, "provider_since": (today or date.today()).isoformat()},
                   key=["id"], update=lambda ex: {"plaid_account_id": ex.plaid_account_id, "hidden": 0})
-        _set_balance(conn, aid, pa)
+        _set_balance(conn, aid, pa, today or date.today())
         _reread(conn, pa["item_id"])
         return {"ok": True, "account_id": aid}
     if not conn.execute(select(Account.id).where(Account.id == target)).fetchone():
@@ -195,21 +206,13 @@ def _retire_own_account(conn, plaid_account_id: str, into: str | None) -> None:
                           .where(Transaction.account_id == own, Transaction.category.is_not(None))
                           .order_by(Transaction.posted)).fetchall():
         for tid in conn.execute(select(Transaction.id).where(Transaction.account_id == into, Transaction.category.is_(None),
-                                                             *_near(t["posted"], t["amount"]))
+                                                             *banktx.near(t["posted"], t["amount"]))
                                 .order_by(Transaction.posted)).scalars():
             if tid not in claimed:
                 claimed.add(tid)
                 conn.execute(update(Transaction).where(Transaction.id == tid)
                              .values(category=t["category"], category_source=t["category_source"], needs_review=0))
                 break
-
-
-def _near(posted: str, amount: float) -> tuple:
-    """Conditions for the same transaction at the other provider: the same amount, posted within OVERLAP_DAYS."""
-    d = date.fromisoformat(posted)
-    return (Transaction.posted >= (d - timedelta(days=OVERLAP_DAYS)).isoformat(),
-            Transaction.posted <= (d + timedelta(days=OVERLAP_DAYS)).isoformat(),
-            Transaction.amount > amount - 0.005, Transaction.amount < amount + 0.005)
 
 
 def set_provider(conn, account_id: str, provider: str, today: date | None = None) -> None:
@@ -234,7 +237,7 @@ def set_provider(conn, account_id: str, provider: str, today: date | None = None
         _reread(conn, _item_for(conn, acct["plaid_account_id"])["item_id"])
         pa = _plaid_account(conn, acct["plaid_account_id"])
         if pa:
-            _set_balance(conn, account_id, pa)
+            _set_balance(conn, account_id, pa, today or date.today())
 
 
 def _item_for(conn, plaid_account_id: str | None):
@@ -251,14 +254,14 @@ def _reread(conn, item_id: str) -> None:
 
 # ------------------------------------------------------------------------------------------------ syncing
 
-def _set_balance(conn, account_id: str, pa) -> None:
+def _set_balance(conn, account_id: str, pa, today: date) -> None:
     acct = conn.execute(select(Account.kind, Account.owed_positive).where(Account.id == account_id)).fetchone()
     if pa["current"] is None or not acct:
         return
     owes = acct["kind"] in ("credit", "loan")
     balance = pa["current"] if (not owes or acct["owed_positive"]) else -pa["current"]
     conn.execute(update(Account).where(Account.id == account_id)
-                 .values(balance=balance, available=pa["available"], balance_date=date.today().isoformat()))
+                 .values(balance=balance, available=pa["available"], balance_date=today.isoformat()))
 
 
 LIABILITY_LOANS = ("mortgage", "student")   # the loans Plaid Liabilities covers (not auto loans)
@@ -316,7 +319,7 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
             select(Account.id, PlaidAccount).select_from(Account)
             .join(PlaidAccount, PlaidAccount.plaid_account_id == Account.plaid_account_id)
             .where(Account.provider == "plaid", PlaidAccount.ignored == 0, PlaidAccount.item_id == item_id))):
-        _set_balance(conn, acct["id"], acct)
+        _set_balance(conn, acct["id"], acct, today)
     out = {"accounts": len(res.get("accounts", [])), "matched": matched, "new": [], "statements": 0}
     if changes is not None:
         out["new"] = sync_transactions(conn, item, today, changes)
@@ -364,28 +367,6 @@ def _fetch_changes(conn, item) -> tuple[list, list, list, str]:
     raise PlaidError("Plaid kept changing the transactions while Runway read them; the next sync will try again.")
 
 
-PLAID_IDS = "%|pl:%"   # LIKE pattern for the ids of transactions from Plaid ("<account>|pl:<Plaid's id>")
-
-
-def bank_values(row, posted: str, amount: float) -> dict:
-    """What a sync writes for a transaction it already has: the bank's date and amount, except where you changed one
-    (then the bank's goes beside it, in bank_posted or bank_amount, and yours stays)."""
-    return {"bank_posted" if row["bank_posted"] is not None else "posted": posted,
-            "bank_amount" if row["bank_amount"] is not None else "amount": amount}
-
-
-def duplicate(conn, account_id: str, posted: str, amount: float, from_plaid: bool, claimed: set) -> bool:
-    """Whether the other provider already brought this transaction in (same account and amount, within a few
-    days). Each earlier transaction stands in for one new one only (claimed)."""
-    other = Transaction.id.not_like(PLAID_IDS) if from_plaid else Transaction.id.like(PLAID_IDS)
-    for tid in conn.execute(select(Transaction.id).where(Transaction.account_id == account_id, *_near(posted, amount), other)
-                            .order_by(Transaction.posted)).scalars():
-        if tid not in claimed:
-            claimed.add(tid)
-            return True
-    return False
-
-
 def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> list[str]:
     added, modified, removed, cursor = changes or _fetch_changes(conn, item)
     accts = {r["plaid_account_id"]: dict(r) for r in conn.execute(
@@ -408,7 +389,7 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         aid = acct["id"]
         key = f"{aid}|pl:{t['transaction_id']}"
         posted = t.get("date") or t.get("authorized_date") or today.isoformat()
-        amount = -float(t.get("amount") or 0)       # Plaid: positive = money out; Runway: positive = money in
+        amount = -(validate.parse_external(t.get("amount")) or 0.0)   # Plaid: positive = money out; Runway: positive = money in
         desc = (t.get("original_description") or t.get("name") or "").strip()
         # Plaid's merchant name is the merchant's own already; without one, a big merchant gets the brand's name.
         payee = bank_payee(t["merchant_name"]) if t.get("merchant_name") else clean_payee(t.get("name") or desc, keep_bank)
@@ -419,43 +400,28 @@ def sync_transactions(conn, item, today: date, changes: tuple | None = None) -> 
         if known:
             conn.execute(update(Transaction).where(Transaction.id == key).values(
                 description=desc, pending=pending, merchant_id=func.coalesce(merchant, Transaction.merchant_id),
-                **bank_values(known, posted, amount)))
+                **banktx.bank_values(known, posted, amount)))
             if known["is_split"] and known["bank_amount"] is None:
                 splits.follow_amount(conn, key, amount)
             continue
         since = acct["provider_since"]
         if aid in earlier and since:
-            if posted < (date.fromisoformat(since) - timedelta(days=7)).isoformat():
+            if posted < (date.fromisoformat(since) - timedelta(days=banktx.SINCE_SIMPLEFIN_DAYS)).isoformat():
                 continue   # SimpleFIN has this part of the history
-            if duplicate(conn, aid, posted, amount, True, claimed):
+            if banktx.duplicate(conn, aid, posted, amount, True, claimed):
                 continue
-        # A posted transaction replaces its pending version: keep the category you gave it.
-        prior, old = None, None
+        # A posted transaction replaces its pending version (Plaid says which): it keeps what you did with that one.
+        prior = None
         if t.get("pending_transaction_id"):
             old = f"{aid}|pl:{t['pending_transaction_id']}"
-            prior = conn.execute(select(Transaction.payee, Transaction.description, Transaction.category, Transaction.category_source, Transaction.confidence,
-                                        Transaction.needs_review, Transaction.recurring_id, Transaction.recurring_linked_by,
-                                        Transaction.notes)
-                                 .where(Transaction.id == old)).fetchone()
+            prior = conn.execute(select(*banktx.PENDING).where(Transaction.id == old)).fetchone()
             conn.execute(delete(Transaction).where(Transaction.id == old))
-        # And the name you gave it: a categorized one's as it was (a rule may have renamed it), an uncategorized one's
-        # if it isn't the bank's (Plaid may name the merchant only once it posts).
-        if prior and prior["payee"] and (prior["category"] or not payees.from_bank(prior["payee"], prior["description"])):
-            payee = prior["payee"]
-        row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee, "pending": pending,
-               "notes": prior["notes"] if prior else None}
-        if prior and prior["category"]:
-            conn.execute(insert(Transaction).values(
-                **row, category=prior["category"], category_source=prior["category_source"],
-                confidence=prior["confidence"], needs_review=prior["needs_review"], recurring_id=prior["recurring_id"],
-                recurring_linked_by=prior["recurring_linked_by"]))
-        else:
-            conn.execute(insert(Transaction).values(**row))
+        row = {"id": key, "account_id": aid, "posted": posted, "amount": amount, "description": desc, "payee": payee,
+               "pending": pending}
+        if banktx.store(conn, row, prior):
             new_ids.append(key)
         if merchant:
             conn.execute(update(Transaction).where(Transaction.id == key).values(merchant_id=merchant))
-        if old:
-            splits.carry_over(conn, old, key, amount)
     for r in removed:
         # By key in each account it could be in (a LIKE on the id would read the whole table for each one).
         conn.execute(delete(Transaction).where(Transaction.id.in_(select(Account.id + ("|pl:" + r["transaction_id"])))))
@@ -485,7 +451,7 @@ def store_statements(conn, item, res: dict) -> int:
                 "last_payment_amount": c.get("last_payment_amount"), "last_payment_date": c.get("last_payment_date"),
                 "is_overdue": 1 if c.get("is_overdue") else 0, "updated": _now(),
                 # the APR on purchases (not cash advances, balance transfers or a promotion), for the forecast's interest
-                "purchase_apr": next((_float(a.get("apr_percentage")) for a in c.get("aprs") or []
+                "purchase_apr": next((validate.parse_external(a.get("apr_percentage")) for a in c.get("aprs") or []
                                       if a.get("apr_type") == "purchase_apr"), None)}
         db.upsert(conn, CardStatement, {"plaid_account_id": c["account_id"], "item_id": item["item_id"], **stmt},
                   key=["plaid_account_id"], update=list(stmt))   # a card stays with the connection it was first seen on
@@ -510,19 +476,12 @@ def store_loan_terms(conn, item, res: dict) -> int:
                 payment = x.get("minimum_payment_amount") or x.get("last_payment_amount")
                 maturity = x.get("expected_payoff_date")
             found.append({"plaid_account_id": x["account_id"], "item_id": item["item_id"], "kind": kind,
-                          "interest_rate": _float(rate), "monthly_payment": _float(payment),
+                          "interest_rate": validate.parse_external(rate), "monthly_payment": validate.parse_external(payment),
                           "maturity_date": maturity or None, "updated": _now()})
     for row in found:   # a loan stays with the connection it was first seen on, as a card's statement does
         db.upsert(conn, LoanTerms, row, key=["plaid_account_id"],
                   update=[k for k in row if k not in ("plaid_account_id", "item_id")])
     return len(found)
-
-
-def _float(v) -> float | None:
-    try:
-        return None if v is None else float(v)
-    except (TypeError, ValueError):
-        return None
 
 
 def statement(conn, card_id: str, today: date):
@@ -537,8 +496,8 @@ def statement(conn, card_id: str, today: date):
 def sync_all(conn, today: date | None = None) -> dict:
     out: dict[str, Any] = {"items": 0, "new": [], "errors": []}
     for item in conn.execute(select(PlaidItem)).fetchall():
-        if not is_bank_item(item):
-            continue
+        if "bank" not in syncs(item):
+            continue   # investments only: the investment sync reads it (plaid.sync_all)
         try:
             r = sync_item(conn, item["item_id"], today)
             out["items"] += 1

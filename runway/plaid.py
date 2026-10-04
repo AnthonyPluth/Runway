@@ -6,13 +6,12 @@ removing them."""
 from __future__ import annotations
 
 import os
-import re
 from datetime import date, datetime, timedelta, UTC
 from typing import Any
 
 from sqlalchemy import delete, func, null, or_, select, union_all, update
 
-from . import db, deleted_accounts, plaidbank, secretbox
+from . import brands, db, deleted_accounts, plaidbank, secretbox
 from . import settings_keys as sk
 # Re-exported: the rest of Runway (and the tests, which patch plaid.call) reach Plaid through this module.
 from .models import Account, Holding, InvAccount, InvSnapshot, InvTransaction, PlaidAccount, PlaidItem, Security
@@ -150,16 +149,6 @@ def duplicates(conn, item_id: str) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------ in your accounts
 
-def _compact_institution(name: str | None) -> str:
-    """"E*TRADE from Morgan Stanley" and "E*Trade" → comparable keys ("etradefrommorganstanley", "etrade")."""
-    return re.sub(r"[^a-z0-9]", "", re.sub(r"\b(financial|investments?|securities|bank|inc|llc)\b", "", (name or "").lower()))
-
-
-def _same_institution(a: str | None, b: str | None) -> bool:
-    x, y = _compact_institution(a), _compact_institution(b)
-    return len(x) >= 4 and len(y) >= 4 and (x in y or y in x)
-
-
 def investment_candidates(conn, item_id: str) -> list[dict]:
     """Your investment accounts (from SimpleFIN) that a Plaid account at this institution could be."""
     inst = _institution(conn, item_id)
@@ -167,7 +156,7 @@ def investment_candidates(conn, item_id: str) -> list[dict]:
     return [dict(a) for a in conn.execute(   # linked_to: the Plaid account already linked to it, if any
         select(Account.id, Account.name, Account.display_name, Account.org, Account.balance, linked_to.label("linked_to"))
         .where(Account.kind == "investment", Account.id.not_like("pl:%")).order_by(Account.name)).fetchall()
-        if _same_institution(a["org"] or a["name"], inst)]
+        if brands.same_institution(a["org"] or a["name"], inst)]
 
 
 def match_investment(conn, inv_id: str, target: str, today: date | None = None) -> dict:
@@ -254,19 +243,33 @@ def _security_update(ex) -> dict:
 
 
 def sync_item(conn, item_id: str, today: date | None = None) -> dict:
+    """One connection, now (its Sync button, or just linked): with the bank sync when it's a bank or card connection,
+    else with the investment sync (plaidbank.syncs). One with both reads its investments with the investment sync
+    (sync_all)."""
     today = today or date.today()
     item = conn.execute(select(PlaidItem).where(PlaidItem.item_id == item_id)).fetchone()
     if not item:
         raise PlaidError("Connection not found")
-    if plaidbank.is_bank_item(item):
+    if "bank" in plaidbank.syncs(item):
         return plaidbank.sync_item(conn, item_id, today)
+    return sync_investments(conn, item, today)
+
+
+def _set_error(conn, item_id: str, e: PlaidError) -> None:
+    """A sync that stopped part way: the connection says so (and keeps the time of its last full one)."""
+    conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(error=e.code or str(e)))
+    conn.commit()
+
+
+def sync_investments(conn, item, today: date) -> dict:
+    """A connection's investment accounts, holdings and activity."""
+    item_id = item["item_id"]
     token = item["access_token"]
     conn.commit()
     try:
         h = call(conn, "/investments/holdings/get", {"access_token": token})
     except PlaidError as e:
-        conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(error=e.code or str(e)))
-        conn.commit()
+        _set_error(conn, item_id, e)
         raise
     if not item["institution_name"] and (h.get("item") or {}).get("institution_name"):
         conn.execute(update(PlaidItem).where(PlaidItem.item_id == item_id).values(institution_name=h["item"]["institution_name"]))
@@ -302,10 +305,14 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     start = today - timedelta(days=HISTORY_DAYS if first else REFRESH_DAYS)
     offset, total, fetched = 0, None, 0
     while total is None or offset < total:
-        res = call(conn, "/investments/transactions/get", {
-            "access_token": token, "start_date": start.isoformat(), "end_date": today.isoformat(),
-            "options": {"count": PAGE, "offset": offset},
-        })
+        try:
+            res = call(conn, "/investments/transactions/get", {
+                "access_token": token, "start_date": start.isoformat(), "end_date": today.isoformat(),
+                "options": {"count": PAGE, "offset": offset},
+            })
+        except PlaidError as e:   # the holdings are saved, but not all the activity: not a sync that went fine
+            _set_error(conn, item_id, e)
+            raise
         _store_securities(conn, res.get("securities", []))
         txs = res.get("investment_transactions", [])
         for t in txs:
@@ -328,14 +335,17 @@ def sync_item(conn, item_id: str, today: date | None = None) -> dict:
     return {"accounts": len(account_ids), "holdings": len(held), "transactions": fetched}
 
 
-def sync_all(conn) -> dict:
+def sync_all(conn, today: date | None = None) -> dict:
+    """The investment sync: every connection's investments (plaidbank.syncs). Bank and card connections, and the bank
+    side of one with both, sync with the bank sync (plaidbank.sync_all)."""
+    today = today or date.today()
     out: dict[str, Any] = {"items": 0, "errors": []}
-    for row in conn.execute(select(PlaidItem.item_id, PlaidItem.institution_name, PlaidItem.products)).fetchall():
-        if "investments" not in (row["products"] or "investments"):
-            continue   # bank and card connections sync with the bank sync
+    for item in conn.execute(select(PlaidItem)).fetchall():
+        if "investments" not in plaidbank.syncs(item):
+            continue
         try:
-            sync_item(conn, row["item_id"])
+            sync_investments(conn, item, today)
             out["items"] += 1
         except PlaidError as e:
-            out["errors"].append(f"{row['institution_name'] or 'Connection'}: {e}")
+            out["errors"].append(f"{item['institution_name'] or 'Connection'}: {e}")
     return out
