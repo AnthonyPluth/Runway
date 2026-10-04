@@ -39,7 +39,7 @@ describe("autosave", () => {
     autosave(input, vi.fn().mockResolvedValue(undefined));
     const said = document.querySelector("[data-autosave-status]")!;
     expect(said).toHaveAttribute("role", "status");
-    expect(said).toHaveTextContent("");   // there before the first save, so that one is read out too
+    expect(said).toHaveTextContent("");
     await edit(input, "b");
     expect(said).toHaveTextContent("Saved");
     vi.advanceTimersByTime(1700);
@@ -55,7 +55,7 @@ describe("autosave", () => {
     expect(line).toHaveTextContent("Not saved · Retry");
     expect(input).toHaveAccessibleDescription("Not saved · Retry");
     vi.advanceTimersByTime(5000);
-    expect(line.isConnected).toBe(true);   // it stays
+    expect(line.isConnected).toBe(true);
     await fireEvent.click(line.querySelector("button")!);
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(input).not.toHaveAttribute("aria-invalid");
@@ -78,7 +78,7 @@ describe("autosave", () => {
     const flash = first.querySelector("[data-saved-flash]")!;
     expect(flash).toHaveTextContent("Saved ✓");
     expect(flash).toHaveAttribute("aria-hidden", "true");
-    expect(first).not.toHaveClass("just-saved");   // no flash above it, over the row before
+    expect(first).not.toHaveClass("just-saved");
     vi.advanceTimersByTime(1700);
     expect(first.querySelector("[data-saved-flash]")).toBeNull();
   });
@@ -90,7 +90,7 @@ describe("autosave", () => {
     expect(toast.error).toHaveBeenCalledWith("Too long");
     expect(input.value).toBe("b");
     expect(label).not.toHaveClass("just-saved");
-    await fireEvent.change(input);   // still differs from the last saved value, so it tries again
+    await fireEvent.change(input);
     expect(save).toHaveBeenCalledTimes(2);
     expect(label).toHaveClass("just-saved");
   });

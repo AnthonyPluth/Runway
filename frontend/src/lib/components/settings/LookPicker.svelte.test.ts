@@ -58,7 +58,7 @@ describe("a category's emoji picker", () => {
     const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { body: { name: string; icon: string; color: string } }];
     expect(path).toBe("/api/categories/look");
     expect(opts.body).toEqual({ name: "Dining", icon: "🌮", color: "#d95926" });
-    expect(box).toHaveValue("");                                   // ready for another
+    expect(box).toHaveValue("");
   });
 
   it("saves the emoji you pick and leaves a color set before as it is", async () => {
@@ -114,7 +114,7 @@ describe("on a phone", () => {
 
   it("opens just a field, focused within the tap itself, with no grid, search or hint", async () => {
     render(LookPicker, { c: cat });
-    screen.getByRole("button", { name: "Emoji for Dining" }).click();               // synchronous: no await, no timers
+    screen.getByRole("button", { name: "Emoji for Dining" }).click();
     const box = screen.getByPlaceholderText("Type an emoji");
     expect(document.activeElement).toBe(box);
     expect(box).toHaveAccessibleName("Type an emoji for Dining");
@@ -128,7 +128,7 @@ describe("on a phone", () => {
     screen.getByRole("button", { name: "Emoji for Dining" }).click();
     const box = screen.getByPlaceholderText("Type an emoji");
     expect(document.activeElement).toBe(box);
-    await userEvent.paste("🌮");   // what the emoji keyboard does: inserts the text
+    await userEvent.paste("🌮");
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledTimes(1));
     const [path, opts] = vi.mocked(api).mock.calls[0] as [string, { body: unknown }];
     expect(path).toBe("/api/categories/look");

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// The Sync button beside the sync status: syncs the banks now, says how it went, and refreshes what's on screen.
 import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { toast } from "svelte-sonner";
@@ -15,7 +14,7 @@ import MobileNav from "./MobileNav.svelte";
 import Sidebar from "./Sidebar.svelte";
 import SyncButton from "./SyncButton.svelte";
 
-class ApiError extends Error { constructor(m: string, readonly status: number) { super(m); } }   // as api throws it
+class ApiError extends Error { constructor(m: string, readonly status: number) { super(m); } }
 const state = (extra: Partial<AppState> = {}): AppState => ({ connected: true, last_sync_ok: new Date(Date.now() - 36e5).toISOString(), ...extra });
 beforeEach(() => {
   vi.mocked(api).mockReset(); for (const f of [toast, toast.success, toast.error, toast.warning]) vi.mocked(f).mockReset();
@@ -34,8 +33,8 @@ describe("SyncButton", () => {
     expect(button).toBeDisabled();
     finish({ new: 3, categorized: {}, bank_messages: [] });
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Synced · 3 new transactions"));
-    expect(api).toHaveBeenCalledWith("/api/state", expect.anything());   // the state is read again
-    expect(app.version).toBe(1);                                          // and the page loads again
+    expect(api).toHaveBeenCalledWith("/api/state", expect.anything());
+    expect(app.version).toBe(1);
     expect(app.state?.last_sync_ok).toBe("2026-10-01T07:02:00");
     expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
   });
@@ -105,7 +104,7 @@ describe("SyncButton", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sync now" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't reach Runway"));
     expect(app.state?.syncing).toBe(true);
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();   // watched until it's done
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeDisabled();
   });
 
   it("is disabled while the server is syncing (the daily sync, or a visit's)", () => {

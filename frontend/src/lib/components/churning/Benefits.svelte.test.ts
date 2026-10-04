@@ -47,12 +47,12 @@ describe("benefits tab", () => {
     render(Benefits, { cards: [vx, csr], showOwner: false, onchanged: vi.fn() });
     const perks = screen.getByRole("list", { name: "Lounges & perks" });
     const rows = within(perks).getAllByRole("listitem").map((li) => li.textContent!.replace(/\s+/g, " ").trim());
-    expect(rows).toEqual([   // by card, then name; each network its own row
+    expect(rows).toEqual([
       "Priority Pass lounges Sapphire Reserve Cardholder + 2 guests —",
       "Capital One Lounges Venture X Cardholder only · used twice this period —",
       "Priority Pass lounges Venture X Cardholder only —",
     ]);
-    expect(within(perks).queryByRole("button")).toBeNull();   // nothing to use up
+    expect(within(perks).queryByRole("button")).toBeNull();
     expect(within(screen.getByRole("list", { name: "Still to use" })).getByRole("button", { name: "Mark Travel credit on Venture X used" })).toBeInTheDocument();
   });
 
@@ -60,7 +60,7 @@ describe("benefits tab", () => {
     vi.mocked(api).mockResolvedValue({ id: 5 } as never);
     const onclose = vi.fn();
     render(BenefitForm, { card: { id: 1, product: "Venture X" }, d: churning(), b: null, onclose });
-    expect(screen.queryByLabelText(/Guests free/)).toBeNull();   // a credit has no guests
+    expect(screen.queryByLabelText(/Guests free/)).toBeNull();
     await userEvent.type(screen.getByLabelText(/^Benefit/), "Priority Pass lounges");
     await userEvent.selectOptions(screen.getByLabelText("Kind"), "access");
     await userEvent.type(screen.getByLabelText(/Guests free/), "2");
@@ -83,12 +83,12 @@ describe("marking a benefit used on the board", () => {
     expect(screen.queryByLabelText("Amount of Travel credit used")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Mark Travel credit on Venture X used" }));
     const amount = screen.getByLabelText("Amount of Travel credit used");
-    expect(amount).toHaveValue(120);   // what's left
+    expect(amount).toHaveValue(120);
     await userEvent.click(screen.getByRole("button", { name: "Mark used" }));
     await waitFor(() => expect(calls("/api/churning/benefits/1/use")).toHaveLength(1));
-    expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({});   // unchanged: the rest
+    expect(bodyOf(calls("/api/churning/benefits/1/use")[0])).toEqual({});
     expect(onchanged).toHaveBeenCalled();
-    expect(screen.queryByLabelText("Amount of Travel credit used")).toBeNull();   // the popover closes
+    expect(screen.queryByLabelText("Amount of Travel credit used")).toBeNull();
   });
 
   it("sends the amount you typed instead", async () => {

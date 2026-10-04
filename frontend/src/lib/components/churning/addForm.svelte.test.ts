@@ -24,7 +24,7 @@ describe("AddForm", () => {
     let release!: () => void;
     const sending = f.add(() => new Promise<void>((r) => { release = r; }), null);
     await vi.waitFor(() => expect(f.busy).toBe(true));
-    await f.add(vi.fn(), null);   // a second click while it's out does nothing
+    await f.add(vi.fn(), null);
     release();
     await sending;
     expect(f.busy).toBe(false);

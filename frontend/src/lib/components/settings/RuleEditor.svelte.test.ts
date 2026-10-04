@@ -37,8 +37,6 @@ describe("RuleEditor", () => {
     setup();
     await userEvent.type(screen.getByPlaceholderText("whole foods"), "whole");
     expect(await screen.findByText("Matches 5 past transactions · applying it would change 2")).toBeInTheDocument();
-    // The count can already be there from the preview of the empty rule (the mock answers every request alike), so
-    // wait for the debounced request that carries what was typed.
     await waitFor(() => expect(posts("/api/rules/preview").at(-1)).toMatchObject({ match: "whole", match_mode: "contains" }));
   });
 
@@ -79,7 +77,7 @@ describe("RuleEditor", () => {
     await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const dialog = await screen.findByRole("dialog", { name: "Apply this rule to past transactions?" });
     expect(dialog).toHaveTextContent("This changes 2 transactions: Groceries.");
-    expect(posts("/api/rules")).toHaveLength(0);                       // nothing saved until it's confirmed
+    expect(posts("/api/rules")).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole("button", { name: "Change 2 transactions" }));
     await waitFor(() => expect(api).toHaveBeenCalledWith("/api/rules/12/apply", { method: "POST" }));
     expect(posts("/api/rules").at(-1)).toMatchObject({ match: "whole foods", apply: false });
@@ -123,7 +121,7 @@ describe("RuleEditor", () => {
     setup();
     const add = screen.getByRole("button", { name: "Add rule" });
     expect(add).toBeDisabled();
-    expect(screen.queryByText(/Add a condition/)).not.toBeInTheDocument();   // not before you've done anything
+    expect(screen.queryByText(/Add a condition/)).not.toBeInTheDocument();
     await pickCategory(screen.getAllByRole("combobox", { name: "Category" })[0], "Groceries");
     const box = screen.getByPlaceholderText("whole foods");
     expect(screen.getByText(/Add a condition/)).toBeInTheDocument();
@@ -174,7 +172,7 @@ describe("RuleEditor", () => {
     expect(first).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByRole("button", { name: "Add rule" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "+ Add a part" }));
-    expect(screen.getByRole("spinbutton", { name: "Part 3 percent" })).toHaveValue(20);   // the new part took the missing 20%
+    expect(screen.getByRole("spinbutton", { name: "Part 3 percent" })).toHaveValue(20);
     expect(screen.getByText("adds up")).toBeInTheDocument();
     expect(screen.getByText("Give every part a category.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add rule" })).toBeDisabled();

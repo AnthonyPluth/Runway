@@ -44,8 +44,8 @@ class BankStatementTests(LedgerCase):
     def test_without_a_due_date_after_the_close_it_is_due_a_while_after(self):
         self.stmt("cc", 800.0, "2026-09-10", None)
         self.assertEqual(forecast.bank_statement(self.conn, self.card(), TODAY)["due_day"],
-                         (date(2026, 9, 10) + forecast.timedelta(days=forecast.NO_STATEMENT_DUE_DAYS)).day)   # Oct 5
-        self.stmt("cc", 800.0, "2026-09-10", "2026-09-10")   # not after the close
+                         (date(2026, 9, 10) + forecast.timedelta(days=forecast.NO_STATEMENT_DUE_DAYS)).day)
+        self.stmt("cc", 800.0, "2026-09-10", "2026-09-10")
         self.assertEqual(forecast.bank_statement(self.conn, self.card(), TODAY)["due_day"], 5)
 
     def test_none_without_a_statement(self):
@@ -56,13 +56,11 @@ class CycleTests(unittest.TestCase):
     def test_statement_cycles(self):
         self.assertEqual(list(forecast.statement_cycles(date(2026, 9, 10), 10, 5, date(2026, 12, 31))),
                          [(date(2026, 10, 10), date(2026, 11, 5)), (date(2026, 11, 10), date(2026, 12, 5))])
-        # closing the 31st, due the 28th: a short month closes on its last day
         self.assertEqual(list(forecast.statement_cycles(date(2026, 1, 31), 31, 28, date(2026, 5, 1))),
                          [(date(2026, 2, 28), date(2026, 3, 28)), (date(2026, 3, 31), date(2026, 4, 28))])
         self.assertEqual(list(forecast.statement_cycles(date(2026, 9, 10), 10, 5, date(2026, 11, 4))), [])
 
     def test_month_end_cycles(self):
-        # due 25 days after each month's end; Nov 30's is due Dec 25 (a holiday), paid the 28th, still by Dec 28
         self.assertEqual(list(forecast.month_end_cycles(date(2026, 9, 23), date(2026, 12, 28))),
                          [(date(2026, 9, 30), date(2026, 10, 25)), (date(2026, 10, 31), date(2026, 11, 25)),
                           (date(2026, 11, 30), date(2026, 12, 25))])
@@ -71,10 +69,10 @@ class CycleTests(unittest.TestCase):
                          [(date(2027, 1, 31), date(2027, 2, 25)), (date(2027, 2, 28), date(2027, 3, 25))])
 
     def test_paid_toward(self):
-        self.assertEqual(forecast.paid_toward(MINIMUM, 40.0, True, -250.0), 250.0)    # your edit
-        self.assertEqual(forecast.paid_toward(MINIMUM, 40.0, False, -250.0), 40.0)    # not on the chart: the plan's
+        self.assertEqual(forecast.paid_toward(MINIMUM, 40.0, True, -250.0), 250.0)
+        self.assertEqual(forecast.paid_toward(MINIMUM, 40.0, False, -250.0), 40.0)
         self.assertEqual(forecast.paid_toward(MINIMUM, 40.0, True, None), 40.0)
-        self.assertEqual(forecast.paid_toward(FULL, 300.0, True, -250.0), 300.0)      # paid in full: carries nothing
+        self.assertEqual(forecast.paid_toward(FULL, 300.0, True, -250.0), 300.0)
 
 
 class SimulateTests(unittest.TestCase):
@@ -93,7 +91,7 @@ class SimulateTests(unittest.TestCase):
                          [(date(2026, 10, 10), 330.0, 330.0, 0.0), (date(2026, 11, 10), 117.0, 117.0, 0.0)])
         self.assertEqual([c["key"] for c in cycles], ["cardclose:cc:2026-10-10", "cardclose:cc:2026-11-10"])
         self.assertEqual([c["old_key"] for c in cycles], ["card:cc:2026-11-05", "card:cc:2026-12-05"])
-        self.assertEqual([c["pays"] for c in cycles], [date(2026, 11, 5), date(2026, 12, 7)])   # Dec 5 is a Saturday
+        self.assertEqual([c["pays"] for c in cycles], [date(2026, 11, 5), date(2026, 12, 7)])
         self.assertEqual(cycles[1]["fees"], [fee("2026-10-14")])
         first = cycles[0]["estimate"]
         self.assertEqual((first["charged_so_far"], first["budgets_total"], first["recurring"]),
@@ -121,7 +119,7 @@ class SimulateTests(unittest.TestCase):
         self.assertEqual(second["estimate"]["carried"], 245.0)
 
     def test_an_edit_is_whats_paid_and_carries_the_rest(self):
-        cycles = self.run_cycles(MINIMUM, 1000.0, edits={"card:cc:2026-11-05": -600.0})   # under its old key
+        cycles = self.run_cycles(MINIMUM, 1000.0, edits={"card:cc:2026-11-05": -600.0})
         self.assertEqual(cycles[0]["pay"], 600.0)
         self.assertAlmostEqual(cycles[0]["carried"], cycles[0]["statement"] - 600.0)
         self.assertEqual(cycles[1]["pay"], cycles[1]["planned"])
@@ -154,5 +152,5 @@ class OldKeyTests(LedgerCase):
         self.assertEqual(list(self.conn.execute(select(Override.key, Override.amount))), [("cardclose:cc:2026-10-10", -77.0)])
 
     def test_nothing_to_move(self):
-        forecast.move_old_keys(self.conn, {})   # no write, not even an empty one
+        forecast.move_old_keys(self.conn, {})
         self.assertEqual(list(self.conn.execute(select(Override.key))), [])

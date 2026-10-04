@@ -65,7 +65,7 @@ describe("AI assistants (MCP)", () => {
     expect(screen.getByText(/by me@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/not used yet/)).toBeInTheDocument();
     const revoke = screen.getAllByRole("button", { name: "Disconnect" })[0];
-    await userEvent.click(revoke);                                   // asks first
+    await userEvent.click(revoke);
     await userEvent.click(screen.getByRole("button", { name: "Disconnect?" }));
     await waitFor(() => expect(screen.queryByText("Claude")).not.toBeInTheDocument());
     expect(vi.mocked(api)).toHaveBeenCalledWith("/api/mcp-settings/connections/1/revoke", { method: "POST" });
@@ -77,7 +77,7 @@ describe("AI assistants (MCP)", () => {
     render(McpCard);
     const box = await screen.findByRole("checkbox", { name: "Let assistants change churning" });
     expect(box).toBeEnabled();
-    expect(box).not.toBeChecked();                                   // off unless you turn it on
+    expect(box).not.toBeChecked();
     await userEvent.click(box);
     await waitFor(() => expect(box).toBeChecked());
     const posts = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/mcp-settings/writes").map((c) => (c[1] as { body: unknown }).body);
@@ -90,7 +90,7 @@ describe("AI assistants (MCP)", () => {
     serve({ allow_writes: false, allow_categorize: false, allow_all: false, oauth: true, url: "https://r.example/mcp", reason: null, connections: [] });
     render(McpCard);
     const box = await screen.findByRole("checkbox", { name: "Let assistants categorize" });
-    expect(box).not.toBeChecked();                                   // off unless you turn it on
+    expect(box).not.toBeChecked();
     await userEvent.click(box);
     await waitFor(() => expect(box).toBeChecked());
     const posts = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/mcp-settings/categorize").map((c) => (c[1] as { body: unknown }).body);
@@ -104,7 +104,7 @@ describe("AI assistants (MCP)", () => {
     serve({ allow_writes: false, allow_categorize: false, allow_all: false, oauth: true, url: "https://r.example/mcp", reason: null, connections: [] });
     render(McpCard);
     const box = await screen.findByRole("checkbox", { name: "Let assistants change anything" });
-    expect(box).not.toBeChecked();                                   // off unless you turn it on
+    expect(box).not.toBeChecked();
     await userEvent.click(box);
     await waitFor(() => expect(box).toBeChecked());
     const posts = () => vi.mocked(api).mock.calls.filter((c) => c[0] === "/api/mcp-settings/all").map((c) => (c[1] as { body: unknown }).body);

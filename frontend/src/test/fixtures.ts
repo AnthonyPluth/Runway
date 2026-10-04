@@ -1,4 +1,3 @@
-// Builders for the API shapes component tests render, so each test states only what it cares about.
 import type { Category } from "$lib/types";
 import type { Tx } from "$lib/components/transactions/types";
 import type { Holding } from "$lib/components/investments/types";

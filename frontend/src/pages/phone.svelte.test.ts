@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// The pages on a phone: what they keep, and the note where a computer's part would be. A computer sees them as before.
 import { cleanup, render, screen, within } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +17,6 @@ import Settings from "./Settings.svelte";
 
 const NOTE = /Open Runway on a computer to/;
 beforeEach(() => { vi.mocked(api).mockReset(); app.state = { connected: true, brands: {} } as never; });
-// Unmount first: the page would otherwise redraw as a computer's when the flag flips back.
 afterEach(() => { cleanup(); viewport.phone = false; });
 
 describe("Settings", () => {
@@ -72,7 +70,7 @@ describe("Churning", () => {
     viewport.phone = true;
     data();
     const { rerender } = render(Churning, { sub: "" });
-    expect(await screen.findByRole("button", { name: "Add a to-do" })).toBeInTheDocument();   // the Overview: to-dos and plans
+    expect(await screen.findByRole("button", { name: "Add a to-do" })).toBeInTheDocument();
     expect(screen.getByText("Planned")).toBeInTheDocument();
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
     expect(screen.queryByText(/Open Runway on a computer/)).not.toBeInTheDocument();

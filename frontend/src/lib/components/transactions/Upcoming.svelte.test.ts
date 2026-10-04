@@ -37,8 +37,8 @@ describe("Upcoming", () => {
     width(false);
     app.state = { connected: true, brands: { a1: { institution: "Chase", initial: "C" } } } as typeof app.state;
     const { unmount, container } = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1) } });
-    expect(container.querySelector("[data-account-badge]")).toHaveAttribute("title", "Checking");   // on the item's logo
-    expect(screen.getAllByText(/^Checking/).length).toBe(1);                                          // and named on its projected balance only
+    expect(container.querySelector("[data-account-badge]")).toHaveAttribute("title", "Checking");
+    expect(screen.getAllByText(/^Checking/).length).toBe(1);
     unmount();
     const one = render(Upcoming, { props: { onchanged: vi.fn(), events: events(1), oneAccount: true } });
     expect(one.container.querySelector("[data-account-badge]")).toBeNull();

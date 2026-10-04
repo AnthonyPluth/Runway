@@ -44,7 +44,7 @@ describe("Sankey", () => {
   it("colors spending by category, and everything else gray", () => {
     render(Sankey, { cf, monthName: "March" });
     expect(mark(/^Groceries: \$500/).style.fill).toBe("rgb(0, 131, 0)");
-    expect(mark(/^Rent: \$1,200/).style.fill).toBe("rgb(57, 135, 229)");   // a subcategory wears its category's color
+    expect(mark(/^Rent: \$1,200/).style.fill).toBe("rgb(57, 135, 229)");
     expect(mark(/^Everything else \(2\): \$30/).style.fill).toBe("var(--cat-other)");
     expect(mark(/^Salary: \$4,000/).style.fill).toBe("var(--flow-in)");
   });
@@ -74,7 +74,6 @@ describe("Sankey", () => {
 
   it("on a touch screen, the first tap selects (its line stays under the chart) and the second opens", async () => {
     render(Sankey, { cf, monthName: "March" });
-    // as a browser does it: the tap focuses the mark between its pointerdown and its click
     const tap = async (el: Element) => { await fireEvent.pointerDown(el, { pointerType: "touch" }); await fireEvent.focus(el); await fireEvent.click(el); };
     await tap(mark(/^Groceries: /));
     expect(showTransactions).not.toHaveBeenCalled();

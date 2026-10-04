@@ -101,7 +101,7 @@ describe("CategorySelect", () => {
     const onchange = vi.fn();
     render(CategorySelect, { onchange, blank: false });
     await open();
-    await userEvent.keyboard("{ArrowDown}{ArrowDown}");   // Travel → Transit → Salary
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
     const search = screen.getByRole("combobox", { name: "Search categories" });
     expect(document.getElementById(search.getAttribute("aria-activedescendant")!)).toHaveTextContent("Salary");
     await userEvent.keyboard("{Enter}");

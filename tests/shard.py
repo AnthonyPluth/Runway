@@ -31,7 +31,6 @@ def main(arg: str) -> str:
     index, _, count = arg.partition("/")
     if not (index.isdigit() and count.isdigit() and 1 <= int(index) <= int(count)):
         raise SystemExit(f"Give a shard as N/COUNT, like 2/3 (not {arg!r}).")
-    # A trailing dot, so tests.test_mcp. doesn't also pick up tests.test_mcp_oauth.
     return " ".join(f"-k tests.{m}." for m in shards(int(count))[int(index) - 1])
 
 

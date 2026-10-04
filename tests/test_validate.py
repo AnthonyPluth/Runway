@@ -55,7 +55,7 @@ class ProviderNumbersTests(unittest.TestCase):
     def test_providers(self):
         from runway import carta, sfinvest
         from runway.retail.parsers import common as retail
-        readers = {"sfinvest": sfinvest._num, "carta": carta._num, "retail": retail.read_money}   # SimpleFIN's: test_simplefin
+        readers = {"sfinvest": sfinvest._num, "carta": carta._num, "retail": retail.read_money}
         for name, read in readers.items():
             for bad in (float("nan"), float("inf"), 1e15, "99,999,999,999,999"):
                 with self.subTest(name=name, v=bad):
@@ -153,7 +153,7 @@ class TextTests(unittest.TestCase):
         self.assertEqual(self.v.text("  Sapphire  ", "name", 10), "Sapphire")
         self.assertIsNone(self.v.text("   ", "name", 10))
         self.assertIsNone(self.v.text(None, "name", 10))
-        self.assertIsNone(self.v.text(0, "name", 10))   # falsy, as before
+        self.assertIsNone(self.v.text(0, "name", 10))
         self.assertEqual(self.v.text(12, "name", 10), "12")
         self.assertEqual(self.v.text("a’b – c", "name", 10), "a’b – c")
 
@@ -193,7 +193,7 @@ class AmountTests(unittest.TestCase):
     v = validate.Validator(Oops, drop="")
 
     def test_an_amount(self):
-        self.assertEqual(self.v.amount("-12.345", "amount"), -12.35)            # to the cent
+        self.assertEqual(self.v.amount("-12.345", "amount"), -12.35)
         self.assertEqual(self.v.amount("-12.345", "amount", cents=False), -12.345)
         self.assertEqual(self.v.amount(999_999_999.99, "amount"), 999_999_999.99)
         self.assertIsNone(self.v.amount("", "amount"))

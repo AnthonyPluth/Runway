@@ -30,7 +30,7 @@ describe("ConfirmButton", () => {
     expect(screen.getByRole("button", { name: "Really?" })).toBeInTheDocument();
     await vi.advanceTimersByTimeAsync(4100);
     expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button"));   // a click after it lapsed asks again rather than acting
+    await user.click(screen.getByRole("button"));
     expect(onconfirm).not.toHaveBeenCalled();
   });
 

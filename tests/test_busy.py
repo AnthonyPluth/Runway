@@ -26,7 +26,7 @@ class BusyTests(unittest.TestCase):
         for text in ("database is locked", "database table is locked", "database table is locked: account"):
             with self.subTest(text=text):
                 self.assertTrue(db.is_busy(wrapped(sqlite3.OperationalError(text))))
-                self.assertTrue(db.is_busy(sqlite3.OperationalError(text)))   # the driver's own, unwrapped
+                self.assertTrue(db.is_busy(sqlite3.OperationalError(text)))
 
     def test_sqlite_by_its_error_name(self):
         e = sqlite3.OperationalError("something else")
@@ -59,7 +59,7 @@ class BusyTests(unittest.TestCase):
 
     @unittest.skipUnless(db.using_postgres(), "needs Postgres (DATABASE_URL)")
     def test_a_real_postgres_lock_timeout(self):
-        key = 0x7E57B05   # an advisory lock only this test takes
+        key = 0x7E57B05
         with db.engine().connect() as a, db.engine().connect() as b:
             a.execute(select(func.pg_advisory_xact_lock(key)))
             b.execute(select(func.set_config("lock_timeout", "50ms", False)))
@@ -69,8 +69,6 @@ class BusyTests(unittest.TestCase):
             a.rollback()
 
     def test_other_postgres_errors_are_not(self):
-        # A statement timeout, a missing column and a broken constraint aren't worth trying again, even when their text
-        # says "locked" (only the SQLSTATE counts on Postgres).
         for e in (psycopg.errors.QueryCanceled("canceling statement"), psycopg.errors.UndefinedColumn("column locked"),
                   psycopg.errors.UniqueViolation("database is locked")):
             with self.subTest(error=type(e).__name__):

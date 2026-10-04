@@ -29,14 +29,14 @@ class CleanProductTests(unittest.TestCase):
             ("Costco Anywhere Visa® Card by Citi-6620 (6620)", "citi", None, "Costco Anywhere"),
             ("Capital One Venture Rewards ••4321", "capital_one", None, "Venture Rewards"),
             ("Freedom Unlimited x9876", "other", None, "Freedom Unlimited"),
-            ("Venture X 7731", "capital_one", None, "Venture X"),   # an X that is part of the name stays
-            ("DISCOVER IT CARD (1234)", "discover", None, "DISCOVER IT"),   # a product named for its issuer keeps it
+            ("Venture X 7731", "capital_one", None, "Venture X"),
+            ("DISCOVER IT CARD (1234)", "discover", None, "DISCOVER IT"),
             ("Discover it Chrome", "discover", None, "Discover it Chrome"),
             ("The Platinum Card® from American Express (1009)", "amex", None, "The Platinum"),
             ("Blue Cash Preferred® Card from American Express", "amex", None, "Blue Cash Preferred"),
-            ("WORLD OF HYATT (1234)", "chase", None, "WORLD OF HYATT"),   # "World" in a name stays...
+            ("WORLD OF HYATT (1234)", "chase", None, "WORLD OF HYATT"),
             ("Chase World of Hyatt Credit Card", "chase", None, "World of Hyatt"),
-            ("Ink Business Preferred World Mastercard (5555)", "chase", None, "Ink Business Preferred"),   # ...not as a tier
+            ("Ink Business Preferred World Mastercard (5555)", "chase", None, "Ink Business Preferred"),
             ("Southwest Rapid Rewards Plus Visa World", "chase", None, "Southwest Rapid Rewards Plus"),
         ]:
             with self.subTest(name=name):
@@ -71,10 +71,10 @@ class FoundTests(DbCase):
         self.tx("t1", "a1", "2024-03-02", -10)
         self.tx("t2", "a1", "2025-03-05", -550, "ANNUAL MEMBERSHIP FEE")
         self.tx("t3", "a1", "2026-03-07", -795, description="Annual Fee")
-        self.tx("t4", "a1", "2026-04-01", 795, description="Annual fee refund")   # a refund isn't the fee
+        self.tx("t4", "a1", "2026-04-01", 795, description="Annual fee refund")
         d = self.drafts()["a1"]
         self.assertEqual((d["issuer"], d["product"], d["owner"], d["business"]), ("chase", "Sapphire Reserve", "Alex", 0))
-        self.assertEqual(d["annual_fee"], 795.0)   # the latest charge; its month isn't kept (the fee follows the opening month)
+        self.assertEqual(d["annual_fee"], 795.0)
         self.assertNotIn("fee_month", d)
         self.assertEqual((d["opened_on"], d["opened_on_estimate"]), ("2024-03-02", True))
         self.assertNotIn("family", d)
@@ -178,7 +178,7 @@ class SuggestTests(DbCase):
         self.assertEqual(out["benefits"][0]["amount"], churn_found.MAX_CREDIT)
         self.assertEqual(len(out["benefits"]), 1)
         out = churn_found.suggest(self.c, "chase", "X", self.caller(json.dumps({"currency": "Chase Ultimate Rewards"})))
-        self.assertEqual(out["currency"], "ur")   # by name
+        self.assertEqual(out["currency"], "ur")
 
     def test_the_request_carries_the_bank_and_card_name_only(self):
         self.c.execute(insert(Account).values(id="acct-secret-1", name="Chase Sapphire Reserve (8814)", kind="credit",
@@ -203,7 +203,7 @@ class SuggestTests(DbCase):
         db.set_setting(self.c, sk.OPENROUTER_API_KEY, None)
         with self.assertRaisesRegex(churning.ChurnError, "OpenRouter API key"):
             churn_found.suggest(self.c, "chase", "X", self.caller("{}"))
-        self.assertEqual(len(self.prompts), 2)   # no key: nothing was sent
+        self.assertEqual(len(self.prompts), 2)
 
     def test_the_endpoint_reports_errors(self):
         with mock.patch("runway.categorize.chat", self.caller(self.REPLY)):
@@ -222,11 +222,9 @@ class SuggestTests(DbCase):
         self.assertEqual(self.webs, ["tool"])
         self.assertIn("Search the web", self.prompts[-1])
         self.assertIn('"sources"', self.prompts[-1])
-        # A model that can't call tools: the web plugin instead (it still searches).
         out = churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}", no_tools=True))
         self.assertEqual(self.webs[1:], ["tool", "plugin"])
         self.assertTrue(out["web"])
-        # Switched off in Settings: no search, and the prompt says so.
         api_state.api_settings(self.c, {}, {"churn_ai_web": False})
         self.assertFalse(api_state.api_state(self.c, {}, None)["churn_ai_web"])
         out = churn_found.suggest(self.c, "chase", "Sapphire Reserve", self.caller("{}"))
@@ -329,7 +327,7 @@ class ChatRequestTests(DbCase):
         def call(api_key, model, prompt, web=None):
             models.append(model)
             return "{}", []
-        db.set_setting(self.c, sk.LLM_MODEL, "openai/gpt-4o-mini")   # the categorizer's: not the card lookup's
+        db.set_setting(self.c, sk.LLM_MODEL, "openai/gpt-4o-mini")
         churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
         db.set_setting(self.c, sk.CARD_AI_MODEL, "google/gemini-2.5-flash")
         churn_found.suggest(self.c, "chase", "Sapphire Reserve", call)
@@ -348,7 +346,7 @@ class ChatRequestTests(DbCase):
         with mock.patch("runway.tls.urlopen", return_value=_response(self.REPLY)) as urlopen:
             categorize.call_llm("k", "openrouter/free", "p")
             self.assertEqual(self.sent(urlopen)["provider"], {"data_collection": "deny"})
-            churn_found.suggest(self.c, "chase", "Sapphire Reserve")   # a card's name only: any provider
+            churn_found.suggest(self.c, "chase", "Sapphire Reserve")
             self.assertNotIn("provider", self.sent(urlopen))
         none = urllib.error.HTTPError("u", 404, "Not Found", {},
                                       io.BytesIO(b'{"error":{"message":"No endpoints found matching your data policy"}}'))

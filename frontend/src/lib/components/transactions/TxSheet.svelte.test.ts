@@ -28,7 +28,7 @@ async function change(name: string, value: string) {
   const el = field(name);
   await userEvent.clear(el);
   if (value) await userEvent.type(el, value);
-  el.blur();   // a field saves when you leave it
+  el.blur();
 }
 
 beforeEach(() => {

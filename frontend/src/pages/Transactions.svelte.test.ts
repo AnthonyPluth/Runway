@@ -24,7 +24,7 @@ describe("Transactions page", () => {
     expect(await screen.findByText("Alpha")).toBeInTheDocument();
     const h1 = screen.getByRole("heading", { level: 1 });
     expect(h1).toHaveAccessibleName("Transactions");
-    expect(summary()).toHaveTextContent("2 transactions · −$25.00 net");   // the count, with what they add up to, under the filters
+    expect(summary()).toHaveTextContent("2 transactions · −$25.00 net");
     expect(screen.getByRole("link", { name: /To review/ })).toHaveTextContent("3");
     expect(lastList()).toContain("limit=100");
     expect(lastList()).not.toContain("review=1");
@@ -78,7 +78,7 @@ describe("Transactions page", () => {
     await userEvent.type(screen.getByRole("searchbox", { name: "Search transactions" }), "blue");
     await waitFor(() => expect(lastList()).toContain("q=blue"));
     expect(txFilters.transactions.q).toBe("blue");
-    expect(location.hash).toBe("#transactions?q=blue");   // in the address, for a reload, Back or a bookmark
+    expect(location.hash).toBe("#transactions?q=blue");
   });
 
   it("filters by account", async () => {
@@ -127,7 +127,7 @@ describe("Transactions page", () => {
     render(Transactions);
     expect(await screen.findByText("No transactions match these filters.")).toBeInTheDocument();
     expect(screen.queryByText(/No transactions yet/)).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Clear filters" })).toHaveLength(2);   // beside the filters, and in the empty card
+    expect(screen.getAllByRole("button", { name: "Clear filters" })).toHaveLength(2);
     await userEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[1]);
     expect(txFilters.transactions).toEqual(none());
     await waitFor(() => expect(lastList()).not.toContain("zzz"));
@@ -190,7 +190,6 @@ describe("Transactions page", () => {
     render(Transactions);
     await screen.findByText("Alpha");
     await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
-    // In the change's toast: "Always for Alpha" its main button, Undo beside it.
     await waitFor(() => expect(toast).toHaveBeenLastCalledWith("Groceries", expect.objectContaining({
       action: expect.objectContaining({ label: "Always for Alpha" }), cancel: expect.objectContaining({ label: "Undo" }) })));
   });
@@ -221,7 +220,7 @@ describe("Transactions page", () => {
       expect(lastList()).toContain("q=rent&from=2026-01-01&to=2026-01-31&min=50&kind=out");
       expect(screen.getByRole("searchbox")).toHaveValue("rent");
       expect(screen.getByRole("button", { name: "Dates: January 2026" })).toBeInTheDocument();
-      expect(screen.getByText("Money out")).toBeInTheDocument();   // a chip for each filter behind More
+      expect(screen.getByText("Money out")).toBeInTheDocument();
       expect(screen.getByText("$50 or more")).toBeInTheDocument();
     });
 
@@ -256,7 +255,6 @@ describe("Transactions page", () => {
     render(Transactions);
     await screen.findByText("Alpha");
     await userEvent.click(screen.getByRole("button", { name: "Dates: All dates" }));
-    // (the panel is positioned by measuring, which jsdom can't, so role queries don't find what's in it here)
     await userEvent.click(await screen.findByText("This year"));
     const y = new Date().getFullYear();
     await waitFor(() => expect(lastList()).toContain(`from=${y}-01-01&to=${y}-12-31`));
@@ -290,8 +288,8 @@ describe("Transactions page", () => {
     await screen.findByText("Alpha");
     await pickCategory(screen.getByRole("combobox", { name: "Category for Alpha" }), "Groceries");
     expect(await screen.findByText("Couldn’t refresh")).toBeInTheDocument();
-    expect(screen.getByText("Alpha")).toBeInTheDocument();   // the list stays
-    expect(summary()).toHaveClass("opacity-50");             // its numbers marked as not up to date
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(summary()).toHaveClass("opacity-50");
     fail = false;
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.queryByText("Couldn’t refresh")).not.toBeInTheDocument());
@@ -363,7 +361,7 @@ describe("Transactions page", () => {
       await userEvent.type(input, "1400{Enter}");
       expect(await screen.findByRole("button", { name: "−$1,400.00" })).toBeInTheDocument();
       expect(screen.getByText("Alpha")).toBeInTheDocument();
-      expect(app.version).toBe(version);   // the page wasn't drawn afresh
+      expect(app.version).toBe(version);
     });
 
     it("shows a budget's link what's still coming in it, recurring charges on cards included", async () => {
@@ -376,15 +374,14 @@ describe("Transactions page", () => {
           events: [ev("2026-03-20", "Farm box", "Groceries", { balance_after: 900, account_id: "a1", account: "Checking" }),
             ev("2026-03-21", "Beans", "Coffee", { balance_after: 880, account_id: "a1", account: "Checking" })],
           charges: [ev("2026-03-22", "Meal kit", "Food", { account_id: "c1", account: "Travel Card" }),
-            ev("2026-04-22", "Meal kit", "Food", { account_id: "c1", account: "Travel Card" })],   // next month's
+            ev("2026-04-22", "Meal kit", "Food", { account_id: "c1", account: "Travel Card" })],
         } : undefined);
       render(Transactions);
       const group = (await screen.findByRole("heading", { name: "Upcoming · projected" })).closest("section") ?? document.body;
-      await within(group as HTMLElement).findByText("Farm box");   // a subcategory's
+      await within(group as HTMLElement).findByText("Farm box");
       const kit = within(group as HTMLElement).getByText("Meal kit");
       expect(within(group as HTMLElement).getAllByText("Meal kit")).toHaveLength(1);
       expect(within(group as HTMLElement).queryByText("Beans")).not.toBeInTheDocument();
-      // the card is its bank's badge on the row's logo (named in its tooltip), and a charge to it doesn't move a projected balance
       expect(kit.closest(".cell")!.querySelector("[data-account-badge]")).toHaveAttribute("title", "Travel Card");
       expect(kit.closest(".cell")).not.toHaveTextContent("Travel Card");
       expect(within(group as HTMLElement).getAllByText(/projected balance/)).toHaveLength(1);

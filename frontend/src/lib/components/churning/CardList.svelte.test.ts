@@ -19,14 +19,13 @@ describe("the card list", () => {
     setup({ plan: "close", plan_active: true, plan_date: "2026-10-20" });
     expect(screen.queryByText(/5\/24/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^Plan:/)).not.toBeInTheDocument();
-    expect(screen.getByText("Plan")).toBeInTheDocument();          // a plan that's due still shows, as a badge
+    expect(screen.getByText("Plan")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Venture X details" }));
     expect(screen.getByTestId("card-details-1")).toHaveTextContent(/opened Mar 2025 · counts toward 5\/24 until/);
     await userEvent.click(screen.getByRole("button", { name: "Mark the plan for Venture X done" }));
     expect(calls(/plan/).length).toBeGreaterThan(0);
   });
 
-  // d.today is 2026-09-30 in the fixtures.
   const active = (deadline: string, over = {}) => ({ bonus: 60000, currency: "c1", bonus_spend: 4000, spent: 1000, bonus_state: "active" as const, deadline, ...over });
   const bar = () => screen.getByRole("progressbar").firstElementChild as HTMLElement;
 
@@ -46,12 +45,12 @@ describe("the card list", () => {
   });
 
   it("takes the bonus deadline's tone on the date and the spending bar, and says the daily need in the tooltip only", () => {
-    setup(active("2026-10-07"));   // 7 days: red; $3,000 to go is $429 a day, rounded up
+    setup(active("2026-10-07"));
     expect(screen.getByText(/^by Oct/)).toHaveClass("text-loss");
     expect(bar()).toHaveClass("bg-loss");
     const tip = screen.getByText(/of \$4,000/).closest("div[title]")!;
     expect(tip).toHaveAttribute("title", "in 7 days · $429/day needed");
-    expect(screen.queryByText(/\/day needed/)).toBeNull();   // not visible text
+    expect(screen.queryByText(/\/day needed/)).toBeNull();
   });
 
   it("is amber within 30 days and the usual color after", () => {

@@ -93,7 +93,7 @@ describe("lastEmoji", () => {
   it("finds one whole emoji in what was typed or pasted", () => {
     for (const e of ["🌮", "🍽️", "👍🏽", "🇯🇵", "1️⃣", "#️⃣", "👩‍💻", "👨‍👩‍👧‍👦", "❤️", "▶️", "ℹ️", "‼️", "〰️", "↔️"]) expect(lastEmoji(e)).toBe(e);
     expect(lastEmoji("taco 🌮")).toBe("🌮");
-    expect(lastEmoji("🌮🍕")).toBe("🍕");                              // the latest one
+    expect(lastEmoji("🌮🍕")).toBe("🍕");
   });
   it("finds nothing in letters, digits or punctuation", () => {
     for (const t of ["", "taco", "1", "#", "!?", "  ", "é", "!\ufe0f"]) expect(lastEmoji(t)).toBeNull();

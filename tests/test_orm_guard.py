@@ -40,7 +40,7 @@ def _is_sql_text(node, string_names: set[str]) -> bool:
 def _string_names(fn) -> set[str]:
     """Names assigned SQL text anywhere in a function (or module)."""
     names: set[str] = set()
-    for _ in range(2):   # twice, so `q = base + " WHERE ..."` after `base = "SELECT ..."` counts
+    for _ in range(2):
         for n in ast.walk(fn):
             if isinstance(n, ast.Assign) and _is_sql_text(n.value, names):
                 names.update(t.id for t in n.targets if isinstance(t, ast.Name))
@@ -97,7 +97,7 @@ def count(path: str) -> int:
                                                             and isinstance(f.value, ast.Name) and f.value.id in modules):
             around = " ".join(lines[max(0, node.lineno - 2):node.lineno])
             parent = parents.get(id(node))
-            if isinstance(parent, ast.keyword) and parent.arg == "server_default":   # a column default in schema.py
+            if isinstance(parent, ast.keyword) and parent.arg == "server_default":
                 continue
             if "# raw SQL:" not in around:
                 n += 1

@@ -36,7 +36,7 @@ describe("the Churning page", () => {
     const before = calls("/api/churning").length;
     await rerender({ sub: "benefits" });
     expect(await screen.findByText("Worth a year")).toBeInTheDocument();
-    expect(calls("/api/churning").length).toBe(before);   // the same data, not fetched again
+    expect(calls("/api/churning").length).toBe(before);
   });
 
   it("shows 0/24 with a prompt when there are no people yet", async () => {
@@ -62,13 +62,13 @@ describe("the Churning page", () => {
     render(Churning, { sub: "" });
     const tabs = await screen.findByRole("navigation", { name: "Churning sections" });
     const after = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(after(document.querySelector("dl")!, tabs)).toBe(true);   // the tiles, then the tabs
+    expect(after(document.querySelector("dl")!, tabs)).toBe(true);
     expect(within(tabs).getAllByRole("link").map((a) => a.textContent!.trim())).toEqual(["Overview", "Cards", "Benefits", "Bank bonuses"]);
     expect(within(tabs).getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
     const heads = ["Upcoming", "Planned", "Best card for…", "Rewards"].map((t) => screen.getAllByText(t, { selector: "[data-slot=card-title]" })[0]);
     expect(after(tabs, heads[0])).toBe(true);
     for (let i = 1; i < heads.length; i++) expect(after(heads[i - 1], heads[i])).toBe(true);
-    expect(screen.queryByText("Cards", { selector: "[data-slot=card-title]" })).toBeNull();   // those are in the Cards tab
+    expect(screen.queryByText("Cards", { selector: "[data-slot=card-title]" })).toBeNull();
   });
 
   it("routes #churning to the Overview, #churning/cards to the cards, and keeps the data when switching", async () => {
@@ -82,7 +82,7 @@ describe("the Churning page", () => {
     expect(await screen.findByRole("button", { name: "Add a card" })).toBeInTheDocument();
     expect(screen.queryByText("Planned", { selector: "[data-slot=card-title]" })).toBeNull();
     expect(screen.getByRole("link", { name: "Cards" })).toHaveAttribute("aria-current", "page");
-    await rerender({ sub: "something-else" });   // an unknown tab is the Overview
+    await rerender({ sub: "something-else" });
     expect(await screen.findByText("Planned", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
   });
 
@@ -99,13 +99,13 @@ describe("the Churning page", () => {
     render(Churning, { sub: "cards" });
     await screen.findByTestId("found-cards");
     expect(screen.queryByTestId("getting-started")).toBeNull();
-    expect(screen.queryByText("5/24", { selector: "dt span" })).toBeNull();   // no stat strip of zeros
+    expect(screen.queryByText("5/24", { selector: "dt span" })).toBeNull();
     for (const t of ["Upcoming", "Planned", "Best card for…", "Rewards"]) expect(screen.queryByText(t)).toBeNull();
     expect(screen.getAllByRole("button", { name: "Add a card" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Add a card you’ve opened" })).toBeNull();
     expect(calls(/best\?/)).toHaveLength(0);
     await userEvent.click(screen.getByRole("button", { name: "Add a card" }));
-    expect(await screen.findByPlaceholderText("e.g. Sapphire Preferred")).toBeInTheDocument();   // the new-card form opens
+    expect(await screen.findByPlaceholderText("e.g. Sapphire Preferred")).toBeInTheDocument();
   });
 
   it("collapses empty sections to one line and hides Best card, and Rewards is a line, when there is one card and little else", async () => {
@@ -116,7 +116,7 @@ describe("the Churning page", () => {
     expect(screen.getByRole("button", { name: "Plan a card or bonus" })).toBeInTheDocument();
     expect(screen.queryByText("Best card for…")).toBeNull();
     expect(screen.getByText("no points tracked yet")).toBeInTheDocument();
-    expect(document.querySelectorAll("[data-slot=card-title]")).toHaveLength(0);   // all one-liners
+    expect(document.querySelectorAll("[data-slot=card-title]")).toHaveLength(0);
   });
 
   it("keeps Best card, and Rewards once a card has earned something, when there is data", async () => {
@@ -146,7 +146,7 @@ describe("the Churning page", () => {
     expect(screen.queryByText("Bonus money by year")).toBeNull();
     expect(screen.queryByText("No bank bonuses received yet.")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Add a bank bonus" }));
-    expect(await screen.findByText("Bank bonuses", { selector: "[data-slot=card-title]" })).toBeInTheDocument();   // the form opens in its card
+    expect(await screen.findByText("Bank bonuses", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
   });
 
   it("groups the bank bonus form into collapsed sections, each saying what's in it", async () => {
@@ -199,7 +199,7 @@ describe("the Churning page", () => {
       expect(within(section).getByText("Sapphire Reserve")).toBeInTheDocument();
       expect(within(section).getByText(/\$795 annual fee/)).toBeInTheDocument();
       expect(within(section).getByText(/opened on or before Mar 2, 2024/)).toBeInTheDocument();
-      expect(within(section).getByText("CREDIT CARD (3392)")).toBeInTheDocument();   // no product to show: the account's name
+      expect(within(section).getByText("CREDIT CARD (3392)")).toBeInTheDocument();
       expect(within(section).getAllByRole("button", { name: /^Add / })).toHaveLength(2);
     });
 
@@ -337,7 +337,7 @@ describe("the Churning page", () => {
       await userEvent.click(screen.getByRole("button", { name: "Try again" }));
       expect(await screen.findByRole("button", { name: "Add a card" })).toBeInTheDocument();
       expect(calls("/api/churning").length).toBe(before.page + 1);
-      expect(calls("/api/churning/found").length).toBe(before.found + 1);   // the found cards too
+      expect(calls("/api/churning/found").length).toBe(before.found + 1);
     });
 
     it("says so when a reload fails, keeping what was shown but not letting it pass as current", async () => {
@@ -352,7 +352,7 @@ describe("the Churning page", () => {
       failing = true;
       await userEvent.click(screen.getByRole("button", { name: "Drop Sapphire Preferred" }));
       expect(await screen.findByRole("alert")).toHaveTextContent("Couldn’t refresh this page, so what’s shown may be out of date.");
-      expect(screen.getByText("Planned", { selector: "[data-slot=card-title]" })).toBeInTheDocument();   // still there, with the warning above it
+      expect(screen.getByText("Planned", { selector: "[data-slot=card-title]" })).toBeInTheDocument();
       failing = false;
       await userEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }));
       await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
@@ -368,7 +368,7 @@ describe("the Churning page", () => {
       const note = await screen.findByTestId("found-failed");
       expect(note).toHaveTextContent("Couldn’t check your accounts for cards to add.");
       expect(note).toHaveClass("text-muted-foreground");
-      expect(screen.getByRole("button", { name: "Add a card" })).toBeInTheDocument();   // the page itself is fine
+      expect(screen.getByRole("button", { name: "Add a card" })).toBeInTheDocument();
       failing = false;
       await userEvent.click(within(note).getByRole("button", { name: "Try again" }));
       expect(await screen.findByTestId("found-cards")).toBeInTheDocument();
@@ -394,7 +394,7 @@ describe("the Churning page", () => {
   describe("the annual fee tile", () => {
     const due = (over: Partial<ChurnCard>) => card({ fee_due: "2026-10-20", annual_fee: 95, ...over });
     it("counts the fees within 30 days, as its label says, the window the rows turn amber at", async () => {
-      serve({ cards: [due({ id: 1, fee_due: "2026-10-28" }), due({ id: 2, fee_due: "2026-11-15" })] });   // today is 2026-09-30: 28 and 46 days
+      serve({ cards: [due({ id: 1, fee_due: "2026-10-28" }), due({ id: 2, fee_due: "2026-11-15" })] });
       render(Churning, { sub: "cards" });
       const label = await screen.findByText("Annual fees within 30 days", { selector: "dt span" });
       const tile = label.closest<HTMLElement>("div")!;

@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// The small transaction popups: RecurringPicker, LogoPicker and Upcoming.
 import { render, screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +14,6 @@ import RecurringPicker from "./RecurringPicker.svelte";
 import Upcoming from "./Upcoming.svelte";
 import { createRawSnippet } from "svelte";
 
-// (braces: a returned function would be run by Vitest as a cleanup hook)
 beforeEach(() => { vi.mocked(api).mockReset(); });
 afterEach(() => vi.clearAllMocks());
 
@@ -70,7 +68,7 @@ describe("RecurringPicker", () => {
     const { onchanged } = setup();
     await userEvent.selectOptions(select(), "1");
     expect(toast).toHaveBeenCalledWith("Linked to Coffee club", expect.objectContaining({ description: "Also match “online transfer from savings” from now on?" }));
-    expect(toast.success).not.toHaveBeenCalled();   // the question says it's linked
+    expect(toast.success).not.toHaveBeenCalled();
     expect(onchanged).toHaveBeenCalled();
   });
 

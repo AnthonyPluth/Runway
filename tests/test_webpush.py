@@ -54,7 +54,7 @@ class WebPushTests(DbCase):
         _v1, pub1 = w.vapid_keys(self.c)
         _v2, pub2 = w.vapid_keys(self.c)
         self.assertEqual(pub1, pub2)
-        self.assertEqual(len(w.unb64u(pub1)), 65)                # uncompressed P-256 point, as browsers expect
+        self.assertEqual(len(w.unb64u(pub1)), 65)
         self.assertTrue(w.valid_public_key(pub1))
         self.assertFalse(w.valid_public_key(w.b64u(b"\x04" + bytes(64))))
 
@@ -68,7 +68,6 @@ class WebPushTests(DbCase):
         self.assertEqual((path, headers["Content-Encoding"], headers["TTL"], headers["Urgency"]),
                          ("/push/abc", "aes128gcm", "86400", "normal"))
         self.assertEqual(decrypt(body, key, auth), {"title": "Hi", "body": "$1,234.56"})
-        # The VAPID token is signed by this server's key and names the push service and a contact.
         auth_header = headers["Authorization"]
         token = auth_header.split("t=")[1].split(",")[0].strip()
         self.assertIn(f"k={pub}", auth_header)

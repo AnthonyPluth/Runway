@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-// Net worth is a hub: Summary, Investments, Equity and Retirement are tabs of one page.
 import { render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";

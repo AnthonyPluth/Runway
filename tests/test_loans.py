@@ -12,38 +12,35 @@ from tests.shared import TODAY, LedgerCase
 
 class AmortizationTests(unittest.TestCase):
     def test_a_30_year_mortgage_as_a_calculator_has_it(self):
-        # $200,000 at 6.5% over 30 years: $1,264.14 a month, $187,221 left after 5 years, $0 after 30.
         payment = loans.payment_to_pay_off(200_000, 6.5, 360)
         self.assertAlmostEqual(payment, 1264.14, places=2)
         owed, short = loans.project(200_000, 6.5, 1264.14)
         self.assertFalse(short)
-        self.assertEqual(len(owed), 31)                       # today, then each year until it's paid off
+        self.assertEqual(len(owed), 31)
         self.assertEqual(owed[0], 200_000)
         self.assertAlmostEqual(owed[1], 197_764.50, places=2)
-        self.assertAlmostEqual(owed[5], 187_221.68, places=2)  # B(1+r)^60 − P((1+r)^60 − 1)/r with P = 1,264.14
+        self.assertAlmostEqual(owed[5], 187_221.68, places=2)
         self.assertEqual(owed[-1], 0)
 
     def test_paid_off_early_floors_at_zero(self):
         owed, short = loans.project(10_000, 5, 5_000)
         self.assertEqual(owed, [10_000, 0])
         self.assertFalse(short)
-        self.assertEqual(loans.project(12_000, 0, 1_000)[0], [12_000, 0])   # interest-free: a year of payments
-        self.assertEqual(loans.project(-50, 5, 100), ([-50], False))         # overpaid: nothing to project
+        self.assertEqual(loans.project(12_000, 0, 1_000)[0], [12_000, 0])
+        self.assertEqual(loans.project(-50, 5, 100), ([-50], False))
 
     def test_a_payment_that_doesnt_cover_the_interest_is_flagged_not_grown(self):
-        # 6% on $300,000 is $1,500 a month: paying $1,400 (or exactly $1,500) never pays it down.
         for payment in (1_400, 1_500, 0):
             self.assertEqual(loans.project(300_000, 6, payment), ([300_000], True))
 
     def test_the_year_of_the_last_payment(self):
         today, t = date(2026, 10, 1), lambda rate, payment: {"rate": rate, "payment": payment}
-        # a payment a month from November: 2 is December 2026, 14 December 2027, 15 January 2028
         self.assertEqual(loans.payoff_year(2_000, t(0, 1_000), today), 2026)
         self.assertEqual(loans.payoff_year(14_000, t(0, 1_000), today), 2027)
         self.assertEqual(loans.payoff_year(14_001, t(0, 1_000), today), 2028)
-        self.assertEqual(loans.payoff_year(50_000, t(6, 1_000), today), 2031)   # 58 payments: the last in August 2031
-        self.assertEqual(loans.payoff_year(0, t(6, 1_000), today), 2026)        # already paid off
-        for terms in (None, t(None, 1_000), t(6, None), t(6, 250), t(6, 0)):    # not projected, or never paid down
+        self.assertEqual(loans.payoff_year(50_000, t(6, 1_000), today), 2031)
+        self.assertEqual(loans.payoff_year(0, t(6, 1_000), today), 2026)
+        for terms in (None, t(None, 1_000), t(6, None), t(6, 250), t(6, 0)):
             self.assertIsNone(loans.payoff_year(50_000, terms, today))
 
     def test_payment_that_pays_it_off_by_a_date(self):
@@ -77,12 +74,11 @@ class TermsTests(LedgerCase):
             self.tx("mtg", f"{m}-03", amount, "PAYMENT")
 
     def test_payment_inferred_from_recent_months(self):
-        # Sept is this month (left out); a double payment one month and a refund-like debit don't sway the median.
         self.payments("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09")
         self.payments("2026-07", amount=1_840.0)
         self.tx("mtg", "2026-06-15", -45.0, "LATE FEE")
-        self.tx("mtg", "2026-08-20", 300.0, "EXTRA", pending=1)          # pending: not yet
-        self.tx("mtg", "2026-02-03", 9_999.0, "LONG AGO")                # before the last six whole months
+        self.tx("mtg", "2026-08-20", 300.0, "EXTRA", pending=1)
+        self.tx("mtg", "2026-02-03", 9_999.0, "LONG AGO")
         self.assertEqual(loans.inferred_payments(self.conn, ["mtg"], TODAY), {"mtg": 1_840.0})
 
     def test_no_inference_without_enough_history(self):
@@ -103,13 +99,11 @@ class TermsTests(LedgerCase):
 
     def test_plaids_terms_win_and_a_payoff_date_gives_the_payment(self):
         self.conn.execute(update(Account).where(Account.id == "mtg").values(interest_rate=3, monthly_payment=900))
-        self.plaid(interest_rate=6.0, monthly_payment=None, maturity_date="2036-09-01")   # ten years from TODAY's month
+        self.plaid(interest_rate=6.0, monthly_payment=None, maturity_date="2036-09-01")
         t = loans.terms(self.conn, TODAY)["mtg"]
-        # Plaid's rate wins over yours; it sent no payment, so the one you set is used (and can be changed)
         self.assertEqual((t["rate"], t["payment"], t["source"], t["plaid"], t["plaid_payment"], t["maturity"]),
                          (6.0, 900, "manual", True, False, "2036-09-01"))
-        self.assertEqual((t["set_rate"], t["set_payment"]), (3, 900))   # your rate is kept, just not used
-        # With no payment set either, Plaid's payoff date gives the payment that pays it off by then
+        self.assertEqual((t["set_rate"], t["set_payment"]), (3, 900))
         self.conn.execute(update(Account).where(Account.id == "mtg").values(monthly_payment=None))
         t = loans.terms(self.conn, TODAY)["mtg"]
         self.assertEqual(t["source"], "plaid")
@@ -124,7 +118,7 @@ class TermsTests(LedgerCase):
         self.payments("2026-07", "2026-08")
         for maturity in ("2020-01-01", "someday"):
             self.conn.execute(LoanTerms.__table__.delete())
-            self.plaid(interest_rate=4.0, monthly_payment=0, maturity_date=maturity)   # 0: in deferment
+            self.plaid(interest_rate=4.0, monthly_payment=0, maturity_date=maturity)
             t = loans.terms(self.conn, TODAY)["mtg"]
             self.assertEqual((t["payment"], t["source"]), (1_840.0, "inferred"))
 
@@ -145,7 +139,6 @@ class SellableTests(LedgerCase):
         self.assertEqual(len(h["owed_by_year"]), 31)
         self.assertAlmostEqual(h["owed_by_year"][5], 187_221.68, places=2)
         self.assertEqual(h["owed_by_year"][-1], 0)
-        # 360 payments from October 2026: the last in September 2056; no money out like it, so it isn't in spending
         self.assertEqual(h["loan"], {"rate": 6.5, "payment": 1264.14, "source": "manual", "note": None, "account_id": "mtg",
                                      "payment_counted": None, "payoff_year": 2056})
 
@@ -161,14 +154,12 @@ class SellableTests(LedgerCase):
         self.assertEqual((h["owed"], h["owed_by_year"], h["loan"]), (0, [0], None))
 
     def test_a_home_against_an_account_no_longer_a_loan_keeps_todays_balance(self):
-        self.acct("mtg", "credit", -5_000, interest_rate=6.5, monthly_payment=1_000)   # its type changed since
+        self.acct("mtg", "credit", -5_000, interest_rate=6.5, monthly_payment=1_000)
         self.home()
         h = self.sellable("asset:")
         self.assertEqual((h["owed"], h["owed_by_year"], h["loan"]), (5_000, [5_000], None))
 
     def test_loans_against_nothing_are_in_the_plan_as_debts(self):
-        # A student loan with its terms, paid from checking each month; a personal loan with none yet (as a new one
-        # synced from Lakeside Bank is); a mortgage against the house; and a hidden loan and a paid-off one, left out
         self.acct("mtg", "loan", -200_000, interest_rate=6.5, monthly_payment=1264.14)
         self.home()
         self.acct("stu", "loan", -12_000, name="Student Loan", org="Nelnet", interest_rate=5, monthly_payment=400)
@@ -179,66 +170,57 @@ class SellableTests(LedgerCase):
         for m in (4, 5, 6, 7, 8):
             self.tx("chk", f"2026-{m:02}-12", -400, "NELNET STUDENT LN PMT", "Education")
         plan = planner.sellable(self.conn, TODAY)
-        self.assertEqual([a["key"] for a in plan], ["asset:1", "loan:exp", "loan:stu"])   # the mortgage is the home's
+        self.assertEqual([a["key"] for a in plan], ["asset:1", "loan:exp", "loan:stu"])
         stu = next(a for a in plan if a["key"] == "loan:stu")
         self.assertEqual((stu["name"], stu["kind"], stu["value"], stu["owed"]), ("Student Loan", "loan", 0, 12_000))
-        self.assertEqual(stu["owed_by_year"], loans.project(12_000, 5, 400)[0])   # paid down on its terms
+        self.assertEqual(stu["owed_by_year"], loans.project(12_000, 5, 400)[0])
         self.assertEqual(stu["loan"], {"rate": 5, "payment": 400, "source": "manual", "note": None, "account_id": "stu",
                                        "payment_counted": True, "payoff_year": 2029})
         exp = next(a for a in plan if a["key"] == "loan:exp")
         self.assertEqual((exp["owed"], exp["owed_by_year"]), (30_000, [30_000]))
         self.assertEqual(exp["loan"], {"rate": None, "payment": None, "source": None, "note": "no_rate", "account_id": "exp",
                                        "payment_counted": None, "payoff_year": None})
-        # paid as a transfer naming it: not in spending, so the page adds it
         self.conn.execute(update(Transaction).where(Transaction.account_id == "chk").values(category="Transfer"))
         stu = next(a for a in planner.sellable(self.conn, TODAY) if a["key"] == "loan:stu")
         self.assertIs(stu["loan"]["payment_counted"], False)
-        # left out of net worth: left out of the plan too
         self.conn.execute(update(Account).where(Account.id == "stu").values(networth_hidden=1))
         self.assertNotIn("loan:stu", [a["key"] for a in planner.sellable(self.conn, TODAY)])
-        # and never sold into it
         with self.assertRaisesRegex(planner.PlanError, "Unknown asset"):
             planner.clean({**planner.default({"yearly_savings": 0, "annual_spending": 0, "expected_return": 0.05}, TODAY),
                            "assets": [{"key": "loan:exp", "sell_year": 2030}]}, TODAY)
 
     def test_equity_counts_what_will_have_vested(self):
-        # 4,800 RSUs from 2025-09-15 over 4 years with a 1-year cliff: 1,200 vested on TODAY (2026-09-23), all by 2029.
         cid = equity.save_company(self.conn, {"name": "Acme", "share_price": 10})
         equity.save_grant(self.conn, cid, {"kind": "rsu", "quantity": 4800, "vest_start": "2025-09-15", "vest_months": 48,
                                            "cliff_months": 12})
         e = self.sellable("equity:")
         self.assertEqual(e["value_by_year"], [12_000, 24_000, 36_000, 48_000])
-        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, None))   # keeps pace with inflation
+        self.assertEqual((e["value"], e["owed"], e["yearly_change"]), (12_000, 0, None))
 
     def test_equity_with_nothing_vested_yet_is_offered_if_it_will_vest(self):
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
         equity.save_grant(self.conn, cid, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2026-09-01",
                                            "vest_months": 24, "cliff_months": 12})
         e = self.sellable("equity:")
-        self.assertEqual(e["value_by_year"], [0, 750, 1_500])   # half at the cliff, then the rest; $1.50 a share over the strike
-        # Left out of net worth, or never worth anything (no share price): not offered.
+        self.assertEqual(e["value_by_year"], [0, 750, 1_500])
         equity.save_company(self.conn, {"in_networth": False}, cid)
         self.assertFalse(any(a["key"].startswith("equity:") for a in planner.sellable(self.conn, TODAY)))
         equity.save_company(self.conn, {"name": "Unpriced"})
         self.assertFalse(any(a["key"].startswith("equity:") for a in planner.sellable(self.conn, TODAY)))
 
     def test_options_expiring_later_are_taken_as_exercised_first(self):
-        # 1,000 options at $0.50, all vested by TODAY; 200 exercised; they expire in 2028. Nobody lets vested options
-        # lapse, so selling after 2028 still counts them: 800 × $1.50 spread + 200 shares × $2, every year.
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
         equity.save_grant(self.conn, cid, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2022-01-01",
                                            "vest_months": 48, "exercised": 200, "expires_on": "2028-06-30"})
         self.assertEqual(self.sellable("equity:")["value_by_year"], [1_600])
 
     def test_options_vest_only_until_they_expire_and_expired_ones_count_what_was_exercised(self):
-        # 1,200 options vesting monthly over 4 years from 2025-10-01, expiring 2027-10-01: 24 months' worth (600) vest.
         cid = equity.save_company(self.conn, {"name": "Startup", "share_price": 2})
         equity.save_grant(self.conn, cid, {"kind": "nso", "quantity": 1200, "strike": 1, "vest_start": "2025-10-01",
                                            "vest_months": 48, "expires_on": "2027-10-01"})
         by_year = self.sellable("equity:")["value_by_year"]
-        self.assertEqual(by_year[-1], 600)   # 600 × $1 spread, from the expiry on
-        self.assertEqual(len(by_year), 3)    # and nothing changes after it
-        # one that expired before today: only what was exercised from it
+        self.assertEqual(by_year[-1], 600)
+        self.assertEqual(len(by_year), 3)
         cid2 = equity.save_company(self.conn, {"name": "Oldco", "share_price": 2})
         equity.save_grant(self.conn, cid2, {"kind": "iso", "quantity": 1000, "strike": 0.5, "vest_start": "2018-01-01",
                                             "vest_months": 48, "exercised": 300, "expires_on": "2026-01-01"})
@@ -246,9 +228,6 @@ class SellableTests(LedgerCase):
         self.assertEqual(old["value_by_year"], [600])
 
     def test_carta_grants_go_on_vesting_from_what_carta_reported(self):
-        # As Carta sends them: no vesting start (the schedule runs from the grant date), and what's vested as Carta
-        # reported it two days ago, ahead of the schedule from the grant date (9,450 then). It goes on vesting from
-        # there, every year, until it's all vested in November 2028 as the schedule has it, and stays there after.
         today = date(2026, 10, 1)
         self.conn.execute(insert(EquityCompany).values(id="c", name="Startup", share_price=12, in_networth=1, source="carta"))
         self.conn.execute(insert(EquityGrant), [
@@ -260,18 +239,15 @@ class SellableTests(LedgerCase):
              "vested_reported": None, "vested_reported_on": None, "expires_on": "2036-01-23", "source": "carta"}])
         e = next(a for a in planner.sellable(self.conn, today) if a["key"] == "equity:c")
         by_year = e["value_by_year"]
-        es858 = 3002 * (12 - 4.78)   # all vested by January 2027
-        self.assertEqual(by_year[0], round(11168 * 8.5 + 3002 * 8 / 12 * 7.22, 2))   # today: Carta's 11,168 and 8 of 12 months
-        self.assertEqual(len(by_year), 4)   # 2026, 2027, 2028 still vesting (until November), then flat
+        es858 = 3002 * (12 - 4.78)
+        self.assertEqual(by_year[0], round(11168 * 8.5 + 3002 * 8 / 12 * 7.22, 2))
+        self.assertEqual(len(by_year), 4)
         self.assertTrue(by_year[0] < by_year[1] < by_year[2] < by_year[3])
         self.assertEqual(by_year[3], round(20619 * 8.5 + es858, 2))
-        # a year out, the 9,451 still to vest has vested as the schedule vests its last 11,169: 4,362 more
         self.assertAlmostEqual(by_year[1], (11168 + 9451 * 5154.75 / 11168.625) * 8.5 + es858, delta=0.05)
-        # all vested in November 2028, not before
         g = equity.overview(self.conn, today)["companies"][0]["grants"][0]
         self.assertLess(equity.vested_later(g, date(2028, 11, 22), today), 20619)
         self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
-        # Carta behind the schedule: never below what the schedule has vested
         g = {**g, "vested_reported": 5000}
         self.assertEqual(equity.vested_later(g, date(2028, 11, 23), today), 20619)
         self.assertGreaterEqual(equity.vested_later(g, date(2027, 10, 1), today), 5000)

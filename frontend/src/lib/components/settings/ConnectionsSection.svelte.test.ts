@@ -28,13 +28,12 @@ let statuses: Record<string, unknown> = {};
 const serve = (st: PlaidStatus | Error) => vi.mocked(api).mockImplementation(async (path: string) => {
   if (path in statuses) return statuses[path];
   if (path === "/api/plaid/status") { if (st instanceof Error) throw st; return st; }
-  if (path === "/api/retail") throw new Error("The extension's status didn't load");   // its own tests cover it
+  if (path === "/api/retail") throw new Error("The extension's status didn't load");
   if (path.endsWith("/status")) return statuses[path] ?? {};
   return { ok: true, new: 3 };
 });
 const acct = (id: string, org: string | null, provider = "simplefin"): SettingsAccount => ({ id, name: id, kind: "checking", org, provider });
 const state = app.state as unknown as Record<string, unknown>;
-// A service's row: the <details> whose summary carries its name.
 const NAMES = "details > summary [data-service]";
 const card = (name: string) => [...document.querySelectorAll(NAMES)].find((e) => e.textContent === name)!.closest("details") as HTMLDetailsElement;
 const badge = (name: string) => card(name).querySelector("summary [data-status]")!;
@@ -63,7 +62,6 @@ describe("Settings → Connections", () => {
     expect(badge("SimpleFIN")).toHaveTextContent("Not set");
     expect(badge("Plaid")).toHaveTextContent("Not set");
     expect(within(card("SimpleFIN")).getByLabelText("SimpleFIN setup token")).toBeInTheDocument();
-    // no paragraph under the Banks heading
     expect(screen.getByRole("heading", { name: "Banks" }).nextElementSibling).toBe(card("SimpleFIN"));
   });
 
@@ -76,7 +74,7 @@ describe("Settings → Connections", () => {
     await userEvent.click(within(card("Plaid")).getByText("Plaid"));
     await waitFor(() => expect(card("SimpleFIN").open).toBe(false));
     expect(card("Plaid").open).toBe(true);
-    await userEvent.click(within(card("AI categorization")).getByText("AI categorization"));   // not one of the two
+    await userEvent.click(within(card("AI categorization")).getByText("AI categorization"));
     expect(card("Plaid").open).toBe(true);
   });
 
@@ -103,10 +101,10 @@ describe("Settings → Connections", () => {
     state.simplefin = true; state.last_log = { at: "2026-09-30T14:00:00+00:00", ok: true, message: "12 new" };
     serve(status());
     render(ConnectionsSection, { accounts: [acct("sf1", "Discover"), acct("sf2", "Ally Bank"), acct("sf3", "Ally Bank"), acct("pl:x", "Chase"),
-      acct("sf4", "Amex", "plaid")] });   // switched to Plaid under Accounts: SimpleFIN no longer brings it in
+      acct("sf4", "Amex", "plaid")] });
     const sf = card("SimpleFIN");
     expect(badge("SimpleFIN")).toHaveTextContent("Connected");
-    expect(within(sf).getByText(/^Last sync Sep 30, 10:00\sAM · 12 new$/)).toBeInTheDocument();   // in this browser's time zone
+    expect(within(sf).getByText(/^Last sync Sep 30, 10:00\sAM · 12 new$/)).toBeInTheDocument();
     expect(within(sf).getByText(/^3 accounts from Ally Bank, Discover ·/)).toBeInTheDocument();
     expect(within(sf).getByRole("link", { name: "Manage in Accounts" })).toHaveAttribute("href", "#setup/accounts");
     expect(within(sf).queryByLabelText("SimpleFIN setup token")).toBeNull();
@@ -125,7 +123,7 @@ describe("Settings → Connections", () => {
     expect(badge("SimpleFIN")).toHaveTextContent("Needs attention");
     expect(badge("SimpleFIN")).toHaveClass("text-warning");
     expect(card("SimpleFIN").open).toBe(true);
-    expect(screen.getByText(/^Last sync Sep 30, 10:00\sAM$/)).toBeInTheDocument();   // the old UTC form reads as UTC
+    expect(screen.getByText(/^Last sync Sep 30, 10:00\sAM$/)).toBeInTheDocument();
     unmount();
     state.last_log = { at: "2026-09-30T14:00:00+00:00", ok: true, message: "2 new transactions · bank messages: Chase: log in again" };
     state.sync_warnings = ["Chase: log in again"];
@@ -169,7 +167,7 @@ describe("Settings → Connections", () => {
     const plaid = card("Plaid");
     expect(within(plaid).getByText("Fidelity")).toBeInTheDocument();
     expect(within(plaid).getByText("investments")).toBeInTheDocument();
-    expect(within(plaid).queryByText("bank")).toBeNull();   // a plain bank needs no label
+    expect(within(plaid).queryByText("bank")).toBeNull();
     expect(within(plaid).getAllByRole("button", { name: "Sync" })).toHaveLength(2);
     expect(within(plaid).getByRole("button", { name: "Reconnect" })).toBeInTheDocument();
     expect(within(plaid).getAllByRole("button", { name: "Remove" })).toHaveLength(3);
@@ -366,8 +364,8 @@ describe("Settings → Connections, the optional services", () => {
     await screen.findByRole("button", { name: "Connect a bank or card" });
     const ai = within(card("AI categorization"));
     const web = ai.getByLabelText(/Search the web when filling in a card/);
-    expect(web).toBeChecked();   // on unless switched off
-    expect(ai.queryByText(/OpenRouter charges for the search/)).toBeNull();   // the docs cover the cost
+    expect(web).toBeChecked();
+    expect(ai.queryByText(/OpenRouter charges for the search/)).toBeNull();
     await userEvent.click(web);
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/settings", { method: "POST", body: { churn_ai_web: false } }));
   });

@@ -12,7 +12,6 @@ const open = async (props: { from?: string; to?: string } = {}) => {
   await user.click(screen.getByRole("button", { name: /^Dates:/ }));
   return { user, onchange, from: screen.getByLabelText(/^From/) as HTMLInputElement, to: screen.getByLabelText(/^To/) as HTMLInputElement };
 };
-// (jsdom can't place a popover, so it counts as hidden, names and all: find its buttons by their text)
 const inPopover = { hidden: true };
 const inside = (text: string) => screen.getByText(text, { selector: "[data-popover-content] button" });
 const apply = () => inside("Apply");

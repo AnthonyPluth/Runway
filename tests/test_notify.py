@@ -31,7 +31,6 @@ class NotifyTests(DbCase):
         super().setUp()
         self.c.execute(insert(Account).values(id="chk", name="Checking", kind="checking", balance=700,
                                               balance_date="2026-09-23"))
-        # Card closes on the 1st, due on the 25th (two days away), $400 statement unpaid.
         self.c.execute(insert(Account).values(id="cc", name="Visa", kind="credit", balance=-400,
                                               balance_date="2026-09-23", pay_from="chk", plaid_account_id="p-cc"))
         self.c.execute(insert(CardStatement).values(plaid_account_id="p-cc", item_id="item",
@@ -42,7 +41,7 @@ class NotifyTests(DbCase):
         self.c.execute(insert(Transaction).values(id="chk|1", account_id="chk", posted="2026-09-22", amount=-812.5,
                                                   description="BEST BUY", payee="Best Buy", category="Shopping"))
         self.ua, self.p256dh, _ = receiver()
-        env = mock.patch.dict(os.environ, {"RUNWAY_PUSH_HOSTS": "127.0.0.1"})   # the test's own push service
+        env = mock.patch.dict(os.environ, {"RUNWAY_PUSH_HOSTS": "127.0.0.1"})
         env.start()
         self.addCleanup(env.stop)
         self.c.execute(insert(PushSubscription).values(endpoint=f"http://127.0.0.1:{self.srv.server_port}/p/1",
@@ -60,7 +59,7 @@ class NotifyTests(DbCase):
         self.assertIn("$812.50 at Best Buy", t)
         self.assertTrue(any(x.startswith("Checking gets low") or x.startswith("Checking goes negative") for x in t), t)
         n = len(PushService.received)
-        notify.run(self.c, TODAY)                      # nothing new: nothing sent
+        notify.run(self.c, TODAY)
         self.assertEqual(len(PushService.received), n)
 
     def test_preferences(self):
@@ -70,7 +69,6 @@ class NotifyTests(DbCase):
         for bad in ("lots", "nan", "inf", "1e13", None, ""):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "^Enter a number$"):
                 notify.save_prefs(self.c, {"big_charge_over": bad})
-        # A switch sent as text: "false" is off (bool("false") would be on).
         p = notify.save_prefs(self.c, {"review": "true", "missed": "false", "sync_failed": "0", "churn_fee": 1,
                                        "card_due_days": "30", "low_balance_below": "-5"})
         self.assertEqual({k: p[k] for k in ("review", "missed", "sync_failed", "churn_fee", "card_due_days", "low_balance_below")},
@@ -96,7 +94,6 @@ class NotifyTests(DbCase):
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "iPhone · app", "u1")
         self.assertEqual(self.c.execute(select(PushSubscription.device)
                                         .where(PushSubscription.endpoint == "https://fcm.googleapis.com/fcm/send/1")).fetchone()[0], "iPhone · app")
-        # subscribing again from that browser (its keys) makes it whoever is signed in there now, but keeps when it was added
         created = self.c.execute(select(PushSubscription.created)
                                  .where(PushSubscription.endpoint == "https://fcm.googleapis.com/fcm/send/1")).fetchone()[0]
         notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "", "u2")
@@ -104,7 +101,6 @@ class NotifyTests(DbCase):
                                     PushSubscription.user_sub, PushSubscription.created)
                              .where(PushSubscription.endpoint == "https://fcm.googleapis.com/fcm/send/1")).fetchone()
         self.assertEqual(tuple(row), (self.p256dh, "YWJj", "This device", "u2", created))
-        # someone who only knows its address can't take it (new keys), but its owner can renew them
         _ua2, p256dh2, _ = receiver()
         with self.assertRaises(ValueError):
             notify.subscribe(self.c, {"endpoint": "https://fcm.googleapis.com/fcm/send/1", "keys": {"p256dh": p256dh2, "auth": "ZGVm"}}, "x", "u1")
@@ -112,7 +108,6 @@ class NotifyTests(DbCase):
         self.assertEqual(self.c.execute(select(PushSubscription.p256dh, PushSubscription.user_sub)
                                         .where(PushSubscription.endpoint == "https://fcm.googleapis.com/fcm/send/1")).fetchone()[:],
                          (p256dh2, "u2"))
-        # nor a device from before sign-in (nobody's), which only its own browser can claim
         old = "https://fcm.googleapis.com/fcm/send/old"
         notify.subscribe(self.c, {"endpoint": old, "keys": {"p256dh": self.p256dh, "auth": "YWJj"}}, "Old phone", None)
         with self.assertRaises(ValueError):
@@ -121,39 +116,35 @@ class NotifyTests(DbCase):
         self.assertEqual(self.c.execute(select(PushSubscription.user_sub)
                                         .where(PushSubscription.endpoint == old)).fetchone()[0], "u1")
         notify.unsubscribe(self.c, old)
-        self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "iPhone · app"])   # oldest first
+        self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "iPhone · app"])
         notify.unsubscribe(self.c, "https://fcm.googleapis.com/fcm/send/1")
         self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone"])
 
     def test_devices_end_with_the_person(self):
-        # A device's notifications last as long as the person who turned them on may sign in (like their sessions).
         oidc.remember_user(self.c, "u1", "a@example.com", "A")
         oidc.remember_user(self.c, "u2", "b@example.com", "B")
-        for who, n in (("u1", 2), ("u2", 3)):   # both on the test's push service (setUp), as "Test phone" is
+        for who, n in (("u1", 2), ("u2", 3)):
             self.c.execute(insert(PushSubscription).values(endpoint=f"http://127.0.0.1:{self.srv.server_port}/p/{n}",
                                                            p256dh=self.p256dh, auth=webpush.b64u(b"0123456789abcdef"),
                                                            device=f"{who}'s phone", user_sub=who, created=n))
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
             self.assertEqual(notify.lapsed(self.c, {"user_sub": "u2"}), "user_removed")
             self.assertIsNone(notify.lapsed(self.c, {"user_sub": "u1"}))
-            self.assertIsNone(notify.lapsed(self.c, {"user_sub": None}))   # subscribed without sign-in: nobody to lose
+            self.assertIsNone(notify.lapsed(self.c, {"user_sub": None}))
             self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "u1's phone"])
             self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 2)
         self.assertEqual(self.c.execute(select(func.count()).select_from(PushSubscription)).fetchone()[0], 2)
 
     def test_someone_let_in_by_group_who_hasnt_signed_in_lately_is_skipped_not_dropped(self):
-        # With OIDC_ALLOWED_GROUPS, whether someone may still sign in is known only when they do: their alerts pause
-        # RUNWAY_SESSION_DAYS after their last sign-in and come back by themselves when they next sign in (their browser
-        # still holds the subscription; nothing would put a dropped one back).
         oidc.remember_user(self.c, "u1", "a@example.com", "A", when=time.time() - 40 * 86400)
         self.c.execute(insert(PushSubscription).values(endpoint=f"http://127.0.0.1:{self.srv.server_port}/p/2",
                                                        p256dh=self.p256dh, auth=webpush.b64u(b"0123456789abcdef"),
                                                        device="A's phone", user_sub="u1", created=2))
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_GROUPS": "family"}):
             self.assertEqual(notify.lapsed(self.c, {"user_sub": "u1"}), "sign_in_lapsed")
-            self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "A's phone"])   # kept
-            self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 1)                                # skipped
-            oidc.remember_user(self.c, "u1", "a@example.com", "A")                                              # signs in again
+            self.assertEqual([s["device"] for s in notify.subscriptions(self.c)], ["Test phone", "A's phone"])
+            self.assertEqual(notify.send_all(self.c, {"title": "x"})["sent"], 1)
+            oidc.remember_user(self.c, "u1", "a@example.com", "A")
             self.assertIsNone(notify.lapsed(self.c, {"user_sub": "u1"}))
             self.assertEqual(notify.send_all(self.c, {"title": "y"})["sent"], 2)
 
@@ -166,7 +157,6 @@ class NotifyTests(DbCase):
         return f"http://127.0.0.1:{self.srv.server_port}/p/{n}"
 
     def test_each_person_has_their_own_notifications(self):
-        # With sign-in, each person gets alerts on their own devices, by what they chose, and sees only their own.
         from runway.server.api import notifications as api
         from runway.server.common import ApiError, _current
         oidc.remember_user(self.c, "u1", "a@example.com", "A")
@@ -176,18 +166,17 @@ class NotifyTests(DbCase):
         self.addCleanup(lambda: setattr(_current, "user", None))
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com,b@example.com"}):
             _current.user = {"sub": "u2", "email": "b@example.com"}
-            api.api_push_prefs(self.c, {}, {"card_due": False, "low_balance": False})   # B only wants big charges
+            api.api_push_prefs(self.c, {}, {"card_due": False, "low_balance": False})
             mine = api.api_push(self.c, {}, {})
             self.assertFalse(mine["prefs"]["card_due"])
-            # their own device, and the one from before sign-in (nobody's), never A's
             self.assertEqual([(d["device"], d["unclaimed"]) for d in mine["devices"]], [("Test phone", True), ("u2's phone", False)])
             _current.user = {"sub": "u1", "email": "a@example.com"}
-            self.assertTrue(api.api_push(self.c, {}, {})["prefs"]["card_due"])        # A's are their own
+            self.assertTrue(api.api_push(self.c, {}, {})["prefs"]["card_due"])
             self.assertEqual([d["device"] for d in api.api_push(self.c, {}, {})["devices"]], ["Test phone", "u1's phone"])
-            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})      # B's: as if it weren't there
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})
             with self.assertRaises(ApiError):
                 api.api_push_test(self.c, {}, {"endpoint": self.endpoint(3)})
-            with self.assertRaises(ApiError) as e:                                       # nobody's: says how to get it back
+            with self.assertRaises(ApiError) as e:
                 api.api_push_test(self.c, {}, {"endpoint": self.endpoint(1)})
             self.assertIn("before sign-in", str(e.exception))
             self.assertEqual(self.c.execute(select(func.count()).select_from(PushSubscription)).fetchone()[0], 3)
@@ -196,34 +185,33 @@ class NotifyTests(DbCase):
             notify.run(self.c, TODAY)
             to = {p: [decrypt(b, self.ua, b"0123456789abcdef")["title"] for q, _h, b in PushService.received if q == p]
                   for p in ("/p/1", "/p/2", "/p/3")}
-            self.assertEqual(to["/p/1"], [])                                             # nobody's: nothing
+            self.assertEqual(to["/p/1"], [])
             self.assertIn("Visa payment due Friday", to["/p/2"])
             self.assertIn("$812.50 at Best Buy", to["/p/2"])
             self.assertEqual(to["/p/3"], ["$812.50 at Best Buy"])
-            # each sees what they were sent
             self.assertEqual([r["title"] for r in api.api_push(self.c, {}, {})["recent"]].count("$812.50 at Best Buy"), 1)
             _current.user = {"sub": "u2", "email": "b@example.com"}
             self.assertEqual([r["title"] for r in api.api_push(self.c, {}, {})["recent"]], ["$812.50 at Best Buy"])
             n = len(PushService.received)
-            notify.run(self.c, TODAY)                                                    # nothing new for anyone
+            notify.run(self.c, TODAY)
             self.assertEqual(len(PushService.received), n)
-            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})      # their own: gone
-            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(1)})      # nobody's: anyone may remove it
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(3)})
+            api.api_push_unsubscribe(self.c, {}, {"endpoint": self.endpoint(1)})
             self.assertEqual([r[0] for r in self.c.execute(select(PushSubscription.device))], ["u1's phone"])
 
     def test_alerts_sent_before_they_were_each_person_s_count_as_sent(self):
-        notify.run(self.c, TODAY)                                                       # without sign-in: everyone's
+        notify.run(self.c, TODAY)
         oidc.remember_user(self.c, "u1", "a@example.com", "A")
         self.c.execute(update(PushSubscription).values(user_sub="u1"))
         n = len(PushService.received)
         with mock.patch.dict(os.environ, {"OIDC_ISSUER": "https://id.example.com", "OIDC_ALLOWED_EMAILS": "a@example.com"}):
             notify.run(self.c, TODAY)
-            self.assertEqual(len(notify.recent(self.c, "u1")), min(n, 8))              # still listed as sent
+            self.assertEqual(len(notify.recent(self.c, "u1")), min(n, 8))
         self.assertEqual(len(PushService.received), n)
 
     def test_without_sign_in_every_device_is_yours(self):
         from runway.server.api import notifications as api
-        self.add_device("u1", 2)   # turned on while sign-in was on
+        self.add_device("u1", 2)
         self.assertEqual([d["device"] for d in api.api_push(self.c, {}, {})["devices"]], ["Test phone", "u1's phone"])
         notify.run(self.c, TODAY)
         self.assertEqual({p for p, _h, _b in PushService.received}, {"/p/1", "/p/2"})
@@ -268,8 +256,8 @@ class NotifyTests(DbCase):
         got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
         self.assertEqual(sorted(got), ["big:chk|1", "review:2026-09-23", "syncfail:2026-09-23"])
         self.assertEqual((got["big:chk|1"]["title"], got["big:chk|1"]["body"]), ("$812.50 at Best Buy", "On Checking (Sam)."))
-        self.assertEqual(got["review:2026-09-23"]["title"], "3 transactions to review")   # not the brokerage's
-        self.assertNotIn("The bank said no", got["syncfail:2026-09-23"]["body"])   # not on a lock screen: the app has it
+        self.assertEqual(got["review:2026-09-23"]["title"], "3 transactions to review")
+        self.assertNotIn("The bank said no", got["syncfail:2026-09-23"]["body"])
         self.assertIn("Settings", got["syncfail:2026-09-23"]["body"])
         self.c.execute(insert(SyncLog).values(ok=1, message="fine again"))
         self.assertNotIn("syncfail:2026-09-23", {a["key"] for a in notify.alerts(self.c, TODAY, p)})
@@ -279,16 +267,15 @@ class NotifyTests(DbCase):
         self.c.execute(insert(SyncLog).values(ok=0, message="Plaid: ITEM_LOGIN_REQUIRED"))
         p = {**notify.DEFAULTS, "card_due": False, "low_balance": False, "missed": False, "big_charge": False}
         keys = lambda: {a["key"] for a in notify.alerts(self.c, TODAY, p)}
-        self.assertNotIn("syncfail:2026-09-23", keys())                 # no bank connected: nothing to say
+        self.assertNotIn("syncfail:2026-09-23", keys())
         db.set_setting(self.c, "plaid_client_id", "cid"); db.set_setting(self.c, "plaid_secret", "sec")
         self.c.execute(insert(PlaidItem).values(item_id="it", access_token="x", products="transactions"))
-        self.assertIn("syncfail:2026-09-23", keys())                    # a Plaid bank, without SimpleFIN
+        self.assertIn("syncfail:2026-09-23", keys())
 
     def test_a_card_payment_alert_says_which_account_pays(self):
         p = {**notify.DEFAULTS, "card_due": True, "review": False, "low_balance": False, "missed": False}
         got = {a["key"]: a for a in notify.alerts(self.c, TODAY, p)}
         self.assertEqual(got["card:cc:2026-09-25"]["body"], "$400.00 comes out of Checking.")
-        # paying a fixed amount: that's what comes out
         from runway import settings_keys as sk
         db.set_setting(self.c, sk.card_pay_mode("cc"), "fixed")
         db.set_setting(self.c, sk.card_pay_amount("cc"), "150")

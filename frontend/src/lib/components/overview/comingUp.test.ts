@@ -18,7 +18,7 @@ describe("comingUp", () => {
     const all = comingUp({ events, charges }, { charges: true });
     expect(all.map((e) => e.name)).toEqual(["Music", "Rent", "Streaming"]);
     expect(all[2]).toMatchObject({ account_id: "card", account: "Travel Card" });
-    expect(comingUp({ events }, { charges: true }).map((e) => e.name)).toEqual(["Rent"]);   // an older server
+    expect(comingUp({ events }, { charges: true }).map((e) => e.name)).toEqual(["Rent"]);
   });
 
   it("works without fees (an older server)", () => {

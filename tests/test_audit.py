@@ -34,8 +34,6 @@ class SimpleFinOutboundTests(unittest.TestCase):
         self.assertIn("https://", str(cm.exception))
 
     def test_a_private_address_is_refused_before_anything_is_sent(self):
-        # A name that passed check_address can point at this machine by the time Runway connects (or a restored
-        # backup's address was never checked): the connection itself refuses, before the credentials go out.
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)
@@ -47,12 +45,12 @@ class SimpleFinOutboundTests(unittest.TestCase):
             self.assertIn("private network address", str(cm.exception))
         finally:
             listener.close()
-        self.assertIn(got, ([], [b""]))   # nothing (no TLS hello, no request) reached it
+        self.assertIn(got, ([], [b""]))
 
     def test_redirects_are_not_followed(self):
         srv = HTTPServer(("127.0.0.1", 0), Redirecting)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        plain = urllib.request.build_opener(simplefin._NoRedirects())   # plain http for the local test server
+        plain = urllib.request.build_opener(simplefin._NoRedirects())
         try:
             with mock.patch.object(simplefin, "_opener", lambda: plain):
                 with self.assertRaises(simplefin.SimpleFinError) as cm:

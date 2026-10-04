@@ -41,7 +41,7 @@ describe("api", () => {
       fetchMock.mockReturnValue(Promise.resolve(new Response("<html>Bad gateway</html>", { status })));
       await expect(api("/api/x")).rejects.toMatchObject({ message: "Runway is restarting or unreachable. Try again in a moment.", status });
     }
-    fetchMock.mockReturnValue(reply({ error: "Plaid is down" }, 502));   // Runway's own message stays as it is
+    fetchMock.mockReturnValue(reply({ error: "Plaid is down" }, 502));
     await expect(api("/api/x")).rejects.toMatchObject({ message: "Plaid is down", status: 502 });
   });
 
@@ -63,7 +63,7 @@ describe("api", () => {
 
   it("sends you to sign in again, and back here, when the session has expired", async () => {
     fetchMock.mockReturnValue(reply({}, 401));
-    const fake = { href: "", pathname: "/", hash: "#budget" };   // jsdom can't navigate, so watch the assignment
+    const fake = { href: "", pathname: "/", hash: "#budget" };
     vi.stubGlobal("location", fake);
     await expect(api("/api/x")).rejects.toMatchObject({ status: 401 });
     expect(fake.href).toBe("/auth/login?next=" + encodeURIComponent("/#budget"));
@@ -79,7 +79,7 @@ describe("api", () => {
     await expect(api("/api/state", { keep: true, background: true }))
       .rejects.toMatchObject({ message: "Your session expired. Sign in again to keep going.", status: 401 });
     expect(fake.href).toBe("");
-    const cancel = (e: Event) => e.preventDefault();   // what the app does while you're editing
+    const cancel = (e: Event) => e.preventDefault();
     window.addEventListener("runway:signed-out", cancel);
     await expect(api("/api/x", { method: "POST", body: { split: 1 } })).rejects.toMatchObject({ status: 401 });
     expect(fake.href).toBe("");

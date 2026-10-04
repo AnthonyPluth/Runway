@@ -62,13 +62,13 @@ describe("dates", () => {
     expect(nb("in 3 days")).toBe(`in${NBSP}3${NBSP}days`);
   });
   it("says how far off a day is", () => {
-    const today = "2026-09-28";   // a Monday
+    const today = "2026-09-28";
     expect(relDay("2026-09-28", today)).toBe("today");
     expect(relDay("2026-09-29", today)).toBe("tomorrow");
     expect(relDay("2026-10-01", today)).toBe("Thursday");
     expect(relDay("2026-10-04", today)).toBe("Sunday");
-    expect(relDay("2026-10-05", today)).toBe(`Oct${NBSP}5`);   // a week out
-    expect(relDay("2026-09-27", today)).toBe(`Sep${NBSP}27`);  // yesterday is a date
+    expect(relDay("2026-10-05", today)).toBe(`Oct${NBSP}5`);
+    expect(relDay("2026-09-27", today)).toBe(`Sep${NBSP}27`);
   });
   it("counts days across a month end", () => {
     expect(relDay("2026-03-01", "2026-02-28")).toBe("tomorrow");
@@ -94,7 +94,7 @@ describe("serverTime", () => {
     expect(serverTime("2026-09-30T12:02:00+00:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
     expect(serverTime("2026-09-30T07:02:00-05:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
     expect(serverTime("2026-09-30 12:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
-    expect(serverTime("2026-09-30T08:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");   // New York, the tests' zone
+    expect(serverTime("2026-09-30T08:02:00").toISOString()).toBe("2026-09-30T12:02:00.000Z");
   });
 });
 
@@ -156,7 +156,7 @@ describe("barWidth", () => {
     expect(barWidth(1)).toBe("100%");
     expect(barWidth(1.5)).toBe("100%");
     expect(barWidth(-1)).toBe("0%");
-    expect(barWidth(Infinity)).toBe("100%");   // spent something against nothing: full
+    expect(barWidth(Infinity)).toBe("100%");
   });
   it("is an empty bar with no share", () => {
     expect(barWidth(NaN)).toBe("0%");
@@ -167,7 +167,6 @@ describe("barWidth", () => {
 
 describe("fmtDateTime", () => {
   it("shows the day and time in the local zone", () => {
-    // 21:54 UTC is 5:54 PM in New York, the zone `npm test` runs in.
     expect(fmtDateTime(new Date("2026-09-28T21:54:00Z"))).toBe("Sep 28, 5:54 PM");
   });
 });

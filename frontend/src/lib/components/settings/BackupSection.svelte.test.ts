@@ -35,11 +35,11 @@ describe("Settings → Data: download", () => {
       expect(screen.getByText("Last backup: Sep 28")).toBeInTheDocument();
       const link = screen.getByRole("link", { name: "Download a backup" });
       expect(link).toHaveAttribute("href", "/api/backup");
-      link.addEventListener("click", (e) => e.preventDefault());   // jsdom can't download
+      link.addEventListener("click", (e) => e.preventDefault());
       link.click();
       vi.mocked(refreshState).mockClear();
       vi.advanceTimersByTime(3000);
-      expect(refreshState).toHaveBeenCalled();                     // to pick up the new "Last backup"
+      expect(refreshState).toHaveBeenCalled();
       cleanup();
       app.state!.last_backup = "2025-01-05T08:00:00-05:00";
       render(BackupSection);
@@ -60,7 +60,7 @@ describe("Settings → Data: restore", () => {
     render(BackupSection);
     const user = userEvent.setup();
     const open = screen.getByRole("button", { name: "Restore…" });
-    expect(open).toBeDisabled();                                       // nothing chosen yet
+    expect(open).toBeDisabled();
     await choose();
     expect(await screen.findByText("Backup from Sep 1, 2026, 9:30 AM (Postgres): 3 accounts, 1,234 transactions, 4 recurring items, 1 budget"))
       .toBeInTheDocument();
@@ -81,7 +81,6 @@ describe("Settings → Data: restore", () => {
     expect(toast.success).toHaveBeenCalledWith("Restored");
     expect(reload).toHaveBeenCalled();
 
-    // What's worth keeping stays under Restore, through the page redrawing, until it's dismissed.
     const note = () => screen.getByRole("alert");
     expect(note()).toHaveTextContent("Restored the backup from Sep 1, 2026, 9:30 AM.");
     expect(note()).toHaveTextContent("A copy of what was here before is at /data/runway-before-restore-2026-09-30-101500.json.gz.");
@@ -104,14 +103,14 @@ describe("Settings → Data: restore", () => {
     render(BackupSection);
     const user = userEvent.setup();
     await choose();
-    expect(await screen.findByText(warning)).toBeInTheDocument();       // before you restore it
+    expect(await screen.findByText(warning)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Restore…" }));
     const dialog = await screen.findByRole("dialog", { name: "Replace everything with this backup?" });
     expect(dialog).toHaveTextContent(warning);
     await user.type(within(dialog).getByLabelText(/Type RESTORE to confirm/), "RESTORE");
     await user.click(within(dialog).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.getByRole("alert")).toHaveTextContent(warning);       // and after, until dismissed
+    expect(screen.getByRole("alert")).toHaveTextContent(warning);
     cleanup();
     render(BackupSection);
     await user.click(within(screen.getByRole("alert")).getByRole("button", { name: "Dismiss" }));

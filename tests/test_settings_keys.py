@@ -8,7 +8,6 @@ import unittest
 from runway import settings_keys as sk
 
 RUNWAY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runway")
-# Raw SQL that names a settings row by a literal: settings ... key='x' (or LIKE 'x%').
 SQL_KEY = re.compile(r"\bsettings\b.*\bkey\s*(=|LIKE|IN)\s*\(?\s*'", re.I | re.S)
 
 
@@ -71,7 +70,6 @@ class SettingsKeysTest(unittest.TestCase):
         self.assertLessEqual(set(sk.SECRETS), set(constants().values()))
 
     def test_every_key_is_used(self):
-        # A name nothing refers to is a key that was renamed or retired without cleaning up here.
         code = "\n".join(src for _name, src, _tree in sources())
         unused = [k for k in constants() if not re.search(rf"\bsk\.{k}\b", code)]
         self.assertEqual(unused, [])

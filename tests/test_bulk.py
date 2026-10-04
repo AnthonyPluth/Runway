@@ -35,7 +35,7 @@ class BulkTests(Fixture):
         self.assertEqual(categorize.bulk_update(self.c, ["t0", "t1", "t2", "nope"], category="Coffee & Snacks"), 3)
         r = self.rows()
         self.assertEqual(r["t0"][1:], ("Coffee & Snacks", "manual", 0, 0))
-        self.assertEqual(r["t2"][1:], ("Coffee & Snacks", "manual", 0, 0))          # a split goes back together
+        self.assertEqual(r["t2"][1:], ("Coffee & Snacks", "manual", 0, 0))
         self.assertEqual(splits.get(self.c, "t2"), [])
         categorize.bulk_update(self.c, ["t0", "t1"], payee="Joe's Coffee")
         self.assertEqual({self.rows()[t][0] for t in ("t0", "t1")}, {"Joe's Coffee"})
@@ -62,7 +62,6 @@ class BulkTests(Fixture):
         self.assertEqual([(p["category"], p["amount"]) for p in splits.get(self.c, "t2")], [("Groceries", -60), ("Shopping", -40)])
 
     def test_restore_puts_the_payee_back_exactly(self):
-        # A bank's payee isn't tidied like a rename: double spaces and length survive an undo.
         long = "ACH WEB SINGLE CO NAME " * 5
         for tid, payee in (("t0", "SQ *JOES  COFFEE"), ("t1", long)):
             self.c.execute(update(Transaction).where(Transaction.id == tid).values(payee=payee))
@@ -71,7 +70,7 @@ class BulkTests(Fixture):
         self.assertEqual(api_tx.restore(self.c, was), 2)
         self.assertEqual(self.rows()["t0"][0], "SQ *JOES  COFFEE")
         self.assertEqual(self.rows()["t1"][0], long)
-        self.assertEqual(api_tx.restore(self.c, [{"id": "t0", "payee": 7}]), 1)   # not text: cleared, not str()'d
+        self.assertEqual(api_tx.restore(self.c, [{"id": "t0", "payee": 7}]), 1)
         self.assertIsNone(self.rows()["t0"][0])
 
     def test_restore_skips_what_is_gone_and_unknown_categories(self):
@@ -90,7 +89,7 @@ class BulkTests(Fixture):
 
 class RuleApplyTests(Fixture):
     def test_apply_says_what_changed_so_it_can_be_undone(self):
-        self.c.execute(update(Transaction).where(Transaction.id == "t1").values(category_source="manual"))   # yours: the rule leaves it alone
+        self.c.execute(update(Transaction).where(Transaction.id == "t1").values(category_source="manual"))
         rid = rules.save(self.c, {"match": "joes", "category": "Coffee & Snacks", "rename": "Joe's"})
         before = self.rows()
         r = api_categories.api_rule_apply(self.c, None, None, str(rid))
@@ -99,7 +98,7 @@ class RuleApplyTests(Fixture):
         by = {c["id"]: c for c in r["changed"]}
         self.assertEqual(set(by), {"t0", "t1"})
         self.assertEqual((by["t0"]["was_category"], by["t0"]["was_payee"], by["t0"]["was_needs_review"]), (None, "SQ *JOES 1", 1))
-        self.assertEqual((by["t1"]["was_category"], by["t1"]["was_source"]), ("Shopping", "manual"))   # renamed only
+        self.assertEqual((by["t1"]["was_category"], by["t1"]["was_source"]), ("Shopping", "manual"))
         rows = [{"id": c["id"], "category": c["was_category"], "category_source": c["was_source"], "confidence": c["was_confidence"],
                  "needs_review": c["was_needs_review"], "payee": c["was_payee"], "is_split": c["was_split"]} for c in r["changed"]]
         api_tx.restore(self.c, rows)

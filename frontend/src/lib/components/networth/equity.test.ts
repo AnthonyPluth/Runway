@@ -37,7 +37,6 @@ describe("vestingSeries", () => {
     const co = company({
       share_price: 10,
       grants: [
-        // Cumulative vested shares on each date.
         grant({ kind: "rsu", schedule: [["2026-01-15", 100], ["2026-03-15", 200]] }),
         grant({ kind: "iso", strike: 4, schedule: [["2026-02-01", 50]] }),
       ],
@@ -59,7 +58,6 @@ describe("vestingSeries", () => {
     const sized = (name: string, n: number) => company({ name, share_price: 1, grants: [grant({ schedule: [["2026-05-10", n]] })] });
     const cos = [sized("A", 10), sized("B", 500), sized("C", 30), sized("D", 400), sized("E", 20), sized("F", 300)];
     const s = vestingSeries(cos)!;
-    // The three biggest keep their own lines, in the companies' order; C, E and A (30 + 20 + 10) are Other.
     expect(s.lines.map((l) => l.name)).toEqual(["B", "D", "F", "Other"]);
     expect(s.lines.at(-1)!.values).toEqual([60, 60]);
     const all = (i: number) => s.lines.reduce((a, l) => a + l.values[i], 0);

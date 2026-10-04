@@ -91,7 +91,7 @@ class DbCase(unittest.TestCase):
         from runway import db
         self.path = own_database(self)
         self.c = db.connect(self.path)
-        self.addCleanup(self.c.close)   # cleanups run last first: the connection closes before the directory goes
+        self.addCleanup(self.c.close)
 
 
 TODAY = date(2026, 9, 23)

@@ -12,7 +12,7 @@ import Status from "./Status.svelte";
 import { reportState } from "./state.svelte";
 import type { Cashflow as Flow } from "./types";
 
-const desc = { selector: "dt > span" };   // "Money in" is also a table heading
+const desc = { selector: "dt > span" };
 const flow = (extra: Partial<Flow> = {}): Flow => ({
   month: "2026-03",
   income: [{ name: "Salary", value: 4000 }],
@@ -28,8 +28,8 @@ describe("Cashflow report", () => {
     render(Cashflow);
     expect(await screen.findByText("Money in", desc)).toBeInTheDocument();
     expect(screen.getByText("$4,000", { selector: "dd" })).toBeInTheDocument();
-    expect(screen.getByText("$2,000", { selector: "dd" })).toBeInTheDocument();   // money out
-    expect(screen.getByText("$2,000", { selector: "div" })).toBeInTheDocument();   // the left-over hero
+    expect(screen.getByText("$2,000", { selector: "dd" })).toBeInTheDocument();
+    expect(screen.getByText("$2,000", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("Left over", { selector: "div" })).toBeInTheDocument();
     expect(screen.getByText("Savings rate 50%")).toBeInTheDocument();
     expect(api).toHaveBeenCalledWith("/api/cashflow?month=2026-03");
@@ -42,7 +42,7 @@ describe("Cashflow report", () => {
     expect(label).toHaveClass("text-destructive");
     expect(screen.queryByText(/▲/)).not.toBeInTheDocument();
     expect(screen.getByText("Savings rate −50%")).toBeInTheDocument();
-    expect(screen.getByText("$500", { selector: "div" })).toHaveClass("text-destructive");   // shown without the sign
+    expect(screen.getByText("$500", { selector: "div" })).toHaveClass("text-destructive");
   });
 
   it("frames a month still under way as so far, in muted text, even when more went out than came in", async () => {
@@ -68,7 +68,7 @@ describe("Cashflow report", () => {
     render(Cashflow);
     expect(await screen.findByText("$1,000", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("$500", { selector: "dd" })).toBeInTheDocument();
-    expect(screen.getByText("$500", { selector: "div" })).toBeInTheDocument();   // 1,000 − 500, not $501
+    expect(screen.getByText("$500", { selector: "div" })).toBeInTheDocument();
   });
 
   it("lists the same numbers as a table with shares and subcategories", async () => {
@@ -174,7 +174,6 @@ describe("Cashflow report", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(api).toHaveBeenLastCalledWith("/api/cashflow?month=2026-10");
     expect(await screen.findByText("October 2026")).toBeInTheDocument();
-    // A month someone picked stays
     reportState.month = "2026-08"; reportState.monthPicked = true;
     vi.mocked(api).mockClear();
     vi.setSystemTime(new Date("2026-11-01T00:01:00"));

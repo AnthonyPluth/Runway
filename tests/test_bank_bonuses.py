@@ -29,27 +29,27 @@ class LogicTests(unittest.TestCase):
     def test_direct_deposits(self):
         dd = lambda **kw: bb.is_direct_deposit({"amount": 1000, "category": None, "payee": "", "description": "", **kw}, CATS)
         self.assertTrue(dd(category="Paycheck"))
-        self.assertTrue(dd(description="ACME CORP PAYROLL PPD"))     # not categorized yet, looks like payroll
+        self.assertTrue(dd(description="ACME CORP PAYROLL PPD"))
         self.assertTrue(dd(payee="Gusto"))
-        self.assertFalse(dd(category="Refunds"))                     # a refund isn't a paycheck
-        self.assertFalse(dd(category="Transfer", description="PAYROLL"))   # moved from your own account
+        self.assertFalse(dd(category="Refunds"))
+        self.assertFalse(dd(category="Transfer", description="PAYROLL"))
         self.assertFalse(dd(description="Zelle from Sam"))
         self.assertFalse(dd(amount=-50, category="Paycheck"))
 
     def test_progress_and_state(self):
         b = bonus(dd_total=2000, dd_count=2, debit_count=3, min_balance=1500)
-        rows = [tx("2026-07-31", 5000, "Paycheck"),                 # before it was opened
+        rows = [tx("2026-07-31", 5000, "Paycheck"),
                 tx("2026-08-15", 1200, "Paycheck"), tx("2026-08-29", 900, None, description="DIR DEP ACME"),
                 tx("2026-08-30", 500, "Transfer"), tx("2026-09-01", -20, "Groceries"), tx("2026-09-02", -40, None),
-                tx("2026-09-03", -300, "Transfer"),                   # moving money out isn't a purchase
-                tx("2026-11-15", 3000, "Paycheck")]                   # after the deadline (Oct 30)
+                tx("2026-09-03", -300, "Transfer"),
+                tx("2026-11-15", 3000, "Paycheck")]
         p = bb.progress(b, rows, CATS, 1600)
         self.assertEqual((p["dd_total"], p["dd_count"], p["debits"], p["balance_ok"], p["met"]), (2100, 2, 2, True, False))
         self.assertEqual(bb.state(b, p, TODAY), "active")
         p = bb.progress(b, [*rows, tx("2026-09-10", -5, None)], CATS, 1600)
         self.assertTrue(p["met"])
         self.assertEqual(bb.state(b, p, TODAY), "met")
-        self.assertFalse(bb.progress(b, [*rows, tx("2026-09-10", -5, None)], CATS, 100)["met"])   # balance too low
+        self.assertFalse(bb.progress(b, [*rows, tx("2026-09-10", -5, None)], CATS, 100)["met"])
         manual = bb.progress({**b, "account_id": None, "manual_dd": 2500, "manual_debits": 3}, [], CATS, None)
         self.assertEqual((manual["dd_total"], manual["dd_count"], manual["balance_ok"], manual["met"]), (2500, None, None, True))
         missed = bb.progress(b, [], CATS, 0)
@@ -60,15 +60,13 @@ class LogicTests(unittest.TestCase):
 
     def test_dates(self):
         b = bonus()
-        self.assertEqual(bb.deadline(b), date(2026, 10, 30))                   # 90 days by default
+        self.assertEqual(bb.deadline(b), date(2026, 10, 30))
         self.assertEqual(bb.deadline({**b, "deadline_days": 60}), date(2026, 9, 30))
         self.assertEqual(bb.deadline({**b, "deadline": "2026-12-31"}), date(2026, 12, 31))
-        self.assertEqual(bb.expected_on(b), date(2026, 12, 29))                # + 60 days to post
-        # Safe to close: the latest of the days to keep it open, the balance hold, and the bonus posting
+        self.assertEqual(bb.expected_on(b), date(2026, 12, 29))
         self.assertEqual(bb.safe_close_on({**b, "keep_open_days": 180}), date(2027, 1, 28))
         self.assertEqual(bb.safe_close_on({**b, "keep_open_days": 30, "received_on": "2026-10-20"}), date(2026, 10, 20))
         self.assertEqual(bb.safe_close_on({**b, "received_on": "2026-10-20", "hold_until": "2026-11-30"}), date(2026, 12, 1))
-        # Fee reminders on the day of the month it was opened, while there's a fee
         self.assertEqual(bb.next_fee_reminder({**b, "monthly_fee": 12, "opened_on": "2026-01-31"}, TODAY), date(2026, 9, 30))
         self.assertIsNone(bb.next_fee_reminder({**b, "monthly_fee": 0}, TODAY))
         self.assertIsNone(bb.next_fee_reminder({**b, "monthly_fee": 12, "status": "closed"}, TODAY))
@@ -81,7 +79,7 @@ class LogicTests(unittest.TestCase):
         self.assertEqual(bb.eligibility({**old, "repeat_months": None}, [], TODAY)["status"], "unknown")
         self.assertEqual(bb.eligibility({**old, "eligible_on": "2026-01-01"}, [], TODAY)["status"], "now")
         current = bonus(2)
-        self.assertEqual(bb.eligibility(old, [old, current], TODAY)["status"], "in_progress")   # the same bank, still going
+        self.assertEqual(bb.eligibility(old, [old, current], TODAY)["status"], "in_progress")
         self.assertEqual(bb.eligibility(bonus(3, bank="Citi"), [old], TODAY)["status"], "in_progress")
         sams = bonus(4, owner="Sam", status="closed")
         self.assertEqual(bb.eligibility(sams, [old, sams], TODAY)["status"], "now")
@@ -108,7 +106,7 @@ class DbTests(DbCase):
         self.assertEqual(out["five24"]["Sam"]["count"], 0)
         chase = out["bank"][0]
         self.assertEqual((chase["state"], chase["progress"]["dd_total"], chase["due"]), ("active", 300, "2026-10-30"))
-        self.assertEqual(chase["safe_close_on"], "2027-01-28")   # 180 days, and after it posts (Dec 29)
+        self.assertEqual(chase["safe_close_on"], "2027-01-28")
         sofi = out["bank"][1]
         self.assertEqual((sofi["state"], sofi["status"], sofi["eligibility"]["on"]), ("received", "received", "2027-03-01"))
         self.assertEqual(out["bank_income"], {"Sam": {"2025": 275.0, "2026": 500.0}})
@@ -137,7 +135,7 @@ class DbTests(DbCase):
                                     ChurnBankBonus.once_per_lifetime)
                              .where(ChurnBankBonus.id == bid)).fetchone()
         self.assertEqual(tuple(row), ("checking", 90, 60, 0.0, "open", 0))
-        bb.save(self.c, {"received_on": "2026-10-01"}, bid)   # a day it posted: received
+        bb.save(self.c, {"received_on": "2026-10-01"}, bid)
         self.assertEqual(self.c.execute(select(ChurnBankBonus.status)
                                         .where(ChurnBankBonus.id == bid)).fetchone()[0], "received")
         with self.assertRaisesRegex(ChurnError, "not found"):

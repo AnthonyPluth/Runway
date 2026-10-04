@@ -59,7 +59,7 @@ describe("Report", () => {
     r.load();
     calls[0].resolve("old");
     await calls[0].p;
-    expect(r.loading).toBe(true);   // the newer one is still out
+    expect(r.loading).toBe(true);
     calls[1].resolve("new");
     await calls[1].p;
     expect(r.loading).toBe(false);
@@ -125,13 +125,13 @@ describe("report colors and links", () => {
       const ink = channels(textOn(c))!;
       expect(contrast(channels(c)!, ink)).toBeGreaterThanOrEqual(4.5);
     }
-    expect(textOn("var(--nowhere)")).toBe(INK_DARK);   // can't be read: dark ink
+    expect(textOn("var(--nowhere)")).toBe(INK_DARK);
   });
 
   it("turns a report's exclusive end into Transactions' last day, across months and years", () => {
     expect(dayBefore("2026-10-01")).toBe("2026-09-30");
     expect(dayBefore("2027-01-01")).toBe("2026-12-31");
-    expect(dayBefore("2026-03-09")).toBe("2026-03-08");   // the day the clocks change
+    expect(dayBefore("2026-03-09")).toBe("2026-03-08");
   });
 
   it("asks Transactions for the accounts the reports count, and for no category as Uncategorized", () => {

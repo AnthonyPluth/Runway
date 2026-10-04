@@ -46,7 +46,7 @@ describe("ages that can't be", () => {
   it("flags retiring before the age you are now, and says what the age is", () => {
     expect(retireError({ name: "A", birth_year: Y - 70, retire_age: 65, savings: 0 }, Y)).toBe("At least 70, your age now");
     expect(retireError({ name: "A", birth_year: Y - 40, retire_age: 65, savings: 0 }, Y)).toBeNull();
-    expect(retireError({ name: "A", birth_year: Y - 65, retire_age: 65, savings: 0 }, Y)).toBeNull();   // retiring this year is fine
+    expect(retireError({ name: "A", birth_year: Y - 65, retire_age: 65, savings: 0 }, Y)).toBeNull();
   });
 
   it("says nothing while a birth year or age is still being typed", () => {
@@ -66,7 +66,7 @@ describe("ages that can't be", () => {
     expect(planUsable(plan({ plan_to_age: 60 }), Y)).toBe(false);
     expect(agesFit(plan({ plan_to_age: 60 }), Y)).toBe(false);
     expect(planUsable(plan({ people: [{ name: "A", birth_year: 0, retire_age: 65, savings: 0 }] }), Y)).toBe(false);
-    expect(agesFit(plan({ people: [{ name: "A", birth_year: 0, retire_age: 65, savings: 0 }] }), Y)).toBe(true);   // not wrong, just not there yet
+    expect(agesFit(plan({ people: [{ name: "A", birth_year: 0, retire_age: 65, savings: 0 }] }), Y)).toBe(true);
   });
 
   it("takes a birth year of someone 14 to 100 years old", () => {
@@ -87,7 +87,7 @@ describe("projectable", () => {
     expect(out.spending).toBe(0);
     expect(out.income).toEqual([{ name: "Pension", amount: 0, person: 0, start_age: 67, end_age: null }]);
     expect(out.events).toEqual([{ name: "Roof", year: 0, amount: -10 }]);
-    expect(Number.isNaN(p.people[0].savings)).toBe(true);   // the plan itself is left as typed
+    expect(Number.isNaN(p.people[0].savings)).toBe(true);
   });
 });
 

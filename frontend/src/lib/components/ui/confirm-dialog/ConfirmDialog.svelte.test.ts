@@ -14,7 +14,7 @@ describe("ConfirmDialog", () => {
     const dialog = await screen.findByRole("dialog", { name: "Delete the thing?" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveAccessibleDescription("It goes for good.");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());   // the safe choice first
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus());
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -39,7 +39,7 @@ describe("ConfirmDialog", () => {
     const box = screen.getByLabelText(/Type RESTORE to confirm/);
     await waitFor(() => expect(box).toHaveFocus());
     await user.type(box, "restore");
-    expect(go).toBeDisabled();                                         // exactly the word
+    expect(go).toBeDisabled();
     await user.clear(box);
     await user.type(box, "RESTORE");
     expect(go).toBeEnabled();
@@ -47,7 +47,7 @@ describe("ConfirmDialog", () => {
     expect(onconfirm).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "Deleting…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    await user.keyboard("{Escape}");                                   // not while it's working
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     finish();
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyLiveQuotes } from "./live";
 import type { Holding, Investments, Quote } from "./types";
 
-const NOW = 1_790_000_000;   // seconds
+const NOW = 1_790_000_000;
 
 function holding(over: Partial<Holding>): Holding {
   return {
@@ -11,7 +11,6 @@ function holding(over: Partial<Holding>): Holding {
     allocation: 0, gain: null, gain_pct: null, day_change: null, day_change_pct: null, ...over,
   };
 }
-// Only the fields applyLiveQuotes reads and writes.
 const page = (holdings: Holding[]) =>
   ({ holdings, total: 0, unrealized_gain: null, cost_basis: null, day_change: null, day_change_pct: null }) as unknown as Investments;
 const quote = (over: Partial<Quote>): Quote => ({ price: 0, prev_close: null, time: NOW - 60, type: "EQUITY", ...over });
@@ -40,7 +39,7 @@ describe("applyLiveQuotes", () => {
     expect(a.allocation).toBeCloseTo(1100 / 1600, 10);
     expect(cash.allocation).toBeCloseTo(500 / 1600, 10);
     expect(d.day_change).toBe(100);
-    expect(d.day_change_pct).toBeCloseTo(0.1, 10);   // against the 1,000 it was worth at yesterday's close
+    expect(d.day_change_pct).toBeCloseTo(0.1, 10);
     expect(d.unrealized_gain).toBe(300);
     expect(d.cost_basis).toBe(800);
   });
@@ -70,6 +69,6 @@ describe("applyLiveQuotes", () => {
     expect(d.total).toBe(10);
     expect(d.day_change).toBeNull();
     expect(d.day_change_pct).toBeNull();
-    expect(d.unrealized_gain).toBeNull();   // no holding's gain is known
+    expect(d.unrealized_gain).toBeNull();
   });
 });

@@ -9,7 +9,6 @@ describe("opening the forecast settings from a link", () => {
     const { forecastSheet } = await import("./forecastSheet.svelte");
     expect(forecastSheet.open).toBe(true);
     expect(location.hash).toBe("#overview");
-    // the same link works again once it's closed
     forecastSheet.open = false;
     location.hash = "overview?forecast";
     await vi.waitFor(() => expect(forecastSheet.open).toBe(true));

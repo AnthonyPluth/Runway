@@ -39,7 +39,7 @@ describe("validateWish", () => {
     expect(validateWish({ owner: "Alex", kind: "card", issuer: "chase", product: "" }).product).toBeDefined();
     expect(validateWish({ owner: "Alex", kind: "card", issuer: "chase", product: "Gold" })).toEqual({});
     expect(validateWish({ owner: "Alex", kind: "bank_bonus", bank: " " }).bank).toBe("Enter the bank, like Chase.");
-    expect(validateWish({ owner: "Alex", kind: "bank_bonus", bank: "Chase", product: "" })).toEqual({});   // the offer is optional
+    expect(validateWish({ owner: "Alex", kind: "bank_bonus", bank: "Chase", product: "" })).toEqual({});
   });
 });
 
@@ -47,7 +47,7 @@ describe("validateBenefit", () => {
   it("needs a name, and an amount that isn't below 0", () => {
     expect(validateBenefit({ name: "", kind: "credit", amount: "" }).name).toBe("Enter the benefit’s name, like Lyft credit.");
     expect(validateBenefit({ name: "Lyft", kind: "credit", amount: "-5" }).amount).toBe("The amount can’t be below 0.");
-    expect(validateBenefit({ name: "Lounge", kind: "access", amount: "-5" })).toEqual({});   // an access benefit has no amount
+    expect(validateBenefit({ name: "Lounge", kind: "access", amount: "-5" })).toEqual({});
   });
 });
 
