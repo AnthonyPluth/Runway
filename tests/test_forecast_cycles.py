@@ -1,6 +1,7 @@
 """The pieces forecast.build is made of: a card's statement and billing cycle (bank_statement), its statements cycle by
 cycle (statement_cycles, month_end_cycles, simulate_statements), what's paid toward one (paid_toward), the chart's
 balances, and moving card payment edits saved under their old keys, which the Overview does and build doesn't."""
+import itertools
 import unittest
 from datetime import date
 from unittest import mock
@@ -50,6 +51,15 @@ class BankStatementTests(LedgerCase):
 
     def test_none_without_a_statement(self):
         self.assertIsNone(forecast.bank_statement(self.conn, self.card(), TODAY))
+
+    def test_a_statement_you_entered_has_no_issuer_apr_and_only_it_goes_stale(self):
+        self.manual("cc", 800.0, "2026-07-10", "2026-08-05")
+        info = self.cycle("cc")
+        self.assertEqual((info["statement_source"], info["statement_stale"], info["apr"], info["apr_source"]),
+                         ("manual", True, None, None))
+        self.stmt("cc", 800.0, "2026-07-10", "2026-08-05")
+        info = self.cycle("cc")
+        self.assertEqual((info["statement_source"], info["statement_stale"]), ("plaid", False))
 
 
 class CycleTests(unittest.TestCase):
@@ -127,6 +137,15 @@ class SimulateTests(unittest.TestCase):
     def test_a_cycle_paid_before_today_has_no_estimate(self):
         cycles = self.run_cycles(FULL, 0.0, today=date(2026, 11, 20), charged_so_far=50.0, budgets={"2026-11-01": 20.0})
         self.assertEqual(["estimate" in c for c in cycles], [False, True])
+
+    def test_paying_the_estimated_minimum_never_lets_the_balance_grow(self):
+        cycles = forecast.simulate_statements(
+            forecast.statement_cycles(date(2026, 9, 10), 10, 5, date(2027, 12, 31)), card_id="cc", start=date(2026, 9, 10),
+            owing=5000.0, plan={**MINIMUM, "apr": 29.99}, today=TODAY, budgets={}, charges=[], fees=[], covers=set(),
+            spent_on={})
+        statements = [c["statement"] for c in cycles]
+        self.assertGreater(len(statements), 12)
+        self.assertTrue(all(b < a for a, b in itertools.pairwise(statements)), statements)
 
 
 class ChartTests(unittest.TestCase):

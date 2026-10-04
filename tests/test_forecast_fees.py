@@ -326,6 +326,12 @@ class AnnualFeeTests(LedgerCase):
         card = next(c for c in fc["cards"] if c["id"] == "cc")
         self.assertEqual(card["annual_fees"], [])
 
+    def test_what_reads_as_an_annual_fee(self):
+        for text in ("ANNUAL FEE", "Annual Membership Fee", "MEMBERSHIP FEE", "annual  fee"):
+            self.assertTrue(forecast.FEE_TEXT.search(text), text)
+        for text in ("LATE FEE", "FOREIGN TRANSACTION FEE", "ANNUAL PERCENTAGE RATE"):
+            self.assertFalse(forecast.FEE_TEXT.search(text), text)
+
     def test_late_fee_comes_today(self):
         self.churn(account_id="cc")
         self.churn(opened="2024-10-02", product="Unlinked")
