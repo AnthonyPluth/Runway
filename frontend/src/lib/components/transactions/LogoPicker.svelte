@@ -4,6 +4,7 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import type { Snippet } from "svelte";
+  import { act, errMsg } from "$lib/act";
 
   // The merchant's logo, which (tucked away: click it) lets you choose another for every transaction from that
   // merchant: one of Logo.dev's matches for its name, a website's logo, none, or Runway's own pick again. With
@@ -64,15 +65,13 @@
     opts = null;
     const query = account ? "" : holding ? `?group=${encodeURIComponent(holding)}&name=${encodeURIComponent(name)}` : `?name=${encodeURIComponent(name)}`;
     try { opts = await api<Options>(`${base}/logo-options${query}`); website = opts.choice?.website ?? ""; }
-    catch (err) { toast.error((err as Error).message); open = false; }
+    catch (err) { toast.error(errMsg(err)); open = false; }
   }
   async function choose(body: { website?: string; hidden?: boolean }, what: string) {
-    busy = true;
-    try {
+    await act(async () => {
       await api(`${base}/logo`, { method: "POST", body: account ? body : holding ? { group: holding, ...body } : { name, ...body } });
       toast.success(account || holding ? `${what} for ${name}` : `${what} for every ${name} transaction`); close(); onchanged();
-    } catch (err) { toast.error((err as Error).message); }
-    finally { busy = false; }
+    }, { busy: (on) => (busy = on) });
   }
   function outside(e: MouseEvent) {
     const t = e.target as Node;

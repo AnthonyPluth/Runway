@@ -18,6 +18,7 @@
   import RecurringFields from "./RecurringFields.svelte";
   import { dueLabel } from "./schedule";
   import { FREQ, validate, type MatchedTx, type RecurringItem, type RecurringValues } from "./types";
+  import { act, errMsg } from "$lib/act";
 
   // One recurring item, a row of its Money in or Money out group: a summary line that opens into its fields, each saved
   // as you change it, and Pause, Skip the next one and Remove. After a save, `onsaved` gets the fresh list, so the summary
@@ -87,7 +88,7 @@
     const was = active;
     active = next;
     try { await persist(); }
-    catch (err) { active = was; toast.error((err as Error).message); return; }
+    catch (err) { active = was; toast.error(errMsg(err)); return; }
     finally { pausing = false; }
     if (next) toast.success(`${v.name} is back in the forecast`);
     else undoable(`Paused ${v.name}`, async () => {
@@ -103,27 +104,23 @@
     const d = r.next_date;
     if (!d) return;
     const key = `rec:${r.id}:${d}`;
-    try { await overrides(key, "POST"); }
-    catch (err) { toast.error((err as Error).message); return; }
+    if (!(await act(async () => { await overrides(key, "POST"); }))) return;
     await refresh();
     undoable(`Skipped ${v.name} on ${fmtDate(d)}`, async () => { await overrides(key, "DELETE"); await refresh(); });
   }
   async function unskip(d: string) {
-    try { await overrides(`rec:${r.id}:${d}`, "DELETE"); toast.success(`${fmtDate(d)} is back in the forecast`); await refresh(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await overrides(`rec:${r.id}:${d}`, "DELETE"); toast.success(`${fmtDate(d)} is back in the forecast`); await refresh(); });
   }
 
   // Removing says what it does first: the matched transactions are unlinked (they stay in your history) and its one-off
   // changes to single dates go.
   let removing = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/recurring/${r.id}`, { method: "DELETE" }); toast("Removed"); reload(); });
   }
   async function showMatches() {
     if (matches) { matches = null; return; }
-    try { matches = (await api<{ items: MatchedTx[] }>(`/api/transactions?recurring=${r.id}&limit=50`)).items; }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { matches = (await api<{ items: MatchedTx[] }>(`/api/transactions?recurring=${r.id}&limit=50`)).items; });
   }
 </script>
 

@@ -4,6 +4,7 @@
 // A failed save shows the error, marks the field invalid and leaves it as you typed it, with a "Not saved · Retry"
 // line under it until a save goes through.
 import { toast } from "svelte-sonner";
+import { errMsg } from "./act";
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 const valueOf = (f: Field) => (f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value);
@@ -68,7 +69,7 @@ export function autosave(f: Field, save: (f: Field) => unknown | Promise<unknown
     const now = valueOf(f);
     if (now === last) return;
     try { await run(f); last = now; markSaved(f); }
-    catch (err) { toast.error((err as Error).message); showFailure(f, onChange); }
+    catch (err) { toast.error(errMsg(err)); showFailure(f, onChange); }
   };
   const onKey = (e: Event) => {
     if ((e as KeyboardEvent).key === "Enter" && f instanceof HTMLInputElement) { e.preventDefault(); f.blur(); }

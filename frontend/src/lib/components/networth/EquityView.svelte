@@ -19,13 +19,14 @@
   import GrantSheet from "./GrantSheet.svelte";
   import RefreshFailed from "./RefreshFailed.svelte";
   import type { Company, Equity, Grant, GrantBody } from "./types";
+  import { act, errMsg } from "$lib/act";
 
   // #networth/equity: stock options, RSUs and shares, what's vested and what it's worth, by company; from Carta or entered
   // by hand. Net worth counts vested equity, and its summary loads afresh when you go back to it. A reload that fails
   // keeps the figures on screen under a "Couldn't refresh" line.
   let d = $state<Equity | null>(null), error = $state("");
   async function load() {
-    try { d = await api<Equity>("/api/equity"); error = ""; } catch (err) { error = (err as Error).message; }
+    try { d = await api<Equity>("/api/equity"); error = ""; } catch (err) { error = errMsg(err); }
   }
   load();
 
@@ -39,8 +40,7 @@
   const my = (s: string | null | undefined, o: Intl.DateTimeFormatOptions = { month: "short", year: "numeric" }) => (s ? fmtDate(s, o) : "");
 
   async function post(url: string, body: unknown, msg: string): Promise<boolean> {
-    try { await api(url, { method: "POST", body }); if (msg) toast(msg); await load(); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(url, { method: "POST", body }); if (msg) toast(msg); await load(); });
   }
   // Adding a company: a form (Enter adds it), the name required, Add waiting for the save.
   let adding = $state(false), coName = $state(""), coPrice = $state(""), coBusy = $state(false), coErr = $state<string | null>(null);
@@ -51,7 +51,7 @@
     if (!coName.trim()) { coErr = "Give the company a name"; (e.currentTarget as HTMLFormElement).querySelector<HTMLInputElement>("input")?.focus(); return; }
     coBusy = true; coErr = null;
     try { await api("/api/equity/companies", { method: "POST", body: { name: coName, share_price: coPrice } }); toast("Company added"); adding = false; await load(); }
-    catch (err) { coErr = (err as Error).message; }
+    catch (err) { coErr = errMsg(err); }
     finally { coBusy = false; }
   }
   // Carta's last errors, as a plain first line and the reason (Settings → Connections is where it's fixed).
@@ -63,10 +63,10 @@
   let syncing = $state(false);
   async function sync() {
     syncing = true;
-    try {
+    await act(async () => {
       const r = await api<{ companies: number; grants: number }>("/api/carta/sync", { method: "POST" });
       toast(`Carta: ${r.companies} compan${r.companies === 1 ? "y" : "ies"}, ${r.grants} grant${r.grants === 1 ? "" : "s"}`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
     syncing = false;
     await load();
   }
@@ -79,7 +79,7 @@
     try {
       if (sheetGrant) await api(`/api/equity/grants/${encodeURIComponent(sheetGrant.id)}`, { method: "POST", body });
       else await api(`/api/equity/companies/${cid(sheetCo)}/grants`, { method: "POST", body });
-    } catch (err) { return (err as Error).message; }
+    } catch (err) { return errMsg(err); }
     toast(sheetGrant ? "Grant saved" : "Grant added");
     sheetOpen = false;
     await load();

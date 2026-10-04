@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { act, errMsg } from "$lib/act";
   // Shared by the recurring pages' plain inputs and selects (they carry `use:autosave`, so they can't be components).
   export const fieldCls = "h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-sm text-foreground shadow-xs outline-none transition-[color,box-shadow] placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/30 dark:bg-input/30";
   export const selectCls = fieldCls + " cursor-pointer pl-2.5 pr-8 [&>option]:bg-popover";
@@ -44,8 +45,9 @@
   async function setOut(next: boolean) {
     if (next === out) return;
     out = next; push();
-    if (!save || !amountInput || v.amount === null) return;
-    try { await save(amountInput); markSaved(amountInput); } catch (err) { toast.error((err as Error).message); }
+    const input = amountInput;
+    if (!save || !input || v.amount === null) return;
+    await act(async () => { await save(input); markSaved(input); });
   }
   // The suggestion is about the saved amount: it goes once the field has another (you took it, or typed your own) or
   // the amount comes from the payments, and comes back if a save of it fails and the old amount returns.
@@ -60,7 +62,7 @@
     if (!save || !amountInput) return;
     await tick();   // the input shows the new amount before it saves
     try { await save(amountInput); markSaved(amountInput); }
-    catch (err) { mag = was; push(); toast.error((err as Error).message); }
+    catch (err) { mag = was; push(); toast.error(errMsg(err)); }
   }
   // Or let the amount follow the payments: the average of the last three, as "Amount to forecast" can.
   let modeSelect = $state<HTMLSelectElement | null>(null);
@@ -70,7 +72,7 @@
     if (!save || !modeSelect) return;
     await tick();
     try { await save(modeSelect); markSaved(modeSelect); }
-    catch (err) { v.amount_mode = was; toast.error((err as Error).message); }
+    catch (err) { v.amount_mode = was; toast.error(errMsg(err)); }
   }
   // Clearing the end date saves like picking one (the field's own change, so autosave knows its new value).
   let endInput = $state<HTMLInputElement | null>(null);

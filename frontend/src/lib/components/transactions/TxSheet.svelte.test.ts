@@ -12,10 +12,11 @@ import { app } from "$lib/app.svelte";
 import { categories } from "$lib/categories.svelte";
 import { category, tx } from "../../../test/fixtures";
 import TxSheet from "./TxSheet.svelte";
+import type { Account } from "$lib/types";
 import type { Tx } from "./types";
 import { pickCategory, pickedValue } from "../../../test/pick";
 
-const accounts = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "c1", name: "Card", kind: "credit" }, { id: "inv", name: "Brokerage", kind: "investment" }];
+const accounts: Account[] = [{ id: "a1", name: "Checking", kind: "checking" }, { id: "c1", name: "Card", kind: "credit" }, { id: "inv", name: "Brokerage", kind: "investment" }];
 const setup = (t: Tx | null, extra: Record<string, unknown> = {}) => {
   const p = { open: true, t, accounts, recurring: [], onsave: vi.fn().mockResolvedValue(true), onchanged: vi.fn(), ...extra };
   render(TxSheet, p);

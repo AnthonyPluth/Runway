@@ -11,6 +11,7 @@
   import { b64uToBytes, currentSubscription, deviceName, isInstalled, isIOS, pushSupported } from "./push";
   import type { PushInfo } from "./types";
   import { checkCls, dangerGhost, inputCls } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // Settings → Notifications: turn them on or off for this device, what to be told about, and the devices that get
   // them. With sign-in they're each person's own: your devices and choices, never anyone else's.
@@ -37,26 +38,26 @@
       await api("/api/push/subscribe", { method: "POST", body: { subscription: s.toJSON(), device: deviceName() } });
       toast.success("Notifications are on");
       await api("/api/push/test", { method: "POST", body: { endpoint: s.endpoint } }).catch(() => {});
-    } catch (err) { toast.error((err as Error).message); }
+    } catch (err) { toast.error(errMsg(err)); }
     busy = false;
     again();
   }
   async function test(sub: PushSubscription) {
-    try { await api("/api/push/test", { method: "POST", body: { endpoint: sub.endpoint } }); toast.success("Sent. It should arrive in a few seconds."); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/push/test", { method: "POST", body: { endpoint: sub.endpoint } }); toast.success("Sent. It should arrive in a few seconds."); });
     again();
   }
   async function turnOff(sub: PushSubscription) {
-    try { await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); toast.success("Notifications are off on this device"); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); toast.success("Notifications are off on this device"); });
     again();
   }
   async function removeDevice(ep: string, sub: PushSubscription | null) {
-    try {
+    await act(async () => {
       await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: ep } });
+      // Runway has already forgotten the device; dropping this browser's own subscription is housekeeping, and a failure
+      // leaves nothing that would send a notification.
       if (sub && sub.endpoint === ep) await sub.unsubscribe().catch(() => {});
       toast.success("Removed · notifications are off on that device");
-    } catch (err) { toast.error((err as Error).message); }
+    });
     again();
   }
   const savePref = (k: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {

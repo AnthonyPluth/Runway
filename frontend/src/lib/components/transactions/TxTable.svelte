@@ -13,11 +13,11 @@
   import { fmtDate, fmtSigned, plural } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
   import type { RecurringItem } from "$lib/components/recurring/types";
   import { restoreTx, type Was } from "./restore";
   import TxRow from "./TxRow.svelte";
   import type { RuleOffer, Tx } from "./types";
+  import { act } from "$lib/act";
 
   // The list, a day at a time, with checkboxes (shift-click for a range) to change many transactions together: a
   // category, the merchant's name, or accepting the categories they have. The bar for that sticks to the top while you
@@ -107,7 +107,7 @@
   $effect(() => { if (!asking) bulkCat = ""; });   // backing out leaves "Set category…" showing, not the one that was asked about
 
   async function send(c: Pick<Change, "body" | "what" | "ids" | "filter">): Promise<boolean> {
-    try {
+    return act(async () => {
       const r = await api<{ updated: number; was: Was[]; offer_rule?: RuleOffer | null }>("/api/transactions/bulk", { method: "POST",
         body: c.filter ? { filter: c.filter, ...c.body } : { ids: c.ids, ...c.body } });
       // All one merchant's: "Always for Blue Bottle" too.
@@ -118,8 +118,7 @@
         offer ? { description: offer.description || undefined, also: offer.also } : {});
       picked = {}; bulkCat = ""; rename = ""; everything = false;   // done with these; the list below updates where it is
       refreshState(); onchanged();
-      return true;
-    } catch (err) { toast.error((err as Error).message); return false; }
+    });
   }
   function change(c: Omit<Change, "ids" | "description" | "confirm" | "busy">, description: string, confirm: string, busy: string) {
     const all = { ...c, ids: [...ids], filter: everything && every ? every : undefined, description, confirm, busy };

@@ -9,6 +9,7 @@
   import SecretInput from "./SecretInput.svelte";
   import type { CartaStatus } from "./types";
   import { fieldCls, inputCls, linkCls, rowCls, selectCls } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // Carta (stock options, RSUs and shares) as a row of the browser extension's list: read by the extension, or through
   // Carta's Portfolio API (which needs Carta to approve your app), or Carta's sample data. `onproblem` tells the
@@ -26,27 +27,25 @@
     c = (await api<{ carta: CartaStatus }>("/api/equity")).carta;
     env = c.env; clientId = c.client_id || ""; secret = "";
   }
-  load().catch((err) => toast.error((err as Error).message));
+  load().catch((err) => toast.error(errMsg(err)));
 
   const save = () => api("/api/carta/settings", { method: "POST", body: { env, client_id: clientId, client_secret: secret, origin: location.origin } });
-  async function changeEnv() { try { await save(); await load(); } catch (err) { toast.error((err as Error).message); } }
+  async function changeEnv() { await act(async () => { await save(); await load(); }); }
   async function saveField() { await save(); toast.success("Saved"); }
   async function connect() {
-    try { await save(); const r = await api<{ url: string }>("/api/carta/connect", { method: "POST", body: { origin: location.origin } }); location.href = r.url; }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await save(); const r = await api<{ url: string }>("/api/carta/connect", { method: "POST", body: { origin: location.origin } }); location.href = r.url; });
   }
   async function sync() {
     syncing = true;
-    try {
+    await act(async () => {
       const r = await api<{ companies: number; grants: number }>("/api/carta/sync", { method: "POST" });
       toast.success(`Carta: ${r.companies} compan${r.companies === 1 ? "y" : "ies"}, ${r.grants} grant${r.grants === 1 ? "" : "s"}`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
     syncing = false;
     load();
   }
   async function disconnect() {
-    try { await api("/api/carta/disconnect", { method: "POST" }); toast.success("Disconnected"); load(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/carta/disconnect", { method: "POST" }); toast.success("Disconnected"); load(); });
   }
   const code = "rounded bg-muted px-1 text-foreground";
 </script>

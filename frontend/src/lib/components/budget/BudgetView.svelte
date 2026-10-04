@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { actGet, errMsg } from "$lib/act";
   // The month you're looking at survives redraws (a sync, moving to Transactions and back), like the classic app.
   let budgetMonth: string | null = null;
 </script>
@@ -31,7 +32,7 @@
       await loadCategories();
       const r = await api<BudgetMonth>(`/api/budget?month=${month}`);
       if (n === seq) { b = r; error = ""; }
-    } catch (err) { if (n === seq) error = (err as Error).message; }
+    } catch (err) { if (n === seq) error = errMsg(err); }
   }
   refresh();
 
@@ -42,10 +43,9 @@
 
   // A subcategory's budget can raise its parent's (the parent's covers its subcategories'): the toast says so.
   async function saveBudget(category: string, amount: string) {
-    let r: BudgetSaved;
-    try { r = await api<BudgetSaved>("/api/budget", { method: "POST", body: { category, amount } }); }
-    catch (err) { toast.error((err as Error).message); return; }
-    const raised = (r?.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)}`);
+    const r = await actGet(() => api<BudgetSaved>("/api/budget", { method: "POST", body: { category, amount } }));
+    if (!r) return;
+    const raised = (r.raised ?? []).map((x) => `${x.category} raised to ${fmt0(x.amount)}`);
     toast.success(amount ? ["Budget saved", ...raised].join(" · ") : "Budget removed");
     refresh();
   }

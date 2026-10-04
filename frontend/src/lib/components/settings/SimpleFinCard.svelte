@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isPlaidStub } from "$lib/accounts";
   import { app } from "$lib/app.svelte";
   import { fmtDateTime, serverTime } from "$lib/format";
   import ProblemNote from "./ProblemNote.svelte";
@@ -23,7 +24,7 @@
   const summary = $derived(log?.ok ? (log.message ?? "").split(" · bank messages:")[0] : "");
   // Its accounts are the ones it syncs: not Plaid's own ("pl:…"), nor one switched to Plaid under Accounts (which keeps
   // its id). Hidden ones still sync, so they count. Its banks are their institutions.
-  const mine = $derived(accounts.filter((a) => !a.id.startsWith("pl:") && a.provider !== "plaid"));
+  const mine = $derived(accounts.filter((a) => !isPlaidStub(a.id) && a.provider !== "plaid"));
   const banks = $derived([...new Set(mine.map((a) => a.org?.trim()).filter(Boolean))].sort((a, b) => a!.localeCompare(b!)));
   let replacing = $state(false);
 </script>

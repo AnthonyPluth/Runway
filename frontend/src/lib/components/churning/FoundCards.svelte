@@ -3,11 +3,11 @@
   import { Button } from "$lib/components/ui/button";
   import { fmt0 } from "$lib/format";
   import { undoable } from "$lib/undo";
-  import { toast } from "svelte-sonner";
   import Chip from "./Chip.svelte";
   import { fullDate } from "./churning";
   import FoldedLine from "./FoldedLine.svelte";
   import type { Churning, Found, FoundDraft } from "./types";
+  import { act } from "$lib/act";
 
   // "Found on your accounts": credit card accounts that aren't churning cards yet, each pre-filled from what Runway
   // knows. Add opens the add-card form with it for review (nothing is saved until you save the form); Dismiss hides
@@ -24,14 +24,13 @@
     await onchanged();
   }
   async function dismiss(x: FoundDraft) {
-    try {
+    await act(async () => {
       await post(path(x.account_id, "dismiss"));
       undoable(`Dismissed ${x.product || x.account_name}`, () => post(path(x.account_id, "undismiss")));
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   async function bringBack(id: string) {
-    try { await post(path(id, "undismiss")); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await post(path(id, "undismiss")); });
   }
 </script>
 

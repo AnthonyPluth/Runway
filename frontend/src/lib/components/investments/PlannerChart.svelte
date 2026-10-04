@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fmt0, shortMoney } from "$lib/format";
-  import { niceTicks, sideways } from "./numbers";
+  import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
+  import YAxis from "../YAxis.svelte";
   import { HELD_KINDS, type Dollars, type HeldKind, type Projection } from "./planner";
 
   // The plan by age: the likely range (the middle half of the runs) shaded, the median run as a line, a marker at
@@ -42,9 +43,9 @@
     const seen = new Set<string>();
     return niceTicks(0, Math.max(1000, ...p.high, ...total), 4).filter((t) => !seen.has(shortMoney(t)) && !!seen.add(shortMoney(t)));
   });
-  const top = $derived(ticks[ticks.length - 1]);
-  const x = (i: number) => m.left + (i / Math.max(1, n - 1)) * iw;
-  const y = (v: number) => m.top + (1 - v / (top || 1)) * ih;
+  const scale = $derived(yScale(ticks, m.top, ih));
+  const x = (i: number) => xScale(0, n - 1, m.left, iw)(i);
+  const y = (v: number) => scale.y(v);
   const line = (vals: number[]) => vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const area = (hi: number[], lo: number[]) => `${line(hi)} ${lo.map((_, i) => n - 1 - i).map((i) => `L${x(i).toFixed(1)},${y(lo[i]).toFixed(1)}`).join(" ")} Z`;
   const band = $derived(area(p.high, p.low));
@@ -77,10 +78,7 @@
   <svg bind:this={svgEl} viewBox={`0 0 ${W} ${height}`} class="block w-full select-none text-xs" role="img"
     aria-label={`Projected investments by age, in ${unit}: median ${fmt0(p.atEnd)} at the end of the plan${
       layers.length ? `, ${fmt0(total[n - 1])} with ${layers.map((l) => HELD[l.kind].label.toLowerCase()).join(" and ")}` : ""}`}>
-    {#each ticks as t (t)}
-      <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
-      <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
-    {/each}
+    <YAxis {ticks} {y} left={m.left} right={W - m.right} />
     {#each xTicks as i (i)}
       <text x={x(i)} y={height - 24} text-anchor="middle" fill="var(--muted-foreground)">{p.ages[0][i]}</text>
       <text x={x(i)} y={height - 10} text-anchor="middle" fill="var(--muted-foreground)" font-size="10" opacity="0.8" data-year>{p.years[i]}</text>

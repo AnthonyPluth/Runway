@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fmtDate, fmtDow } from "$lib/format";
-  import { niceTicks, sideways } from "./numbers";
+  import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
+  import YAxis from "../YAxis.svelte";
   import type { Series } from "./types";
 
   // A small line chart, shared by Investments and Net worth: a shared y axis, each line's name at its end, and a
@@ -37,9 +38,10 @@
     if (lo === hi) { lo -= Math.abs(lo) * 0.1 || 1; hi += Math.abs(hi) * 0.1 || 1; }
     return niceTicks(lo, hi, 4);
   });
-  const y0 = $derived(ticks[0]), y1 = $derived(ticks[ticks.length - 1]);
-  const x = (i: number) => m.left + (i / Math.max(1, n - 1)) * iw;
-  const y = (v: number) => m.top + (1 - (v - y0) / (y1 - y0 || 1)) * ih;
+  const scale = $derived(yScale(ticks, m.top, ih));
+  const y0 = $derived(scale.y0), y1 = $derived(scale.y1);
+  const x = (i: number) => xScale(0, n - 1, m.left, iw)(i);
+  const y = (v: number) => scale.y(v);
   const xLabel = (i: number) => (labels ? xs[i] : fmtDate(xs[i], n > 200 ? { month: "short", year: "2-digit" } : { month: "short", day: "numeric" }));
 
   // About six evenly spaced labels along the bottom.
@@ -152,10 +154,7 @@
     <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full rounded-md text-xs outline-none select-none focus-visible:ring-2 focus-visible:ring-ring"
       role="slider" tabindex="0" aria-label={summary} aria-valuemin={0} aria-valuemax={n - 1} aria-valuenow={hover ?? n - 1}
       aria-valuetext={readout(hover ?? n - 1)} onkeydown={key} onblur={() => (pointed = null)}>
-      {#each ticks as t (t)}
-        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
-        <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{fmtY(t)}</text>
-      {/each}
+      <YAxis {ticks} {y} left={m.left} right={W - m.right} fmt={fmtY} />
       {#if zero && y0 < 0 && y1 > 0}<line x1={m.left} x2={W - m.right} y1={y(0)} y2={y(0)} stroke="var(--muted-foreground)" />{/if}
       {#each xTicks as i (i)}
         <text x={x(i)} y={H - 6} text-anchor={i === 0 ? "start" : x(i) > W - m.right - 30 ? "end" : "middle"} fill="var(--muted-foreground)">{xLabel(i)}</text>

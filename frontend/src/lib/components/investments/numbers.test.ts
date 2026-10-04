@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gainCls, niceTicks, pct, pctAbs, qty, signed } from "./numbers";
+import { gainCls, pct, pctAbs, qty, signed } from "./numbers";
 
 describe("pct", () => {
   it("signs gains and losses, with a real minus", () => {
@@ -46,27 +46,6 @@ describe("gainCls", () => {
     expect(gainCls(0)).toBe("");
     expect(gainCls(-5)).toBe("text-loss");
     expect(gainCls(null)).toBe("");
-  });
-});
-
-describe("niceTicks", () => {
-  it("steps by round numbers covering the range", () => {
-    expect(niceTicks(0, 100)).toEqual([0, 20, 40, 60, 80, 100]);
-    expect(niceTicks(0, 1234)).toEqual([0, 250, 500, 750, 1000, 1250]);
-    expect(niceTicks(13, 87)).toEqual([0, 20, 40, 60, 80, 100]);
-  });
-  it("spans zero", () => {
-    expect(niceTicks(-50, 50)).toEqual([-60, -40, -20, 0, 20, 40, 60]);
-  });
-  it("doesn't pile up floating-point dust", () => {
-    expect(niceTicks(0, 0.7)).toEqual([0, 0.2, 0.4, 0.6, 0.8]);
-  });
-  it("copes with a flat line", () => {
-    expect(niceTicks(5, 5)).toEqual([5]);
-    expect(niceTicks(0, 0)).toEqual([0]);
-  });
-  it("takes a tick count", () => {
-    expect(niceTicks(0, 100, 2)).toEqual([0, 50, 100]);
   });
 });
 

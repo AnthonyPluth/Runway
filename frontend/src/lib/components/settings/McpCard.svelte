@@ -8,6 +8,7 @@
   import { relTime } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { inputCls, warnText } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // AI assistants connect to Runway's MCP endpoint (/mcp) by its address and sign in with OAuth: you approve each one
   // on Runway's consent page. This shows the address, holds the switches that let them change churning, categorize, or
@@ -20,7 +21,7 @@
   let address = $state<HTMLInputElement | null>(null);
 
   async function load() {
-    try { status = await api<Status>("/api/mcp-settings"); error = ""; } catch (err) { error = (err as Error).message; }
+    try { status = await api<Status>("/api/mcp-settings"); error = ""; } catch (err) { error = errMsg(err); }
   }
   load();
   async function setWrites(e: Event) {
@@ -29,7 +30,7 @@
       const r = await api<{ allow_writes: boolean }>("/api/mcp-settings/writes", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_writes: r.allow_writes };
       toast.success(r.allow_writes ? "Assistants can change churning" : "Assistants can only read again");
-    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
+    } catch (err) { box.checked = !allow; toast.error(errMsg(err)); await load(); }   // as it was: nothing changed
   }
   async function setCategorize(e: Event) {
     const box = e.currentTarget as HTMLInputElement, allow = box.checked;
@@ -37,7 +38,7 @@
       const r = await api<{ allow_categorize: boolean }>("/api/mcp-settings/categorize", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_categorize: r.allow_categorize };
       toast.success(r.allow_categorize ? "Assistants can categorize" : "Assistants can't categorize any more");
-    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
+    } catch (err) { box.checked = !allow; toast.error(errMsg(err)); await load(); }   // as it was: nothing changed
   }
   async function setAll(e: Event) {
     const box = e.currentTarget as HTMLInputElement, allow = box.checked;
@@ -45,7 +46,7 @@
       const r = await api<{ allow_all: boolean }>("/api/mcp-settings/all", { method: "POST", body: { allow } });
       if (status) status = { ...status, allow_all: r.allow_all };
       toast.success(r.allow_all ? "Assistants can change anything, asking first" : "Assistants can't change everything any more");
-    } catch (err) { box.checked = !allow; toast.error((err as Error).message); await load(); }   // as it was: nothing changed
+    } catch (err) { box.checked = !allow; toast.error(errMsg(err)); await load(); }   // as it was: nothing changed
   }
   function access(scope: string[]): string {
     if (scope.includes("write")) return "Read + any change";
@@ -53,10 +54,10 @@
     return ["Read", ...extra].join(" + ");
   }
   async function revoke(c: Connection) {
-    try {
+    await act(async () => {
       await api(`/api/mcp-settings/connections/${c.id}/revoke`, { method: "POST" });
       toast.success(`${c.client || "The assistant"} is disconnected`);
-    } catch (err) { toast.error((err as Error).message); }
+    });
     await load();
   }
   const url = $derived(status?.url || `${location.origin}/mcp`);

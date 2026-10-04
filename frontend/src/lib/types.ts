@@ -1,4 +1,5 @@
 // The shapes of Runway's API replies that the pages use (see runway/server.py).
+import type { AccountKind } from "./accounts";
 
 interface User { name?: string; email?: string; local?: boolean }
 export interface Brand {
@@ -89,11 +90,11 @@ export interface Account {
   id: string;
   name: string;
   display_name?: string | null;
-  kind: string;
+  kind: AccountKind;
   balance?: number | null;
-  hidden?: boolean | number;
+  /** Hidden from the lists (a yes/no here: loadAccounts turns the server's 0 or 1 into one). */
+  hidden?: boolean;
   owner?: string | null;
-  [key: string]: unknown;
 }
 export const accountName = (a: Account) => a.display_name || a.name;
 
