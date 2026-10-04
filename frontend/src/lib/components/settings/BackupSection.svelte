@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { act, errMsg } from "$lib/act";
   // What the last restore said that's worth keeping (where the copy of what it replaced went, keys it couldn't read,
   // and that a backup from an older version may have older data not brought up to date): it stays under Restore until
   // dismissed, through the page redrawing after the restore.
@@ -7,6 +8,7 @@
 </script>
 
 <script lang="ts">
+  import { api } from "$lib/api";
   import { app, refreshState, reload } from "$lib/app.svelte";
   import { Alert, AlertDescription } from "$lib/components/ui/alert";
   import { Button } from "$lib/components/ui/button";
@@ -28,21 +30,13 @@
   let restored = $state<Restored | null>(lastRestore);
   $effect(() => { lastRestore = restored; });
 
-  // The backup goes up as it is (not JSON), so these are plain fetches rather than api().
-  async function upload<T>(path: string, f: File, failed: string): Promise<T> {
-    const res = await fetch(path, { method: "POST", headers: { "X-Runway": "1", "Content-Type": "application/octet-stream" }, body: f });
-    const r = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(r.error || `${failed} (${res.status})`);
-    return r as T;
-  }
-
   async function choose(f: File | null) {
     file = f; inspected = null; problem = "";
     if (!f) return;
     try {
-      const r = await upload<Inspected>("/api/backup/inspect", f, "Couldn’t read that backup");
+      const r = await api<Inspected>("/api/backup/inspect", { method: "POST", body: f, failed: "Couldn’t read that backup" });
       if (file === f) inspected = r;   // not a file chosen before this one
-    } catch (err) { if (file === f) problem = (err as Error).message; }
+    } catch (err) { if (file === f) problem = errMsg(err); }
   }
 
   const n = (k: number, word: string) => `${k.toLocaleString("en-US")} ${word}${k === 1 ? "" : "s"}`;
@@ -67,19 +61,21 @@
     return { day: d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) }), full: when(app.state!.last_backup) };
   });
   // The browser saves the file itself, so there's no telling when it's done: look again once it likely is.
+  // (Only the "last backup" line depends on it, and the next state check corrects it, so a failed look says nothing.)
   function downloaded() { setTimeout(() => { refreshState().catch(() => {}); }, 3000); }
 
   async function restore() {
-    if (!file) return false;
-    try {
-      const r = await upload<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[]; warning?: string | null }>(
-        "/api/restore", file, "Restore failed");
+    const f = file;
+    if (!f) return false;
+    if (!(await act(async () => {
+      const r = await api<{ created?: string | null; safety_copy?: string | null; unreadable_secrets?: string[]; warning?: string | null }>(
+        "/api/restore", { method: "POST", body: f, failed: "Restore failed" });
       // The backup's bank access and API keys are encrypted with the key of the Runway that made it: under another
       // key they can't be read, and each is entered again in Settings (the note under Restore says so).
       restored = { when: when(r.created), copy: r.safety_copy || null, unreadable: r.unreadable_secrets?.length ?? 0, warning: r.warning || null };
       toast.success("Restored");
       await refreshState(); reload();
-    } catch (err) { toast.error((err as Error).message); return false; }
+    }))) return false;
   }
 </script>
 

@@ -8,7 +8,7 @@
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { planDone, planUndo } from "./actions";
@@ -17,12 +17,15 @@
   import { PLAN_ACTS, PLAN_LABEL, benefitsSummary, bonusSummary, fullDate, ratesPayload, ratesSummary, type RateRow } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import FieldNote from "./FieldNote.svelte";
-  import { fieldProps, focusFirstInvalid } from "./form";
+  import { fieldProps } from "./form";
   import FormFooter from "./FormFooter.svelte";
   import RatesEditor from "./RatesEditor.svelte";
   import Section from "./Section.svelte";
-  import type { CardSuggestion, ChurnCard, Churning, DraftBenefit, FoundDraft } from "./types";
+  import type { ChurnCard, Churning, FoundDraft } from "./types";
   import { validateCard } from "./validate";
+  import { act } from "$lib/act";
+  import { AddForm } from "./addForm.svelte";
+  import { CardSuggest, sourceHost } from "./cardSuggest.svelte";
 
   // Adding a card, or editing one (each field saves as you change it, as elsewhere in Runway; Close redraws the page).
   // The essentials (whose card, bank, name, opened, annual fee) are always showing; the rest sits in sections that start
@@ -58,10 +61,7 @@
   let openedGuess = $state(!c && !!draft);
   let changed = false;
   const uid = $props.id();
-  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
-  let attempted = $state(false);
-  const errors = $derived(attempted ? validateCard(v) : {});
-  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
+  const fp = (name: string, required = false) => fieldProps(form.errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
@@ -69,143 +69,45 @@
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!c) return;
     try { await api(`/api/churning/cards/${c.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
-    catch (err) { attempted = true; throw err; }
+    catch (err) { form.attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (c ? fromAction(autosave, () => save(key)) : null);
   // The base rate travels inside `rates` (as the "*" category), so it isn't sent twice.
-  const ratesBody = () => ({ rates: ratesPayload(v.base_rate, rateRows), portal_name: portalName });
-  let addError = $state(""), busy = $state(false);
-  async function add() {
-    if (busy) return;
-    attempted = true; addError = ""; flagged = null;
-    await tick();
-    if (Object.keys(validateCard(v)).length) { focusFirstInvalid(box); return; }
+  const ratesBody = () => ({ rates: ratesPayload(v.base_rate, rates.rows), portal_name: rates.portalName });
+  const add = () => form.add(async () => {
     const { base_rate: _base, ...rest } = v;
-    busy = true;
-    try {
-      // The benefits go with the card, in one request: if one is refused, no card is added.
-      await api("/api/churning/cards", { method: "POST", body: { ...rest, ...ratesBody(), benefits: benefitsBody() } });
-      toast(`Added ${v.product}`);
-      onclose(true);
-    }
-    catch (err) { addError = (err as Error).message; flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
-    finally { busy = false; }
-  }
-  const benefitBody = ({ ai: _ai, ...b }: DraftBenefit) => ({ ...b, amount: b.amount === null || String(b.amount) === "" ? null : b.amount });
-  const benefitsBody = () => aiBenefits.filter((b) => b.name.trim()).map(benefitBody);
-  const saveBenefits = async (cardId: number) => {
-    for (const b of benefitsBody()) await api(`/api/churning/cards/${cardId}/benefits`, { method: "POST", body: b });
-  };
-
+    // The benefits go with the card, in one request: if one is refused, no card is added.
+    await api("/api/churning/cards", { method: "POST", body: { ...rest, ...ratesBody(), benefits: ai.benefitsBody() } });
+    toast(`Added ${v.product}`);
+    onclose(true);
+  }, box);
   // The sections, and which one a refusal is about (the server's messages name the field).
   type Key = "rates" | "bonus" | "benefits" | "plan" | "more";
-  const open = $state<Record<Key, boolean>>({ rates: false, bonus: false, benefits: false, plan: false, more: false });
-  let flagged = $state<Key | null>(null);
   const SECTION_OF: [Key, RegExp][] = [
     ["benefits", /benefit|resets|kind is/i], ["rates", /earning|rate|points per dollar|portal|category|listed twice|what the card earns/i],
     ["bonus", /bonus|spending|months to spend|credit card account/i], ["plan", /plan|do it by|days ahead|day it was done/i],
     ["more", /family|notes|eligible|changed from/i],
   ];
-  const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
+  const form = new AddForm<Key>(() => validateCard(v), SECTION_OF);
   // Deleting a card takes its to-dos, earning rates and benefits with it, and none of that comes back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
-    try { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Deleted ${c!.product}`); onclose(true); return true; }
-    catch (err) { toast.error((err as Error).message); return false; }
+    return act(async () => { await api(`/api/churning/cards/${c!.id}/remove`, { method: "POST" }); toast(`Deleted ${c!.product}`); onclose(true); });
   }
 
   // Earning rates: kept in the form and sent with the card when adding; when editing, each change saves the whole list.
   // svelte-ignore state_referenced_locally
   const start = c;   // the form is drawn afresh for each card, so what it starts with is all it needs
-  let rateRows = $state<RateRow[]>((start?.rates ?? []).map((r) => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only })));
-  let portalName = $state(str(start?.portal_name));
+  const rates = $state({ rows: (start?.rates ?? []).map((r): RateRow => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only })), portalName: str(start?.portal_name) });
   async function saveRates() {
     await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: ratesBody() });
     changed = true;
   }
 
-  // "Fill in the rest" (when an OpenRouter key is set): what the AI knows of the card from its bank and name alone. It
-  // only fills what's still empty, and everything stays in the form, marked, until you save: adding saves it with the
-  // card; editing asks first (Save these / Discard).
+  // "Fill in the rest" (when an OpenRouter key is set): see cardSuggest.svelte.ts.
   const canSuggest = $derived(!!app.state?.has_api_key);
-  let suggesting = $state(false);
-  let aiMarked = $state(false);
-  let aiBenefits = $state<DraftBenefit[]>([]);
-  // Where the suggestions came from (web pages, http(s) only), and whether the AI searched the web at all.
-  let aiSources = $state<string[]>([]);
-  let aiWeb = $state(false);
-  const host = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
-  let aiUndo: (() => void) | null = null;
-  let aiFields: Record<string, unknown> = {};
-  let aiRates = false;
-  async function suggest() {
-    suggesting = true;
-    try {
-      applySuggestion(await api<CardSuggestion>("/api/churning/suggest", { method: "POST", body: { issuer: v.issuer, product: v.product } }));
-    } catch (err) { toast.error((err as Error).message); }
-    finally { suggesting = false; }
-  }
-  function applySuggestion(s: CardSuggestion) {
-    const before: Record<string, unknown> = { ...v }, rows = rateRows.map((r) => ({ ...r })), portal = portalName, benefits = aiBenefits;
-    const fields: Record<string, unknown> = {};
-    if (s.family && !v.family.trim()) { v.family = s.family; fields.family = s.family; }
-    if (s.currency && v.currency === "cash" && s.currency !== "cash") { v.currency = s.currency; fields.currency = s.currency; }
-    if (s.annual_fee && !v.annual_fee) { v.annual_fee = String(s.annual_fee); fields.annual_fee = s.annual_fee; }
-    if (s.portal_name && !portalName.trim()) { portalName = s.portal_name; fields.portal_name = s.portal_name; }
-    // The public sign-up offer, only for a card you're adding (one you have came with the offer you applied with).
-    if (!c && s.bonus?.amount && !v.bonus && !v.bonus_spend) {
-      v.bonus = String(s.bonus.amount); fields.bonus = v.bonus;
-      if (s.bonus.spend) { v.bonus_spend = String(s.bonus.spend); fields.bonus_spend = v.bonus_spend; }
-      if (s.bonus.months && ["", "3"].includes(String(v.bonus_months))) { v.bonus_months = String(s.bonus.months); fields.bonus_months = v.bonus_months; }
-    }
-    let rates = false;
-    if (!rateRows.length && (s.rates.length || s.base_rate != null)) {
-      if (s.base_rate != null && ["", "1"].includes(String(v.base_rate))) { v.base_rate = String(s.base_rate); fields.base_rate = v.base_rate; }
-      rateRows = s.rates.map((r) => ({ category: r.category, multiplier: r.multiplier, portal_only: !!r.portal_only }));
-      rates = true;
-    }
-    const have = new Set([...(c?.benefits ?? []), ...aiBenefits].map((b) => b.name.toLowerCase()));   // the card's, and ones already suggested
-    const fresh = s.benefits.filter((b) => !have.has(b.name.toLowerCase()));
-    if (!Object.keys(fields).length && !rates && !fresh.length) { toast("The AI had nothing to add for this card"); return; }
-    aiBenefits = [...aiBenefits, ...fresh.map((b) => ({ ...b, ai: true }))];
-    // Sections that got something open, so the suggestions can be checked.
-    if (fields.family) open.more = true;
-    if (fields.currency || fields.portal_name || rates) open.rates = true;
-    if (fresh.length) open.benefits = true;
-    if (fields.bonus) open.bonus = true;
-    aiSources = [...new Set([...aiSources, ...(s.sources ?? []).filter((u) => /^https?:\/\//i.test(u))])];
-    aiWeb = !!s.web;
-    aiFields = { ...aiFields, ...fields };
-    aiRates = aiRates || rates;
-    const prev = aiUndo;
-    // Discard takes back only what the AI filled, and only where it still holds the AI's value: anything you changed
-    // since (the opened date, the bonus) stays as you left it.
-    const filledRows = JSON.stringify(rateRows);
-    aiUndo = () => {
-      const v_ = v as Record<string, unknown>;
-      for (const [k, val] of Object.entries(fields)) {
-        if (k === "portal_name") { if (portalName === val) portalName = portal; }
-        else if (String(v_[k]) === String(val)) v_[k] = before[k];
-      }
-      if (rates && JSON.stringify(rateRows) === filledRows) rateRows = rows;
-      aiBenefits = benefits;
-      prev?.();
-    };
-    aiMarked = true;
-  }
-  function discardSuggestions() { aiUndo?.(); aiUndo = null; aiFields = {}; aiRates = false; aiMarked = false; aiSources = []; }
-  async function saveSuggestions() {
-    try {
-      // What the form holds now for the fields the AI filled: you may have corrected one since.
-      const now = Object.fromEntries(Object.keys(aiFields).map((k) => [k, k === "portal_name" ? portalName : (v as Record<string, unknown>)[k]]));
-      await api(`/api/churning/cards/${c!.id}`, { method: "POST", body: { ...now, ...(aiRates ? ratesBody() : {}) } });
-      await saveBenefits(c!.id);
-      aiBenefits = []; aiFields = {}; aiRates = false; aiUndo = null; aiMarked = false; aiSources = []; changed = true;
-      toast("Saved the suggestions");
-      await onchanged();
-    } catch (err) { toast.error((err as Error).message); }
-  }
+  const ai = new CardSuggest({ get card() { return c; }, v, rates, open: form.open, ratesBody, saved: () => { changed = true; }, onchanged: () => onchanged() });
 
   const currencyName = $derived(d.currencies.find((x) => x.key === v.currency)?.name ?? "");
   const planSummary = $derived(PLAN_LABEL[v.plan as keyof typeof PLAN_LABEL] + (PLAN_ACTS.includes(v.plan) && v.plan_date ? ` by ${fullDate(v.plan_date, d.today)}` : ""));
@@ -231,18 +133,18 @@
     </label>
     <div class="flex min-w-48 flex-1 flex-col gap-1">
       <label class={lbl}><span>Card{@render star()}</span><Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" {...fp("product", true)} /></label>
-      <FieldNote {uid} name="product" {errors} />
+      <FieldNote {uid} name="product" errors={form.errors} />
     </div>
     {#if canSuggest}
-      <Button variant="outline" size="sm" disabled={!v.product.trim() || suggesting} onclick={suggest}
-        title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent.">{suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
+      <Button variant="outline" size="sm" disabled={!v.product.trim() || ai.suggesting} onclick={ai.suggest}
+        title="Asks an AI model about this card, searching the web unless that’s off in Settings. Only the bank and the card’s name are sent.">{ai.suggesting ? "Asking…" : "Fill in the rest with AI"}</Button>
       <span class="self-center text-xs text-muted-foreground" data-testid="ai-consent">Sends only the bank and card name.</span>
     {/if}
   </div>
   <div class="mt-3 flex flex-wrap items-end gap-3">
     <div class="flex flex-col gap-1">
       <label class={lbl}><span>{openedGuess ? "Opened (on or before)" : "Opened"}{@render star()}</span><Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} oninput={() => (openedGuess = false)} {...fp("opened_on", true)} /></label>
-      <FieldNote {uid} name="opened_on" {errors} />
+      <FieldNote {uid} name="opened_on" errors={form.errors} />
     </div>
     <label class={lbl}>Status
       <NativeSelect bind:value={v.status} {@attach edit("status")}>
@@ -254,7 +156,7 @@
     {/if}
     <div class="flex flex-col gap-1">
       <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="0" {...fp("annual_fee")} /></label>
-      <FieldNote {uid} name="annual_fee" {errors} />
+      <FieldNote {uid} name="annual_fee" errors={form.errors} />
     </div>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.authorized_user} {@attach edit("authorized_user")} />Authorized user</label>
     <label class="inline-flex items-center gap-2 pb-2 text-sm"><input type="checkbox" class="size-4" bind:checked={v.business} {@attach edit("business")} />Business card</label>
@@ -263,33 +165,33 @@
   {#if openedGuess}
     <p class="mt-1 text-xs text-warning" data-testid="opened-guess">{draft?.opened_on ? "This is a guess: the card’s first transaction in Runway, so it was opened on or before this day. Change it to the day you opened it; 5/24 and the bonus rules depend on it." : "Runway can’t tell when this card was opened: enter the day. 5/24 and the bonus rules depend on it."}</p>
   {/if}
-  {#if aiMarked}
+  {#if ai.marked}
     <div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm" role="status" data-testid="ai-marked">
       <span class="text-muted-foreground">Suggested by AI, check before saving. The fields it filled are below; change anything that’s wrong.</span>
-      {#if c}<Button size="sm" onclick={saveSuggestions}>Save these</Button>{/if}
-      <Button size="sm" variant="ghost" onclick={discardSuggestions}>Discard</Button>
+      {#if c}<Button size="sm" onclick={ai.save}>Save these</Button>{/if}
+      <Button size="sm" variant="ghost" onclick={ai.discard}>Discard</Button>
       <p class="w-full text-xs text-muted-foreground" data-testid="ai-sources">
-        {#if aiSources.length}From: {#each aiSources as u, i (u)}{i ? ", " : ""}<a href={u} target="_blank" rel="noopener noreferrer" class="underline" title={u}>{host(u)}</a>{/each}
-        {:else if aiWeb}It didn’t say where this came from: check it on the bank’s site.
+        {#if ai.sources.length}From: {#each ai.sources as u, i (u)}{i ? ", " : ""}<a href={u} target="_blank" rel="noopener noreferrer" class="underline" title={u}>{sourceHost(u)}</a>{/each}
+        {:else if ai.web}It didn’t say where this came from: check it on the bank’s site.
         {:else}From the model’s memory, without a web search (Settings → Connections → AI categorization): it may be out of date.{/if}
       </p>
     </div>
   {/if}
 
-  <Section id="rates" title="Earning rates" bind:open={open.rates} flagged={flagged === "rates"} error={addError} summary={ratesSummary(rateRows, currencyName, v.currency, v.earn_note, v.base_rate)}>
+  <Section id="rates" title="Earning rates" bind:open={form.open.rates} flagged={form.flagged === "rates"} error={form.error} summary={ratesSummary(rates.rows, currencyName, v.currency, v.earn_note, v.base_rate)}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>Earns
         <CurrencySelect {d} bind:value={v.currency} {@attach edit("currency")} />
       </label>
       <label class={`${lbl} min-w-48 flex-1`}>Rotating or other earning<Input bind:value={v.earn_note} {@attach edit("earn_note")} placeholder="e.g. 5x quarterly categories" /></label>
     </div>
-    <RatesEditor {d} bind:base={v.base_rate} bind:rows={rateRows} bind:portalName save={c ? saveRates : undefined} />
+    <RatesEditor {d} bind:base={v.base_rate} bind:rows={rates.rows} bind:portalName={rates.portalName} save={c ? saveRates : undefined} />
   </Section>
 
-  <Section id="bonus" title="Sign-up bonus" bind:open={open.bonus} flagged={flagged === "bonus"} error={addError} summary={bonusSummary(v.bonus, v.bonus_spend, v.bonus_months, v.currency, currencyName)}>
+  <Section id="bonus" title="Sign-up bonus" bind:open={form.open.bonus} flagged={form.flagged === "bonus"} error={form.error} summary={bonusSummary(v.bonus, v.bonus_spend, v.bonus_months, v.currency, currencyName)}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>Bonus ({v.currency === "cash" ? "dollars" : "points"})<Input type="number" min="0" step="1000" class="w-32" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} /></label>
-      <div class="flex flex-col gap-1"><label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" {...fp("bonus_spend")} /></label><FieldNote {uid} name="bonus_spend" {errors} /></div>
+      <div class="flex flex-col gap-1"><label class={lbl}>Spend<Input type="number" min="0" step="100" class="w-28" bind:value={v.bonus_spend} {@attach edit("bonus_spend")} {@attach commas} placeholder="$" {...fp("bonus_spend")} /></label><FieldNote {uid} name="bonus_spend" errors={form.errors} /></div>
       <label class={lbl}>Within (months)<Input type="number" min="1" max="24" class="w-24" bind:value={v.bonus_months} {@attach edit("bonus_months")} /></label>
       <label class={lbl}><span>Deadline <span class="text-muted-foreground">(if different)</span></span><Input type="date" class="w-40" bind:value={v.bonus_deadline} {@attach edit("bonus_deadline")} /></label>
       <label class={lbl}>Bonus posted on<Input type="date" class="w-40" bind:value={v.bonus_earned_on} {@attach edit("bonus_earned_on")} /></label>
@@ -307,16 +209,16 @@
     </div>
   </Section>
 
-  <Section id="benefits" title="Benefits" bind:open={open.benefits} flagged={flagged === "benefits"} error={addError} summary={benefitsSummary((c?.benefits.length ?? 0) + aiBenefits.length)}>
+  <Section id="benefits" title="Benefits" bind:open={form.open.benefits} flagged={form.flagged === "benefits"} error={form.error} summary={benefitsSummary((c?.benefits.length ?? 0) + ai.benefits.length)}>
     {#if c}
-      {#if aiBenefits.length}<BenefitDrafts {d} bind:rows={aiBenefits} picker={false} />{/if}
+      {#if ai.benefits.length}<BenefitDrafts {d} bind:rows={ai.benefits} picker={false} />{/if}
       <CardBenefits card={c} {d} {onchanged} />
     {:else}
-      <BenefitDrafts {d} bind:rows={aiBenefits} />
+      <BenefitDrafts {d} bind:rows={ai.benefits} />
     {/if}
   </Section>
 
-  <Section id="plan" title="Plan" bind:open={open.plan} flagged={flagged === "plan"} error={addError} summary={planSummary}>
+  <Section id="plan" title="Plan" bind:open={form.open.plan} flagged={form.flagged === "plan"} error={form.error} summary={planSummary}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}>What I'll do with it
         <NativeSelect bind:value={v.plan} {@attach edit("plan")}>
@@ -342,7 +244,7 @@
     {/if}
   </Section>
 
-  <Section id="more" title="More details" bind:open={open.more} flagged={flagged === "more"} error={addError} summary={moreSummary}>
+  <Section id="more" title="More details" bind:open={form.open.more} flagged={form.flagged === "more"} error={form.error} summary={moreSummary}>
     <div class="flex flex-wrap items-end gap-3">
       <label class={lbl}><span>Family <span class="text-muted-foreground">(optional)</span></span>
         <Input class="w-40" bind:value={v.family} {@attach edit("family")} placeholder="e.g. Sapphire" title="Cards whose bonuses the bank counts as one" />
@@ -360,12 +262,12 @@
     </div>
   </Section>
 
-  <FormFooter error={addError} sticky={!c}>
+  <FormFooter error={form.error} sticky={!c}>
     {#if c}
       <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
       <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete card</Button>
     {:else}
-      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={form.busy}>{form.busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
   </FormFooter>
 </div>

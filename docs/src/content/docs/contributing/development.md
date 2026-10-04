@@ -78,6 +78,8 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/server/` | Web server: `handler.py` (who may reach what, security headers, request limits, reading bodies and sending answers, `serve()`), `routes.py` (the API's route table: finding a request's route and answering it, for the web app and `/mcp` alike) and `api/` (the API, one module per area), `oauth_http.py` (OAuth for `/mcp` and its consent page), `static.py` (the web app's files), `sync.py` (background sync) |
 | `runway/simplefin.py`, `sfinvest.py` | Bank sync and SimpleFIN investment positions |
 | `runway/plaid.py`, `plaidbank.py` | Plaid: investments; banks and cards (per-account provider, transactions, card statements) |
+| `runway/banktx.py` | What storing a bank transaction works the same way for with either provider: a posted one taking over its pending version, and matching up the history when an account switches |
+| `runway/tls.py`, `validate.py` | The TLS context for every outbound https request; checking numbers and other input, including numbers in a provider's reply |
 | `runway/tracked.py` | Hand-tracked holdings |
 | `runway/categorize.py`, `categories.py`, `payees.py` | Rules, history and AI categorization; the category tree; merchant names shortened from the bank’s text |
 | `runway/forecast.py`, `recurring.py` | Cash-flow forecast, card statements, recurring items and missed payments |
@@ -88,7 +90,7 @@ Runway applies it on its next start. Queries, in the app and in the tests, are S
 | `runway/notify.py`, `webpush.py` | Push notifications: what to alert about, and sending them |
 | `runway/mcp_server.py`, `mcp_access.py`, `mcp_oauth.py` | The MCP server's tools, what an assistant may reach, and OAuth for connecting one |
 | `runway/db.py`, `schema.py`, `models.py`, `backup.py` | Database connections (SQLite or Postgres), the schema and its ORM models, backups |
-| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0039) |
+| `runway/migrations/`, `alembic.ini` | Alembic migrations, applied on start-up (with foreign keys off on SQLite while they run: batch mode remakes tables). Repairs for data saved by older versions are migrations too, run once, not code run at every start. A migration that removes data saves a backup first (see 0040) |
 | `runway/brands.py` | Which institution each account belongs to, and their logos (Logo.dev, by name) |
 | `frontend/` | The web app (Svelte): `src/pages/` one file per page, `src/lib/` the API client, formatting and components (`components/settings/` holds Settings' tabs) |
 | `extension/` | The browser extension (Amazon, Target, Costco and Carta): `background.js` runs the imports, with one file each for Runway's API, the store address allow-list, hidden frames and tabs, and each store. Plain scripts with no build step; their pure helpers are tested by `frontend/src/extension/` |

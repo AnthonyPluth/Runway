@@ -22,6 +22,7 @@
   import Switch from "./Switch.svelte";
   import type { Tx } from "./types";
   import { sourceLabel } from "./sources";
+  import { act, errMsg } from "$lib/act";
 
   // One transaction in the sheet: its name, category, date, amount and note, each saved when you leave it (or pick
   // one), with an Undo. A bank's date and amount you changed stay yours (the bank's is a hover away), and a pending one's
@@ -77,7 +78,7 @@
       }, { description: label || undefined });
       refreshState(); onchanged();
       return true;
-    } catch (err) { errors[field] = (err as Error).message; return false; }
+    } catch (err) { errors[field] = errMsg(err); return false; }
   }
 
   function saveName() {
@@ -133,14 +134,14 @@
     if (!b) return;
     naming = false;
     const use = b.using === "brand" ? "bank" : "brand";
-    try {
+    await act(async () => {
       const r = await api<{ updated: number; payee: string; was: Was[]; keep_bank: KeepBank }>(
         `/api/transactions/${encodeURIComponent(t.id)}/name`, { method: "POST", body: { use, all } });
       const message = !all ? `${name} → ${r.payee}` : use === "bank" ? `${b.brand}: the bank’s names from now on` : `${b.brand} from now on`;
       undoable(message, async () => { await restoreTx(r.was, all ? r.keep_bank : undefined); onchanged(); },
         { description: all ? `${r.updated} renamed` : undefined });
       onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
 
   let splitting = $state(false);
@@ -148,11 +149,11 @@
   let splitButton = $state<HTMLButtonElement | null>(null);
   let deleting = $state(false);
   async function remove() {
-    try {
+    if (!(await act(async () => {
       await api(`/api/transactions/${encodeURIComponent(t.id)}`, { method: "DELETE" });
       toast.success(`Deleted ${name}`);
       refreshState(); onchanged(); onclose();
-    } catch (err) { toast.error((err as Error).message); return false; }
+    }))) return false;
   }
   const lbl = "flex flex-col gap-1.5 text-xs text-muted-foreground";
 </script>

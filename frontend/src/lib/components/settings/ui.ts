@@ -15,5 +15,6 @@ export const linkCls = "font-medium text-foreground underline underline-offset-4
 export const helpCls = "text-sm leading-relaxed text-muted-foreground";
 /** Something that needs a look ("no paying account"): the classic app's orange. */
 export const warnText = "text-(--low)";
-/** A card title's quiet note ("optional, via OpenRouter"). */
-export const titleNote = "ml-1 text-sm font-normal text-muted-foreground";
+/** A "$" inside a money field's left edge, and a "%" inside a rate field's right edge (the input gets `pl-6` or `pr-7`). */
+export const moneyPrefix = "pointer-events-none absolute top-[1.125rem] left-3 -translate-y-1/2 text-sm text-muted-foreground";
+export const percentSuffix = "pointer-events-none absolute top-[1.125rem] right-3 -translate-y-1/2 text-sm text-muted-foreground";

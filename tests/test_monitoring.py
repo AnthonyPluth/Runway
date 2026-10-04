@@ -428,7 +428,7 @@ class MonitoringTests(unittest.TestCase):
             db.set_setting(conn, "llm_model", "anthropic/claude-haiku-4.5")
             conn.commit()
             group = [{"posted": "2026-09-01", "amount": -87.12, "kind": "credit", "payee": "Whole Foods", "description": "WHOLE FOODS #123"}]
-            with monitoring.task("sync"), mock.patch("urllib.request.urlopen", return_value=resp):
+            with monitoring.task("sync"), mock.patch("runway.tls.urlopen", return_value=resp):
                 self.assertEqual(categorize.ask_model(conn, [group])[0][0], "Groceries")
         sentry_sdk.flush()
         spans = {sp["name"]: {k: v["value"] for k, v in sp["attributes"].items()} | {"trace_id": sp["trace_id"]}
@@ -459,7 +459,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_only_web_addresses_are_opened_for_the_ai(self):
         with mock.patch.object(categorize, "OPENROUTER_URL", "file:///etc/passwd"), \
-                mock.patch("urllib.request.urlopen") as urlopen, self.assertRaisesRegex(RuntimeError, "http"):
+                mock.patch("runway.tls.urlopen") as urlopen, self.assertRaisesRegex(RuntimeError, "http"):
             categorize.call_llm("k", "m", "p")
         urlopen.assert_not_called()
 

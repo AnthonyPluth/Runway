@@ -668,7 +668,7 @@ def serve(host: str = "127.0.0.1", port: int = 8765, auto_sync: bool = True) -> 
         raise SystemExit("Runway is set to accept connections from other devices, so it needs sign-in.\n"
                          "Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, RUNWAY_PUBLIC_URL and OIDC_ALLOWED_EMAILS\n"
                          "(or RUNWAY_ALLOW_NO_AUTH=1 if a proxy in front of Runway already handles sign-in).")
-    db.init()   # migrations included: repairs for data saved by earlier versions are among them (0038)
+    db.init()   # migrations included: repairs for data saved by earlier versions are among them (0039)
     sync.AUTO_SYNC = auto_sync   # sync_on_visit reads it there
     if auto_sync:
         threading.Thread(target=background_sync, daemon=True).start()

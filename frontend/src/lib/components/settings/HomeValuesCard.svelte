@@ -6,6 +6,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { helpCls, linkCls, rowCls } from "./ui";
+  import { act } from "$lib/act";
 
   // Home values through Realie. The provider has changed before (it was RentCast), so everything about it lives here.
   const configured = $derived(!!app.state?.realie_configured);
@@ -17,8 +18,7 @@
     toast.success("Key saved"); await refreshState();
   }
   async function clearKey() {
-    try { await api("/api/realie/settings", { method: "POST", body: { clear: true } }); await refreshState(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/realie/settings", { method: "POST", body: { clear: true } }); await refreshState(); });
   }
 </script>
 

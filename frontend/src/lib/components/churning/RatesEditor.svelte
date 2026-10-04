@@ -5,9 +5,9 @@
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { tick } from "svelte";
   import { fromAction } from "svelte/attachments";
-  import { toast } from "svelte-sonner";
   import { isTravel, rowKey, type RateRow } from "./churning";
   import type { Churning } from "./types";
+  import { act } from "$lib/act";
 
   // What a card earns: a base rate for everything else, and a row for each category with its multiplier, marked when it
   // only counts if you book through the issuer's travel portal (then the portal's name; travel categories only). Adding a card keeps these in
@@ -26,7 +26,7 @@
   const auto = fromAction(autosave, () => commit);
   async function drop(i: number) {
     rows = rows.filter((_, n) => n !== i);
-    try { await commit(); } catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await commit(); });
   }
   const anyPortal = $derived(rows.some((r) => r.portal_only));
   const label = (c: { name: string; parent: string | null }) => (c.parent ? `${c.parent} › ${c.name}` : c.name);

@@ -6,6 +6,8 @@
   import X from "@lucide/svelte/icons/x";
   import { onMount, tick } from "svelte";
   import type { Tracked } from "./types";
+  import { errMsg } from "$lib/act";
+  import { debounced } from "$lib/debounce";
 
   // Holdings you enter for an account that only reports a balance (a 401(k) through SimpleFIN, say). Every change
   // saves (after checking the rows add up); Done closes it and redraws the page if anything was saved.
@@ -17,12 +19,12 @@
   let t = $state<Tracked | null>(null), err = $state("");
   let rows = $state<Row[]>([]);
   let status = $state(""), bad = $state(false);
-  let changed = false, timer: ReturnType<typeof setTimeout>;
+  let changed = false;
   let box = $state<HTMLDivElement | null>(null);
 
   onMount(async () => {
     try { t = await api<Tracked>(`/api/tracked/${encodeURIComponent(acctId)}`); }
-    catch (e) { err = (e as Error).message; return; }
+    catch (e) { err = errMsg(e); return; }
     rows = t.positions.length ? t.positions.map((p) => ({
       key: seq++, ticker: p.ticker ?? "", name: p.ticker ? "" : (p.name ?? ""), namePh: p.ticker ? (p.name ?? "") : "Fund name (if no ticker)",
       shares: p.ticker && p.shares != null ? String(+(+p.shares).toFixed(4)) : "",
@@ -43,9 +45,10 @@
     if (out.some((r) => r.ticker && !Number(r.shares))) return say("Enter shares for each fund with a ticker", true);
     say("Saving…");
     try { await api(`/api/tracked/${encodeURIComponent(acctId)}`, { method: "POST", body: { rows: out } }); changed = true; say("Saved ✓ · prices updated"); }
-    catch (e) { say((e as Error).message, true); }
+    catch (e) { say(errMsg(e), true); }
   }
-  const soon = () => { clearTimeout(timer); timer = setTimeout(save, 150); };
+  const later = debounced(save, 150);
+  const soon = () => later.call();
   async function add() {
     rows.push(blank());
     await tick();

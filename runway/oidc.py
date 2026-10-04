@@ -29,7 +29,6 @@ import hashlib
 import json
 import os
 import secrets
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -38,7 +37,7 @@ import urllib.request
 import jwt
 from sqlalchemy import delete, insert, select, update
 
-from . import db, secretbox
+from . import db, secretbox, tls
 from .models import AuthPending, AuthSession, User
 
 
@@ -121,20 +120,9 @@ def check_config() -> list[str]:
 
 # ------------------------------------------------------------------------------------------------ HTTP helpers
 
-def _ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
-
-        ctx.load_verify_locations(certifi.where())
-    except (ImportError, OSError):   # certifi is optional; without it (or its bundle) the system certs still apply
-        pass
-    return ctx
-
-
 def _get_json(url: str, headers: dict | None = None) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Runway/0.1", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+    with tls.urlopen(req, timeout=15, allow_http=True) as r:   # your provider may be on your network, over http
         return json.loads(r.read().decode())
 
 
@@ -231,7 +219,7 @@ def finish_login(conn, params: dict, login_cookie: str | None) -> tuple[str, str
             form["client_secret"] = c["client_secret"]
     req = urllib.request.Request(d["token_endpoint"], data=urllib.parse.urlencode(form).encode(), headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=15, context=_ctx()) as r:
+        with tls.urlopen(req, timeout=15, allow_http=True) as r:
             tokens = json.loads(r.read().decode())
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:200]

@@ -7,7 +7,6 @@
   import { NativeSelect } from "$lib/components/ui/native-select";
   import { relDay } from "$lib/format";
   import { cn } from "$lib/utils";
-  import { toast } from "svelte-sonner";
   import AlarmClock from "@lucide/svelte/icons/alarm-clock";
   import CalendarCheck from "@lucide/svelte/icons/calendar-check";
   import CreditCard from "@lucide/svelte/icons/credit-card";
@@ -21,6 +20,7 @@
   import { benefitUse, planDone, taskDone, taskSnooze } from "./actions";
   import { DEADLINE_KINDS, KIND_LABEL, URGENCY_CLASS, fullDate, urgency } from "./churning";
   import type { ChurnCard, UpcomingItem } from "./types";
+  import { act } from "$lib/act";
 
   // What's coming up, soonest first, with your own to-dos (tick one off when it's done) and a way to add one.
   let { items, cards, today, showOwner, onchanged }: {
@@ -43,11 +43,11 @@
   const SNOOZE = [{ days: 7, label: "1 week" }, { days: 14, label: "2 weeks" }, { days: 30, label: "1 month" }];
   const seePlanned = () => document.getElementById("churning-planned")?.scrollIntoView({ behavior: "smooth", block: "start" });
   async function add() {
-    try {
+    await act(async () => {
       await api("/api/churning/tasks", { method: "POST", body: { card_id: card, due_on: due, action } });
       adding = false; card = ""; due = ""; action = "";
       onchanged();
-    } catch (err) { toast.error((err as Error).message); }
+    });
   }
   // The date column: "3 days overdue", today or a weekday within the week, else the day. Red within 7 days or once
   // overdue and amber within 30, for what has a deadline (a chance to apply or a safe day to close isn't late).

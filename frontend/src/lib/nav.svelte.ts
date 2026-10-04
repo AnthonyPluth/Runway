@@ -3,7 +3,6 @@ import { api } from "./api";
 import { route } from "./app.svelte";
 import { isoDay, parseDate, relDay } from "./format";
 import type { AppState } from "./types";
-import { toast } from "svelte-sonner";
 import ChartColumn from "@lucide/svelte/icons/chart-column";
 import ChartPie from "@lucide/svelte/icons/chart-pie";
 import CreditCard from "@lucide/svelte/icons/credit-card";
@@ -11,6 +10,7 @@ import House from "@lucide/svelte/icons/house";
 import Landmark from "@lucide/svelte/icons/landmark";
 import Repeat from "@lucide/svelte/icons/repeat";
 import List from "@lucide/svelte/icons/list";
+import { act } from "./act";
 
 export interface NavItem { page: string; label: string; icon: typeof House }
 
@@ -32,7 +32,7 @@ export const currentPage = () => (route.page === "review" ? "transactions" : rou
 export const signedInUser = (s: AppState | null) => (s?.user && !s.user.local ? s.user : null);
 
 /** After this long without a good sync, the data is called out as old (a day, and some slack for a late sync). */
-export const STALE_HOURS = 26;
+const STALE_HOURS = 26;
 
 type SyncTone = "" | "busy" | "warn" | "bad";
 /** The sync line: its text and tone, a visible second line (`detail`), the full story on hover (`title`), and where to
@@ -89,8 +89,8 @@ export function balanceAsOf(dates: (string | null | undefined)[], today: string,
 /** Signing out is a POST (so no other site can sign you out with a link); then on to the provider's sign-out page. */
 export async function signOut(e: Event): Promise<void> {
   e.preventDefault();
-  try {
+  await act(async () => {
     const r = await api<{ redirect?: string }>("/auth/logout", { method: "POST" });
     location.href = r.redirect || "/auth/signed-out";
-  } catch (err) { toast.error((err as Error).message); }
+  });
 }

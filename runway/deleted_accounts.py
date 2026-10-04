@@ -7,7 +7,7 @@ you set), its recurring items and the rules that only apply to it, the one-off a
 and its settings (how a card is paid, its APR). Whatever else pointed at it lets go: a budget paid with it, a home's
 loan, a churning card or bank bonus linked to it, a card paid from it, and the forecast's account.
 
-The database's foreign keys (schema.py, migration 0039) do part of it when the account's row goes: its transactions,
+The database's foreign keys (schema.py, migration 0040) do part of it when the account's row goes: its transactions,
 recurring items, rules and entered statements go with it (ON DELETE CASCADE), and the columns pointing at it let go
 (SET NULL). The rest is kept by id in places a foreign key can't reach (settings keys, forecast overrides, Plaid and
 investment data, a transaction's splits) and is done here by hand.

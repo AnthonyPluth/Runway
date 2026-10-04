@@ -146,7 +146,7 @@ class CategoryCascadeTests(Base):
         categories.set_look(self.c, "Pets", "", "")
         self.assertEqual(tuple(self.one(select(Category.icon, Category.color)
                                         .where(Category.name == "Pets"))), (None, None))
-        # an orphan (its parent removed by hand) shows at the top level (deeper nesting: migration 0038, test_migrations.py)
+        # an orphan (its parent removed by hand) shows at the top level (deeper nesting: migration 0039, test_migrations.py)
         self.c.execute(insert(Category), [{"name": "Lost", "is_transfer": 0, "is_income": 0, "parent": "Gone"}])
         categories.add(self.c, "Vitamins", "Pharmacy")
         lost = next(c for c in categories.all_categories(self.c) if c["name"] == "Lost")

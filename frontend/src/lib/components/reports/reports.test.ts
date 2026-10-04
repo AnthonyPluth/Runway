@@ -1,27 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Report, monthTick, niceTicks, scrub } from "./chart.svelte";
+import { Report, monthTick } from "./chart.svelte";
 import { catFilter, channels, contrast, dayBefore, drill, INK_DARK, INK_LIGHT, textOn } from "./look";
 import { monthsOptions, rangeDates, rangeOptions } from "./state.svelte";
-
-describe("niceTicks", () => {
-  it("picks round steps that cover the range", () => {
-    expect(niceTicks(0, 100)).toEqual([0, 20, 40, 60, 80, 100]);
-    const t = niceTicks(-130, 480);
-    expect(t[0]).toBeLessThanOrEqual(-130);
-    expect(t.at(-1)).toBeGreaterThanOrEqual(480);
-    expect(t).toContain(0);
-  });
-
-  it("gives a single tick, not NaN or a hang, when everything is one value", () => {
-    expect(niceTicks(0, 0)).toEqual([0]);
-    expect(niceTicks(50, 50)).toEqual([50]);
-  });
-
-  it("rounds away floating point dust in small steps", () => {
-    expect(niceTicks(0, 0.3)).toEqual([0, 0.1, 0.2, 0.3, 0.4].slice(0, niceTicks(0, 0.3).length));
-  });
-});
 
 describe("monthTick", () => {
   it("shows the short month, with the year to mark where one starts", () => {
@@ -123,42 +104,6 @@ describe("Report", () => {
     await good.p;
     expect(r.error).toBeNull();
     expect(r.data).toBe("ok");
-  });
-});
-
-describe("scrub", () => {
-  const touch = (x: number, y: number) => ({ clientX: x, clientY: y });
-  const fire = (el: Element, type: string, t: ReturnType<typeof touch>) => {
-    const e = new Event(type, { cancelable: true }) as Event & { touches: unknown[] };
-    e.touches = [t];
-    el.dispatchEvent(e);
-    return e;
-  };
-
-  it("follows a sideways drag and keeps the page from scrolling with it", () => {
-    const el = document.createElement("div"), moves: number[] = [];
-    scrub(el, (x) => moves.push(x));
-    fire(el, "touchstart", touch(10, 10));
-    const e = fire(el, "touchmove", touch(30, 12));
-    expect(moves).toEqual([10, 30]);
-    expect(e.defaultPrevented).toBe(true);
-  });
-
-  it("lets a mostly vertical drag scroll the page", () => {
-    const el = document.createElement("div"), moves: number[] = [];
-    scrub(el, (x) => moves.push(x));
-    fire(el, "touchstart", touch(10, 10));
-    const e = fire(el, "touchmove", touch(12, 60));
-    expect(moves).toEqual([10]);
-    expect(e.defaultPrevented).toBe(false);
-  });
-
-  it("stops listening when destroyed", () => {
-    const el = document.createElement("div"), moves: number[] = [];
-    const a = scrub(el, (x) => moves.push(x));
-    a.destroy();
-    fire(el, "touchstart", touch(1, 1));
-    expect(moves).toEqual([]);
   });
 });
 

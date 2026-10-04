@@ -17,7 +17,7 @@ from sqlalchemy import func, insert, select, update
 
 from runway import backup, db, networth, server
 from runway import settings_keys as sk
-from runway.models import Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken, Rule, Transaction
+from runway.models import Account, AuthSession, Budget, Category, OAuthClient, OAuthGrant, OAuthToken, PlaidItem, Rule, Transaction
 from tests.shared import own_database
 
 db_session = db.session
@@ -106,12 +106,12 @@ class BackupTests(unittest.TestCase):
     def test_an_older_backup_round_trips_through_the_migrations(self):
         from alembic import command
         with db.engine(self.a).begin() as c:
-            command.downgrade(db.alembic_config(c), "0038")   # the schema before foreign keys: same columns
+            command.downgrade(db.alembic_config(c), "0039")   # the schema before foreign keys: same columns
         src = db.connect(self.a)
         self.awkward(src)
         src.commit()
         data = backup.load(backup.dump(src))
-        self.assertEqual(data["revision"], "0038")
+        self.assertEqual(data["revision"], "0039")
         dst = db.connect(self.b)
         backup.restore(dst, data)
         dst.commit()
@@ -121,7 +121,7 @@ class BackupTests(unittest.TestCase):
         src.close(); dst.close()
 
     def test_an_older_backup_gets_what_the_migrations_since_change(self):
-        # Made at 0031: 0032 shortens the bank's payees, 0036 moves a budget's card to its category, 0039 drops a
+        # Made at 0031: 0032 shortens the bank's payees, 0036 moves a budget's card to its category, 0040 drops a
         # transaction whose account is gone. Restored here, the backup's data is changed just the same.
         from alembic import command
         with db.engine(self.a).begin() as c:
@@ -142,7 +142,7 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(dict(dst.execute(select(Transaction.id, Transaction.payee)).fetchall()), {"chk|1": "Target"})
         self.assertEqual(dst.execute(select(Category.pay_with).where(Category.name == "Groceries")).scalar(), "cc")
         self.assertEqual(dst.execute(select(Budget.amount)).scalar(), 500)
-        # The backup is the copy: restoring it doesn't save one of it (0039 does for a database it changes).
+        # The backup is the copy: restoring it doesn't save one of it (0040 does for a database it changes).
         self.assertFalse([f for f in os.listdir(self.tmp.name) if f.startswith("runway-before-migration")])
         src.close(); dst.close()
 
@@ -152,7 +152,7 @@ class BackupTests(unittest.TestCase):
         data = backup.load(backup.dump(src))
         del data["revision"]
         t = data["tables"]["accounts"]
-        t["columns"].append("daily_spend")                       # as it had then (0037 dropped it)
+        t["columns"].append("daily_spend")                       # as it had then (0038 dropped it)
         for r in t["rows"]:
             r.append(1)
         data["tables"]["transactions"]["rows"].append(["gone|1", "gone", "2026-09-01", -5.0] + [None] * (len(data["tables"]["transactions"]["columns"]) - 4))
@@ -164,6 +164,35 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(dst.execute(select(Account.name)).scalar(), "Checking")
         self.assertEqual(db.get_setting(dst, "openrouter_api_key"), "sk-secret")
         src.close(); dst.close()
+
+    def test_an_unversioned_backups_plaid_connections_get_their_sides_once(self):
+        # Without a revision: one made before 0037 gets it (an investment-only connection's sync time and error move to
+        # inv_*); one made after already has them, and running 0037 over it again would wipe them.
+        src = self.fill(self.a)
+        src.execute(insert(PlaidItem).values(item_id="inv", access_token="t", products="investments", inv_last_sync="2026-09-01 10:00:00",
+                                             inv_error="ITEM_LOGIN_REQUIRED"))
+        src.commit()
+        after = backup.load(backup.dump(src))
+        del after["revision"]
+        before = json.loads(json.dumps(after))
+        items = before["tables"]["plaid_items"]
+        c = items["columns"]
+        for r in items["rows"]:   # as 0036 had it: one error and time per connection
+            r[c.index("last_sync")], r[c.index("error")] = r[c.index("inv_last_sync")], r[c.index("inv_error")]
+        keep = [i for i, name in enumerate(c) if name not in ("inv_last_sync", "inv_error")]
+        items["columns"] = [c[i] for i in keep]
+        items["rows"] = [[r[i] for i in keep] for r in items["rows"]]
+        self.assertEqual((backup.unversioned(before), backup.unversioned(after)), ("0036", "0037"))
+        for data in (before, after):
+            with self.subTest(at=backup.unversioned(data)):
+                dst = db.connect(self.b)
+                backup.restore(dst, data)
+                dst.commit()
+                self.assertEqual(tuple(dst.execute(select(PlaidItem.last_sync, PlaidItem.error, PlaidItem.inv_last_sync,
+                                                          PlaidItem.inv_error)).fetchone()),
+                                 (None, None, "2026-09-01 10:00:00", "ITEM_LOGIN_REQUIRED"))
+                dst.close()
+        src.close()
 
     def test_rows_referring_to_what_the_backup_doesnt_have(self):
         # A database changed by hand (SQLite's own shell doesn't enforce foreign keys) can have them: left out, or let go.
@@ -193,7 +222,7 @@ class BackupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "newer version of Runway"):
             backup.restore(dst, {**data, "revision": "0999"})
         self.assertEqual([r[0] for r in dst.execute(select(Account.id))], ["kept"])   # nothing touched
-        for bad in (5, ["0039"]):
+        for bad in (5, ["0040"]):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "isn't a Runway backup"):
                 backup.load(json.dumps({**data, "revision": bad}).encode())
         src.close(); dst.close()
@@ -259,6 +288,11 @@ class BackupTests(unittest.TestCase):
             self.assertFalse(lock.locked())
             self.assertEqual((done["counts"]["transactions"], done["safety_copy"], done["unreadable_secrets"], done["warning"]),
                              (20, None, [], None))   # nothing was here to keep a copy of
+
+    def test_every_secret_has_a_label(self):
+        self.assertEqual(set(backup.SECRET_LABELS), set(sk.SECRETS))
+        self.assertEqual(backup.unreadable_summary([sk.PLAID_SECRET, "plaid:abc"]), "Plaid secret, 1 Plaid connection")
+        self.assertEqual(backup.unreadable_summary([]), "")
 
     def test_preview_says_what_a_backup_holds(self):
         src = self.fill(self.a)
@@ -426,6 +460,25 @@ class RestoreCommandTests(unittest.TestCase):
             self.assertIn("A copy of what was here before is at " + dst, r.stdout)
             self.assertNotIn("Note:", r.stdout)
             self.assertTrue([f for f in os.listdir(dst) if f.startswith("runway-before-restore-")])
+            self.assertNotIn("can't be read", r.stdout)
+
+            # Secrets this key can't read (made under another): named as Settings has them, Plaid's as a count, never
+            # a connection's id.
+            data["revision"] = backup.head()
+            data["tables"]["settings"]["rows"] += [[sk.OPENROUTER_API_KEY, "enc:v1:not-this-key"],
+                                                   [sk.CARTA_ACCESS_TOKEN, "enc:v1:x"], [sk.CARTA_REFRESH_TOKEN, "enc:v1:y"]]
+            items = data["tables"]["plaid_items"]
+            for item_id in ("item-sekrit-1", "item-sekrit-2"):
+                items["rows"].append([{"item_id": item_id, "access_token": "enc:v1:not-this-key"}.get(c) for c in items["columns"]])
+            locked = os.path.join(tmp, "locked.json.gz")
+            with open(locked, "wb") as f:
+                f.write(gzip.compress(json.dumps(data, default=str).encode()))
+            r = self.run_py(dst, "restore", locked, "--yes")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("These can't be read with this Runway's secret key: OpenRouter API key, Carta sign-in, "
+                          "2 Plaid connections.", r.stdout)
+            self.assertNotIn("sekrit", r.stdout + r.stderr)
+            self.assertNotIn(sk.OPENROUTER_API_KEY, r.stdout)
 
             data["revision"] = "0999"
             with open(old, "wb") as f:

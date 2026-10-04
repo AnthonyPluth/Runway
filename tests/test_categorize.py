@@ -564,7 +564,7 @@ class CategoryTests(LedgerCase):
         food = next(n for n in cf["spending"] if n["name"] == "Food")
         self.assertEqual((food["value"], sorted(k["name"] for k in food["children"])), (20.0, ["Groceries & more", "Restaurants"]))
         self.assertEqual(len(server.api_transactions(self.conn, {"category": ["Food"]}, None)["items"]), 2)
-        # (anything nested deeper by an earlier version was moved up by migration 0038: tests/test_migrations.py)
+        # (anything nested deeper by an earlier version was moved up by migration 0039: tests/test_migrations.py)
         categories.add(self.conn, "Burgers", parent="Food")
         categories.move(self.conn, "Burgers", None)
         categories.move(self.conn, "Burgers", "Income")

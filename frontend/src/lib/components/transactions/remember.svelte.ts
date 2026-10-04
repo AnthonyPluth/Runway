@@ -8,6 +8,7 @@ import { UNDO_MS } from "$lib/undo";
 import type { Also } from "$lib/undoBatch";
 import { toast } from "svelte-sonner";
 import type { RuleOffer } from "./types";
+import { act } from "$lib/act";
 
 /**
  * The rule offer as an Undo toast's extra action ("Always for Blue Bottle"), and the line saying what it would do
@@ -44,9 +45,9 @@ export function askAlsoMatch(recurringId: number, name: string, text: string, re
 
 /** "Also match": add the text to the item, so the next transaction with it links by itself. */
 export async function alsoMatch(recurringId: number, name: string, text: string, reload: () => void): Promise<void> {
-  try {
+  await act(async () => {
     const r = await api<{ linked: number }>(`/api/recurring/${recurringId}/match`, { method: "POST", body: { text } });
     toast.success(r.linked ? `${name} also matches “${text}” now · ${r.linked} more linked` : `${name} also matches “${text}” now`);
     if (r.linked) reload();
-  } catch (err) { toast.error((err as Error).message); }
+  });
 }

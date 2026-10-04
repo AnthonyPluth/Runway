@@ -8,7 +8,7 @@ export interface PickOption { value: string; label: string; icon?: string }
 export interface PickSection { label: string; items: PickOption[] }
 
 const RECENT_KEY = "runway.recent-categories";
-export const RECENT_MAX = 5;
+const RECENT_MAX = 5;
 
 /** The categories picked last, newest first (none when the browser keeps nothing). */
 export function recentCategories(): string[] {
@@ -25,7 +25,7 @@ export function rememberRecent(name: string): void {
   catch { /* not remembered; picking still works */ }
 }
 
-export const optionOf = (c: Category): PickOption => ({ value: c.name, label: catLabel(c), icon: c.icon || undefined });
+const optionOf = (c: Category): PickOption => ({ value: c.name, label: catLabel(c), icon: c.icon || undefined });
 
 /** Lower case, without accents, for matching what's typed. */
 const fold = (s: string) => s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();

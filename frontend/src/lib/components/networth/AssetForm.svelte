@@ -10,6 +10,7 @@
   import { toast } from "svelte-sonner";
   import { HOME_VALUES } from "./homeValues";
   import { ASSET_KIND_LABEL, type Asset, type NetWorth } from "./types";
+  import { errMsg } from "$lib/act";
 
   // Adding an asset (Add, or Enter, saves it all at once), or editing one's details (each field saves as you change it;
   // Done redraws the page). What's missing or refused shows under its field, and Add waits for the save.
@@ -41,7 +42,7 @@
     const body = { name, kind, yearly_change: yc, loan_account_id: loan, url, address, auto_update: auto, value };
     busy = true; problem = null;
     try { await api("/api/assets", { method: "POST", body }); toast(`Added ${name}`); onclose(true); }
-    catch (err) { problem = (err as Error).message; }
+    catch (err) { problem = errMsg(err); }
     finally { busy = false; }
   }
   function submit(e: SubmitEvent) {

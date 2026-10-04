@@ -5,6 +5,7 @@
   import { plural } from "$lib/format";
   import { toast } from "svelte-sonner";
   import { inputCls } from "./ui";
+  import { errMsg } from "$lib/act";
 
   // The SimpleFIN setup-token flow: paste a token, and Runway claims it and runs the first sync. Connecting for the first
   // time then opens Settings → Accounts, where the new accounts are; "Replace the setup token" passes `ondone` instead,
@@ -23,7 +24,7 @@
       await refreshState();
       if (ondone) { reload(); ondone(); }
       else location.hash = "#setup/accounts";
-    } catch (err) { toast.error((err as Error).message); busy = ""; }
+    } catch (err) { toast.error(errMsg(err)); busy = ""; }
   }
 </script>
 

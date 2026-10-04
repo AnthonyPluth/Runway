@@ -278,10 +278,12 @@ plaid_items = Table(
     Column('institution_name', Text),
     Column('env', Text),
     Column('created_at', Text, server_default=now_text()),
-    Column('last_sync', Text),
-    Column('error', Text, doc='e.g. ITEM_LOGIN_REQUIRED'),
+    Column('last_sync', Text, doc='the bank sync: transactions, balances, card statements (plaidbank)'),
+    Column('error', Text, doc='the bank sync\'s, e.g. ITEM_LOGIN_REQUIRED'),
     Column('products', Text, server_default=text("'investments'"), doc='comma-separated: investments, transactions, liabilities'),
     Column('cursor', Text, doc='/transactions/sync position'),
+    Column('inv_last_sync', Text, doc='the investment sync: holdings and activity (plaid.sync_investments)'),
+    Column('inv_error', Text, doc='the investment sync\'s'),
 )
 
 plaid_accounts = Table(

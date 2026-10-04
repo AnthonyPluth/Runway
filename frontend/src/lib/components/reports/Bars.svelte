@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { fmt0, shortMoney } from "$lib/format";
+  import { fmt0 } from "$lib/format";
   import { cn } from "$lib/utils";
   import type { Snippet } from "svelte";
-  import { niceTicks, scrub } from "./chart.svelte";
+  import { niceTicks, scrub, yScale } from "$lib/chart";
+  import YAxis from "../YAxis.svelte";
   import Swatch from "./Swatch.svelte";
   import Tip from "./Tip.svelte";
   import type { BarSeries } from "./types";
@@ -27,8 +28,9 @@
   const totals = $derived(labels.map((_, i) => series.reduce((a, s) => a + (s.values[i] || 0), 0)));
   const hi = $derived(grouped ? Math.max(0, ...series.flatMap((s) => s.values)) : Math.max(0, ...totals));
   const ticks = $derived(niceTicks(0, hi, ih < 150 ? 3 : 4));
-  const y1 = $derived(ticks[ticks.length - 1]);
-  const y = (v: number) => m.top + (1 - v / y1) * ih;
+  const scale = $derived(yScale(ticks, m.top, ih));
+  const y1 = $derived(scale.y1);
+  const y = (v: number) => scale.y(v);
   const bw = $derived(iw / Math.max(1, n));
   const every = $derived(Math.ceil(n / Math.max(1, Math.floor(iw / 44))));
   const cx = (i: number) => m.left + bw * i + bw / 2;
@@ -152,10 +154,7 @@
     <p class="py-4 text-center text-sm text-muted-foreground">Nothing to show for these months.</p>
   {:else}
     <svg bind:this={svgEl} viewBox={`0 0 ${W} ${H}`} class="block w-full select-none overflow-visible" role="img" aria-label={label}>
-      {#each ticks as t (t)}
-        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" shape-rendering="crispEdges" />
-        <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)" font-size="11.5" class="tabular-nums">{shortMoney(t)}</text>
-      {/each}
+      <YAxis {ticks} {y} left={m.left} right={W - m.right} fontSize="11.5" textClass="tabular-nums" crisp />
       {#if hover != null}<rect x={m.left + bw * hover} y={m.top} width={bw} height={ih} fill="var(--foreground)" opacity="0.05" />{/if}
       {#each shapes as s, k (k)}<path d={s.d} style:fill={s.color} fill-opacity={s.faint ? 0.4 : undefined} data-partial={s.faint || undefined} />{/each}
       {#if avg != null && avg > 0}

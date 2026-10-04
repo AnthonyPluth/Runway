@@ -6,6 +6,7 @@
   import type { Missed } from "$lib/types";
   import { toast } from "svelte-sonner";
   import type { Candidate } from "./types";
+  import { act, errMsg } from "$lib/act";
 
   // "Link a transaction" on a missed payment: the unlinked transactions on its account around its date at about its
   // amount (GET /api/recurring/{id}/candidates). Linking one is the same link as Transactions' repeat button, and puts
@@ -35,12 +36,11 @@
         toast.success(`Linked to ${m.name}`, { description: `Also match “${text}” from now on?`, action: { label: "Also match", onClick: () => alsoMatch(text) } });
       } else toast.success(`Linked to ${m.name}`);
       onlinked();
-    } catch (err) { toast.error((err as Error).message); }
+    } catch (err) { toast.error(errMsg(err)); }
     finally { busy = false; }
   }
   async function alsoMatch(text: string) {
-    try { await api(`/api/recurring/${m.recurring_id}/match`, { method: "POST", body: { text } }); toast.success(`${m.name} also matches “${text}” now`); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api(`/api/recurring/${m.recurring_id}/match`, { method: "POST", body: { text } }); toast.success(`${m.name} also matches “${text}” now`); });
   }
   function find(e: Event) {
     e.preventDefault();

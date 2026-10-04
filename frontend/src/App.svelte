@@ -33,7 +33,8 @@
     LOADERS[name]().then((m) => { loaded[name] = m.default; })
       .catch((err) => { console.error(err); loadError = "This page couldn't be loaded. Check your connection and try again."; });
   });
-  // Start fetching the other pages once the first one is up, so moving around later is instant.
+  // Start fetching the other pages once the first one is up, so moving around later is instant. A failed preload says nothing:
+  // it only saves time, and opening that page tries again (and says so, above, if it fails then).
   whenBooted(() => setTimeout(() => Object.values(LOADERS).forEach((load) => load().catch(() => {})), 1500));
 </script>
 

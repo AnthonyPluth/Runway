@@ -12,8 +12,8 @@ A backup records the schema it was made with (its Alembic revision). Restoring o
 rows into a database of their own at that revision, runs the migrations since over them (so what they change in the
 data, a payee renamed or a setting moved, is changed in the backup's data too) and then copies the result in. That
 database is a throwaway: in memory on SQLite, and on Postgres a schema made inside a transaction that's rolled back.
-A backup from before backups recorded their revision is taken to be at UNVERSIONED (the last revision without it): the
-migrations after it run, the ones before don't, and the restore says some older data may not be updated. A backup from
+A backup from before backups recorded their revision is taken to be at the last revision its shape fits (unversioned()):
+the migrations after it run, the ones before don't, and the restore says some older data may not be updated. A backup from
 a newer version than this one is refused.
 """
 from __future__ import annotations
@@ -38,13 +38,15 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateColumn
 
 from . import db, monitoring, schema, secretbox
+from . import settings_keys as sk
 from .models import PlaidItem, Setting
 
 FORMAT = "runway-backup"
 VERSION = 2   # 2: it records its schema (revision); a Runway that reads only 1 refuses it rather than lose what's new
 # Sign-ins, and the assistants connected with OAuth: neither travels (reconnect them after a restore).
 SKIP = {"auth_sessions", "auth_pending", "oauth_clients", "oauth_grants", "oauth_codes", "oauth_tokens", "oauth_consents"}
-UNVERSIONED = "0036"   # backups made before they recorded their revision were made at this revision or an earlier one
+UNVERSIONED = "0036"   # backups made before they recorded their revision were made at this revision or an earlier one...
+UNVERSIONED_PLAID_SIDES = "0037"   # ... or at this one, which gave a Plaid connection's investment sync its own columns
 OLD_BACKUP = ("This backup is from an older version of Runway that didn’t record its database version, so some of "
               "its older data may not have been brought up to date. Check your accounts, payees and budgets.")
 NEWER = "That backup is from a newer version of Runway. Update Runway first."
@@ -239,6 +241,27 @@ def unreadable_secrets(conn) -> list[str]:
     return out
 
 
+# What each secret is called where it's entered again (Settings), for saying which ones a restore couldn't read.
+SECRET_LABELS = {
+    sk.SIMPLEFIN_ACCESS_URL: "SimpleFIN access", sk.PLAID_SECRET: "Plaid secret", sk.PLAID_PENDING_LINK: "a Plaid connection in progress",
+    sk.OPENROUTER_API_KEY: "OpenRouter API key", sk.REALIE_API_KEY: "Realie API key", sk.FINNHUB_API_KEY: "Finnhub API key",
+    sk.LOGODEV_TOKEN: "Logo.dev publishable key", sk.LOGODEV_SECRET: "Logo.dev secret key",
+    sk.VAPID_PRIVATE_KEY: "notifications' signing key (devices sign up for notifications again)",
+    sk.CARTA_CLIENT_SECRET: "Carta client secret", sk.CARTA_ACCESS_TOKEN: "Carta sign-in", sk.CARTA_REFRESH_TOKEN: "Carta sign-in",
+    sk.CARTA_WEB_CAPTURE: "what was read from Carta",
+}
+
+
+def unreadable_summary(unreadable: list[str]) -> str:
+    """unreadable_secrets() for people: each setting by its name in Settings, and Plaid connections as a count. Only
+    these fixed labels and a count are said, never anything read from the rows (a connection's id)."""
+    labels = list(dict.fromkeys(label for key, label in SECRET_LABELS.items() if key in unreadable))
+    plaid = sum(1 for u in unreadable if u.startswith("plaid:"))
+    if plaid:
+        labels.append(f"{plaid} Plaid connection{'s' if plaid != 1 else ''}")
+    return ", ".join(labels)
+
+
 # ------------------------------------------------------------------------------------------------ restoring
 
 Rows = dict[str, tuple[list[str], list[list]]]   # table -> (columns, rows)
@@ -270,13 +293,13 @@ def _scratch(conn) -> Iterator[SAConnection]:
 
 def _migrate(sc: SAConnection, to: str) -> None:
     cfg = db.alembic_config(sc)
-    cfg.attributes["restoring"] = True   # the backup is the copy: migration 0039 needn't save one of it
+    cfg.attributes["restoring"] = True   # the backup is the copy: migration 0040 needn't save one of it
     command.upgrade(cfg, to)
 
 
 def _budget_cards(sc: SAConnection, tables: dict) -> None:
     """A backup from before a category kept its own card (migration 0036) has it on the budget: it goes to the
-    category. (Only for a backup that didn't record its revision, loaded at UNVERSIONED: one that did gets 0036 itself.)"""
+    category. (Only for a backup that didn't record its revision, loaded at unversioned(): one that did gets 0036 itself.)"""
     b = tables.get("budgets") or {}
     if "pay_with" not in (b.get("columns") or []):
         return
@@ -287,11 +310,20 @@ def _budget_cards(sc: SAConnection, tables: dict) -> None:
             sc.execute(update(c).where(c.c.name == r[cat], c.c.pay_with.is_(None)).values(pay_with=r[acct]))
 
 
+def unversioned(data: dict) -> str:
+    """The revision a backup that didn't record one was made at, as far as can be told: 0037 (its Plaid connections have
+    inv_error, which 0037 added; running 0037 again would move their sync times a second time), else 0036."""
+    items = data["tables"].get("plaid_items")
+    if isinstance(items, dict) and "inv_error" in (items.get("columns") or []):
+        return UNVERSIONED_PLAID_SIDES
+    return UNVERSIONED
+
+
 def _upgraded(conn, data: dict) -> Rows:
     """The backup's rows as they'd be had its database been migrated to this version's schema."""
     rev = data.get("revision")
     with _scratch(conn) as sc:
-        _migrate(sc, rev or UNVERSIONED)
+        _migrate(sc, rev or unversioned(data))
         then = MetaData()
         then.reflect(sc)
         order = [t for t in then.sorted_tables if t.name != "alembic_version"]

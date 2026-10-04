@@ -76,7 +76,7 @@ if __name__ == "__main__":
             if done["safety_copy"]:
                 print(f"A copy of what was here before is at {done['safety_copy']}.")
             if done["unreadable_secrets"]:
-                print(f"These can't be read with this Runway's secret key: {', '.join(done['unreadable_secrets'])}. Set the key "
+                print(f"These can't be read with this Runway's secret key: {backup.unreadable_summary(done['unreadable_secrets'])}. Set the key "
                       "the backup was made with as RUNWAY_SECRET_KEY_OLD and start Runway, or enter them again in Settings.")
             if done["warning"]:
                 print(f"Note: {done['warning']}")

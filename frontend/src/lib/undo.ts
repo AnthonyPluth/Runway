@@ -1,6 +1,7 @@
 // A change that has already happened, said in a toast with an Undo. The one place for the wording, how long it stays
 // (longer than a plain toast, so there's time to read it and reach for it) and what happens when undoing fails.
 import { toast } from "svelte-sonner";
+import { errMsg } from "./act";
 
 /** How long an Undo toast stays up, in ms. */
 export const UNDO_MS = 10_000;
@@ -19,7 +20,7 @@ export function undoable(message: string, undo: () => Promise<string | void>,
       try {
         const what = await undo();
         toast("Undone", what ? { description: what } : undefined);
-      } catch (err) { toast.error((err as Error).message || "Couldn’t undo that"); }
+      } catch (err) { toast.error(errMsg(err) || "Couldn’t undo that"); }
     },
   };
   const also = opts.also;
@@ -28,7 +29,7 @@ export function undoable(message: string, undo: () => Promise<string | void>,
     duration: opts.duration ?? UNDO_MS,
     ...(also ? {
       cancel: undoButton,
-      action: { label: also.label, onClick: async () => { try { await also.run(); } catch (err) { toast.error((err as Error).message || "Couldn’t do that"); } } },
+      action: { label: also.label, onClick: async () => { try { await also.run(); } catch (err) { toast.error(errMsg(err) || "Couldn’t do that"); } } },
     } : { action: undoButton }),
   });
 }

@@ -7,6 +7,7 @@
   import SecretInput from "./SecretInput.svelte";
   import ServiceRow from "./ServiceRow.svelte";
   import { helpCls, linkCls, rowCls } from "./ui";
+  import { act, errMsg } from "$lib/act";
 
   // Merchant logos through Logo.dev, for merchants Plaid has no logo for.
   const configured = $derived(!!app.state?.logodev_configured);
@@ -14,11 +15,12 @@
   // Where logos stand: how many Runway has, how many are still to fetch, and why Logo.dev last failed.
   interface Status { plaid: number; logodev: number; unknown: number; waiting: number; last_error: string | null; last_error_name: string | null; searchable: boolean; fetching: boolean }
   let st = $state<Status | null>(null);
-  const loadStatus = () => api<Status>("/api/logodev/status").then((r) => (st = r)).catch(() => {});
+  // When it can't be read, the last numbers don't stay up as if they were current: the card says so, with Retry.
+  let statusError = $state("");
+  const loadStatus = () => api<Status>("/api/logodev/status").then((r) => { st = r; statusError = ""; }).catch((err) => { st = null; statusError = errMsg(err); });
   loadStatus();
   async function fetchNow() {
-    try { await api("/api/logodev/fetch", { method: "POST" }); toast.success("Fetching logos now. They fill in over the next few minutes."); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/fetch", { method: "POST" }); toast.success("Fetching logos now. They fill in over the next few minutes."); });
     setTimeout(loadStatus, 4000);
   }
 
@@ -35,12 +37,10 @@
     toast.success("Key saved: looking merchants up again with Brand Search."); loadStatus();
   }
   async function clearSecret() {
-    try { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/settings", { method: "POST", body: { clear_secret: true } }); loadStatus(); });
   }
   async function clearKey() {
-    try { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); }
-    catch (err) { toast.error((err as Error).message); }
+    await act(async () => { await api("/api/logodev/settings", { method: "POST", body: { clear: true } }); await refreshState(); loadStatus(); });
   }
 </script>
 
@@ -80,5 +80,8 @@
         <Button variant="outline" size="sm" class="mt-2" disabled={st.fetching} onclick={fetchNow}>{st.fetching ? "Fetching…" : st.waiting ? "Fetch them now" : "Look them up again"}</Button>
       {/if}
     </div>
+  {:else if statusError}
+    <p class="text-sm text-muted-foreground">Couldn’t load the logo status: {statusError}
+      <Button variant="link" class="h-auto p-0" onclick={loadStatus}>Retry</Button></p>
   {/if}
 </ServiceRow>

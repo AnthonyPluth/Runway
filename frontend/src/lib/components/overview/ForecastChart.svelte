@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { fmt, fmtDate, fmtSigned, fmtDow, parseDate, shortMoney } from "$lib/format";
+  import { fmt, fmtDate, fmtSigned, fmtDow, parseDate } from "$lib/format";
+  import YAxis from "../YAxis.svelte";
+  import { niceTicks, sideways, xScale, yScale } from "$lib/chart";
   import type { ForecastEvent, Overview } from "$lib/types";
 
   // The projected balance, day by day: what each day brings (hover or drag for a day's readout).
@@ -17,24 +19,16 @@
   const inView = (i: number) => i >= v0 && i <= v1;
   const shown = (vals: number[]) => vals.slice(v0, v1 + 1);
 
-  function niceTicks(min: number, max: number, count = 5): number[] {
-    const span = max - min || Math.abs(max) || 1, raw = span / count;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((s) => s >= raw)!;
-    const start = Math.floor(min / step) * step, end = Math.ceil(max / step) * step;
-    const out: number[] = [];
-    for (let v = start; v <= end + step / 2; v += step) out.push(Math.round(v * 100) / 100);
-    return out;
-  }
   const ticks = $derived.by(() => {
     // The axis always starts at $0, so the line's height is the balance; it only goes lower to show
     // a balance that dips below zero.
     const lo = Math.min(0, ...shown(series)), hi = Math.max(0, ...shown(series));
     return niceTicks(lo, hi);
   });
-  const y0 = $derived(ticks[0]), y1 = $derived(ticks[ticks.length - 1]);
-  const x = (i: number) => m.left + ((i - v0) / Math.max(1, v1 - v0)) * iw;
-  const y = (v: number) => m.top + (1 - (v - y0) / (y1 - y0 || 1)) * ih;
+  const scale = $derived(yScale(ticks, m.top, ih));
+  const y0 = $derived(scale.y0), y1 = $derived(scale.y1);
+  const x = (i: number) => xScale(v0, v1, m.left, iw)(i);
+  const y = (v: number) => scale.y(v);
   const path = (vals: number[]) => shown(vals).map((v, k) => `${x(v0 + k).toFixed(1)},${y(v).toFixed(1)}`).join(" L");
 
   const eventsByDate = $derived.by(() => {
@@ -65,20 +59,10 @@
   // On a phone the readout stays put, in the top left of the chart, instead of riding along under the finger: it's
   // readable there, and two days are compared by dragging between them. A mouse's readout follows the pointer.
   let pinned = $state(false), lastTouch = 0;
-  // Dragging sideways on a phone moves the readout; dragging up or down still scrolls the page. (Svelte's own touch
-  // handlers are passive, so they couldn't stop the page scrolling sideways.)
-  function sideways(el: SVGElement, onMove: (clientX: number) => void) {
-    let start: Touch | null = null;
-    const down = (e: TouchEvent) => { start = e.touches[0]; pinned = true; lastTouch = Date.now(); };
-    const drag = (e: TouchEvent) => {
-      const t = e.touches[0];
-      if (start && Math.abs(t.clientY - start.clientY) > Math.abs(t.clientX - start.clientX)) return;
-      onMove(t.clientX);
-      if (e.cancelable) e.preventDefault();
-    };
+  function touched(el: SVGElement) {
+    const down = () => { pinned = true; lastTouch = Date.now(); };
     el.addEventListener("touchstart", down, { passive: true });
-    el.addEventListener("touchmove", drag, { passive: false });
-    return { destroy() { el.removeEventListener("touchstart", down); el.removeEventListener("touchmove", drag); } };
+    return { destroy() { el.removeEventListener("touchstart", down); } };
   }
   /** The day under a point on screen. */
   function dayAt(clientX: number): number {
@@ -113,10 +97,7 @@
           <stop offset="0" stop-color="var(--chart-1)" stop-opacity="0.22" /><stop offset="1" stop-color="var(--chart-1)" stop-opacity="0" />
         </linearGradient>
       </defs>
-      {#each ticks as t (t)}
-        <line x1={m.left} x2={W - m.right} y1={y(t)} y2={y(t)} stroke="var(--border)" />
-        <text x={m.left - 8} y={y(t) + 4} text-anchor="end" fill="var(--muted-foreground)">{shortMoney(t)}</text>
-      {/each}
+      <YAxis {ticks} {y} left={m.left} right={W - m.right} />
       {#each months as ml (ml.i)}
         <text x={x(ml.i)} y={H - 8} text-anchor={ml.i === 0 ? "start" : "middle"} fill="var(--muted-foreground)">{ml.label}</text>
       {/each}
@@ -132,7 +113,7 @@
       {/if}
       <rect x={m.left} y={m.top} width={iw} height={ih} fill="transparent" role="presentation" class="cursor-crosshair"
         onmousemove={(e) => mouse(e.clientX)} onmouseleave={() => (pointed = null)}
-        use:sideways={move} />
+        use:touched use:sideways={move} />
     </svg>
     {#if hover != null}
       {@const spent = fc.spend?.[fc.dates[hover]] ?? 0}

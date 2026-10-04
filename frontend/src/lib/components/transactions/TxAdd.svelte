@@ -10,6 +10,7 @@
   import { isoDay } from "$lib/format";
   import { undoable } from "$lib/undo";
   import { accountName, type Account } from "$lib/types";
+  import { errMsg } from "$lib/act";
 
   // Add a transaction by hand (cash, a cheque the bank hasn't shown yet): it counts like a synced one. Undo (from the
   // toast) deletes it again. `account`: the one the list is filtered to, picked to start with.
@@ -39,7 +40,7 @@
         refreshState(); onchanged();
       });
       refreshState(); onchanged(); onclose();
-    } catch (err) { error = (err as Error).message; }
+    } catch (err) { error = errMsg(err); }
     busy = false;
   }
   const lbl = "flex flex-col gap-1.5 text-xs text-muted-foreground";
