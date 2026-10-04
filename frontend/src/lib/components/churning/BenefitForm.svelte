@@ -6,15 +6,16 @@
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import FieldNote from "./FieldNote.svelte";
-  import { fieldProps, focusFirstInvalid } from "./form";
+  import { fieldProps } from "./form";
   import FormFooter from "./FormFooter.svelte";
   import type { Benefit, Churning } from "./types";
   import { validateBenefit } from "./validate";
-  import { act, errMsg } from "$lib/act";
+  import { act } from "$lib/act";
+  import { AddForm } from "./addForm.svelte";
 
   // Adding a custom benefit to a card, or editing one (each field saves as you change it, as in the card's form).
   let { card, d, b, onclose }: { card: { id: number; product: string }; d: Churning; b: Benefit | null; onclose: (changed: boolean) => void } = $props();
@@ -31,32 +32,20 @@
   const v = $state(initial());
   let changed = false;
   const uid = $props.id();
-  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
-  let attempted = $state(false);
-  const errors = $derived(attempted ? validateBenefit(v) : {});
-  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
+  const form = new AddForm(() => validateBenefit(v));
+  const fp = (name: string, required = false) => fieldProps(form.errors, uid, name, required);
   let first = $state<HTMLInputElement | null>(null);
   onMount(() => first?.focus());
 
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!b) return;
     try { await api(`/api/churning/benefits/${b.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
-    catch (err) { attempted = true; throw err; }
+    catch (err) { form.attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (b ? fromAction(autosave, () => save(key)) : null);
-  let addError = $state(""), busy = $state(false);
   let box = $state<HTMLDivElement | null>(null);
-  async function add() {
-    if (busy) return;
-    attempted = true; addError = "";
-    await tick();
-    if (Object.keys(validateBenefit(v)).length) { focusFirstInvalid(box); return; }
-    busy = true;
-    try { await api(`/api/churning/cards/${card.id}/benefits`, { method: "POST", body: v }); toast(`Added ${v.name}`); onclose(true); }
-    catch (err) { addError = errMsg(err); }
-    finally { busy = false; }
-  }
+  const add = () => form.add(async () => { await api(`/api/churning/cards/${card.id}/benefits`, { method: "POST", body: v }); toast(`Added ${v.name}`); onclose(true); }, box);
   // Deleting a benefit takes its use history with it, which can't be brought back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
@@ -72,7 +61,7 @@
   <div class="mt-2 flex flex-wrap items-end gap-3">
     <div class="flex min-w-48 flex-1 flex-col gap-1">
       <label class={lbl}><span>Benefit{@render star()}</span><Input bind:ref={first} bind:value={v.name} {@attach edit("name")} placeholder="e.g. Lyft credit, Priority Pass lounges" {...fp("name", true)} /></label>
-      <FieldNote {uid} name="name" {errors} />
+      <FieldNote {uid} name="name" errors={form.errors} />
     </div>
     <label class={lbl}>Kind
       <NativeSelect bind:value={v.kind} {@attach edit("kind")}>{#each d.benefit_kinds as k (k.key)}<option value={k.key}>{k.name}</option>{/each}</NativeSelect>
@@ -83,7 +72,7 @@
       </label>
     {/if}
     {#if v.kind === "credit"}
-      <div class="flex flex-col gap-1"><label class={lbl}>Amount<Input type="number" min="0" step="5" class="w-24" bind:value={v.amount} {@attach edit("amount")} {@attach commas} placeholder="$" {...fp("amount")} /></label><FieldNote {uid} name="amount" {errors} /></div>
+      <div class="flex flex-col gap-1"><label class={lbl}>Amount<Input type="number" min="0" step="5" class="w-24" bind:value={v.amount} {@attach edit("amount")} {@attach commas} placeholder="$" {...fp("amount")} /></label><FieldNote {uid} name="amount" errors={form.errors} /></div>
     {/if}
     <label class={lbl}>Resets
       <NativeSelect bind:value={v.period} {@attach edit("period")}>{#each d.benefit_periods as p (p.key)}<option value={p.key}>{p.name}</option>{/each}</NativeSelect>
@@ -107,12 +96,12 @@
     {/if}
   </div>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
-  <FormFooter error={addError}>
+  <FormFooter error={form.error}>
     {#if b}
       <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
       <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete</Button>
     {:else}
-      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={form.busy}>{form.busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
   </FormFooter>
 </div>

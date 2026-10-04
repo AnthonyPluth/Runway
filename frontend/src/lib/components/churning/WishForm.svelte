@@ -7,18 +7,19 @@
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { BANK_TYPE_LABEL, wishExpectSummary, wishName, wishTimingSummary } from "./churning";
   import CurrencySelect from "./CurrencySelect.svelte";
   import FieldNote from "./FieldNote.svelte";
-  import { fieldProps, focusFirstInvalid } from "./form";
+  import { fieldProps } from "./form";
   import FormFooter from "./FormFooter.svelte";
   import Section from "./Section.svelte";
   import type { Churning, Wish } from "./types";
   import { validateWish } from "./validate";
-  import { act, errMsg } from "$lib/act";
+  import { act } from "$lib/act";
+  import { AddForm } from "./addForm.svelte";
 
   // Planning a card or a bank bonus: what you expect it to cost and pay, and what you're waiting for. Adding sends it
   // all with Add; editing saves each field as you change it (Close redraws the page).
@@ -40,17 +41,14 @@
   const v = $state(initial());
   let changed = false;
   const uid = $props.id();
-  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
-  let attempted = $state(false);
-  const errors = $derived(attempted ? validateWish(v) : {});
-  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
+  const fp = (name: string, required = false) => fieldProps(form.errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!w) return;
     try { await api(`/api/churning/wishlist/${w.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
-    catch (err) { attempted = true; throw err; }
+    catch (err) { form.attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (w ? fromAction(autosave, () => save(key)) : null);
@@ -60,34 +58,26 @@
 
   // Which section a refusal is about (the server's messages name the field), so that section opens.
   type Key = "expect" | "timing";
-  let flagged = $state<Key | null>(null);
-  let error = $state(""), busy = $state(false);
   const SECTION_OF: [Key, RegExp][] = [
     ["timing", /day the offer ends|day to wait until|credit score|offer|wait/i],
     ["expect", /annual fee|bonus|spending needed|months|requirements|paid in|between bonuses/i],
   ];
-  const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
-  async function add() {
-    if (busy) return;
-    attempted = true; error = ""; flagged = null;
-    await tick();
-    if (Object.keys(validateWish(v)).length) { focusFirstInvalid(box); return; }
+  const form = new AddForm<Key>(() => validateWish(v), SECTION_OF);
+  const add = () => form.add(async () => {
     const own = v.kind === "card" ? CARD : BANK;
     const body: Record<string, unknown> = { owner: v.owner, kind: v.kind, bonus: v.bonus, offer_expires_on: v.offer_expires_on, wait_until: v.wait_until,
       min_score: v.min_score, assume_prior_planned: v.assume_prior_planned, notes: v.notes, apply_url: v.apply_url };
     for (const k of own) body[k] = v[k as keyof typeof v];
-    busy = true;
-    try { await api("/api/churning/wishlist", { method: "POST", body }); toast(`Planned ${wishName({ ...v, kind: v.kind as Wish["kind"] })}`); onclose(true); }
-    catch (err) { error = errMsg(err); flagged = sectionOf(error); if (flagged) open[flagged] = true; }
-    finally { busy = false; }
-  }
+    await api("/api/churning/wishlist", { method: "POST", body });
+    toast(`Planned ${wishName({ ...v, kind: v.kind as Wish["kind"] })}`);
+    onclose(true);
+  }, box);
   // Deleting a planned item can't be taken back, so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
     return act(async () => { await api(`/api/churning/wishlist/${w!.id}/remove`, { method: "POST" }); toast(`Deleted ${wishName(w!)}`); onclose(true); });
   }
   const lbl = "flex max-w-full flex-col gap-1 text-sm";
-  const open = $state<Record<Key, boolean>>({ expect: false, timing: false });
 </script>
 
 {#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
@@ -110,13 +100,13 @@
       </label>
       <div class="flex min-w-48 flex-1 flex-col gap-1">
         <label class={lbl}><span>Card{@render star()}</span><Input bind:ref={first} bind:value={v.product} {@attach edit("product")} placeholder="e.g. Sapphire Preferred" {...fp("product", true)} /></label>
-        <FieldNote {uid} name="product" {errors} />
+        <FieldNote {uid} name="product" errors={form.errors} />
       </div>
       <label class={lbl}><span>Family <span class="text-muted-foreground">(optional)</span></span><Input class="w-40" bind:value={v.family} {@attach edit("family")} placeholder="e.g. Sapphire" /></label>
     {:else}
       <div class="flex min-w-40 flex-1 flex-col gap-1">
         <label class={lbl}><span>Bank{@render star()}</span><Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" {...fp("bank", true)} /></label>
-        <FieldNote {uid} name="bank" {errors} />
+        <FieldNote {uid} name="bank" errors={form.errors} />
       </div>
       <label class={lbl}>Account
         <NativeSelect bind:value={v.account_type} {@attach edit("account_type")}>{#each Object.entries(BANK_TYPE_LABEL) as [k, l] (k)}<option value={k}>{l}</option>{/each}</NativeSelect>
@@ -125,7 +115,7 @@
     {/if}
   </div>
 
-  <Section id="expect" title="What you expect" bind:open={open.expect} flagged={flagged === "expect"} {error} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
+  <Section id="expect" title="What you expect" bind:open={form.open.expect} flagged={form.flagged === "expect"} error={form.error} summary={wishExpectSummary(v, d.currencies.find((c) => c.key === v.currency)?.name ?? "")}>
   <div class="flex flex-wrap items-end gap-3">
     {#if v.kind === "card"}
       <label class={lbl}>Annual fee<Input type="number" min="0" step="1" class="w-28" bind:value={v.annual_fee} {@attach edit("annual_fee")} {@attach commas} placeholder="$" /></label>
@@ -144,7 +134,7 @@
   </div>
   </Section>
 
-  <Section id="timing" title="Timing" bind:open={open.timing} flagged={flagged === "timing"} {error} summary={wishTimingSummary(v, d.today)}>
+  <Section id="timing" title="Timing" bind:open={form.open.timing} flagged={form.flagged === "timing"} error={form.error} summary={wishTimingSummary(v, d.today)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}><span>Offer ends <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.offer_expires_on} {@attach edit("offer_expires_on")} /></label>
     <label class={lbl}><span>Don't apply before <span class="text-muted-foreground">(optional)</span></span><Input type="date" class="w-40" bind:value={v.wait_until} {@attach edit("wait_until")} /></label>
@@ -162,12 +152,12 @@
   <label class={`${lbl} mt-3`}><span>Application link <span class="text-muted-foreground">(optional)</span></span><Input type="url" bind:value={v.apply_url} {@attach edit("apply_url")} placeholder="https://…" /></label>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
-  <FormFooter {error} sticky={!w}>
+  <FormFooter error={form.error} sticky={!w}>
     {#if w}
       <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
       <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete</Button>
     {:else}
-      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={form.busy}>{form.busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
   </FormFooter>
 </div>

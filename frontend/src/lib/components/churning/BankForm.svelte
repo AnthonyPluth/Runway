@@ -7,17 +7,18 @@
   import { ConfirmDialog } from "$lib/components/ui/confirm-dialog";
   import { Input } from "$lib/components/ui/input";
   import { NativeSelect } from "$lib/components/ui/native-select";
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { fromAction } from "svelte/attachments";
   import { toast } from "svelte-sonner";
   import { BANK_STATUS_LABEL, BANK_TYPE_LABEL, bankFeesSummary, bankReceivedSummary, bankRequirementsSummary } from "./churning";
   import FieldNote from "./FieldNote.svelte";
-  import { fieldProps, focusFirstInvalid } from "./form";
+  import { fieldProps } from "./form";
   import FormFooter from "./FormFooter.svelte";
   import Section from "./Section.svelte";
   import type { BankBonus, Churning } from "./types";
   import { validateBank } from "./validate";
-  import { act, errMsg } from "$lib/act";
+  import { act } from "$lib/act";
+  import { AddForm } from "./addForm.svelte";
 
   // Adding a bank account bonus, or editing one (each field saves as you change it; Close redraws the page).
   let { b, d, person, onclose }: { b: BankBonus | null; d: Churning; person: string; onclose: (changed: boolean) => void } = $props();
@@ -41,48 +42,33 @@
   const v = $state(initial());
   let changed = false;
   const uid = $props.id();
-  // After the first Add (or a refused save), the fields that need fixing say so, each with its own note.
-  let attempted = $state(false);
-  const errors = $derived(attempted ? validateBank(v) : {});
-  const fp = (name: string, required = false) => fieldProps(errors, uid, name, required);
+  const fp = (name: string, required = false) => fieldProps(form.errors, uid, name, required);
   let box = $state<HTMLDivElement | null>(null), first = $state<HTMLInputElement | null>(null);
   onMount(() => { first?.focus(); box?.scrollIntoView({ behavior: "smooth", block: "nearest" }); });
 
   const save = (key: string) => async (f: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement) => {
     if (!b) return;
     try { await api(`/api/churning/bank/${b.id}`, { method: "POST", body: { [key]: f instanceof HTMLInputElement && f.type === "checkbox" ? f.checked : f.value } }); }
-    catch (err) { attempted = true; throw err; }
+    catch (err) { form.attempted = true; throw err; }
     changed = true;
   };
   const edit = (key: string) => (b ? fromAction(autosave, () => save(key)) : null);
 
   // Which section a refusal is about (the server's messages name the field), so that section opens.
   type Key = "requirements" | "fees" | "received";
-  let flagged = $state<Key | null>(null);
-  let addError = $state(""), busy = $state(false);
   const SECTION_OF: [Key, RegExp][] = [
     ["fees", /fee|keep it open/i],
     ["requirements", /direct deposit|debit|balance|requirements|days to meet|deadline|days for the bonus to post|checking or savings/i],
     ["received", /post|closed|eligible|months between|received|lifetime/i],
   ];
-  const sectionOf = (msg: string): Key | null => SECTION_OF.find(([, re]) => re.test(msg))?.[0] ?? null;
-  async function add() {
-    if (busy) return;
-    attempted = true; addError = ""; flagged = null;
-    await tick();
-    if (Object.keys(validateBank(v)).length) { focusFirstInvalid(box); return; }
-    busy = true;
-    try { await api("/api/churning/bank", { method: "POST", body: v }); toast(`Added ${v.bank}`); onclose(true); }
-    catch (err) { addError = errMsg(err); flagged = sectionOf(addError); if (flagged) open[flagged] = true; }
-    finally { busy = false; }
-  }
+  const form = new AddForm<Key>(() => validateBank(v), SECTION_OF);
+  const add = () => form.add(async () => { await api("/api/churning/bank", { method: "POST", body: v }); toast(`Added ${v.bank}`); onclose(true); }, box);
   // Deleting a bonus takes its record for good (nothing here can bring it back), so it asks first.
   let asking = $state(false);
   async function remove(): Promise<boolean> {
     return act(async () => { await api(`/api/churning/bank/${b!.id}/remove`, { method: "POST" }); toast(`Deleted ${b!.bank}`); onclose(true); });
   }
   const lbl = "flex flex-col gap-1 text-sm";
-  const open = $state<Record<Key, boolean>>({ requirements: false, fees: false, received: false });
 </script>
 
 {#snippet star()}<span aria-hidden="true" class="text-destructive"> *</span>{/snippet}
@@ -94,7 +80,7 @@
     <label class={lbl}>Whose account<OwnerSelect owners={d.owners} bind:value={v.owner} {@attach edit("owner")} {...fp("owner", true)} /></label>
     <div class="flex min-w-40 flex-1 flex-col gap-1">
       <label class={lbl}><span>Bank{@render star()}</span><Input bind:ref={first} bind:value={v.bank} {@attach edit("bank")} placeholder="e.g. Chase" {...fp("bank", true)} /></label>
-      <FieldNote {uid} name="bank" {errors} />
+      <FieldNote {uid} name="bank" errors={form.errors} />
     </div>
     <label class={lbl}>Account
       <NativeSelect bind:value={v.account_type} {@attach edit("account_type")}>
@@ -103,11 +89,11 @@
     </label>
     <div class="flex flex-col gap-1">
       <label class={lbl}><span>Opened{@render star()}</span><Input type="date" class="w-40" bind:value={v.opened_on} {@attach edit("opened_on")} {...fp("opened_on", true)} /></label>
-      <FieldNote {uid} name="opened_on" {errors} />
+      <FieldNote {uid} name="opened_on" errors={form.errors} />
     </div>
     <div class="flex flex-col gap-1">
       <label class={lbl}><span>Bonus{@render star()}</span><Input type="number" min="0" step="25" class="w-28" bind:value={v.bonus} {@attach edit("bonus")} {@attach commas} placeholder="$" {...fp("bonus", true)} /></label>
-      <FieldNote {uid} name="bonus" {errors} />
+      <FieldNote {uid} name="bonus" errors={form.errors} />
     </div>
     <label class={lbl}>Status
       <NativeSelect bind:value={v.status} {@attach edit("status")}>
@@ -116,7 +102,7 @@
     </label>
   </div>
 
-  <Section id="requirements" title="Requirements" bind:open={open.requirements} flagged={flagged === "requirements"} error={addError} summary={bankRequirementsSummary(v)}>
+  <Section id="requirements" title="Requirements" bind:open={form.open.requirements} flagged={form.flagged === "requirements"} error={form.error} summary={bankRequirementsSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Direct deposits total<Input type="number" min="0" step="100" class="w-32" bind:value={v.dd_total} {@attach edit("dd_total")} {@attach commas} placeholder="$" /></label>
     <label class={lbl}>How many deposits<Input type="number" min="0" step="1" class="w-24" bind:value={v.dd_count} {@attach edit("dd_count")} /></label>
@@ -144,7 +130,7 @@
   </div>
   </Section>
 
-  <Section id="fees" title="Fees & closing" bind:open={open.fees} flagged={flagged === "fees"} error={addError} summary={bankFeesSummary(v)}>
+  <Section id="fees" title="Fees & closing" bind:open={form.open.fees} flagged={form.flagged === "fees"} error={form.error} summary={bankFeesSummary(v)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Monthly fee<Input type="number" min="0" step="1" class="w-24" bind:value={v.monthly_fee} {@attach edit("monthly_fee")} {@attach commas} placeholder="0" /></label>
     <label class={`${lbl} min-w-52 flex-1`}>Waived by<Input bind:value={v.fee_waiver} {@attach edit("fee_waiver")} placeholder="e.g. $500 in direct deposits a month" /></label>
@@ -153,7 +139,7 @@
   </div>
   </Section>
 
-  <Section id="received" title="Bonus received & again" bind:open={open.received} flagged={flagged === "received"} error={addError} summary={bankReceivedSummary(v, d.today)}>
+  <Section id="received" title="Bonus received & again" bind:open={form.open.received} flagged={form.flagged === "received"} error={form.error} summary={bankReceivedSummary(v, d.today)}>
   <div class="flex flex-wrap items-end gap-3">
     <label class={lbl}>Posted on<Input type="date" class="w-40" bind:value={v.received_on} {@attach edit("received_on")} /></label>
     <label class={lbl}><span>Amount <span class="text-muted-foreground">(if not the bonus)</span></span><Input type="number" min="0" step="1" class="w-28" bind:value={v.received_amount} {@attach edit("received_amount")} {@attach commas} placeholder="$" /></label>
@@ -165,12 +151,12 @@
   </Section>
   <label class={`${lbl} mt-3`}>Notes<Input bind:value={v.notes} {@attach edit("notes")} /></label>
 
-  <FormFooter error={addError} sticky={!b}>
+  <FormFooter error={form.error} sticky={!b}>
     {#if b}
       <Button size="sm" onclick={() => onclose(changed)}>Close</Button>
       <Button variant="link" size="sm" class="text-destructive" onclick={() => (asking = true)}>Delete</Button>
     {:else}
-      <Button size="sm" onclick={add} disabled={busy}>{busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
+      <Button size="sm" onclick={add} disabled={form.busy}>{form.busy ? "Adding…" : "Add"}</Button><Button variant="link" size="sm" onclick={() => onclose(false)}>Cancel</Button>
     {/if}
   </FormFooter>
 </div>
