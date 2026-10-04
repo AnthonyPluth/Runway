@@ -7,17 +7,21 @@ name: Agent review
 #
 # An agent's pull request is one whose commits carry a Claude-Session or a Claude Co-Authored-By trailer, or whose
 # description says Claude Code generated it (.github/scripts/agent_review.py). Anyone else's gets a passing status
-# saying so; Dependabot's get none (the merge gate doesn't ask for one). Needs an ANTHROPIC_API_KEY secret; the model
-# and the most a review may spend are the AGENT_REVIEW_MODEL and AGENT_REVIEW_BUDGET_USD variables (opus, 5).
+# saying so; Dependabot's get none (the merge gate doesn't ask for one).
+#
+# Authentication, one of two secrets: CLAUDE_CODE_OAUTH_TOKEN, a Claude Pro or Max subscription's token (made with
+# `claude setup-token`), or ANTHROPIC_API_KEY, an API key, which wins when both are set. The model and the most a
+# review may spend are the AGENT_REVIEW_MODEL and AGENT_REVIEW_BUDGET_USD variables (opus, and 5 US dollars, as Claude Code
+# estimates a run's cost).
 #
 # Why pull_request_target: it runs main's copy of this workflow, its prompt and its scripts, so a pull request can't
 # change how it is reviewed (with pull_request it could edit this file to pass itself). The cost is that the job sees
 # secrets while the pull request's code is checked out, so that code is never run, built or installed: it is only
-# read, by a reviewer that has only the Read, Grep and Glob tools (no shell, no network tools, no MCP servers), runs in
-# --bare mode (no hooks, settings or CLAUDE.md from the pull request) and holds no GitHub token. Branches from forks
-# aren't reviewed (that would spend the API key on anyone's pull request): an agent's from a fork fails, for a
-# maintainer to push to a branch here. Posting the comment and the status happens in a second job that never sees the
-# code or the API key.
+# read, by a reviewer (.github/scripts/agent-review-run.sh) whose only tools are Read, Grep and Glob, confined to the
+# review's directory (no shell, no writing, no network tools, no MCP servers), that loads no settings, hooks, skills,
+# plugins or CLAUDE.md (the pull request's included) and holds no GitHub token. Branches from forks aren't reviewed
+# (that would spend the secret on anyone's pull request): an agent's from a fork fails, for a maintainer to push to a
+# branch here. Posting the comment and the status happens in a second job that never sees the code or the secrets.
 on:  # zizmor: ignore[dangerous-triggers] -- runs main's workflow; the pull request's code is only read, never run
   pull_request_target:
     branches: [main]
@@ -110,44 +114,44 @@ jobs:
           git -C review/pr log --format='commit %H%n%B' "$MAIN..$HEAD" > review/commits.txt
           echo "$(wc -l < review/files.txt) file(s), $(wc -l < review/diff.patch) diff line(s)"
 
-      # The reviewer: read-only tools over review/ only, no settings, hooks, MCP servers or CLAUDE.md from anywhere
-      # (--bare: not even the pull request's own), and no GitHub token.
+      # The reviewer, in review/ (main's script; see it for how it is isolated), with whichever secret is set.
       - name: Review
         if: steps.who.outputs.agent == 'true' && steps.who.outputs.same_repo == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE: ${{ runner.temp }}/claude-code/node_modules/.bin/claude
           MODEL: ${{ vars.AGENT_REVIEW_MODEL || 'opus' }}
           BUDGET: ${{ vars.AGENT_REVIEW_BUDGET_USD || '5' }}
         run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret to review with."; exit 0
+          fi
           cd review
-          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "::error::No ANTHROPIC_API_KEY secret."; exit 0; fi
-          status=0
-          "$RUNNER_TEMP/claude-code/node_modules/.bin/claude" --print "$(cat prompt.md)" \
-            --bare --tools Read,Grep,Glob --permission-mode dontAsk --strict-mcp-config --no-session-persistence \
-            --model "$MODEL" --max-budget-usd "$BUDGET" \
-            --json-schema "$(cat schema.json)" --output-format json > output.json || status=$?
-          echo "Claude Code exited with $status"
+          ../trusted/.github/scripts/agent-review-run.sh
 
       - name: Verdict
         id: result
         env:
           AGENT: ${{ steps.who.outputs.agent }}
           SAME_REPO: ${{ steps.who.outputs.same_repo }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}   # only to make sure the answer doesn't contain it
+          # Only to make sure the answer contains neither before it is posted.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ "$AGENT" != true ]; then
             { echo "verdict=pass"; echo "description=Not an agent's pull request"; echo "comment="; } >> "$GITHUB_OUTPUT"
           elif [ "$SAME_REPO" != true ]; then
             { echo "verdict=error"; echo "description=Agents' pull requests are reviewed only from this repository's branches"; echo "comment="; } >> "$GITHUB_OUTPUT"
-          elif [ -z "$ANTHROPIC_API_KEY" ]; then
-            { echo "verdict=error"; echo "description=No ANTHROPIC_API_KEY secret to review with"; echo "comment="; } >> "$GITHUB_OUTPUT"
+          elif [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            { echo "verdict=error"; echo "description=No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret to review with"; echo "comment="; } >> "$GITHUB_OUTPUT"
           else
             python3 trusted/.github/scripts/agent_review.py report review/output.json
           fi
 
   # Posts what the review found: the comment, the "Agent review" status, and asks the merge gate to decide again
-  # (setting a status starts no workflow by itself). It never sees the pull request's code or the API key.
+  # (setting a status starts no workflow by itself). It never sees the pull request's code or the secrets.
   report:
     needs: review
     if: ${{ !cancelled() && github.event.pull_request.user.login != 'dependabot[bot]' }}

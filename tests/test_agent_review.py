@@ -4,6 +4,7 @@ import base64
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +72,11 @@ class Report(unittest.TestCase):
         v = self.verdict(self.answer(summary="the key is sk-test-123"), key="sk-test-123")
         self.assertEqual((v["verdict"], v["comment"]), ("error", ""))
 
+    def test_an_answer_carrying_the_subscription_s_token_isnt_posted(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-test"}):
+            v = self.verdict(self.answer({"severity": "advisory", "title": "t", "detail": "sk-ant-oat01-test"}))
+        self.assertEqual((v["verdict"], v["comment"]), ("error", ""))
+
     def test_outputs_are_one_line_each(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "output"
@@ -79,6 +85,69 @@ class Report(unittest.TestCase):
             lines = out.read_text().splitlines()
         self.assertEqual([ln.split("=", 1)[0] for ln in lines], ["verdict", "description", "comment"])
         self.assertEqual(base64.b64decode(lines[2].split("=", 1)[1]).decode(), "line 1\nline 2\ncomment=injected")
+
+
+FAKE_CLAUDE = """#!/usr/bin/env bash
+{ printf '%s\\n' "$@"; echo "KEY=${ANTHROPIC_API_KEY:-}"; echo "OAUTH=${CLAUDE_CODE_OAUTH_TOKEN:-}";
+  echo "MDS=${CLAUDE_CODE_DISABLE_CLAUDE_MDS:-}"; } > "$RECORD"
+echo '{"is_error": false, "structured_output": {"summary": "s", "findings": []}}'
+"""
+
+
+@unittest.skipUnless(Path("/bin/bash").exists(), "needs bash")
+class Run(unittest.TestCase):
+    """.github/scripts/agent-review-run.sh, with a stand-in for claude that records how it was started."""
+
+    def run_script(self, **secrets):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        d = Path(tmp.name)
+        (d / "prompt.md").write_text("Review it.")
+        (d / "schema.json").write_text("{}")
+        fake = d / "claude"
+        fake.write_text(FAKE_CLAUDE)
+        fake.chmod(0o755)
+        env = {"PATH": os.environ.get("PATH", ""), "CLAUDE": str(fake), "MODEL": "some-model", "BUDGET": "5",
+               "RECORD": str(d / "record"), **secrets}
+        done = subprocess.run(["bash", str(ROOT / ".github/scripts/agent-review-run.sh")], cwd=d, env=env,
+                              capture_output=True, text=True)
+        record = (d / "record").read_text().splitlines() if (d / "record").exists() else []
+        output = (d / "output.json").read_text() if (d / "output.json").exists() else ""
+        return done, record, output
+
+    def assert_isolated(self, args):
+        i = args.index("--tools")
+        self.assertEqual(args[i + 1], "Read,Grep,Glob")
+        for flag in ("--restricted", "--safe-mode", "--strict-mcp-config", "--disable-slash-commands",
+                     "--no-session-persistence", "MDS=1"):
+            self.assertIn(flag, args)
+        self.assertEqual(args[args.index("--permission-mode") + 1], "dontAsk")
+        self.assertEqual(args[args.index("--setting-sources") + 1], "")
+        self.assertEqual(args[args.index("--model") + 1], "some-model")
+        self.assertNotIn("--bare", args)   # it would ignore the subscription's token
+
+    def test_the_subscription_s_token_alone_is_used(self):
+        done, args, output = self.run_script(CLAUDE_CODE_OAUTH_TOKEN="oat-token")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assert_isolated(args)
+        self.assertIn("OAUTH=oat-token", args)
+        self.assertIn("KEY=", args)
+        self.assertIn("structured_output", output)
+        self.assertNotIn("oat-token", done.stdout + done.stderr)
+
+    def test_an_api_key_wins_and_the_token_isnt_passed_on(self):
+        done, args, _ = self.run_script(ANTHROPIC_API_KEY="api-key", CLAUDE_CODE_OAUTH_TOKEN="oat-token")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assert_isolated(args)
+        self.assertIn("KEY=api-key", args)
+        self.assertIn("OAUTH=", args)
+        self.assertNotIn("api-key", done.stdout + done.stderr)
+
+    def test_no_secret_fails_without_starting_claude(self):
+        done, args, _ = self.run_script()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("Neither an ANTHROPIC_API_KEY nor a CLAUDE_CODE_OAUTH_TOKEN", done.stdout)
+        self.assertEqual(args, [])
 
 
 if __name__ == "__main__":

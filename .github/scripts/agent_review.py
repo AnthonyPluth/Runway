@@ -9,7 +9,8 @@ request's). Standard library only.
                                   the "Agent review" status, and with it the merge gate.
 
 The reviewer read the pull request's code, so what it says is untrusted: the comment is built here, @mentions are
-defused, and it is never interpolated into a command. A reply that contains $ANTHROPIC_API_KEY is not posted."""
+defused, and it is never interpolated into a command. A reply that contains $ANTHROPIC_API_KEY or
+$CLAUDE_CODE_OAUTH_TOKEN is not posted."""
 from __future__ import annotations
 
 import base64
@@ -24,6 +25,7 @@ CO_AUTHOR = re.compile(r"^co-authored-by:.*(\bclaude\b|anthropic\.com)", re.IGNO
 BODY_SIGNS = ("Generated with [Claude Code]", "claude.ai/code/session_")
 SEVERITIES = ("blocking", "advisory")
 MAX_COMMENT = 60000
+SECRETS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")   # what the reviewer authenticates with (agent-review-run.sh)
 
 
 def is_agent(messages: list[str], body: str) -> bool:
@@ -111,8 +113,8 @@ def report(path: str) -> dict:
     if findings is None:
         return {**error, "description": "The reviewer's answer wasn't in the expected form; see the run"}
     comment = render(findings, str(answer.get("summary") or ""), run_url)  # type: ignore[union-attr]
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if key and key in json.dumps(output):
+    raw = json.dumps(output)
+    if any(key and key in raw for key in (os.environ.get(name, "") for name in SECRETS)):
         return {**error, "description": "The reviewer's answer contained a secret; not posted"}
     blocking = sum(f["severity"] == "blocking" for f in findings)
     if blocking:
